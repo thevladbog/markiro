@@ -379,6 +379,55 @@ export const orgLogoPutSchema = z
   .strict();
 export type OrgLogoPut = z.infer<typeof orgLogoPutSchema>;
 
+/**
+ * Mirrors `markiro_proto::PalletSheet` (plan А4): an A4 pallet sheet. `spec`
+ * stays unknown here — the office and the station read it with the domain's
+ * `parsePalletSheetSpec`, and a sheet a newer office made does not fail the list.
+ */
+export const palletSheetSchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+  enabled: z.boolean(),
+  presetKey: z.string().nullable(),
+  revision: z.number().int().positive(),
+  spec: z.unknown(),
+});
+export type PalletSheet = z.infer<typeof palletSheetSchema>;
+
+/** Mirrors `markiro_proto::PalletSheets`: every sheet by name and the default. */
+export const palletSheetsSchema = z.object({
+  sheets: z.array(palletSheetSchema),
+  defaultId: z.uuid().nullable(),
+});
+export type PalletSheets = z.infer<typeof palletSheetsSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetCreate`. */
+export const palletSheetCreateSchema = z
+  .object({
+    name: z.string(),
+    presetKey: z.string().optional(),
+    enabled: z.boolean().optional(),
+    spec: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type PalletSheetCreate = z.infer<typeof palletSheetCreateSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetUpdate`: the name or the state, over the revision. */
+export const palletSheetUpdateSchema = z
+  .object({
+    name: z.string().optional(),
+    enabled: z.boolean().optional(),
+    expectedRevision: z.number().int(),
+  })
+  .strict();
+export type PalletSheetUpdate = z.infer<typeof palletSheetUpdateSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetDefaultUpdate`. */
+export const palletSheetDefaultUpdateSchema = z
+  .object({ templateId: z.uuid().nullable() })
+  .strict();
+export type PalletSheetDefaultUpdate = z.infer<typeof palletSheetDefaultUpdateSchema>;
+
 /** One SSCC counter; `extension` 0 is a box, 1 a pallet. */
 export const ssccCounterSchema = z.object({
   issuerPrefix: z.string(),

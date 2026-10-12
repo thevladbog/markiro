@@ -559,6 +559,55 @@ pub fn mono_logo(
     Ok(())
 }
 
+/// The largest A4 sheet the host keeps: 64 KiB of compact JSON (a stock
+/// sheet is a few KiB), so a shift's snapshot keeps it beside its labels.
+pub const MAX_SHEET_SPEC_BYTES: usize = 64 * 1024;
+
+/// An A4 sheet's layout: a JSON object of `schemaVersion` 2 and `kind`
+/// "pallet_sheet", at most [`MAX_SPEC_DEPTH`] levels and
+/// [`MAX_SHEET_SPEC_BYTES`] bytes once compact. The rest is the domain's
+/// check (`parsePalletSheetSpec`), in the office and at the station.
+pub fn sheet_spec(field: &str, spec: &serde_json::Value) -> Result<String, ApiError> {
+    let object = spec
+        .as_object()
+        .ok_or_else(|| ApiError::validation(field, "the spec must be a JSON object"))?;
+    if object.get("schemaVersion") != Some(&serde_json::json!(2))
+        || object.get("kind") != Some(&serde_json::json!("pallet_sheet"))
+    {
+        return Err(ApiError::validation(
+            field,
+            "the spec must be a pallet sheet of schemaVersion 2",
+        ));
+    }
+    if nests_deeper_than(spec, MAX_SPEC_DEPTH) {
+        return Err(ApiError::validation(
+            field,
+            format!("the spec must be at most {MAX_SPEC_DEPTH} levels deep"),
+        ));
+    }
+    let text = serde_json::to_string(spec).map_err(ApiError::internal)?;
+    if text.len() > MAX_SHEET_SPEC_BYTES {
+        return Err(ApiError::validation(
+            field,
+            format!("the spec must be at most {MAX_SHEET_SPEC_BYTES} bytes"),
+        ));
+    }
+    Ok(text)
+}
+
+/// A stock sheet's preset key: 1-64 of `a-z`, `0-9` and `-`.
+pub fn preset_key(field: &str, key: &str) -> Result<(), ApiError> {
+    let valid = (1..=64).contains(&key.len())
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::validation(field, "1-64 of a-z, 0-9 and -"))
+    }
+}
+
 /// The most codes a template lists: more than there are product groups, so
 /// the bound only caps the work one request can ask for.
 pub const MAX_CATEGORY_CODES: usize = 100;
@@ -1472,6 +1521,81 @@ mod tests {
         }
         for refused in [&"Я".repeat(201), "в две\nстроки", "a\u{0}b"] {
             assert_eq!(field(at(refused)), "data.reasonText", "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn a_sheet_spec_is_a_v2_pallet_sheet_within_bounds() {
+        let sheet = |extra: serde_json::Value| {
+            let mut spec = serde_json::json!({ "schemaVersion": 2, "kind": "pallet_sheet" });
+            spec.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            spec
+        };
+        assert_eq!(
+            sheet_spec("spec", &sheet(serde_json::json!({}))).unwrap(),
+            serde_json::to_string(&sheet(serde_json::json!({}))).unwrap()
+        );
+        // Not an object, the wrong version, the wrong kind, a label: refused
+        // on the field named.
+        for refused in [
+            serde_json::json!([]),
+            serde_json::json!("{}"),
+            serde_json::json!({ "schemaVersion": 1, "kind": "pallet_sheet" }),
+            serde_json::json!({ "schemaVersion": "2", "kind": "pallet_sheet" }),
+            serde_json::json!({ "schemaVersion": 2, "kind": "label" }),
+            serde_json::json!({ "schemaVersion": 2 }),
+            serde_json::json!({ "kind": "pallet_sheet" }),
+            serde_json::json!({ "widthMm": 58 }),
+        ] {
+            assert_eq!(field(sheet_spec("spec", &refused)), "spec", "{refused}");
+        }
+        // The size is counted on the compact text: the exact bound is kept,
+        // one byte more is not.
+        let bare = serde_json::to_string(&sheet(serde_json::json!({ "pad": "" }))).unwrap();
+        let pad = "x".repeat(MAX_SHEET_SPEC_BYTES - bare.len());
+        let exact = sheet(serde_json::json!({ "pad": pad }));
+        assert_eq!(
+            sheet_spec("spec", &exact).unwrap().len(),
+            MAX_SHEET_SPEC_BYTES
+        );
+        let over = sheet(serde_json::json!({ "pad": format!("{pad}x") }));
+        assert_eq!(field(sheet_spec("spec", &over)), "spec");
+        // The depth: an object or an array is a level.
+        let mut deep = serde_json::json!({});
+        for _ in 1..MAX_SPEC_DEPTH {
+            deep = serde_json::json!({ "a": deep });
+        }
+        let too_deep = sheet(serde_json::json!({ "deep": deep }));
+        assert_eq!(field(sheet_spec("spec", &too_deep)), "spec");
+        let mut shallow = serde_json::json!({});
+        for _ in 2..MAX_SPEC_DEPTH {
+            shallow = serde_json::json!({ "a": shallow });
+        }
+        assert!(sheet_spec("spec", &sheet(serde_json::json!({ "deep": shallow }))).is_ok());
+    }
+
+    #[test]
+    fn a_preset_key_is_one_to_sixty_four_of_lowercase_digits_and_hyphens() {
+        for ok in ["pallet-a4-portrait", "a", "0", "-", &"a".repeat(64)] {
+            assert!(preset_key("presetKey", ok).is_ok(), "{ok}");
+        }
+        for refused in [
+            "",
+            "Pallet A4",
+            "Pallet",
+            "a_b",
+            "a b",
+            "палета",
+            "a.b",
+            &"a".repeat(65),
+        ] {
+            assert_eq!(
+                field(preset_key("presetKey", refused)),
+                "presetKey",
+                "{refused}"
+            );
         }
     }
 }

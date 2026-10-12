@@ -13,6 +13,7 @@ use markiro_proto::{
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgLogoPut, OrgLogoState,
     OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
     PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
+    PalletSheet, PalletSheetCreate, PalletSheetDefaultUpdate, PalletSheetUpdate, PalletSheets,
     PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus,
     ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
     ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
@@ -166,6 +167,43 @@ fn org_logo_fixtures_round_trip() {
     // client cannot smuggle an `updatedAt` of its own or a second picture.
     let extra = serde_json::json!({ "width": 10, "height": 2, "pixelsBase64": "8MAPQA==", "updatedAt": "x" });
     assert!(serde_json::from_value::<OrgLogoPut>(extra).is_err());
+}
+
+/// The A4 pallet sheets (plan А4): the list, a sheet and the three requests.
+#[test]
+fn pallet_sheet_fixtures_round_trip() {
+    let list: PalletSheets = round_trip("pallet-sheets.json");
+    let sheet: PalletSheet = round_trip("pallet-sheet.json");
+    assert_eq!(list.sheets, vec![sheet.clone()]);
+    assert_eq!(list.default_id.as_deref(), Some(sheet.id.as_str()));
+    let create: PalletSheetCreate = round_trip("pallet-sheet-create.json");
+    assert_eq!(create.preset_key.as_deref(), Some("pallet-a4-portrait"));
+    let bare: PalletSheetCreate = serde_json::from_value(serde_json::json!({
+        "name": "Свой лист", "spec": {}
+    }))
+    .unwrap();
+    assert!(bare.enabled && bare.preset_key.is_none());
+    let update: PalletSheetUpdate = round_trip("pallet-sheet-update.json");
+    assert_eq!(update.expected_revision, 1);
+    let default: PalletSheetDefaultUpdate = round_trip("pallet-sheet-default-update.json");
+    assert_eq!(default.template_id.as_deref(), Some(sheet.id.as_str()));
+    // The requests are strict, like the host's, so a client cannot smuggle a
+    // layout into a rename or an id into a create.
+    for extra in [
+        serde_json::json!({ "name": "x", "spec": {}, "id": "x" }),
+        serde_json::json!({ "name": "x", "spec": {}, "revision": 1 }),
+    ] {
+        assert!(serde_json::from_value::<PalletSheetCreate>(extra).is_err());
+    }
+    let layout = serde_json::json!({ "expectedRevision": 1, "spec": {} });
+    assert!(serde_json::from_value::<PalletSheetUpdate>(layout).is_err());
+    let extra = serde_json::json!({ "templateId": null, "enabled": true });
+    assert!(serde_json::from_value::<PalletSheetDefaultUpdate>(extra).is_err());
+    // `null` clears the default; a body without the field does not.
+    let none: PalletSheetDefaultUpdate =
+        serde_json::from_value(serde_json::json!({ "templateId": null })).unwrap();
+    assert_eq!(none.template_id, None);
+    assert!(serde_json::from_value::<PalletSheetDefaultUpdate>(serde_json::json!({})).is_err());
 }
 
 #[test]

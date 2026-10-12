@@ -62,6 +62,11 @@ import {
   orgProfileSchema,
   orgProfileUpdateSchema,
   orgRecordSchema,
+  palletSheetCreateSchema,
+  palletSheetDefaultUpdateSchema,
+  palletSheetSchema,
+  palletSheetUpdateSchema,
+  palletSheetsSchema,
   pairingCodeRequestSchema,
   pairingCodeSchema,
   passwordChangeSchema,
@@ -262,6 +267,8 @@ const RESPONSES = [
   ["bootstrap-response.json", bootstrapResponseSchema],
   ["org-profile.json", orgProfileSchema],
   ["org-logo.json", orgLogoStateSchema],
+  ["pallet-sheets.json", palletSheetsSchema],
+  ["pallet-sheet.json", palletSheetSchema],
   ["sscc-state.json", ssccStateSchema],
   ["office-user-record.json", officeUserRecordSchema],
   ["error-unauthorized.json", errorBodySchema],
@@ -298,6 +305,9 @@ const REQUESTS = [
   ["bootstrap-request.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
+  ["pallet-sheet-create.json", palletSheetCreateSchema],
+  ["pallet-sheet-update.json", palletSheetUpdateSchema],
+  ["pallet-sheet-default-update.json", palletSheetDefaultUpdateSchema],
   ["sscc-counter-update.json", ssccCounterUpdateSchema],
   ["block-sizes-update.json", blockSizesUpdateSchema],
   ["office-user-create.json", officeUserCreateSchema],
@@ -2853,5 +2863,59 @@ describe("a shift's pallet form data (plan О-Ф)", () => {
     expect(refused({ ...base, organization: { name: null, inn: null } })).toBe(true);
     expect(refused({ ...base, organization: { name: "ООО", inn: 7701234567 } })).toBe(true);
     expect(refused({ ...base, pallets: null })).toBe(true);
+  });
+});
+
+describe("the A4 pallet sheets (plan А4)", () => {
+  const sheet = fixture("pallet-sheet.json") as Record<string, unknown>;
+  const list = fixture("pallet-sheets.json") as Record<string, unknown>;
+
+  it("keeps the layout as the host sent it, whatever its shape", () => {
+    // The host checks the version and the kind only; the domain reads the rest.
+    for (const spec of [{ schemaVersion: 3, kind: "pallet_sheet", novel: [1, 2] }, "x", 7, null]) {
+      expect(palletSheetSchema.parse({ ...sheet, spec }).spec).toEqual(spec);
+    }
+  });
+
+  it("refuses a sheet the host would never send", () => {
+    const refused = (change: Record<string, unknown>) =>
+      palletSheetSchema.safeParse({ ...sheet, ...change }).success === false;
+    expect(refused({ id: "not-a-uuid" })).toBe(true);
+    expect(refused({ name: "" })).toBe(true);
+    expect(refused({ enabled: "yes" })).toBe(true);
+    expect(refused({ revision: 0 })).toBe(true);
+    expect(refused({ revision: 1.5 })).toBe(true);
+    expect(refused({ presetKey: undefined })).toBe(true);
+    // A sheet of the office's own has no key, which the host writes as null.
+    expect(palletSheetSchema.safeParse({ ...sheet, presetKey: null }).success).toBe(true);
+  });
+
+  it("reads the list with none as null, and refuses a list without the default", () => {
+    expect(palletSheetsSchema.safeParse({ sheets: [], defaultId: null }).success).toBe(true);
+    expect(palletSheetsSchema.safeParse({ sheets: [] }).success).toBe(false);
+    expect(palletSheetsSchema.safeParse({ ...list, defaultId: "not-a-uuid" }).success).toBe(false);
+    expect(
+      palletSheetsSchema.safeParse({ ...list, sheets: [{ ...sheet, revision: 0 }] }).success,
+    ).toBe(false);
+  });
+
+  it("builds requests the way the host takes them", () => {
+    const create = { name: "Свой лист", spec: { schemaVersion: 2, kind: "pallet_sheet" } };
+    expect(palletSheetCreateSchema.safeParse(create).success).toBe(true);
+    expect(palletSheetCreateSchema.safeParse({ ...create, spec: [] }).success).toBe(false);
+    expect(palletSheetCreateSchema.safeParse({ ...create, spec: "{}" }).success).toBe(false);
+    expect(palletSheetCreateSchema.safeParse({ name: "x" }).success).toBe(false);
+    // A rename carries no layout, and the revision is not optional.
+    expect(palletSheetUpdateSchema.safeParse({ name: "x", expectedRevision: 1 }).success).toBe(
+      true,
+    );
+    expect(palletSheetUpdateSchema.safeParse({ name: "x" }).success).toBe(false);
+    expect(
+      palletSheetUpdateSchema.safeParse({ expectedRevision: 1, spec: create.spec }).success,
+    ).toBe(false);
+    // The default is a sheet or null, and the field is always there.
+    expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: null }).success).toBe(true);
+    expect(palletSheetDefaultUpdateSchema.safeParse({}).success).toBe(false);
+    expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: "x" }).success).toBe(false);
   });
 });

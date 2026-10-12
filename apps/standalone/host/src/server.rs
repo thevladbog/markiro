@@ -325,6 +325,20 @@ fn protected_routes() -> Router<AppState> {
                 .put(crate::routes::template_defaults::put_template_defaults),
         )
         .route(
+            "/v1/office/pallet-sheets",
+            get(crate::routes::pallet_sheets::list_sheets)
+                .post(crate::routes::pallet_sheets::create_sheet),
+        )
+        .route(
+            "/v1/office/pallet-sheets/{id}",
+            put(crate::routes::pallet_sheets::update_sheet)
+                .delete(crate::routes::pallet_sheets::delete_sheet),
+        )
+        .route(
+            "/v1/office/pallet-sheet-default",
+            put(crate::routes::pallet_sheets::put_default),
+        )
+        .route(
             "/v1/office/shifts",
             get(crate::routes::office_shifts::list_shifts)
                 .post(crate::routes::office_shifts::create_shift),

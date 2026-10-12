@@ -25,6 +25,9 @@ import {
   operatorCreateSchema,
   operatorUpdateSchema,
   orgLogoPutSchema,
+  palletSheetCreateSchema,
+  palletSheetDefaultUpdateSchema,
+  palletSheetUpdateSchema,
   orgProfileUpdateSchema,
   pairingCodeRequestSchema,
   productCreateSchema,
@@ -78,6 +81,12 @@ const TOKEN = "office-session-token";
 const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
 const LOGO_PUT = orgLogoPutSchema.parse(fixture("org-logo-put.json"));
+const SHEET_ID = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+const SHEET_CREATE = palletSheetCreateSchema.parse(fixture("pallet-sheet-create.json"));
+const SHEET_UPDATE = palletSheetUpdateSchema.parse(fixture("pallet-sheet-update.json"));
+const SHEET_DEFAULT = palletSheetDefaultUpdateSchema.parse(
+  fixture("pallet-sheet-default-update.json"),
+);
 const COUNTERPARTY_ID = "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e";
 const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const DEVICE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -150,6 +159,36 @@ const CASES: Case[] = [
     { logo: null },
     (api) => api.deleteOrgLogo(TOKEN),
     { method: "DELETE", path: "/v1/office/org/logo", body: undefined },
+  ],
+  [
+    "listPalletSheets",
+    fixture("pallet-sheets.json"),
+    (api) => api.listPalletSheets(TOKEN),
+    { method: "GET", path: "/v1/office/pallet-sheets", body: undefined },
+  ],
+  [
+    "createPalletSheet",
+    fixture("pallet-sheet.json"),
+    (api) => api.createPalletSheet(TOKEN, SHEET_CREATE),
+    { method: "POST", path: "/v1/office/pallet-sheets", body: SHEET_CREATE },
+  ],
+  [
+    "updatePalletSheet",
+    fixture("pallet-sheet.json"),
+    (api) => api.updatePalletSheet(TOKEN, SHEET_ID, SHEET_UPDATE),
+    { method: "PUT", path: `/v1/office/pallet-sheets/${SHEET_ID}`, body: SHEET_UPDATE },
+  ],
+  [
+    "deletePalletSheet",
+    null,
+    (api) => api.deletePalletSheet(TOKEN, SHEET_ID),
+    { method: "DELETE", path: `/v1/office/pallet-sheets/${SHEET_ID}`, body: undefined },
+  ],
+  [
+    "setDefaultPalletSheet",
+    fixture("pallet-sheets.json"),
+    (api) => api.setDefaultPalletSheet(TOKEN, SHEET_DEFAULT),
+    { method: "PUT", path: "/v1/office/pallet-sheet-default", body: SHEET_DEFAULT },
   ],
   [
     "getSscc",
@@ -527,6 +566,21 @@ describe("HostApi office endpoints", () => {
     const logo = fixture("org-logo.json") as { logo: Record<string, unknown> };
     const stale = { logo: { ...logo.logo, updatedAt: "yesterday" } };
     await expect(recording(stale).api.putOrgLogo(TOKEN, LOGO_PUT)).rejects.toThrow();
+  });
+
+  it("rejects a sheet answer that is not a sheet, and a list without its default", async () => {
+    await expect(recording({}).api.createPalletSheet(TOKEN, SHEET_CREATE)).rejects.toThrow();
+    await expect(
+      recording({ ...(fixture("pallet-sheet.json") as object), revision: 0 }).api.updatePalletSheet(
+        TOKEN,
+        SHEET_ID,
+        SHEET_UPDATE,
+      ),
+    ).rejects.toThrow();
+    await expect(recording({ sheets: [] }).api.listPalletSheets(TOKEN)).rejects.toThrow();
+    await expect(
+      recording({ sheets: [], defaultId: null }).api.listPalletSheets(TOKEN),
+    ).resolves.toEqual({ sheets: [], defaultId: null });
   });
 
   it("rejects a users answer that is not a list", async () => {

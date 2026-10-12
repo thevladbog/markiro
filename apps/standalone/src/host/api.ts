@@ -33,6 +33,8 @@ import {
   officeUserSchema,
   orgLogoStateSchema,
   orgProfileSchema,
+  palletSheetSchema,
+  palletSheetsSchema,
   pairingCodeSchema,
   productGroupSchema,
   officeShiftSchema,
@@ -82,6 +84,11 @@ import {
   type OrgLogoState,
   type OrgProfile,
   type OrgProfileUpdate,
+  type PalletSheet,
+  type PalletSheetCreate,
+  type PalletSheetDefaultUpdate,
+  type PalletSheetUpdate,
+  type PalletSheets,
   type PairingCode,
   type PairingCodeRequest,
   type PasswordChange,
@@ -136,6 +143,11 @@ export interface HostApi {
   getOrgLogo: (token: string) => Promise<OrgLogoState>;
   putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
   deleteOrgLogo: (token: string) => Promise<OrgLogoState>;
+  listPalletSheets: (token: string) => Promise<PalletSheets>;
+  createPalletSheet: (token: string, create: PalletSheetCreate) => Promise<PalletSheet>;
+  updatePalletSheet: (token: string, id: string, update: PalletSheetUpdate) => Promise<PalletSheet>;
+  deletePalletSheet: (token: string, id: string) => Promise<void>;
+  setDefaultPalletSheet: (token: string, update: PalletSheetDefaultUpdate) => Promise<PalletSheets>;
   getSscc: (token: string) => Promise<SsccState>;
   updateSsccCounter: (
     token: string,
@@ -328,6 +340,35 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("DELETE", "/v1/office/org/logo", {
         officeToken: token,
         schema: orgLogoStateSchema,
+      }),
+    listPalletSheets: (token) =>
+      client.request("GET", "/v1/office/pallet-sheets", {
+        officeToken: token,
+        schema: palletSheetsSchema,
+      }),
+    createPalletSheet: (token, create) =>
+      client.request("POST", "/v1/office/pallet-sheets", {
+        body: create,
+        officeToken: token,
+        schema: palletSheetSchema,
+      }),
+    updatePalletSheet: (token, id, update) =>
+      client.request("PUT", `/v1/office/pallet-sheets/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: palletSheetSchema,
+      }),
+    deletePalletSheet: async (token, id) => {
+      await client.request("DELETE", `/v1/office/pallet-sheets/${id}`, {
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
+    setDefaultPalletSheet: (token, update) =>
+      client.request("PUT", "/v1/office/pallet-sheet-default", {
+        body: update,
+        officeToken: token,
+        schema: palletSheetsSchema,
       }),
     getSscc: (token) =>
       client.request("GET", "/v1/office/sscc", { officeToken: token, schema: ssccStateSchema }),

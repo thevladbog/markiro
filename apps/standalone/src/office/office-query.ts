@@ -14,6 +14,7 @@ import { useOfficeSession } from "./office-session.js";
 export const officeKeys = {
   org: ["office", "org"],
   orgLogo: ["office", "org-logo"],
+  palletSheets: ["office", "pallet-sheets"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],
   devices: ["office", "devices"],

@@ -934,6 +934,76 @@ pub struct OrgLogoPut {
     pub pixels_base64: String,
 }
 
+/// An A4 pallet sheet (plan А4; the cloud's `PalletSheetSpecV2`, #702). The
+/// host keeps `spec` an object of `schemaVersion` 2 and `kind`
+/// "pallet_sheet" of at most 64 KiB; the domain checks the layout. A stock
+/// sheet carries its preset's key (`buildPalletSheetPresets`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletSheet {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub preset_key: Option<String>,
+    pub revision: i64,
+    pub spec: serde_json::Value,
+}
+
+/// `GET /v1/office/pallet-sheets` and `PUT /v1/office/pallet-sheet-default`:
+/// every sheet by name and the organization's default sheet, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletSheets {
+    pub sheets: Vec<PalletSheet>,
+    pub default_id: Option<String>,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+/// `POST /v1/office/pallet-sheets`: a new sheet, or a stock one by its preset
+/// key (the same key again answers the sheet already there).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetCreate {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_key: Option<String>,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    pub spec: serde_json::Value,
+}
+
+/// `PUT /v1/office/pallet-sheets/{id}`: the name or the state, over the
+/// sheet's revision. The layout never changes: a new layout is a new sheet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    pub expected_revision: i64,
+}
+
+/// `PUT /v1/office/pallet-sheet-default`: an enabled sheet, or `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetDefaultUpdate {
+    #[serde(deserialize_with = "present")]
+    pub template_id: Option<String>,
+}
+
+/// A field that may be `null` but must be there: a body without it is a
+/// refusal, not a quiet "no default" (plain serde reads an absent `Option`
+/// as `None`).
+fn present<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
 /// One SSCC counter (`GET /v1/office/sscc`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

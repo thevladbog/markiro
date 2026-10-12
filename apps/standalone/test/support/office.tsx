@@ -42,6 +42,13 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(() => unexpected("getOrgLogo")),
     putOrgLogo: vi.fn<HostApi["putOrgLogo"]>(() => unexpected("putOrgLogo")),
     deleteOrgLogo: vi.fn<HostApi["deleteOrgLogo"]>(() => unexpected("deleteOrgLogo")),
+    listPalletSheets: vi.fn<HostApi["listPalletSheets"]>(() => unexpected("listPalletSheets")),
+    createPalletSheet: vi.fn<HostApi["createPalletSheet"]>(() => unexpected("createPalletSheet")),
+    updatePalletSheet: vi.fn<HostApi["updatePalletSheet"]>(() => unexpected("updatePalletSheet")),
+    deletePalletSheet: vi.fn<HostApi["deletePalletSheet"]>(() => unexpected("deletePalletSheet")),
+    setDefaultPalletSheet: vi.fn<HostApi["setDefaultPalletSheet"]>(() =>
+      unexpected("setDefaultPalletSheet"),
+    ),
     getSscc: vi.fn<HostApi["getSscc"]>(() => unexpected("getSscc")),
     updateSsccCounter: vi.fn<HostApi["updateSsccCounter"]>(() => unexpected("updateSsccCounter")),
     updateBlockSizes: vi.fn<HostApi["updateBlockSizes"]>(() => unexpected("updateBlockSizes")),
