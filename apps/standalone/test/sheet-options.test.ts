@@ -51,14 +51,18 @@ describe("the choices of a shift's A4 sheet", () => {
     ).toBe("Основной лист организации (не выбран)");
   });
 
-  it("does not offer «main» to a shift that already has a sheet: the host cannot clear it", () => {
+  it("offers «main» to a shift that already has a sheet too: the edit sends it back with `null`", () => {
     const options = sheetOptions(
       lists([sheet(0), sheet(1)], sheet(0).id),
       sheet(1).id,
       sheet(1).id,
       t,
     );
-    expect(options.map((option) => option.value)).toEqual([sheet(0).id, sheet(1).id]);
+    expect(options).toEqual([
+      { value: "", label: "Основной лист организации (Лист 0)" },
+      { value: sheet(0).id, label: "Лист 0" },
+      { value: sheet(1).id, label: "Лист 1" },
+    ]);
   });
 
   it("keeps the sheet a shift holds, marked, when it was switched off, cannot be read or is gone", () => {
@@ -82,8 +86,9 @@ describe("the choices of a shift's A4 sheet", () => {
     });
     const gone = sheetOptions(lists([sheet(0)]), sheet(1).id, sheet(1).id, t);
     expect(gone).toContainEqual({ value: sheet(1).id, label: "Лист 1a3f0c5e" });
-    // While the list did not load, the held sheet is the only choice but "main".
+    // While the list did not load, «main» and the held sheet are the choices.
     expect(sheetOptions(undefined, sheet(1).id, sheet(1).id, t)).toEqual([
+      { value: "", label: "Основной лист организации (не выбран)" },
       { value: sheet(1).id, label: "Лист 1a3f0c5e" },
     ]);
   });

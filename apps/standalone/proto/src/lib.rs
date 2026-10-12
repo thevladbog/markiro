@@ -1683,10 +1683,13 @@ pub struct ShiftUpdate {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
-    /// The shift's A4 sheet (plan А4), only with pallets; left out, a shift
-    /// with pallets takes the organization's default sheet when it has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pallet_sheet_template_id: Option<String>,
+    /// The shift's A4 sheet (plan А4), only with pallets: an id names that
+    /// sheet; `null` is «the organization's main sheet», resolved by the host
+    /// when it takes the edit (none when there is no main sheet) and frozen
+    /// into the snapshot at opening like any sheet; left out, the shift keeps
+    /// its sheet, and pallets just turned on take the main one.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub pallet_sheet_template_id: Option<Option<String>>,
     pub expected_rev: i64,
 }
 

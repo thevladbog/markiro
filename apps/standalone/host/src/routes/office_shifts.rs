@@ -332,7 +332,9 @@ pub async fn create_shift(
 /// stays is kept even if it was archived, disabled or narrowed since (the
 /// station's open then refuses the template: `template_not_fit`). Pallets
 /// turned on need a pallet template and take the product's capacity unless
-/// the edit names one; turned off, the shift keeps neither.
+/// the edit names one; turned off, the shift keeps neither. The A4 sheet
+/// `null` goes back to the organization's main sheet as it is at this edit
+/// (plan А4): a later change of the main sheet does not reach the shift.
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -410,17 +412,20 @@ pub async fn update_shift(
             template_id,
         } => (box_capacity, Some(template_id.to_owned())),
     };
-    // The A4 sheet (plan А4): kept while pallets stay on, the request's when
-    // it names one, the default when pallets just turned on, none without
-    // pallets.
+    // The A4 sheet (plan А4): the request's when it names one; `null` is
+    // the organization's main sheet as it is now, in this transaction (none
+    // without one; the opening then freezes whatever the shift holds); left
+    // out, kept while pallets stay on and the main one when they just turned
+    // on. Without pallets there is none: a named sheet is refused, `null`
+    // asks for nothing and passes.
     let pallet_sheet_template_id = if pallets_enabled {
         match &update.pallet_sheet_template_id {
-            Some(id) => Some(id.clone()),
+            Some(Some(id)) => Some(id.clone()),
             None if current.pallets_enabled => current.pallet_sheet_template_id.clone(),
-            None => crate::routes::pallet_sheets::default_sheet(&mut tx).await?,
+            Some(None) | None => crate::routes::pallet_sheets::default_sheet(&mut tx).await?,
         }
     } else {
-        if update.pallet_sheet_template_id.is_some() {
+        if let Some(Some(_)) = update.pallet_sheet_template_id {
             return Err(ApiError::validation(
                 "palletSheetTemplateId",
                 "only a shift with pallets has an A4 sheet",
@@ -449,7 +454,9 @@ pub async fn update_shift(
                     pallet_box_capacity.get_or_insert(product.pallet_box_capacity);
                 }
             }
-            if let Some(sheet_id) = &update.pallet_sheet_template_id {
+            // A named sheet that changes is checked; the main sheet (`null`)
+            // is enabled by construction (`default_sheet`).
+            if let Some(Some(sheet_id)) = &update.pallet_sheet_template_id {
                 if current.pallet_sheet_template_id.as_ref() != Some(sheet_id) {
                     crate::routes::pallet_sheets::check_sheet(
                         &mut tx,

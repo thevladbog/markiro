@@ -12,11 +12,11 @@ export interface SheetOption {
 /**
  * The choices of a shift's «Лист А4» (plan А4):
  *
- * - «Основной лист организации (…)» (`""`) for a shift that has no sheet of
- *   its own yet — a new one, or a planned one without. A planned shift that
- *   has a sheet cannot go back to «main»: the host's change cannot clear it
- *   (`ShiftUpdate.palletSheetTemplateId` is never `null`), so the choice is
- *   not offered rather than offered and silently ignored.
+ * - «Основной лист организации (…)» (`""`), always: a new shift takes the
+ *   main sheet, and a planned one that holds a sheet goes back to it
+ *   (`ShiftUpdate.palletSheetTemplateId: null`; the host resolves the main
+ *   sheet when it takes the edit, so a later change of the main sheet does
+ *   not reach the shift).
  * - the sheets in use that this build can read, by name; a name two sheets
  *   share carries the start of the sheet's id, so the two can be told apart.
  * - the sheet the shift already holds, and the one the form holds, even when
@@ -35,14 +35,12 @@ export function sheetOptions(
   const sheets = lists?.sheets ?? [];
   const main = sheets.find((sheet) => sheet.id === lists?.defaultId && sheet.enabled);
   const options: SheetOption[] = [];
-  if (ownId === null) {
-    options.push({
-      value: "",
-      label: t("office.shifts.palletSheetDefault", {
-        name: main?.name ?? t("office.shifts.palletSheetNoDefault"),
-      }),
-    });
-  }
+  options.push({
+    value: "",
+    label: t("office.shifts.palletSheetDefault", {
+      name: main?.name ?? t("office.shifts.palletSheetNoDefault"),
+    }),
+  });
   const sharedNames = new Set<string>();
   const seen = new Set<string>();
   for (const sheet of sheets) {

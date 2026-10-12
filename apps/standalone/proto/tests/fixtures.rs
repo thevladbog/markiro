@@ -1593,3 +1593,27 @@ fn the_sheet_is_left_out_of_a_request_that_names_none() {
     assert!(station.pallet_sheet_template_id.is_some());
     assert!(serde_json::to_value(&station).unwrap()["palletSheetTemplateId"].is_string());
 }
+
+/// A planned shift goes back to the organization's main sheet with
+/// `palletSheetTemplateId: null`, which is neither leaving it out (keep) nor
+/// an id, and goes back out as `null` (`shift-update-main-sheet.json`).
+#[test]
+fn a_shift_update_sends_the_main_sheet_as_null() {
+    let main: ShiftUpdate = round_trip("shift-update-main-sheet.json");
+    assert_eq!(main.pallet_sheet_template_id, Some(None));
+    let named: ShiftUpdate = serde_json::from_value(serde_json::json!({
+        "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b", "expectedRev": 72
+    }))
+    .unwrap();
+    assert_eq!(
+        named.pallet_sheet_template_id,
+        Some(Some("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b".to_owned()))
+    );
+    let kept: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 72 })).unwrap();
+    assert_eq!(kept.pallet_sheet_template_id, None);
+    assert!(serde_json::from_value::<ShiftUpdate>(
+        serde_json::json!({ "palletSheetTemplateId": 7, "expectedRev": 72 })
+    )
+    .is_err());
+}

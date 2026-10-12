@@ -119,7 +119,8 @@ export function toShiftInput(values: ShiftFields): ShiftInput {
       ? {
           boxCapacity: Number(values.palletBoxCapacity.trim()),
           templateId: values.palletTemplateId,
-          ...(values.palletSheetTemplateId === "" ? {} : { sheetId: values.palletSheetTemplateId }),
+          // «Основной лист организации» (`""`) is the main sheet, never an empty id.
+          sheetId: values.palletSheetTemplateId === "" ? null : values.palletSheetTemplateId,
         }
       : null,
   };

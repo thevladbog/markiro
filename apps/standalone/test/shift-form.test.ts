@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import { shiftUpdate } from "../src/host/requests.js";
+import { shiftCreate, shiftUpdate } from "../src/host/requests.js";
 import {
   SHIFT_CONFLICTS,
   SHIFT_FIELD_ORDER,
@@ -77,7 +77,7 @@ describe("a shift's form", () => {
         palletBoxCapacity: " 32 ",
         palletTemplateId: PALLET.id,
       }).pallets,
-    ).toEqual({ boxCapacity: 32, templateId: PALLET.id });
+    ).toEqual({ boxCapacity: 32, templateId: PALLET.id, sheetId: null });
     // Pallets turned off send none, whatever their fields still hold.
     expect(
       toShiftInput({
@@ -136,7 +136,7 @@ describe("a shift's form", () => {
     });
   });
 
-  it("carries a shift's A4 sheet: the form holds it, an empty choice sends none, a chosen one goes with the pallets (plan А4)", () => {
+  it("carries a shift's A4 sheet: the form holds it, an empty choice is the main sheet, a chosen one goes with the pallets (plan А4)", () => {
     const SHEET = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a50";
     const withSheet = {
       ...PLANNED,
@@ -153,10 +153,24 @@ describe("a shift's form", () => {
       templateId: PALLET.id,
       sheetId: SHEET,
     });
-    // «Основной лист организации» sends no sheet at all (never an empty id).
+    // «Основной лист организации» is the main sheet (`null`), never an empty id.
     const main = toShiftInput({ ...pallets, palletSheetTemplateId: "" }).pallets;
-    expect(main).toEqual({ boxCapacity: 40, templateId: PALLET.id });
-    expect(main).not.toHaveProperty("sheetId");
+    expect(main).toEqual({ boxCapacity: 40, templateId: PALLET.id, sheetId: null });
+    // A new shift sends no sheet for it: the host gives it the main one.
+    const created = shiftCreate(toShiftInput({ ...pallets, palletSheetTemplateId: "" }));
+    expect(created).not.toHaveProperty("palletSheetTemplateId");
+    // A planned shift that holds a sheet goes back to the main one with `null`...
+    expect(
+      shiftUpdate(
+        withSheet,
+        toShiftChange({ ...shiftFields(withSheet), palletSheetTemplateId: "" }),
+      ),
+    ).toStrictEqual({ palletSheetTemplateId: null, expectedRev: withSheet.rev });
+    // ... and one with pallets but no sheet of its own sends nothing for it.
+    const bare = { ...withSheet, palletSheetTemplateId: null };
+    expect(shiftUpdate(bare, toShiftChange(shiftFields(bare)))).toStrictEqual({
+      expectedRev: bare.rev,
+    });
     // Pallets off send no sheet, whatever the field still holds.
     expect(toShiftInput({ ...pallets, palletsEnabled: false }).pallets).toBeNull();
     // An unchanged form of a shift with a sheet sends nothing back.

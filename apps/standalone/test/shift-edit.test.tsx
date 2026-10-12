@@ -1056,11 +1056,12 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     return session;
   }
 
-  it("shows the sheet the shift holds, offers no «main» to it, and sends nothing for it unchanged", async () => {
+  it("shows the sheet the shift holds, offers «main» to it too, and sends nothing for it unchanged", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
     await waitFor(() =>
       expect(options(name, "Лист А4")).toEqual([
+        "Основной лист организации (Палета А4 · вертикальная)",
         "Палета А4 · вертикальная",
         "Палета А4 · горизонтальная",
         "Палета А4 · две одинаковые А5",
@@ -1082,7 +1083,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends the other sheet that was chosen, with nothing else", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
     fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
     fireEvent.click(save(name));
     await waitFor(() =>
@@ -1101,7 +1102,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
       expect(options(name, "Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
     );
     expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
-    expect(options(name, "Лист А4")).toHaveLength(3);
+    expect(options(name, "Лист А4")).toHaveLength(4);
     expect(save(name).disabled).toBe(true);
   });
 
@@ -1170,10 +1171,25 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     );
   });
 
+  it("sends a shift that holds a sheet back to «main» as `null`, with nothing else", async () => {
+    const session = sessionWith(WITH_SHEET);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    fireEvent.change(field(name, "Лист А4"), { target: { value: "" } });
+    expect(valueOf(name, "Лист А4")).toBe("");
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_SHEET.id, {
+        palletSheetTemplateId: null,
+        expectedRev: 72,
+      }),
+    );
+  });
+
   it("sends no sheet when the pallets are turned off", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
     expect(within(dialog(name)).queryByLabelText("Лист А4")).toBeNull();
     fireEvent.click(save(name));
@@ -1191,7 +1207,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
       api("validation_failed", { field: "palletSheetTemplateId" }),
     );
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
     fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
     fireEvent.click(save(name));
     await waitFor(() =>

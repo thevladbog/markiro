@@ -1322,9 +1322,10 @@ export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
 
 /**
  * `PUT /v1/office/shifts/{id}`: only the fields sent change, over the loaded
- * revision. `plannedQty: null` and `counterpartyId: null` clear them; every
- * other field is left out or a value, never `null`, which the host would read
- * as «keep». The product never changes, so it is no field. Pallets turned
+ * revision. `plannedQty: null` and `counterpartyId: null` clear them;
+ * `palletSheetTemplateId: null` is «the organization's main sheet», resolved
+ * by the host at this edit (plan А4); every other field is left out or a
+ * value, never `null`, which the host would read as «keep». The product never changes, so it is no field. Pallets turned
  * off clear their capacity and template, which the edit then does not send.
  */
 export const shiftUpdateSchema = z
@@ -1339,7 +1340,7 @@ export const shiftUpdateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
-    palletSheetTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().nullable().optional(),
     expectedRev: z.number().int(),
   })
   .strict();

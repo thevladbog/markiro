@@ -2629,3 +2629,29 @@ async fn a_sheet_and_a_logo_that_make_the_snapshot_too_large_refuse_the_entry() 
         .await;
     assert_eq!(still["status"], "planned");
 }
+
+/// A planned shift sent back to the main sheet (`palletSheetTemplateId:
+/// null`, plan А4 final wave) holds the main sheet of that edit, and the
+/// entry freezes that one, not the main sheet of the day it opens.
+#[tokio::test]
+async fn the_main_sheet_a_planned_shift_went_back_to_is_the_one_its_entry_freezes() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let (_, shift) = planned_with_sheet(&admin, &setup, Some(&landscape)).await;
+    default_sheet_is(&admin, &portrait).await;
+    let (status, main) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap()),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{main}");
+    assert_eq!(main["palletSheetTemplateId"], json!(portrait));
+    default_sheet_is(&admin, &landscape).await;
+    let (status, entered) = enter(&admin, &admin.key, &main).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["snapshot"]["palletSheet"]["id"], json!(portrait));
+}

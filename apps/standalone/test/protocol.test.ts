@@ -334,6 +334,7 @@ const REQUESTS = [
   ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-create-pallet-sheet.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
+  ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["shift-export-record.json", shiftExportRecordSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
@@ -1349,7 +1350,38 @@ describe("request builders send only what changes", () => {
         },
       ],
       [shiftUpdate(sheeted, { pallets: null }), { palletsEnabled: false, expectedRev: 71 }],
+      // «Основной лист» (`null`): sent back by a shift that holds a sheet,
+      // nothing from one that holds none, and pallets turned on leave it out.
+      [
+        shiftUpdate(sheeted, { pallets: { ...keep, sheetId: null } }),
+        { palletSheetTemplateId: null, expectedRev: 71 },
+      ],
+      [shiftUpdate(withPallets, { pallets: { ...keep, sheetId: null } }), { expectedRev: 71 }],
+      [
+        shiftUpdate(without, { pallets: { ...keep, sheetId: null } }),
+        {
+          palletsEnabled: true,
+          palletBoxCapacity: 40,
+          palletTemplateId: template,
+          expectedRev: 71,
+        },
+      ],
     ] as const;
+    expect(
+      shiftUpdate({ ...sheeted, rev: 72 }, { pallets: { ...keep, sheetId: null } }),
+    ).toStrictEqual(fixture("shift-update-main-sheet.json"));
+    expect(
+      shiftCreate({
+        productId: without.productId,
+        lineId: without.lineId,
+        productionDate: without.productionDate,
+        boxTemplateId: without.boxTemplateId,
+        boxCapacity: without.boxCapacity,
+        plannedQty: null,
+        counterpartyId: null,
+        pallets: { ...keep, sheetId: null },
+      }),
+    ).not.toHaveProperty("palletSheetTemplateId");
     for (const [body, expected] of sheetBodies) {
       expect(body).toStrictEqual(expected);
       expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
@@ -1924,6 +1956,7 @@ describe("shift shapes", () => {
       palletsEnabled: ["no"],
       palletBoxCapacity: [0, -1, 1.5, "40", null],
       palletTemplateId: ["42", null],
+      palletSheetTemplateId: ["42", 7],
       expectedRev: [1.5, "71", null],
     };
     for (const [field, values] of Object.entries(refusedUpdate)) {
@@ -1933,6 +1966,10 @@ describe("shift shapes", () => {
       }
     }
     expect(shiftUpdateSchema.safeParse({ lineId: update.lineId }).success).toBe(false);
+    // `palletSheetTemplateId: null` is «the main sheet» (plan А4), not a refusal.
+    expect(shiftUpdateSchema.safeParse({ ...update, palletSheetTemplateId: null }).success).toBe(
+      true,
+    );
     expect(
       shiftUpdateSchema.safeParse({ ...update, boxCapacity: 24, mode: "validation" }).success,
     ).toBe(true);

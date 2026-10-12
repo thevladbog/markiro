@@ -2755,7 +2755,13 @@ device_id = ?`, not the order the Node list pins) to both query-plan lists.
 A shift's A4 sheet and organization (plan А4). A shift with pallets may name a sheet
 (`palletSheetTemplateId`, only with pallets — a database trigger and the routes refuse it
 otherwise; without a request the host takes the main sheet, a shift made on a station always
-does). `shifts::snapshot` freezes, when the shift is opened, the sheet (`palletSheet`: id, name,
+does). An edit's `palletSheetTemplateId: null` (`ShiftUpdate`, a double option like
+`counterpartyId`) is «the organization's main sheet as it is at this edit»: `default_sheet` in the
+edit's transaction (none without a main sheet) is stored as the shift's sheet, so a later change
+of the main sheet does not reach a planned shift; without pallets `null` asks for nothing and
+passes, on an open shift it passes only when it changes nothing (`shift_status` otherwise). The
+office always offers «Основной лист организации» (`sheetOptions`) and sends `null` only from a
+shift that holds a sheet of its own (`shiftUpdate`). `shifts::snapshot` freezes, when the shift is opened, the sheet (`palletSheet`: id, name,
 revision and the whole spec) and the organization (`organization`: name, INN, logo as
 `width`/`height`/`pixelsBase64`) into the snapshot beside the layouts, and nothing re-reads them
 for that shift: renaming, switching off, deleting the sheet, changing the organization or its
