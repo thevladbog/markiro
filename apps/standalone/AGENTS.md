@@ -3800,7 +3800,13 @@ master database, one at a time, on a connection of its own:
   is created empty as `.partial` (owner-only), closed by a `KeyFileGuard`
   (Unix `0600`; Windows `icacls /inheritance:r /grant:r` SYSTEM,
   Administrators and OWNER RIGHTS — the service's account) BEFORE the key is
-  written, renamed, and only then is the manifest written. The worker reads the
+  written, renamed, and only then is the manifest written. The key goes
+  through the handle that created the file, never through its name
+  (`backup/key_file.rs`, std only so a probe crate type-checks it for
+  Windows): on Windows that handle is unshared (`share_mode(0)`), so nobody
+  opens, deletes or renames the file while the host writes it; on Unix a file
+  moved away and replaced while the guard ran fails the device and inode
+  check, its key is wiped and the copy goes without the identity. The worker reads the
   data folder's identity before every copy and leaves it out when it does not
   read or names another host. A guard or write that fails leaves the copy
   without it (that folder's manifest names none; the office warns

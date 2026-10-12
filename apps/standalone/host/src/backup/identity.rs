@@ -9,8 +9,10 @@
 //! (`0600`) and closed by a [`KeyFileGuard`] before it gets its name: on
 //! Windows only SYSTEM, the administrators and the file's owner (the
 //! service's account) keep access. The guard closes the still empty file
-//! BEFORE the key is written into it, so the key never sits in a file with
-//! the folder's inherited access. A folder that cannot be closed (a
+//! BEFORE the key is written into it, and the key goes through the handle
+//! that created the file, never through its name: on Windows that handle
+//! is unshared, so nobody can open the file, delete it or rename it while
+//! the host writes it (`super::key_file`). A folder that cannot be closed (a
 //! FAT32 or exFAT flash drive, a share that refuses ACLs) gets the copy
 //! without the identity, and the manifest of that folder names none.
 //! Nothing here logs a byte of the key: `Debug` prints the host id, the
@@ -27,7 +29,8 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
-use super::copy::{create_private, partial_path};
+use super::copy::partial_path;
+use super::key_file;
 use crate::config::{HostConfig, HostPaths};
 use crate::install::{run_checked, Commands};
 use crate::tls::TlsIdentity;
@@ -331,9 +334,12 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, IdentityError> {
 }
 
 /// Write `bytes` to `<target>.partial`, close it with `guard` while it is
-/// still empty, then fill it (synced) and rename it to `target`. A stale
-/// `.partial` (or a link planted under its name) is removed first and the
-/// file is created exclusively, so nothing is ever written through a link.
+/// still empty, then fill it (synced) through the handle that created it and
+/// rename it to `target`. A stale `.partial` (or a link planted under its
+/// name) is removed first and the file is created exclusively (unshared on
+/// Windows), so nothing is ever written through a link or into a file the
+/// guard did not close. A file moved away and replaced while the guard ran
+/// (Unix) is wiped, and nothing gets the identity's name.
 /// `None`, with nothing of it left, when a step fails; the reason goes to
 /// the process log only. Blocking.
 fn put_file(target: &Path, bytes: &[u8], guard: &dyn KeyFileGuard) -> Option<()> {
@@ -345,15 +351,23 @@ fn put_file(target: &Path, bytes: &[u8], guard: &dyn KeyFileGuard) -> Option<()>
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(text(error)),
         }
-        drop(create_private(&partial, true).map_err(text)?);
+        // The handle created here is the only one the key goes through:
+        // nothing reopens the file by its name after the guard ran.
+        let mut file = key_file::create(&partial).map_err(text)?;
         guard.protect(&partial)?;
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&partial)
-            .map_err(text)?;
         file.write_all(bytes).map_err(text)?;
         file.sync_all().map_err(text)?;
+        if !key_file::still_named(&file, &partial).unwrap_or(false) {
+            // Moved away and something else put under its name while the
+            // guard ran: the key is wiped from this file, wherever it went,
+            // and the identity's name is never given to what is there now.
+            let _ = file.set_len(0);
+            let _ = file.sync_all();
+            return Err(format!(
+                "{} was moved or replaced while it was closed",
+                partial.display()
+            ));
+        }
         drop(file);
         fs::rename(&partial, target).map_err(text)
     })();
@@ -973,6 +987,120 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    /// Someone with rights on the folder moves the empty partial away while
+    /// the guard closes it, puts a file of their own under its name and
+    /// keeps it open to read whatever the host writes into it.
+    #[derive(Default)]
+    struct Swapping {
+        aside: Mutex<Option<PathBuf>>,
+        planted: Mutex<Option<fs::File>>,
+    }
+
+    impl KeyFileGuard for Swapping {
+        fn protect(&self, path: &Path) -> Result<(), String> {
+            let aside = path.with_file_name("moved-away");
+            // On Windows the host's unshared handle refuses the move.
+            if fs::rename(path, &aside).is_ok() {
+                fs::write(path, b"planted").unwrap();
+                *self.planted.lock().unwrap() = Some(fs::File::open(path).unwrap());
+                *self.aside.lock().unwrap() = Some(aside);
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_partial_swapped_while_it_is_closed_never_gets_the_key_nor_the_identitys_name() {
+        let keys = tempfile::tempdir().unwrap();
+        let identity = made(keys.path(), HOST);
+        let copies = tempfile::tempdir().unwrap();
+        let db = copies.path().join(COPY);
+        let guard = Swapping::default();
+        let reference = attach(&db, &identity, &guard);
+        let aside = guard.aside.lock().unwrap().take();
+        assert_eq!(aside.is_none(), cfg!(windows), "{aside:?}");
+        match aside {
+            None => {
+                let reference = reference.expect("written");
+                assert!(read_beside(&db, HOST, &reference)
+                    .unwrap()
+                    .same_as(&identity));
+            }
+            Some(aside) => {
+                assert_eq!(reference, None);
+                let mut planted = Vec::new();
+                guard
+                    .planted
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap()
+                    .read_to_end(&mut planted)
+                    .unwrap();
+                // Compared without printing: a failure must not show a key.
+                assert!(
+                    planted == b"planted",
+                    "no key byte reached the planted file"
+                );
+                assert!(
+                    fs::symlink_metadata(identity_path(&db)).is_err(),
+                    "nothing took the identity's name"
+                );
+                assert_eq!(
+                    fs::metadata(&aside).unwrap().len(),
+                    0,
+                    "the key is wiped from the file moved away"
+                );
+            }
+        }
+    }
+
+    /// Moves the empty partial away while the guard closes it and puts a
+    /// link to a file in another folder under its name.
+    #[cfg(unix)]
+    struct Linking {
+        victim: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl KeyFileGuard for Linking {
+        fn protect(&self, path: &Path) -> Result<(), String> {
+            fs::rename(path, path.with_file_name("moved-away")).unwrap();
+            std::os::unix::fs::symlink(&self.victim, path).unwrap();
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_partial_swapped_for_a_link_while_it_is_closed_writes_nothing_through_it() {
+        let keys = tempfile::tempdir().unwrap();
+        let identity = made(keys.path(), HOST);
+        let copies = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let victim = elsewhere.path().join("victim.txt");
+        fs::write(&victim, b"untouched").unwrap();
+        let db = copies.path().join(COPY);
+        let guard = Linking {
+            victim: victim.clone(),
+        };
+        assert_eq!(attach(&db, &identity, &guard), None);
+        // Compared without printing: a failure must not show a key.
+        assert!(fs::read(&victim).unwrap() == b"untouched");
+        assert!(fs::symlink_metadata(identity_path(&db)).is_err());
+        let left: Vec<_> = fs::read_dir(copies.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["moved-away"], "the planted link went");
+        assert_eq!(
+            fs::metadata(copies.path().join("moved-away"))
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[cfg(unix)]

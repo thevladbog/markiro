@@ -7,6 +7,7 @@
 pub mod copy;
 pub mod folder;
 pub mod identity;
+mod key_file;
 pub mod retention;
 pub mod worker;
 
