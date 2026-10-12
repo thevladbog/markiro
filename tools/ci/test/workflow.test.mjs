@@ -248,6 +248,21 @@ test("the standalone app's Vitest suite runs in its own job and in no other app 
   );
 });
 
+test("both standalone cargo test steps report every failing test binary in one run", () => {
+  for (const name of ["standalone-rust", "standalone-windows-build"]) {
+    const commands = workflow.jobs[name].steps
+      .flatMap((step) => (step.run ?? "").split("\n"))
+      .map((line) => line.trim())
+      .filter((line) => /^cargo test\b/.test(line));
+    assert.equal(commands.length, 1, `${name} runs cargo test once`);
+    assert.match(
+      commands[0],
+      /--manifest-path apps\/standalone\/Cargo\.toml --workspace --no-fail-fast$/,
+      name,
+    );
+  }
+});
+
 test("Signer Windows verification includes the stable release contract", () => {
   const job = workflow.jobs["signer-windows-build"];
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));

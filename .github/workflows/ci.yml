@@ -738,10 +738,12 @@ jobs:
       # `tauri::generate_context!` needs `apps/standalone/dist` at compile time.
       - name: Build standalone webview + workspace deps
         run: pnpm turbo build --filter '@markiro/standalone...'
+      # `--no-fail-fast`: one run reports the failures of every test binary,
+      # not only those of the first one that fails.
       - name: cargo build + test (protocol, host and shell)
         run: |
           cargo build --manifest-path apps/standalone/Cargo.toml --workspace
-          cargo test  --manifest-path apps/standalone/Cargo.toml --workspace
+          cargo test  --manifest-path apps/standalone/Cargo.toml --workspace --no-fail-fast
 
   standalone-windows-build:
     needs: classify-changes
@@ -768,9 +770,10 @@ jobs:
       # by the step above (the test skips without it).
       - run: pnpm test:standalone-export
       # The Windows service entry point and its installer seam only compile on
-      # Windows, so this is the only job that exercises them.
+      # Windows, so this is the only job that exercises them. `--no-fail-fast`
+      # as in standalone-rust: every Windows-only failure in one run.
       - name: cargo test (Windows paths)
-        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace
+        run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --no-fail-fast
       - name: Build the host for the installer
         run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host
       # Tauri bundles `bundle.externalBin` from src-tauri/binaries under the
