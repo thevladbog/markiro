@@ -3633,7 +3633,15 @@ Each attempt's outcome (`sent`, `unknown`, `failed`, `verified`,
 sends them after the facts (`sendWarehouseBatch`) to `POST
 /v1/device/warehouse/reprints`, which keeps one row per record in
 `warehouse_reprints` (host migration `0015`): receipts as the facts', with
-`invalid_record`, `payload_mismatch` and `subject_unknown`. A record names a
+`invalid_record`, `payload_mismatch` and `subject_unknown`. A failed send of
+the records has a count and a retry of its own (`warehouseRetry` in
+`host-link.ts`, 2 s … 60 s, dropped when the link goes down or ends): it never
+shows as a failure of the facts and never pauses them, a scan's send of the
+facts does not ask the records' route again before that retry, and a pause of
+the facts neither cuts nor stretches it (the retry's end sends only when no
+retry of the facts runs; that one sends the records after the facts). Only
+`restore_pending` — the host holds both routes — holds the facts too
+(`factsHeld`, 60 s). A record names a
 code's hash or an SSCC, never a full code; reprint records write no audit row
 and take no revision, and change no box, pallet, code or SSCC. A finished
 session whose records were all accepted goes 30 days after its finish

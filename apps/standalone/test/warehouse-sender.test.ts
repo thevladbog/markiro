@@ -661,3 +661,151 @@ describe("the warehouse records on the link (plan СКЛ)", () => {
     expect(station.types().length).toBe(before);
   });
 });
+
+// The records' failures have a pause of their own (final review of plan СКЛ, I2): a failing
+// reprint route neither delays the facts nor is asked again by every scan, and a pause of the
+// facts neither cuts nor stretches the records' one. Only `restore_pending` — the host holds
+// both routes — holds the facts too.
+describe("the warehouse records' own pause (plan СКЛ)", () => {
+  const SERVER = new HostError({ kind: "api", code: "internal", status: 500, message: "no" });
+  const factsUnsent = (db: ReturnType<typeof openLocalDb>["db"]) =>
+    rows(db, "SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")[0]?.["n"];
+  const attempts = (db: ReturnType<typeof openLocalDb>["db"]) =>
+    rows(db, "SELECT attempts FROM wh_outbox")[0]?.["attempts"];
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  /** A link whose reprint route has failed three times in a row: its next try is 8 s away. */
+  async function failedThreeTimes(sendFacts: Send) {
+    const station = await link(
+      async () => {
+        throw NOT_FOUND;
+      },
+      { sendFacts },
+    );
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(1));
+    await advance(2_100);
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(2));
+    await advance(4_100);
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(3));
+    return station;
+  }
+
+  it("send a scan at once while the records' route fails, and ask that route only when its pause ends", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const station = await link(async () => {
+      throw NOT_FOUND;
+    });
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(1));
+    await settle();
+    // Two scans in the records' first pause: each goes at once, the records do not.
+    await unsentScans(station.local, 1, PAIRING, 100);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(1));
+    await unsentScans(station.local, 1, PAIRING, 101);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(factsUnsent(station.db)).toBe(0));
+    await settle();
+    expect(station.warehouse).toHaveBeenCalledTimes(1);
+    // Counted once: a scan is no retry of the records.
+    expect(attempts(station.db)).toBe(1);
+    expect(station.types()).not.toContain("facts_failed");
+    await advance(2_100);
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(2));
+    expect(attempts(station.db)).toBe(2);
+    station.hook.unmount();
+  });
+
+  it("keep their pause when the facts fail meanwhile, and wait for it after the facts went", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    let factsDown = true;
+    const station = await failedThreeTimes(async (records) => {
+      if (factsDown) throw SERVER;
+      return acceptAll(records);
+    });
+    // A scan while the facts' route fails: its own pauses, 2 s then 4 s.
+    await unsentScans(station.local, 1, PAIRING, 100);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(1));
+    await advance(2_100);
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(2));
+    factsDown = false;
+    station.warehouse?.mockImplementation(acceptAll);
+    await advance(4_100);
+    await waitFor(() => expect(factsUnsent(station.db)).toBe(0));
+    await settle();
+    // The facts went; the records' 8 s pause is not over.
+    expect(station.warehouse).toHaveBeenCalledTimes(3);
+    await advance(2_000);
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.warehouse).toHaveBeenCalledTimes(4);
+    station.hook.unmount();
+  });
+
+  it("end their pause without cutting the facts' one", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const station = await failedThreeTimes(async () => {
+      throw SERVER;
+    });
+    // The facts fail at 0 s, 2 s and 6 s: their next try is at 14 s.
+    await unsentScans(station.local, 1, PAIRING, 100);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(1));
+    await advance(2_100);
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(2));
+    await advance(4_100);
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(3));
+    // The records' pause ends at 8 s: the facts wait for their own.
+    await advance(3_000);
+    await settle();
+    expect(station.facted).toHaveBeenCalledTimes(3);
+    expect(station.warehouse).toHaveBeenCalledTimes(3);
+    station.facted.mockImplementation(acceptAll);
+    station.warehouse?.mockImplementation(acceptAll);
+    await advance(5_100);
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.facted).toHaveBeenCalledTimes(4);
+    expect(station.warehouse).toHaveBeenCalledTimes(4);
+    station.hook.unmount();
+  });
+
+  it("hold the facts too when the host holds the stations' records after a restore", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const held = new HostError({ kind: "api", code: "restore_pending", status: 503, message: "" });
+    const station = await link(async () => {
+      throw held;
+    });
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(1));
+    await unsentScans(station.local, 1, PAIRING, 100);
+    station.hook.result.current.requestFacts();
+    await advance(30_000);
+    expect(station.facted).not.toHaveBeenCalled();
+    station.warehouse?.mockImplementation(acceptAll);
+    await advance(30_000);
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    await waitFor(() => expect(factsUnsent(station.db)).toBe(0));
+    expect(station.facted).toHaveBeenCalledTimes(1);
+    station.hook.unmount();
+  });
+
+  it("drop their pause when the link goes down or ends", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const station = await link(async () => {
+      throw NOT_FOUND;
+    });
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(1));
+    await settle();
+    const withPause = vi.getTimerCount();
+    await station.connection.status(OFFLINE);
+    expect(vi.getTimerCount()).toBe(withPause - 1);
+    await station.connection.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(station.warehouse).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(vi.getTimerCount()).toBe(withPause);
+    station.hook.unmount();
+    expect(vi.getTimerCount()).toBe(withPause - 1);
+  });
+});

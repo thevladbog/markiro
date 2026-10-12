@@ -132,7 +132,11 @@ export interface HostLinkControls {
  * write; a batch of 100 asks for the next at once; a failed send is retried
  * after `nextSyncRetryMs` with a count of its own while the link is online,
  * and at once when the link is back; a refused key ends the link as
- * everywhere. It lives exactly as long as the link: a refusal waiting for the
+ * everywhere. The warehouse reprint's records (plan СКЛ) go after the last
+ * batch of facts, with a count and a retry of their own: a failure of theirs
+ * neither pauses the facts nor is asked again by a scan before its retry, and
+ * the facts' pauses leave that retry alone (only `restore_pending` holds both).
+ * It lives exactly as long as the link: a refusal waiting for the
  * operator to leave the shift stops the link (`App`), and the delivery with
  * it. After a restore of the host (plan РК-С) an online status names its new
  * epoch: the pairing notes it and owes the host its blocks, a sync from zero
@@ -203,9 +207,6 @@ export function useHostLink({
     };
     // And for sending the outbox.
     let factFailures = 0;
-    // Failed sends of the warehouse records in a row (their own count: a failure of
-    // theirs is not the facts', and never shows as one).
-    let warehouseFailures = 0;
     let factRetry: ReturnType<typeof setTimeout> | null = null;
     // The host holds the facts and the wait it named is running: only that
     // wait's end asks again (it is set exactly when `factRetry` is the
@@ -216,6 +217,19 @@ export function useHostLink({
       if (factRetry === null) return;
       clearTimeout(factRetry);
       factRetry = null;
+    };
+    // And for the warehouse reprint's records (plan СКЛ): failed sends in a row
+    // and the pending retry, both their own. A failure of theirs is not the
+    // facts': it never shows as one, never pauses the facts, and a send of the
+    // facts (a scan's) neither cancels this retry nor asks the records' route
+    // while it runs (final review of plan СКЛ, I2). Only `restore_pending`
+    // holds the facts too: the host holds both routes.
+    let warehouseFailures = 0;
+    let warehouseRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelWarehouseRetry = () => {
+      if (warehouseRetry === null) return;
+      clearTimeout(warehouseRetry);
+      warehouseRetry = null;
     };
     // And for settling a restore of the host.
     let reconcileFailures = 0;
@@ -261,6 +275,7 @@ export function useHostLink({
       cancelRefreshRetry();
       cancelShiftRetry();
       cancelFactRetry();
+      cancelWarehouseRetry();
       cancelReconcileRetry();
     };
     const scheduler = createSyncScheduler(async () => {
@@ -413,12 +428,13 @@ export function useHostLink({
           () => new Date(),
         );
         if (!active) return;
-        // The warehouse records (plan СКЛ) once no fact waits. Their failure is
-        // not the facts': a refused key or a changed certificate still ends the
-        // link; anything else keeps them for a retry of their own.
+        // The warehouse records (plan СКЛ) once no fact waits, and not while
+        // their own retry runs (its end sends them). Their failure is not the
+        // facts': a refused key or a changed certificate still ends the link;
+        // anything else keeps them for a retry of their own.
         let warehouse = { sent: 0, more: false };
         let warehouseFailure: unknown = null;
-        if (!more && sendWarehouseRecords !== undefined) {
+        if (!more && sendWarehouseRecords !== undefined && warehouseRetry === null) {
           try {
             warehouse = await sendWarehouseBatch(
               local,
@@ -441,17 +457,22 @@ export function useHostLink({
         if (more || warehouse.more) factSender.trigger();
         if (warehouseFailure !== null) {
           warehouseFailures += 1;
-          if (online) {
-            const held = restoreHeld(warehouseFailure);
-            factRetry = setTimeout(
-              () => {
-                factRetry = null;
-                factsHeld = false;
-                factSender.trigger();
-              },
-              held ? RESTORE_HOLD_RETRY_MS : nextSyncRetryMs(warehouseFailures),
-            );
-            factsHeld = held;
+          if (online && restoreHeld(warehouseFailure)) {
+            // The host holds the stations' records: the facts wait the same
+            // minute, exactly as when their own send meets the hold.
+            factRetry = setTimeout(() => {
+              factRetry = null;
+              factsHeld = false;
+              factSender.trigger();
+            }, RESTORE_HOLD_RETRY_MS);
+            factsHeld = true;
+          } else if (online) {
+            warehouseRetry = setTimeout(() => {
+              warehouseRetry = null;
+              // A retry of the facts that is running sends the records at its
+              // end, after the facts: this one must not cut the facts' pause.
+              if (factRetry === null) factSender.trigger();
+            }, nextSyncRetryMs(warehouseFailures));
           }
         }
       } catch (error) {
@@ -543,6 +564,7 @@ export function useHostLink({
             cancelRefreshRetry();
             cancelShiftRetry();
             cancelFactRetry();
+            cancelWarehouseRetry();
             cancelReconcileRetry();
             return;
           }
