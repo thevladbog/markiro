@@ -137,6 +137,66 @@ describe("Резервные копии", () => {
     expect(screen.queryByLabelText("Путь ко второй папке")).toBeNull();
   });
 
+  it("says which copies carry the host identity, and warns when the newest lacks it", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      local: {
+        ...HEALTHY_BACKUPS.local,
+        copies: [
+          { ...backupCopy("2026-10-09T14:00:00Z"), hostIdentity: false },
+          backupCopy("2026-10-09T11:35:12Z", "manual"),
+        ],
+      },
+    });
+    await openBackups(session);
+    expect(screen.getByText(ru.office.backups.warnings.localNoIdentity)).toBeTruthy();
+    const table = card("Копии на компьютере хоста");
+    expect(within(table).getByRole("columnheader", { name: "Ключ хоста" })).toBeTruthy();
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("нет")).toBeTruthy();
+    expect(within(rows[1]!).getByText("есть")).toBeTruthy();
+    expect(within(card("Восстановление")).getByText(ru.office.backups.restore.newPc)).toBeTruthy();
+  });
+
+  it("says in words what the key column claims and is quiet when every copy has the key", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue(HEALTHY_BACKUPS);
+    await openBackups(session);
+    expect(screen.queryByText(ru.office.backups.warnings.localNoIdentity)).toBeNull();
+    expect(screen.queryByText(ru.office.backups.warnings.secondNoIdentity)).toBeNull();
+    const rows = within(card("Копии на компьютере хоста")).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(within(row).getByText("есть")).toBeTruthy();
+    // The word does not claim more than the host checks when it lists the folder.
+    expect(screen.getByText(ru.office.backups.identity.note)).toBeTruthy();
+  });
+
+  it("warns, with its tone in words, of a second folder whose newest copy lacks the key", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      second: {
+        ...HEALTHY_BACKUPS.second!,
+        copies: [{ ...backupCopy("2026-10-09T14:00:00Z"), hostIdentity: false }],
+      },
+    });
+    await openBackups(session);
+    const alert = screen.getByText(ru.office.backups.warnings.secondNoIdentity);
+    expect(alert.textContent).toContain(ru.office.backups.tone.warn);
+    expect(screen.queryByText(ru.office.backups.warnings.localNoIdentity)).toBeNull();
+  });
+
+  it("shows no key note while there are no copies", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      local: { ...HEALTHY_BACKUPS.local, copies: [] },
+    });
+    await openBackups(session);
+    expect(screen.queryByText(ru.office.backups.identity.note)).toBeNull();
+  });
+
   it("writes every time in the organization's zone and says so", async () => {
     const session = sessionOf();
     session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Asia/Vladivostok" });

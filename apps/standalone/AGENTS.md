@@ -3792,6 +3792,39 @@ master database, one at a time, on a connection of its own:
   (they hold what `host.db` holds: PIN and badge hashes, pairing keys); on
   Windows they take the folder's ACL, which is the installer's job for the
   data folder and the administrator's for the second folder;
+- beside each copy the worker puts the host identity (plan I1,
+  `backup/identity.rs`): `<name>.identity` holds `host.json`'s `hostId` and
+  port and the TLS certificate and PKCS#8 key (JSON, base64 DER, format 1),
+  and the manifest names it (`identity { fingerprint, sizeBytes, sha256 }`,
+  optional: an older manifest or build reads on, and the format stays 1). It
+  is created empty as `.partial` (owner-only), closed by a `KeyFileGuard`
+  (Unix `0600`; Windows `icacls /inheritance:r /grant:r` SYSTEM,
+  Administrators and OWNER RIGHTS — the service's account) BEFORE the key is
+  written, renamed, and only then is the manifest written. The key goes
+  through the handle that created the file, never through its name
+  (`backup/key_file.rs`, std only so a probe crate type-checks it for
+  Windows): on Windows that handle is unshared (`share_mode(0)`), so nobody
+  opens, deletes or renames the file while the host writes it; on Unix a file
+  moved away and replaced while the guard ran fails the device and inode
+  check, its key is wiped and the copy goes without the identity. The worker reads the
+  data folder's identity before every copy and leaves it out when it does not
+  read or names another host. A guard or write that fails leaves the copy
+  without it (that folder's manifest names none; the office warns
+  `localNoIdentity`/`secondNoIdentity` when a folder's newest copy lacks it,
+  and lists «Ключ хоста» per copy, which the host sets from "the manifest
+  names an identity and a file of its size lies beside the copy"): the copy
+  never fails for the identity. The second folder's replica is checked against
+  the manifest and closed by that folder's guard; rotation deletes it with its
+  copy (manifest, database, identity last), cleaning removes an `.identity`
+  beside no manifest. An `.identity` (or its `.partial`) that cannot be
+  removed is logged (path and io error) and skipped, never failing `rotate`
+  or `clean`: it is the only copy file with its own ACL, so after a change of
+  the service's account or from a new PC on the same share the service may no
+  longer delete it, and a sticky second-folder failure would cost more than
+  the orphan (runbook section 2: an administrator deletes it). The file IS the host's private key: whoever reads it can answer
+  the stations as their host, so it is protected like the copy's PIN hashes,
+  never encrypted (no key to keep outside the copies; pilot spec §26).
+  `HostIdentity`'s `Debug` prints the host id, port and fingerprint only;
 - scheduled: at most one copy per UTC hour, in the first minute of an hour
   in which the database changed since the last good copy
   (`PRAGMA data_version` of the worker's connection, which the worker's own
@@ -3903,9 +3936,33 @@ renames the new database into place (each rename retried against a virus
 scanner, the folders synced) and puts everything back if a rename fails.
 `crate::start` refuses while the marker is there (`restore::refuse_unfinished`,
 before the database opens): the next `restore` rolls back, finishes or, when
-the files fit neither, refuses and leaves them for support. A data folder
-without `host.json` gets a new identity after the new database is checked:
-every device pairs again. `markiro-host verify-copy` runs the same checks.
+the files fit neither, refuses and leaves them for support. The host
+identity (plan I1, `identity_plan`): a copy without one keeps the data
+folder's (or creates a new one in a folder without `host.json`: every device
+pairs again); a folder that already has the copy's identity changes nothing;
+a folder without one, or whose database is absent or read without a wizard
+(the new PC's installer), gets the copy's; a working host of another
+identity (wizard done, or unreadable) is refused unless `--take-identity`
+(its files are kept in `restore-<time>/identity/`); `--keep-identity` never
+takes the copy's; a damaged identity beside the copy is refused unless
+`--keep-identity`; `--without-manifest` reads none. The copy's identity is
+staged in `identity.partial/` before the marker (`Intent.identity`) and
+renamed into place after the database — key, certificate, `host.json` last —
+so the host (refused while the marker is there) never serves a certificate
+without its key; a cut-off restore finishes it first (`finish_interrupted`
+now runs before `host.json` is read). `foreign` — and with it
+`history_known`, the 100 000 margin and the carried revocations — is of the
+identity the folder had BEFORE the restore: a restored identity never makes
+the installer's or another host's database the copy's history. The
+`host.restore` row names `identity` (`same`, `restored`, `kept`, `created`).
+Two limits of an interrupted restore: the run that finishes it reads the
+database the first run put in place, whose `host.json` is now the copy's, so
+its summary says «revocations carried over … 0» where the lost first
+summary said what was active again (the runbook sends the engineer to its
+check 3 after «it had finished»); and a cut before the marker leaves
+`identity.partial/` (0700/0600) until the next restore. `markiro-host
+verify-copy` runs the same checks and prints the identity (a damaged one
+fails it).
 `restore_crashing` and `CrashPoint` are `#[doc(hidden)]` test hooks that stop
 the real restore dead after a rename; production passes `None`.
 
@@ -4005,24 +4062,34 @@ Left open, none of it hidden by a green test:
   obligation open and the outbox waiting: the status bar keeps «станция
   возвращает…», and support reads the station's database.
 
-A restore on a NEW PC is not covered, and that is an open owner decision. The
-host there gets a new `hostId` and certificate, every station pairs again, and
-everything above is keyed to the CURRENT pairing. What the old pairing did
-after the copy never reaches the restored host: its records acknowledged by
-the dead host after the copy, its unsent records (they stay on the disk;
-`device_forget` refuses with `unsent_facts` until confirmed), the boxes it
-labelled in its open shift (a shift opened after the copy is unknown to the new
-host; one opened before is known, under the old device, but none of its boxes
-after the copy), and the SSCC blocks it got after the copy. SSCC uniqueness
-then rests on the host's +100 000 counter margin and the runbook's check 1,
-which is mandatory. The same loss hits, on ANY restore (the same PC
-included), every station paired after the copy: the copy does not know its
-device, its key is refused and it pairs again. Its SSCC is safe only when the
-previous database was read (the counters stand above everything the host
-issued); otherwise check 1 is mandatory for it too (runbook check 4). The options: back up `host.json` and `tls/` with
-the copy so stations keep their pairing; carry the old pairing's records and
-blocks into the new one; or accept the loss. The checks that make up for all of
-this are the runbook's, done by a person before the resume.
+A restore on a NEW PC keeps the stations' pairing when the copy carries the
+host identity (owner decision 2026-10-11, plan I1): the same `hostId`,
+certificate and device keys, so everything above applies unchanged. The
+stations learn the new address by the PC taking the old one's IP or name, or
+by «Сменить адрес хоста» (plan УСТ, `device_change_address`, which keeps the
+pairing only where the pinned certificate answers and the host takes the
+key; an office session ends with the restore, so the office signs in again);
+the certificate is not reissued — devices pin its SHA-256, not its names.
+The flip side: a device revoked after the copy is valid again on a new PC
+(revocations are not carried, the certificate is the same) and reconnects by
+itself once the service answers at the old address, so the runbook (section 6
+step 7, check 3) re-revokes under another address first and gives the new PC
+the old IP only then.
+Still lost on a new PC: stations paired after the copy (the copy does not
+know them, their key is refused, they pair again; as on any restore), and
+the station that ran on the dead host PC itself. A copy without the identity
+(older, from a folder that could not be closed, or `--keep-identity`) keeps
+the old limit: every device pairs again, and what the old pairing did after
+the copy never reaches the restored host (its records acknowledged after the
+copy, its unsent records — they stay on the disk, `device_forget` refuses
+with `unsent_facts` until confirmed — its open shift's boxes and its
+post-copy SSCC blocks); SSCC uniqueness then rests on the +100 000 margin and
+the runbook's check 1, which is mandatory. Two hosts with one identity on one
+network would split the stations: the runbook disables the old PC's service.
+The same loss hits, on ANY restore (the same PC included), every station
+paired after the copy; its SSCC is safe only when the previous database was
+read (runbook check 4). The checks that make up for all of this are the
+runbook's, done by a person before the resume.
 
 Migration `0011` may be applied after `0012` on a database that already had
 it (sqlx accepts a lower version not yet applied; the test builds a
@@ -4218,8 +4285,10 @@ either; a file log is stage 5.
   while the host is restored from an hourly copy, the blocks it got after the
   copy registered again, the hold's line and its one-minute retries, nothing
   lost, no `sscc_not_issued` and no repeated SSCC after the resume, and the
-  copies of the station equal to the office's; and a restore on a new PC with
-  the stations paired again (item 9, third run). Until then it has run only
+  copies of the station equal to the office's; a restore on a new PC from a
+  copy with the host identity, the stations keeping their pairing at the new
+  address, and one without it, the stations paired again (item 9, third and
+  fourth runs; the key file's ACLs, item 11). Until then it has run only
   under jsdom and node:sqlite with a fake `HostApi`; the shell's `hello` read
   ran against a real host on 127.0.0.1 whose `site.restore_epoch` a test
   wrote, never against `markiro-host restore`, and nothing of it has met

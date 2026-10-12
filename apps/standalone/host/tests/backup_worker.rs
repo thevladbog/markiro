@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use markiro_host::backup::identity::{KeyFileGuard, OwnerOnly};
 use markiro_host::backup::worker::{scheduled_due, spawn};
 use markiro_host::backup::{Backups, Worker};
+use markiro_host::config::HostPaths;
 use markiro_proto::backup::{failure, BackupAttempt, BackupState, BackupTrigger};
 use serde_json::json;
 use support::app::{add_operator, admin, audit_trail, Admin, AuditRow};
-use support::backup::{at, fake_copy, names};
+use support::backup::{at, fake_copy, names, write_identity};
 
 const HOST_ID: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 
@@ -484,6 +486,35 @@ async fn what_a_broken_copy_left_is_cleaned_before_the_next_copy_in_both_folders
     }
 }
 
+/// An `.identity` the service can no longer delete (closed by icacls to the
+/// account the service ran under before, or to the old PC's account on a
+/// share) never makes the second folder fail: a folder stands for it here.
+#[tokio::test]
+async fn an_identity_the_host_cannot_delete_never_fails_the_second_folder() {
+    let admin = admin().await;
+    let local = local_folder(&admin);
+    let second = tempfile::tempdir().unwrap();
+    set_second_dir(&admin, Some(second.path())).await;
+    let stuck = second
+        .path()
+        .join("markiro-host-20260920T100000Z-deadbeef.identity");
+    std::fs::create_dir(&stuck).unwrap();
+    std::fs::write(stuck.join("inside"), b"x").unwrap();
+    let backups = backups_in(&admin, &local);
+    let mut worker = worker(&admin, &backups);
+
+    let report = worker.tick().await.unwrap();
+    let made = report.local.unwrap();
+    assert_eq!(report.second, Some(Ok(())));
+    assert!(stuck.is_dir(), "it stays for an administrator");
+    let second_status = state(&admin, &backups, Some(second.path())).second.unwrap();
+    assert_eq!(second_status.copies, [made.copy()]);
+    assert_eq!(
+        second_status.last_attempt,
+        attempt(T0, BackupTrigger::Scheduled, None)
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_failed_copy_thins_out_nothing() {
@@ -566,4 +597,134 @@ async fn a_restarted_worker_knows_the_copies_there_are_and_copies_once_at_start(
         [again.copy(), first.copy()]
     );
     assert!(restarted.tick().await.is_none(), "then the hourly rule");
+}
+
+/// Plan I1: the worker reads the data folder's identity before each copy and
+/// puts it beside the copy in both folders.
+#[tokio::test]
+async fn the_worker_puts_the_host_identity_beside_each_copy_in_both_folders() {
+    let admin = admin().await;
+    write_identity(admin.app.dir(), HOST_ID);
+    let local = local_folder(&admin);
+    let second_parent = tempfile::tempdir().unwrap();
+    let second = second_parent.path().join("ADMIN-PC");
+    std::fs::create_dir(&second).unwrap();
+    set_second_dir(&admin, Some(&second)).await;
+    let backups = backups_in(&admin, &local);
+    let mut worker = worker(&admin, &backups);
+
+    let made = worker.tick().await.unwrap().local.unwrap();
+    assert!(made.identity.is_some());
+    assert_eq!(
+        names(&second),
+        [
+            made.file.clone(),
+            made.file.replace(".db", ".identity"),
+            made.file.replace(".db", ".json"),
+        ]
+    );
+    let status = state(&admin, &backups, Some(&second));
+    assert!(status.local.copies[0].host_identity);
+    assert!(status.second.unwrap().copies[0].host_identity);
+}
+
+/// An identity that names another host than the worker's stays out of the
+/// copy: a data folder that was mixed up says nothing of this host.
+#[tokio::test]
+async fn an_identity_of_another_host_stays_out_of_the_copy() {
+    let admin = admin().await;
+    write_identity(admin.app.dir(), "0b7a6c5d-4e3f-4a2b-9c1d-8e7f6a5b4c3d");
+    let local = local_folder(&admin);
+    let backups = backups_in(&admin, &local);
+    let made = worker(&admin, &backups)
+        .tick()
+        .await
+        .unwrap()
+        .local
+        .unwrap();
+    assert_eq!(made.identity, None);
+    assert!(!names(&local).iter().any(|name| name.ends_with(".identity")));
+}
+
+/// A guard that refuses the files under `folder` and closes the rest: a
+/// share that takes no ACL beside a disk that does.
+struct RefusesUnder(PathBuf);
+
+impl KeyFileGuard for RefusesUnder {
+    fn protect(&self, path: &Path) -> Result<(), String> {
+        if path.starts_with(&self.0) {
+            Err("icacls ended with code 5".to_owned())
+        } else {
+            OwnerOnly.protect(path)
+        }
+    }
+}
+
+fn backups_guarded(admin: &Admin, local: &Path, guard: Arc<dyn KeyFileGuard>) -> Arc<Backups> {
+    Backups::new_with_guard(
+        admin.app.dir().to_path_buf(),
+        local.to_path_buf(),
+        admin.app.dir().join("host.db"),
+        HOST_ID,
+        guard,
+    )
+}
+
+#[tokio::test]
+async fn each_folder_is_closed_by_the_workers_guard_and_a_folder_it_refuses_gets_no_identity() {
+    let admin = admin().await;
+    write_identity(admin.app.dir(), HOST_ID);
+    let local = local_folder(&admin);
+    let second_parent = tempfile::tempdir().unwrap();
+    let second = second_parent.path().join("ADMIN-PC");
+    std::fs::create_dir(&second).unwrap();
+    set_second_dir(&admin, Some(&second)).await;
+
+    // The second folder refuses: the local copy has the identity, the second
+    // one a copy without it, and the run is a success.
+    let backups = backups_guarded(&admin, &local, Arc::new(RefusesUnder(second.clone())));
+    let report = worker(&admin, &backups).tick().await.unwrap();
+    let made = report.local.unwrap();
+    assert!(report.second.unwrap().is_ok());
+    assert!(made.identity.is_some());
+    assert!(!names(&second)
+        .iter()
+        .any(|name| name.ends_with(".identity")));
+    let status = state(&admin, &backups, Some(&second));
+    assert!(status.local.copies[0].host_identity);
+    assert!(!status.second.unwrap().copies[0].host_identity);
+
+    // The local folder refuses: no identity there, and so none in the second.
+    let other = tempfile::tempdir().unwrap();
+    let backups = backups_guarded(
+        &admin,
+        other.path(),
+        Arc::new(RefusesUnder(other.path().to_owned())),
+    );
+    let report = worker(&admin, &backups).tick().await.unwrap();
+    assert_eq!(report.local.unwrap().identity, None);
+    assert!(report.second.unwrap().is_ok());
+    assert!(!names(other.path())
+        .iter()
+        .any(|name| name.ends_with(".identity")));
+}
+
+#[tokio::test]
+async fn a_data_folder_whose_identity_does_not_read_still_gets_its_copies() {
+    let admin = admin().await;
+    write_identity(admin.app.dir(), HOST_ID);
+    // The key lost to a disk fault: the identity no longer reads.
+    std::fs::write(
+        HostPaths::new(admin.app.dir()).tls_dir().join("key.der"),
+        b"x",
+    )
+    .unwrap();
+    let local = local_folder(&admin);
+    let backups = backups_in(&admin, &local);
+    let report = worker(&admin, &backups).tick().await.unwrap();
+    assert_eq!(report.local.unwrap().identity, None);
+    let status = state(&admin, &backups, None);
+    assert_eq!(status.local.copies.len(), 1);
+    assert!(!status.local.copies[0].host_identity);
+    assert!(status.local.last_attempt.is_none_or(|attempt| attempt.ok));
 }

@@ -28,6 +28,7 @@ describe("backup shapes (proto/fixtures)", () => {
     const state = backupStateSchema.parse(fixture("backup-state.json"));
     expect(state.second?.lastAttempt?.code).toBe("destination_unavailable");
     expect(state.local.copies.map((copy) => copy.trigger)).toEqual(["scheduled", "manual"]);
+    expect(state.local.copies.map((copy) => copy.hostIdentity)).toEqual([true, false]);
     const running = backupStateSchema.parse(fixture("backup-state-running.json"));
     expect(running.running).toEqual({ trigger: "manual", startedAt: "2026-10-09T14:19:58Z" });
     expect(running.second).toBeNull();

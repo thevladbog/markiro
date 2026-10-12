@@ -5,6 +5,7 @@
 mod support;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use markiro_host::backup::copy::sync_file;
@@ -12,11 +13,14 @@ use markiro_host::backup::copy::{
     classify_io, classify_sqlite, is_copy_file_name, make_copy, make_copy_tagged, manifest_path,
     read_manifest, sha256_file, verify_database,
 };
-use markiro_host::backup::folder::{clean, list, probe, replicate, rotate};
+use markiro_host::backup::copy::{make_copy_with_identity, Manifest};
+use markiro_host::backup::folder::{clean, list, probe, replicate, replicate_guarded, rotate};
+use markiro_host::backup::identity::{identity_path, HostIdentity, KeyFileGuard, OwnerOnly};
+use markiro_host::config::HostPaths;
 use markiro_proto::backup::{dir_problems, failure, BackupTrigger};
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use support::app::{admin, Admin};
-use support::backup::{at, fake_copy, latest_migration, names, worker_conn};
+use support::backup::{at, fake_copy, latest_migration, names, worker_conn, write_identity};
 
 const CREATED: &str = "2026-10-09T14:00:00Z";
 
@@ -791,4 +795,423 @@ async fn sqlite_cannot_open_is_told_apart_by_the_folder() {
         classify_sqlite(&error, folder.path()),
         failure::ACCESS_DENIED
     );
+}
+
+const IDENTITY_HOST: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+
+/// A folder that cannot be closed: a FAT32 flash drive, a share that
+/// refuses ACLs.
+struct Refusing;
+
+impl KeyFileGuard for Refusing {
+    fn protect(&self, _path: &Path) -> Result<(), String> {
+        Err("icacls ended with code 5".to_owned())
+    }
+}
+
+/// A copy of `admin`'s database in `dir` with the host identity of its data
+/// folder beside it (plan I1).
+async fn copy_with_identity(admin: &Admin, dir: &Path, guard: Arc<dyn KeyFileGuard>) -> Manifest {
+    write_identity(admin.app.dir(), IDENTITY_HOST);
+    let identity = HostIdentity::read(&HostPaths::new(admin.app.dir())).unwrap();
+    let mut conn = worker_conn(&admin.app).await;
+    make_copy_with_identity(
+        &mut conn,
+        dir,
+        at(CREATED),
+        BackupTrigger::Scheduled,
+        IDENTITY_HOST,
+        Some(Arc::new(identity)),
+        guard,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_copy_carries_the_host_identity_beside_it_closed_to_others() {
+    let admin = admin().await;
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = copy_with_identity(&admin, dir.path(), Arc::new(OwnerOnly)).await;
+    let db = dir.path().join(&manifest.file);
+    assert_eq!(
+        names(dir.path()),
+        [
+            manifest.file.clone(),
+            manifest.file.replace(".db", ".identity"),
+            manifest.file.replace(".db", ".json"),
+        ]
+    );
+    let source = HostIdentity::read(&HostPaths::new(admin.app.dir())).unwrap();
+    let reference = manifest.identity.clone().expect("the manifest names it");
+    assert_eq!(reference.fingerprint, source.fingerprint());
+    assert_eq!(read_manifest(&db).unwrap(), manifest);
+    let beside =
+        HostIdentity::from_file_bytes(&std::fs::read(identity_path(&db)).unwrap()).unwrap();
+    assert!(beside.same_as(&source));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(identity_path(&db))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    assert!(list(dir.path()).unwrap()[0].copy().host_identity);
+    // A copy whose identity file is gone is listed without it.
+    std::fs::remove_file(identity_path(&db)).unwrap();
+    assert!(!list(dir.path()).unwrap()[0].copy().host_identity);
+}
+
+#[tokio::test]
+async fn a_folder_that_cannot_be_closed_gets_the_copy_without_the_identity() {
+    let admin = admin().await;
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = copy_with_identity(&admin, dir.path(), Arc::new(Refusing)).await;
+    assert_eq!(manifest.identity, None);
+    assert_eq!(
+        names(dir.path()),
+        [manifest.file.clone(), manifest.file.replace(".db", ".json")]
+    );
+    assert!(!list(dir.path()).unwrap()[0].copy().host_identity);
+}
+
+#[tokio::test]
+async fn the_second_folder_gets_the_identity_or_a_manifest_without_it() {
+    let admin = admin().await;
+    let local = tempfile::tempdir().unwrap();
+    let closed = tempfile::tempdir().unwrap();
+    let open = tempfile::tempdir().unwrap();
+    let manifest = copy_with_identity(&admin, local.path(), Arc::new(OwnerOnly)).await;
+    replicate_guarded(local.path(), &manifest, closed.path(), &OwnerOnly).unwrap();
+    assert_eq!(names(closed.path()), names(local.path()));
+    assert_eq!(
+        read_manifest(&closed.path().join(&manifest.file)).unwrap(),
+        manifest
+    );
+    replicate_guarded(local.path(), &manifest, open.path(), &Refusing).unwrap();
+    assert_eq!(
+        names(open.path()),
+        [manifest.file.clone(), manifest.file.replace(".db", ".json")]
+    );
+    let there = read_manifest(&open.path().join(&manifest.file)).unwrap();
+    assert_eq!(there.identity, None);
+    assert_eq!(
+        Manifest {
+            identity: manifest.identity.clone(),
+            ..there
+        },
+        manifest,
+        "only the identity differs"
+    );
+}
+
+#[test]
+fn rotation_and_cleaning_take_the_identity_with_its_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    // 26 copies of one hour: the rule keeps the newest 24.
+    let copies: Vec<_> = (0..26)
+        .map(|minute| {
+            let manifest = fake_copy(
+                dir.path(),
+                &format!("2026-10-09T10:{minute:02}:00Z"),
+                &format!("{minute:08x}"),
+            );
+            std::fs::write(identity_path(&dir.path().join(&manifest.file)), b"identity").unwrap();
+            manifest
+        })
+        .collect();
+    let staying = rotate(dir.path(), None).unwrap();
+    assert_eq!(staying.len(), 24);
+    for gone in &copies[..2] {
+        assert!(!identity_path(&dir.path().join(&gone.file)).exists());
+    }
+    for kept in &copies[2..] {
+        assert!(identity_path(&dir.path().join(&kept.file)).exists());
+    }
+    // An identity whose copy lost its manifest is a leftover.
+    let orphan = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity");
+    std::fs::write(&orphan, b"identity").unwrap();
+    assert_eq!(clean(dir.path()).unwrap(), 1);
+    assert!(!orphan.exists());
+    assert!(identity_path(&dir.path().join(&copies[25].file)).exists());
+}
+
+/// A guard that closes the identity file and, as a side effect, makes the
+/// copy's manifest unwritable: it puts a folder where the manifest's
+/// `.partial` is to be created. The copy then fails after its identity was
+/// put beside it.
+struct BreaksTheManifest;
+
+impl KeyFileGuard for BreaksTheManifest {
+    fn protect(&self, path: &Path) -> Result<(), String> {
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap();
+        let stem = name.strip_suffix(".identity.partial").unwrap();
+        std::fs::create_dir(path.with_file_name(format!("{stem}.json.partial")))
+            .map_err(|error| error.to_string())?;
+        OwnerOnly.protect(path)
+    }
+}
+
+fn bytes_of(dir: &Path, manifest: &Manifest) -> [Vec<u8>; 3] {
+    let db = dir.join(&manifest.file);
+    [
+        std::fs::read(&db).unwrap(),
+        std::fs::read(manifest_path(&db)).unwrap(),
+        std::fs::read(identity_path(&db)).unwrap(),
+    ]
+}
+
+#[tokio::test]
+async fn a_copy_that_fails_after_its_identity_leaves_nothing_of_it_and_none_of_the_others() {
+    let admin = admin().await;
+    let dir = tempfile::tempdir().unwrap();
+    let good = copy_with_identity(&admin, dir.path(), Arc::new(OwnerOnly)).await;
+    let before = bytes_of(dir.path(), &good);
+    write_identity(admin.app.dir(), IDENTITY_HOST);
+    let identity = HostIdentity::read(&HostPaths::new(admin.app.dir())).unwrap();
+    let mut conn = worker_conn(&admin.app).await;
+    let failed = make_copy_with_identity(
+        &mut conn,
+        dir.path(),
+        at("2026-10-09T15:00:00Z"),
+        BackupTrigger::Scheduled,
+        IDENTITY_HOST,
+        Some(Arc::new(identity)),
+        Arc::new(BreaksTheManifest),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failed.code, failure::WRITE_FAILED);
+    // Of the failed copy only the folder the guard made is left: no database,
+    // no identity, no manifest, no partial file.
+    let left = names(dir.path());
+    assert_eq!(left.len(), 4, "{left:?}");
+    for name in &left {
+        let ours = name == &good.file
+            || name == &good.file.replace(".db", ".json")
+            || name == &good.file.replace(".db", ".identity");
+        assert!(ours || name.ends_with(".json.partial"), "{name} is left");
+        if name.ends_with(".json.partial") {
+            assert!(dir.path().join(name).is_dir());
+        }
+    }
+    // The copy that was there is as it was, and still carries its identity.
+    assert_eq!(bytes_of(dir.path(), &good), before);
+    assert!(list(dir.path()).unwrap()[0].copy().host_identity);
+}
+
+#[tokio::test]
+async fn a_failed_replication_removes_the_identity_it_put_and_keeps_the_one_that_was_there() {
+    let admin = admin().await;
+    let local = tempfile::tempdir().unwrap();
+    let manifest = copy_with_identity(&admin, local.path(), Arc::new(OwnerOnly)).await;
+
+    // A folder the copy was not in: a failed replication leaves none of it.
+    let fresh = tempfile::tempdir().unwrap();
+    let failed =
+        replicate_guarded(local.path(), &manifest, fresh.path(), &BreaksTheManifest).unwrap_err();
+    assert_eq!(failed.code, failure::WRITE_FAILED);
+    let left = names(fresh.path());
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert!(left[0].ends_with(".json.partial"));
+
+    // A folder that has the copy already: the failure leaves it as it was.
+    let there = tempfile::tempdir().unwrap();
+    replicate_guarded(local.path(), &manifest, there.path(), &OwnerOnly).unwrap();
+    let before = bytes_of(there.path(), &manifest);
+    replicate_guarded(local.path(), &manifest, there.path(), &BreaksTheManifest).unwrap_err();
+    assert_eq!(bytes_of(there.path(), &manifest), before);
+    assert!(list(there.path()).unwrap()[0].copy().host_identity);
+}
+
+#[tokio::test]
+async fn the_identity_is_copied_only_when_the_manifest_names_it_and_stays_closed_there() {
+    let admin = admin().await;
+    let local = tempfile::tempdir().unwrap();
+    let with = copy_with_identity(&admin, local.path(), Arc::new(OwnerOnly)).await;
+    // The manifest of this copy names none, though a file lies beside it.
+    let bare = fake_copy(local.path(), "2026-10-09T15:00:00Z", "0000000a");
+    std::fs::write(identity_path(&local.path().join(&bare.file)), b"identity").unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    replicate_guarded(local.path(), &with, dest.path(), &OwnerOnly).unwrap();
+    replicate_guarded(local.path(), &bare, dest.path(), &OwnerOnly).unwrap();
+    assert!(identity_path(&dest.path().join(&with.file)).exists());
+    assert!(!identity_path(&dest.path().join(&bare.file)).exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(identity_path(&dest.path().join(&with.file)))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn a_manifest_without_an_identity_is_the_manifest_of_an_older_build_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let bare = fake_copy(dir.path(), CREATED, "0000000b");
+    let db = dir.path().join(&bare.file);
+    let text = std::fs::read_to_string(manifest_path(&db)).unwrap();
+    assert!(!text.contains("identity"), "{text}");
+    // A manifest of an older build has no such member and reads as none.
+    assert_eq!(read_manifest(&db).unwrap().identity, None);
+    // One that names an identity writes it under `identity`.
+    let named = Manifest {
+        identity: Some(markiro_host::backup::identity::IdentityRef {
+            fingerprint: "ab".repeat(32),
+            size_bytes: 2048,
+            sha256: "cd".repeat(32),
+        }),
+        ..bare
+    };
+    let json = serde_json::to_value(&named).unwrap();
+    assert_eq!(json["identity"]["sizeBytes"], 2048);
+    assert_eq!(
+        serde_json::from_value::<Manifest>(json).unwrap().identity,
+        named.identity
+    );
+}
+
+#[test]
+fn the_listing_trusts_an_identity_only_of_the_size_the_manifest_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut manifest = fake_copy(dir.path(), CREATED, "0000000c");
+    let db = dir.path().join(&manifest.file);
+    manifest.identity = Some(markiro_host::backup::identity::IdentityRef {
+        fingerprint: "ab".repeat(32),
+        size_bytes: 8,
+        sha256: "cd".repeat(32),
+    });
+    std::fs::write(manifest_path(&db), serde_json::to_vec(&manifest).unwrap()).unwrap();
+    std::fs::write(identity_path(&db), b"identity").unwrap();
+    assert!(list(dir.path()).unwrap()[0].copy().host_identity);
+    std::fs::write(identity_path(&db), b"identity, longer").unwrap();
+    assert!(!list(dir.path()).unwrap()[0].copy().host_identity);
+    std::fs::write(identity_path(&db), b"short").unwrap();
+    assert!(!list(dir.path()).unwrap()[0].copy().host_identity);
+}
+
+#[test]
+fn rotation_keeps_the_identity_of_the_fresh_copy_and_copes_with_copies_that_have_none() {
+    let dir = tempfile::tempdir().unwrap();
+    // 26 copies of one hour; the rule keeps the newest 24. The oldest is the
+    // copy a run has just made (the host's clock was set back): it stays.
+    let copies: Vec<_> = (0..26)
+        .map(|minute| {
+            fake_copy(
+                dir.path(),
+                &format!("2026-10-09T10:{minute:02}:00Z"),
+                &format!("{minute:08x}"),
+            )
+        })
+        .collect();
+    // Copies of an older build have no identity: only some do.
+    for copy in copies.iter().filter(|copy| copy.file != copies[1].file) {
+        std::fs::write(identity_path(&dir.path().join(&copy.file)), b"identity").unwrap();
+    }
+    let staying = rotate(dir.path(), Some(&copies[0].file)).unwrap();
+    assert_eq!(staying.len(), 24 + 1);
+    assert!(identity_path(&dir.path().join(&copies[0].file)).exists());
+    assert!(dir.path().join(&copies[0].file).exists());
+    // The other copy the rule drops had none, and went without a fuss.
+    assert!(!dir.path().join(&copies[1].file).exists());
+    assert!(!identity_path(&dir.path().join(&copies[1].file)).exists());
+}
+
+/// An identity that is no file cannot be removed with `remove_file`: it
+/// stands for an `.identity` closed by icacls to another account than the
+/// service's now (the service account changed, or a new PC writes to the same
+/// share).
+fn undeletable(path: &Path) {
+    std::fs::create_dir(path).unwrap();
+    std::fs::write(path.join("inside"), b"x").unwrap();
+}
+
+#[test]
+fn rotation_goes_on_past_an_identity_it_cannot_remove() {
+    let dir = tempfile::tempdir().unwrap();
+    let copies: Vec<_> = (0..26)
+        .map(|minute| {
+            fake_copy(
+                dir.path(),
+                &format!("2026-10-09T10:{minute:02}:00Z"),
+                &format!("{minute:08x}"),
+            )
+        })
+        .collect();
+    // Rotation goes newest first: the copy of 10:01 is dropped before the
+    // copy of 10:00.
+    let stuck = identity_path(&dir.path().join(&copies[1].file));
+    undeletable(&stuck);
+    let after = identity_path(&dir.path().join(&copies[0].file));
+    std::fs::write(&after, b"identity").unwrap();
+    let staying = rotate(dir.path(), None).unwrap();
+    assert_eq!(staying.len(), 24);
+    for gone in &copies[..2] {
+        let db = dir.path().join(&gone.file);
+        assert!(
+            !db.exists() && !manifest_path(&db).exists(),
+            "{}",
+            gone.file
+        );
+    }
+    assert!(stuck.is_dir(), "only the identity it cannot remove stays");
+    assert!(!after.exists(), "the next copy's identity still goes");
+    for kept in &copies[2..] {
+        assert!(dir.path().join(&kept.file).exists());
+        assert!(manifest_path(&dir.path().join(&kept.file)).exists());
+    }
+    // The next run is not stopped by it either.
+    assert_eq!(rotate(dir.path(), None).unwrap().len(), 24);
+    assert_eq!(clean(dir.path()).unwrap(), 0);
+    assert!(stuck.is_dir());
+}
+
+#[test]
+fn cleaning_goes_on_past_an_identity_it_cannot_remove_and_still_fails_on_anything_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = fake_copy(dir.path(), CREATED, "0000000e");
+    let orphan = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity");
+    let partial = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity.partial");
+    undeletable(&orphan);
+    undeletable(&partial);
+    let half = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.db.partial");
+    std::fs::write(&half, b"half").unwrap();
+    let bare = dir.path().join("markiro-host-20261009T080000Z-0badf00d.db");
+    std::fs::write(&bare, b"no manifest").unwrap();
+    assert_eq!(clean(dir.path()).unwrap(), 2, "the two it could remove");
+    assert!(!half.exists() && !bare.exists());
+    assert!(orphan.is_dir() && partial.is_dir());
+    assert!(dir.path().join(&kept.file).exists());
+    // A leftover of a copy's database it cannot remove still fails the call.
+    undeletable(&half);
+    assert!(clean(dir.path()).is_err());
+}
+
+#[test]
+fn a_stale_partial_identity_is_cleaned_with_the_other_leftovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = fake_copy(dir.path(), CREATED, "0000000d");
+    let partial = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity.partial");
+    std::fs::write(&partial, b"half").unwrap();
+    let other = dir.path().join("notes.identity");
+    std::fs::write(&other, b"not ours").unwrap();
+    assert_eq!(clean(dir.path()).unwrap(), 1);
+    assert!(!partial.exists());
+    assert!(other.exists(), "only names of copies are ever touched");
+    assert!(dir.path().join(&kept.file).exists());
 }
