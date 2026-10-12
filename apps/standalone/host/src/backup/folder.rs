@@ -21,6 +21,33 @@ fn ours(name: &str) -> bool {
     name.starts_with(COPY_PREFIX)
 }
 
+/// A host identity beside a copy (plan I1), or what is left of writing one.
+fn is_identity(name: &str) -> bool {
+    name.ends_with(".identity") || name.ends_with(".identity.partial")
+}
+
+/// Remove the host identity file `path`; whether it went. One that cannot be
+/// removed is logged (its path and the error only) and left in place: an
+/// `.identity` is the only copy file with an access list of its own, so after
+/// a change of the service's account, or from a new PC writing to the same
+/// share, the service may no longer delete it. That never stops rotation or
+/// cleaning: the copies they keep matter more, and an administrator deletes
+/// the file.
+fn remove_identity(path: &Path) -> bool {
+    match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            tracing::warn!(
+                file = %path.display(),
+                %error,
+                "a host identity could not be removed: it stays until an administrator deletes it"
+            );
+            false
+        }
+    }
+}
+
 /// The verified copies in `dir`, newest first: a `<name>.db` whose
 /// manifest reads and names it, with the size the manifest says. A copy
 /// without them is no copy.
@@ -62,9 +89,11 @@ pub fn list(dir: &Path) -> std::io::Result<Vec<Manifest>> {
     Ok(copies)
 }
 
-/// Remove what broken copies left in `dir`: `.partial` files and a `.db`
-/// without its manifest. Returns how many files went. Only for a moment when
-/// no copy is being written into `dir`: a copy in flight looks the same.
+/// Remove what broken copies left in `dir`: `.partial` files, a `.db` and an
+/// `.identity` without their manifest. Returns how many files went; an
+/// identity it cannot remove is logged and skipped ([`remove_identity`]).
+/// Only for a moment when no copy is being written into `dir`: a copy in
+/// flight looks the same.
 pub fn clean(dir: &Path) -> std::io::Result<usize> {
     let mut removed = 0;
     for entry in fs::read_dir(dir)? {
@@ -80,7 +109,12 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
         let broken = name.ends_with(".partial")
             || (name.ends_with(".db") && !manifest_path(&path).exists())
             || (name.ends_with(".identity") && !path.with_extension("json").exists());
-        if broken {
+        if !broken {
+            continue;
+        }
+        if is_identity(name) {
+            removed += usize::from(remove_identity(&path));
+        } else {
             fs::remove_file(&path)?;
             removed += 1;
         }
@@ -89,8 +123,10 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
 }
 
 /// Delete the copies of `dir` that [`retention::keep`] does not keep: the
-/// manifest first, so a copy half deleted is a `.db` without one, which
-/// [`clean`] removes. `keep_also` (the copy a run just made) always stays:
+/// manifest first, so a copy half deleted is a `.db` or an `.identity`
+/// without one, which [`clean`] removes; the database next; the identity
+/// last, and one it cannot remove is logged and skipped ([`remove_identity`]),
+/// never failing the call. `keep_also` (the copy a run just made) always stays:
 /// with the host's clock set back the copies made before are newer, and by
 /// the rule alone the fresh copy would be the first to go. Returns the
 /// copies that stay, newest first.
@@ -114,12 +150,8 @@ pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manife
         }
         let db = dir.join(&copy.file);
         fs::remove_file(manifest_path(&db))?;
-        match fs::remove_file(identity_path(&db)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
         fs::remove_file(&db)?;
+        remove_identity(&identity_path(&db));
     }
     Ok(staying)
 }

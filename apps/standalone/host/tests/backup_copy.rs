@@ -1124,8 +1124,17 @@ fn rotation_keeps_the_identity_of_the_fresh_copy_and_copes_with_copies_that_have
     assert!(!identity_path(&dir.path().join(&copies[1].file)).exists());
 }
 
+/// An identity that is no file cannot be removed with `remove_file`: it
+/// stands for an `.identity` closed by icacls to another account than the
+/// service's now (the service account changed, or a new PC writes to the same
+/// share).
+fn undeletable(path: &Path) {
+    std::fs::create_dir(path).unwrap();
+    std::fs::write(path.join("inside"), b"x").unwrap();
+}
+
 #[test]
-fn rotation_stops_at_an_identity_it_cannot_remove_and_keeps_the_copies_it_keeps() {
+fn rotation_goes_on_past_an_identity_it_cannot_remove() {
     let dir = tempfile::tempdir().unwrap();
     let copies: Vec<_> = (0..26)
         .map(|minute| {
@@ -1136,13 +1145,59 @@ fn rotation_stops_at_an_identity_it_cannot_remove_and_keeps_the_copies_it_keeps(
             )
         })
         .collect();
-    // An identity that is no file cannot be removed with `remove_file`.
-    std::fs::create_dir(identity_path(&dir.path().join(&copies[0].file))).unwrap();
-    assert!(rotate(dir.path(), None).is_err());
+    // Rotation goes newest first: the copy of 10:01 is dropped before the
+    // copy of 10:00.
+    let stuck = identity_path(&dir.path().join(&copies[1].file));
+    undeletable(&stuck);
+    let after = identity_path(&dir.path().join(&copies[0].file));
+    std::fs::write(&after, b"identity").unwrap();
+    let staying = rotate(dir.path(), None).unwrap();
+    assert_eq!(staying.len(), 24);
+    for gone in &copies[..2] {
+        let db = dir.path().join(&gone.file);
+        assert!(
+            !db.exists() && !manifest_path(&db).exists(),
+            "{}",
+            gone.file
+        );
+    }
+    assert!(stuck.is_dir(), "only the identity it cannot remove stays");
+    assert!(!after.exists(), "the next copy's identity still goes");
     for kept in &copies[2..] {
         assert!(dir.path().join(&kept.file).exists());
         assert!(manifest_path(&dir.path().join(&kept.file)).exists());
     }
+    // The next run is not stopped by it either.
+    assert_eq!(rotate(dir.path(), None).unwrap().len(), 24);
+    assert_eq!(clean(dir.path()).unwrap(), 0);
+    assert!(stuck.is_dir());
+}
+
+#[test]
+fn cleaning_goes_on_past_an_identity_it_cannot_remove_and_still_fails_on_anything_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = fake_copy(dir.path(), CREATED, "0000000e");
+    let orphan = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity");
+    let partial = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.identity.partial");
+    undeletable(&orphan);
+    undeletable(&partial);
+    let half = dir
+        .path()
+        .join("markiro-host-20261009T090000Z-deadbeef.db.partial");
+    std::fs::write(&half, b"half").unwrap();
+    let bare = dir.path().join("markiro-host-20261009T080000Z-0badf00d.db");
+    std::fs::write(&bare, b"no manifest").unwrap();
+    assert_eq!(clean(dir.path()).unwrap(), 2, "the two it could remove");
+    assert!(!half.exists() && !bare.exists());
+    assert!(orphan.is_dir() && partial.is_dir());
+    assert!(dir.path().join(&kept.file).exists());
+    // A leftover of a copy's database it cannot remove still fails the call.
+    undeletable(&half);
+    assert!(clean(dir.path()).is_err());
 }
 
 #[test]

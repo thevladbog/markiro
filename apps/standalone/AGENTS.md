@@ -3815,8 +3815,13 @@ master database, one at a time, on a connection of its own:
   names an identity and a file of its size lies beside the copy"): the copy
   never fails for the identity. The second folder's replica is checked against
   the manifest and closed by that folder's guard; rotation deletes it with its
-  copy (manifest, identity, database), cleaning removes an `.identity` beside
-  no manifest. The file IS the host's private key: whoever reads it can answer
+  copy (manifest, database, identity last), cleaning removes an `.identity`
+  beside no manifest. An `.identity` (or its `.partial`) that cannot be
+  removed is logged (path and io error) and skipped, never failing `rotate`
+  or `clean`: it is the only copy file with its own ACL, so after a change of
+  the service's account or from a new PC on the same share the service may no
+  longer delete it, and a sticky second-folder failure would cost more than
+  the orphan (runbook section 2: an administrator deletes it). The file IS the host's private key: whoever reads it can answer
   the stations as their host, so it is protected like the copy's PIN hashes,
   never encrypted (no key to keep outside the copies; pilot spec §26).
   `HostIdentity`'s `Debug` prints the host id, port and fingerprint only;

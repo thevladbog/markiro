@@ -486,6 +486,35 @@ async fn what_a_broken_copy_left_is_cleaned_before_the_next_copy_in_both_folders
     }
 }
 
+/// An `.identity` the service can no longer delete (closed by icacls to the
+/// account the service ran under before, or to the old PC's account on a
+/// share) never makes the second folder fail: a folder stands for it here.
+#[tokio::test]
+async fn an_identity_the_host_cannot_delete_never_fails_the_second_folder() {
+    let admin = admin().await;
+    let local = local_folder(&admin);
+    let second = tempfile::tempdir().unwrap();
+    set_second_dir(&admin, Some(second.path())).await;
+    let stuck = second
+        .path()
+        .join("markiro-host-20260920T100000Z-deadbeef.identity");
+    std::fs::create_dir(&stuck).unwrap();
+    std::fs::write(stuck.join("inside"), b"x").unwrap();
+    let backups = backups_in(&admin, &local);
+    let mut worker = worker(&admin, &backups);
+
+    let report = worker.tick().await.unwrap();
+    let made = report.local.unwrap();
+    assert_eq!(report.second, Some(Ok(())));
+    assert!(stuck.is_dir(), "it stays for an administrator");
+    let second_status = state(&admin, &backups, Some(second.path())).second.unwrap();
+    assert_eq!(second_status.copies, [made.copy()]);
+    assert_eq!(
+        second_status.last_attempt,
+        attempt(T0, BackupTrigger::Scheduled, None)
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_failed_copy_thins_out_nothing() {
