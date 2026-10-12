@@ -9,6 +9,31 @@ describe("editable A4 starter templates", () => {
       "pallet-a4-two-a5",
     ]);
   });
+  it("separates branding from a larger title on the right in every A4 preset", () => {
+    for (const preset of domain.buildPalletSheetPresets()) {
+      const content = preset.spec.body[0];
+      if (content?.kind !== "stack") throw new Error("Missing content");
+      const header = content.children[0];
+      if (header?.kind !== "row") throw new Error("Missing header");
+      const [brand, title] = header.children;
+      expect(brand).toMatchObject({
+        id: "brand",
+        kind: "row",
+        gapMm: preset.spec.page.copies === 2 ? 3 : 5,
+      });
+      expect(title).toMatchObject({
+        id: "label-title",
+        kind: "text",
+        text: "ПАЛЕТА",
+        align: "right",
+        fontSizePt: preset.spec.page.copies === 2 ? 12 : 18,
+      });
+      expect(preset.spec.footer.caption).toMatchObject({
+        showInn: true,
+        platformText: "Сформировано в Маркиро",
+      });
+    }
+  });
   it("stores real editable content rather than a built-in layout selector", () => {
     for (const preset of domain.buildPalletSheetPresets()) {
       expect(domain.parseStoredLabelTemplate(preset.spec)).toEqual(preset.spec);

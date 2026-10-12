@@ -770,7 +770,7 @@ describe("JSON import", () => {
     const fetchMock = stubCreateFetch("new-json");
     renderCreateFlow();
     const dialog = await openJsonImport(
-      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+      JSON.stringify({ name: "Палета 58×40", purpose: "box", spec: JSON_SPEC }),
     );
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
@@ -778,7 +778,7 @@ describe("JSON import", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
 
     expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
-    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Паллета 58×40");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Палета 58×40");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(postedSpec<typeof JSON_SPEC>(fetchMock)).toEqual(JSON_SPEC);
@@ -788,7 +788,7 @@ describe("JSON import", () => {
     renderCreateFlow();
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Моё имя" } });
     const dialog = await openJsonImport(
-      JSON.stringify({ name: "Паллета 58×40", spec: { ...JSON_SPEC, dpi: 300, language: "tspl" } }),
+      JSON.stringify({ name: "Палета 58×40", spec: { ...JSON_SPEC, dpi: 300, language: "tspl" } }),
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
@@ -944,7 +944,7 @@ describe("Edit flow (load + PATCH)", () => {
     // template already has an established, saved name.
     fireEvent.change(nameInput, { target: { value: "" } });
     const dialog = await openJsonImport(
-      JSON.stringify({ name: "Паллета 58×40", purpose: "box", spec: JSON_SPEC }),
+      JSON.stringify({ name: "Палета 58×40", purpose: "box", spec: JSON_SPEC }),
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));

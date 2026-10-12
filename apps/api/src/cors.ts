@@ -60,6 +60,10 @@ function isStationRequest(req: Request): boolean {
         path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
         path === "/station/warehouse-reprint/lookup" ||
+        path === "/station/warehouse-reprint/label-facts" ||
+        path === "/station/warehouse-reprint/pallet-sources" ||
+        path === "/station/warehouse-reprint/pallet-lookup" ||
+        path === "/station/warehouse-reprint/pallet-events" ||
         path === "/station/warehouse-reprint/event-batches" ||
         path === "/station/shift-closures" ||
         path === "/station/device-replacement-intent/v1/acknowledge" ||
@@ -69,6 +73,7 @@ function isStationRequest(req: Request): boolean {
       (path === "/station/identity" ||
         path === "/station/operators" ||
         path === "/station/warehouse-reprint/templates" ||
+        path === "/station/warehouse-reprint/source-capabilities" ||
         path === "/station/branding" ||
         path === "/station/device-replacement-intent/v1")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||

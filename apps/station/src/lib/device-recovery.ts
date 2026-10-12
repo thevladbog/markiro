@@ -111,7 +111,7 @@ export async function initializeDeviceRecovery(
   if (!saved) {
     const [history] = await exec.all<{ count: number }>(`SELECT
       (SELECT COUNT(*) FROM outbox)+(SELECT COUNT(*) FROM warehouse_reprint_events)+(SELECT COUNT(*) FROM inventory_outbox)+
-      (SELECT COUNT(*) FROM product_label_jobs)+(SELECT COUNT(*) FROM boxes_mirror)+
+      (SELECT COUNT(*) FROM product_label_jobs)+(SELECT COUNT(*) FROM unit_label_facts)+(SELECT COUNT(*) FROM warehouse_pallet_sources)+(SELECT COUNT(*) FROM warehouse_pallet_jobs)+(SELECT COUNT(*) FROM warehouse_pallet_events)+(SELECT COUNT(*) FROM warehouse_pallet_closures)+(SELECT COUNT(*) FROM boxes_mirror)+
       (SELECT COUNT(*) FROM codes_mirror)+(SELECT COUNT(*) FROM validation_occurrences)+(SELECT COUNT(*) FROM shift_close_outbox)+
       (SELECT COUNT(*) FROM box_exceptions_mirror)+(SELECT COUNT(*) FROM inventory_task_mirror)+
       (SELECT COUNT(*) FROM scan_events_mirror)+(SELECT COUNT(*) FROM sscc_pool)+
@@ -124,6 +124,10 @@ export async function initializeDeviceRecovery(
         ? await exec.all(
             `WITH expected(hash,device) AS (VALUES (?,?))
       SELECT 1 FROM product_label_accept_commands,expected WHERE credential_ownership<>hash OR json_extract(acceptance_json,'$.deviceId')<>device
+      UNION SELECT 1 FROM unit_label_facts,expected WHERE owner<>hash
+      UNION SELECT 1 FROM warehouse_pallet_sources,expected WHERE owner<>hash
+      UNION SELECT 1 FROM warehouse_pallet_jobs,expected WHERE owner<>hash
+      UNION SELECT 1 FROM warehouse_pallet_events,expected WHERE owner<>hash
       UNION SELECT 1 FROM validation_occurrences,expected WHERE credential_ownership<>hash
       UNION SELECT 1 FROM inventory_task_mirror,expected WHERE credential_ownership IS NOT NULL AND credential_ownership<>hash
       UNION SELECT 1 FROM outbox,expected WHERE terminal_id IS NOT NULL AND terminal_id<>device

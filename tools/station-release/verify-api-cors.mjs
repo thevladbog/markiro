@@ -196,6 +196,31 @@ export const STATION_PREFLIGHTS = Object.freeze([
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
+  {
+    path: "/station/warehouse-reprint/source-capabilities",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/warehouse-reprint/label-facts",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/warehouse-reprint/pallet-sources",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/warehouse-reprint/pallet-lookup",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/warehouse-reprint/pallet-events",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
   { path: "/shifts", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },
   { path: "/shifts", method: "POST", headers: "content-type,x-api-key,x-station-capabilities" },
   {

@@ -1,5 +1,6 @@
 import {
   WAREHOUSE_REPRINT_PROTOCOL,
+  LABEL_FACTS_PROTOCOL,
   THERMAL_LABEL_BRANDING_PROTOCOL,
   PRODUCT_LABEL_PROTOCOL,
   VALIDATION_REPROCESSING_PROTOCOL,
@@ -101,7 +102,7 @@ export interface StationClientOptions {
  * another turn.
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
-export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${THERMAL_LABEL_BRANDING_PROTOCOL},${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL},${WAREHOUSE_REPRINT_PROTOCOL}`;
+export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${THERMAL_LABEL_BRANDING_PROTOCOL},${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL},${WAREHOUSE_REPRINT_PROTOCOL},${LABEL_FACTS_PROTOCOL}`;
 
 /** Constant-cost presence heartbeat; the handler does no work beyond TenantGuard. */
 const HEARTBEAT_PATH = "/station/heartbeat";

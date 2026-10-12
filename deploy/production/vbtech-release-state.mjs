@@ -231,20 +231,26 @@ async function readLifecycleClaim(directory, file, createError) {
   return value;
 }
 
-async function assertAllowedTransientEntry(directory, file) {
+async function assertAllowedTransientEntry(directory, file, system) {
   if (file === LOCK_FILE) {
     await readLifecycleLock(directory, stateError);
     return;
   }
   if (file.endsWith(".claim")) return readLifecycleClaim(directory, file, stateError);
 
+  const temporary =
+    TEMPORARY_FILE_PATTERN.test(file) ||
+    LOCK_TEMPORARY_FILE_PATTERN.test(file) ||
+    CLAIM_TEMPORARY_FILE_PATTERN.test(file);
   const path = join(directory, file);
   let linkMetadata;
   let metadata;
   try {
-    linkMetadata = await lstat(path);
-    metadata = await stat(path);
-  } catch {
+    linkMetadata = await system.lstat(path);
+    metadata = await system.stat(path);
+  } catch (error) {
+    // Atomic publication may rename a recognized temporary file after readdir.
+    if (temporary && error?.code === "ENOENT") return;
     throw stateError();
   }
   if (!linkMetadata.isFile() || !metadata.isFile() || (metadata.mode & 0o777) !== PRIVATE_FILE_MODE)
@@ -375,7 +381,7 @@ async function readReleaseState(directory, supplied = {}) {
   const records = [];
   for (const file of files.sort()) {
     if (!file.endsWith(".json")) {
-      const claim = await assertAllowedTransientEntry(directory, file);
+      const claim = await assertAllowedTransientEntry(directory, file, system);
       if (claim) claims.push(claim);
       continue;
     }

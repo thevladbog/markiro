@@ -277,7 +277,7 @@ it("does not re-seed over an operator edit when initial values change in the sam
 // from the organisation default.
 const BOX_LABEL_TEMPLATE = {
   id: "22222222-2222-4222-8222-222222222222",
-  name: "Короб паллета 100×150",
+  name: "Короб палета 100×150",
   widthMm: 100,
   heightMm: 150,
   dpi: 203,
@@ -1467,15 +1467,15 @@ describe("ShiftsPage", () => {
     await screen.findByText("Новая смена");
 
     expect(screen.queryByLabelText("Вместимость короба, шт")).toBeNull();
-    expect(screen.queryByLabelText("Использовать паллеты")).toBeNull();
+    expect(screen.queryByLabelText("Использовать палеты")).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Агрегация"));
     expect(await screen.findByLabelText("Вместимость короба, шт")).toBeDefined();
-    expect(screen.getByLabelText("Использовать паллеты")).toBeDefined();
-    expect(screen.queryByLabelText("Коробов на паллете")).toBeNull();
+    expect(screen.getByLabelText("Использовать палеты")).toBeDefined();
+    expect(screen.queryByLabelText("Коробов на палете")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText("Использовать паллеты"));
-    expect(await screen.findByLabelText("Коробов на паллете")).toBeDefined();
+    fireEvent.click(screen.getByLabelText("Использовать палеты"));
+    expect(await screen.findByLabelText("Коробов на палете")).toBeDefined();
 
     fireEvent.click(screen.getByLabelText("Валидация"));
     expect(screen.queryByLabelText("Вместимость короба, шт")).toBeNull();
@@ -2103,9 +2103,9 @@ describe("ShiftsPage", () => {
     });
 
     // Toggle the pallets checkbox to show and prefill the pallet box capacity field
-    await user.click(screen.getByLabelText("Использовать паллеты"));
+    await user.click(screen.getByLabelText("Использовать палеты"));
     await waitFor(() => {
-      expect((screen.getByLabelText("Коробов на паллете") as HTMLInputElement).value).toBe(
+      expect((screen.getByLabelText("Коробов на палете") as HTMLInputElement).value).toBe(
         String(PRODUCT_A.palletBoxCapacity),
       );
     });

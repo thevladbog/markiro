@@ -417,7 +417,7 @@ it.each(["removed", "group", "fields", "denied"])(
           : kind === "group"
             ? "WAREHOUSE_TEMPLATE_GROUP"
             : kind === "fields"
-              ? "WAREHOUSE_SOURCE_FIELDS"
+              ? "WAREHOUSE_SOURCE_EXPIRY"
               : "WAREHOUSE_OPERATION_FAILED",
       );
     } finally {

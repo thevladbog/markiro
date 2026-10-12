@@ -26,7 +26,7 @@ describe("editable sheet tree and history", () => {
     expect(parsePalletSheetSpec(moved)).toEqual(moved);
   });
   it("rejects cycles and moving the mandatory footer", () => {
-    expect(() => moveSheetNode(spec, "header", "organization", 0)).toThrow(/cycle/i);
+    expect(() => moveSheetNode(spec, "header", "brand", 0)).toThrow(/cycle/i);
     expect(() => removeSheetNode(spec, spec.footer.id)).toThrow(/footer/i);
   });
   it("updates canvas coordinates and preserves other nodes", () => {

@@ -1,3 +1,5 @@
+import { useWarehousePalletReprint } from "../lib/use-warehouse-pallet-reprint.js";
+import { PalletConfirmation } from "../ui/warehouse-reprint/PalletConfirmation.js";
 import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,7 +46,119 @@ export function WarehouseReprint(props: WarehouseReprintProps) {
     [props],
   );
   const { state, work } = useWarehouseReprint(options, props.onFloorWorkRegister);
-  return <WarehouseReprintView {...props} state={state} work={work} />;
+  const pallet = useWarehousePalletReprint(options, props.onFloorWorkRegister);
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<"codes" | "pallet">("codes");
+  const [modeBusy, setModeBusy] = useState(false);
+  const unresolved = (value: { state: string } | null | undefined) =>
+    Boolean(
+      value &&
+      ["prepared", "sending", "failed_before_send", "delivery_unknown"].includes(value.state),
+    );
+  const blocked =
+    state.busy ||
+    pallet.state.busy ||
+    modeBusy ||
+    (mode === "codes" ? unresolved(state.job) : unresolved(pallet.state.job));
+  const changeMode = async (next: "codes" | "pallet") => {
+    if (next === mode || blocked || props.credentialGeneration.sealed) return;
+    setModeBusy(true);
+    try {
+      if (next === "pallet") {
+        await work.close();
+        pallet.work.open();
+        await pallet.work.initialize();
+      } else {
+        await pallet.work.close();
+        work.open();
+        await work.initialize();
+      }
+      if (!props.credentialGeneration.sealed) setMode(next);
+    } finally {
+      setModeBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (
+      mode !== "codes" ||
+      !state.initialized ||
+      !pallet.state.initialized ||
+      !unresolved(pallet.state.job) ||
+      state.busy ||
+      unresolved(state.job)
+    )
+      return;
+    let active = true;
+    void work.close().then(() => {
+      if (active && !props.credentialGeneration.sealed) {
+        pallet.work.open();
+        setMode("pallet");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    mode,
+    state.initialized,
+    state.busy,
+    state.job,
+    pallet.state.initialized,
+    pallet.state.job,
+    work,
+    pallet.work,
+    props.credentialGeneration,
+  ]);
+  const finishPallet = async () => {
+    if (unresolved(pallet.work.getSnapshot().job) || pallet.work.getSnapshot().busy) return;
+    setModeBusy(true);
+    try {
+      work.open();
+      if (!(await work.finish())) return;
+      if (await pallet.work.finish()) props.onExit();
+    } finally {
+      setModeBusy(false);
+    }
+  };
+  return (
+    <div className="warehouse-reprint-mode-panel">
+      <nav className="warehouse-reprint-modes" aria-label={t("warehouse.pallet.modeLabel")}>
+        <Button
+          size="floor"
+          variant={mode === "codes" ? "primary" : "secondary"}
+          aria-pressed={mode === "codes"}
+          disabled={blocked || !state.initialized}
+          onClick={() => void changeMode("codes")}
+        >
+          {t("warehouse.pallet.codesMode")}
+        </Button>
+        <Button
+          size="floor"
+          variant={mode === "pallet" ? "primary" : "secondary"}
+          aria-pressed={mode === "pallet"}
+          disabled={blocked || !state.initialized}
+          onClick={() => void changeMode("pallet")}
+        >
+          {t("warehouse.pallet.palletMode")}
+        </Button>
+      </nav>
+      {mode === "codes" ? (
+        <WarehouseReprintView
+          {...props}
+          state={{ ...state, busy: state.busy || modeBusy }}
+          work={work}
+        />
+      ) : (
+        <PalletConfirmation
+          {...props}
+          state={pallet.state}
+          work={pallet.work}
+          onFinish={finishPallet}
+          modeBusy={modeBusy}
+        />
+      )}
+    </div>
+  );
 }
 export function WarehouseReprintView(
   props: WarehouseReprintProps & {

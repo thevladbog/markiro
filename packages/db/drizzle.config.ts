@@ -11,6 +11,8 @@ export default defineConfig({
     "./src/schema/labels.ts",
     "./src/schema/product-labels.ts",
     "./src/schema/warehouse-reprint.ts",
+    "./src/schema/label-facts.ts",
+    "./src/schema/pallet-label-sources.ts",
     "./src/schema/validation-reprocessing.ts",
     "./src/schema/pickup.ts",
     "./src/schema/integrations.ts",

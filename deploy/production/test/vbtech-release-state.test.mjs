@@ -759,3 +759,31 @@ test("fails closed when the private state directory disappears after lstat", asy
     }),
   );
 });
+
+for (const recognized of [true, false]) {
+  test(`disappearing ${recognized ? "recognized temporary" : "unknown"} entry remains safe`, async () => {
+    const releases = await directory();
+    await writePendingVbtechRelease(releases, selector(), dependencies());
+    const transient = join(
+      releases,
+      recognized
+        ? `.${fileName(record())}.00000000-0000-4000-8000-000000000000.tmp`
+        : "unknown.tmp",
+    );
+    await writeFile(transient, "temporary", { mode: 0o600 });
+    let raced = false;
+    const action = () =>
+      latestHealthyVbtechRelease(releases, {
+        lstat: async (path) => {
+          if (path === transient) {
+            unlinkSync(transient);
+            raced = true;
+          }
+          return lstat(path);
+        },
+      });
+    if (recognized) assert.equal(await action(), undefined);
+    else await assertStateRejected(action);
+    assert.equal(raced, true);
+  });
+}

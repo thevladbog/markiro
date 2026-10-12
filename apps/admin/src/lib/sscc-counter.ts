@@ -60,7 +60,7 @@ export function ssccFirstSerial(extensionDigit: number): number {
 }
 
 /**
- * Titles the counter's own section ("Короба"/"Паллеты"), so two counters on
+ * Titles the counter's own section ("Короба"/"Палеты"), so two counters on
  * one page are told apart by name rather than by position.
  */
 export function ssccCounterTitle(t: TFunction, extensionDigit: number): string {

@@ -1,3 +1,5 @@
+import { WarehousePalletService } from "./pallet.service";
+import { WarehouseLabelFactsService } from "./label-facts.service";
 import { WarehouseEventsService } from "./events.service";
 import { Module } from "@nestjs/common";
 import { StationWarehouseReprintController } from "./controller";
@@ -6,6 +8,12 @@ import { WarehouseTemplatesService } from "./templates.service";
 
 @Module({
   controllers: [StationWarehouseReprintController],
-  providers: [WarehouseLookupService, WarehouseTemplatesService, WarehouseEventsService],
+  providers: [
+    WarehouseLookupService,
+    WarehouseTemplatesService,
+    WarehouseEventsService,
+    WarehouseLabelFactsService,
+    WarehousePalletService,
+  ],
 })
 export class StationWarehouseReprintModule {}

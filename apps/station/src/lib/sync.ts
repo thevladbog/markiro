@@ -1,3 +1,8 @@
+import { retainRecoveryDeniedShifts } from "./sync-recovery-denials.js";
+import { purgeUnitLabelFacts } from "./warehouse-reprint/history-retention.js";
+import { runWarehouseHistoryChannels } from "./warehouse-reprint/channels.js";
+import { purgeWarehousePalletJobs, syncWarehousePallets } from "./warehouse-reprint/pallet-sync.js";
+import { syncUnitLabelFacts } from "./warehouse-reprint/label-facts.js";
 import { purgeWarehouseJobs } from "./warehouse-reprint/retention.js";
 import { syncWarehouseEvents } from "./warehouse-reprint/sync.js";
 import {
@@ -1312,8 +1317,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const palletPending = palletPendingRows[0]?.n ?? 0;
     const [warehousePending] = owner
       ? await deps.exec.all<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'`,
-          [owner],
+          `SELECT SUM(n) AS n FROM (
+            SELECT COUNT(*) n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND (receive_status='pending' OR (receive_status='accepted' AND COALESCE(json_extract(production_delivery_json,'$.sequence'),0)>production_delivery_acked_sequence))
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending')`,
+          [owner, owner, owner, owner],
         )
       : [];
     const pending =
@@ -1676,25 +1685,55 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 }
               },
             };
-            try {
-              await purgeWarehouseJobs(
-                warehouseExec,
-                owner,
-                new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-              );
-              while (
-                await syncWarehouseEvents(
+            await runWarehouseHistoryChannels([
+              async () => {
+                await purgeWarehousePalletJobs(
+                  warehouseExec,
+                  owner,
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                while (
+                  await syncWarehousePallets(
+                    warehouseExec,
+                    deps.client,
+                    owner,
+                    () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                  )
+                ) {
+                  /* Drain acknowledged immutable prefixes. */
+                }
+              },
+              async () => {
+                await purgeUnitLabelFacts(
+                  warehouseExec,
+                  owner,
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                await syncUnitLabelFacts(
                   warehouseExec,
                   deps.client,
                   owner,
                   () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
-                )
-              ) {
-                /* Drain immutable prefixes only. */
-              }
-            } catch {
-              console.warn("station: warehouse print history retained for retry");
-            }
+                );
+              },
+              async () => {
+                await purgeWarehouseJobs(
+                  warehouseExec,
+                  owner,
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                while (
+                  await syncWarehouseEvents(
+                    warehouseExec,
+                    deps.client,
+                    owner,
+                    () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                  )
+                ) {
+                  /* Drain immutable prefixes only. */
+                }
+              },
+            ]);
           }
           break;
         }
@@ -2016,6 +2055,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               ? res.denied.filter(isDeniedStationRecord)
               : [];
             if (denied.length > 0) {
+              if (!commitIsCurrent()) break drainLoop;
+              // Fail before acknowledging rows if durable quarantine protection cannot be saved.
+              await retainRecoveryDeniedShifts(
+                commitExec,
+                denied.map((record) => record.shiftId),
+              );
               if (!commitIsCurrent()) break drainLoop;
               try {
                 await savePersistedValue(
