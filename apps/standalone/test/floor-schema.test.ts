@@ -38,6 +38,15 @@ import {
   PALLET_SSCC_HELD_SQL,
 } from "../src/floor/pallets/pallets.js";
 import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
+import {
+  DISMISS_SQL,
+  QUEUE_SETTLED_SQL,
+  QUEUE_UNSENT_SQL,
+  RESEND_INSERT_SQL,
+  RESEND_MARK_SQL,
+  RESEND_READ_SQL,
+  STRANDED_COUNT_SQL,
+} from "../src/floor/queue/outbox-recovery.js";
 import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
@@ -1299,6 +1308,60 @@ describe("the shape of the production tables (migration 0006)", () => {
       REOPEN_SQL,
       SETTLE_SQL,
       RECONCILED_AT_SQL,
+    ];
+    expect(new Set(statements).size).toBe(7);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
+  });
+
+  // The queue screen (plan ОЧ) reads on opening and writes on a person's press: seeks in the
+  // outbox's partial indexes and by the records' own key. Pinned on the shell too.
+  it("serve the queue screen's reads and writes from an index (plan ОЧ)", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    const unsent = plan(QUEUE_UNSENT_SQL);
+    expect(unsent.join("\n")).toContain("outbox_unsent (host_id=? AND device_id=?)");
+    expect(unsent.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([
+      "USE TEMP B-TREE FOR GROUP BY",
+    ]);
+    const settled = plan(QUEUE_SETTLED_SQL);
+    for (const index of [
+      "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+      "sqlite_autoindex_floor_boxes_1 (id=?)",
+      "sqlite_autoindex_floor_pallets_1 (id=?)",
+    ]) {
+      expect(settled.join("\n"), index).toContain(index);
+    }
+    expect(settled.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
+    for (const sql of [RESEND_INSERT_SQL, RESEND_MARK_SQL, DISMISS_SQL]) {
+      expect(plan(sql).join("\n"), sql).toContain("sqlite_autoindex_outbox_1 (id=?)");
+    }
+    // The only walk: the unsent records of every pairing, in their partial index. Without the
+    // statement's INDEXED BY the planner walks `outbox_shift`, the whole table (measured: 11 ms
+    // against 0.08 ms at 300 000 records of one pairing).
+    expect(plan(STRANDED_COUNT_SQL)).toEqual(["SCAN outbox USING INDEX outbox_unsent"]);
+    // The settled records the resend reads: the pairing's refused ones, nothing else.
+    expect(plan(RESEND_READ_SQL)).toEqual([
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+    ]);
+  });
+
+  it("are pinned on the shell's SQLite with the queue screen's own statements (plan ОЧ)", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [
+      QUEUE_UNSENT_SQL,
+      QUEUE_SETTLED_SQL,
+      RESEND_READ_SQL,
+      RESEND_INSERT_SQL,
+      RESEND_MARK_SQL,
+      DISMISS_SQL,
+      STRANDED_COUNT_SQL,
     ];
     expect(new Set(statements).size).toBe(7);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);

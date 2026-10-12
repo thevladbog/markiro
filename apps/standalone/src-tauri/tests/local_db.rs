@@ -1467,6 +1467,44 @@ const RESTORE_SETTLE: &str =
     "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ?, refused_blocks = ? WHERE \
      host_id = ? AND device_id = ? AND epoch = ? AND reconciled_at IS NULL";
 
+/// The queue screen (plan ОЧ; `src/floor/queue/outbox-recovery.ts`): read on opening, written on a
+/// person's press. `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite
+/// and checks that they appear here word for word.
+const QUEUE_UNSENT: &str =
+    "SELECT kind, count(*) AS n, min(created_at) AS oldest FROM outbox WHERE host_id = ? \
+     AND device_id = ? AND acked_at IS NULL GROUP BY kind";
+const QUEUE_SETTLED: &str =
+    "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, \
+     o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc \
+     FROM outbox o LEFT JOIN floor_shifts s ON s.host_id = o.host_id \
+     AND s.device_id = o.device_id AND s.id = o.shift_id \
+     LEFT JOIN floor_boxes b ON b.id = (o.payload ->> '$.data.boxId') \
+     LEFT JOIN floor_pallets p ON p.id = (o.payload ->> '$.data.palletId') \
+     WHERE o.host_id = ? AND o.device_id = ? AND o.outcome IN ('rejected', 'conflict') \
+     AND o.resolved_at IS NULL";
+const QUEUE_RESEND_READ: &str =
+    "SELECT id, payload FROM outbox WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+     AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
+const QUEUE_RESEND_INSERT: &str =
+    "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+     SELECT r.value ->> 'newId', o.host_id, o.device_id, o.kind, o.shift_id, \
+     r.value ->> 'payload', ? FROM json_each(?) AS r JOIN outbox AS o ON o.id = r.value ->> 'oldId' \
+     WHERE +o.host_id = ? AND +o.device_id = ? AND +o.outcome = 'rejected' \
+     AND o.resolved_at IS NULL ORDER BY o.seq";
+const QUEUE_RESEND_MARK: &str =
+    "UPDATE outbox SET resolution = 'resent', resent_as = r.value ->> 'newId', resolved_at = ?, \
+     resolved_by = ? FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'oldId' \
+     AND +outbox.host_id = ? AND +outbox.device_id = ? AND +outbox.outcome = 'rejected' \
+     AND outbox.resolved_at IS NULL";
+const QUEUE_DISMISS: &str =
+    "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? \
+     WHERE host_id = ? AND device_id = ? AND id = ? AND outcome IN ('rejected', 'conflict') \
+     AND kind <> 'shift_closed' AND resolved_at IS NULL";
+/// The one walk of the queue screen: the unsent records of every pairing, in their partial index.
+const QUEUE_STRANDED: &str =
+    "SELECT count(*) AS n FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL \
+     AND NOT (host_id = ? AND device_id = ?)";
+
 /// The pallets' statements (plan ПЛ-Ц; `src/floor/pallets/pallets.ts`, `src/floor/close/shift-close.ts`,
 /// `src/floor/print/print-jobs.ts`; `test/floor-schema.test.ts` checks the texts agree): the open
 /// pallet and its counts, a pallet's close, a box joining it, the shift close's check and
@@ -1570,7 +1608,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 92] = [
+    let reads: [(&str, &str); 98] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1988,6 +2026,23 @@ async fn the_floors_repeating_reads_search_an_index() {
             RESTORE_REOPEN,
             "outbox_settled (host_id=? AND device_id=? AND outcome>?)",
         ),
+        // The queue screen (plan ОЧ): read on opening, written on a person's press;
+        // `test/floor-schema.test.ts` checks the texts agree.
+        (
+            QUEUE_UNSENT,
+            "outbox_unsent (host_id=? AND device_id=?)",
+        ),
+        (
+            QUEUE_SETTLED,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            QUEUE_RESEND_READ,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (QUEUE_RESEND_INSERT, "sqlite_autoindex_outbox_1 (id=?)"),
+        (QUEUE_RESEND_MARK, "sqlite_autoindex_outbox_1 (id=?)"),
+        (QUEUE_DISMISS, "sqlite_autoindex_outbox_1 (id=?)"),
     ];
     for (sql, index) in reads {
         let placeholders = sql.matches('?').count();
@@ -2070,6 +2125,25 @@ async fn the_floors_repeating_reads_search_an_index() {
     assert!(
         !plan.iter().any(|step| step.contains("TEMP")),
         "the refused closes should need no sort, its plan is {plan:?}"
+    );
+    // The queue screen's count of the records older pairings left: the only walk of the screen,
+    // over the unsent records of every pairing in their partial index, never the whole outbox.
+    let text = format!("EXPLAIN QUERY PLAN {QUEUE_STRANDED}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..QUEUE_STRANDED.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan,
+        ["SCAN outbox USING INDEX outbox_unsent"],
+        "the stranded count should walk the unsent records only, its plan is {plan:?}"
     );
     // The one read of the floor that names no index: a pairing's waiting block
     // requests. The table holds at most one row per pairing and issuer prefix
