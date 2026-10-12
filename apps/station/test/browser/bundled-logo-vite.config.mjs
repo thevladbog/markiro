@@ -6,7 +6,8 @@ export default {
   root: fileURLToPath(new URL("../..", import.meta.url)),
   build: {
     ...base.build,
-    rollupOptions: {
+    rolldownOptions: {
+      ...base.build.rolldownOptions,
       input: fileURLToPath(new URL("./bundled-logo.html", import.meta.url)),
     },
   },
