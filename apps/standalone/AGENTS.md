@@ -1270,7 +1270,11 @@ codes, and the system's own words go to the shell's stderr only.
   document was aborted; a label may come out). `get_windows_print_job { receipt }` answers
   `present` with `statusFlags`, `absent`, `identity_mismatch` or `unavailable` — never a
   printed label. Each runs on a blocking thread with a 30 s limit (`delivery_unknown` /
-  `unavailable` past it; the Win32 call is not cancelled). The order of the GDI calls lives
+  `unavailable` past it; the Win32 call is not cancelled, and the print runtime frees the
+  queue's address when the command answers at 30 s, so a later label to the same queue can
+  start a second GDI job while the first call still runs: labels can come out of order,
+  and a reprint of the `timeout` label can double one when the hung one finally prints).
+  The order of the GDI calls lives
   in `submit` over `WindowsPrintApi` and is tested on every OS; `mod native` is
   `cfg(windows)` (feature `Win32_Storage_Xps` for `StartDocW`) and compiles only in
   `standalone-windows-build` — plan ДРВ type-checked it with a probe crate outside the
