@@ -744,3 +744,53 @@
   height: 0;
   overflow: hidden;
 }
+
+/* The warehouse reprint (plan СКЛ): reason buttons in a row, the template list beside its preview. */
+.warehouse {
+  width: min(960px, 100%);
+}
+
+.warehouse__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.warehouse__templates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.warehouse-picker__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: 16px;
+  align-items: start;
+}
+
+.warehouse-picker__list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.warehouse-picker__preview {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.warehouse-picker__preview canvas {
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+}
