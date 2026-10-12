@@ -14,6 +14,14 @@ test("box sale controls remain reachable on a short mobile screen", async ({
     const url = new URL(route.request().url());
     let body: unknown;
     if (route.request().method() !== "GET") throw new Error("Unexpected mutation");
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories", "/api/shifts?status=active"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     if (url.pathname === "/api/support-chat/episodes") {
       await route.fulfill({
         status: 503,

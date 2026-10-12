@@ -80,6 +80,14 @@ async function setup(page: Page, language = "ru", theme = "light") {
   );
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated cabinet scenarios.
     if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({

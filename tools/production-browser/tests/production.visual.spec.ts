@@ -1165,6 +1165,14 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
     const url = new URL(route.request().url());
     const path = url.pathname;
 
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated screen scenarios.
     if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({
@@ -1182,6 +1190,23 @@ async function installApi(page: Page, scenario: Scenario, fx: Fixtures) {
       return json(route, scenario === "deviceDrawer" ? ACCESS_ADMIN : ACCESS);
     }
     if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
+    if (route.request().method() === "GET" && path + url.search === "/api/shifts?status=active") {
+      const items =
+        scenario === "shiftDuplicate" || scenario === "shiftLabels"
+          ? [fx.DUPLICATE_SHIFT]
+          : scenario === "shiftsList" ||
+              scenario === "shiftCreate" ||
+              scenario === "shiftsPlanned" ||
+              scenario === "shiftActiveEdit"
+            ? [fx.ACTIVE_SHIFT]
+            : scenario === "shiftsClose" ||
+                scenario === "shiftsLate" ||
+                scenario === "dashboardCalm" ||
+                scenario === "dashboardAttention"
+              ? [fx.ACTIVE_SHIFT_09]
+              : [];
+      return json(route, { items });
+    }
     // The details panel loads the summary for every shift status, and each
     // shift gets ITS OWN: the summary sits on the same frame as the shift's
     // list row, so the two have to tell one story.
