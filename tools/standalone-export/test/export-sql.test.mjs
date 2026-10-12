@@ -79,6 +79,38 @@ test(
     try {
       const clean = JSON.parse(await runPsql({ psql, tenantId: "imp-test-atoll", env }));
       assert.deepEqual(clean, JSON.parse(readFileSync(fixture("raw-cloud.json"), "utf8")));
+      // The seeded A4 sheet (migration 0183) comes out with its format and
+      // its two defaults counted, and the file leaves all three out.
+      const SHEET = "0d0d0000-0000-4000-8000-000000000007";
+      assert.equal(clean.templates.find((each) => each.id === SHEET)?.format, "pallet_sheet_v2");
+      assert.ok(
+        clean.templates
+          .filter((each) => each.id !== SHEET)
+          .every((each) => each.format === "label_v1"),
+      );
+      assert.equal(clean.palletSheetDefaults, 2);
+      const fromSql = buildExportFile(clean, { exportedAt: "2026-10-09T18:30:00.000Z" });
+      assert.ok(!fromSql.payload.templates.some((each) => each.id === SHEET));
+      assert.deepEqual(
+        fromSql.notes.filter(
+          (note) => note.id === SHEET || note.code === "pallet_sheet_defaults_lost",
+        ),
+        [
+          { code: "template_dropped", id: SHEET, reason: "pallet_sheet" },
+          { code: "pallet_sheet_defaults_lost", count: 2 },
+        ],
+      );
+      // Each default counts on its own: the organization's alone is one.
+      assert.equal(
+        exportAfter(env, [
+          "DELETE FROM org_pallet_sheet_template_defaults WHERE tenant_id = 'imp-test-atoll';",
+        ]).palletSheetDefaults,
+        1,
+      );
+      psqlRun(env, [
+        "-c",
+        "INSERT INTO org_pallet_sheet_template_defaults (tenant_id, chz_product_group_code, template_id) VALUES ('imp-test-atoll', 8, '0d0d0000-0000-4000-8000-000000000007')",
+      ]);
 
       // What a product loses on the way: the two causes the fixture has no
       // row for are added here (a default counterparty, a photo).

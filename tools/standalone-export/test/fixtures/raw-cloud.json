@@ -59,6 +59,7 @@
       "name": "Короб 58×40",
       "purpose": "box",
       "enabled": true,
+      "format": "label_v1",
       "chzProductGroupCodes": null,
       "spec": {
         "dpi": 203,
@@ -73,6 +74,7 @@
       "name": "Короб молочный",
       "purpose": "box",
       "enabled": true,
+      "format": "label_v1",
       "chzProductGroupCodes": [8],
       "spec": {
         "dpi": 203,
@@ -87,6 +89,7 @@
       "name": "Паллета 100×150",
       "purpose": "pallet",
       "enabled": true,
+      "format": "label_v1",
       "chzProductGroupCodes": null,
       "spec": {
         "dpi": 203,
@@ -101,6 +104,7 @@
       "name": "Дубликат",
       "purpose": "product_duplicate",
       "enabled": true,
+      "format": "label_v1",
       "chzProductGroupCodes": null,
       "spec": {
         "dpi": 203,
@@ -115,6 +119,7 @@
       "name": "Старый короб",
       "purpose": "box",
       "enabled": false,
+      "format": "label_v1",
       "chzProductGroupCodes": null,
       "spec": {
         "dpi": 300,
@@ -129,8 +134,43 @@
       "name": "Не макет",
       "purpose": "box",
       "enabled": true,
+      "format": "label_v1",
       "chzProductGroupCodes": null,
       "spec": ["not", "a", "layout"]
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000007",
+      "name": "Палета А4 · вертикальная",
+      "purpose": "pallet",
+      "enabled": true,
+      "format": "pallet_sheet_v2",
+      "chzProductGroupCodes": null,
+      "spec": {
+        "dpi": 300,
+        "body": [],
+        "kind": "pallet_sheet",
+        "page": {
+          "size": "A4",
+          "copies": 1,
+          "cutLine": false,
+          "marginsMm": {
+            "top": 10,
+            "left": 10,
+            "right": 10,
+            "bottom": 10
+          },
+          "orientation": "portrait"
+        },
+        "footer": {
+          "id": "sscc",
+          "kind": "sscc",
+          "align": "center",
+          "source": "sscc",
+          "moduleDots": 11,
+          "barHeightMm": 45
+        },
+        "schemaVersion": 2
+      }
     }
   ],
   "boxDefaults": [
@@ -388,5 +428,6 @@
   "activeShifts": [],
   "staleDevices": [],
   "counterpartyIssuedShifts": 1,
-  "plannedShifts": 2
+  "plannedShifts": 2,
+  "palletSheetDefaults": 2
 }

@@ -1571,7 +1571,12 @@ test("an output that lacks a list or a count stops the export instead of failing
       );
     }
   }
-  for (const key of ["nonOperatorBadges", "counterpartyIssuedShifts", "plannedShifts"]) {
+  for (const key of [
+    "nonOperatorBadges",
+    "counterpartyIssuedShifts",
+    "plannedShifts",
+    "palletSheetDefaults",
+  ]) {
     for (const bad of [undefined, null, "2", -1, 1.5, Number.NaN]) {
       const source = raw();
       if (bad === undefined) delete source[key];
@@ -1671,4 +1676,163 @@ test("the other tenants' serials are read for a warning, never carried into the 
   const source = raw();
   source.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 0, maxSerial: 99_999_999 }];
   assert.deepEqual(buildExportFile(source, { exportedAt: EXPORTED_AT }), golden());
+});
+
+test("an A4 pallet sheet stays in the cloud with a note, and so do the defaults that name one", () => {
+  const SHEET = "0d0d0000-0000-4000-8000-000000000007";
+  const file = buildExportFile(raw(), { exportedAt: EXPORTED_AT });
+  assert.ok(!file.payload.templates.some((template) => template.id === SHEET));
+  assert.ok(!JSON.stringify(file.payload).includes("pallet_sheet"));
+  assert.deepEqual(
+    file.notes.filter((note) => note.id === SHEET || note.code === "pallet_sheet_defaults_lost"),
+    [
+      { code: "template_dropped", id: SHEET, reason: "pallet_sheet" },
+      { code: "pallet_sheet_defaults_lost", count: 2 },
+    ],
+  );
+
+  // A sheet named as the organization's pallet label, a category's or a
+  // product's default goes with it, each with the note of its slot.
+  const source = raw();
+  source.orgProfile.defaultPalletTemplateId = SHEET;
+  source.palletDefaults = [{ chzProductGroupCode: 8, templateId: SHEET }];
+  source.products[0].defaultLabelTemplateId = SHEET;
+  source.palletSheetDefaults = 0;
+  const named = buildExportFile(source, { exportedAt: EXPORTED_AT });
+  assert.equal(named.payload.templateDefaults.defaultPalletTemplateId, null);
+  assert.deepEqual(
+    named.payload.templateDefaults.categories.filter((each) => each.purpose === "pallet"),
+    [],
+  );
+  assert.equal(named.payload.products[0].defaultBoxTemplateId, null);
+  assert.equal(named.payload.products[0].defaultPalletTemplateId, null);
+  const about = named.notes.filter((note) => note.templateId === SHEET);
+  // Categories are read before the organization's slots, as the tool always did.
+  assert.deepEqual(about, [
+    {
+      code: "template_default_dropped",
+      purpose: "pallet",
+      chzProductGroupCode: 8,
+      templateId: SHEET,
+    },
+    {
+      code: "template_default_dropped",
+      purpose: "pallet",
+      chzProductGroupCode: null,
+      templateId: SHEET,
+    },
+    { code: "product_template_dropped", id: source.products[0].id, templateId: SHEET },
+  ]);
+  assert.ok(!named.notes.some((note) => note.code === "pallet_sheet_defaults_lost"));
+});
+
+test("a layout is a thermal label only in its own format: a sheet is told by its format or its kind", () => {
+  const templateOf = (change) => {
+    const source = raw();
+    const template = source.templates[2];
+    change(template);
+    const file = buildExportFile(source, { exportedAt: EXPORTED_AT });
+    const kept = file.payload.templates.some((each) => each.id === template.id);
+    const dropped = file.notes.find(
+      (note) => note.code === "template_dropped" && note.id === template.id,
+    );
+    return kept ? "kept" : dropped?.reason;
+  };
+  assert.equal(
+    templateOf(() => {}),
+    "kept",
+  );
+  // A copy older than migration 0183 has no format column: every layout there is a label.
+  assert.equal(
+    templateOf((template) => (template.format = null)),
+    "kept",
+  );
+  assert.equal(
+    templateOf((template) => delete template.format),
+    "kept",
+  );
+  assert.equal(
+    templateOf((template) => (template.format = "pallet_sheet_v2")),
+    "pallet_sheet",
+  );
+  assert.equal(
+    templateOf((template) => {
+      template.format = null;
+      template.spec = { schemaVersion: 2, kind: "pallet_sheet" };
+    }),
+    "pallet_sheet",
+  );
+  assert.equal(
+    templateOf((template) => (template.spec = { ...template.spec, kind: "pallet_sheet" })),
+    "pallet_sheet",
+  );
+  assert.equal(
+    templateOf((template) => (template.format = "label_v2")),
+    "format",
+  );
+  // The format is read before the name: an unnamed sheet is a sheet.
+  assert.equal(
+    templateOf((template) => {
+      template.format = "pallet_sheet_v2";
+      template.name = " ";
+    }),
+    "pallet_sheet",
+  );
+});
+
+test("the cut-over table always has both extensions of the organization's prefix", () => {
+  const source = raw();
+  // Pallets came late: no pallet counter, block or printed pallet in the cloud.
+  source.ssccCounters = source.ssccCounters.filter((each) => each.extension === 0);
+  source.ssccBlocks = source.ssccBlocks.filter((each) => each.extension === 0);
+  source.ssccPrinted = source.ssccPrinted.filter((each) => each.extension === 0);
+  const file = buildExportFile(source, { exportedAt: EXPORTED_AT });
+  const organization = file.cutover.ssccCounters.filter(
+    (each) => each.issuerPrefix === "460068200",
+  );
+  assert.deepEqual(organization, [
+    {
+      issuerPrefix: "460068200",
+      extension: 0,
+      owner: { kind: "organization" },
+      issuedMax: 21_003,
+      printedMax: 21_003,
+      standaloneStart: 30_000,
+      cloudReseedTo: 1_030_000,
+    },
+    {
+      issuerPrefix: "460068200",
+      extension: 1,
+      owner: { kind: "organization" },
+      issuedMax: null,
+      printedMax: null,
+      standaloneStart: 0,
+      cloudReseedTo: 100_000,
+    },
+  ]);
+  assert.deepEqual(
+    file.payload.ssccCounters.filter((each) => each.issuerPrefix === "460068200"),
+    [
+      { issuerPrefix: "460068200", extension: 0, nextSerial: 30_000 },
+      { issuerPrefix: "460068200", extension: 1, nextSerial: 0 },
+    ],
+  );
+
+  // Nothing at all under the organization's prefix: both rows still stand.
+  const none = raw();
+  none.ssccCounters = [];
+  none.ssccBlocks = [];
+  none.ssccPrinted = [];
+  assert.deepEqual(
+    buildExportFile(none, { exportedAt: EXPORTED_AT }).cutover.ssccCounters.map((each) => [
+      each.issuerPrefix,
+      each.extension,
+      each.standaloneStart,
+      each.cloudReseedTo,
+    ]),
+    [
+      ["460068200", 0, 1, 1_000_001],
+      ["460068200", 1, 0, 100_000],
+    ],
+  );
 });

@@ -122,14 +122,31 @@ export function cloudReseedTo(start, extension, windows) {
 
 /**
  * One row per (prefix, extension) the tenant has a counter, a block or a
- * printed SSCC of. `counters`, `blocks` and `printed` are `export.sql`'s
- * arrays; `owners` names whose prefix it is. Rows come by prefix, then
- * extension. Several rows of one key keep the largest number of each kind.
+ * printed SSCC of, and always both extensions of `organizationPrefix` (the
+ * first 9 digits of the organization's GLN; `null` only where no organization
+ * is meant). `counters`, `blocks` and `printed` are `export.sql`'s arrays;
+ * `owners` names whose prefix it is. Rows come by prefix, then extension.
+ * Several rows of one key keep the largest number of each kind.
+ *
+ * The organization's two rows stand even when the cloud never issued under
+ * an extension (pallets came late): the standalone issues under both, so
+ * the cut-over must move both cloud counters past its window, or a rollback
+ * would cut the cloud's first block over serials the standalone printed.
+ * Such a row starts at the extension's first serial.
+ *
  * Throws when the cloud already used the whole prefix (the standalone could
  * never issue under it), for a prefix that is not 9 digits, for an extension
- * other than 0 and 1, and for a number that is no serial.
+ * other than 0 and 1, for a number that is no serial, and when
+ * `organizationPrefix` is missing (`undefined`).
  */
-export function planSsccCounters({ counters, blocks, printed }, owners, windows) {
+export function planSsccCounters(
+  { organizationPrefix, counters, blocks, printed },
+  owners,
+  windows,
+) {
+  if (organizationPrefix === undefined) {
+    throw new RangeError("organizationPrefix is required (null when there is no organization)");
+  }
   const rows = new Map();
   const row = (issuerPrefix, extension) => {
     checkIssuerPrefix(issuerPrefix);
@@ -155,6 +172,10 @@ export function planSsccCounters({ counters, blocks, printed }, owners, windows)
       });
     }
   };
+  if (organizationPrefix !== null) {
+    row(organizationPrefix, 0);
+    row(organizationPrefix, 1);
+  }
   for (const counter of counters) {
     const each = row(counter.issuerPrefix, counter.extension);
     within(each.issuerPrefix, each.extension, () => {

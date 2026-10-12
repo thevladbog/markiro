@@ -53,7 +53,17 @@ const RAW_LISTS = [
   "activeShifts",
   "staleDevices",
 ];
-const RAW_COUNTS = ["nonOperatorBadges", "counterpartyIssuedShifts", "plannedShifts"];
+const RAW_COUNTS = [
+  "nonOperatorBadges",
+  "counterpartyIssuedShifts",
+  "plannedShifts",
+  "palletSheetDefaults",
+];
+
+/** The cloud's thermal label layout (`label_templates.format`); `null` from a copy older than the column. */
+const LABEL_FORMAT = "label_v1";
+/** The cloud's A4 pallet sheet (migration 0183): no thermal label, the standalone has no sheets yet. */
+const PALLET_SHEET_FORMAT = "pallet_sheet_v2";
 
 /**
  * A refusal to write any file: the data cannot become a site. The codes:
@@ -266,13 +276,20 @@ export function buildExportFile(raw, options) {
   }
   if (counterpartyNotes > 0) note({ code: "counterparty_notes_lost", count: counterpartyNotes });
 
-  // Templates.
+  // Templates. An A4 pallet sheet is no thermal label: imported as one, a
+  // shift that chose it would stop at the station's entry, so it stays in the
+  // cloud (the standalone's sheet library is plan А4's), and so does a
+  // layout of a format this tool does not know.
   const templates = [];
   const templateById = new Map();
   for (const each of raw.templates) {
     const name = plainText(each.name, 200);
+    const format = each.format ?? null;
     let reason = null;
-    if (name === "") reason = "name";
+    if (format === PALLET_SHEET_FORMAT || each.spec?.kind === "pallet_sheet") {
+      reason = "pallet_sheet";
+    } else if (format !== null && format !== LABEL_FORMAT) reason = "format";
+    else if (name === "") reason = "name";
     else if (each.spec === null || typeof each.spec !== "object" || Array.isArray(each.spec)) {
       reason = "spec_not_object";
     } else if (depthOf(each.spec) > MAX_SPEC_DEPTH) reason = "spec_too_deep";
@@ -340,6 +357,10 @@ export function buildExportFile(raw, options) {
     defaultPalletTemplateId: orgDefault(raw.orgProfile.defaultPalletTemplateId, "pallet"),
     categories,
   };
+  // The organization's A4 sheet and its categories' sheets go with the sheets.
+  if (raw.palletSheetDefaults > 0) {
+    note({ code: "pallet_sheet_defaults_lost", count: raw.palletSheetDefaults });
+  }
 
   // Products.
   const products = [];
@@ -474,7 +495,12 @@ export function buildExportFile(raw, options) {
   let cutoverCounters;
   try {
     cutoverCounters = planSsccCounters(
-      { counters: raw.ssccCounters, blocks: raw.ssccBlocks, printed: raw.ssccPrinted },
+      {
+        organizationPrefix: gln.slice(0, 9),
+        counters: raw.ssccCounters,
+        blocks: raw.ssccBlocks,
+        printed: raw.ssccPrinted,
+      },
       owners,
       windows,
     );

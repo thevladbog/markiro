@@ -233,6 +233,14 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
         unique_id(&mut ids, &field("id"), &each.id)?;
         let name = validate::template_name(&field("name"), &each.name)?;
         let spec = validate::template_spec(&field("spec"), &each.spec)?;
+        // The cloud's A4 pallet sheet (`pallet_sheet_v2`) is no thermal
+        // label: the export leaves it out, so one here means a damaged file.
+        if each.spec.get("kind").and_then(serde_json::Value::as_str) == Some("pallet_sheet") {
+            return Err(ApiError::validation(
+                &field("spec"),
+                "an A4 pallet sheet is not a label template",
+            ));
+        }
         let codes = each.chz_product_group_codes.as_deref();
         validate::category_codes(&field("chzProductGroupCodes"), codes)?;
         for &code in codes.unwrap_or_default() {

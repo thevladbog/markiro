@@ -4,7 +4,7 @@
   "tool": "standalone-export/1",
   "exportedAt": "2026-10-09T18:30:00.000Z",
   "rehearsal": false,
-  "checksum": "sha256:9716b9df54092b60e007f36bfce2eea504bb7b61a1f08d7e9bf5186be09945c5",
+  "checksum": "sha256:f679947ff4d77ea58c682bd5c72d12637c1ce5929a16dcb30f238d16b8bdea0e",
   "source": {
     "tenantId": "imp-test-atoll",
     "tenantName": "ООО «Атолл»"
@@ -328,10 +328,19 @@
       "reason": "spec_not_object"
     },
     {
+      "code": "template_dropped",
+      "id": "0d0d0000-0000-4000-8000-000000000007",
+      "reason": "pallet_sheet"
+    },
+    {
       "code": "template_default_dropped",
       "purpose": "box",
       "chzProductGroupCode": 13,
       "templateId": "0d0d0000-0000-4000-8000-000000000005"
+    },
+    {
+      "code": "pallet_sheet_defaults_lost",
+      "count": 2
     },
     {
       "code": "text_changed",

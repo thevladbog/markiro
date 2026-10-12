@@ -18,6 +18,7 @@ DELETE FROM media_assets WHERE owner_tenant_id IN ('imp-test-atoll', 'imp-test-o
 DELETE FROM products WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
 DELETE FROM org_box_label_template_defaults WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
 DELETE FROM org_pallet_label_template_defaults WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
+DELETE FROM org_pallet_sheet_template_defaults WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
 DELETE FROM org_profiles WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
 DELETE FROM label_templates WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');
 DELETE FROM counterparties WHERE tenant_id IN ('imp-test-atoll', 'imp-test-other');

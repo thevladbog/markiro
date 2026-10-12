@@ -384,7 +384,7 @@ describe("«Перенос из облака»", () => {
 
     expect(await screen.findByText("ООО «Атолл», ИНН 7701234567, GLN 4600682000010")).toBeTruthy();
     expect(screen.queryByText(/не совпадает с файлом/)).toBeNull();
-    expect(valueOf("Контрольная сумма")).toBe("sha256:9716b9df…");
+    expect(valueOf("Контрольная сумма")).toBe("sha256:f679947f…");
     expect(valueOf("Организация в облаке")).not.toBe("");
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
@@ -400,7 +400,15 @@ describe("«Перенос из облака»", () => {
     expect(
       screen.getByText("Номера смен продолжат облачные: NOV26 → 1, OCT26 → 7, SEP26 → 41."),
     ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Замечания выгрузки: 24" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Замечания выгрузки: 26" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Шаблон #0d0d0000 не перенесён: это А4-лист паллеты, а автоном переносит только термоэтикетки.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Умолчания А4-листов паллет (организации и категорий) не переносятся: 2."),
+    ).toBeTruthy();
     expect(
       screen.getByText(
         "Линия « линия 1 » переименована в «линия 1 (2)»: имена линий не повторяются.",

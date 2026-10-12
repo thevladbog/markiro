@@ -730,6 +730,27 @@ fn template_categories_and_layouts_follow_the_office_routes() {
 }
 
 #[test]
+fn an_a4_pallet_sheet_is_no_thermal_template_and_is_refused() {
+    // The export leaves the cloud's A4 sheets out (`pallet_sheet_v2`); a file
+    // that still carries one is damaged or made by hand: a shift that chose
+    // it would stop at the station's entry.
+    let sheet = json!({ "schemaVersion": 2, "kind": "pallet_sheet", "page": { "size": "A4" } });
+    assert_eq!(
+        refused(|body| body["payload"]["templates"][2]["spec"] = sheet.clone()),
+        "payload.templates.2.spec"
+    );
+    assert_eq!(
+        refused(|body| body["payload"]["templates"][0]["spec"]["kind"] = json!("pallet_sheet")),
+        "payload.templates.0.spec"
+    );
+    // Only that kind: another `kind`, or a nested one, is a layout like any other.
+    accepted(|body| body["payload"]["templates"][2]["spec"]["kind"] = json!("label"));
+    accepted(|body| {
+        body["payload"]["templates"][2]["spec"]["elements"] = json!([{ "kind": "pallet_sheet" }]);
+    });
+}
+
+#[test]
 fn a_badge_salt_is_sixteen_bytes_in_canonical_standard_base64() {
     for salt in [
         "",

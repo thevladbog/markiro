@@ -32,11 +32,20 @@ INSERT INTO label_templates (id, tenant_id, name, spec, purpose, enabled, chz_pr
   ('0d0d0000-0000-4000-8000-000000000098', 'imp-test-other', 'Чужая паллета',
     '{"widthMm":100,"heightMm":150,"dpi":203,"language":"zpl","elements":[]}', 'pallet', true, NULL, '2026-01-11 09:00:08+00');
 
+-- An A4 pallet sheet (migration 0183), the organization's default sheet and
+-- a category's: the export leaves all three out and says so.
+INSERT INTO label_templates (id, tenant_id, name, spec, purpose, format, enabled, chz_product_group_codes, created_at) VALUES
+  ('0d0d0000-0000-4000-8000-000000000007', 'imp-test-atoll', 'Палета А4 · вертикальная',
+    '{"schemaVersion":2,"kind":"pallet_sheet","dpi":300,"page":{"size":"A4","orientation":"portrait","copies":1,"cutLine":false,"marginsMm":{"top":10,"right":10,"bottom":10,"left":10}},"body":[],"footer":{"id":"sscc","kind":"sscc","source":"sscc","barHeightMm":45,"moduleDots":11,"align":"center"}}',
+    'pallet', 'pallet_sheet_v2', true, NULL, '2026-01-11 09:00:09+00');
+
 INSERT INTO org_profiles (tenant_id, gln, gs1_prefixes, inn, time_zone,
-    default_box_label_template_id, default_pallet_label_template_id) VALUES
+    default_box_label_template_id, default_pallet_label_template_id,
+    default_pallet_sheet_template_id) VALUES
   ('imp-test-atoll', '4600682000010', '{4600682," 4600682 ",46x}', '7701234567', 'Europe/Moscow',
-    '0d0d0000-0000-4000-8000-000000000001', '0d0d0000-0000-4000-8000-000000000003'),
-  ('imp-test-other', '4600682000010', '{}', NULL, 'Europe/Moscow', NULL, NULL);
+    '0d0d0000-0000-4000-8000-000000000001', '0d0d0000-0000-4000-8000-000000000003',
+    '0d0d0000-0000-4000-8000-000000000007'),
+  ('imp-test-other', '4600682000010', '{}', NULL, 'Europe/Moscow', NULL, NULL, NULL);
 
 INSERT INTO org_box_label_template_defaults (tenant_id, chz_product_group_code, template_id) VALUES
   ('imp-test-atoll', 8, '0d0d0000-0000-4000-8000-000000000002'),
@@ -45,6 +54,8 @@ INSERT INTO org_box_label_template_defaults (tenant_id, chz_product_group_code, 
 INSERT INTO org_pallet_label_template_defaults (tenant_id, chz_product_group_code, template_id) VALUES
   ('imp-test-atoll', 8, '0d0d0000-0000-4000-8000-000000000003'),
   ('imp-test-other', 8, '0d0d0000-0000-4000-8000-000000000098');
+INSERT INTO org_pallet_sheet_template_defaults (tenant_id, chz_product_group_code, template_id) VALUES
+  ('imp-test-atoll', 8, '0d0d0000-0000-4000-8000-000000000007');
 
 INSERT INTO employee_badge_salts (tenant_id, salt) VALUES
   ('imp-test-atoll', 'bWFya2lyby1iYWRnZS0wMQ=='),

@@ -28,6 +28,7 @@ export const KNOWN_NOTE_CODES: ReadonlySet<string> = new Set([
   "counterparty_sscc_used",
   "planned_shifts_not_moved",
   "sscc_window_does_not_fit",
+  "pallet_sheet_defaults_lost",
 ]);
 
 /**
@@ -68,6 +69,8 @@ export const NOTE_REASONS: ReadonlySet<string> = new Set([
   "operator",
   "code",
   "duplicate",
+  "pallet_sheet",
+  "format",
 ]);
 export const NOTE_PURPOSES: ReadonlySet<string> = new Set(["box", "pallet"]);
 

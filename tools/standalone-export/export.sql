@@ -46,6 +46,7 @@ SELECT json_build_object(
     FROM counterparties c WHERE c.tenant_id = :'tenant_id'), '[]'::json),
   'templates', coalesce((SELECT json_agg(json_build_object(
       'id', t.id, 'name', t.name, 'purpose', t.purpose, 'enabled', t.enabled,
+      'format', t.format,
       'chzProductGroupCodes', to_json(t.chz_product_group_codes), 'spec', t.spec)
       ORDER BY t.created_at, t.id)
     FROM label_templates t WHERE t.tenant_id = :'tenant_id'), '[]'::json),
@@ -153,7 +154,13 @@ SELECT json_build_object(
   'counterpartyIssuedShifts', (SELECT count(*) FROM shifts
     WHERE tenant_id = :'tenant_id' AND sscc_issuer_counterparty_id IS NOT NULL),
   'plannedShifts', (SELECT count(*) FROM shifts
-    WHERE tenant_id = :'tenant_id' AND status = 'planned')
+    WHERE tenant_id = :'tenant_id' AND status = 'planned'),
+  -- The A4 pallet sheet defaults (the organization's and its categories'):
+  -- the sheets stay in the cloud, so the export only counts what is lost.
+  'palletSheetDefaults', (SELECT count(*) FROM org_profiles p
+      WHERE p.tenant_id = :'tenant_id' AND p.default_pallet_sheet_template_id IS NOT NULL)
+    + (SELECT count(*) FROM org_pallet_sheet_template_defaults d
+      WHERE d.tenant_id = :'tenant_id')
 );
 
 COMMIT;
