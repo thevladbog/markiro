@@ -8,6 +8,7 @@ import {
   palletProductionDeliverySchema,
   palletLookupResultSchema,
   PALLET_REPRINT_PROTOCOL,
+  PALLET_PRODUCTION_DELIVERY_PROTOCOL,
   resolveWarehouseReprintScan,
   type PalletLabelSourceV1,
   type MonoBitmap,
@@ -21,6 +22,7 @@ import {
   AUTHORIZED_CREDENTIAL_OWNERS_SQL,
 } from "../device-recovery.js";
 import { warehouseNetworkUnavailable } from "./sources.js";
+import { syncWarehousePalletEvidence } from "./pallet-diagnostics.js";
 import { loadPalletSheetPrintSnapshot } from "../pallet-sheet-print-snapshot.js";
 interface Membership {
   sscc: string;
@@ -358,13 +360,35 @@ export async function resolveWarehousePalletSource(
       .strictObject({ protocols: z.array(z.string()) })
       .parse(await client.get("/station/warehouse-reprint/source-capabilities"));
     if (!caps.protocols.includes(PALLET_REPRINT_PROTOCOL)) return offline();
-    const result = palletLookupResultSchema.parse(
+    let result = palletLookupResultSchema.parse(
       await client.post("/station/warehouse-reprint/pallet-lookup", {
         protocol: PALLET_REPRINT_PROTOCOL,
         raw,
         operatorId,
       }),
     );
+    if (
+      result.status === "unavailable" &&
+      result.code === "delivery_unresolved" &&
+      local &&
+      !localError &&
+      caps.protocols.includes(PALLET_PRODUCTION_DELIVERY_PROTOCOL)
+    ) {
+      try {
+        if (await syncWarehousePalletEvidence(client, exec, owner, local.sscc)) {
+          result = palletLookupResultSchema.parse(
+            await client.post("/station/warehouse-reprint/pallet-lookup", {
+              protocol: PALLET_REPRINT_PROTOCOL,
+              raw,
+              operatorId,
+            }),
+          );
+        }
+      } catch (error) {
+        // A failed repair must not turn an authoritative unresolved response into offline eligibility.
+        throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED", { cause: error });
+      }
+    }
     if (result.status !== "found") {
       if (
         result.status === "unavailable" &&

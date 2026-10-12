@@ -5,6 +5,7 @@ import {
   buildPalletLabelTemplates,
   warehouseBoxSource,
   PALLET_REPRINT_PROTOCOL,
+  PALLET_PRODUCTION_DELIVERY_PROTOCOL,
 } from "@markiro/domain";
 import { applyMigrations } from "../src/lib/mirror.js";
 import { makeRotatingExec } from "./support/sqlite-exec.js";
@@ -258,3 +259,126 @@ it("does not invent historical fields from an incomplete legacy closure", async 
     db.close();
   }
 });
+
+it.each(["accepted", "retryable", "conflict"] as const)(
+  "resends the saved production receipt on unresolved lookup (%s), without changing its facts",
+  async (status) => {
+    const db = new DatabaseSync(":memory:"),
+      exec = makeRotatingExec([db, db]);
+    await applyMigrations(exec);
+    try {
+      const saved = source(),
+        owner = "owner";
+      await savePalletLabelSource(exec, owner, saved);
+      const evidence = {
+        sourceRevision: saved.revision,
+        sequence: 2,
+        attemptId: "production-1",
+        bytesDigest: "b".repeat(64),
+        state: "sent",
+        occurredAt: "2026-10-11T00:00:02.000Z",
+      };
+      await exec.run("UPDATE warehouse_pallet_sources SET production_delivery_json=?", [
+        JSON.stringify(evidence),
+      ]);
+      let uploaded = false;
+      const post = vi.fn(async (path: string, body?: unknown) => {
+        if (path.endsWith("/pallet-sources")) {
+          expect(body).toEqual({
+            protocol: PALLET_REPRINT_PROTOCOL,
+            entries: [saved],
+            productionDelivery: evidence,
+          });
+          uploaded = status === "accepted";
+          return {
+            protocol: PALLET_REPRINT_PROTOCOL,
+            results: [{ revision: saved.revision, status }],
+          };
+        }
+        return uploaded
+          ? { status: "found", source: saved }
+          : { status: "unavailable", code: "delivery_unresolved" };
+      });
+      const client: StationClient = {
+        get: async <T>() =>
+          ({ protocols: [PALLET_REPRINT_PROTOCOL, PALLET_PRODUCTION_DELIVERY_PROTOCOL] }) as T,
+        post: async <T>(path: string, body?: unknown) => (await post(path, body)) as T,
+        download: async () => new Blob(),
+        whoami: async () => ({ ok: true }),
+      };
+      const result = resolveWarehousePalletSource(
+        client,
+        exec,
+        owner,
+        saved.sscc,
+        "00000000-0000-4000-8000-000000000004",
+      );
+      if (status === "accepted") expect((await result).source).toEqual(saved);
+      else await expect(result).rejects.toThrow("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
+      expect(post.mock.calls.filter(([path]) => path.endsWith("/pallet-sources"))).toHaveLength(1);
+      const rows = await exec.all<{ value_json: string; production_delivery_json: string }>(
+        "SELECT value_json,production_delivery_json FROM warehouse_pallet_sources",
+      );
+      expect(JSON.parse(rows[0]?.value_json ?? "null")).toEqual(saved);
+      expect(JSON.parse(rows[0]?.production_delivery_json ?? "null")).toEqual(evidence);
+    } finally {
+      db.close();
+    }
+  },
+);
+
+it.each(["delivery_unresolved", "composition_changed", "network"] as const)(
+  "does not bypass the authoritative %s response after receipt resync",
+  async (failure) => {
+    const db = new DatabaseSync(":memory:"),
+      exec = makeRotatingExec([db, db]);
+    await applyMigrations(exec);
+    try {
+      const saved = source();
+      await savePalletLabelSource(exec, "owner", saved);
+      await exec.run("UPDATE warehouse_pallet_sources SET production_delivery_json=?", [
+        JSON.stringify({
+          sourceRevision: saved.revision,
+          sequence: 2,
+          attemptId: "production-1",
+          bytesDigest: "b".repeat(64),
+          state: "sent",
+          occurredAt: "2026-10-11T00:00:02.000Z",
+        }),
+      ]);
+      let uploaded = false;
+      const client: StationClient = {
+        get: async <T>() =>
+          ({ protocols: [PALLET_REPRINT_PROTOCOL, PALLET_PRODUCTION_DELIVERY_PROTOCOL] }) as T,
+        post: async <T>(path: string) => {
+          if (path.endsWith("/pallet-sources")) {
+            uploaded = true;
+            return {
+              protocol: PALLET_REPRINT_PROTOCOL,
+              results: [{ revision: saved.revision, status: "accepted" }],
+            } as T;
+          }
+          if (uploaded && failure === "network") throw new TypeError("Failed to fetch");
+          return { status: "unavailable", code: uploaded ? failure : "delivery_unresolved" } as T;
+        },
+        download: async () => new Blob(),
+        whoami: async () => ({ ok: true }),
+      };
+      await expect(
+        resolveWarehousePalletSource(
+          client,
+          exec,
+          "owner",
+          saved.sscc,
+          "00000000-0000-4000-8000-000000000004",
+        ),
+      ).rejects.toThrow(
+        failure === "composition_changed"
+          ? "WAREHOUSE_PALLET_COMPOSITION_CHANGED"
+          : "WAREHOUSE_PALLET_DELIVERY_UNRESOLVED",
+      );
+    } finally {
+      db.close();
+    }
+  },
+);
