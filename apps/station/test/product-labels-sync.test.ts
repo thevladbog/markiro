@@ -488,7 +488,7 @@ describe("product label sync", () => {
   });
 
   it("includes pending labels in recovery counts and preserves them while clearing reproducible caches", async () => {
-    expect(await readSealedWorkSummary(work.exec)).toMatchObject({ productLabels: 1, total: 2 });
+    expect(await readSealedWorkSummary(work.exec)).toMatchObject({ productLabels: 2, total: 3 });
     await clearRejectedCredentialState({
       exec: work.exec,
       clearCredential: async () => {},

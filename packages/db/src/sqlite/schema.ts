@@ -1026,6 +1026,7 @@ export const productLabelAcceptCommands = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.credentialOwnership, t.jobId] }),
+    index("product_label_accept_facts_idx").on(t.shiftId, t.codeHash, t.acceptedAt),
     check(
       "product_label_acceptance_json_check",
       sql`json_valid(${t.acceptanceJson}) AND json_type(${t.acceptanceJson}) = 'object'`,
@@ -1693,3 +1694,35 @@ export const printerDeliveries = sqliteTable(
     ),
   ],
 );
+
+export const unitLabelFacts = sqliteTable(
+  "unit_label_facts",
+  {
+    owner: text("owner").notNull(),
+    shiftId: text("shift_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    acceptedAt: text("accepted_at").notNull(),
+    canonicalRaw: text("canonical_raw").notNull(),
+    contextJson: text("context_json"),
+    fieldsJson: text("fields_json"),
+    receiveStatus: text("receive_status").notNull().default("pending"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.shiftId, t.codeHash, t.acceptedAt] }),
+    index("unit_label_facts_identity_idx").on(t.codeHash, t.shiftId, t.acceptedAt),
+    check(
+      "unit_label_facts_context_check",
+      sql`${t.contextJson} IS NULL OR json_valid(${t.contextJson})`,
+    ),
+    check(
+      "unit_label_facts_fields_check",
+      sql`${t.fieldsJson} IS NULL OR json_valid(${t.fieldsJson})`,
+    ),
+    check(
+      "unit_label_facts_status_check",
+      sql`${t.receiveStatus} IN ('pending','accepted','conflict')`,
+    ),
+  ],
+);
+
+export * from "./pallet-reprint-schema.js";

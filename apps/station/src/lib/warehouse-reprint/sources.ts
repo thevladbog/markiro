@@ -1,5 +1,9 @@
+import { frozenUnitSource } from "./label-facts.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import {
+  formatLabelDate,
+  DomainError,
+  parseDuplicateKm,
   productLabelBytesDigest,
   productLabelValueDigest,
   warehouseLookupResultSchema,
@@ -51,6 +55,15 @@ export async function findWarehouseSource(
     );
     if (retired) throw new Error("WAREHOUSE_SOURCE_NOT_PRINTABLE");
   }
+  if (scan.kind === "unit") {
+    const [denied] = await exec.all(
+      `SELECT 1 FROM conflicts_mirror WHERE code_hash=?
+       UNION ALL SELECT 1 FROM unit_label_facts f JOIN codes_mirror c ON c.code_hash=f.code_hash AND c.shift_id=f.shift_id AND c.scanned_at=f.accepted_at
+       WHERE f.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND f.code_hash=? AND f.receive_status='conflict' LIMIT 1`,
+      [identity, owner, identity],
+    );
+    if (denied) throw new Error("WAREHOUSE_SOURCE_NOT_PRINTABLE");
+  }
   const local = await readLocalClosedBox(exec, owner, scan);
   if (local) {
     if (local.denied) throw new Error("WAREHOUSE_SOURCE_ELIGIBILITY_DENIED");
@@ -58,7 +71,7 @@ export async function findWarehouseSource(
   }
   if (scan.kind === "unit") {
     const [row] = await exec.all<{ job_id: string }>(
-      `SELECT job_id FROM product_label_accept_commands WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND code_hash=? ORDER BY accepted_at DESC LIMIT 1`,
+      `SELECT a.job_id FROM product_label_accept_commands a JOIN codes_mirror c ON c.code_hash=a.code_hash AND c.shift_id=a.shift_id AND c.scanned_at=a.accepted_at WHERE a.credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND a.code_hash=? ORDER BY a.accepted_at DESC LIMIT 1`,
       [owner, identity],
     );
     if (row) {
@@ -77,6 +90,21 @@ export async function findWarehouseSource(
       };
       return warehouseSourceSchema.parse({ ...value, revision: productLabelValueDigest(value) });
     }
+  }
+  if (scan.kind === "unit") {
+    const [current] = await exec.all<{ shift_id: string }>(
+      "SELECT shift_id FROM codes_mirror WHERE code_hash=?",
+      [identity],
+    );
+    const frozen = await frozenUnitSource(
+      exec,
+      owner,
+      identity,
+      current ? await localProductGroup(exec, current.shift_id) : null,
+    );
+    if (frozen) return frozen;
+    const fromBox = await frozenClosedBoxUnitSource(exec, owner, scan);
+    if (fromBox) return fromBox;
   }
   const [cached] = await exec.all<{ value_json: string }>(
     `SELECT value_json FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind=? AND identity=? AND cached_at>=? ORDER BY cached_at DESC,rowid DESC LIMIT 1`,
@@ -127,15 +155,18 @@ export async function resolveWarehouseSource(
     if (warehouseNetworkUnavailable(error)) return offline();
     throw error;
   }
+  const originalBoxUnit =
+    scan.kind === "unit" ? await frozenClosedBoxUnitSource(exec, owner, scan) : null;
   const originalLocal =
     scan.kind === "box"
       ? await readLocalClosedBox(exec, owner, scan)
       : (
           await exec.all(
-            `SELECT 1 FROM product_label_accept_commands WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND code_hash=? LIMIT 1`,
-            [owner, scan.codeHash],
+            `SELECT 1 FROM product_label_accept_commands WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND code_hash=?
+            UNION ALL SELECT 1 FROM unit_label_facts f JOIN codes_mirror c ON c.code_hash=f.code_hash AND c.shift_id=f.shift_id AND c.scanned_at=f.accepted_at WHERE f.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND f.code_hash=? LIMIT 1`,
+            [owner, scan.codeHash, owner, scan.codeHash],
           )
-        ).length > 0;
+        ).length > 0 || originalBoxUnit !== null;
   const result = warehouseLookupResultSchema.parse(response);
   if (result.status === "found") {
     if (
@@ -156,10 +187,14 @@ export async function resolveWarehouseSource(
       );
     // A local print snapshot retains its historical fields; the online read validates
     // current eligibility and supplies the current group, never recalculates its dates.
+    const serverUnavailable = result.source.unavailableFields;
     if (
       originalLocal &&
       local &&
-      local.unavailableFields.length === 0 &&
+      (scan.kind !== "unit" ||
+        serverUnavailable.includes("date") ||
+        serverUnavailable.includes("expiry")) &&
+      local.unavailableFields.every((field) => serverUnavailable.includes(field)) &&
       local.sourceShiftId === result.source.sourceShiftId
     ) {
       const source = withSourceGroup(local, result.source.chzProductGroupCode);
@@ -308,4 +343,80 @@ async function readLocalClosedBox(exec: SqlExecutor, owner: string, scan: Wareho
     if (group !== null) source = withSourceGroup(source, group);
   }
   return { source, denied: row.eligibility_denied !== 0 };
+}
+
+/** A box's immutable label proves batch dates only for an unchanged declared production day. */
+async function frozenClosedBoxUnitSource(
+  exec: SqlExecutor,
+  owner: string,
+  scan: WarehouseReprintScan,
+): Promise<WarehouseReprintSource | null> {
+  if (scan.kind !== "unit") return null;
+  const rows = await exec.all<{
+    shift_id: string;
+    gtin14: string;
+    production_date: string | null;
+    sscc: string;
+    box_id: string;
+    raw: string;
+  }>(
+    `SELECT c.shift_id,c.gtin14,s.production_date,b.sscc,b.box_id,e.raw FROM codes_mirror c
+ JOIN shift_mirror s ON s.id=c.shift_id JOIN boxes_mirror b ON b.box_id=c.box_id AND b.shift_id=c.shift_id
+ JOIN scan_events_mirror e ON e.shift_id=c.shift_id AND e.scanned_at=c.scanned_at AND e.verdict='ok'
+ WHERE c.code_hash=? AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL AND s.production_date IS NOT NULL
+ ORDER BY e.id DESC`,
+    [scan.codeHash],
+  );
+  const matching = rows.filter((row) => {
+    const candidate = resolveWarehouseReprintScan(row.raw);
+    return candidate.kind === "unit" && candidate.codeHash === scan.codeHash;
+  });
+  const [row] = matching;
+  if (!row || row.production_date === null || new Set(matching.map((row) => row.raw)).size !== 1)
+    return null;
+  const box = await readLocalClosedBox(exec, owner, { kind: "box", sscc: row.sscc, repair: null });
+  if (
+    !box ||
+    box.denied ||
+    box.source.sourceId !== row.box_id ||
+    box.source.sourceShiftId !== row.shift_id ||
+    box.source.fields["product.gtin"] !== row.gtin14 ||
+    box.source.fields.date !== formatLabelDate(row.production_date) ||
+    box.source.unavailableFields.some((field) => field === "date" || field === "expiry")
+  )
+    return null;
+  let raw: string;
+  try {
+    raw = parseDuplicateKm(row.raw).raw;
+  } catch (error) {
+    if (error instanceof DomainError) return null;
+    throw error;
+  }
+  if (
+    resolveWarehouseReprintScan(raw).kind !== "unit" ||
+    parseDuplicateKm(raw).gtin14 !== row.gtin14
+  )
+    return null;
+  // Several units can share a timestamp: validate the actual code hash, not an arbitrary journal row.
+  const identity = resolveWarehouseReprintScan(raw);
+  if (identity.kind !== "unit" || identity.codeHash !== scan.codeHash) return null;
+  const value = {
+    kind: "unit" as const,
+    sourceId: scan.codeHash,
+    identity: scan.codeHash,
+    productName: box.source.productName,
+    chzProductGroupCode: box.source.chzProductGroupCode,
+    fields: {
+      ...box.source.fields,
+      qty: "1",
+      "qty.boxes": "",
+      sscc: "",
+      "km.code": raw,
+      operator: "",
+    },
+    unavailableFields: ["operator" as const],
+    payloadDigest: productLabelBytesDigest(new TextEncoder().encode(raw)),
+    sourceShiftId: row.shift_id,
+  };
+  return warehouseSourceSchema.parse({ ...value, revision: productLabelValueDigest(value) });
 }

@@ -1303,6 +1303,20 @@
       "when": 1791679125765,
       "tag": "0185_standard_label_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1791750811277,
+      "tag": "0186_noisy_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1791756221331,
+      "tag": "0187_brave_lord_tyger",
+      "breakpoints": true
     }
   ]
 }

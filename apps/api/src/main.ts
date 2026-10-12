@@ -1,3 +1,4 @@
+import { palletSourcesBodyParser } from "./modules/station-warehouse-reprint/pallet-body-parser";
 import "reflect-metadata";
 import { grantEvidenceBodyParser } from "./modules/device-grants/evidence-body-parser";
 import express, { type Express } from "express";
@@ -83,6 +84,7 @@ async function bootstrap() {
   // request out of this parser.
   server.use(grantEvidenceBodyParser);
   server.use(stationScansBodyParser);
+  server.use(palletSourcesBodyParser);
   server.use(nationalCatalogBodyParser);
   server.use(excludeExchangeRoute(express.json()));
 

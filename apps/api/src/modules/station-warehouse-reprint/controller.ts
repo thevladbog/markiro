@@ -1,3 +1,19 @@
+import { WarehousePalletService } from "./pallet.service";
+import {
+  PALLET_REPRINT_PROTOCOL,
+  palletLookupRequestSchema,
+  palletLookupResultSchema,
+  palletSourcesBatchSchema,
+  palletSourcesReceiptSchema,
+  palletEventsBatchSchema,
+  palletEventsReceiptSchema,
+} from "@markiro/domain";
+import { WarehouseLabelFactsService } from "./label-facts.service";
+import {
+  LABEL_FACTS_PROTOCOL,
+  labelFactsBatchSchema,
+  labelFactsReceiptSchema,
+} from "@markiro/domain";
 import {
   Body,
   Controller,
@@ -65,7 +81,73 @@ export class StationWarehouseReprintController {
     private readonly lookupService: WarehouseLookupService,
     private readonly templatesService: WarehouseTemplatesService,
     private readonly events: WarehouseEventsService,
+    private readonly labelFacts: WarehouseLabelFactsService,
+    private readonly pallets: WarehousePalletService,
   ) {}
+  @Get("source-capabilities")
+  @ApiOperation({ summary: "Read supported durable label source protocols" })
+  @ApiZodResponse({ status: 200, schema: z.strictObject({ protocols: z.array(z.string()) }) })
+  @ApiHttpErrors(401, 403)
+  sourceCapabilities() {
+    return { protocols: [LABEL_FACTS_PROTOCOL, PALLET_REPRINT_PROTOCOL] };
+  }
+  @Post("pallet-sources")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletSourcesBatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletSourcesReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletSources(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletSourcesBatchSchema))
+    input: z.infer<typeof palletSourcesBatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.pallets.receive(tenantId, deviceId, input.entries);
+  }
+  @Post("pallet-lookup")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletLookupRequestSchema)
+  @ApiZodResponse({ status: 200, schema: palletLookupResultSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletLookup(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletLookupRequestSchema))
+    input: z.infer<typeof palletLookupRequestSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.pallets.lookup(tenantId, deviceId, input.operatorId, input.raw);
+  }
+  @Post("pallet-events")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletEventsBatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletEventsReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletEvents(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletEventsBatchSchema))
+    input: z.infer<typeof palletEventsBatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.pallets.events(tenantId, deviceId, input.entries);
+  }
+  @Post("label-facts")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiOperation({ summary: "Receive immutable facts of accepted production labels" })
+  @ApiZodBody(labelFactsBatchSchema)
+  @ApiZodResponse({ status: 200, schema: labelFactsReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  receiveFacts(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(labelFactsBatchSchema))
+    input: z.infer<typeof labelFactsBatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.labelFacts.receive(tenantId, deviceId, input.operatorId, input.entries);
+  }
   @Post("lookup")
   @AllowSubscriptionRecovery("station")
   @HttpCode(200)

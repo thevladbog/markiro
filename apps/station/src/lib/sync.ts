@@ -1,3 +1,5 @@
+import { purgeWarehousePalletJobs, syncWarehousePallets } from "./warehouse-reprint/pallet-sync.js";
+import { syncUnitLabelFacts } from "./warehouse-reprint/label-facts.js";
 import { purgeWarehouseJobs } from "./warehouse-reprint/retention.js";
 import { syncWarehouseEvents } from "./warehouse-reprint/sync.js";
 import {
@@ -1312,8 +1314,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const palletPending = palletPendingRows[0]?.n ?? 0;
     const [warehousePending] = owner
       ? await deps.exec.all<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'`,
-          [owner],
+          `SELECT SUM(n) AS n FROM (
+            SELECT COUNT(*) n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending')`,
+          [owner, owner, owner, owner],
         )
       : [];
     const pending =
@@ -1677,10 +1683,31 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               },
             };
             try {
+              await purgeWarehousePalletJobs(
+                warehouseExec,
+                owner,
+                new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              );
               await purgeWarehouseJobs(
                 warehouseExec,
                 owner,
                 new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              );
+              while (
+                await syncWarehousePallets(
+                  warehouseExec,
+                  deps.client,
+                  owner,
+                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                )
+              ) {
+                /* Drain acknowledged immutable prefixes. */
+              }
+              await syncUnitLabelFacts(
+                warehouseExec,
+                deps.client,
+                owner,
+                () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
               );
               while (
                 await syncWarehouseEvents(

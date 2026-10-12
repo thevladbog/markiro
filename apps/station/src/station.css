@@ -6295,3 +6295,65 @@ body,
   height: auto;
   object-fit: contain;
 }
+
+.warehouse-reprint-mode-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  gap: 12px;
+}
+.warehouse-reprint-modes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.warehouse-pallet-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+.warehouse-pallet-search,
+.warehouse-pallet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.warehouse-pallet-search > :first-child {
+  flex: 1;
+}
+.warehouse-pallet-content {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 1fr);
+  gap: 24px;
+}
+.warehouse-pallet-preview {
+  display: flex;
+  justify-content: center;
+  align-items: start;
+  min-width: 0;
+}
+.warehouse-pallet-preview canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 45vh;
+  object-fit: contain;
+}
+.warehouse-pallet-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+}
+.warehouse-pallet-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .warehouse-pallet-content {
+    grid-template-columns: 1fr;
+  }
+}
