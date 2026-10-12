@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
 import {
+  buildPalletLabelTemplates,
+  buildPalletSheetPresets,
+  createPalletSheetSnapshot,
+  PALLET_REPRINT_V2_PROTOCOL,
+  type PalletTemplateChoice,
   buildWarehouseCodeOnlyLabelTemplate,
   productLabelValueDigest,
   warehouseBoxTemplate,
@@ -30,6 +35,32 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
     };
     void digest;
     const unit = { ...value, digest: productLabelValueDigest(value) };
+    const preset = buildPalletLabelTemplates()[0];
+    if (!preset) throw new Error("Missing pallet preset");
+    let pallet: PalletTemplateChoice = {
+      kind: "thermal",
+      id: "00000000-0000-4000-8000-000000000041",
+      name: "Палета 75×120",
+      snapshot: preset.spec,
+      snapshotDigest: productLabelValueDigest(preset.spec),
+    };
+    if (variant === "ready-a4") {
+      const preset = buildPalletSheetPresets()[0];
+      if (!preset) throw new Error("Missing A4 preset");
+      const snapshot = createPalletSheetSnapshot({
+        id: "00000000-0000-4000-8000-000000000041",
+        name: preset.name,
+        revision: 1,
+        spec: preset.spec,
+      });
+      pallet = {
+        kind: "a4",
+        id: "00000000-0000-4000-8000-000000000041",
+        name: preset.name,
+        snapshot,
+        snapshotDigest: productLabelValueDigest(snapshot),
+      };
+    }
     const event = warehousePreparedEvent();
     const state: WarehouseWorkState = {
       initialized: true,
@@ -51,6 +82,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
           }),
         ],
       },
+      palletCatalog: { protocol: PALLET_REPRINT_V2_PROTOCOL, templates: [pallet] },
       session: {
         owner: "synthetic",
         sessionId: event.sessionId,
@@ -59,6 +91,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
         status: variant === "setup" ? "paused" : "active",
         unitTemplate: unit,
         boxTemplate: box,
+        palletTemplate: pallet,
         sentCount: variant === "legacy-sent" ? 1 : 0,
       },
       job:
@@ -89,10 +122,18 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
   const work = {
     scan: async () => {},
     newSession: async () => {},
-    configure: (reason, unitTemplate, boxTemplate) => {
+    configure: (reason, unitTemplate, boxTemplate, palletTemplate) => {
       setState((s) => ({
         ...s,
-        session: s.session ? { ...s.session, reason, unitTemplate, boxTemplate } : null,
+        session: s.session
+          ? {
+              ...s.session,
+              reason,
+              unitTemplate,
+              boxTemplate,
+              palletTemplate: palletTemplate ?? null,
+            }
+          : null,
       }));
       return Promise.resolve();
     },
@@ -107,6 +148,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
     cancelVerification: () => setState((s) => ({ ...s, verification: false })),
     reprint: async () => {},
     sendPrepared: async () => {},
+    resolveOriginal: async () => {},
     acknowledgeHistory: () => {
       setState((s) => ({ ...s, historyIssue: null }));
       return Promise.resolve();
@@ -127,6 +169,24 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
         printerLanguage: "tspl",
         printerDpi: 203,
         verifyPrintedLabel: false,
+        ...(variant === "ready-a4"
+          ? {
+              printerRouting: {
+                printers: [
+                  {
+                    id: "pallet",
+                    name: "A4 Windows",
+                    target: { kind: "usb" as const, printer: "A4" },
+                    mode: "windows_driver" as const,
+                    paper: "a4" as const,
+                    dpi: 300 as const,
+                    language: "zpl" as const,
+                  },
+                ],
+                assignments: { box: null, duplicate: null, pallet: "pallet" },
+              },
+            }
+          : {}),
       }}
       print={async () => {}}
       onExit={() => {}}

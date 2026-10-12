@@ -1,3 +1,4 @@
+import { UNIFIED_REPRINT_MIGRATIONS } from "./unified-reprint-migrations.js";
 /**
  * Ordered SQLite DDL applied by the station at startup (Task 9) via
  * tauri-plugin-sql. This array is the source of truth for the on-device
@@ -5089,6 +5090,7 @@ export const STATION_MIGRATIONS: string[] = [
   ...PALLET_REPRINT_MIGRATIONS,
   ...PRINTING_FOLLOW_UP_MIGRATIONS,
   ...PALLET_REPRINT_V2_MIGRATIONS,
+  ...UNIFIED_REPRINT_MIGRATIONS,
 ];
 
 export interface StationMigrationEntry {

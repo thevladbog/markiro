@@ -3,7 +3,6 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
-  palletLabelSourceSchema,
   palletProductionDeliverySchema,
   palletProductionResolutionSchema,
   productLabelValueDigest,
@@ -11,7 +10,7 @@ import {
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { assertWarehouseDevice, assertWarehouseOperator } from "./access";
-import { palletMembership, samePalletComposition } from "./pallet.service";
+import { storedPalletData, palletMembership, samePalletComposition } from "./pallet.service";
 @Injectable()
 export class WarehousePalletResolutionsService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -97,16 +96,17 @@ export class WarehousePalletResolutionsService {
               eq(schema.palletProductionResolutions.attemptId, value.attemptId),
             ),
           );
+        const data = storedPalletData(source.value, source.revision);
         if (
+          !data ||
           previous ||
           latest.sequence > value.productionSequence ||
           !membership ||
           membership.pallet.disassembledAt ||
           membership.pallet.kind !== "production" ||
           membership.pallet.terminalId !== deviceId ||
-          membership.pallet.closedAt?.toISOString() !==
-            palletLabelSourceSchema.parse(source.value).closedAt ||
-          !samePalletComposition(membership, palletLabelSourceSchema.parse(source.value))
+          membership.pallet.closedAt?.toISOString() !== data.closedAt ||
+          !samePalletComposition(membership, data)
         ) {
           results.push({ eventId: value.eventId, status: "conflict" });
           continue;

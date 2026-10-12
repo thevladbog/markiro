@@ -82,3 +82,48 @@ it("does not apply a box template restored into the unit selection", () => {
     screen.getByRole<HTMLButtonElement>("button", { name: "Применить шаблоны" }).disabled,
   ).toBe(true);
 });
+
+it("adds the third choice before the session and filters pallet paper by the configured printer", async () => {
+  const { thermalChoice, sheetChoice } =
+    await import("../../../packages/domain/test/support/pallet-reprint.js");
+  const { PALLET_REPRINT_V2_PROTOCOL } = await import("@markiro/domain");
+  const box = warehouseBoxTemplate(),
+    { digest: discarded, ...body } = box;
+  void discarded;
+  const unitBody = {
+    ...body,
+    id: "00000000-0000-4000-8000-000000000040",
+    purpose: "product_duplicate" as const,
+    spec: buildWarehouseCodeOnlyLabelTemplate().spec,
+  };
+  const unit = { ...unitBody, digest: productLabelValueDigest(unitBody) };
+  const thermal = thermalChoice(),
+    sheet = sheetChoice();
+  const catalog: WarehouseTemplateCatalog = {
+    protocol: WAREHOUSE_REPRINT_PROTOCOL,
+    revision: productLabelValueDigest([unit, box]),
+    templates: [unit, box],
+  };
+  const apply = vi.fn();
+  render(
+    <TemplatePicker
+      catalog={catalog}
+      unitTemplate={unit}
+      boxTemplate={box}
+      palletTemplate={null}
+      palletCatalog={{ protocol: PALLET_REPRINT_V2_PROTOCOL, templates: [thermal, sheet] }}
+      palletPaper="thermal"
+      onApply={apply}
+      onCancel={vi.fn()}
+      unitDpi={203}
+      boxDpi={203}
+      unitLanguage="tspl"
+      boxLanguage="tspl"
+    />,
+  );
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Палеты · SSCC" })));
+  expect(screen.queryByRole("radio", { name: new RegExp(sheet.name) })).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: new RegExp(thermal.name) }));
+  fireEvent.click(screen.getByRole("button", { name: "Применить шаблоны" }));
+  expect(apply).toHaveBeenCalledWith(unit, box, thermal);
+});

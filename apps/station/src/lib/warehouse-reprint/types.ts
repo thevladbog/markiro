@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  palletTemplateChoiceSchema,
   warehouseSourceSchema,
   warehouseTemplateSchema,
   warehouseReasonSchema,
@@ -17,6 +18,7 @@ export const warehouseSessionSchema = z.strictObject({
   status: z.enum(["active", "paused"]),
   unitTemplate: warehouseTemplateSchema.nullable(),
   boxTemplate: warehouseTemplateSchema.nullable(),
+  palletTemplate: palletTemplateChoiceSchema.nullable().optional(),
   // Persist invalidated/cleared choices separately from an initially empty session.
   unitTemplateNeedsSelection: z.boolean().optional(),
   boxTemplateNeedsSelection: z.boolean().optional(),

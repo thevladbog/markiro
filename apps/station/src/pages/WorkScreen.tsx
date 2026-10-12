@@ -748,6 +748,7 @@ export function WorkScreen({
                 ownerDigest,
                 result.sscc,
                 "a4",
+                true,
               ).catch(() => null);
               const template =
                 retained?.rendering.kind === "a4"
@@ -810,6 +811,7 @@ export function WorkScreen({
                   bytesDigest: productLabelBytesDigest(prepared.bytes),
                   geometryFingerprint: geometry.fingerprint,
                 },
+                true,
               ).catch(() => {
                 console.warn("station: pallet reprint source unavailable");
               });

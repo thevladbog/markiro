@@ -1,5 +1,6 @@
 import {
   syncWarehousePalletV2,
+  syncWarehousePalletV3,
   syncPalletProductionResolutions,
 } from "./warehouse-reprint/pallet-v2-sync.js";
 import { retainRecoveryDeniedShifts } from "./sync-recovery-denials.js";
@@ -1694,6 +1695,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await runWarehouseHistoryChannels([
               async () => {
                 await syncWarehousePalletV2(
+                  warehouseExec,
+                  deps.client,
+                  owner,
+                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                );
+              },
+              async () => {
+                await syncWarehousePalletV3(
                   warehouseExec,
                   deps.client,
                   owner,

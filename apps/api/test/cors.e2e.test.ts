@@ -261,6 +261,11 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["POST", "/station/warehouse-reprint/pallet-events"],
         ["GET", "/station/warehouse-reprint/pallet-templates-v2"],
         ["POST", "/station/warehouse-reprint/pallet-lookup-v2"],
+        ["POST", "/station/warehouse-reprint/lookup-v3"],
+        ["POST", "/station/warehouse-reprint/pallet-data-v3"],
+        ["POST", "/station/warehouse-reprint/pallet-renderings-v3"],
+        ["POST", "/station/warehouse-reprint/pallet-events-v3"],
+
         ["POST", "/station/warehouse-reprint/pallet-renderings-v2"],
         ["POST", "/station/warehouse-reprint/pallet-events-v2"],
         ["POST", "/station/warehouse-reprint/pallet-production-resolutions"],

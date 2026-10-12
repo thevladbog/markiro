@@ -1,3 +1,4 @@
+import { WarehouseUnifiedService } from "./unified.service";
 import { WarehousePalletRenderingsService } from "./pallet-renderings.service";
 import { WarehousePalletResolutionsService } from "./pallet-resolutions.service";
 import { WarehousePalletService } from "./pallet.service";
@@ -11,6 +12,7 @@ import { WarehouseTemplatesService } from "./templates.service";
 @Module({
   controllers: [StationWarehouseReprintController],
   providers: [
+    WarehouseUnifiedService,
     WarehouseLookupService,
     WarehouseTemplatesService,
     WarehouseEventsService,

@@ -16,11 +16,11 @@ function migrate(db: DatabaseSync, statements: readonly string[] = STATION_MIGRA
 it("adds nullable rendering columns while keeping legacy jobs intact on repeated migration", () => {
   const db = new DatabaseSync(":memory:");
   try {
-    const v2 = new Set<string>(PALLET_REPRINT_V2_MIGRATIONS);
-    migrate(
-      db,
-      STATION_MIGRATIONS.filter((statement) => !v2.has(statement)),
-    );
+    const firstV2 = PALLET_REPRINT_V2_MIGRATIONS[0];
+    if (!firstV2) throw new Error("Missing V2 migration boundary");
+    const boundary = STATION_MIGRATIONS.indexOf(firstV2);
+    expect(boundary).toBeGreaterThan(0);
+    migrate(db, STATION_MIGRATIONS.slice(0, boundary));
     expect(
       db
         .prepare("PRAGMA table_info(warehouse_pallet_jobs)")

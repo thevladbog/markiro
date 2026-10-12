@@ -1088,7 +1088,7 @@
     "unit": "Unit code",
     "legacyRepair": "An old label with !1 was recognised. The new label contains the corrected code.",
     "status": {
-      "ready": "Scan a unit or box code",
+      "ready": "Scan a product, box or pallet code",
       "prepared": "Label ready to send",
       "sending": "Sending label to printer",
       "sent": "Label sent to printer",
@@ -1096,7 +1096,8 @@
       "delivery_unknown": "Label delivery is unknown",
       "failed_before_send": "Label was not sent",
       "duplicate": "This code was already printed in this session",
-      "verify": "Scan the new label"
+      "verify": "Scan the new label",
+      "skipped": "Attempt closed without print confirmation"
     },
     "hint": {
       "ready": "We will find the code and send one label to its assigned printer.",
@@ -1107,7 +1108,8 @@
       "delivery_unknown": "Check the printer. If the label printed, scan it. Another attempt requires confirmation.",
       "failed_before_send": "Check the printer assignment, language and resolution.",
       "duplicate": "Choose a reason and confirm another attempt to print an extra label.",
-      "verify": "An old !1 label cannot verify the corrected output."
+      "verify": "An old !1 label cannot verify the corrected output.",
+      "skipped": "The next scan creates a new job."
     },
     "errors": {
       "WAREHOUSE_OPERATION_FAILED": "The operation failed. The saved job remains on this station.",
@@ -1140,7 +1142,7 @@
       "WAREHOUSE_PALLET_NOT_PRODUCTION": "Only Station production pallets are supported",
       "WAREHOUSE_PALLET_COMPOSITION_CHANGED": "Pallet composition changed or conflicts",
       "WAREHOUSE_PALLET_SNAPSHOT_MISSING": "Original pallet label was not retained",
-      "WAREHOUSE_PALLET_DELIVERY_UNRESOLVED": "Resolve the original pallet print attempt first",
+      "WAREHOUSE_PALLET_DELIVERY_UNRESOLVED": "The original pallet label may have printed. On its originating station, scan it to confirm or record a skip, then scan the pallet again.",
       "WAREHOUSE_PALLET_AMBIGUOUS": "Code identifies multiple pallets",
       "WAREHOUSE_PALLET_NETWORK_REQUIRED": "This pallet requires a server connection",
       "WAREHOUSE_PALLET_SOURCE_CHANGED": "Pallet source changed. Look it up again",
@@ -1168,7 +1170,7 @@
     "applyReason": "Apply reason",
     "manualTitle": "Enter code manually",
     "manualLabel": "Box number or full unit code",
-    "manualIntro": "If the barcode cannot be scanned, enter the visible box number.",
+    "manualIntro": "If the barcode is unreadable, enter the box or pallet number.",
     "manualHint": "For a box, enter all 18 SSCC digits without spaces. A unit requires its full marking code.",
     "manualSubmit": "Find and reprint",
     "manualInvalid": "Check the code: a box number must be a valid SSCC. A unit requires its full marking code.",
@@ -1246,6 +1248,8 @@
       },
       "refreshTemplates": "Refresh catalog",
       "sheetCount": "A4 · 1 sheet · Pallet labels: {{copies}}"
-    }
+    },
+    "palletTab": "Pallets · SSCC",
+    "palletSelected": "Pallets: {{name}}"
   }
 }

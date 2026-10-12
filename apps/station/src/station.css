@@ -6410,3 +6410,25 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+/* One page scroll on small kiosks; the session summary and result do not nest scroll areas. */
+.warehouse-reprint .warehouse-session-panel,
+.warehouse-reprint .warehouse-status {
+  overflow: visible;
+}
+.warehouse-reprint .warehouse-work-grid {
+  min-height: min-content;
+}
+.warehouse-reprint .warehouse-session-panel > p {
+  margin: var(--sp-2) 0;
+}
+.warehouse-sheet-choice-preview canvas {
+  width: auto;
+  height: auto;
+  max-height: calc(var(--label-preview-max-height) - 2rem);
+  max-width: 100%;
+  object-fit: contain;
+}
+.warehouse-template-grid > div:last-child {
+  overflow: hidden;
+}

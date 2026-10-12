@@ -1,5 +1,4 @@
-import { useWarehousePalletReprint } from "../lib/use-warehouse-pallet-reprint.js";
-import { PalletConfirmation } from "../ui/warehouse-reprint/PalletConfirmation.js";
+import { PalletDeliveryRecovery } from "../ui/warehouse-reprint/PalletDeliveryRecovery.js";
 import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -46,120 +45,9 @@ export function WarehouseReprint(props: WarehouseReprintProps) {
     [props],
   );
   const { state, work } = useWarehouseReprint(options, props.onFloorWorkRegister);
-  const pallet = useWarehousePalletReprint(options, props.onFloorWorkRegister);
-  const { t } = useTranslation();
-  const [mode, setMode] = useState<"codes" | "pallet">("codes");
-  const [modeBusy, setModeBusy] = useState(false);
-  const unresolved = (value: { state: string } | null | undefined) =>
-    Boolean(
-      value &&
-      ["prepared", "sending", "failed_before_send", "delivery_unknown"].includes(value.state),
-    );
-  const blocked =
-    state.busy ||
-    pallet.state.busy ||
-    modeBusy ||
-    (mode === "codes" ? unresolved(state.job) : unresolved(pallet.state.job));
-  const changeMode = async (next: "codes" | "pallet") => {
-    if (next === mode || blocked || props.credentialGeneration.sealed) return;
-    setModeBusy(true);
-    try {
-      if (next === "pallet") {
-        await work.close();
-        pallet.work.open();
-        await pallet.work.initialize();
-      } else {
-        await pallet.work.close();
-        work.open();
-        await work.initialize();
-      }
-      if (!props.credentialGeneration.sealed) setMode(next);
-    } finally {
-      setModeBusy(false);
-    }
-  };
-  useEffect(() => {
-    if (
-      mode !== "codes" ||
-      !state.initialized ||
-      !pallet.state.initialized ||
-      !unresolved(pallet.state.job) ||
-      state.busy ||
-      unresolved(state.job)
-    )
-      return;
-    let active = true;
-    void work.close().then(() => {
-      if (active && !props.credentialGeneration.sealed) {
-        pallet.work.open();
-        setMode("pallet");
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [
-    mode,
-    state.initialized,
-    state.busy,
-    state.job,
-    pallet.state.initialized,
-    pallet.state.job,
-    work,
-    pallet.work,
-    props.credentialGeneration,
-  ]);
-  const finishPallet = async () => {
-    if (unresolved(pallet.work.getSnapshot().job) || pallet.work.getSnapshot().busy) return;
-    setModeBusy(true);
-    try {
-      work.open();
-      if (!(await work.finish())) return;
-      if (await pallet.work.finish()) props.onExit();
-    } finally {
-      setModeBusy(false);
-    }
-  };
-  return (
-    <div className="warehouse-reprint-mode-panel">
-      <nav className="warehouse-reprint-modes" aria-label={t("warehouse.pallet.modeLabel")}>
-        <Button
-          size="floor"
-          variant={mode === "codes" ? "primary" : "secondary"}
-          aria-pressed={mode === "codes"}
-          disabled={blocked || !state.initialized}
-          onClick={() => void changeMode("codes")}
-        >
-          {t("warehouse.pallet.codesMode")}
-        </Button>
-        <Button
-          size="floor"
-          variant={mode === "pallet" ? "primary" : "secondary"}
-          aria-pressed={mode === "pallet"}
-          disabled={blocked || !state.initialized}
-          onClick={() => void changeMode("pallet")}
-        >
-          {t("warehouse.pallet.palletMode")}
-        </Button>
-      </nav>
-      {mode === "codes" ? (
-        <WarehouseReprintView
-          {...props}
-          state={{ ...state, busy: state.busy || modeBusy }}
-          work={work}
-        />
-      ) : (
-        <PalletConfirmation
-          {...props}
-          state={pallet.state}
-          work={pallet.work}
-          onFinish={finishPallet}
-          modeBusy={modeBusy}
-        />
-      )}
-    </div>
-  );
+  return <WarehouseReprintView {...props} state={state} work={work} />;
 }
+
 export function WarehouseReprintView(
   props: WarehouseReprintProps & {
     state: WarehouseWorkState;
@@ -177,10 +65,14 @@ export function WarehouseReprintView(
       | "reprint"
       | "sendPrepared"
       | "acknowledgeHistory"
+      | "resolveOriginal"
     >;
   },
 ) {
   const { t } = useTranslation();
+  const [originalResolution, setOriginalResolution] = useState<"confirmed" | "skipped" | null>(
+    null,
+  );
   const [picker, setPicker] = useState(false);
   const [manual, setManual] = useState(false);
   const [manualValue, setManualValue] = useState("");
@@ -207,6 +99,7 @@ export function WarehouseReprintView(
     ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(state.job.state);
   useEffect(() => {
     if (
+      originalResolution ||
       picker ||
       reasonDialog ||
       repeatDialog ||
@@ -222,6 +115,7 @@ export function WarehouseReprintView(
     });
   }, [
     props.source,
+    originalResolution,
     picker,
     reasonDialog,
     repeatDialog,
@@ -272,6 +166,26 @@ export function WarehouseReprintView(
           {t(`warehouse.errors.${state.error}`, {
             defaultValue: t("warehouse.errors.WAREHOUSE_OPERATION_FAILED"),
           })}
+          {state.palletDiagnostic?.originDeviceId === props.deviceId &&
+          !["sending", "prepared"].includes(state.palletDiagnostic.kind) ? (
+            <div className="warehouse-recovery-actions">
+              <Button
+                size="floor"
+                disabled={state.busy}
+                onClick={() => setOriginalResolution("confirmed")}
+              >
+                {t("warehouse.pallet.resolveConfirm")}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={state.busy}
+                onClick={() => setOriginalResolution("skipped")}
+              >
+                {t("warehouse.pallet.resolveSkip")}
+              </Button>
+            </div>
+          ) : null}
           {props.onSetup && state.error.includes("PRINTER") ? (
             <Button size="floor" onClick={() => props.onSetup?.()}>
               {t("warehouse.setupPrinter")}
@@ -304,11 +218,21 @@ export function WarehouseReprintView(
               </fieldset>
               <Button
                 size="floor"
-                disabled={!editable || !session?.unitTemplate || !session.boxTemplate}
+                disabled={
+                  !editable ||
+                  !session?.unitTemplate ||
+                  !session.boxTemplate ||
+                  !session.palletTemplate
+                }
                 onClick={() => {
                   if (session)
                     void work
-                      .configure(reason, session.unitTemplate, session.boxTemplate)
+                      .configure(
+                        reason,
+                        session.unitTemplate,
+                        session.boxTemplate,
+                        session.palletTemplate ?? null,
+                      )
                       .then(() => work.start());
                 }}
               >
@@ -326,8 +250,14 @@ export function WarehouseReprintView(
             <WindowsDeliveryStatus
               exec={props.exec}
               scope={state.job.printScope}
-              purpose={state.job.kind === "box" ? "box" : "duplicate"}
-              jobId={state.job.jobId}
+              purpose={
+                state.job.kind === "pallet"
+                  ? "pallet"
+                  : state.job.kind === "box"
+                    ? "box"
+                    : "duplicate"
+              }
+              jobId={state.job.kind === "pallet" ? state.job.identity : state.job.jobId}
               revision={state.job.updatedAt}
             />
           ) : null}
@@ -404,6 +334,7 @@ export function WarehouseReprintView(
           <p>{t("warehouse.sentCount")}</p>
           <p>{t("warehouse.unitSelected", { name: session?.unitTemplate?.name ?? "—" })}</p>
           <p>{t("warehouse.boxSelected", { name: session?.boxTemplate?.name ?? "—" })}</p>
+          <p>{t("warehouse.palletSelected", { name: session?.palletTemplate?.name ?? "—" })}</p>
           <Button
             size="floor"
             variant="secondary"
@@ -436,6 +367,21 @@ export function WarehouseReprintView(
           {t("warehouse.finishSession")}
         </Button>
       </footer>
+      {originalResolution && state.palletDiagnostic ? (
+        <PalletDeliveryRecovery
+          diagnostic={state.palletDiagnostic}
+          outcome={originalResolution}
+          source={props.source}
+          busy={state.busy}
+          error={state.error}
+          onClose={() => setOriginalResolution(null)}
+          onResolve={(raw, value) => {
+            void work
+              .resolveOriginal(originalResolution, raw, value)
+              .then(() => setOriginalResolution(null));
+          }}
+        />
+      ) : null}
       {finishDialog ? (
         <FullScreenDialog
           open
@@ -569,7 +515,12 @@ export function WarehouseReprintView(
               onClick={() => {
                 if (session)
                   void work
-                    .configure(reason, session.unitTemplate, session.boxTemplate)
+                    .configure(
+                      reason,
+                      session.unitTemplate,
+                      session.boxTemplate,
+                      session.palletTemplate ?? null,
+                    )
                     .then(() => {
                       setReasonDialog(false);
                       setReason(null);
@@ -610,11 +561,16 @@ export function WarehouseReprintView(
           boxLanguage={resolvePrinter(props.hardwareConfig, "box")?.language ?? null}
           unitDpi={resolvePrinter(props.hardwareConfig, "duplicate")?.dpi ?? null}
           boxDpi={resolvePrinter(props.hardwareConfig, "box")?.dpi ?? null}
+          palletCatalog={state.palletCatalog ?? null}
+          palletTemplate={session?.palletTemplate ?? null}
+          palletPaper={
+            resolvePrinter(props.hardwareConfig, "pallet")?.paper === "a4" ? "a4" : "thermal"
+          }
           unitTemplate={session?.unitTemplate ?? null}
           boxTemplate={session?.boxTemplate ?? null}
           onCancel={() => setPicker(false)}
-          onApply={(unit, box) => {
-            void work.configure(reason, unit, box).then(() => setPicker(false));
+          onApply={(unit, box, pallet) => {
+            void work.configure(reason, unit, box, pallet ?? null).then(() => setPicker(false));
           }}
         />
       ) : null}

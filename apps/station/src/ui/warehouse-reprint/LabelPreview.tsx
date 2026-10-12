@@ -1,9 +1,11 @@
 import { loadThermalLabelLogo } from "../../lib/organization-branding.js";
 import type { SqlExecutor } from "../../lib/mirror.js";
 import type { CredentialGeneration } from "../../lib/credential-recovery.js";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   createLabelRenderPlan,
+  productLabelValueDigest,
+  sheetLogoFingerprint,
   sampleLabelData,
   type LabelRenderPlan,
   type PrinterDpi,
@@ -12,6 +14,7 @@ import {
 import { TextPreview } from "./TextPreview.js";
 import { rasterizeText } from "../../lib/rasterizer.js";
 import { useTranslation } from "react-i18next";
+const ownerCaches = new WeakMap<CredentialGeneration, Map<string, Promise<LabelRenderPlan>>>();
 type PreviewTemplate = { name: string; spec: LabelTemplateSpec };
 export function LabelPreview({
   template,
@@ -27,8 +30,10 @@ export function LabelPreview({
   const { t } = useTranslation();
   const logoExec = logoOwner?.exec;
   const logoGeneration = logoOwner?.generation;
+  const localCache = useRef(new Map<string, Promise<LabelRenderPlan>>());
+  const renderKey = productLabelValueDigest([template.spec, dpi, language]);
   const [loaded, setLoaded] = useState<{
-    template: PreviewTemplate;
+    key: string;
     dpi: PrinterDpi;
     language: LabelTemplateSpec["language"];
     plan: LabelRenderPlan | null;
@@ -43,25 +48,46 @@ export function LabelPreview({
         hasLogo && logoExec && logoGeneration
           ? { logo: await loadThermalLabelLogo(logoExec, logoGeneration) }
           : {};
-      return createLabelRenderPlan(
-        template.spec,
-        { ...sampleLabelData(), "km.code": `${sampleLabelData()["km.code"]}\u001d93DEMO` },
-        { dpi, language, rasterizeText, ...branding },
-      );
+      const key = JSON.stringify([
+        renderKey,
+        "logo" in branding && branding.logo ? sheetLogoFingerprint(branding.logo) : null,
+      ]);
+      const cache = logoGeneration
+        ? (ownerCaches.get(logoGeneration) ?? new Map<string, Promise<LabelRenderPlan>>())
+        : localCache.current;
+      if (logoGeneration) ownerCaches.set(logoGeneration, cache);
+      let pending = cache.get(key);
+      if (!pending) {
+        pending = createLabelRenderPlan(
+          template.spec,
+          { ...sampleLabelData(), "km.code": `${sampleLabelData()["km.code"]}\u001d93DEMO` },
+          { dpi, language, rasterizeText, ...branding },
+        );
+        if (cache.size >= 6) {
+          const oldest = cache.keys().next().value;
+          if (oldest) cache.delete(oldest);
+        }
+        cache.set(key, pending);
+        pending.catch(() => {
+          if (cache.get(key) === pending) cache.delete(key);
+        });
+      }
+      return pending;
     };
     void run()
       .then((plan) => {
-        if (active) setLoaded({ template, dpi, language, plan, logoExec, logoGeneration });
+        if (active) setLoaded({ key: renderKey, dpi, language, plan, logoExec, logoGeneration });
       })
       .catch(() => {
-        if (active) setLoaded({ template, dpi, language, plan: null, logoExec, logoGeneration });
+        if (active)
+          setLoaded({ key: renderKey, dpi, language, plan: null, logoExec, logoGeneration });
       });
     return () => {
       active = false;
     };
-  }, [template, dpi, language, logoExec, logoGeneration]);
+  }, [template, renderKey, dpi, language, logoExec, logoGeneration]);
   const current =
-    loaded?.template === template &&
+    loaded?.key === renderKey &&
     loaded.dpi === dpi &&
     loaded.language === language &&
     loaded.logoExec === logoExec &&

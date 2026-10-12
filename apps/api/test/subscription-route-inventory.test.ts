@@ -576,6 +576,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/warehouse-reprint/pallet-events (StationWarehouseReprintController.palletEvents)",
       "GET /station/warehouse-reprint/pallet-templates-v2 (StationWarehouseReprintController.palletTemplatesV2)",
       "POST /station/warehouse-reprint/pallet-lookup-v2 (StationWarehouseReprintController.palletLookupV2)",
+      "POST /station/warehouse-reprint/lookup-v3 (StationWarehouseReprintController.unifiedLookup)",
+      "POST /station/warehouse-reprint/pallet-data-v3 (StationWarehouseReprintController.palletDataV3)",
+      "POST /station/warehouse-reprint/pallet-renderings-v3 (StationWarehouseReprintController.palletRenderingsV3)",
+      "POST /station/warehouse-reprint/pallet-events-v3 (StationWarehouseReprintController.palletEventsV3)",
+
       "POST /station/warehouse-reprint/pallet-renderings-v2 (StationWarehouseReprintController.palletRenderingsV2)",
       "POST /station/warehouse-reprint/pallet-events-v2 (StationWarehouseReprintController.palletEventsV2)",
       "POST /station/warehouse-reprint/pallet-production-resolutions (StationWarehouseReprintController.palletProductionResolutions)",

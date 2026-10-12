@@ -139,8 +139,8 @@ it.each([false, true])(
                 "SELECT value_json FROM warehouse_pallet_sources",
               )
             )[0]?.value_json ?? "null",
-          ).rendering.kind,
-        ).toBe("thermal");
+          ),
+        ).toMatchObject({ version: 3, sscc });
     } finally {
       db.close();
     }

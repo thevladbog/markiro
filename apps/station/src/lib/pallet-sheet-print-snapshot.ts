@@ -49,6 +49,7 @@ const factsSchema = z.strictObject({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable(),
   shelfLifeDays: z.number().int().positive().nullable(),
+  expiryDate: z.iso.date().nullable().optional(),
   boxCount: z.number().int().nonnegative(),
   itemCount: z.number().int().nonnegative(),
   shiftNumber: z.string().max(255).nullable(),
@@ -144,8 +145,10 @@ export async function rebuildPalletSheet(
 ): Promise<Uint8Array> {
   const saved = parsePalletSheetPrintSnapshot(JSON.stringify(snapshot));
   const branding = parseOrganizationBranding(saved.brandingJson);
+  const { expiryDate, ...facts } = saved.facts;
   const context: PalletSheetContext = {
-    ...saved.facts,
+    ...facts,
+    ...(expiryDate === undefined ? {} : { expiryDate }),
     organizationName: branding.organizationName,
     ...(branding.organizationInn !== undefined
       ? { organizationInn: branding.organizationInn }

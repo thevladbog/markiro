@@ -3,11 +3,11 @@ for (const viewport of [
   { width: 1280, height: 800 },
   { width: 1024, height: 768 },
 ])
-  test(`warehouse picker and ready at ${viewport.width}`, async ({ page }) => {
+  test(`warehouse picker and ready at ${viewport.width}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.goto("/?gallery=1&state=warehouse-reprint-ready&locale=ru");
     await expect(page.getByRole("heading", { name: "Повторная печать этикеток" })).toBeVisible();
-    await expect(page.getByText("Отсканируйте код единицы или короба")).toBeVisible();
+    await expect(page.getByText("Отсканируйте код продукции, короба или палеты")).toBeVisible();
     const manual = page.locator("header").getByRole("button", { name: "Ввести код вручную" });
     await expect(manual).toBeVisible();
     await expect(manual).toBeEnabled();
@@ -17,7 +17,11 @@ for (const viewport of [
     await expect(page.getByRole("img", { name: /Предпросмотр/ })).toBeVisible();
     await expect(page.locator("[data-raster-element]").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Применить шаблоны" })).toBeInViewport();
-    await page.screenshot({ path: `/tmp/warehouse-preview-${viewport.width}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`warehouse-preview-${viewport.width}.png`) });
+    await page.getByRole("button", { name: "Палеты · SSCC" }).click();
+    await expect(page.getByRole("radio", { name: /Палета 75×120/ })).toBeVisible();
+    await expect(page.getByRole("img", { name: /Предпросмотр.*Палета/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Применить шаблоны" })).toBeInViewport();
     await page.getByRole("button", { name: "Отмена" }).click();
     await expect(page.getByText("Коды: Только код")).toBeVisible();
     await expect(page.getByText("Короба: Коробка 58×40")).toBeVisible();
@@ -35,7 +39,7 @@ for (const viewport of [
     await expect(page.getByRole("button", { name: "Найти и перепечатать" })).toBeDisabled();
     await field.fill("346006820000000014");
     await expect(page.getByRole("button", { name: "Найти и перепечатать" })).toBeEnabled();
-    await page.screenshot({ path: `/tmp/warehouse-manual-${viewport.width}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`warehouse-manual-${viewport.width}.png`) });
     await field.press("Enter");
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Ввести код вручную" }).click();
@@ -44,13 +48,15 @@ for (const viewport of [
     ).toHaveValue("");
     await page.getByRole("textbox").press("Escape");
     await expect(page.getByRole("button", { name: "Ввести код вручную" })).toBeFocused();
-    await page.screenshot({ path: `/tmp/warehouse-reprint-${viewport.width}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`warehouse-reprint-${viewport.width}.png`) });
   });
 for (const viewport of [
   { width: 1280, height: 800 },
   { width: 1024, height: 768 },
 ])
-  test(`legacy recovery makes corrected output explicit at ${viewport.width}`, async ({ page }) => {
+  test(`legacy recovery makes corrected output explicit at ${viewport.width}`, async ({
+    page,
+  }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.goto("/?gallery=1&state=warehouse-reprint-legacy-sent&locale=ru");
     await expect(page.getByText("Этикетка передана на принтер")).toBeVisible();
@@ -65,9 +71,9 @@ for (const viewport of [
     expect(recovery).not.toBeNull();
     expect(footer).not.toBeNull();
     if (recovery && footer) expect(recovery.y + recovery.height).toBeLessThanOrEqual(footer.y);
-    await page.screenshot({ path: `/tmp/warehouse-legacy-${viewport.width}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`warehouse-legacy-${viewport.width}.png`) });
   });
-test("unknown recovery remains explicit in English", async ({ page }) => {
+test("unknown recovery remains explicit in English", async ({ page }, testInfo) => {
   await page.goto("/?gallery=1&state=warehouse-reprint-unknown&locale=en");
   await expect(page.getByText("Label delivery is unknown")).toBeVisible();
   await expect(page.getByRole("button", { name: "Print again" })).toBeVisible();
@@ -78,7 +84,7 @@ test("unknown recovery remains explicit in English", async ({ page }) => {
 });
 
 for (const locale of ["ru", "en"])
-  test(`quarantine acknowledgment stays visible at 1024 ${locale}`, async ({ page }) => {
+  test(`quarantine acknowledgment stays visible at 1024 ${locale}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto(`/?gallery=1&state=warehouse-reprint-history-warning&locale=${locale}`);
     const warning = page.getByRole("alert");
@@ -92,7 +98,40 @@ for (const locale of ["ru", "en"])
     );
     expect(await acknowledge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     expect(await acknowledge.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
-    await page.screenshot({ path: `/tmp/warehouse-history-warning-${locale}.png` });
+    await page.screenshot({ path: testInfo.outputPath(`warehouse-history-warning-${locale}.png`) });
     await acknowledge.click();
     await expect(warning).toHaveCount(0);
   });
+
+test("A4 sample preview is bounded and cached on reopen", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/?gallery=1&state=warehouse-reprint-ready-a4&locale=ru");
+  await page.getByRole("button", { name: "Выбрать шаблоны" }).click();
+  const coldStart = Date.now();
+  await page.getByRole("button", { name: "Палеты · SSCC" }).click();
+  const canvas = page.locator(".warehouse-sheet-choice-preview canvas");
+  await expect(canvas).toBeVisible();
+  const coldMs = Date.now() - coldStart;
+  expect(
+    await canvas.evaluate((node) =>
+      Math.max((node as HTMLCanvasElement).width, (node as HTMLCanvasElement).height),
+    ),
+  ).toBe(800);
+  await expect(page.getByRole("button", { name: "Применить шаблоны" })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("warehouse-a4-preview.png") });
+  await page.getByRole("button", { name: "Отмена" }).click();
+  const warmStart = Date.now();
+  await page.getByRole("button", { name: "Выбрать шаблоны" }).click();
+  await page.getByRole("button", { name: "Палеты · SSCC" }).click();
+  await expect(canvas).toBeVisible();
+  const warmMs = Date.now() - warmStart;
+  await testInfo.attach("preview-timing.json", {
+    body: JSON.stringify({
+      environment: "Mac Chromium, bundled demo branding, production layout and fonts",
+      coldMs,
+      warmMs,
+    }),
+    contentType: "application/json",
+  });
+  console.info(JSON.stringify({ coldMs, warmMs }));
+});

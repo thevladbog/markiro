@@ -1,3 +1,15 @@
+import { WarehouseUnifiedService } from "./unified.service";
+import {
+  UNIFIED_REPRINT_PROTOCOL,
+  unifiedLookupRequestSchema,
+  unifiedLookupResultSchema,
+  palletDataBatchSchema,
+  palletDataReceiptSchema,
+  palletRenderingsV3BatchSchema,
+  palletRenderingsV3ReceiptSchema,
+  palletEventsV3BatchSchema,
+  palletEventsV3ReceiptSchema,
+} from "@markiro/domain";
 import { WarehousePalletRenderingsService } from "./pallet-renderings.service";
 import { WarehousePalletResolutionsService } from "./pallet-resolutions.service";
 import {
@@ -101,6 +113,7 @@ export class StationWarehouseReprintController {
     private readonly pallets: WarehousePalletService,
     private readonly renderings: WarehousePalletRenderingsService,
     private readonly resolutions: WarehousePalletResolutionsService,
+    private readonly unified: WarehouseUnifiedService,
   ) {}
   @Get("source-capabilities")
   @ApiOperation({ summary: "Read supported durable label source protocols" })
@@ -109,6 +122,7 @@ export class StationWarehouseReprintController {
   sourceCapabilities() {
     return {
       protocols: [
+        UNIFIED_REPRINT_PROTOCOL,
         LABEL_FACTS_PROTOCOL,
         PALLET_REPRINT_PROTOCOL,
         PALLET_PRODUCTION_DELIVERY_PROTOCOL,
@@ -116,6 +130,62 @@ export class StationWarehouseReprintController {
         PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
       ],
     };
+  }
+  @Post("lookup-v3")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(unifiedLookupRequestSchema)
+  @ApiZodResponse({ status: 200, schema: unifiedLookupResultSchema })
+  @ApiHttpErrors(400, 401, 403)
+  unifiedLookup(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(unifiedLookupRequestSchema))
+    input: z.infer<typeof unifiedLookupRequestSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.unified.lookup(tenantId, deviceId, input.operatorId, input.raw);
+  }
+  @Post("pallet-data-v3")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletDataBatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletDataReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletDataV3(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletDataBatchSchema))
+    input: z.infer<typeof palletDataBatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.unified.receiveData(tenantId, deviceId, input);
+  }
+  @Post("pallet-renderings-v3")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletRenderingsV3BatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletRenderingsV3ReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletRenderingsV3(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletRenderingsV3BatchSchema))
+    input: z.infer<typeof palletRenderingsV3BatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.unified.receiveRenderings(tenantId, deviceId, input);
+  }
+  @Post("pallet-events-v3")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletEventsV3BatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletEventsV3ReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletEventsV3(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletEventsV3BatchSchema))
+    input: z.infer<typeof palletEventsV3BatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.pallets.events(tenantId, deviceId, input.entries, UNIFIED_REPRINT_PROTOCOL);
   }
   @Get("pallet-templates-v2")
   @ApiZodResponse({ status: 200, schema: palletTemplateCatalogV2Schema })

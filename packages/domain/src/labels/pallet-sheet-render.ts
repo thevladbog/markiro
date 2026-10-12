@@ -36,6 +36,8 @@ export interface PalletSheetContext {
   egaisCode: string | null;
   productionDate: string | null;
   shelfLifeDays: number | null;
+  /** Frozen historical expiry. Undefined retains the original shelf-life rule. */
+  expiryDate?: string | null;
   boxCount: number;
   itemCount: number;
   shiftNumber: string | null;
@@ -143,6 +145,12 @@ function contextFields(context: PalletSheetContext): Record<PalletSheetField, st
     (!Number.isSafeInteger(context.shelfLifeDays) || context.shelfLifeDays < 1)
   )
     fail("expiryDate", "Invalid shelf life");
+  if (
+    context.expiryDate !== undefined &&
+    context.expiryDate !== null &&
+    !addCalendarDays(context.expiryDate, 0)
+  )
+    fail("expiryDate", "Invalid historical expiry date");
   validateMonoBitmap(context.logo);
   return {
     "organization.name": context.organizationName,
@@ -150,9 +158,14 @@ function contextFields(context: PalletSheetContext): Record<PalletSheetField, st
     "product.gtin": context.gtin14,
     "product.egais": context.egaisCode ?? "",
     productionDate: context.productionDate ? formatLabelDate(context.productionDate) : "",
-    expiryDate: context.productionDate
-      ? formatLabelDate(shelfLifeExpiryDate(context.productionDate, context.shelfLifeDays))
-      : "",
+    expiryDate:
+      context.expiryDate !== undefined
+        ? context.expiryDate
+          ? formatLabelDate(context.expiryDate)
+          : ""
+        : context.productionDate
+          ? formatLabelDate(shelfLifeExpiryDate(context.productionDate, context.shelfLifeDays))
+          : "",
     boxCount: String(context.boxCount),
     itemCount: String(context.itemCount),
     shiftNumber: context.shiftNumber ?? "",

@@ -45,6 +45,11 @@ describe.skipIf(!ready)("warehouse print OpenAPI", () => {
         "pallet-events",
         "label-facts",
         "pallet-lookup-v2",
+        "lookup-v3",
+        "pallet-data-v3",
+        "pallet-renderings-v3",
+        "pallet-events-v3",
+
         "pallet-renderings-v2",
         "pallet-events-v2",
         "pallet-production-resolutions",
