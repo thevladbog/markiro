@@ -5,6 +5,10 @@ import test from "node:test";
 import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import {
+  withoutSharedContractsBootstrap,
+  withoutSharedContractsBootstrapBytes,
+} from "./support/shared-contracts-bootstrap.mjs";
+import {
   withoutNativeAssemblyOwner,
   withoutNativeAssemblyOwnerBytes,
 } from "./support/native-assembly-owner.mjs";
@@ -19,7 +23,10 @@ const readWorkflows = () =>
   Object.fromEntries(
     readdirSync(".github/workflows")
       .filter((entry) => /\.ya?ml$/.test(entry))
-      .map((entry) => [entry, load(readFileSync(`.github/workflows/${entry}`, "utf8"))]),
+      .map((entry) => [
+        entry,
+        withoutSharedContractsBootstrap(load(readFileSync(`.github/workflows/${entry}`, "utf8"))),
+      ]),
   );
 const builds = [
   [
@@ -175,7 +182,9 @@ test("historical normalization preserves malformed native owners and existing ow
     earlier.run,
     "existing owner drift survives normalization",
   );
-  const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+  const source = withoutSharedContractsBootstrapBytes(
+    readFileSync(".github/workflows/us-development.yml", "utf8"),
+  );
   assert.equal(withoutNativeAssemblyOwnerBytes(source), source.replace(block, ""));
   for (const changedSource of [
     source.replace(command, `${command} || true`),
@@ -434,7 +443,9 @@ test("native assembly rejects fresh parsed workflow mutations at intended assert
 });
 
 test("removing exactly the native owner restores pinned predecessor bytes and AST", () => {
-  const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+  const source = withoutSharedContractsBootstrapBytes(
+    readFileSync(".github/workflows/us-development.yml", "utf8"),
+  );
   assert.equal(source.split(block).length, 2, "one exact raw native owner");
   const predecessor = source.replace(block, "");
   assert.equal(Buffer.byteLength(predecessor), 34614, "predecessor byte count");

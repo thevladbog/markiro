@@ -1,4 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
+import {
+  withoutSharedContractsBootstrap,
+  withoutSharedContractsBootstrapBytes,
+} from "./shared-contracts-bootstrap.mjs";
 
 const owner = {
   name: "Verify pure native dataset assembly input",
@@ -12,7 +16,7 @@ export function isNativeAssemblyOwner(step) {
 
 // Historical pins permit this complete additive owner only. Drift stays visible.
 export function withoutNativeAssemblyOwner(workflow) {
-  const result = structuredClone(workflow);
+  const result = withoutSharedContractsBootstrap(workflow);
   if (result.jobs?.isolation?.steps) {
     result.jobs.isolation.steps = result.jobs.isolation.steps.filter(
       (step) => !isNativeAssemblyOwner(step),
@@ -22,6 +26,7 @@ export function withoutNativeAssemblyOwner(workflow) {
 }
 
 export function withoutNativeAssemblyOwnerBytes(source) {
+  source = withoutSharedContractsBootstrapBytes(source);
   return source.replace(block, (matched, offset) => {
     const followingLine = source
       .slice(offset + matched.length)

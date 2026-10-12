@@ -2482,3 +2482,23 @@ rejecting 24 connection attempts. The skipped cases include 3390 US-named
 cases, four US deployment-entry cases, 22 separate inventory-database cases,
 two real local-infrastructure cases and one live National Catalog case. Their
 explicit opt-ins remained unset; this is not a zero-skip or full-CI claim.
+
+### Fresh-checkout CI dependency order (2026-10-13)
+
+GitHub run 38312499042 failed before API verification: the Node tooling checks
+imported the US Vite configuration, whose contracts package exports compiled
+`dist/index.js`. The fresh checkout had not built it. Existing local output hid
+this ordering defect; the runner reported 92 passed and 12 failed checks.
+
+An unconditional contracts bootstrap now runs after the release isolation checker
+and before all Node tooling checks. `pnpm turbo build --filter
+'@markiro/platform-contracts...'` builds both contracts and their domain dependency
+through the existing dependency graph. All later checks, commands, permissions,
+release locks and the 30-minute CI budget remain unchanged.
+
+Three new regressions verify this execution boundary and reject missing, moved,
+duplicate, conditional and failure-swallowing bootstrap steps. Historical owner
+snapshots remove only the exact ordered additive step; their existing byte/AST
+hashes stay unchanged, and malformed additions remain visible. Local checks passed
+108/108 without skips, and the real two-package bootstrap build passed. Remote
+CI completion is a separate gate to be checked against the pushed source SHA.

@@ -6,12 +6,16 @@ import test from "node:test";
 import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import { isNativeAssemblyOwner } from "./support/native-assembly-owner.mjs";
+import { withoutSharedContractsBootstrap } from "./support/shared-contracts-bootstrap.mjs";
 
 const workflows = () =>
   Object.fromEntries(
     readdirSync(".github/workflows")
       .filter((name) => /\.ya?ml$/.test(name))
-      .map((name) => [name, load(readFileSync(`.github/workflows/${name}`, "utf8"))]),
+      .map((name) => [
+        name,
+        withoutSharedContractsBootstrap(load(readFileSync(`.github/workflows/${name}`, "utf8"))),
+      ]),
   );
 
 const transformationTransactionOwner = "Check US Transformation native transaction foundation";
