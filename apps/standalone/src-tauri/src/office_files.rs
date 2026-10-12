@@ -1270,11 +1270,17 @@ mod tests {
 
     /// The last segment leaves room for « (99)»: 145 characters are taken,
     /// 146 are not, and the folder made at the end of the suffix range has a
-    /// name `open_office_folder` takes.
+    /// name `open_office_folder` takes. The bound counts characters, not
+    /// bytes: the longest name is half Cyrillic (two bytes each in UTF-8), yet
+    /// it stays within the 255 bytes Linux allows a name, « (99)» and all, so
+    /// the folders are real on every system the tests run on.
     #[test]
     fn the_last_segment_leaves_room_for_the_suffix() {
         let root = tempfile::tempdir().unwrap();
-        let longest = "я".repeat(MAX_NAME_CHARS - SUFFIX_CHARS);
+        let longest = format!("{}{}", "я".repeat(100), "a".repeat(45));
+        assert_eq!(longest.chars().count(), MAX_NAME_CHARS - SUFFIX_CHARS);
+        assert!(longest.len() > MAX_NAME_CHARS);
+        assert!(longest.len() + " (99)".len() <= 255);
         let path = |last: &str| segments(&["Выгрузки", "OCT26-004", last]);
         assert_eq!(SUFFIX_CHARS, " (99)".chars().count());
         assert_eq!(
