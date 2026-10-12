@@ -1222,6 +1222,8 @@
       "original": "Original saved layout",
       "templateTitle": "Pallet label template",
       "v2Unavailable": "Template selection is currently unavailable. Use the original snapshot or refresh the catalog.",
+      "pickAfterSync": "To choose a template, wait for the server to acknowledge the send, then refresh the status.",
+      "shiftUnavailable": "Shift name unavailable",
       "pickAfterLookup": "Find a pallet to choose a layout for its saved data.",
       "origin": "Original print station",
       "thisStation": "This station",
@@ -1230,7 +1232,7 @@
       "refreshStatus": "Refresh status",
       "resolveConfirm": "Confirm original print",
       "resolveSkip": "Close original attempt",
-      "resolveAtOrigin": "Resolve the original attempt at the station that printed this pallet.",
+      "resolveAtOrigin": "On the original station, scan the printed SSCC to confirm the label, or close the attempt without confirmation if no label came out.",
       "originalConfirmHint": "Scan the SSCC of the existing print. This confirms the original attempt without sending another label.",
       "originalSkipHint": "Close the uncertainty without confirming a print. Original history remains. Reprinting may produce an extra copy.",
       "diagnostics": {

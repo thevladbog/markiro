@@ -137,6 +137,12 @@ it("shows saved facts and requires confirmation; cancel never prints and scanned
     await screen.findByRole("img", { name: "Сохранённая этикетка палеты" });
     expect(screen.getAllByText("11.10.2026")).toHaveLength(2);
     expect(print).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Выбрать шаблоны" }));
+    await screen.findByRole("dialog", { name: "Шаблон этикетки палеты" });
+    fireEvent.click(screen.getByRole("button", { name: "Применить шаблоны" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(work.getSnapshot().choice?.id).toBeNull();
+    expect(print).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     expect(await exec.all("SELECT * FROM warehouse_pallet_jobs")).toHaveLength(0);
     await act(async () => {
@@ -160,6 +166,91 @@ it("shows saved facts and requires confirmation; cancel never prints and scanned
     });
     expect(work.getSnapshot().job?.state).toBe("verified");
     expect(await exec.all("SELECT * FROM warehouse_reprint_jobs")).toHaveLength(0);
+  } finally {
+    view.unmount();
+    await work.close();
+    db.close();
+  }
+});
+
+it("shows a human shift number and sync guidance instead of asking to resolve a successful send", async () => {
+  await i18n.changeLanguage("ru");
+  const db = new DatabaseSync(":memory:"),
+    exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const input = warehousePreparedJobInput(),
+    generation = createCredentialGeneration("pending-screen");
+  await seedWarehouseOperator(exec, input.operatorId);
+  const shiftId = "00000000-0000-4000-8000-000000000001";
+  await exec.run(
+    "INSERT INTO shift_mirror(id,status,mode,product_id,number) VALUES(?,'closed','aggregation','product','OCT26-006/S')",
+    [shiftId],
+  );
+  const diagnostic = {
+    sscc: "146000000000001231",
+    shiftId,
+    originDeviceId: input.deviceId,
+    sourceRevision: "a".repeat(64),
+    attemptId: null,
+    productionSequence: null,
+    kind: "sync_pending",
+  };
+  const client: StationClient = {
+    get: async <T,>() =>
+      ({ protocols: [PALLET_REPRINT_PROTOCOL, "warehouse-pallet-reprint-v2"] }) as T,
+    post: async <T,>() => ({ status: "unavailable", code: "delivery_unresolved", diagnostic }) as T,
+    download: async () => new Blob(),
+    whoami: async () => ({ ok: true }),
+  };
+  const hardwareConfig = {
+    scanner: null,
+    printer: null,
+    printerLanguage: "tspl" as const,
+    verifyPrintedLabel: false,
+    boxPrinter: null,
+    duplicatePrinter: null,
+    palletPrinter: input.printer,
+  };
+  const work = createWarehousePalletWork({
+    exec,
+    client,
+    generation,
+    deviceId: input.deviceId,
+    operatorId: input.operatorId,
+    hardware: () => hardwareConfig,
+    print: async () => {
+      throw new Error("must not print");
+    },
+  });
+  await work.initialize();
+  await work.scan(diagnostic.sscc);
+  const view = render(
+    <PalletConfirmation
+      exec={exec}
+      client={client}
+      credentialGeneration={generation}
+      deviceId={input.deviceId}
+      operatorId={input.operatorId}
+      source={{ start: () => () => {} }}
+      hardwareConfig={hardwareConfig}
+      print={async () => {
+        throw new Error("must not print");
+      }}
+      onExit={() => {}}
+      state={work.getSnapshot()}
+      work={work}
+      onFinish={async () => {}}
+      modeBusy={false}
+    />,
+  );
+  try {
+    expect(screen.getByText("OCT26-006/S")).toBeTruthy();
+    expect(screen.queryByText(shiftId)).toBeNull();
+    expect(
+      screen.queryByText("Разрешите исходную попытку на станции, где печатали эту палету."),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Обновить статус" })).toBeTruthy();
+    expect(screen.getByText(/Для выбора шаблона дождитесь/)).toBeTruthy();
   } finally {
     view.unmount();
     await work.close();

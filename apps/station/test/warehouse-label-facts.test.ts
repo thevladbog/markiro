@@ -242,3 +242,50 @@ it("freezes the actual accepting operator name from the published roster", async
     db.close();
   }
 });
+
+it("uploads pre-pallet unit facts without inventing box counts or recalculating their historical dates", async () => {
+  const { warehouseBoxSource } = await import("@markiro/domain");
+  const { syncUnitLabelFacts } = await import("../src/lib/warehouse-reprint/label-facts.js");
+  const db = new DatabaseSync(":memory:"),
+    exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  try {
+    const legacyFields: Partial<ReturnType<typeof warehouseBoxSource>["fields"]> = {
+      ...warehouseBoxSource().fields,
+    };
+    delete legacyFields["qty.boxes"];
+    await exec.run(
+      "INSERT INTO unit_label_facts(owner,shift_id,code_hash,accepted_at,canonical_raw,fields_json) VALUES('owner','00000000-0000-4000-8000-000000000001',?,'2026-09-10T08:49:21.875Z','',?)",
+      [
+        "a".repeat(64),
+        JSON.stringify({ ...legacyFields, date: "10.09.2026", expiry: "10.09.2027" }),
+      ],
+    );
+    let sent: { fields: Record<string, string> } | undefined;
+    const client = {
+      get: async <T>() => ({ protocols: ["warehouse-label-facts-v1"] }) as T,
+      post: async <T>(_path: string, body?: unknown) => {
+        const { entries } = body as {
+          entries: Array<{ digest: string; fields: Record<string, string> }>;
+        };
+        sent = entries[0];
+        return {
+          protocol: "warehouse-label-facts-v1",
+          results: entries.map((e) => ({ digest: e.digest, status: "accepted" })),
+        } as T;
+      },
+    };
+    expect(await syncUnitLabelFacts(exec, client, "owner", () => true)).toBe(1);
+    expect(sent?.fields).toMatchObject({
+      "qty.boxes": "",
+      date: "10.09.2026",
+      expiry: "10.09.2027",
+      "km.code": "",
+    });
+    expect(await exec.all("SELECT receive_status FROM unit_label_facts")).toEqual([
+      { receive_status: "accepted" },
+    ]);
+  } finally {
+    db.close();
+  }
+});

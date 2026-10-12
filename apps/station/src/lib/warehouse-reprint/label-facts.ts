@@ -40,7 +40,10 @@ interface Row {
 export function parseUnitLabelFacts(row: Row): UnitLabelFactsV1 {
   const fields =
     row.fields_json !== null
-      ? warehouseSourceSchema.shape.fields.parse(JSON.parse(row.fields_json))
+      ? warehouseSourceSchema.shape.fields.parse({
+          "qty.boxes": "", // Older unit jobs predate this pallet-only field.
+          ...z.record(z.string(), z.unknown()).parse(JSON.parse(row.fields_json)),
+        })
       : (() => {
           const c = contextSchema.parse(JSON.parse(row.context_json ?? "null"));
           return boxLabelFields({

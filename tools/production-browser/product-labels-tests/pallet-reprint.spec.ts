@@ -266,8 +266,8 @@ for (const scenario of scenarios)
     await expect(
       page.getByText(
         ru
-          ? "Разрешите исходную попытку на станции, где печатали эту палету."
-          : "Resolve the original attempt at the station that printed this pallet.",
+          ? "На станции исходной печати подтвердите готовую этикетку сканированием SSCC или закройте попытку без подтверждения, если этикетка не вышла."
+          : "On the original station, scan the printed SSCC to confirm the label, or close the attempt without confirmation if no label came out.",
       ),
     ).toBeVisible();
     await expect(main.locator(".warehouse-pallet-card")).toHaveCount(0);
