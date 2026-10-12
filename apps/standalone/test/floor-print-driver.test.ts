@@ -1,11 +1,15 @@
+import { decodeMonoRaster, mmToDots } from "@markiro/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PrintResult, WindowsPrinting } from "../src/hardware/hardware.js";
+import { renderLabel } from "../src/floor/print/label-render.js";
 import {
+  base64ToBytes,
   readPrintJob,
   recoverInterruptedJobs,
   sendLabelJob,
   settleOutcome,
+  type RenderLabel,
 } from "../src/floor/print/print-jobs.js";
 import { printAgain, UnresolvableJobError } from "../src/floor/print/print-resolution.js";
 import { createPrintRuntime, PRINT_SEND_LIMIT_MS } from "../src/floor/print/print-runtime.js";
@@ -13,6 +17,7 @@ import type { PrinterProfile } from "../src/floor/setup/workstation-settings.js"
 import { fakeHardware } from "./support/hardware.js";
 import {
   closeBoxWithLabel,
+  fakeRaster,
   fakeRender,
   flushPromises,
   jobRows,
@@ -504,4 +509,62 @@ describe("a driver job in doubt is never sent again by itself", () => {
     expect(prints).toHaveLength(1);
     expect(shell.sends).toHaveLength(1);
   });
+});
+
+describe("a box closed on a printer in driver mode, end to end", () => {
+  // The real renderer (jsdom has no canvas, so the text rasterizer is the fake one).
+  const render: RenderLabel = (spec, fields, printer) =>
+    renderLabel(spec, fields, printer, fakeRaster);
+
+  it.each([203, 300] as const)(
+    "freezes a mono-raster page at the profile's %i dpi and sends it once to the Windows queue",
+    async (dpi) => {
+      const godex: PrinterProfile = { ...GODEX, dpi };
+      const at = await printStation({
+        printers: [godex, ZEBRA],
+        assignments: { box: "godex", pallet: null, duplicate: null },
+      });
+      const job = await closeBoxWithLabel(at, render);
+      expect(job).toMatchObject({ state: "prepared", errorCode: null, printer: godex });
+      // The frozen bytes are the driver page, not the printer language's text.
+      const frozen = base64ToBytes(job.bytesBase64 ?? "");
+      const page = decodeMonoRaster(frozen);
+      const { widthMm, heightMm } = at.shift.snapshot.boxTemplate.spec;
+      expect(page).toMatchObject({
+        format: "mono-raster-v1",
+        dpi,
+        widthMm,
+        heightMm,
+        widthDots: mmToDots(widthMm, dpi),
+        heightDots: mmToDots(heightMm, dpi),
+      });
+      const shell = fakeHardware();
+      const sent: Uint8Array[] = [];
+      const windows: WindowsPrinting = {
+        supportsWindowsPrinting: vi.fn(async () => true),
+        printWindowsRaster: vi.fn(
+          async (queue: string, bytes: Uint8Array, documentName: string): Promise<PrintResult> => {
+            sent.push(bytes);
+            return { sent: true, receipt: { queue, jobId: 42, documentName } };
+          },
+        ),
+        getWindowsPrintJob: vi.fn(async () => ({ state: "present" as const, statusFlags: 0 })),
+      };
+      const runtime = createPrintRuntime(shell.hardware.printBytes, {
+        windows,
+        newDocumentId: () => DOC_ID,
+      });
+      const after = await sendLabelJob(resolveContext(at.local, runtime), job);
+      expect(after).toMatchObject({ state: "sent", attempts: 1 });
+      expect(windows.printWindowsRaster).toHaveBeenCalledTimes(1);
+      expect(windows.printWindowsRaster).toHaveBeenCalledWith(
+        "Godex G500",
+        expect.any(Uint8Array),
+        `Markiro:${DOC_ID}`,
+      );
+      // Exactly the frozen page reaches the queue, and nothing goes RAW.
+      expect(Array.from(sent[0] ?? [])).toEqual(Array.from(frozen));
+      expect(shell.sends).toEqual([]);
+    },
+  );
 });

@@ -32,5 +32,7 @@
     "error": { "code": "geometry_mismatch", "phase": "before_start" }
   },
   "windowsJobPresent": { "state": "present", "statusFlags": 8 },
-  "windowsJobAbsent": { "state": "absent" }
+  "windowsJobAbsent": { "state": "absent" },
+  "windowsJobIdentityMismatch": { "state": "identity_mismatch" },
+  "windowsJobUnavailable": { "state": "unavailable" }
 }

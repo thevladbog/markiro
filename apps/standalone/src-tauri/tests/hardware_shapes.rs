@@ -86,10 +86,18 @@ fn the_hardware_shapes_are_the_ones_the_fixture_pins() {
             "windowsJobAbsent",
             serde_json::to_value(Observation::Absent),
         ),
+        (
+            "windowsJobIdentityMismatch",
+            serde_json::to_value(Observation::IdentityMismatch),
+        ),
+        (
+            "windowsJobUnavailable",
+            serde_json::to_value(Observation::Unavailable),
+        ),
     ];
     for (key, value) in shapes {
         assert_eq!(value.unwrap(), fixture[key], "{key}");
     }
     // Nothing else is pinned by the file: a new shape needs a new key here.
-    assert_eq!(fixture.as_object().unwrap().len(), 7);
+    assert_eq!(fixture.as_object().unwrap().len(), 9);
 }
