@@ -205,6 +205,27 @@ test("isolated support chat tests retain explicit scratch database guards throug
   }
 });
 
+test("the standalone export runs in the Node job after the domain build and its SQL after the migrations", () => {
+  const command = "pnpm test:standalone-export";
+  const staticSteps = workflow.jobs["verify-static"].steps;
+  const staticRun = staticSteps.findIndex((step) => step.run === command);
+  assert.ok(staticRun >= 0, "verify-static must run the export tool's tests");
+  assert.equal(staticSteps[staticRun].env, undefined, "the pure run must not see a database");
+  const build = staticSteps.findIndex(
+    (step) => step.run === "pnpm turbo run build --filter=@markiro/domain",
+  );
+  assert.ok(build >= 0 && build < staticRun, "packages/domain must be built before the tests");
+
+  const apiSteps = workflow.jobs["verify-api-tests"].steps;
+  const migrate = apiSteps.findIndex((step) => step.run === "pnpm --filter @markiro/db db:migrate");
+  const sqlRun = apiSteps.findIndex((step) => step.run === command);
+  assert.ok(migrate >= 0 && sqlRun > migrate, "the SQL test must run after the cloud migrations");
+  assert.equal(
+    apiSteps[sqlRun].env.STANDALONE_EXPORT_TEST_DATABASE_URL,
+    workflow.jobs["verify-api-tests"].env.DATABASE_URL,
+  );
+});
+
 test("Signer Windows verification includes the stable release contract", () => {
   const job = workflow.jobs["signer-windows-build"];
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));

@@ -3,6 +3,7 @@
 pub mod backups;
 pub mod bootstrap;
 pub mod changes;
+pub mod cloud_import;
 pub mod codes;
 pub mod counterparties;
 pub mod device_shifts;

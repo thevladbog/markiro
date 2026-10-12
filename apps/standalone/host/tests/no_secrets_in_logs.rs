@@ -1985,7 +1985,9 @@ fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
 /// `error!` of the batch route for a record that failed in the database, by
 /// the device and the record's position (the warehouse records' batch has the
 /// same one). A new logging call there is a
-/// decision for this test and the walk, not a quiet line.
+/// decision for this test and the walk, not a quiet line. The cloud import
+/// (plan IMP) carries PIN and badge hashes and the badge salt in its request,
+/// so its two modules (the row checks and the route) log nothing at all.
 #[test]
 fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -1998,6 +2000,8 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
         "routes/office_shifts.rs",
         "routes/warehouse.rs",
     ];
+    let import_path = ["cloud_import.rs", "routes/cloud_import.rs"];
+    let mut import_files = 0;
     let mut facts_files = 0;
     for file in &files {
         let relative = file
@@ -2014,6 +2018,14 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
                     "{relative} writes past the log with {print}"
                 );
             }
+        }
+        if import_path.contains(&relative.as_str()) {
+            import_files += 1;
+            assert_eq!(
+                text.matches("tracing::").count(),
+                0,
+                "{relative} logs, and the import request holds verifiers"
+            );
         }
         if relative.starts_with("facts/") || facts_path.contains(&relative.as_str()) {
             facts_files += 1;
@@ -2037,4 +2049,5 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
     // plan СКЛ: the lookup answers a unit's full code and logs nothing, the
     // records' batch has the one `error!` by device and position.
     assert_eq!(facts_files, 18);
+    assert_eq!(import_files, 2, "the import modules were not found");
 }

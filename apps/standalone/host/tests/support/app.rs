@@ -545,6 +545,29 @@ pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
     shift
 }
 
+/// The `importId` the tests send with the golden file.
+pub const IMPORT_ID: &str = "8f14e45f-ceea-467a-9d9b-1c7e0b1a2d3e";
+
+/// The request the office sends for the export tool's golden file
+/// (`proto/fixtures/cloud-export-file.json`, plan IMP): the file's envelope
+/// and payload under `import_id` (`cloudImportRequest` in the webview).
+pub fn cloud_import_request(import_id: &str, dry_run: bool) -> Value {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../proto/fixtures/cloud-export-file.json"
+    );
+    let file: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    serde_json::json!({
+        "importId": import_id,
+        "dryRun": dry_run,
+        "formatVersion": file["formatVersion"],
+        "exportedAt": file["exportedAt"],
+        "rehearsal": file["rehearsal"],
+        "source": file["source"],
+        "payload": file["payload"],
+    })
+}
+
 /// A station inside an open shift: what facts are sent from.
 pub struct Floor {
     pub shift: String,

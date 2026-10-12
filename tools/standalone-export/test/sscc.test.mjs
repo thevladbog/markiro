@@ -67,6 +67,7 @@ test("every prefix and extension of the counters, blocks and printed codes gets 
     prefix === "460068200" ? { kind: "organization" } : { kind: "unknown" };
   const rows = planSsccCounters(
     {
+      organizationPrefix: null,
       counters: [
         { issuerPrefix: "460068200", extension: 1, nextSerial: 301 },
         { issuerPrefix: "460068200", extension: 0, nextSerial: 18_500 },
@@ -123,6 +124,7 @@ test("a prefix the cloud used up stops the export", () => {
     () =>
       planSsccCounters(
         {
+          organizationPrefix: null,
           counters: [{ issuerPrefix: "460068200", extension: 0, nextSerial: SERIAL_CAPACITY }],
           blocks: [],
           printed: [],
@@ -130,6 +132,91 @@ test("a prefix the cloud used up stops the export", () => {
         () => ({ kind: "organization" }),
       ),
     /every serial of prefix 460068200, extension 0/u,
+  );
+});
+
+test("the organization's prefix gets both extensions, even one the cloud never issued under", () => {
+  const owners = (prefix) =>
+    prefix === "460068200" ? { kind: "organization" } : { kind: "unknown" };
+  // Pallets came late: the cloud has a box counter and a box block, nothing for pallets.
+  const rows = planSsccCounters(
+    {
+      organizationPrefix: "460068200",
+      counters: [{ issuerPrefix: "460068200", extension: 0, nextSerial: 18_500 }],
+      blocks: [
+        { issuerPrefix: "460068200", extension: 0, maxToSerial: 19_999, maxConsumedThrough: 3 },
+      ],
+      printed: [],
+    },
+    owners,
+  );
+  assert.deepEqual(rows, [
+    {
+      issuerPrefix: "460068200",
+      extension: 0,
+      owner: { kind: "organization" },
+      issuedMax: 19_999,
+      printedMax: 3,
+      standaloneStart: 20_000,
+      cloudReseedTo: 1_020_000,
+    },
+    {
+      issuerPrefix: "460068200",
+      extension: 1,
+      owner: { kind: "organization" },
+      issuedMax: null,
+      printedMax: null,
+      standaloneStart: 0,
+      cloudReseedTo: PALLET_WINDOW,
+    },
+  ]);
+  // Boxes too: a cloud that issued nothing at all still gets both rows.
+  assert.deepEqual(
+    planSsccCounters(
+      { organizationPrefix: "460068200", counters: [], blocks: [], printed: [] },
+      owners,
+    ).map((each) => [each.extension, each.issuedMax, each.standaloneStart, each.cloudReseedTo]),
+    [
+      [0, null, 1, 1 + BOX_WINDOW],
+      [1, null, 0, PALLET_WINDOW],
+    ],
+  );
+  // Another prefix's rows stay as they were; the organization's are not repeated.
+  assert.deepEqual(
+    planSsccCounters(
+      {
+        organizationPrefix: "460068200",
+        counters: [
+          { issuerPrefix: "460068200", extension: 1, nextSerial: 5 },
+          { issuerPrefix: "460123400", extension: 0, nextSerial: 1 },
+        ],
+        blocks: [],
+        printed: [],
+      },
+      owners,
+    ).map((each) => `${each.issuerPrefix}/${each.extension}`),
+    ["460068200/0", "460068200/1", "460123400/0"],
+  );
+});
+
+test("the organization's prefix is required, checked like any prefix, and null means none", () => {
+  assert.throws(
+    () => planSsccCounters({ counters: [], blocks: [], printed: [] }, () => ({ kind: "unknown" })),
+    /organizationPrefix is required/u,
+  );
+  assert.throws(
+    () =>
+      planSsccCounters(
+        { organizationPrefix: "46006820", counters: [], blocks: [], printed: [] },
+        () => ({ kind: "organization" }),
+      ),
+    /issuer prefix "46006820" is not 9 digits/u,
+  );
+  assert.deepEqual(
+    planSsccCounters({ organizationPrefix: null, counters: [], blocks: [], printed: [] }, () => ({
+      kind: "organization",
+    })),
+    [],
   );
 });
 
@@ -159,7 +246,11 @@ test("shift-number counters keep every month that drew a number, by month key", 
 const organization = () => ({ kind: "organization" });
 const PREFIX = "460068200";
 const plan = (input, windows) =>
-  planSsccCounters({ counters: [], blocks: [], printed: [], ...input }, organization, windows);
+  planSsccCounters(
+    { organizationPrefix: null, counters: [], blocks: [], printed: [], ...input },
+    organization,
+    windows,
+  );
 
 /** Independent GS1 mod-10 check digit, so the fixture is checked without the domain package. */
 function checkDigit(body) {
@@ -205,7 +296,9 @@ test("every start and the last serial of the space build a valid SSCC with the d
   let domain;
   try {
     domain = await import("../../../packages/domain/dist/gs1/sscc.js");
-  } catch {
+  } catch (error) {
+    // Only a domain that is not built is a skip; a broken one must fail the test.
+    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
     context.skip("packages/domain is not built (pnpm turbo run build --filter=@markiro/domain)");
     return;
   }
@@ -468,6 +561,7 @@ test("each row names its own owner", () => {
   const seen = [];
   const rows = planSsccCounters(
     {
+      organizationPrefix: null,
       counters: [
         { issuerPrefix: "460000001", extension: 0, nextSerial: 2 },
         { issuerPrefix: "460000001", extension: 1, nextSerial: 2 },
@@ -643,6 +737,7 @@ test("the start of an issued serial that is no serial is refused", () => {
 
 test("the plan reads the input without changing it", () => {
   const input = {
+    organizationPrefix: PREFIX,
     counters: [{ issuerPrefix: PREFIX, extension: 0, nextSerial: 18_500 }],
     blocks: [{ issuerPrefix: PREFIX, extension: 0, maxToSerial: 19_999, maxConsumedThrough: 3 }],
     printed: [{ issuerPrefix: PREFIX, extension: 0, maxSerial: 21_003 }],
@@ -732,4 +827,33 @@ test("shift numbers: the list is by month key and carries nothing but the key an
     { monthKey: "DEC25", lastSeq: 4 },
     { monthKey: "SEP26", lastSeq: 2 },
   ]);
+});
+
+test("a rollback window that is no positive whole number stops the export", () => {
+  for (const bad of [
+    0,
+    -5_000,
+    1.5,
+    Number.NaN,
+    "50",
+    null,
+    undefined,
+    Number.MAX_SAFE_INTEGER + 2,
+  ]) {
+    assert.throws(
+      () => windowOf(0, { box: bad, pallet: 100_000 }),
+      (error) => error instanceof RangeError && /rollback window/u.test(error.message),
+      `box window ${String(bad)}`,
+    );
+    assert.throws(
+      () => cloudReseedTo(30_000, 1, { box: 1_000_000, pallet: bad }),
+      (error) => error instanceof RangeError && /rollback window/u.test(error.message),
+      `pallet window ${String(bad)}`,
+    );
+  }
+  assert.equal(windowOf(0, { box: 1, pallet: 1 }), 1);
+  assert.equal(windowOf(1, { box: 1, pallet: 2 }), 2);
+  assert.equal(cloudReseedTo(30_000, 0, { box: 1, pallet: 1 }), 30_001);
+  // The window of the other extension is not looked at.
+  assert.equal(windowOf(0, { box: 5, pallet: "x" }), 5);
 });

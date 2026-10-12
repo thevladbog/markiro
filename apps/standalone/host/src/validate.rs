@@ -40,7 +40,12 @@ fn is_plain(text: &str, max: usize) -> bool {
 /// Free text after the one rule every text field shares: trimmed, then
 /// [`is_plain`] of at most `max` characters. `what` names the field in the
 /// diagnostic message; the error is `validation_failed` on `field`.
-fn clean_text<'a>(field: &str, text: &'a str, max: usize, what: &str) -> Result<&'a str, ApiError> {
+pub fn clean_text<'a>(
+    field: &str,
+    text: &'a str,
+    max: usize,
+    what: &str,
+) -> Result<&'a str, ApiError> {
     let text = text.trim();
     if is_plain(text, max) {
         Ok(text)

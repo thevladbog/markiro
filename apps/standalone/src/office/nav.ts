@@ -87,4 +87,10 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     sectionKey: "office.nav.sections.service",
     roles: ["admin", "technologist"],
   },
+  {
+    to: "/import",
+    labelKey: "office.nav.cloudImport",
+    sectionKey: "office.nav.sections.service",
+    roles: ["admin"],
+  },
 ];

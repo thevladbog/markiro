@@ -102,6 +102,12 @@ jobs:
       - run: pnpm test:dependency-guard
       - run: pnpm test:indexnow
       - run: pnpm test:rospatent
+      # The cloud → standalone export (plan IMP): its pure tests run here, its
+      # SQL test skips without a database and runs in verify-api-tests. The
+      # export's SSCC rules are compared with packages/domain, so build that
+      # first (the comparison skips explicitly when it is not built).
+      - run: pnpm turbo run build --filter=@markiro/domain
+      - run: pnpm test:standalone-export
       - run: pnpm test:handheld-release:contract
       # The CI policy suite guards this very file -- the reviewed workflow list,
       # the classifier's job gating, the trigger scopes. It was in the repository
@@ -158,6 +164,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @markiro/db db:migrate
+      # export.sql of the cloud → standalone export against the migrated
+      # cloud schema; it seeds and removes two tenants of its own.
+      - run: pnpm test:standalone-export
+        env:
+          STANDALONE_EXPORT_TEST_DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
       # `api#test` already declares `dependsOn: @markiro/db#test`, so the two
       # Postgres consumers stay serialized against the single database here.
       - run: pnpm turbo test --filter=@markiro/db --filter=@markiro/api --concurrency=1 --force

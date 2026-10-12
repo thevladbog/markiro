@@ -383,6 +383,12 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::backups::resume_facts),
         )
         .route(
+            "/v1/office/import",
+            post(crate::routes::cloud_import::import).layer(axum::extract::DefaultBodyLimit::max(
+                crate::routes::cloud_import::MAX_BODY_BYTES,
+            )),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

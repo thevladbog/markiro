@@ -272,6 +272,31 @@ test("deployment and release tooling selects its consuming jobs", () => {
   }
 });
 
+test("the cloud → standalone export runs its Node tests and its SQL against the cloud schema", () => {
+  for (const path of [
+    "tools/standalone-export/export.sql",
+    "tools/standalone-export/test/fixtures/seed-cloud.sql",
+  ]) {
+    assert.deepEqual(
+      enabledJobs(classifyChangedFiles([path])),
+      ["verify_static", "verify_api_tests"],
+      path,
+    );
+  }
+});
+
+test("the files the export tool compares itself with select the Node job that runs it", () => {
+  // The SSCC serial fixture and the golden file are read by tools/standalone-export/test;
+  // packages/domain's SSCC code is what its equivalence test imports.
+  for (const path of [
+    "apps/standalone/proto/fixtures/sscc-serials.json",
+    "apps/standalone/proto/fixtures/cloud-export-file.json",
+    "packages/domain/src/gs1/sscc.ts",
+  ]) {
+    assert.ok(enabledJobs(classifyChangedFiles([path])).includes("verify_static"), path);
+  }
+});
+
 test("documentation-only changes select no heavy job", () => {
   const result = classifyChangedFiles([
     "README.md",

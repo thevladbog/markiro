@@ -216,6 +216,9 @@ function jobsForPath(path) {
   // Node contracts for the Android release, so they run in the Node job -- the
   // handheld job is Gradle-only and has no pnpm.
   if (path.startsWith("tools/handheld-release/")) return ["verify_static"];
+  // The cloud → standalone export (plan IMP): its pure tests run in the Node
+  // job, its SQL against the migrated cloud schema in the API job.
+  if (path.startsWith("tools/standalone-export/")) return ["verify_static", "verify_api_tests"];
   if (path.startsWith("tools/production-browser/")) {
     return ["production_bundle"];
   }

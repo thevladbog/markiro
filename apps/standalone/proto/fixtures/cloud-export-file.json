@@ -1,0 +1,445 @@
+{
+  "format": "markiro-cloud-export",
+  "formatVersion": 1,
+  "tool": "standalone-export/1",
+  "exportedAt": "2026-10-09T18:30:00.000Z",
+  "rehearsal": false,
+  "checksum": "sha256:99628cca2f1715e1744c2c07fd887bd62236634926fe98c6880516e3a494469a",
+  "source": {
+    "tenantId": "imp-test-atoll",
+    "tenantName": "ООО «Атолл»"
+  },
+  "payload": {
+    "organization": {
+      "name": "ООО «Атолл»",
+      "inn": "7701234567",
+      "gln": "4600682000010",
+      "gs1Prefixes": ["4600682"],
+      "timeZone": "Europe/Moscow"
+    },
+    "badgeSalt": "bWFya2lyby1iYWRnZS0wMQ==",
+    "lines": [
+      {
+        "id": "0a0a0000-0000-4000-8000-000000000001",
+        "name": "Линия 1"
+      },
+      {
+        "id": "0a0a0000-0000-4000-8000-000000000002",
+        "name": "Упаковка"
+      },
+      {
+        "id": "0a0a0000-0000-4000-8000-000000000003",
+        "name": "линия 1 (2)"
+      }
+    ],
+    "counterparties": [
+      {
+        "id": "0c0c0000-0000-4000-8000-000000000001",
+        "name": "ООО «Берег»",
+        "inn": "7812345678",
+        "gln": "4601234000017",
+        "gs1Prefixes": ["4601234"]
+      },
+      {
+        "id": "0c0c0000-0000-4000-8000-000000000003",
+        "name": "АО «Дельта»",
+        "inn": null,
+        "gln": "4607000000014",
+        "gs1Prefixes": []
+      }
+    ],
+    "templates": [
+      {
+        "id": "0d0d0000-0000-4000-8000-000000000001",
+        "name": "Короб 58×40",
+        "purpose": "box",
+        "enabled": true,
+        "chzProductGroupCodes": null,
+        "spec": {
+          "dpi": 203,
+          "widthMm": 58,
+          "elements": [],
+          "heightMm": 40,
+          "language": "zpl"
+        }
+      },
+      {
+        "id": "0d0d0000-0000-4000-8000-000000000002",
+        "name": "Короб молочный",
+        "purpose": "box",
+        "enabled": true,
+        "chzProductGroupCodes": [8],
+        "spec": {
+          "dpi": 203,
+          "widthMm": 58,
+          "elements": [],
+          "heightMm": 60,
+          "language": "zpl"
+        }
+      },
+      {
+        "id": "0d0d0000-0000-4000-8000-000000000003",
+        "name": "Паллета 100×150",
+        "purpose": "pallet",
+        "enabled": true,
+        "chzProductGroupCodes": null,
+        "spec": {
+          "dpi": 203,
+          "widthMm": 100,
+          "elements": [],
+          "heightMm": 150,
+          "language": "zpl"
+        }
+      },
+      {
+        "id": "0d0d0000-0000-4000-8000-000000000004",
+        "name": "Дубликат",
+        "purpose": "product_duplicate",
+        "enabled": true,
+        "chzProductGroupCodes": null,
+        "spec": {
+          "dpi": 203,
+          "widthMm": 58,
+          "elements": [],
+          "heightMm": 40,
+          "language": "zpl"
+        }
+      },
+      {
+        "id": "0d0d0000-0000-4000-8000-000000000005",
+        "name": "Старый короб",
+        "purpose": "box",
+        "enabled": false,
+        "chzProductGroupCodes": null,
+        "spec": {
+          "dpi": 300,
+          "widthMm": 58,
+          "elements": [],
+          "heightMm": 40,
+          "language": "tspl"
+        }
+      }
+    ],
+    "templateDefaults": {
+      "defaultBoxTemplateId": "0d0d0000-0000-4000-8000-000000000001",
+      "defaultPalletTemplateId": "0d0d0000-0000-4000-8000-000000000003",
+      "categories": [
+        {
+          "chzProductGroupCode": 8,
+          "purpose": "box",
+          "templateId": "0d0d0000-0000-4000-8000-000000000002"
+        },
+        {
+          "chzProductGroupCode": 8,
+          "purpose": "pallet",
+          "templateId": "0d0d0000-0000-4000-8000-000000000003"
+        }
+      ]
+    },
+    "products": [
+      {
+        "id": "0e0e0000-0000-4000-8000-000000000001",
+        "gtin14": "04600682000013",
+        "name": "Молоко 3,2% 0,9 л",
+        "printName": "Молоко 3,2%",
+        "chzProductGroupCode": 8,
+        "boxCapacity": 12,
+        "palletBoxCapacity": 40,
+        "shelfLifeDays": 10,
+        "defaultBoxTemplateId": "0d0d0000-0000-4000-8000-000000000002",
+        "defaultPalletTemplateId": null,
+        "archived": false
+      },
+      {
+        "id": "0e0e0000-0000-4000-8000-000000000002",
+        "gtin14": "04600682000020",
+        "name": "Вода яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+        "printName": null,
+        "chzProductGroupCode": 13,
+        "boxCapacity": 6,
+        "palletBoxCapacity": null,
+        "shelfLifeDays": null,
+        "defaultBoxTemplateId": null,
+        "defaultPalletTemplateId": "0d0d0000-0000-4000-8000-000000000003",
+        "archived": false
+      },
+      {
+        "id": "0e0e0000-0000-4000-8000-000000000003",
+        "gtin14": "04600682000013",
+        "name": "Молоко (старая карточка)",
+        "printName": null,
+        "chzProductGroupCode": 8,
+        "boxCapacity": 12,
+        "palletBoxCapacity": 40,
+        "shelfLifeDays": null,
+        "defaultBoxTemplateId": null,
+        "defaultPalletTemplateId": null,
+        "archived": true
+      }
+    ],
+    "operators": [
+      {
+        "id": "0f0f0000-0000-4000-8000-000000000001",
+        "login": "0042",
+        "name": "Анна Кузнецова",
+        "role": "Оператор линии",
+        "pinPhc": "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+        "active": true
+      },
+      {
+        "id": "0f0f0000-0000-4000-8000-000000000002",
+        "login": "117",
+        "name": "Пётр Сидоров",
+        "role": null,
+        "pinPhc": "pbkdf2$sha256$100000$bWFya2lyby1waW4tdHdvIQ==$QVZc+yU8wJn39tbKU3wt1Q2wIycAv4j5TS8wJZxy3u8=",
+        "active": false
+      },
+      {
+        "id": "0f0f0000-0000-4000-8000-000000000004",
+        "login": "205",
+        "name": "Ольга Архивная",
+        "role": null,
+        "pinPhc": "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+        "active": false
+      }
+    ],
+    "badges": [
+      {
+        "id": "0b0b0000-0000-4000-8000-000000000001",
+        "operatorId": "0f0f0000-0000-4000-8000-000000000001",
+        "badgePhc": "pbkdf2$sha256$100000$bWFya2lyby1iYWRnZS0wMQ==$CFQuvVuv7iz+ANkhgZVnO2k8iP67A2gex7JV7uWRayo=",
+        "label": "Пропуск 1"
+      },
+      {
+        "id": "0b0b0000-0000-4000-8000-000000000002",
+        "operatorId": "0f0f0000-0000-4000-8000-000000000001",
+        "badgePhc": "pbkdf2$sha256$100000$bWFya2lyby1iYWRnZS0wMQ==$5wci3Wka6fKZDuXLxiSxhZ+gzdMQw/NMSbCU7QI3xOQ=",
+        "label": null
+      },
+      {
+        "id": "0b0b0000-0000-4000-8000-000000000003",
+        "operatorId": "0f0f0000-0000-4000-8000-000000000002",
+        "badgePhc": "pbkdf2$sha256$100000$bWFya2lyby1iYWRnZS0wMQ==$iQQaQcgfnmironGPSppRAC7eD2OKnyBx2k5/EU/0MLE=",
+        "label": "Запасной бейдж"
+      }
+    ],
+    "ssccCounters": [
+      {
+        "issuerPrefix": "460068200",
+        "extension": 0,
+        "nextSerial": 30000
+      },
+      {
+        "issuerPrefix": "460068200",
+        "extension": 1,
+        "nextSerial": 10000
+      },
+      {
+        "issuerPrefix": "460123400",
+        "extension": 0,
+        "nextSerial": 1
+      },
+      {
+        "issuerPrefix": "460999900",
+        "extension": 0,
+        "nextSerial": 10000
+      }
+    ],
+    "shiftNumberCounters": [
+      {
+        "monthKey": "NOV26",
+        "lastSeq": 1
+      },
+      {
+        "monthKey": "OCT26",
+        "lastSeq": 7
+      },
+      {
+        "monthKey": "SEP26",
+        "lastSeq": 41
+      }
+    ]
+  },
+  "cutover": {
+    "boxWindow": 1000000,
+    "palletWindow": 100000,
+    "ssccCounters": [
+      {
+        "issuerPrefix": "460068200",
+        "extension": 0,
+        "owner": {
+          "kind": "organization"
+        },
+        "issuedMax": 21003,
+        "printedMax": 21003,
+        "standaloneStart": 30000,
+        "cloudReseedTo": 1030000
+      },
+      {
+        "issuerPrefix": "460068200",
+        "extension": 1,
+        "owner": {
+          "kind": "organization"
+        },
+        "issuedMax": 400,
+        "printedMax": 250,
+        "standaloneStart": 10000,
+        "cloudReseedTo": 110000
+      },
+      {
+        "issuerPrefix": "460123400",
+        "extension": 0,
+        "owner": {
+          "kind": "counterparty",
+          "id": "0c0c0000-0000-4000-8000-000000000001",
+          "name": "ООО «Берег»"
+        },
+        "issuedMax": null,
+        "printedMax": null,
+        "standaloneStart": 1,
+        "cloudReseedTo": 1000001
+      },
+      {
+        "issuerPrefix": "460999900",
+        "extension": 0,
+        "owner": {
+          "kind": "unknown"
+        },
+        "issuedMax": 777,
+        "printedMax": 777,
+        "standaloneStart": 10000,
+        "cloudReseedTo": 1010000
+      }
+    ]
+  },
+  "notes": [
+    {
+      "code": "gs1_prefix_dropped",
+      "entity": "organization",
+      "value": "46x"
+    },
+    {
+      "code": "line_renamed",
+      "id": "0a0a0000-0000-4000-8000-000000000003",
+      "from": " линия 1 ",
+      "to": "линия 1 (2)"
+    },
+    {
+      "code": "counterparty_dropped",
+      "id": "0c0c0000-0000-4000-8000-000000000002",
+      "reason": "gln"
+    },
+    {
+      "code": "inn_dropped",
+      "entity": "counterparties",
+      "id": "0c0c0000-0000-4000-8000-000000000003"
+    },
+    {
+      "code": "counterparty_notes_lost",
+      "count": 1
+    },
+    {
+      "code": "template_dropped",
+      "id": "0d0d0000-0000-4000-8000-000000000006",
+      "reason": "spec_not_object"
+    },
+    {
+      "code": "template_dropped",
+      "id": "0d0d0000-0000-4000-8000-000000000007",
+      "reason": "pallet_sheet"
+    },
+    {
+      "code": "template_default_dropped",
+      "purpose": "box",
+      "chzProductGroupCode": 13,
+      "templateId": "0d0d0000-0000-4000-8000-000000000005"
+    },
+    {
+      "code": "pallet_sheet_defaults_lost",
+      "count": 2
+    },
+    {
+      "code": "text_changed",
+      "entity": "products",
+      "id": "0e0e0000-0000-4000-8000-000000000002",
+      "field": "name"
+    },
+    {
+      "code": "product_value_cleared",
+      "id": "0e0e0000-0000-4000-8000-000000000002",
+      "field": "palletBoxCapacity"
+    },
+    {
+      "code": "product_value_cleared",
+      "id": "0e0e0000-0000-4000-8000-000000000002",
+      "field": "shelfLifeDays"
+    },
+    {
+      "code": "product_template_dropped",
+      "id": "0e0e0000-0000-4000-8000-000000000003",
+      "templateId": "0d0d0000-0000-4000-8000-000000000004"
+    },
+    {
+      "code": "product_dropped",
+      "id": "0e0e0000-0000-4000-8000-000000000004",
+      "reason": "gtin"
+    },
+    {
+      "code": "product_fields_lost",
+      "field": "egaisCode",
+      "count": 1
+    },
+    {
+      "code": "product_fields_lost",
+      "field": "externalRef",
+      "count": 1
+    },
+    {
+      "code": "product_fields_lost",
+      "field": "price",
+      "count": 1
+    },
+    {
+      "code": "text_changed",
+      "entity": "operators",
+      "id": "0f0f0000-0000-4000-8000-000000000002",
+      "field": "name"
+    },
+    {
+      "code": "operator_dropped",
+      "id": "0f0f0000-0000-4000-8000-000000000003",
+      "reason": "login"
+    },
+    {
+      "code": "operator_dropped",
+      "id": "0f0f0000-0000-4000-8000-000000000005",
+      "reason": "pin"
+    },
+    {
+      "code": "badge_dropped",
+      "id": "0b0b0000-0000-4000-8000-000000000005",
+      "reason": "operator"
+    },
+    {
+      "code": "badge_dropped",
+      "id": "0b0b0000-0000-4000-8000-000000000004",
+      "reason": "code"
+    },
+    {
+      "code": "badges_rehashed",
+      "count": 2
+    },
+    {
+      "code": "badges_not_operators",
+      "count": 2
+    },
+    {
+      "code": "counterparty_sscc_used",
+      "count": 1
+    },
+    {
+      "code": "planned_shifts_not_moved",
+      "count": 2
+    }
+  ]
+}
