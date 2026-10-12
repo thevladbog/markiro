@@ -2502,3 +2502,17 @@ snapshots remove only the exact ordered additive step; their existing byte/AST
 hashes stay unchanged, and malformed additions remain visible. Local checks passed
 108/108 without skips, and the real two-package bootstrap build passed. Remote
 CI completion is a separate gate to be checked against the pushed source SHA.
+
+The following run passed the bootstrap, Node tooling, corrected Cases and special
+dataset checks, then exposed a Receiving timeout-witness reporter mismatch. ANSI
+formatting interrupted its exact summary regex and coloured its boolean marker.
+The witness now removes terminal control formatting after child closure, before
+the same assertions. It deliberately requests coloured child output; local
+verification also disabled agent-detection metadata, which otherwise makes Vitest
+silently turn colours off. No process-access restriction was changed.
+
+A real coloured runner reproduced the summary failure before normalization. The
+entire Receiving lifecycle file then passed 38/38 without skips in 28.66 seconds.
+The 50-ms fault budgets, exact child failure/skip counts, no-reprovision guard,
+single provision, drain ordering and verified owned-database absence remain
+unchanged. This is a test-output correction, not a relaxed timeout or runtime fix.

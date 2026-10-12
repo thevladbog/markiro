@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { schema } from "@markiro/db";
 import { receivingAmendmentDraftSchema } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
@@ -90,7 +91,9 @@ async function witnessTimedOutReceivingPhase() {
       };
     `,
     );
-    const environment = { ...process.env };
+    // Exercise the coloured reporter that GitHub uses, even on a NO_COLOR host.
+    const environment: typeof process.env = { ...process.env, FORCE_COLOR: "1" };
+    delete environment.NO_COLOR;
     delete environment.DATABASE_URL;
     const child = spawn(
       process.execPath,
@@ -111,6 +114,7 @@ async function witnessTimedOutReceivingPhase() {
       child.once("error", reject);
       child.once("close", done);
     });
+    output = stripVTControlCharacters(output);
     expect(exitCode).toBe(1);
     expect(output).toMatch(/Tests\s+2 failed \| 36 skipped \(38\)/);
     expect(output).not.toMatch(/Failed Suites|Unhandled Errors|Unhandled Rejection/);
