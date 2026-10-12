@@ -930,7 +930,13 @@ Organization logo and A4 sheets (plan А4). The organization has one printing lo
 base64, which the office prepares in the browser (`decodeLogoFile` → `logoFromRgba` of the
 domain → `logoToWire`, `src/labels/logo.ts`) and the host only checks (size, length, canonical
 spelling, zero padding bits of every row — it parses no picture, so no script or external
-reference in an SVG ever reaches it). `GET/PUT/DELETE /v1/office/org/logo`; the last write wins,
+reference in an SVG ever reaches it). The office's own guards on the untrusted file: a type of
+`LOGO_FILE_TYPES` and at most `MAX_LOGO_FILE_BYTES` (4 MiB) before a byte is read — a cap on the
+FILE, not on what decoding it costs — and, for PNG, JPEG and WebP, at most
+`MAX_LOGO_SOURCE_PIXELS` (8192 × 4096) declared pixels, read once the picture has loaded and
+before `decode()` or a canvas (`too_many_pixels`), so a small file declaring a huge picture
+does not take the office window down; an SVG is drawn at the logo's size and its declared size
+is not counted. `GET/PUT/DELETE /v1/office/org/logo`; the last write wins,
 the logo takes no revision and is not in the change feed (a shift freezes it, see «Shifts»).
 Without one, every print takes the bundled `src/assets/markiro-print-logo.svg`
 (`loadBundledMarkiroLogo`, decoded once in the webview; where it cannot be decoded a thermal
@@ -3280,7 +3286,9 @@ other word, as no profile — the form's `settleDraft` keeps the draft consisten
 box or duplicate assignment of such a printer as not assigned, `resolvePrinter`,
 `printerForAgain` (own, chosen and the purpose's printer alike) and the lists of «Другой принтер»
 and of the setup all leave it out of any other purpose. The printer chooses the format, nothing
-prints twice: a pallet job whose printer is A4 is rendered by `shiftLabelRender` →
+prints twice (a thermal or driver label of `shiftLabelRender` gets the caller's rasterizer as it
+is, so a driver page keeps `rasterizeDriverText` and the bundled face): a pallet job whose
+printer is A4 is rendered by `shiftLabelRender` →
 `renderShiftSheet` — the sheet, the organization's name, INN and logo (the bundled Markiro logo
 when the shift froze none) the SHIFT FROZE, the SSCC and counts of the pallet's label fields, the
 shift's production date (never the pallet's close day; the expiry is the domain's, the production
