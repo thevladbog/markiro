@@ -568,3 +568,54 @@ describe("a box closed on a printer in driver mode, end to end", () => {
     },
   );
 });
+
+describe("the print runtime's A4 paper (plan А4)", () => {
+  it("passes the paper A4 to the shell's driver call, and nothing for a label", async () => {
+    const shell = fakeHardware();
+    const { windows, prints } = fakeWindows();
+    const runtime = createPrintRuntime(shell.hardware.printBytes, {
+      windows,
+      newDocumentId: () => DOC_ID,
+    });
+    await runtime.send("job-1", GODEX.target, new Uint8Array([1]), "windows_driver", "a4");
+    await runtime.send("job-2", GODEX.target, new Uint8Array([2]), "windows_driver");
+    expect(vi.mocked(windows.printWindowsRaster).mock.calls).toEqual([
+      ["Godex G500", new Uint8Array([1]), `Markiro:${DOC_ID}`, "a4"],
+      ["Godex G500", new Uint8Array([2]), `Markiro:${DOC_ID}`],
+    ]);
+    expect(prints).toHaveLength(2);
+    expect(shell.sends).toEqual([]);
+  });
+
+  it("never gives an A4 sheet to a RAW printer: refused as invalid_target, nothing sent", async () => {
+    const shell = fakeHardware();
+    const { windows, prints } = fakeWindows();
+    const runtime = createPrintRuntime(shell.hardware.printBytes, { windows });
+    for (const mode of ["raw", undefined] as const) {
+      await expect(
+        runtime.send("job-1", ZEBRA.target, new Uint8Array([1]), mode, "a4"),
+      ).resolves.toEqual({ kind: "answered", result: { sent: false, code: "invalid_target" } });
+    }
+    expect(shell.sends).toEqual([]);
+    expect(prints).toEqual([]);
+    // A sheet bound for a Windows queue in RAW mode is refused too, whatever the queue.
+    await expect(
+      runtime.send("job-2", GODEX.target, new Uint8Array([1]), "raw", "a4"),
+    ).resolves.toEqual({ kind: "answered", result: { sent: false, code: "invalid_target" } });
+    expect(shell.sends).toEqual([]);
+  });
+
+  it("keeps the spooler receipt of a sheet like a label's", async () => {
+    const shell = fakeHardware();
+    const { windows } = fakeWindows();
+    const runtime = createPrintRuntime(shell.hardware.printBytes, {
+      windows,
+      newDocumentId: () => DOC_ID,
+    });
+    await runtime.send("job-1", GODEX.target, new Uint8Array([1]), "windows_driver", "a4");
+    await expect(runtime.checkWindowsJob("job-1")).resolves.toEqual({
+      state: "present",
+      statusFlags: 0,
+    });
+  });
+});

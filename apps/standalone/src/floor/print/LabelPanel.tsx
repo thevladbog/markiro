@@ -8,6 +8,7 @@ import { Alert, Button } from "@markiro/ui";
 import { REPRINT_REASONS } from "../exception-reasons.js";
 import {
   printerMode,
+  printsPurpose,
   type PrinterProfile,
   type WorkstationSettings,
 } from "../setup/workstation-settings.js";
@@ -313,6 +314,8 @@ export function LabelPanel({
       </Alert>
     );
   } else if (mode.kind === "printers") {
+    // A printer of A4 sheets (plan А4) is offered for a pallet's label only.
+    const choices = mode.printers?.filter((printer) => printsPurpose(printer, job.purpose)) ?? null;
     body = (
       <Alert
         tone="warn"
@@ -321,11 +324,9 @@ export function LabelPanel({
         className="work-screen__label"
       >
         <p>{sscc}</p>
-        {mode.printers !== null && mode.printers.length === 0 && (
-          <p>{t("floor.print.printers.none")}</p>
-        )}
+        {choices !== null && choices.length === 0 && <p>{t("floor.print.printers.none")}</p>}
         <div className="standalone-form__actions">
-          {(mode.printers ?? []).map((printer) => (
+          {(choices ?? []).map((printer) => (
             <Button key={printer.id} size="floor" {...press(() => again(printer))}>
               {t("floor.print.printers.option", {
                 name: printer.name,

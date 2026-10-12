@@ -57,6 +57,8 @@ export async function palletStation(
     boxCapacity?: number;
     palletBlock?: boolean;
     settings?: Partial<WorkstationSettings>;
+    /** What the host froze besides the layouts (plan А4): `snapshot.palletSheet` and `.organization`, as the wire has them. */
+    frozen?: Record<string, unknown>;
   } = {},
 ): Promise<PalletStation> {
   const { db, executor } = openLocalDb();
@@ -64,6 +66,7 @@ export async function palletStation(
     ...PALLETS_ENTERED,
     boxCapacity: options.boxCapacity ?? PALLETS_ENTERED.boxCapacity,
     palletBoxCapacity: options.capacity ?? 3,
+    snapshot: { ...PALLETS_ENTERED.snapshot, ...options.frozen },
   });
   const pallets = shiftPallets(shift);
   if (pallets === null) throw new Error("the shift has no pallets");

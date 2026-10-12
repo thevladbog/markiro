@@ -925,6 +925,27 @@ bring bwip-js, about 0.9 MB) and the font check (opentype.js, about 0.2 MB)
 load on demand as chunks of their own (`label-print.ts`,
 `BROWSER_LABEL_RENDERING`), so the main chunk stays near 876 kB.
 
+Organization logo and A4 sheets (plan А4). The organization has one printing logo, `org_logo`
+(migration `0016`): a 1-bit bitmap up to 1024 × 512 dots, at most 90 000 characters of canonical
+base64, which the office prepares in the browser (`decodeLogoFile` → `logoFromRgba` of the
+domain → `logoToWire`, `src/labels/logo.ts`) and the host only checks (size, length, canonical
+spelling, zero padding bits of every row — it parses no picture, so no script or external
+reference in an SVG ever reaches it). `GET/PUT/DELETE /v1/office/org/logo`; the last write wins,
+the logo takes no revision and is not in the change feed (a shift freezes it, see «Shifts»).
+Without one, every print takes the bundled `src/assets/markiro-print-logo.svg`
+(`loadBundledMarkiroLogo`, decoded once in the webview; where it cannot be decoded a thermal
+label leaves the `organization_logo` box empty and a sheet does not render). The A4 sheets are a
+library of their own, `pallet_sheet_templates`, because every consumer of `label_templates`
+reads the layout as a V1 label: a row's `spec` is the domain's `PalletSheetSpecV2` (at most
+64 KiB), which the host checks only for `schemaVersion: 2` and `kind: "pallet_sheet"` — the
+layout is the domain's to read (`parsePalletSheetSpec`), in the office and on the station.
+`GET/POST /v1/office/pallet-sheets`, `PUT/DELETE …/{id}`, `PUT /v1/office/pallet-sheet-default`;
+the stock sheets of `buildPalletSheetPresets()` are added by `presetKey` and idempotently, the
+main sheet is the organization's default (it cannot be switched off or deleted), and a sheet a
+planned shift names cannot be deleted. Sheets are not in the station's feed: the station prints a
+sheet only from a shift's snapshot. Preview and print draw through one function,
+`renderSheetRaster` (`src/labels/sheet-render.ts`), at A4's nominal geometry.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
@@ -2731,6 +2752,21 @@ shift is plan 2b's). The status bar reads its own three outbox statements, so
 calls it repeatedly adds its exact text (`acked_at IS NULL AND host_id = ? AND
 device_id = ?`, not the order the Node list pins) to both query-plan lists.
 
+A shift's A4 sheet and organization (plan А4). A shift with pallets may name a sheet
+(`palletSheetTemplateId`, only with pallets — a database trigger and the routes refuse it
+otherwise; without a request the host takes the main sheet, a shift made on a station always
+does). `shifts::snapshot` freezes, when the shift is opened, the sheet (`palletSheet`: id, name,
+revision and the whole spec) and the organization (`organization`: name, INN, logo as
+`width`/`height`/`pixelsBase64`) into the snapshot beside the layouts, and nothing re-reads them
+for that shift: renaming, switching off, deleting the sheet, changing the organization or its
+logo changes the NEXT shift only. A sheet switched off after the shift was planned is frozen as
+it is; a sheet missing from the table is frozen as none (never replaced by another). The station
+reads them in `checkShiftSnapshot` (`palletSheet`, `organization`): a layout or logo the build
+does not read is `null`, not a refusal of the shift — the thermal labels still print and an A4
+print of that shift ends `render_failed`. The snapshot keeps its bound of 327 680 bytes, so a big
+sheet or logo can make the entry `snapshot_too_large`; the station table is unchanged (the
+snapshot is the text of `floor_shifts.snapshot`).
+
 ## Facts
 
 Stage 2a, plan 2a2 (`host/src/facts`). A station sends what happened on the
@@ -3218,17 +3254,54 @@ kept in memory by the runtime (one that answered after the limit too; a new send
 it, a restart loses it) for «Проверить очередь Windows» on the label panel (unknown, or a
 check waiting; driver printers only), whose answer is diagnostic and decides nothing.
 `printAgain` renders again when the way of printing changes, even at one language and
-resolution. The setup offers «Способ печати» for a Windows queue only where
+resolution (and when the paper changes, below). The setup offers «Способ печати» for a Windows queue only where
 `supports_windows_printing` is `true` (or the profile is already in driver mode), hides the
 language in driver mode, says the driver's paper and resolution must match, and prints its
 test label either way; the screens name a driver profile's format «Драйвер Windows»
 (`printerFormatText`). Not done (plan ДРВ «Перенесено»): receipts in the database, the
-saved raster's preview, a separate preflight, A4 sheets (plan A4). Not verified (never run
+saved raster's preview, a separate preflight (A4 sheets are plan А4, next paragraph). Not verified (never run
 on Windows or a real printer): the spooler and GDI calls, real drivers' behaviour with
 user-size paper and their reported resolution, IBM Plex loading through `document.fonts`
 in WebView2 (`rasterizeDriverText` refuses if it does not load), and the ≥64 px
 production-browser contract of the new setup controls; the manual list is in
 `docs/runbooks/standalone-install.md`.
+
+Paper «Лист А4» (plan А4, `src/floor/print/shift-render.ts`, `src/floor/setup/a4-test.ts`). A
+driver profile may carry `paper: "a4"` in the `printers` setting: only with
+`mode: "windows_driver"` and `dpi: 300` (`parsePrinterProfile` reads any other combination, and any
+other word, as no profile — the form's `settleDraft` keeps the draft consistent and
+`profileOf` refuses with `paper`), and only for the purpose «Паллета»: `parsePrinters` reads a
+box or duplicate assignment of such a printer as not assigned, `resolvePrinter`,
+`printerForAgain` (own, chosen and the purpose's printer alike) and the lists of «Другой принтер»
+and of the setup all leave it out of any other purpose. The printer chooses the format, nothing
+prints twice: a pallet job whose printer is A4 is rendered by `shiftLabelRender` →
+`renderShiftSheet` — the sheet, the organization's name, INN and logo (the bundled Markiro logo
+when the shift froze none) the SHIFT FROZE, the SSCC and counts of the pallet's label fields, the
+shift's production date (never the pallet's close day; the expiry is the domain's, the production
+day being day one) — to `mono-raster-v1` bytes, whose required area the shell checks against the
+printer's printable area before it sends (`geometry_mismatch`, a refusal before the spooler). The
+job is the ordinary one: `template_id`/`template_rev` are the snapshot's THERMAL pallet template,
+`fields` the label's, `bytes_base64` the page, `printer` the profile with its paper, the same
+states, check by scan of the pallet SSCC, one job per pallet close (the sheet replaces the
+thermal label of the pallet, the box's label goes first as before), and a reprint of a closed
+pallet is a new job of the same pallet and SSCC. A shift that froze no sheet or no organization
+cannot render one: the pallet closes, the job is `failed` `render_failed` with no bytes, and the
+recovery's «Другой принтер» prints the thermal label elsewhere. `printAgain` reuses the job's
+bytes only when the mode, the paper, the language and the resolution of the profile are the
+job's; otherwise it renders again from the snapshot (a sheet from a label job and the thermal
+label from a sheet job alike). The runtime's `send(jobId, target, bytes, mode, paper)` hands
+`paper` to `print_windows_raster` only for `"a4"` (a label's call is as it was) and refuses an
+A4 sheet bound for RAW as `invalid_target`, sending nothing. The setup's «Бумага» field appears
+for a Windows queue in driver mode; «Лист А4» sets 300 dpi and locks the resolution, and a
+printer made A4 loses its box and duplicate assignments. «Пробная печать» on an A4 printer
+prints the stock portrait sheet of `a4TestSheet` (synthetic SSCC of the company prefix 9999,
+the bundled logo, drawn by the same `renderSheetRaster` as a real sheet) through the driver
+with the paper A4, shows the very raster at a sixth on a canvas, and takes the scan of the
+sheet's SSCC; a change of the printer's paper (or its removal) forgets that test and drops the
+answer of one still on its way. The 20 s send limit is the label's: an A4 spool of about 1 MB
+can run past it and end `unknown` `timeout`, which the operator decides, and the queue is
+freed at 30 s while the Win32 call may run on (plan ДРВ's note). Not verified: see the end of
+this file.
 
 A job (`floor_print_jobs`, `print-jobs.ts`) walks `prepared → sending → sent`,
 then `verified` or `skipped` when the job asks for the label check (`verify`, the
@@ -4432,3 +4505,16 @@ either; a file log is stage 5.
   `explorer.exe` opens for a form's `.html`, Cyrillic and DataMatrix on paper,
   nor a card of thousands of boxes; «Бланк смены»'s DataMatrix scanned by a
   station is plan 2a5's.
+- A4 sheets (plan А4) have run only under jsdom, fake hosts and the Rust code of the
+  shell on the development machine (pure arithmetic and a fake driver): never a real laser or
+  inkjet printer on Windows — `DMPAPER_A4` taken by a real driver, orientation, simplex and
+  copies, the 1:1 whole-number scale of `StretchDIBits` (a driver that answers 0 for a scaled
+  blit would end every sheet `delivery_unknown`), the printable area against `GetDeviceCaps`,
+  margins and the 0.5 mm guard measured with a ruler, a 1 MB spool, a driver refusal, paper out, an
+  unavailable queue, a restart in the middle of a job, and the SSCC of both halves of the two-A5
+  sheet scanned after cutting. Not run either: the decoding of the logo images (PNG, JPEG,
+  WebP, SVG) and of the bundled Markiro SVG in WebView2 (jsdom decodes none; the tests give a
+  decoder), IBM Plex loading for `rasterizeSheetText` offline in WebView2 and the office
+  preview matching the station's print on one PC, the Windows branches of the shell
+  (`#[cfg(windows)]` compiles only in a Windows job — type-checked by a probe crate, never built
+  by CI here), and the legibility of the 1-bit logo on a real 203/300 dpi thermal label.

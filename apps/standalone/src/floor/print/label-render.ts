@@ -18,6 +18,8 @@ export interface LabelPrinter {
   dpi: PrinterDpi;
   /** `windows_driver` — a `mono-raster-v1` page for the Windows driver (plan ДРВ); absent — the language. */
   mode?: PrinterMode;
+  /** «Лист А4» (plan А4): the shift's A4 sheet instead of the label; only with the driver at 300 dpi. */
+  paper?: "a4";
 }
 
 /** A label's fields, as the domain gives them for its template. */

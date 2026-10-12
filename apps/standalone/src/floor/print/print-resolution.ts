@@ -12,6 +12,7 @@ import {
 } from "../facts.js";
 import {
   printerMode,
+  printsPurpose,
   resolvePrinter,
   type PrinterProfile,
   type WorkstationSettings,
@@ -229,15 +230,20 @@ export interface PrintAgain {
   printer: PrinterProfile | null;
 }
 
-/** The printer a print again goes to. */
+/**
+ * The printer a print again goes to. A printer of A4 sheets (plan А4) takes a
+ * pallet's job only: for a box's, whichever way it was named — chosen, the
+ * job's own profile that was changed to A4 since, or the purpose's — there is
+ * no printer, and nothing is rendered or sent.
+ */
 export function printerForAgain(
   job: Pick<PrintJob, "printer" | "purpose">,
   settings: Pick<WorkstationSettings, "printers" | "assignments">,
   chosen: PrinterProfile | null,
 ): PrinterProfile | null {
-  if (chosen !== null) return chosen;
   const own = job.printer === null ? null : settings.printers.find((p) => p.id === job.printer?.id);
-  return own ?? resolvePrinter(settings, job.purpose);
+  const printer = chosen ?? own ?? resolvePrinter(settings, job.purpose);
+  return printer !== null && printsPurpose(printer, job.purpose) ? printer : null;
 }
 
 /**
@@ -248,9 +254,10 @@ export function printerForAgain(
  * exception in the transaction that marks the job `sending`. The bytes are
  * the job's when the printer's language and resolution are the job's, and
  * rendered again from the shift's snapshot otherwise — another language,
- * resolution or way of printing (plan ДРВ; `template` must be the job's own
- * revision). No printer — `NoPrinterError`; no render —
- * `LabelRenderError`; neither changes or sends anything.
+ * resolution, way of printing (plan ДРВ) or paper (plan А4: a pallet's sheet
+ * or its thermal label; `template` must be the job's own revision). No
+ * printer — `NoPrinterError`; no render — `LabelRenderError`; neither
+ * changes or sends anything.
  *
  * Known limit: a rebind overwrites the job's printer and bytes, and the
  * reprint exception has no field that could name the printer the first label
@@ -276,10 +283,12 @@ export async function printAgain(
   const printer = printerForAgain(job, settings, request.printer);
   if (printer === null) throw new NoPrinterError();
   let bytesBase64 = job.bytesBase64;
-  // A driver page and a RAW document are other bytes even at one language and resolution (plan ДРВ).
+  // A driver page and a RAW document are other bytes even at one language and resolution (plan ДРВ),
+  // and an A4 sheet is other bytes than a label of the same printer settings (plan А4).
   const sameRender =
     job.printer !== null &&
     printerMode(job.printer) === printerMode(printer) &&
+    job.printer.paper === printer.paper &&
     job.printer.language === printer.language &&
     job.printer.dpi === printer.dpi;
   if (bytesBase64 === null || !sameRender) {

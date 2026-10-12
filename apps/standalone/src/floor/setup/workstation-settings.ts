@@ -47,6 +47,13 @@ export interface PrinterProfile {
    * in driver mode: the last RAW language, for switching back.
    */
   mode?: PrinterMode;
+  /**
+   * «Лист А4» (plan А4): the printer takes A4 sheets through its Windows
+   * driver at 300 dpi; only the purpose «Паллета» may print on it, and it
+   * prints the shift's A4 sheet instead of the thermal pallet label. Left out
+   * for a label printer.
+   */
+  paper?: "a4";
 }
 
 /** The workstation's sound: the verdict tones' level, 0–100, or none at all. */
@@ -195,7 +202,28 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   // A way of printing this build does not know is no profile; the driver prints to a Windows queue only.
   if (row["mode"] !== undefined && mode === undefined) return null;
   if (mode === "windows_driver" && target.kind !== "usb") return null;
-  return { id, name, target, language, dpi, ...(mode === undefined ? {} : { mode }) };
+  // An A4 sheet goes through a Windows driver at 300 dpi and nowhere else (plan А4).
+  const paper = row["paper"];
+  if (paper !== undefined && (paper !== "a4" || mode !== "windows_driver" || dpi !== 300)) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    target,
+    language,
+    dpi,
+    ...(mode === undefined ? {} : { mode }),
+    ...(paper === "a4" ? { paper: "a4" as const } : {}),
+  };
+}
+
+/**
+ * Whether a printer may print for `purpose`: a printer of A4 sheets prints
+ * pallets only (plan А4) — a box or duplicate label never goes to it.
+ */
+export function printsPurpose(profile: Pick<PrinterProfile, "paper">, purpose: PrintPurpose) {
+  return profile.paper !== "a4" || purpose === "pallet";
 }
 
 /**
@@ -232,6 +260,12 @@ export function parsePrinters(
   for (const purpose of PRINT_PURPOSES) {
     const id = stored?.[purpose];
     assignments[purpose] = typeof id === "string" ? (aliases.get(id) ?? null) : null;
+  }
+  // An A4 sheet printer prints pallets only (plan А4): box and duplicate labels never go to it.
+  for (const purpose of PRINT_PURPOSES) {
+    const id = assignments[purpose];
+    const printer = printers.find((candidate) => candidate.id === id);
+    if (printer !== undefined && !printsPurpose(printer, purpose)) assignments[purpose] = null;
   }
   return { printers, assignments };
 }
@@ -381,7 +415,9 @@ export function resolvePrinter(
   purpose: PrintPurpose,
 ): PrinterProfile | null {
   const id = settings.assignments[purpose];
-  return settings.printers.find((printer) => printer.id === id) ?? null;
+  const printer = settings.printers.find((candidate) => candidate.id === id) ?? null;
+  // Whatever the settings object says, an A4 printer takes no label but a pallet's (plan А4).
+  return printer !== null && printsPurpose(printer, purpose) ? printer : null;
 }
 
 /**

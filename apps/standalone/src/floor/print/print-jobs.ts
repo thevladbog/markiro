@@ -513,6 +513,7 @@ export async function sendLabelJob(
     printer.target,
     base64ToBytes(bytesBase64),
     printerMode(printer),
+    printer.paper,
   );
   const settled = settleOutcome(outcome);
   try {

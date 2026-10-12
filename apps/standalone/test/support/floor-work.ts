@@ -10,7 +10,7 @@ import {
   readStoredWork,
   type WorkShift,
 } from "../../src/floor/shifts/shift-copies.js";
-import type { SnapshotOrganization } from "../../src/floor/shifts/shift-snapshot.js";
+import type { SnapshotOrganization, SnapshotSheet } from "../../src/floor/shifts/shift-snapshot.js";
 import type { ScanContext } from "../../src/floor/work/scan-pipeline.js";
 import { enteredShiftSchema, type CodeCheck, type EnteredShift } from "../../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../src/local/executor.js";
@@ -68,6 +68,19 @@ export async function workShift(organization: SnapshotOrganization | null): Prom
   const { executor } = openLocalDb();
   const shift = await enteredShift(executor);
   return { ...shift, snapshot: { ...shift.snapshot, organization } };
+}
+
+/**
+ * The entered shift with the A4 sheet and the organization as its snapshot
+ * froze them (plan А4): what `renderShiftSheet` reads, the shift not stored again.
+ */
+export async function sheetedShift(frozen: {
+  palletSheet: SnapshotSheet | null;
+  organization: SnapshotOrganization | null;
+}): Promise<WorkShift> {
+  const { executor } = openLocalDb();
+  const shift = await enteredShift(executor);
+  return { ...shift, snapshot: { ...shift.snapshot, ...frozen } };
 }
 
 /** A clock that moves on by one second per reading, from 06:15:00.000Z. */

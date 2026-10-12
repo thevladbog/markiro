@@ -65,7 +65,9 @@ export interface PrintRuntime {
   /**
    * Sends `bytes` to `target` after the sends already queued for its address:
    * in the printer's language (`raw`, the default) or as a page for the
-   * Windows driver (`windows_driver`, a Windows queue only). Never rejects: a
+   * Windows driver (`windows_driver`, a Windows queue only). `paper: "a4"`
+   * (plan А4) is an A4 sheet for the driver and nothing else: with RAW it is
+   * refused as `invalid_target`, nothing sent. Never rejects: a
    * failed IPC call is `outcome_unknown` (`printBytes`) or `driver_unknown`.
    * `jobId` (a print job's, `null` for a test label) is in flight from now
    * until the shell's call really settles — past the limit too.
@@ -75,6 +77,7 @@ export interface PrintRuntime {
     target: PrintTarget,
     bytes: Uint8Array,
     mode?: PrinterMode,
+    paper?: "a4",
   ) => Promise<SendOutcome>;
   /** The job's bytes are with the shell, or wait for their turn. */
   isInFlight: (jobId: string) => boolean;
@@ -132,16 +135,20 @@ export function createPrintRuntime(
     target: PrintTarget,
     bytes: Uint8Array,
     mode: PrinterMode,
+    paper: "a4" | undefined,
   ): Promise<PrintResult> {
+    // A sheet of A4 is a driver page: RAW has no such paper, and its bytes are no printer language.
+    if (mode !== "windows_driver" && paper === "a4") return { sent: false, code: "invalid_target" };
     if (mode !== "windows_driver") return printBytes(target, bytes);
     // A driver profile is a Windows queue (`parsePrinterProfile`): anything else never goes.
     if (target.kind !== "usb") return { sent: false, code: "invalid_target" };
     if (windows === undefined) return { sent: false, code: "unsupported" };
-    const result = await windows.printWindowsRaster(
-      target.printer,
-      bytes,
-      `Markiro:${newDocumentId()}`,
-    );
+    const documentName = `Markiro:${newDocumentId()}`;
+    // The paper reaches the shell only when it is asked for: a label's call is as it was before plan А4.
+    const result =
+      paper === "a4"
+        ? await windows.printWindowsRaster(target.printer, bytes, documentName, "a4")
+        : await windows.printWindowsRaster(target.printer, bytes, documentName);
     if (jobId !== null && result.receipt !== undefined && newest.get(jobId) === send) {
       receipts.set(jobId, result.receipt);
     }
@@ -149,7 +156,7 @@ export function createPrintRuntime(
   }
 
   return {
-    send: (jobId, target, bytes, mode = "raw") => {
+    send: (jobId, target, bytes, mode = "raw", paper) => {
       const key = printerTargetKey(target);
       const release = hold(jobId);
       sequence += 1;
@@ -167,7 +174,7 @@ export function createPrintRuntime(
       const call = previous.then(async (): Promise<PrintResult | null> => {
         if (expired) return null;
         started = true;
-        return deliver(jobId, send, target, bytes, mode);
+        return deliver(jobId, send, target, bytes, mode, paper);
       });
       const settled = call.then(
         () => undefined,

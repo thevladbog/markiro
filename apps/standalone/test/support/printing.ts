@@ -64,6 +64,37 @@ export const TSC: PrinterProfile = {
   dpi: 300,
 };
 
+/** A laser printer of A4 sheets through its Windows driver (plan А4): pallets only, 300 dpi. */
+export const HP_A4: PrinterProfile = {
+  id: "hp-a4",
+  name: "HP LaserJet А4",
+  target: { kind: "usb", printer: "HP LaserJet" },
+  language: "zpl",
+  dpi: 300,
+  mode: "windows_driver",
+  paper: "a4",
+};
+
+/** The same queue and settings as `HP_A4`, printing labels: the profiles differ in the paper alone. */
+export const HP_LABEL: PrinterProfile = {
+  id: "hp-a4",
+  name: "HP LaserJet А4",
+  target: { kind: "usb", printer: "HP LaserJet" },
+  language: "zpl",
+  dpi: 300,
+  mode: "windows_driver",
+};
+
+/** A thermal label printer through its Windows driver (plan ДРВ), not A4. */
+export const GODEX_DRIVER: PrinterProfile = {
+  id: "godex",
+  name: "Godex через драйвер",
+  target: { kind: "usb", printer: "Godex G500" },
+  language: "zpl",
+  dpi: 203,
+  mode: "windows_driver",
+};
+
 /** Settings with the Zebra for boxes and the TSC on the side. */
 export function printingSettings(
   overrides: Partial<WorkstationSettings> = {},
