@@ -1454,8 +1454,14 @@ mod tests {
             "page\u{200b}.html",
             "page\u{202e}.html",
         ] {
-            // Best effort: some names cannot exist on every file system.
-            let _ = fs::write(dir.join(name), b"x");
+            // Best effort: some names cannot exist on every file system, and
+            // on Windows a device name with any extension may open the device
+            // (`com1` the serial port) instead of a file.
+            let stem = name.split('.').next().unwrap_or_default();
+            let device = ["con", "nul", "com1"].contains(&stem.to_ascii_lowercase().as_str());
+            if !(cfg!(windows) && device) {
+                let _ = fs::write(dir.join(name), b"x");
+            }
             assert_eq!(
                 existing_form(root.path(), &folder, name),
                 Err(OfficeFilesError::InvalidRequest),

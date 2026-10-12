@@ -137,11 +137,31 @@ async fn a_limit_outside_its_bounds_is_refused_before_any_io() {
             "{ms}"
         );
     }
-    // Inside the bounds the request does go out, and finds the port closed:
-    // the refusals above came before any connection.
+    // Inside the bounds, both ends included, the request does go out, and
+    // finds the port closed: the refusals above came before any connection.
+    // Windows refuses a closed loopback port only after about 2 s of
+    // connection retries, so at 100 ms the request's own limit comes first.
+    let shortest = station
+        .request_within("GET", "/v1/device", None, None, Some(100))
+        .await;
+    #[cfg(not(windows))]
+    assert_eq!(
+        shortest,
+        Err(DeviceError::Request(RequestError::Unreachable))
+    );
+    #[cfg(windows)]
+    assert!(
+        matches!(
+            shortest,
+            Err(DeviceError::Request(
+                RequestError::Unreachable | RequestError::Timeout
+            ))
+        ),
+        "{shortest:?}"
+    );
     assert_eq!(
         station
-            .request_within("GET", "/v1/device", None, None, Some(100))
+            .request_within("GET", "/v1/device", None, None, Some(10_000))
             .await,
         Err(DeviceError::Request(RequestError::Unreachable))
     );

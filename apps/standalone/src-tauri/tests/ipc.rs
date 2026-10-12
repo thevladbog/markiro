@@ -23,7 +23,7 @@ use markiro_standalone_lib::lockdown::LockdownState;
 use markiro_standalone_lib::office_files::OfficeFilesState;
 use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
-use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
+use markiro_standalone_lib::secret_store;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -443,10 +443,9 @@ fn save_pairing_at(dir: &std::path::Path, address: &str) {
             kind: DeviceKind::Station,
             line_id: None,
             device_name: Some("Станция на линии 1".into()),
-            device_key: ProtectedSecret {
-                scheme: Scheme::Plain,
-                value: "device-key-value".into(),
-            },
+            // In the scheme of this system (DPAPI on Windows): a plain key
+            // there is unreadable, and the app would read as unpaired.
+            device_key: secret_store::protect("device-key-value").unwrap(),
         },
     )
     .unwrap();
