@@ -605,23 +605,23 @@ describe("the outbox and the serials on the floor's status bar", () => {
     };
     await step(1501, 1);
     const quarter = await screen.findByText(
-      "Номеров SSCC для коробов осталось 500 — меньше четверти блока. Новые номера выдаёт хост: станция должна быть с ним на связи.",
+      "Номеров SSCC для коробов осталось 500 — четверть блока или меньше. Новые номера выдаёт хост: станция должна быть с ним на связи.",
     );
     expect(heardOnce(before, quarter)).toBe(true);
     await step(1801, 2);
     expect(
       await screen.findByText(
-        "Номеров SSCC для коробов осталось 200 — меньше десятой части блока. Без связи с хостом короба скоро не закрыть.",
+        "Номеров SSCC для коробов осталось 200 — десятая часть блока или меньше. Без связи с хостом короба скоро не закрыть.",
       ),
     ).toBeTruthy();
     // One warning at a time: the quarter's words are gone.
-    expect(screen.queryByText(/меньше четверти блока/)).toBeNull();
+    expect(screen.queryByText(/четверть блока или меньше/)).toBeNull();
     await step(2000, 3);
     const last = await screen.findByText(
       "Остался последний номер SSCC для коробов: следующий короб без связи с хостом не закрыть.",
     );
     expect(heardOnce(before, last)).toBe(true);
-    expect(screen.queryByText(/меньше десятой части блока/)).toBeNull();
+    expect(screen.queryByText(/десятая часть блока или меньше/)).toBeNull();
     await step(2001, 4);
     const gone = await screen.findByText(
       "Номера SSCC для коробов закончились: короб не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
@@ -636,6 +636,19 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
     expect(screen.queryByText(/Номера SSCC для коробов закончились/)).toBeNull();
     expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
+  });
+
+  it("says «или меньше» at a quarter and a tenth, for boxes and pallets: both thresholds count exactly 25 % and 10 % (final review m-5)", () => {
+    const stock = (
+      JSON.parse(readFileSync(new URL("../src/i18n/ru.json", testModuleUrl), "utf8")) as {
+        floor: { status: { stock: Record<string, Record<string, string>> } };
+      }
+    ).floor.status.stock;
+    for (const what of ["box", "pallet"]) {
+      expect(stock[what]?.["quarter"], what).toContain("— четверть блока или меньше.");
+      expect(stock[what]?.["tenth"], what).toContain("— десятая часть блока или меньше.");
+      expect(JSON.stringify(stock[what]), what).not.toMatch(/меньше (четверти|десятой)/);
+    }
   });
 
   it("calls the warnings by their weight: a warning at a quarter and a tenth, an error at the last serial and at none", async () => {
@@ -657,11 +670,11 @@ describe("the outbox and the serials on the floor's status bar", () => {
       db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
       view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
     };
-    await screen.findByText(/меньше четверти блока/);
-    expect(toneOf(/меньше четверти блока/)).toBe("mk-alert--warn");
+    await screen.findByText(/четверть блока или меньше/);
+    expect(toneOf(/четверть блока или меньше/)).toBe("mk-alert--warn");
     step(1801, 1);
-    await screen.findByText(/меньше десятой части блока/);
-    expect(toneOf(/меньше десятой части блока/)).toBe("mk-alert--warn");
+    await screen.findByText(/десятая часть блока или меньше/);
+    expect(toneOf(/десятая часть блока или меньше/)).toBe("mk-alert--warn");
     step(2000, 2);
     await screen.findByText(/Остался последний номер/);
     expect(toneOf(/Остался последний номер/)).toBe("mk-alert--error");
@@ -690,7 +703,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("20"));
     expect(
       screen.getByText(
-        "Номеров SSCC для паллет осталось 20 — меньше десятой части блока. Без связи с хостом полную паллету скоро не закрыть.",
+        "Номеров SSCC для паллет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную паллету скоро не закрыть.",
       ),
     ).toBeTruthy();
     // The boxes' stock is plentiful: nothing is said of it.

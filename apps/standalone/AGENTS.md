@@ -3555,8 +3555,9 @@ id leaves the floor's marks of the original as they were.
 
 The status bar also warns of the serials left (`readShiftStock`): the boxes'
 and, in a shift with pallets, the pallets', at a quarter and a tenth of the
-newest block of that prefix and extension, at the last serial and at none
-(pilot spec §9.3); it says how many blocks the host gave that the station did
+newest block of that prefix and extension — inclusive, so the words say
+«четверть блока или меньше» / «десятая часть блока или меньше» — at the last
+serial and at none (pilot spec §9.3); it says how many blocks the host gave that the station did
 not take (`floor_block_drops`: a block that shares serials with one kept —
 `overlap` — or is not the one asked for — `mismatch`; written with the drop of
 its request, `TableClass::DeviceData`), and names, as an item, the records an
@@ -3578,8 +3579,6 @@ Known limits of the queue screen, none of it hidden by a green test:
   `shift_id`, so the retention never purges it, and a forget keeps it.
 - The records of an older pairing are only counted and named; nothing sends
   them (they stay on the PC's disk; the runbook says what to tell support).
-- The stock texts say «меньше четверти / десятой части» while the threshold is
-  inclusive (exactly 25 % or 10 % warns); the tests pin the thresholds.
 - A queue screen's refusal list cannot send a single record again, nor take
   off a refused close. The office closes a shift the host knows; a close
   refused because the restored host does not know the shift stays (one per

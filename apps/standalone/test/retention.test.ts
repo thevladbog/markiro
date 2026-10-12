@@ -471,6 +471,34 @@ describe("the retention of a shift's records on the station", () => {
     expect(keptFor(at, PAIRING, THIRD.id)).toEqual(NONE);
   });
 
+  // The final review's m-6: the race above lands a refusal; the delete's own check must hold a
+  // shift for a conflict too (mutant M18: `DONE_WITH`'s `r` with only 'rejected').
+  it("keeps a shift that took a conflict between its reading and its delete (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, THIRD, "C", "2026-09-01T00:00:00.000Z");
+    expect(await dueIds(at)).toEqual([ENTERED.id, THIRD.id].sort());
+    let first = true;
+    const racing = {
+      query: at.local.query.bind(at.local),
+      transaction: async (statements: Parameters<typeof at.local.transaction>[0]) => {
+        if (first) {
+          first = false;
+          // Another write lands first: the host found a scan of the shift in conflict.
+          at.db
+            .prepare(
+              "UPDATE outbox SET outcome = 'conflict', outcome_code = NULL WHERE id = (SELECT id FROM outbox WHERE shift_id = ? AND kind = 'scan' AND host_id = ? AND device_id = ? ORDER BY seq LIMIT 1)",
+            )
+            .run(ENTERED.id, PAIRING.hostId, PAIRING.deviceId);
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(WHOLE);
+    expect(keptFor(at, PAIRING, THIRD.id)).toEqual(NONE);
+  });
+
   it("deletes a shift's pallets and their exceptions with it (plan ПЛ-Ц)", async () => {
     const at = await palletStation({ capacity: 1 });
     const closed = await closeBoxOnPallet(at, ["A1"]);
