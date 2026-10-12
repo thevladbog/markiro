@@ -3,6 +3,11 @@ import { z } from "zod";
 import {
   palletLabelSourceSchema,
   palletReprintEventSchema,
+  palletReprintEventV2Schema,
+  palletRenderingV2Schema,
+  assertPalletRenderingMatchesSource,
+  PALLET_REPRINT_V2_PROTOCOL,
+  type PalletRenderingV2,
   validatePalletBranding,
   productLabelBytesDigest,
   productLabelValueDigest,
@@ -41,6 +46,8 @@ export interface PalletPrepareInput {
   operatorId: string;
   reason: WarehouseSession["reason"];
   source: PalletLabelSourceV1;
+  rendering?: PalletRenderingV2;
+  sessionId?: string;
   profile: PrinterProfile;
   tenantId: string;
   render?: () => Promise<Uint8Array>;
@@ -67,19 +74,42 @@ const rowSchema = z.object({
     "skipped",
   ]),
   event_json: z.string(),
+  rendering_json: z.string().nullable().default(null),
+  rendering_revision: z.string().nullable().default(null),
+  protocol: z.string().nullable().default(null),
 });
 type Row = z.infer<typeof rowSchema>;
 export interface PalletJobView {
+  rendering: PalletRenderingV2 | null;
   deliveryScope: string;
   jobId: string;
   source: PalletLabelSourceV1;
   profile: PrinterProfile;
   state: Row["state"];
 }
+function eventSchema(row: Pick<Row, "protocol">) {
+  return row.protocol === PALLET_REPRINT_V2_PROTOCOL
+    ? palletReprintEventV2Schema
+    : palletReprintEventSchema;
+}
 function decode(row: Row) {
   const source = palletLabelSourceSchema.parse(JSON.parse(row.source_json)),
     profile = parsePrinterProfile(JSON.parse(row.profile_json)),
-    event = palletReprintEventSchema.parse(JSON.parse(row.event_json));
+    event = eventSchema(row).parse(JSON.parse(row.event_json)),
+    rendering = row.rendering_json
+      ? palletRenderingV2Schema.parse(JSON.parse(row.rendering_json))
+      : null;
+  if (rendering) {
+    assertPalletRenderingMatchesSource(source, rendering);
+    if (
+      row.protocol !== PALLET_REPRINT_V2_PROTOCOL ||
+      rendering.renderingRevision !== row.rendering_revision ||
+      !("renderingRevision" in event) ||
+      event.renderingRevision !== rendering.renderingRevision
+    )
+      throw new Error("WAREHOUSE_PALLET_SOURCE_CORRUPT");
+  } else if (row.protocol !== null || row.rendering_revision !== null)
+    throw new Error("WAREHOUSE_PALLET_SOURCE_CORRUPT");
   const bytes: Uint8Array = Uint8Array.from(atob(row.bytes_base64), (c) => c.charCodeAt(0));
   if (
     !profile ||
@@ -91,13 +121,14 @@ function decode(row: Row) {
     event.bytesDigest !== row.bytes_digest
   )
     throw new Error("WAREHOUSE_PALLET_SOURCE_CORRUPT");
-  return { source, profile, event, bytes };
+  return { source, profile, event, bytes, rendering };
 }
 function view(row: Row): PalletJobView {
-  const { source, profile } = decode(row);
+  const { source, profile, rendering } = decode(row);
   return {
     deliveryScope: JSON.stringify(["warehouse-pallet", row.owner, row.job_id]),
     jobId: row.job_id,
+    rendering,
     source,
     profile,
     state: row.state,
@@ -121,15 +152,17 @@ export async function findWarehousePalletJob(exec: SqlExecutor, owner: string) {
 async function renderSource(input: PalletPrepareInput) {
   const source = palletLabelSourceSchema.parse(input.source),
     profile = parsePrinterProfile(input.profile);
+  if (input.rendering) assertPalletRenderingMatchesSource(source, input.rendering);
+  const saved = input.rendering?.rendering ?? source.rendering;
   if (!profile || profile.dpi === null) throw new Error("WAREHOUSE_PRINTER_DPI");
-  if (source.rendering.kind === "a4") {
+  if (saved.kind === "a4") {
     if (profile.paper !== "a4" || profile.target.kind !== "usb")
       throw new Error("WAREHOUSE_PALLET_PRINTER_FORMAT");
     const hardware = input.hardware ?? tauriWindowsPrinting;
     if (!hardware.getWindowsPageGeometry) throw new Error("WAREHOUSE_PALLET_PRINTER_FORMAT");
-    const old = parseOrganizationBranding(source.rendering.brandingJson);
+    const old = parseOrganizationBranding(saved.brandingJson);
     if (old.tenantId !== input.tenantId) throw new Error("WAREHOUSE_OWNER_CHANGED");
-    const original = validatePalletBranding(source.rendering.brandingJson);
+    const original = validatePalletBranding(saved.brandingJson);
     const { digest: ignored, ...content } = original;
     void ignored;
     const rebound = { ...content, ownerDigest: input.owner };
@@ -138,13 +171,13 @@ async function renderSource(input: PalletPrepareInput) {
     );
     const geometry = await hardware.getWindowsPageGeometry(profile.target.printer, {
       mode: "a4_sheet",
-      orientation: source.rendering.template.spec.page.orientation,
+      orientation: saved.template.spec.page.orientation,
     });
     return preparePalletSheet(
       {
         profile,
-        template: source.rendering.template,
-        facts: source.rendering.facts,
+        template: saved.template,
+        facts: saved.facts,
         branding,
         geometry,
       },
@@ -153,16 +186,14 @@ async function renderSource(input: PalletPrepareInput) {
   }
   if (profile.paper === "a4") throw new Error("WAREHOUSE_PALLET_PRINTER_FORMAT");
   const branding =
-    source.rendering.brandingJson === null
-      ? null
-      : parseOrganizationBranding(source.rendering.brandingJson);
+    saved.brandingJson === null ? null : parseOrganizationBranding(saved.brandingJson);
   if (branding && branding.tenantId !== input.tenantId) throw new Error("WAREHOUSE_OWNER_CHANGED");
   const bytes = input.render
     ? await input.render()
     : (
         await renderPrintArtifact(
-          source.rendering.template,
-          source.rendering.fields,
+          saved.template,
+          saved.fields,
           profile,
           printerMode(profile) === "windows_driver" ? rasterizeDriverText : rasterizeText,
           { logo: branding?.logo ?? null },
@@ -173,7 +204,8 @@ async function renderSource(input: PalletPrepareInput) {
 export async function prepareWarehousePalletJob(input: PalletPrepareInput): Promise<PalletJobView> {
   const { bytes, renderSnapshot } = await renderSource(input),
     jobId = crypto.randomUUID();
-  const event = palletReprintEventSchema.parse({
+  const event = (input.rendering ? palletReprintEventV2Schema : palletReprintEventSchema).parse({
+    ...(input.rendering ? { renderingRevision: input.rendering.renderingRevision } : {}),
     eventId: crypto.randomUUID(),
     jobId,
     attemptId: crypto.randomUUID(),
@@ -188,7 +220,7 @@ export async function prepareWarehousePalletJob(input: PalletPrepareInput): Prom
     bytesDigest: productLabelBytesDigest(bytes),
   });
   await input.exec.run(
-    "INSERT INTO warehouse_pallet_jobs(owner,job_id,sscc,source_revision,source_json,profile_json,bytes_base64,bytes_digest,state,event_json,render_snapshot_json) VALUES(?,?,?,?,?,?,?,?,'prepared',?,?)",
+    "INSERT INTO warehouse_pallet_jobs(owner,job_id,sscc,source_revision,source_json,profile_json,bytes_base64,bytes_digest,state,event_json,render_snapshot_json,rendering_json,rendering_revision,protocol,session_id) VALUES(?,?,?,?,?,?,?,?,'prepared',?,?,?,?,?,?)",
     [
       input.owner,
       jobId,
@@ -200,6 +232,10 @@ export async function prepareWarehousePalletJob(input: PalletPrepareInput): Prom
       event.bytesDigest,
       JSON.stringify(event),
       renderSnapshot ? JSON.stringify(renderSnapshot) : null,
+      input.rendering ? JSON.stringify(input.rendering) : null,
+      input.rendering?.renderingRevision ?? null,
+      input.rendering ? PALLET_REPRINT_V2_PROTOCOL : null,
+      input.sessionId ?? null,
     ],
   );
   return view(await read(input.exec, input.owner, jobId));
@@ -222,7 +258,7 @@ async function stateEvent(
   state: ReturnType<typeof palletReprintEventSchema.parse>["state"],
   operatorId: string,
 ) {
-  const event = palletReprintEventSchema.parse({
+  const event = eventSchema(row).parse({
     ...JSON.parse(row.event_json),
     eventId: crypto.randomUUID(),
     state,
@@ -272,6 +308,7 @@ export async function sendWarehousePalletJob(input: {
           operatorId: input.operatorId,
           reason: event.reason,
           source,
+          ...(decoded.rendering ? { rendering: decoded.rendering } : {}),
           profile: input.profile,
           tenantId: input.tenantId ?? "",
           ...(input.hardware ? { hardware: input.hardware } : {}),
@@ -293,7 +330,7 @@ export async function sendWarehousePalletJob(input: {
         };
         snapshot = JSON.stringify({ ...replay, digest: productLabelValueDigest(replay) });
       }
-      event = palletReprintEventSchema.parse({
+      event = eventSchema(row).parse({
         ...event,
         eventId: crypto.randomUUID(),
         attemptId: crypto.randomUUID(),

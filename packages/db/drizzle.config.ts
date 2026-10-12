@@ -13,6 +13,8 @@ export default defineConfig({
     "./src/schema/warehouse-reprint.ts",
     "./src/schema/label-facts.ts",
     "./src/schema/pallet-label-sources.ts",
+    "./src/schema/pallet-reprint-renderings.ts",
+    "./src/schema/pallet-production-resolutions.ts",
     "./src/schema/validation-reprocessing.ts",
     "./src/schema/pickup.ts",
     "./src/schema/integrations.ts",

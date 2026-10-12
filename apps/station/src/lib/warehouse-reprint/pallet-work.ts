@@ -1,5 +1,15 @@
+import { z } from "zod";
+import { loadPalletTemplates } from "./pallet-templates.js";
+import { originalPalletTemplate, palletTemplateUnavailable } from "./pallet-rendering.js";
+import { PalletDeliveryError, resolveOriginalPalletDelivery } from "./pallet-resolutions.js";
+import { syncPalletProductionResolutions } from "./pallet-v2-sync.js";
 import {
   warehouseReasonSchema,
+  makePalletRenderingV2,
+  palletTemplateChoiceSchema,
+  type PalletTemplateChoice,
+  type PalletTemplateCatalogV2,
+  type PalletDeliveryDiagnostic,
   resolveWarehouseReprintScan,
   type PalletLabelSourceV1,
 } from "@markiro/domain";
@@ -24,6 +34,10 @@ import { resolvePrinter } from "../printer-routing.js";
 import type { SqlExecutor } from "../mirror.js";
 import type { WarehouseSession } from "./types.js";
 export interface PalletWorkState {
+  session: { id: string; sentCount: number; status: "active" | "finished" } | null;
+  catalog: PalletTemplateCatalogV2 | null;
+  choice: PalletTemplateChoice | null;
+  diagnostic: PalletDeliveryDiagnostic | null;
   initialized: boolean;
   busy: boolean;
   reason: WarehouseSession["reason"];
@@ -35,6 +49,10 @@ export interface PalletWorkState {
 /** An independent mode; it cannot create, send or resolve unit/box attempts. */
 export function createWarehousePalletWork(o: WarehouseWorkOptions) {
   let state: PalletWorkState = {
+    session: null,
+    catalog: null,
+    choice: null,
+    diagnostic: null,
     initialized: false,
     busy: false,
     reason: "damaged",
@@ -82,6 +100,7 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
       .catch((error) => {
         if (current())
           publish({
+            ...(error instanceof PalletDeliveryError ? { diagnostic: error.diagnostic } : {}),
             error:
               error instanceof Error && error.message.startsWith("WAREHOUSE_")
                 ? error.message
@@ -99,6 +118,39 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
   const unresolved = () =>
     state.job &&
     ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(state.job.state);
+  const readSession = async () => {
+    const [settings] = await o.exec.all<{
+      session_id: string;
+      sent_count: number;
+      session_status: "active" | "finished";
+    }>("SELECT session_id,sent_count,session_status FROM warehouse_pallet_settings WHERE owner=?", [
+      owner,
+    ]);
+    return settings
+      ? { id: settings.session_id, sentCount: settings.sent_count, status: settings.session_status }
+      : null;
+  };
+  const chooseFor = async (source: PalletLabelSourceV1) => {
+    const [settings] = await o.exec.all<{ template_choices_json: string }>(
+      "SELECT template_choices_json FROM warehouse_pallet_settings WHERE owner=?",
+      [owner],
+    );
+    const prefs = settings
+      ? z.record(z.string(), z.unknown()).parse(JSON.parse(settings.template_choices_json))
+      : {};
+    const prior = palletTemplateChoiceSchema.safeParse(prefs[source.rendering.kind]);
+    if (
+      state.catalog &&
+      prior.success &&
+      (prior.data.id === null ||
+        state.catalog.templates.some(
+          (t) => t.id === prior.data.id && t.snapshotDigest === prior.data.snapshotDigest,
+        )) &&
+      !palletTemplateUnavailable(source, prior.data, resolvePrinter(o.hardware(), "pallet"))
+    )
+      return prior.data;
+    return originalPalletTemplate(source);
+  };
   const send = async (jobId: string, retry = false) => {
     await assertOperator();
     const profile = resolvePrinter(o.hardware(), "pallet");
@@ -122,7 +174,11 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
       lease.release();
     }
     if (current())
-      publish({ job: await warehousePalletJobView(o.exec, owner, jobId), selection: null });
+      publish({
+        job: await warehousePalletJobView(o.exec, owner, jobId),
+        selection: null,
+        session: await readSession(),
+      });
   };
   return {
     subscribe: (fn: () => void) => {
@@ -141,15 +197,107 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
         if (!proof || !current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
         owner = proof;
         await recoverWarehousePalletJobs(guarded, owner, o.operatorId);
+        await guarded.run(
+          "INSERT INTO warehouse_pallet_settings(owner,reason,session_id,session_status) VALUES(?,'damaged',?,'active') ON CONFLICT(owner) DO UPDATE SET session_id=CASE WHEN session_status='active' AND session_id IS NOT NULL THEN session_id ELSE excluded.session_id END,sent_count=CASE WHEN session_status='active' AND session_id IS NOT NULL THEN sent_count ELSE 0 END,session_status='active'",
+          [owner, crypto.randomUUID()],
+        );
         const [settings] = await o.exec.all<{ reason: string }>(
           "SELECT reason FROM warehouse_pallet_settings WHERE owner=?",
           [owner],
         );
+        let catalog: PalletTemplateCatalogV2 | null = null;
+        try {
+          catalog = await loadPalletTemplates(o.client, guarded, owner);
+        } catch {
+          /* Original snapshots remain usable without a refreshed catalog. */
+        }
+        if (!current()) return;
         publish({
           initialized: true,
+          session: await readSession(),
+          catalog,
           job: await findWarehousePalletJob(o.exec, owner),
           reason: settings ? warehouseReasonSchema.parse(settings.reason) : "damaged",
         });
+      }),
+    refreshTemplates: () =>
+      operation(async () => {
+        await assertOperator();
+        const catalog = await loadPalletTemplates(o.client, guarded, owner);
+        if (current()) publish({ catalog });
+      }),
+    selectTemplate: (input: PalletTemplateChoice) =>
+      operation(async () => {
+        if (unresolved()) throw new Error("WAREHOUSE_RECOVERY_REQUIRED");
+        await assertOperator();
+        const source = state.selection?.source;
+        if (!source) throw new Error("WAREHOUSE_PALLET_SOURCE_CHANGED");
+        const choice = palletTemplateChoiceSchema.parse(input);
+        if (
+          choice.id !== null &&
+          !state.catalog?.templates.some(
+            (t) => t.id === choice.id && t.snapshotDigest === choice.snapshotDigest,
+          )
+        )
+          throw new Error("WAREHOUSE_CATALOG_NETWORK");
+        const unavailable = palletTemplateUnavailable(
+          source,
+          choice,
+          resolvePrinter(o.hardware(), "pallet"),
+        );
+        if (unavailable) throw new Error(unavailable);
+        await guarded.run(
+          "UPDATE warehouse_pallet_settings SET template_choices_json=json_set(template_choices_json,?,json(?)) WHERE owner=?",
+          ["$." + choice.kind, JSON.stringify(choice), owner],
+        );
+        if (current()) publish({ choice });
+      }),
+    resolveOriginal: (
+      outcome: "confirmed" | "skipped",
+      scannedSscc?: string,
+      reason: WarehouseSession["reason"] = "not_printed",
+    ) =>
+      operation(async () => {
+        await assertOperator();
+        const diagnostic = state.diagnostic;
+        if (!diagnostic) throw new Error("WAREHOUSE_PALLET_SOURCE_CHANGED");
+        await resolveOriginalPalletDelivery({
+          exec: guarded,
+          owner,
+          generation: o.generation,
+          deviceId: o.deviceId,
+          operatorId: o.operatorId,
+          diagnostic,
+          outcome,
+          reason,
+          ...(scannedSscc !== undefined ? { scannedSscc } : {}),
+        });
+        try {
+          await syncPalletProductionResolutions(guarded, o.client, owner, current);
+        } catch {
+          /* Durable decision awaits reconnect. */
+        }
+        if (current()) publish({ diagnostic: null, error: null, selection: null });
+      }),
+    refreshOriginal: () =>
+      operation(async () => {
+        const diagnostic = state.diagnostic;
+        if (!diagnostic) return;
+        await assertOperator();
+        const found = await resolveWarehousePalletSource(
+          o.client,
+          guarded,
+          owner,
+          diagnostic.sscc,
+          o.operatorId,
+        );
+        if (current())
+          publish({
+            selection: { ...found, raw: diagnostic.sscc },
+            diagnostic: null,
+            choice: await chooseFor(found.source),
+            job: null,
+          });
       }),
     setReason: (reason: WarehouseSession["reason"]) =>
       operation(async () => {
@@ -177,6 +325,13 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
           return;
         }
         if (unresolved()) throw new Error("WAREHOUSE_RECOVERY_REQUIRED");
+        publish({
+          selection: null,
+          job: null,
+          choice: null,
+          diagnostic: null,
+          verification: false,
+        });
         const stamp = epoch;
         const found = await resolveWarehousePalletSource(
           o.client,
@@ -186,12 +341,24 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
           o.operatorId,
         );
         if (!current() || stamp !== epoch) throw new Error("WAREHOUSE_OWNER_CHANGED");
-        publish({ selection: { ...found, raw }, verification: false });
+        publish({
+          selection: { ...found, raw },
+          verification: false,
+          diagnostic: null,
+          choice: await chooseFor(found.source),
+          job: null,
+        });
       }),
     cancel: () => {
       if (!pending && current() && !unresolved()) {
         ++epoch;
-        publish({ selection: null, verification: false, error: null });
+        publish({
+          selection: null,
+          verification: false,
+          error: null,
+          diagnostic: null,
+          choice: null,
+        });
       }
     },
     confirm: (revision: string) =>
@@ -214,7 +381,11 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
           found.source.sscc !== selected.source.sscc
         )
           throw new Error("WAREHOUSE_PALLET_SOURCE_CHANGED");
+        const choice = state.choice ?? originalPalletTemplate(found.source);
+        if (choice.id !== null && !state.catalog) throw new Error("WAREHOUSE_CATALOG_NETWORK");
         const profile = resolvePrinter(o.hardware(), "pallet");
+        const unavailable = palletTemplateUnavailable(found.source, choice, profile);
+        if (unavailable) throw new Error(unavailable);
         if (!profile) throw new Error("WAREHOUSE_PRINTER_UNCONFIGURED");
         const lease = acquireCredentialCommitLease(o.generation);
         if (!lease) throw new Error("WAREHOUSE_OWNER_CHANGED");
@@ -236,6 +407,8 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
             operatorId: o.operatorId,
             reason: state.reason,
             source: found.source,
+            ...(state.catalog ? { rendering: makePalletRenderingV2(found.source, choice) } : {}),
+            ...(state.session ? { sessionId: state.session.id } : {}),
             profile,
             tenantId: recovery?.owner?.tenantId ?? "",
           });
@@ -295,6 +468,11 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
           publish({ error: "WAREHOUSE_RECOVERY_REQUIRED" });
           return false;
         }
+        await guarded.run(
+          "UPDATE warehouse_pallet_settings SET session_status='finished' WHERE owner=?",
+          [owner],
+        );
+        publish({ session: await readSession() });
         finished = true;
         accepting = false;
         return true;

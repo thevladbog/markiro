@@ -9,6 +9,7 @@ import {
   buildDuplicateLabelTemplate,
 } from "@markiro/domain";
 import express from "express";
+import { palletSourcesBodyParser } from "../../src/modules/station-warehouse-reprint/pallet-body-parser";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
 import { mountAuth, setupAuth } from "../../src/auth/auth.setup";
@@ -39,8 +40,8 @@ interface WarehouseApiHarness {
   lookup: (apiKey: string, operatorId: string, raw: string) => request.Test;
   close: () => Promise<void>;
 }
-export async function setupWarehouseApi(): Promise<WarehouseApiHarness> {
-  const env = loadEnv();
+export async function setupWarehouseApi(databaseUrl?: string): Promise<WarehouseApiHarness> {
+  const env = { ...loadEnv(), ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}) };
   const setup = setupAuth(env);
   const db: Db = setup.db;
   const ref = await Test.createTestingModule({
@@ -49,6 +50,7 @@ export async function setupWarehouseApi(): Promise<WarehouseApiHarness> {
   const app = ref.createNestApplication({ bodyParser: false });
   const server = app.getHttpAdapter().getInstance();
   mountAuth(server, setup.auth);
+  server.use(palletSourcesBodyParser);
   server.use(express.json());
   await app.init();
   await listenOnLoopback(app);

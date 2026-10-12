@@ -500,3 +500,5 @@ export * from "./warehouse-reprint/label-facts.js";
 export * from "./warehouse-reprint/pallet-contracts.js";
 
 export * from "./warehouse-reprint/pallet-branding.js";
+
+export * from "./warehouse-reprint/pallet-reprint-v2.js";

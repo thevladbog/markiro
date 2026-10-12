@@ -30,7 +30,7 @@ export async function syncWarehousePallets(
     [owner],
   );
   const events = await exec.all<{ owner: string; event_id: string; value_json: string }>(
-    `SELECT owner,event_id,value_json FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' ORDER BY last_tried_at,rowid LIMIT 100`,
+    `SELECT owner,event_id,value_json FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND json_extract(value_json,'$.renderingRevision') IS NULL ORDER BY last_tried_at,rowid LIMIT 100`,
     [owner],
   );
   if (!sources.length && !events.length) return 0;

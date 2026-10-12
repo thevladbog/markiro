@@ -1,3 +1,8 @@
+import {
+  PalletDeliveryError,
+  localPalletDiagnostic,
+  palletOriginalIsResolved,
+} from "./pallet-resolutions.js";
 import { z } from "zod";
 import {
   makePalletLabelSource,
@@ -8,6 +13,10 @@ import {
   palletProductionDeliverySchema,
   palletLookupResultSchema,
   PALLET_REPRINT_PROTOCOL,
+  PALLET_REPRINT_V2_PROTOCOL,
+  palletLookupV2ResultSchema,
+  palletDeliveryDiagnosticSchema,
+  PALLET_PRODUCTION_DELIVERY_PROTOCOL,
   resolveWarehouseReprintScan,
   type PalletLabelSourceV1,
   type MonoBitmap,
@@ -21,6 +30,7 @@ import {
   AUTHORIZED_CREDENTIAL_OWNERS_SQL,
 } from "../device-recovery.js";
 import { warehouseNetworkUnavailable } from "./sources.js";
+import { syncWarehousePalletEvidence } from "./pallet-diagnostics.js";
 import { loadPalletSheetPrintSnapshot } from "../pallet-sheet-print-snapshot.js";
 interface Membership {
   sscc: string;
@@ -230,15 +240,19 @@ async function localSource(exec: SqlExecutor, owner: string, sscc: string) {
   );
   if (saved?.eligibility_denied || saved?.receive_status === "conflict")
     throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+  let resolvedAttempt: string | null = null;
   if (saved?.production_delivery_json) {
     const evidence = palletProductionDeliverySchema.parse(
       JSON.parse(saved.production_delivery_json),
     );
+    const decision = await palletOriginalIsResolved(exec, owner, sscc, evidence);
+    if (decision) resolvedAttempt = evidence.attemptId;
     const resolved =
-      membership &&
-      [membership.pallet.print_verified_at, membership.pallet.print_skipped_at].some(
-        (at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt),
-      );
+      decision ||
+      (membership &&
+        [membership.pallet.print_verified_at, membership.pallet.print_skipped_at].some(
+          (at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt),
+        ));
     if (evidence.state !== "sent" && !resolved)
       throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
   }
@@ -299,11 +313,15 @@ async function localSource(exec: SqlExecutor, owner: string, sscc: string) {
       JSON.stringify(membership.boxes) !== JSON.stringify([...source.boxSsccs].sort())
     )
       throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
-    if (!["printed", "skipped"].includes(membership.pallet.print_state))
+    if (!["printed", "skipped"].includes(membership.pallet.print_state) && !resolvedAttempt)
       throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
     const [unknown] = await exec.all(
-      "SELECT 1 FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND state IN ('sending','delivery_unknown','prepared') AND resolved_at IS NULL LIMIT 1",
-      [JSON.stringify([membership.pallet.shift_id, membership.pallet.terminal_id]), sscc],
+      "SELECT 1 FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND state IN ('sending','delivery_unknown','prepared') AND resolved_at IS NULL AND attempt_id IS NOT ? LIMIT 1",
+      [
+        JSON.stringify([membership.pallet.shift_id, membership.pallet.terminal_id]),
+        sscc,
+        resolvedAttempt,
+      ],
     );
     if (unknown) throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
   }
@@ -346,6 +364,11 @@ export async function resolveWarehousePalletSource(
       local = await localSource(exec, owner, identities[0]);
     } catch (error) {
       localError = error instanceof Error ? error : new Error(String(error));
+      if (localError.message === "WAREHOUSE_PALLET_DELIVERY_UNRESOLVED")
+        localError = new PalletDeliveryError(
+          localError.message,
+          await localPalletDiagnostic(exec, owner, identities[0]),
+        );
     }
   const offline = () => {
     if (localError) throw localError;
@@ -358,13 +381,60 @@ export async function resolveWarehousePalletSource(
       .strictObject({ protocols: z.array(z.string()) })
       .parse(await client.get("/station/warehouse-reprint/source-capabilities"));
     if (!caps.protocols.includes(PALLET_REPRINT_PROTOCOL)) return offline();
-    const result = palletLookupResultSchema.parse(
-      await client.post("/station/warehouse-reprint/pallet-lookup", {
-        protocol: PALLET_REPRINT_PROTOCOL,
-        raw,
-        operatorId,
-      }),
-    );
+    const v2 = caps.protocols.includes(PALLET_REPRINT_V2_PROTOCOL);
+    const lookup = async () => {
+      const response = await client.post(
+        v2
+          ? "/station/warehouse-reprint/pallet-lookup-v2"
+          : "/station/warehouse-reprint/pallet-lookup",
+        { protocol: v2 ? PALLET_REPRINT_V2_PROTOCOL : PALLET_REPRINT_PROTOCOL, raw, operatorId },
+      );
+      return v2
+        ? palletLookupV2ResultSchema.parse(response)
+        : palletLookupResultSchema.parse(response);
+    };
+    let result = await lookup();
+    if (
+      result.status === "unavailable" &&
+      result.code === "delivery_unresolved" &&
+      local &&
+      !localError &&
+      caps.protocols.includes(PALLET_PRODUCTION_DELIVERY_PROTOCOL)
+    ) {
+      try {
+        if (await syncWarehousePalletEvidence(client, exec, owner, local.sscc)) {
+          result = await lookup();
+        }
+      } catch (error) {
+        // A failed repair must not turn an authoritative unresolved response into offline eligibility.
+        throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED", { cause: error });
+      }
+    }
+    if (result.status === "unavailable" && result.code === "delivery_unresolved") {
+      const localDiagnostic = identities[0]
+        ? await localPalletDiagnostic(exec, owner, identities[0])
+        : null;
+      const serverDiagnostic =
+        "diagnostic" in result
+          ? palletDeliveryDiagnosticSchema.nullable().parse(result.diagnostic)
+          : null;
+      const diagnostic = localDiagnostic ?? serverDiagnostic;
+      if (
+        local &&
+        localDiagnostic &&
+        serverDiagnostic &&
+        localDiagnostic.attemptId === serverDiagnostic.attemptId &&
+        localDiagnostic.productionSequence === serverDiagnostic.productionSequence &&
+        localDiagnostic.sourceRevision === serverDiagnostic.sourceRevision &&
+        (await palletOriginalIsResolved(exec, owner, local.sscc, {
+          sourceRevision: local.revision,
+          sequence: localDiagnostic.productionSequence ?? 0,
+          attemptId: localDiagnostic.attemptId ?? "",
+        }))
+      )
+        return { source: local, offline: true };
+      throw new PalletDeliveryError("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED", diagnostic);
+    }
     if (result.status !== "found") {
       if (
         result.status === "unavailable" &&
@@ -388,17 +458,22 @@ export async function resolveWarehousePalletSource(
           `UPDATE warehouse_pallet_sources SET eligibility_denied=1 WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=?`,
           [owner, identities[0]],
         );
-      throw new Error(
-        `WAREHOUSE_PALLET_${result.status === "not_found" ? "NOT_FOUND" : result.code.toUpperCase()}`,
-      );
+      const message = `WAREHOUSE_PALLET_${result.status === "not_found" ? "NOT_FOUND" : result.code.toUpperCase()}`;
+      if (result.status === "unavailable" && "diagnostic" in result)
+        throw new PalletDeliveryError(
+          message,
+          palletDeliveryDiagnosticSchema.nullable().parse(result.diagnostic),
+        );
+      throw new Error(message);
     }
     const currentMembership = await palletMembership(exec, result.source.sscc);
     if (
       currentMembership &&
       (currentMembership.compositionDigest !== result.source.compositionDigest ||
-        !["printed", "skipped"].includes(currentMembership.pallet.print_state))
+        (!["printed", "skipped"].includes(currentMembership.pallet.print_state) && !local))
     )
       throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+    let authoritativeResolvedAttempt: string | null = null;
     const [localEvidence] = await exec.all<{ production_delivery_json: string | null }>(
       `SELECT production_delivery_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid DESC LIMIT 1`,
       [owner, result.source.sscc],
@@ -407,21 +482,25 @@ export async function resolveWarehousePalletSource(
       const evidence = palletProductionDeliverySchema.parse(
         JSON.parse(localEvidence.production_delivery_json),
       );
+      const decision = await palletOriginalIsResolved(exec, owner, result.source.sscc, evidence);
+      if (decision) authoritativeResolvedAttempt = evidence.attemptId;
       const resolved =
-        currentMembership &&
-        [
-          currentMembership.pallet.print_verified_at,
-          currentMembership.pallet.print_skipped_at,
-        ].some((at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt));
+        decision ||
+        (currentMembership &&
+          [
+            currentMembership.pallet.print_verified_at,
+            currentMembership.pallet.print_skipped_at,
+          ].some((at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt)));
       if (evidence.state !== "sent" && !resolved)
         throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
     }
     if (currentMembership) {
       const [unknown] = await exec.all(
-        "SELECT 1 FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND state IN ('sending','delivery_unknown','prepared') AND resolved_at IS NULL LIMIT 1",
+        "SELECT 1 FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND state IN ('sending','delivery_unknown','prepared') AND resolved_at IS NULL AND attempt_id IS NOT ? LIMIT 1",
         [
           JSON.stringify([currentMembership.pallet.shift_id, currentMembership.pallet.terminal_id]),
           result.source.sscc,
+          authoritativeResolvedAttempt,
         ],
       );
       if (unknown) throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");

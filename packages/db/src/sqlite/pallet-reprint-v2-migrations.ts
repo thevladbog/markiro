@@ -1,0 +1,20 @@
+/** Additive V2 storage; V1 snapshots and queued events remain unchanged. */
+export const PALLET_REPRINT_V2_MIGRATIONS = [
+  `ALTER TABLE warehouse_pallet_jobs ADD COLUMN rendering_json TEXT;`,
+  `ALTER TABLE warehouse_pallet_jobs ADD COLUMN rendering_revision TEXT;`,
+  `ALTER TABLE warehouse_pallet_jobs ADD COLUMN protocol TEXT;`,
+  `ALTER TABLE warehouse_pallet_jobs ADD COLUMN session_id TEXT;`,
+  `ALTER TABLE warehouse_pallet_settings ADD COLUMN session_id TEXT;`,
+  `ALTER TABLE warehouse_pallet_settings ADD COLUMN session_status TEXT NOT NULL DEFAULT 'finished' CHECK(session_status IN ('active','finished'));`,
+  `ALTER TABLE warehouse_pallet_settings ADD COLUMN sent_count INTEGER NOT NULL DEFAULT 0 CHECK(sent_count>=0);`,
+  `ALTER TABLE warehouse_pallet_settings ADD COLUMN template_choices_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(template_choices_json));`,
+  `CREATE TABLE IF NOT EXISTS warehouse_pallet_renderings(owner TEXT NOT NULL,job_id TEXT NOT NULL,revision TEXT NOT NULL,value_json TEXT NOT NULL CHECK(json_valid(value_json) AND length(value_json)<1000000),receive_status TEXT NOT NULL DEFAULT 'pending' CHECK(receive_status IN ('pending','accepted','conflict')),last_tried_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(owner,job_id));`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_rendering_immutable BEFORE UPDATE OF value_json,revision ON warehouse_pallet_renderings WHEN NEW.value_json<>OLD.value_json OR NEW.revision<>OLD.revision BEGIN SELECT RAISE(ABORT,'PALLET_RENDERING_IMMUTABLE'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_job_rendering_insert AFTER INSERT ON warehouse_pallet_jobs WHEN NEW.rendering_json IS NOT NULL BEGIN INSERT INTO warehouse_pallet_renderings(owner,job_id,revision,value_json) VALUES(NEW.owner,NEW.job_id,NEW.rendering_revision,NEW.rendering_json); END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_job_rendering_immutable BEFORE UPDATE OF rendering_json,rendering_revision,protocol ON warehouse_pallet_jobs WHEN NEW.rendering_json IS NOT OLD.rendering_json OR NEW.rendering_revision IS NOT OLD.rendering_revision OR NEW.protocol IS NOT OLD.protocol BEGIN SELECT RAISE(ABORT,'PALLET_RENDERING_IMMUTABLE'); END;`,
+  `CREATE TABLE IF NOT EXISTS warehouse_pallet_production_resolutions(owner TEXT NOT NULL,event_id TEXT NOT NULL,sscc TEXT NOT NULL,source_revision TEXT NOT NULL,attempt_id TEXT NOT NULL,value_json TEXT NOT NULL CHECK(json_valid(value_json) AND length(value_json)<8192),digest TEXT NOT NULL,receive_status TEXT NOT NULL DEFAULT 'pending' CHECK(receive_status IN ('pending','accepted','conflict')),last_tried_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(owner,event_id),UNIQUE(owner,sscc,source_revision,attempt_id));`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_resolution_immutable BEFORE UPDATE OF value_json,digest,sscc,source_revision,attempt_id ON warehouse_pallet_production_resolutions WHEN NEW.value_json<>OLD.value_json OR NEW.digest<>OLD.digest OR NEW.sscc<>OLD.sscc OR NEW.source_revision<>OLD.source_revision OR NEW.attempt_id<>OLD.attempt_id BEGIN SELECT RAISE(ABORT,'PALLET_RESOLUTION_IMMUTABLE'); END;`,
+  `CREATE TABLE IF NOT EXISTS warehouse_pallet_session_sends(owner TEXT NOT NULL,session_id TEXT NOT NULL,attempt_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(owner,session_id,attempt_id));`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_session_send_count AFTER INSERT ON warehouse_pallet_session_sends BEGIN UPDATE warehouse_pallet_settings SET sent_count=sent_count+1 WHERE owner=NEW.owner AND session_id=NEW.session_id; END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_pallet_job_session_sent AFTER UPDATE OF event_json ON warehouse_pallet_jobs WHEN NEW.session_id IS NOT NULL AND NEW.state='sent' AND json_extract(NEW.event_json,'$.state')='sent' BEGIN INSERT OR IGNORE INTO warehouse_pallet_session_sends(owner,session_id,attempt_id,job_id) VALUES(NEW.owner,NEW.session_id,json_extract(NEW.event_json,'$.attemptId'),NEW.job_id); END;`,
+] as const;
