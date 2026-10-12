@@ -1,3 +1,5 @@
+import { purgeUnitLabelFacts } from "./warehouse-reprint/history-retention.js";
+import { runWarehouseHistoryChannels } from "./warehouse-reprint/channels.js";
 import { purgeWarehousePalletJobs, syncWarehousePallets } from "./warehouse-reprint/pallet-sync.js";
 import { syncUnitLabelFacts } from "./warehouse-reprint/label-facts.js";
 import { purgeWarehouseJobs } from "./warehouse-reprint/retention.js";
@@ -1317,7 +1319,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           `SELECT SUM(n) AS n FROM (
             SELECT COUNT(*) n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
             UNION ALL SELECT COUNT(*) FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
-            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND (receive_status='pending' OR (receive_status='accepted' AND COALESCE(json_extract(production_delivery_json,'$.sequence'),0)>production_delivery_acked_sequence))
             UNION ALL SELECT COUNT(*) FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending')`,
           [owner, owner, owner, owner],
         )
@@ -1682,46 +1684,55 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 }
               },
             };
-            try {
-              await purgeWarehousePalletJobs(
-                warehouseExec,
-                owner,
-                new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-              );
-              await purgeWarehouseJobs(
-                warehouseExec,
-                owner,
-                new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-              );
-              while (
-                await syncWarehousePallets(
+            await runWarehouseHistoryChannels([
+              async () => {
+                await purgeWarehousePalletJobs(
+                  warehouseExec,
+                  owner,
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                while (
+                  await syncWarehousePallets(
+                    warehouseExec,
+                    deps.client,
+                    owner,
+                    () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                  )
+                ) {
+                  /* Drain acknowledged immutable prefixes. */
+                }
+              },
+              async () => {
+                await purgeUnitLabelFacts(
+                  warehouseExec,
+                  owner,
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                await syncUnitLabelFacts(
                   warehouseExec,
                   deps.client,
                   owner,
                   () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
-                )
-              ) {
-                /* Drain acknowledged immutable prefixes. */
-              }
-              await syncUnitLabelFacts(
-                warehouseExec,
-                deps.client,
-                owner,
-                () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
-              );
-              while (
-                await syncWarehouseEvents(
+                );
+              },
+              async () => {
+                await purgeWarehouseJobs(
                   warehouseExec,
-                  deps.client,
                   owner,
-                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
-                )
-              ) {
-                /* Drain immutable prefixes only. */
-              }
-            } catch {
-              console.warn("station: warehouse print history retained for retry");
-            }
+                  new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                );
+                while (
+                  await syncWarehouseEvents(
+                    warehouseExec,
+                    deps.client,
+                    owner,
+                    () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                  )
+                ) {
+                  /* Drain immutable prefixes only. */
+                }
+              },
+            ]);
           }
           break;
         }

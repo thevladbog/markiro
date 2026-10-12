@@ -230,8 +230,8 @@ async function stateEvent(
     occurredAt: new Date().toISOString(),
   });
   await exec.run(
-    "UPDATE warehouse_pallet_jobs SET state=?,event_json=? WHERE owner=? AND job_id=?",
-    [state, JSON.stringify(event), row.owner, row.job_id],
+    "UPDATE warehouse_pallet_jobs SET state=?,event_json=? WHERE owner=? AND job_id=? AND state=? AND claim_id IS ? AND event_json=?",
+    [state, JSON.stringify(event), row.owner, row.job_id, row.state, row.claim_id, row.event_json],
   );
 }
 export async function sendWarehousePalletJob(input: {

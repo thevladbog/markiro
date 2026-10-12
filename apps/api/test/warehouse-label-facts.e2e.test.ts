@@ -47,6 +47,121 @@ describe.skipIf(!ready)("immutable warehouse unit label facts", () => {
       .post("/station/warehouse-reprint/label-facts")
       .set("x-api-key", key)
       .send(body);
+  it("quarantines a proven displaced occurrence without treating missing ingestion as final", async () => {
+    const original = await entry();
+    const { digest: _digest, ...body } = original;
+    void _digest;
+    const facts = makeUnitLabelFacts({ ...body, acceptedAt: "2026-10-10T01:00:00.000Z" });
+    const payload = { protocol: "warehouse-label-facts-v1", operatorId: null, entries: [facts] };
+    expect((await send(h.a.apiKey, payload).expect(200)).body.results).toEqual([
+      { digest: facts.digest, status: "retryable" },
+    ]);
+    await h.db.insert(schema.codeConflicts).values({
+      tenantId: h.a.tenantId,
+      codeHash: h.codeHash,
+      losingShiftId: h.shiftId,
+      losingTerminalId: h.a.deviceId,
+      losingScannedAt: new Date(facts.acceptedAt),
+      winningShiftId: h.shiftId,
+      winningTerminalId: h.a.deviceId,
+      winningScannedAt: new Date(original.acceptedAt),
+    });
+    expect((await send(h.a.apiKey, payload).expect(200)).body.results).toEqual([
+      { digest: facts.digest, status: "conflict" },
+    ]);
+  });
+  it("finishes an exactly cancelled box occurrence as conflict", async () => {
+    const original = await entry();
+    const { digest: _digest, ...body } = original;
+    void _digest;
+    const facts = makeUnitLabelFacts({ ...body, acceptedAt: "2026-10-10T02:00:00.000Z" });
+    const [item] = await h.db
+      .select()
+      .from(schema.boxItems)
+      .where(
+        and(eq(schema.boxItems.tenantId, h.a.tenantId), eq(schema.boxItems.codeHash, h.codeHash)),
+      )
+      .limit(1);
+    if (!item) throw new Error("box occurrence missing");
+    const [box] = await h.db.select().from(schema.boxes).where(eq(schema.boxes.id, item.boxId));
+    if (!box) throw new Error("box missing");
+    await h.db
+      .update(schema.boxes)
+      .set({ terminalId: h.a.deviceId })
+      .where(eq(schema.boxes.id, item.boxId));
+    const scope = and(
+      eq(schema.boxItems.tenantId, h.a.tenantId),
+      eq(schema.boxItems.boxId, item.boxId),
+      eq(schema.boxItems.codeHash, h.codeHash),
+    );
+    await h.db
+      .update(schema.boxItems)
+      .set({ addedAt: new Date(facts.acceptedAt), removedAt: new Date() })
+      .where(scope);
+    try {
+      expect(
+        (
+          await send(h.a.apiKey, {
+            protocol: "warehouse-label-facts-v1",
+            operatorId: null,
+            entries: [facts],
+          }).expect(200)
+        ).body.results,
+      ).toEqual([{ digest: facts.digest, status: "conflict" }]);
+    } finally {
+      await h.db
+        .update(schema.boxItems)
+        .set({ addedAt: item.addedAt, removedAt: item.removedAt })
+        .where(scope);
+    }
+  });
+  it("finishes a durable denied item only for its exact tenant, device and occurrence", async () => {
+    const original = await entry();
+    const { digest: _digest, ...body } = original;
+    void _digest;
+    const facts = makeUnitLabelFacts({ ...body, acceptedAt: "2026-10-10T03:00:00.000Z" });
+    const batchId = "denied-label-fact";
+    await h.db.insert(schema.syncBatches).values({
+      tenantId: h.a.tenantId,
+      batchId,
+      terminalId: h.a.deviceId,
+      payloadDigest: "a".repeat(64),
+    });
+    await h.db.insert(schema.stationSyncQuarantine).values({
+      tenantId: h.a.tenantId,
+      batchId,
+      terminalId: h.a.deviceId,
+      payloadDigest: "a".repeat(64),
+      recordKind: "item",
+      recordIndex: 0,
+      shiftId: h.shiftId,
+      reason: "shift_closed",
+      payload: {
+        shiftId: h.shiftId,
+        scannedAt: facts.acceptedAt,
+        code: { codeHash: facts.codeHash },
+      },
+    });
+    expect(
+      (
+        await send(h.a.apiKey, {
+          protocol: "warehouse-label-facts-v1",
+          operatorId: null,
+          entries: [facts],
+        }).expect(200)
+      ).body.results,
+    ).toEqual([{ digest: facts.digest, status: "conflict" }]);
+    const another = makeUnitLabelFacts({ ...body, acceptedAt: "2026-10-10T03:00:01.000Z" });
+    expect(
+      (
+        await send(h.a.apiKey, {
+          protocol: "warehouse-label-facts-v1",
+          operatorId: null,
+          entries: [another],
+        }).expect(200)
+      ).body.results,
+    ).toEqual([{ digest: another.digest, status: "retryable" }]);
+  });
   it("keeps frozen expiry in lookup after idempotent upload and product changes", async () => {
     const facts = await entry();
     const body = { protocol: "warehouse-label-facts-v1", operatorId: null, entries: [facts] };

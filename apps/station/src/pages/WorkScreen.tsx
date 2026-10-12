@@ -708,18 +708,6 @@ export function WorkScreen({
     explicitRetry = false,
   ) {
     await palletLabelSpecReady.current;
-    if (credentialGeneration) {
-      const captureLease = acquireCredentialCommitLease(credentialGeneration);
-      if (!captureLease) return { kind: "failed" as const, code: "persistence_failed" as const };
-      try {
-        const owner = await credentialGenerationOwnership(credentialGeneration);
-        if (owner) await retainPalletClosureSource(exec, owner, result.sscc);
-      } catch {
-        return { kind: "failed" as const, code: "persistence_failed" as const };
-      } finally {
-        captureLease.release();
-      }
-    }
     const currentPrinting = palletPrintingRef.current;
     const candidate = currentPrinting ? outputPrinterProfile(currentPrinting) : null;
     const key = {
@@ -755,7 +743,12 @@ export function WorkScreen({
             isCurrent: () => !credentialGeneration.sealed,
             prepare: async () => {
               const { scope } = await readShiftExecutionProjection(exec, shiftId);
-              const retained = await retainPalletClosureSource(exec, ownerDigest, result.sscc);
+              const retained = await retainPalletClosureSource(
+                exec,
+                ownerDigest,
+                result.sscc,
+                "a4",
+              ).catch(() => null);
               const template =
                 retained?.rendering.kind === "a4"
                   ? retained.rendering.template
@@ -817,7 +810,9 @@ export function WorkScreen({
                   bytesDigest: productLabelBytesDigest(prepared.bytes),
                   geometryFingerprint: geometry.fingerprint,
                 },
-              );
+              ).catch(() => {
+                console.warn("station: pallet reprint source unavailable");
+              });
               return prepared;
             },
           }),

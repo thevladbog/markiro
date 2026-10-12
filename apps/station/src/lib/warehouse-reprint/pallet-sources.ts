@@ -5,6 +5,7 @@ import {
   labelTemplateSpecSchema,
   palletSheetTemplateSnapshotSchema,
   palletLabelSourceSchema,
+  palletProductionDeliverySchema,
   palletLookupResultSchema,
   PALLET_REPRINT_PROTOCOL,
   resolveWarehouseReprintScan,
@@ -27,6 +28,8 @@ interface Membership {
   shift_id: string;
   terminal_id: string | null;
   closed_at: string | null;
+  print_verified_at: string | null;
+  print_skipped_at: string | null;
   disassembled_at: string | null;
   print_state: string;
   box_count: number;
@@ -71,11 +74,12 @@ export async function savePalletLabelSource(
 ) {
   const parsed = palletLabelSourceSchema.parse(source);
   await exec.run(
-    "INSERT INTO warehouse_pallet_sources(owner,sscc,revision,value_json) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
-    [owner, parsed.sscc, parsed.revision, JSON.stringify(parsed)],
+    `INSERT INTO warehouse_pallet_sources(owner,sscc,revision,value_json)
+     SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=?) ON CONFLICT DO NOTHING`,
+    [owner, parsed.sscc, parsed.revision, JSON.stringify(parsed), owner, parsed.sscc],
   );
   const [saved] = await exec.all<{ value_json: string }>(
-    "SELECT value_json FROM warehouse_pallet_sources WHERE owner=? AND sscc=?",
+    `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
     [owner, parsed.sscc],
   );
   if (
@@ -93,7 +97,7 @@ export async function retainProductionPalletSource(
   originalAttempt: PalletLabelSourceV1["originalAttempt"],
 ) {
   const [existing] = await exec.all(
-    "SELECT 1 FROM warehouse_pallet_sources WHERE owner=? AND sscc=?",
+    `SELECT 1 FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? LIMIT 1`,
     [owner, sscc],
   );
   if (existing) return;
@@ -122,9 +126,14 @@ export async function retainProductionPalletSource(
     }),
   );
 }
-export async function retainPalletClosureSource(exec: SqlExecutor, owner: string, sscc: string) {
+export async function retainPalletClosureSource(
+  exec: SqlExecutor,
+  owner: string,
+  sscc: string,
+  paper?: "thermal" | "a4",
+) {
   const [saved] = await exec.all<{ value_json: string }>(
-    "SELECT value_json FROM warehouse_pallet_sources WHERE owner=? AND sscc=?",
+    `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
     [owner, sscc],
   );
   if (saved) return palletLabelSourceSchema.parse(JSON.parse(saved.value_json));
@@ -159,7 +168,13 @@ export async function retainPalletClosureSource(exec: SqlExecutor, owner: string
     const parseSaved = (value: unknown) =>
       typeof value === "string" ? (JSON.parse(value) as unknown) : value;
     let rendering: PalletLabelSourceV1["rendering"] | null = null;
-    if (fields && capture.sheetTemplate && capture.brandingJson)
+    if (
+      fields &&
+      paper !== "thermal" &&
+      capture.sheetTemplate &&
+      capture.brandingJson &&
+      (paper === "a4" || !capture.thermalTemplate)
+    )
       rendering = {
         kind: "a4",
         rendererVersion: "pallet-sheet-v1",
@@ -167,7 +182,12 @@ export async function retainPalletClosureSource(exec: SqlExecutor, owner: string
         facts: fields.facts,
         brandingJson: capture.brandingJson,
       };
-    else if (fields && !capture.sheetTemplate && capture.thermalTemplate)
+    else if (
+      fields &&
+      paper !== "a4" &&
+      capture.thermalTemplate &&
+      (paper === "thermal" || !capture.sheetTemplate)
+    )
       rendering = {
         kind: "thermal",
         rendererVersion: "thermal-v1",
@@ -189,7 +209,7 @@ export async function retainPalletClosureSource(exec: SqlExecutor, owner: string
       }
       await retainProductionPalletSource(exec, owner, sscc, rendering, null);
       const [row] = await exec.all<{ value_json: string }>(
-        "SELECT value_json FROM warehouse_pallet_sources WHERE owner=? AND sscc=?",
+        `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
         [owner, sscc],
       );
       return row ? palletLabelSourceSchema.parse(JSON.parse(row.value_json)) : null;
@@ -203,12 +223,25 @@ async function localSource(exec: SqlExecutor, owner: string, sscc: string) {
     value_json: string;
     eligibility_denied: number;
     receive_status: string;
+    production_delivery_json: string | null;
   }>(
-    `SELECT value_json,eligibility_denied,receive_status FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid DESC LIMIT 1`,
+    `SELECT value_json,eligibility_denied,receive_status,production_delivery_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid DESC LIMIT 1`,
     [owner, sscc],
   );
   if (saved?.eligibility_denied || saved?.receive_status === "conflict")
     throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+  if (saved?.production_delivery_json) {
+    const evidence = palletProductionDeliverySchema.parse(
+      JSON.parse(saved.production_delivery_json),
+    );
+    const resolved =
+      membership &&
+      [membership.pallet.print_verified_at, membership.pallet.print_skipped_at].some(
+        (at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt),
+      );
+    if (evidence.state !== "sent" && !resolved)
+      throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
+  }
   let source = saved ? palletLabelSourceSchema.parse(JSON.parse(saved.value_json)) : null;
   if (!source && membership) {
     const scope = JSON.stringify([membership.pallet.shift_id, membership.pallet.terminal_id]);
@@ -250,7 +283,7 @@ async function localSource(exec: SqlExecutor, owner: string, sscc: string) {
         },
       );
       const [row] = await exec.all<{ value_json: string }>(
-        "SELECT value_json FROM warehouse_pallet_sources WHERE owner=? AND sscc=?",
+        `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
         [owner, sscc],
       );
       source = row ? palletLabelSourceSchema.parse(JSON.parse(row.value_json)) : null;
@@ -347,7 +380,10 @@ export async function resolveWarehousePalletSource(
         );
         if (pending) return { source: local, offline: true };
       }
-      if (identities[0])
+      if (
+        identities[0] &&
+        !(result.status === "unavailable" && result.code === "delivery_unresolved")
+      )
         await exec.run(
           `UPDATE warehouse_pallet_sources SET eligibility_denied=1 WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=?`,
           [owner, identities[0]],
@@ -363,6 +399,23 @@ export async function resolveWarehousePalletSource(
         !["printed", "skipped"].includes(currentMembership.pallet.print_state))
     )
       throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+    const [localEvidence] = await exec.all<{ production_delivery_json: string | null }>(
+      `SELECT production_delivery_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid DESC LIMIT 1`,
+      [owner, result.source.sscc],
+    );
+    if (localEvidence?.production_delivery_json) {
+      const evidence = palletProductionDeliverySchema.parse(
+        JSON.parse(localEvidence.production_delivery_json),
+      );
+      const resolved =
+        currentMembership &&
+        [
+          currentMembership.pallet.print_verified_at,
+          currentMembership.pallet.print_skipped_at,
+        ].some((at) => at !== null && Date.parse(at) >= Date.parse(evidence.occurredAt));
+      if (evidence.state !== "sent" && !resolved)
+        throw new Error("WAREHOUSE_PALLET_DELIVERY_UNRESOLVED");
+    }
     if (currentMembership) {
       const [unknown] = await exec.all(
         "SELECT 1 FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND state IN ('sending','delivery_unknown','prepared') AND resolved_at IS NULL LIMIT 1",
@@ -375,12 +428,12 @@ export async function resolveWarehousePalletSource(
     }
     await savePalletLabelSource(exec, owner, result.source);
     await exec.run(
-      "UPDATE warehouse_pallet_sources SET eligibility_denied=0,receive_status='accepted' WHERE owner=? AND sscc=?",
-      [owner, result.source.sscc],
+      `UPDATE warehouse_pallet_sources SET eligibility_denied=0,receive_status='accepted' WHERE rowid=(SELECT rowid FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1) AND revision=?`,
+      [owner, result.source.sscc, result.source.revision],
     );
     await exec.run(
-      "UPDATE warehouse_pallet_sources SET lookup_keys_json=json_insert(lookup_keys_json,'$[#]',?) WHERE owner=? AND sscc=? AND json_array_length(lookup_keys_json)<1000 AND NOT EXISTS(SELECT 1 FROM json_each(lookup_keys_json) WHERE value=?)",
-      [lookupKey, owner, result.source.sscc, lookupKey],
+      `UPDATE warehouse_pallet_sources SET lookup_keys_json=json_insert(lookup_keys_json,'$[#]',?) WHERE rowid=(SELECT rowid FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1) AND revision=? AND json_array_length(lookup_keys_json)<1000 AND NOT EXISTS(SELECT 1 FROM json_each(lookup_keys_json) WHERE value=?)`,
+      [lookupKey, owner, result.source.sscc, result.source.revision, lookupKey],
     );
     return { source: result.source, offline: false };
   } catch (error) {

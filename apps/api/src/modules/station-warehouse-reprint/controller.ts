@@ -1,6 +1,7 @@
 import { WarehousePalletService } from "./pallet.service";
 import {
   PALLET_REPRINT_PROTOCOL,
+  PALLET_PRODUCTION_DELIVERY_PROTOCOL,
   palletLookupRequestSchema,
   palletLookupResultSchema,
   palletSourcesBatchSchema,
@@ -89,7 +90,13 @@ export class StationWarehouseReprintController {
   @ApiZodResponse({ status: 200, schema: z.strictObject({ protocols: z.array(z.string()) }) })
   @ApiHttpErrors(401, 403)
   sourceCapabilities() {
-    return { protocols: [LABEL_FACTS_PROTOCOL, PALLET_REPRINT_PROTOCOL] };
+    return {
+      protocols: [
+        LABEL_FACTS_PROTOCOL,
+        PALLET_REPRINT_PROTOCOL,
+        PALLET_PRODUCTION_DELIVERY_PROTOCOL,
+      ],
+    };
   }
   @Post("pallet-sources")
   @AllowSubscriptionRecovery("station")
@@ -103,7 +110,7 @@ export class StationWarehouseReprintController {
     input: z.infer<typeof palletSourcesBatchSchema>,
   ) {
     const { tenantId, deviceId } = scope(req);
-    return this.pallets.receive(tenantId, deviceId, input.entries);
+    return this.pallets.receive(tenantId, deviceId, input.entries, input.productionDelivery);
   }
   @Post("pallet-lookup")
   @AllowSubscriptionRecovery("station")

@@ -33,6 +33,10 @@ export const warehousePalletSources = sqliteTable(
     sscc: text("sscc").notNull(),
     revision: text("revision").notNull(),
     valueJson: text("value_json").notNull(),
+    productionDeliveryJson: text("production_delivery_json"),
+    productionDeliveryAckedSequence: integer("production_delivery_acked_sequence")
+      .notNull()
+      .default(0),
     receiveStatus: text("receive_status").notNull().default("pending"),
     lastTriedAt: text("last_tried_at").notNull().default(""),
     lookupKeysJson: text("lookup_keys_json").notNull().default("[]"),
@@ -86,6 +90,7 @@ export const warehousePalletEvents = sqliteTable(
     eventId: text("event_id").notNull(),
     valueJson: text("value_json").notNull(),
     receiveStatus: text("receive_status").notNull().default("pending"),
+    lastTriedAt: text("last_tried_at").notNull().default(""),
   },
   (t) => [
     primaryKey({ columns: [t.owner, t.eventId] }),

@@ -1,5 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   PALLET_REPRINT_PROTOCOL,
@@ -9,6 +9,7 @@ import {
   validatePalletBranding,
   productLabelValueDigest,
   palletReprintEventSchema,
+  palletProductionDeliverySchema,
   type PalletLabelSourceV1,
 } from "@markiro/domain";
 import type { z } from "zod";
@@ -113,7 +114,12 @@ function sameComposition(
 @Injectable()
 export class WarehousePalletService {
   constructor(@Inject(DB) private readonly db: Db) {}
-  async receive(tenantId: string, deviceId: string, entries: PalletLabelSourceV1[]) {
+  async receive(
+    tenantId: string,
+    deviceId: string,
+    entries: PalletLabelSourceV1[],
+    productionDelivery?: z.infer<typeof palletProductionDeliverySchema>,
+  ) {
     return this.db.transaction(async (tx) => {
       await assertWarehouseDevice(tx, tenantId, deviceId);
       await tx.execute(
@@ -121,7 +127,42 @@ export class WarehousePalletService {
       );
       const results: Array<{ revision: string; status: "accepted" | "retryable" | "conflict" }> =
         [];
+      const receiveDelivery = async (
+        source: PalletLabelSourceV1,
+      ): Promise<"accepted" | "conflict"> => {
+        if (!productionDelivery) return "accepted";
+        const deliveryScope = and(
+          eq(schema.palletProductionDeliveries.tenantId, tenantId),
+          eq(schema.palletProductionDeliveries.sscc, source.sscc),
+          eq(schema.palletProductionDeliveries.sequence, productionDelivery.sequence),
+        );
+        const digest = productLabelValueDigest(productionDelivery);
+        const [saved] = await tx
+          .select()
+          .from(schema.palletProductionDeliveries)
+          .where(deliveryScope);
+        if (saved)
+          return saved.sourceDeviceId === deviceId && saved.digest === digest
+            ? "accepted"
+            : "conflict";
+        await tx.insert(schema.palletProductionDeliveries).values({
+          tenantId,
+          sscc: source.sscc,
+          sourceDeviceId: deviceId,
+          sequence: productionDelivery.sequence,
+          digest,
+          value: { ...productionDelivery },
+        });
+        return "accepted";
+      };
       for (const source of entries) {
+        if (
+          productionDelivery &&
+          (entries.length !== 1 || productionDelivery.sourceRevision !== source.revision)
+        ) {
+          results.push({ revision: source.revision, status: "conflict" });
+          continue;
+        }
         const [old] = await tx
           .select()
           .from(schema.palletLabelSources)
@@ -136,7 +177,7 @@ export class WarehousePalletService {
             revision: source.revision,
             status:
               old.sourceDeviceId === deviceId && old.revision === source.revision
-                ? "accepted"
+                ? await receiveDelivery(source)
                 : "conflict",
           });
           continue;
@@ -149,6 +190,7 @@ export class WarehousePalletService {
         const claimedBoxes = await tx
           .select({
             id: schema.boxes.id,
+            sscc: schema.boxes.sscc,
             palletId: schema.boxes.palletId,
             disassembledAt: schema.boxes.disassembledAt,
           })
@@ -156,23 +198,40 @@ export class WarehousePalletService {
           .where(
             and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.sscc, source.boxSsccs)),
           );
-        const removedItems = await tx
-          .select({ id: schema.boxItems.boxId })
-          .from(schema.boxItems)
-          .where(
-            and(
-              eq(schema.boxItems.tenantId, tenantId),
-              inArray(
-                schema.boxItems.boxId,
-                claimedBoxes.map((box) => box.id),
-              ),
-              or(
-                gte(schema.boxItems.removedAt, new Date(source.closedAt)),
-                gte(schema.boxItems.displacedAt, new Date(source.closedAt)),
-              ),
-            ),
-          )
-          .limit(1);
+        // Exact active membership wins: old removals may have happened before
+        // closure and reached the server much later. Server ingestion timestamps
+        // cannot be compared with the device's closure clock.
+        const historicalItems = sameComposition(m, source)
+          ? []
+          : await tx
+              .select({
+                boxId: schema.boxItems.boxId,
+                codeHash: schema.boxItems.codeHash,
+                addedAt: schema.boxItems.addedAt,
+                removedAt: schema.boxItems.removedAt,
+                displacedAt: schema.boxItems.displacedAt,
+              })
+              .from(schema.boxItems)
+              .where(
+                and(
+                  eq(schema.boxItems.tenantId, tenantId),
+                  inArray(
+                    schema.boxItems.boxId,
+                    claimedBoxes.map((box) => box.id),
+                  ),
+                ),
+              );
+        const claimedSsccs = new Map(claimedBoxes.map((box) => [box.id, box.sscc]));
+        // A missing active occurrence is a definitive mutation only when durable
+        // historical memberships reconstruct this exact uploaded composition.
+        // Otherwise fewer active items may still mean incomplete ingestion.
+        const historicalDigest = palletCompositionDigest(
+          historicalItems.map((item) => ({
+            boxSscc: claimedSsccs.get(item.boxId) ?? "",
+            codeHash: item.codeHash,
+            acceptedAt: item.addedAt.toISOString(),
+          })),
+        );
         if (
           m.pallet.kind !== "production" ||
           m.pallet.shiftId !== source.shiftId ||
@@ -182,7 +241,10 @@ export class WarehousePalletService {
           claimedBoxes.some(
             (box) => box.disassembledAt || (box.palletId !== null && box.palletId !== m.pallet.id),
           ) ||
-          removedItems.length > 0
+          (!sameComposition(m, source) &&
+            historicalItems.some((item) => item.removedAt || item.displacedAt) &&
+            historicalDigest === source.compositionDigest &&
+            historicalItems.length === source.itemCount)
         ) {
           results.push({ revision: source.revision, status: "conflict" });
           continue;
@@ -232,7 +294,7 @@ export class WarehousePalletService {
             format: source.rendering.kind,
           },
         });
-        results.push({ revision: source.revision, status: "accepted" });
+        results.push({ revision: source.revision, status: await receiveDelivery(source) });
       }
       return { protocol: PALLET_REPRINT_PROTOCOL, results };
     });
@@ -317,8 +379,6 @@ export class WarehousePalletService {
     if (!m.pallet.closedAt) return { status: "unavailable" as const, code: "not_closed" as const };
     if (m.pallet.disassembledAt || !m.itemCount || !m.boxCount)
       return { status: "unavailable" as const, code: "composition_changed" as const };
-    if (!m.pallet.printVerifiedAt && !m.pallet.printSkippedAt)
-      return { status: "unavailable" as const, code: "delivery_unresolved" as const };
     const [saved] = await this.db
       .select()
       .from(schema.palletLabelSources)
@@ -328,7 +388,37 @@ export class WarehousePalletService {
           eq(schema.palletLabelSources.sscc, sscc),
         ),
       );
-    if (!saved) return { status: "unavailable" as const, code: "snapshot_missing" as const };
+    if (!saved)
+      return {
+        status: "unavailable" as const,
+        code:
+          m.pallet.printVerifiedAt || m.pallet.printSkippedAt
+            ? ("snapshot_missing" as const)
+            : ("delivery_unresolved" as const),
+      };
+    const [latestDelivery] = await this.db
+      .select()
+      .from(schema.palletProductionDeliveries)
+      .where(
+        and(
+          eq(schema.palletProductionDeliveries.tenantId, tenantId),
+          eq(schema.palletProductionDeliveries.sscc, sscc),
+          eq(schema.palletProductionDeliveries.sourceDeviceId, saved.sourceDeviceId),
+        ),
+      )
+      .orderBy(desc(schema.palletProductionDeliveries.sequence))
+      .limit(1);
+    const delivery = latestDelivery
+      ? palletProductionDeliverySchema.parse(latestDelivery.value)
+      : null;
+    // These resolution timestamps and occurredAt are claims from the pallet's
+    // originating device. Earlier resolution flags cannot settle a later unknown
+    // delivery; a sent receipt remains transport evidence, never scan verification.
+    const resolved = [m.pallet.printVerifiedAt, m.pallet.printSkippedAt].some(
+      (at) => at !== null && (!delivery || at.getTime() > Date.parse(delivery.occurredAt)),
+    );
+    if (delivery?.state !== "sent" && !resolved)
+      return { status: "unavailable" as const, code: "delivery_unresolved" as const };
     const source = palletLabelSourceSchema.parse(saved.value);
     if (
       source.sscc !== sscc ||
@@ -351,7 +441,6 @@ export class WarehousePalletService {
       );
       const results: Array<{ eventId: string; status: "accepted" | "retryable" | "conflict" }> = [];
       for (const event of entries) {
-        await assertWarehouseHistoricalOperator(tx, tenantId, event.operatorId);
         const digest = productLabelValueDigest(event),
           scope = and(
             eq(schema.palletReprintEvents.tenantId, tenantId),
@@ -364,8 +453,46 @@ export class WarehousePalletService {
         if (old) {
           results.push({
             eventId: event.eventId,
-            status: old.digest === digest ? "accepted" : "conflict",
+            status: old.digest === digest ? old.status : "conflict",
           });
+          continue;
+        }
+        const reject = async () => {
+          await tx.insert(schema.palletReprintEvents).values({
+            tenantId,
+            deviceId,
+            eventId: event.eventId,
+            jobId: event.jobId,
+            digest,
+            status: "conflict",
+            value: { ...event },
+          });
+          results.push({ eventId: event.eventId, status: "conflict" });
+        };
+        try {
+          await assertWarehouseHistoricalOperator(tx, tenantId, event.operatorId);
+        } catch (error) {
+          if (!(error instanceof ForbiddenException)) throw error;
+          await reject();
+          continue;
+        }
+        const previous = await tx
+          .select()
+          .from(schema.palletReprintEvents)
+          .where(and(scope, eq(schema.palletReprintEvents.jobId, event.jobId)))
+          .orderBy(
+            sql`${schema.palletReprintEvents.value}->>'occurredAt'`,
+            sql`CASE WHEN ${schema.palletReprintEvents.value}->>'state'='prepared' THEN 0 ELSE 1 END`,
+          );
+        if (
+          previous.some(
+            (row) =>
+              row.status === "conflict" &&
+              row.value.state === "prepared" &&
+              row.value.attemptId === event.attemptId,
+          )
+        ) {
+          await reject();
           continue;
         }
         const [source] = await tx
@@ -382,18 +509,11 @@ export class WarehousePalletService {
           continue;
         }
         if (source.revision !== event.sourceRevision) {
-          results.push({ eventId: event.eventId, status: "conflict" });
+          await reject();
           continue;
         }
-        const previous = await tx
-          .select()
-          .from(schema.palletReprintEvents)
-          .where(and(scope, eq(schema.palletReprintEvents.jobId, event.jobId)))
-          .orderBy(
-            sql`${schema.palletReprintEvents.value}->>'occurredAt'`,
-            sql`CASE WHEN ${schema.palletReprintEvents.value}->>'state'='prepared' THEN 0 ELSE 1 END`,
-          );
-        const history = previous.map((row) => palletReprintEventSchema.parse(row.value));
+        const accepted = previous.filter((row) => row.status === "accepted");
+        const history = accepted.map((row) => palletReprintEventSchema.parse(row.value));
         const frozen = palletLabelSourceSchema.parse(source.value);
         if (
           (frozen.rendering.kind === "a4" && event.printFormat !== "mono-raster-v1") ||
@@ -404,7 +524,7 @@ export class WarehousePalletService {
               old.reason !== event.reason,
           )
         ) {
-          results.push({ eventId: event.eventId, status: "conflict" });
+          await reject();
           continue;
         }
         const sameAttempt = history.filter((old) => old.attemptId === event.attemptId);
@@ -414,7 +534,7 @@ export class WarehousePalletService {
           (["sent", "failed_before_send", "delivery_unknown"].includes(event.state) &&
             sameAttempt.some((old) => old.state !== "prepared"))
         ) {
-          results.push({ eventId: event.eventId, status: "conflict" });
+          await reject();
           continue;
         }
         if (event.state === "prepared") {
@@ -425,7 +545,7 @@ export class WarehousePalletService {
               (last.state === "delivery_unknown" &&
                 (last.bytesDigest !== event.bytesDigest || last.printFormat !== event.printFormat)))
           ) {
-            results.push({ eventId: event.eventId, status: "conflict" });
+            await reject();
             continue;
           }
         }
@@ -433,10 +553,10 @@ export class WarehousePalletService {
           event.state === "verified" &&
           !sameAttempt.some((old) => ["sent", "delivery_unknown"].includes(old.state))
         ) {
-          results.push({ eventId: event.eventId, status: "conflict" });
+          await reject();
           continue;
         }
-        const attempt = previous
+        const attempt = accepted
           .map((row) => row.value)
           .find((value) => value.attemptId === event.attemptId && value.state === "prepared");
         if (event.state !== "prepared" && !attempt) {
@@ -450,7 +570,7 @@ export class WarehousePalletService {
             attempt.bytesDigest !== event.bytesDigest ||
             attempt.printFormat !== event.printFormat)
         ) {
-          results.push({ eventId: event.eventId, status: "conflict" });
+          await reject();
           continue;
         }
         await tx.insert(schema.palletReprintEvents).values({
@@ -464,7 +584,7 @@ export class WarehousePalletService {
         await tx.insert(schema.tenantAuditEvents).values({
           organizationId: tenantId,
           actorUserId: null,
-          action: "pallet_label.reprinted",
+          action: `pallet_label.${event.state}`,
           outcome: "accepted",
           targetType: "pallet",
           targetId: source.palletId,

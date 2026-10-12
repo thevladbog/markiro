@@ -6,6 +6,7 @@ import { palletSheetTemplateSnapshotSchema } from "../labels/pallet-sheet-snapsh
 import { productLabelValueDigest } from "../product-labels/km.js";
 import { warehouseReasonSchema } from "./contracts.js";
 export const PALLET_REPRINT_PROTOCOL = "warehouse-pallet-reprint-v1";
+export const PALLET_PRODUCTION_DELIVERY_PROTOCOL = "warehouse-pallet-production-delivery-v1";
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const sscc = z.string().refine(isValidSscc, "Invalid SSCC");
 export const palletFactsSchema = z.strictObject({
@@ -131,10 +132,28 @@ export const palletLookupResultSchema = z.discriminatedUnion("status", [
     ]),
   }),
 ]);
-export const palletSourcesBatchSchema = z.strictObject({
-  protocol: z.literal(PALLET_REPRINT_PROTOCOL),
-  entries: z.array(palletLabelSourceSchema).max(1),
+export const palletProductionDeliverySchema = z.strictObject({
+  sourceRevision: digest,
+  sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  attemptId: z.string().min(1).max(255),
+  bytesDigest: digest,
+  state: z.enum(["sent", "failed_before_send", "delivery_unknown"]),
+  occurredAt: z.iso.datetime(),
 });
+export const palletSourcesBatchSchema = z
+  .strictObject({
+    protocol: z.literal(PALLET_REPRINT_PROTOCOL),
+    entries: z.array(palletLabelSourceSchema).max(1),
+    productionDelivery: palletProductionDeliverySchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (
+      value.productionDelivery &&
+      (value.entries.length !== 1 ||
+        value.productionDelivery.sourceRevision !== value.entries[0]?.revision)
+    )
+      context.addIssue({ code: "custom", message: "Production delivery source mismatch" });
+  });
 export const palletSourcesReceiptSchema = z.strictObject({
   protocol: z.literal(PALLET_REPRINT_PROTOCOL),
   results: z

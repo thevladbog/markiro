@@ -22,7 +22,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     afterAll(async () => {
       await h?.close();
     });
-    it("quarantines a source with a removed unit rather than treating it as incomplete ingestion", async () => {
+    it("accepts exact composition despite older removals, and quarantines later changes independently of device clocks", async () => {
       const palletId = randomUUID(),
         sscc = "146000000000001231";
       await h.db.insert(schema.pallets).values({
@@ -78,9 +78,61 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }),
         },
       });
+      await h.db.insert(schema.boxItems).values({
+        tenantId: h.a.tenantId,
+        boxId: h.boxId,
+        codeHash: "e".repeat(64),
+        addedAt: new Date("2026-10-08T09:00:00Z"),
+        removedAt: new Date("2026-10-12T00:00:00Z"),
+      });
+      const matching = await request(h.app.getHttpServer())
+        .post("/station/warehouse-reprint/pallet-sources")
+        .set("x-api-key", h.a.apiKey)
+        .send({ protocol: PALLET_REPRINT_PROTOCOL, entries: [source] })
+        .expect(200);
+      expect(matching.body.results).toEqual([{ revision: source.revision, status: "accepted" }]);
+      await h.db
+        .delete(schema.palletLabelSources)
+        .where(eq(schema.palletLabelSources.tenantId, h.a.tenantId));
+      if (source.rendering.kind !== "thermal") throw new Error("Expected thermal source");
+      const { revision: sourceRevision, ...sourceBody } = source;
+      const incomplete = makePalletLabelSource({
+        ...sourceBody,
+        itemCount: 2,
+        compositionDigest: palletCompositionDigest([
+          {
+            boxSscc: WAREHOUSE_TEST_SSCC,
+            codeHash: h.codeHash,
+            acceptedAt: "2026-10-08T10:00:00.000Z",
+          },
+          {
+            boxSscc: WAREHOUSE_TEST_SSCC,
+            codeHash: "f".repeat(64),
+            acceptedAt: "2026-10-08T10:01:00.000Z",
+          },
+        ]),
+        rendering: { ...source.rendering, fields: { ...source.rendering.fields, qty: "2" } },
+      });
+      expect(incomplete.revision).not.toBe(sourceRevision);
+      const pending = await request(h.app.getHttpServer())
+        .post("/station/warehouse-reprint/pallet-sources")
+        .set("x-api-key", h.a.apiKey)
+        .send({ protocol: PALLET_REPRINT_PROTOCOL, entries: [incomplete] })
+        .expect(200);
+      expect(pending.body.results).toEqual([
+        { revision: incomplete.revision, status: "retryable" },
+      ]);
+      await h.db
+        .delete(schema.boxItems)
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, h.a.tenantId),
+            eq(schema.boxItems.codeHash, "e".repeat(64)),
+          ),
+        );
       await h.db
         .update(schema.boxItems)
-        .set({ removedAt: new Date("2026-10-11T00:02:00Z") })
+        .set({ removedAt: new Date("2026-10-09T00:02:00Z") })
         .where(and(eq(schema.boxItems.tenantId, h.a.tenantId), eq(schema.boxItems.boxId, h.boxId)));
       const result = await request(h.app.getHttpServer())
         .post("/station/warehouse-reprint/pallet-sources")

@@ -8,6 +8,7 @@ import {
   productLabelValueDigest,
   warehouseSourceSchema,
   parseDuplicateKm,
+  resolveWarehouseReprintScan,
   productLabelBytesDigest,
   type UnitLabelFactsV1,
 } from "@markiro/domain";
@@ -74,7 +75,7 @@ export async function syncUnitLabelFacts(
   isCurrent: () => boolean,
 ) {
   const rows = await exec.all<Row>(
-    `SELECT * FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY rowid LIMIT 100`,
+    `SELECT * FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY last_tried_at,rowid LIMIT 100`,
     [owner],
   );
   if (!rows.length || !isCurrent() || !client.get) return 0;
@@ -117,7 +118,14 @@ export async function syncUnitLabelFacts(
     const entry = entries[index];
     if (!entry) throw new Error("WAREHOUSE_FACT_RECEIPT_MISMATCH");
     const receipt = result.results.find((r) => r.digest === entry.digest);
-    if (!receipt || receipt.status === "retryable") continue;
+    if (!receipt) continue;
+    if (receipt.status === "retryable") {
+      await exec.run(
+        "UPDATE unit_label_facts SET last_tried_at=? WHERE owner=? AND shift_id=? AND code_hash=? AND accepted_at=? AND receive_status='pending'",
+        [new Date().toISOString(), row.owner, row.shift_id, row.code_hash, row.accepted_at],
+      );
+      continue;
+    }
     await exec.run(
       "UPDATE unit_label_facts SET receive_status=? WHERE owner=? AND shift_id=? AND code_hash=? AND accepted_at=? AND receive_status='pending'",
       [receipt.status, row.owner, row.shift_id, row.code_hash, row.accepted_at],
@@ -133,14 +141,30 @@ export async function frozenUnitSource(
 ) {
   const fact = await readUnitLabelFacts(exec, owner, codeHash);
   if (!fact) return null;
-  const [stored] = await exec.all<{ canonical_raw: string }>(
-    "SELECT canonical_raw FROM unit_label_facts WHERE code_hash=? AND shift_id=? AND accepted_at=? AND (owner IN (" +
-      AUTHORIZED_CREDENTIAL_OWNERS_SQL +
-      ") OR (owner='' AND NOT EXISTS(SELECT 1 FROM station_device_recovery))) LIMIT 1",
-    [codeHash, fact.shiftId, fact.acceptedAt, owner],
+  // New facts contain no raw copy. Existing protected sources retain exact crypto bytes.
+  const candidates = await exec.all<{ raw: string }>(
+    `SELECT raw FROM product_label_accept_commands WHERE shift_id=? AND code_hash=? AND accepted_at=? AND credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
+     UNION ALL SELECT raw FROM scan_events_mirror WHERE shift_id=? AND scanned_at=? AND verdict='ok'`,
+    [fact.shiftId, codeHash, fact.acceptedAt, owner, fact.shiftId, fact.acceptedAt],
   );
-  if (!stored) return null;
-  const raw = parseDuplicateKm(stored.canonical_raw).raw;
+  const matching = candidates.filter((row) => {
+    const scan = resolveWarehouseReprintScan(row.raw);
+    return scan.kind === "unit" && scan.codeHash === codeHash;
+  });
+  let storedRaw = matching[0]?.raw;
+  if (new Set(matching.map((row) => row.raw)).size > 1) return null;
+  if (!storedRaw) {
+    // A pre-correction fact may be the last surviving original; retain it until safe history cleanup.
+    const [legacy] = await exec.all<{ canonical_raw: string }>(
+      `SELECT canonical_raw FROM unit_label_facts WHERE code_hash=? AND shift_id=? AND accepted_at=? AND (owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) OR (owner='' AND NOT EXISTS(SELECT 1 FROM station_device_recovery))) LIMIT 1`,
+      [codeHash, fact.shiftId, fact.acceptedAt, owner],
+    );
+    if (!legacy?.canonical_raw) return null;
+    const scan = resolveWarehouseReprintScan(legacy.canonical_raw);
+    if (scan.kind !== "unit" || scan.codeHash !== codeHash) return null;
+    storedRaw = legacy.canonical_raw;
+  }
+  const raw = parseDuplicateKm(storedRaw).raw;
   const value = {
     kind: "unit" as const,
     sourceId: codeHash,

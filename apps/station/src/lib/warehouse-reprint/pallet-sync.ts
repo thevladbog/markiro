@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   PALLET_REPRINT_PROTOCOL,
+  PALLET_PRODUCTION_DELIVERY_PROTOCOL,
+  palletProductionDeliverySchema,
   palletLabelSourceSchema,
   palletReprintEventSchema,
   palletSourcesReceiptSchema,
@@ -18,32 +20,52 @@ export async function syncWarehousePallets(
   isCurrent: () => boolean,
 ) {
   if (!client.get || !isCurrent()) return 0;
-  const sources = await exec.all<{ owner: string; sscc: string; value_json: string }>(
-    `SELECT owner,sscc,value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY last_tried_at,rowid LIMIT 1`,
+  const sources = await exec.all<{
+    owner: string;
+    sscc: string;
+    value_json: string;
+    production_delivery_json: string | null;
+  }>(
+    `SELECT owner,sscc,value_json,production_delivery_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND (receive_status='pending' OR (receive_status='accepted' AND COALESCE(json_extract(production_delivery_json,'$.sequence'),0)>production_delivery_acked_sequence)) AND NOT EXISTS(SELECT 1 FROM outbox) ORDER BY last_tried_at,rowid LIMIT 1`,
     [owner],
   );
   const events = await exec.all<{ owner: string; event_id: string; value_json: string }>(
-    `SELECT owner,event_id,value_json FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' ORDER BY rowid LIMIT 100`,
+    `SELECT owner,event_id,value_json FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' ORDER BY last_tried_at,rowid LIMIT 100`,
     [owner],
   );
   if (!sources.length && !events.length) return 0;
+  let supportsProductionDelivery: boolean;
   try {
     const caps = z
       .strictObject({ protocols: z.array(z.string()) })
       .parse(await client.get("/station/warehouse-reprint/source-capabilities"));
     if (!caps.protocols.includes(PALLET_REPRINT_PROTOCOL)) return 0;
+    supportsProductionDelivery = caps.protocols.includes(PALLET_PRODUCTION_DELIVERY_PROTOCOL);
   } catch (error) {
     if (error instanceof StationApiError && error.status === 404) return 0;
     throw error;
   }
   if (!isCurrent()) return 0;
   let acknowledged = 0;
-  if (sources.length) {
+  if (sources[0]?.production_delivery_json && !supportsProductionDelivery) {
+    await exec.run(
+      "UPDATE warehouse_pallet_sources SET last_tried_at=? WHERE owner=? AND sscc=? AND receive_status<>'conflict'",
+      [new Date().toISOString(), sources[0].owner, sources[0].sscc],
+    );
+  }
+  if (sources.length && (!sources[0]?.production_delivery_json || supportsProductionDelivery)) {
     const entries = sources.map((row) => palletLabelSourceSchema.parse(JSON.parse(row.value_json)));
     const receipt = palletSourcesReceiptSchema.parse(
       await client.post("/station/warehouse-reprint/pallet-sources", {
         protocol: PALLET_REPRINT_PROTOCOL,
         entries,
+        ...(sources[0]?.production_delivery_json
+          ? {
+              productionDelivery: palletProductionDeliverySchema.parse(
+                JSON.parse(sources[0].production_delivery_json),
+              ),
+            }
+          : {}),
       }),
     );
     if (
@@ -57,14 +79,14 @@ export async function syncWarehousePallets(
       if (!result) continue;
       if (result.status === "retryable") {
         await exec.run(
-          "UPDATE warehouse_pallet_sources SET last_tried_at=? WHERE owner=? AND sscc=? AND receive_status='pending'",
+          "UPDATE warehouse_pallet_sources SET last_tried_at=? WHERE owner=? AND sscc=? AND receive_status<>'conflict'",
           [new Date().toISOString(), row.owner, row.sscc],
         );
         continue;
       }
       await exec.run(
-        "UPDATE warehouse_pallet_sources SET receive_status=? WHERE owner=? AND sscc=? AND receive_status='pending'",
-        [result.status, row.owner, row.sscc],
+        "UPDATE warehouse_pallet_sources SET receive_status=?,production_delivery_acked_sequence=CASE WHEN production_delivery_json IS ? AND ?='accepted' THEN COALESCE(json_extract(production_delivery_json,'$.sequence'),0) ELSE production_delivery_acked_sequence END WHERE owner=? AND sscc=? AND receive_status<>'conflict'",
+        [result.status, row.production_delivery_json, result.status, row.owner, row.sscc],
       );
       acknowledged++;
     }
@@ -86,7 +108,14 @@ export async function syncWarehousePallets(
   for (const row of events) {
     if (!isCurrent()) return acknowledged;
     const result = receipt.results.find((r) => r.eventId === row.event_id);
-    if (!result || result.status === "retryable") continue;
+    if (!result) continue;
+    if (result.status === "retryable") {
+      await exec.run(
+        "UPDATE warehouse_pallet_events SET last_tried_at=? WHERE owner=? AND event_id=? AND receive_status='pending'",
+        [new Date().toISOString(), row.owner, row.event_id],
+      );
+      continue;
+    }
     await exec.run(
       "UPDATE warehouse_pallet_events SET receive_status=? WHERE owner=? AND event_id=? AND receive_status='pending'",
       [result.status, row.owner, row.event_id],
@@ -96,12 +125,5 @@ export async function syncWarehousePallets(
   return acknowledged;
 }
 
-/** Large rasters may expire only after explicit resolution and complete event acceptance. */
-export async function purgeWarehousePalletJobs(exec: SqlExecutor, owner: string, before: string) {
-  await exec.run(
-    `DELETE FROM warehouse_pallet_jobs WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND state IN ('verified','skipped') AND json_extract(event_json,'$.occurredAt')<?
- AND NOT EXISTS(SELECT 1 FROM warehouse_pallet_events e WHERE e.owner=warehouse_pallet_jobs.owner AND json_extract(e.value_json,'$.jobId')=warehouse_pallet_jobs.job_id AND e.receive_status<>'accepted')
- AND NOT EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.scope=json_array('warehouse-pallet',warehouse_pallet_jobs.owner,warehouse_pallet_jobs.job_id) AND d.resolved_at IS NULL AND d.state IN ('prepared','sending','delivery_unknown'))`,
-    [owner, before],
-  );
-}
+/** Large rasters and metadata share acknowledgement-aware closed-history retention. */
+export { purgeWarehousePalletHistory as purgeWarehousePalletJobs } from "./history-retention.js";

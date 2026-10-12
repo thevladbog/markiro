@@ -1706,6 +1706,7 @@ export const unitLabelFacts = sqliteTable(
     contextJson: text("context_json"),
     fieldsJson: text("fields_json"),
     receiveStatus: text("receive_status").notNull().default("pending"),
+    lastTriedAt: text("last_tried_at").notNull().default(""),
   },
   (t) => [
     primaryKey({ columns: [t.owner, t.shiftId, t.codeHash, t.acceptedAt] }),

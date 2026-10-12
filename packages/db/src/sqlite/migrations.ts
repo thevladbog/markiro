@@ -8,6 +8,7 @@
 import { WAREHOUSE_REPRINT_SOURCE_MIGRATIONS } from "./warehouse-reprint-source-migrations.js";
 import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
 import { PALLET_REPRINT_MIGRATIONS } from "./pallet-reprint-migrations.js";
+import { PRINTING_FOLLOW_UP_MIGRATIONS } from "./printing-follow-up-migrations.js";
 import { LABEL_FACTS_MIGRATIONS } from "./label-facts-migrations.js";
 export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS station_meta (
@@ -5085,6 +5086,7 @@ export const STATION_MIGRATIONS: string[] = [
       WHERE r.snapshot_json=json_extract(printer_deliveries.render_snapshot_json,'$.brandingJson'));`,
   ...LABEL_FACTS_MIGRATIONS,
   ...PALLET_REPRINT_MIGRATIONS,
+  ...PRINTING_FOLLOW_UP_MIGRATIONS,
 ];
 
 export interface StationMigrationEntry {

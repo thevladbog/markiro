@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { LABEL_FACTS_PROTOCOL, type UnitLabelFactsV1 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -59,7 +59,59 @@ export class WarehouseLabelFactsService {
             ),
           );
         if (!code) {
-          results.push({ digest: fact.digest, status: "retryable" });
+          // Only an exact durable rejection proves this occurrence cannot arrive later.
+          const [displaced] = await tx
+            .select({ id: schema.codeConflicts.id })
+            .from(schema.codeConflicts)
+            .where(
+              and(
+                eq(schema.codeConflicts.tenantId, tenantId),
+                eq(schema.codeConflicts.codeHash, fact.codeHash),
+                eq(schema.codeConflicts.losingShiftId, fact.shiftId),
+                eq(schema.codeConflicts.losingTerminalId, deviceId),
+                eq(schema.codeConflicts.losingScannedAt, new Date(fact.acceptedAt)),
+              ),
+            )
+            .limit(1);
+          const [removed] = await tx
+            .select({ boxId: schema.boxItems.boxId })
+            .from(schema.boxItems)
+            .innerJoin(
+              schema.boxes,
+              and(
+                eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+                eq(schema.boxes.id, schema.boxItems.boxId),
+              ),
+            )
+            .where(
+              and(
+                eq(schema.boxItems.tenantId, tenantId),
+                eq(schema.boxItems.codeHash, fact.codeHash),
+                eq(schema.boxItems.addedAt, new Date(fact.acceptedAt)),
+                eq(schema.boxes.shiftId, fact.shiftId),
+                eq(schema.boxes.terminalId, deviceId),
+                or(isNotNull(schema.boxItems.removedAt), isNotNull(schema.boxItems.displacedAt)),
+              ),
+            )
+            .limit(1);
+          const [denied] = await tx
+            .select({ id: schema.stationSyncQuarantine.id })
+            .from(schema.stationSyncQuarantine)
+            .where(
+              and(
+                eq(schema.stationSyncQuarantine.tenantId, tenantId),
+                eq(schema.stationSyncQuarantine.terminalId, deviceId),
+                eq(schema.stationSyncQuarantine.shiftId, fact.shiftId),
+                eq(schema.stationSyncQuarantine.recordKind, "item"),
+                sql`${schema.stationSyncQuarantine.payload}->'code'->>'codeHash' = ${fact.codeHash}`,
+                sql`${schema.stationSyncQuarantine.payload}->>'scannedAt' = ${fact.acceptedAt}`,
+              ),
+            )
+            .limit(1);
+          results.push({
+            digest: fact.digest,
+            status: displaced || removed || denied ? "conflict" : "retryable",
+          });
           continue;
         }
         if (code.deviceId !== deviceId || code.gtin14 !== fact.fields["product.gtin"]) {
