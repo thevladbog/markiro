@@ -1260,8 +1260,8 @@ codes, and the system's own words go to the shell's stderr only.
   required bounds) to a Windows queue as the document `Markiro:<uuid>`: the driver's
   DEVMODE is set to user paper of the page's millimetres, portrait, one copy, 100 %,
   the page's resolution, and the device context must report that resolution on both
-  axes, the paper within one dot and the required bounds inside the printable area
-  (`geometry_mismatch` otherwise), then GDI draws it 1:1 (`StretchDIBits`). It always
+  axes, the paper within one dot, the printable origin inside the page and the required
+  bounds inside the printable area (`geometry_mismatch` otherwise), then GDI draws it 1:1 (`StretchDIBits`). It always
   answers `{ ok: true, receipt: { queue, jobId, documentName } }` or
   `{ ok: false, error: { code, phase, receipt? } }`: `before_start` (nothing reached the
   spooler: `unsupported_platform`, `invalid_artifact`, `queue_unavailable`,
