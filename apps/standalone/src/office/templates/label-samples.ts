@@ -1,10 +1,12 @@
-import { sampleLabelData, type LabelField } from "@markiro/domain";
+import { sampleLabelData, type LabelField, type MonoBitmap } from "@markiro/domain";
 
 import type { TemplatePurpose } from "../../host/protocol.js";
 
 /** How a layout draws a product's code: natively, or as the shared GS1 raster. */
 export interface LabelRenderOptions {
   kmDataMatrix?: "native" | "raster";
+  /** What an `organization_logo` box draws (#703); none — it stays white. */
+  logo?: MonoBitmap | null;
 }
 
 const BOX = sampleLabelData();

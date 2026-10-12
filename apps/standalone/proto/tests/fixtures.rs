@@ -10,11 +10,12 @@ use markiro_proto::{
     LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
     OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
     OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
-    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows, PasswordChange,
-    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
-    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgLogoPut, OrgLogoState,
+    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
+    PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
+    PalletSheet, PalletSheetCreate, PalletSheetDefaultUpdate, PalletSheetUpdate, PalletSheets,
+    PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus,
+    ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
     ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
     SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
@@ -150,6 +151,59 @@ fn bootstrap_and_org_fixtures_round_trip() {
     let _: OrgProfile = round_trip("org-profile.json");
     let update: OrgProfileUpdate = round_trip("org-profile-update.json");
     assert!(update.inn.is_none());
+}
+
+/// The organization's print logo (plan А4): the answer and the `PUT` body.
+#[test]
+fn org_logo_fixtures_round_trip() {
+    let state: OrgLogoState = round_trip("org-logo.json");
+    let logo = state.logo.expect("the fixture has a logo");
+    assert_eq!((logo.width, logo.height), (10, 2));
+    let put: OrgLogoPut = round_trip("org-logo-put.json");
+    assert_eq!(put.pixels_base64, logo.pixels_base64);
+    let none: OrgLogoState = serde_json::from_value(serde_json::json!({ "logo": null })).unwrap();
+    assert_eq!(none.logo, None);
+    // The body is strict: a field the host does not know is a refusal, so a
+    // client cannot smuggle an `updatedAt` of its own or a second picture.
+    let extra = serde_json::json!({ "width": 10, "height": 2, "pixelsBase64": "8MAPQA==", "updatedAt": "x" });
+    assert!(serde_json::from_value::<OrgLogoPut>(extra).is_err());
+}
+
+/// The A4 pallet sheets (plan А4): the list, a sheet and the three requests.
+#[test]
+fn pallet_sheet_fixtures_round_trip() {
+    let list: PalletSheets = round_trip("pallet-sheets.json");
+    let sheet: PalletSheet = round_trip("pallet-sheet.json");
+    assert_eq!(list.sheets, vec![sheet.clone()]);
+    assert_eq!(list.default_id.as_deref(), Some(sheet.id.as_str()));
+    let create: PalletSheetCreate = round_trip("pallet-sheet-create.json");
+    assert_eq!(create.preset_key.as_deref(), Some("pallet-a4-portrait"));
+    let bare: PalletSheetCreate = serde_json::from_value(serde_json::json!({
+        "name": "Свой лист", "spec": {}
+    }))
+    .unwrap();
+    assert!(bare.enabled && bare.preset_key.is_none());
+    let update: PalletSheetUpdate = round_trip("pallet-sheet-update.json");
+    assert_eq!(update.expected_revision, 1);
+    let default: PalletSheetDefaultUpdate = round_trip("pallet-sheet-default-update.json");
+    assert_eq!(default.template_id.as_deref(), Some(sheet.id.as_str()));
+    // The requests are strict, like the host's, so a client cannot smuggle a
+    // layout into a rename or an id into a create.
+    for extra in [
+        serde_json::json!({ "name": "x", "spec": {}, "id": "x" }),
+        serde_json::json!({ "name": "x", "spec": {}, "revision": 1 }),
+    ] {
+        assert!(serde_json::from_value::<PalletSheetCreate>(extra).is_err());
+    }
+    let layout = serde_json::json!({ "expectedRevision": 1, "spec": {} });
+    assert!(serde_json::from_value::<PalletSheetUpdate>(layout).is_err());
+    let extra = serde_json::json!({ "templateId": null, "enabled": true });
+    assert!(serde_json::from_value::<PalletSheetDefaultUpdate>(extra).is_err());
+    // `null` clears the default; a body without the field does not.
+    let none: PalletSheetDefaultUpdate =
+        serde_json::from_value(serde_json::json!({ "templateId": null })).unwrap();
+    assert_eq!(none.template_id, None);
+    assert!(serde_json::from_value::<PalletSheetDefaultUpdate>(serde_json::json!({})).is_err());
 }
 
 #[test]
@@ -1489,4 +1543,77 @@ fn a_shifts_totals_carry_both_pallet_counts_as_required_whole_numbers() {
             );
         }
     }
+}
+
+/// A shift with an A4 sheet (plan А4): the office's request names it, and the
+/// entry freezes the sheet with the organization.
+#[test]
+fn a_shift_with_a_sheet_freezes_it_with_the_organization() {
+    let create: ShiftCreate = round_trip("shift-create-pallet-sheet.json");
+    assert!(create.pallets_enabled && create.pallet_sheet_template_id.is_some());
+    let entered: DeviceShift = round_trip("device-shift-entered-sheet.json");
+    let snapshot = entered.snapshot.expect("an entry carries the snapshot");
+    let sheet = snapshot.pallet_sheet.expect("the shift froze its sheet");
+    assert_eq!(Some(sheet.id), create.pallet_sheet_template_id);
+    let organization = snapshot
+        .organization
+        .expect("the shift froze the organization");
+    assert_eq!(organization.logo.map(|logo| logo.width), Some(10));
+    let plain: DeviceShift =
+        serde_json::from_value(fixture("device-shift-entered-pallets.json")).unwrap();
+    let plain = plain.snapshot.expect("snapshot");
+    assert_eq!((plain.pallet_sheet, plain.organization), (None, None));
+}
+
+/// The sheet is optional in every request that carries it and is sent only
+/// when set; a shift of the office always answers it (`null` for none).
+#[test]
+fn the_sheet_is_left_out_of_a_request_that_names_none() {
+    let plain: ShiftCreate = round_trip("shift-create-pallets.json");
+    assert_eq!(plain.pallet_sheet_template_id, None);
+    let office: OfficeShift = round_trip("office-shift.json");
+    assert_eq!(office.pallet_sheet_template_id, None);
+    let named = serde_json::json!({ "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b", "expectedRev": 3 });
+    let update: ShiftUpdate = serde_json::from_value(named.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&update).unwrap(), named);
+    let none: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 3 })).unwrap();
+    assert_eq!(
+        serde_json::to_value(&none).unwrap(),
+        serde_json::json!({ "expectedRev": 3 })
+    );
+    let station: DeviceShiftCreate = serde_json::from_value(serde_json::json!({
+        "requestId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5c",
+        "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+        "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+        "productionDate": "2026-10-08",
+        "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b"
+    }))
+    .unwrap();
+    assert!(station.pallet_sheet_template_id.is_some());
+    assert!(serde_json::to_value(&station).unwrap()["palletSheetTemplateId"].is_string());
+}
+
+/// A planned shift goes back to the organization's main sheet with
+/// `palletSheetTemplateId: null`, which is neither leaving it out (keep) nor
+/// an id, and goes back out as `null` (`shift-update-main-sheet.json`).
+#[test]
+fn a_shift_update_sends_the_main_sheet_as_null() {
+    let main: ShiftUpdate = round_trip("shift-update-main-sheet.json");
+    assert_eq!(main.pallet_sheet_template_id, Some(None));
+    let named: ShiftUpdate = serde_json::from_value(serde_json::json!({
+        "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b", "expectedRev": 72
+    }))
+    .unwrap();
+    assert_eq!(
+        named.pallet_sheet_template_id,
+        Some(Some("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b".to_owned()))
+    );
+    let kept: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 72 })).unwrap();
+    assert_eq!(kept.pallet_sheet_template_id, None);
+    assert!(serde_json::from_value::<ShiftUpdate>(
+        serde_json::json!({ "palletSheetTemplateId": 7, "expectedRev": 72 })
+    )
+    .is_err());
 }

@@ -5,8 +5,10 @@
 import type { PrintTarget } from "../../hardware/hardware.js";
 import {
   parsePrinterProfile,
+  printerMode,
   type PrinterDpi,
   type PrinterLanguage,
+  type PrinterMode,
   type PrinterProfile,
 } from "./workstation-settings.js";
 
@@ -26,6 +28,10 @@ export interface PrinterDraft {
   usbPrinter: string;
   language: PrinterLanguage;
   dpi: `${PrinterDpi}`;
+  /** Read only for a Windows queue (plan ДРВ): another kind always prints RAW. */
+  mode: PrinterMode;
+  /** «Лист А4» (plan А4): only a Windows queue in driver mode, at 300 dpi. */
+  paper: "label" | "a4";
 }
 
 export const NEW_PRINTER: PrinterDraft = {
@@ -39,6 +45,8 @@ export const NEW_PRINTER: PrinterDraft = {
   usbPrinter: "",
   language: "zpl",
   dpi: "203",
+  mode: "raw",
+  paper: "label",
 };
 
 export function draftOf(profile: PrinterProfile): PrinterDraft {
@@ -55,17 +63,35 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
     usbPrinter: target.kind === "usb" ? target.printer : "",
     language: profile.language,
     dpi: profile.dpi === 300 ? "300" : "203",
+    mode: printerMode(profile),
+    paper: profile.paper ?? "label",
   };
 }
 
+/**
+ * The draft after a change, kept consistent (plan А4): A4 paper is the 300 dpi
+ * of a Windows queue in driver mode, so choosing it sets 300 dpi and leaving
+ * the driver (another way of connecting or printing) goes back to the label
+ * paper, instead of leaving a hidden choice that the check would refuse.
+ */
+export function settleDraft(draft: PrinterDraft, patch: Partial<PrinterDraft>): PrinterDraft {
+  const next = { ...draft, ...patch };
+  if (!(next.kind === "usb" && next.mode === "windows_driver")) return { ...next, paper: "label" };
+  return next.paper === "a4" ? { ...next, dpi: "300" } : next;
+}
+
 /** The keys of `floor.setup.printers.errors`. */
-export type DraftError = "name" | "host" | "port" | "serialPort" | "baud" | "usbPrinter";
+export type DraftError = "name" | "host" | "port" | "serialPort" | "baud" | "usbPrinter" | "paper";
 
 function wholeNumber(text: string): number | null {
   return /^[0-9]+$/.test(text.trim()) ? Number(text.trim()) : null;
 }
 
-/** The profile a draft describes, or the first thing wrong with it. */
+/**
+ * The profile a draft describes, or the first thing wrong with it. The
+ * driver's mode is written only for a Windows queue; RAW is no field at all,
+ * as every profile before plan ДРВ; so is the label paper before plan А4.
+ */
 export function profileOf(
   draft: PrinterDraft,
   newId: () => string,
@@ -86,12 +112,17 @@ export function profileOf(
     if (draft.usbPrinter.trim() === "") return { error: "usbPrinter" };
     target = { kind: "usb", printer: draft.usbPrinter };
   }
+  const driver = draft.kind === "usb" && draft.mode === "windows_driver";
+  // «Лист А4» is a driver page at 300 dpi and nothing else (plan А4).
+  if (draft.paper === "a4" && !(driver && draft.dpi === "300")) return { error: "paper" };
   const profile = parsePrinterProfile({
     id: draft.id ?? newId(),
     name: draft.name,
     target,
     language: draft.language,
     dpi: Number(draft.dpi),
+    ...(driver ? { mode: "windows_driver" } : {}),
+    ...(draft.paper === "a4" ? { paper: "a4" } : {}),
   });
   return profile === null ? { error: "name" } : { profile };
 }

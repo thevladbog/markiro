@@ -14,7 +14,12 @@ import { createPrintRuntime } from "../floor/print/print-runtime.js";
 import { applySavedScanners } from "../floor/setup/workstation-settings.js";
 import type { FloorOperator } from "../floor/sign-in.js";
 import { createSystemAwake } from "../hardware/awake.js";
-import { createTauriHardware, type HardwareApi } from "../hardware/hardware.js";
+import {
+  createTauriHardware,
+  createTauriWindowsPrinting,
+  type HardwareApi,
+  type WindowsPrinting,
+} from "../hardware/hardware.js";
 
 import { createHostApi, type HostApi } from "../host/api.js";
 import { createTauriHostClient, HostError } from "../host/client.js";
@@ -131,6 +136,8 @@ export interface AppProps {
   scanSource?: ScanSource;
   /** The shell's printers, COM scanners and power request; tests give their own. */
   hardware?: HardwareApi;
+  /** The shell's printing through Windows drivers (plan ДРВ); tests give their own. */
+  windowsPrinting?: WindowsPrinting;
   /** How long a signed-in operator may leave the station untouched; tests shorten it. */
   idleTimeoutMs?: number;
   /** The shortest wait between two syncs the sign-in asks for; tests lengthen it. */
@@ -148,6 +155,7 @@ export function App({
   address = LOCAL_HOST_ADDRESS,
   scanSource,
   hardware,
+  windowsPrinting,
   idleTimeoutMs,
   signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
   lockdown,
@@ -173,7 +181,14 @@ export function App({
   // One queue of sends per printer for the whole app, and the request that
   // keeps the computer awake, let go at the start: a webview that reloaded
   // during a shift leaves the shell's request held.
-  const printing = useMemo(() => createPrintRuntime(hardwareApi.printBytes), [hardwareApi]);
+  const windowsApi = useMemo(
+    () => windowsPrinting ?? createTauriWindowsPrinting(),
+    [windowsPrinting],
+  );
+  const printing = useMemo(
+    () => createPrintRuntime(hardwareApi.printBytes, { windows: windowsApi }),
+    [hardwareApi, windowsApi],
+  );
   const awake = useMemo(() => createSystemAwake(hardwareApi.setSystemAwake), [hardwareApi]);
   useEffect(() => {
     void awake.reset();

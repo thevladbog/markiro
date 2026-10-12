@@ -5,6 +5,7 @@ import {
   DEFAULT_WORKSTATION_SETTINGS,
   InvalidSettingsError,
   MAX_SCANNERS,
+  parsePrinterProfile,
   parsePrinters,
   parsePrintTarget,
   printerTargetKey,
@@ -325,5 +326,101 @@ describe("the sound and the scanners of the settings", () => {
     const configure = vi.fn(async () => undefined);
     await expect(applySavedScanners(broken, configure)).resolves.toBe(false);
     expect(configure).not.toHaveBeenCalled();
+  });
+});
+
+describe("paper «Лист А4» (plan А4)", () => {
+  const driver = {
+    id: "p-a4",
+    name: "HP LaserJet",
+    target: { kind: "usb", printer: "HP LaserJet" },
+    language: "zpl",
+    dpi: 300,
+    mode: "windows_driver",
+  };
+
+  it("reads A4 paper only on a Windows driver profile at 300 dpi", () => {
+    expect(parsePrinterProfile({ ...driver, paper: "a4" })).toMatchObject({ paper: "a4" });
+    expect(parsePrinterProfile({ ...driver, paper: "a4", dpi: 203 })).toBeNull();
+    expect(parsePrinterProfile({ ...driver, paper: "a4", mode: "raw" })).toBeNull();
+    expect(parsePrinterProfile({ ...driver, paper: "letter" })).toBeNull();
+    expect(parsePrinterProfile(driver)).not.toHaveProperty("paper");
+  });
+
+  it("refuses A4 on a RAW profile whatever else it says, and any other spelling of the paper", () => {
+    expect(parsePrinterProfile({ ...driver, mode: undefined, paper: "a4" })).toBeNull();
+    expect(
+      parsePrinterProfile({
+        ...driver,
+        paper: "a4",
+        target: { kind: "tcp", host: "10.0.0.1", port: 9100 },
+      }),
+    ).toBeNull();
+    for (const paper of ["A4", "label", "", null, 4, true]) {
+      expect(parsePrinterProfile({ ...driver, paper })).toBeNull();
+    }
+  });
+
+  it("keeps an A4 printer off the box and duplicate purposes", () => {
+    const parsed = parsePrinters({
+      printers: [{ ...driver, paper: "a4" }],
+      assignments: { box: "p-a4", pallet: "p-a4", duplicate: "p-a4" },
+    });
+    expect(parsed.assignments).toEqual({ box: null, pallet: "p-a4", duplicate: null });
+  });
+
+  it("leaves another printer's box and duplicate purposes where they are", () => {
+    const parsed = parsePrinters({
+      printers: [ZEBRA, { ...driver, paper: "a4" }],
+      assignments: { box: "zebra", pallet: "p-a4", duplicate: "zebra" },
+    });
+    expect(parsed.assignments).toEqual({ box: "zebra", pallet: "p-a4", duplicate: "zebra" });
+  });
+
+  it("stores an A4 printer for the pallet and reads it back as it was", async () => {
+    const { executor } = openLocalDb();
+    const a4 = parsePrinterProfile({ ...driver, paper: "a4" });
+    if (a4 === null) throw new Error("no A4 profile");
+    const settings: WorkstationSettings = {
+      ...SETTINGS,
+      printers: [ZEBRA, a4],
+      assignments: { box: "zebra", pallet: "p-a4", duplicate: null },
+    };
+    await saveWorkstationSettings(executor, settings);
+    expect(await readWorkstationSettings(executor)).toEqual(settings);
+  });
+
+  it("refuses to store an A4 printer for the box or the duplicate, writing nothing", async () => {
+    const { executor } = openLocalDb();
+    const a4 = parsePrinterProfile({ ...driver, paper: "a4" });
+    if (a4 === null) throw new Error("no A4 profile");
+    for (const purpose of ["box", "duplicate"] as const) {
+      await expect(
+        saveWorkstationSettings(executor, {
+          ...SETTINGS,
+          printers: [a4],
+          assignments: { box: null, pallet: null, duplicate: null, [purpose]: "p-a4" },
+        }),
+      ).rejects.toBeInstanceOf(InvalidSettingsError);
+    }
+    expect(await readWorkstationSettings(executor)).toEqual(DEFAULT_WORKSTATION_SETTINGS);
+  });
+
+  it("assigns an A4 printer to the pallet only, even if the settings object says otherwise", () => {
+    const a4 = parsePrinterProfile({ ...driver, paper: "a4" });
+    if (a4 === null) throw new Error("no A4 profile");
+    const settings = {
+      printers: [a4, ZEBRA],
+      assignments: { box: "p-a4", pallet: "p-a4", duplicate: "p-a4" },
+    };
+    expect(resolvePrinter(settings, "pallet")).toEqual(a4);
+    expect(resolvePrinter(settings, "box")).toBeNull();
+    expect(resolvePrinter(settings, "duplicate")).toBeNull();
+    expect(
+      resolvePrinter(
+        { printers: [ZEBRA], assignments: { box: "zebra", pallet: null, duplicate: null } },
+        "box",
+      ),
+    ).toEqual(ZEBRA);
   });
 });

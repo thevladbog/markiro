@@ -3458,6 +3458,16 @@ async fn the_warehouse_reads_search_an_index() {
                 .to_owned(),
             "sqlite_autoindex_wh_outbox_1 (id=?)",
         ),
+        // The organization logo a reprint prints (plan СКЛ × А4,
+        // `src/floor/warehouse/warehouse-logo.ts`): the pairing's shifts through an index on
+        // (host_id, device_id, …) — the planner takes `floor_shifts_line` or the key.
+        (
+            "SELECT snapshot -> '$.organization' AS organization FROM floor_shifts \
+             WHERE host_id = ? AND device_id = ? AND snapshot -> '$.organization' IS NOT NULL \
+             ORDER BY opened_at DESC, id DESC LIMIT 1"
+                .to_owned(),
+            "(host_id=? AND device_id=?)",
+        ),
     ];
     for (sql, index) in &reads {
         let text = format!("EXPLAIN QUERY PLAN {sql}");

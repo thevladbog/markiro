@@ -12,6 +12,7 @@ import {
   bitmapToZplHex,
   convertToMonochrome,
   wrapTextToWidth,
+  wrapTextToWidthStrict,
   type RasterizeTextFn,
   type RasterizeTextOptions,
 } from "@markiro/domain";
@@ -104,6 +105,7 @@ function rasterizeTextSync(
     maxLines,
     lineHeight: lineHeightEm,
     minFontSizePx,
+    overflow,
   }: RasterizeTextOptions,
 ) {
   let font = fontShorthand(fontFamily, fontSizePx, bold);
@@ -122,7 +124,10 @@ function rasterizeTextSync(
       throw new Error("Label quantity exceeds its box at minimum font size");
     }
   }
-  const lines = bounded ? wrapTextToWidth(text, measure, maxWidthPx, maxLines ?? 1) : [text];
+  // A sheet (V2) refuses a text it cannot place in full (`overflow: "error"`,
+  // the domain's strict wrap throws); a label keeps the «…» it always had.
+  const wrap = overflow === "error" ? wrapTextToWidthStrict : wrapTextToWidth;
+  const lines = bounded ? wrap(text, measure, maxWidthPx, maxLines ?? 1) : [text];
   const lineHeight = Math.ceil(fontSizePx * (lineHeightEm ?? 1.5));
   const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
   const width = Math.max(1, bounded ? Math.min(maxWidthPx, naturalWidth) : naturalWidth);
@@ -162,3 +167,36 @@ export const rasterizeText: RasterizeTextFn = async (text, options) => {
     throw error instanceof Error ? error : new Error(String(error));
   }
 };
+
+/**
+ * The rasterizer of a driver page (plan ДРВ, the cloud station's
+ * `rasterizeDriverText`): the page's pixels are frozen into the job's bytes
+ * and replayed by a reprint, so a text is drawn only with the bundled IBM Plex
+ * face loaded for its own script — a webview without `document.fonts`, or a
+ * face that did not load, refuses (`RasterUnavailableError`, the job's
+ * `render_failed`) instead of freezing a fallback face.
+ */
+export const rasterizeDriverText: RasterizeTextFn = (text, options) =>
+  rasterizeWithBundledFace(text, options);
+
+/**
+ * The rasterizer of an A4 sheet (plan А4, the cloud station's
+ * `rasterizeDriverText` for sheets): the bundled face must load and cover the
+ * text, because a sheet is never printed in a fallback face whose metrics the
+ * layout was not measured with, and a text that does not fit is an error
+ * (`overflow: "error"` unless the caller says otherwise).
+ */
+export const rasterizeSheetText: RasterizeTextFn = (text, options) =>
+  rasterizeWithBundledFace(text, { ...options, overflow: options.overflow ?? "error" });
+
+async function rasterizeWithBundledFace(text: string, options: RasterizeTextOptions) {
+  const font = fontShorthand(options.fontFamily, options.fontSizePx, options.bold);
+  const sample = text === "" ? "Аа" : text;
+  const fonts: FontFaceSet | undefined = document.fonts;
+  if (fonts === undefined) throw new RasterUnavailableError("Font loading is unavailable");
+  const loaded = await fonts.load(font, sample);
+  if (loaded.length === 0 || !fonts.check(font, sample)) {
+    throw new RasterUnavailableError("The bundled label font is unavailable");
+  }
+  return rasterizeTextSync(text, options);
+}

@@ -1869,3 +1869,154 @@ fn the_install_role_and_a_new_host_address_have_the_webview_shapes() {
         Ok(json!("office"))
     );
 }
+
+/// The driver printing commands of plan ДРВ: `supports_windows_printing` is
+/// `true` exactly on Windows; a page that is not `mono-raster-v1` is refused
+/// before any queue opens; a valid page goes no further than
+/// `unsupported_platform` off Windows, or `queue_unavailable` on Windows for a
+/// queue that does not exist; a receipt of such a queue reads `unavailable`.
+/// Every answer is the object the webview parses, never Tauri's text.
+#[test]
+fn driver_printing_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(
+        invoke(&webview, "supports_windows_printing", json!({})),
+        Ok(json!(cfg!(windows)))
+    );
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/domain/test/fixtures/mono-raster-v1.json"
+    ))
+    .unwrap();
+    let document = "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f";
+    let print = |payload: &str| {
+        invoke(
+            &webview,
+            "print_windows_raster",
+            json!({
+                "queue": "Markiro: no such queue",
+                "payloadBase64": payload,
+                "documentName": document,
+            }),
+        )
+    };
+    assert_eq!(
+        print("AAAA"),
+        Ok(
+            json!({ "ok": false, "error": { "code": "invalid_artifact", "phase": "before_start" } })
+        )
+    );
+    let expected = if cfg!(windows) {
+        "queue_unavailable"
+    } else {
+        "unsupported_platform"
+    };
+    assert_eq!(
+        print(fixture["base64"].as_str().unwrap()),
+        Ok(json!({ "ok": false, "error": { "code": expected, "phase": "before_start" } }))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "get_windows_print_job",
+            json!({ "receipt": {
+                "queue": "Markiro: no such queue",
+                "jobId": 7,
+                "documentName": document,
+            } }),
+        ),
+        Ok(json!({ "state": "unavailable" }))
+    );
+}
+
+/// The paper of plan А4 on the same command: absent or `null` is the label's
+/// path; `"a4"` asks for a sheet and a page that is no 300 dpi A4 page is
+/// `invalid_artifact` before any queue opens; any other word is too, and a
+/// real A4 page goes as far as the label's page does.
+#[test]
+fn driver_printing_takes_the_paper_of_a_sheet() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/domain/test/fixtures/mono-raster-v1.json"
+    ))
+    .unwrap();
+    let label = fixture["base64"].as_str().unwrap().to_owned();
+    let document = "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f";
+    use base64::Engine;
+    let a4 = |portrait: bool| {
+        // A blank 300 dpi A4 `mono-raster-v1` page (header and zero rows).
+        let (w, h, wm, hm) = if portrait {
+            (2480u32, 3508u32, 210f64, 297f64)
+        } else {
+            (3508, 2480, 297f64, 210f64)
+        };
+        let stride = w.div_ceil(8);
+        let length = stride * h;
+        let mut b = vec![0u8; 64 + length as usize];
+        b[..8].copy_from_slice(b"MKRMNO1\0");
+        for (i, n) in [
+            (8, 300u32),
+            (12, w),
+            (16, h),
+            (20, stride),
+            (40, length),
+            (48, 118),
+            (52, 118),
+            (56, 2000),
+            (60, 2000),
+        ] {
+            b[i..i + 4].copy_from_slice(&n.to_le_bytes());
+        }
+        b[24..32].copy_from_slice(&wm.to_le_bytes());
+        b[32..40].copy_from_slice(&hm.to_le_bytes());
+        base64::engine::general_purpose::STANDARD.encode(b)
+    };
+    let print = |payload: &str, paper: Option<serde_json::Value>| {
+        let mut args = json!({
+            "queue": "Markiro: no such queue",
+            "payloadBase64": payload,
+            "documentName": document,
+        });
+        if let Some(paper) = paper {
+            args["paper"] = paper;
+        }
+        invoke(&webview, "print_windows_raster", args)
+    };
+    let refused =
+        |code: &str| Ok(json!({ "ok": false, "error": { "code": code, "phase": "before_start" } }));
+    let reaches_the_queue = if cfg!(windows) {
+        "queue_unavailable"
+    } else {
+        "unsupported_platform"
+    };
+    // No paper and `null` are the label path.
+    assert_eq!(print(&label, None), refused(reaches_the_queue));
+    assert_eq!(print(&label, Some(json!(null))), refused(reaches_the_queue));
+    // A sheet: the label page is no A4, other words are no paper.
+    assert_eq!(
+        print(&label, Some(json!("a4"))),
+        refused("invalid_artifact")
+    );
+    assert_eq!(
+        print(&a4(true), Some(json!("a5"))),
+        refused("invalid_artifact")
+    );
+    assert_eq!(
+        print(&a4(true), Some(json!("A4"))),
+        refused("invalid_artifact")
+    );
+    assert_eq!(
+        print("AAAA", Some(json!("a4"))),
+        refused("invalid_artifact")
+    );
+    // A real A4 page, either way up, goes as far as the label page does.
+    assert_eq!(
+        print(&a4(true), Some(json!("a4"))),
+        refused(reaches_the_queue)
+    );
+    assert_eq!(
+        print(&a4(false), Some(json!("a4"))),
+        refused(reaches_the_queue)
+    );
+}

@@ -29,6 +29,8 @@ export const shiftFieldsSchema = z
     palletsEnabled: z.boolean(),
     palletBoxCapacity: z.string(),
     palletTemplateId: z.string(),
+    /** The A4 sheet; `""` is the organization's main sheet, which needs no check. */
+    palletSheetTemplateId: z.string(),
     counterpartyId: z.string(),
   })
   .superRefine((values, context) => {
@@ -62,6 +64,7 @@ export const SHIFT_FIELD_ORDER = [
   "palletsEnabled",
   "palletBoxCapacity",
   "palletTemplateId",
+  "palletSheetTemplateId",
   "counterpartyId",
 ] as const satisfies readonly (keyof ShiftFields)[];
 
@@ -77,6 +80,7 @@ export function newShiftFields(today: string): ShiftFields {
     palletsEnabled: false,
     palletBoxCapacity: "",
     palletTemplateId: "",
+    palletSheetTemplateId: "",
     counterpartyId: "",
   };
 }
@@ -93,6 +97,7 @@ export function shiftFields(shift: OfficeShift): ShiftFields {
     palletsEnabled: shift.palletsEnabled,
     palletBoxCapacity: shift.palletBoxCapacity === null ? "" : String(shift.palletBoxCapacity),
     palletTemplateId: shift.palletTemplateId ?? "",
+    palletSheetTemplateId: shift.palletSheetTemplateId ?? "",
     counterpartyId: shift.counterpartyId ?? "",
   };
 }
@@ -114,6 +119,8 @@ export function toShiftInput(values: ShiftFields): ShiftInput {
       ? {
           boxCapacity: Number(values.palletBoxCapacity.trim()),
           templateId: values.palletTemplateId,
+          // «Основной лист организации» (`""`) is the main sheet, never an empty id.
+          sheetId: values.palletSheetTemplateId === "" ? null : values.palletSheetTemplateId,
         }
       : null,
   };
@@ -133,6 +140,10 @@ export const SHIFT_FIELDS = {
   palletTemplateId: {
     field: "palletTemplateId",
     message: "office.shifts.errors.palletTemplateRejected",
+  },
+  palletSheetTemplateId: {
+    field: "palletSheetTemplateId",
+    message: "office.shifts.errors.palletSheetRejected",
   },
   productionDate: "productionDate",
   plannedQty: "plannedQty",

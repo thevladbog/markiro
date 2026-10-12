@@ -6,5 +6,33 @@
       { "port": "COM4", "baud": 115200, "status": "disconnected" }
     ]
   },
-  "usbPrinter": { "name": "Zebra ZD421", "port": "USB001" }
+  "usbPrinter": { "name": "Zebra ZD421", "port": "USB001" },
+  "windowsPrintSent": {
+    "ok": true,
+    "receipt": {
+      "queue": "Godex G500",
+      "jobId": 42,
+      "documentName": "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f"
+    }
+  },
+  "windowsPrintUnknown": {
+    "ok": false,
+    "error": {
+      "code": "driver_failure",
+      "phase": "delivery_unknown",
+      "receipt": {
+        "queue": "Godex G500",
+        "jobId": 42,
+        "documentName": "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f"
+      }
+    }
+  },
+  "windowsPrintRefused": {
+    "ok": false,
+    "error": { "code": "geometry_mismatch", "phase": "before_start" }
+  },
+  "windowsJobPresent": { "state": "present", "statusFlags": 8 },
+  "windowsJobAbsent": { "state": "absent" },
+  "windowsJobIdentityMismatch": { "state": "identity_mismatch" },
+  "windowsJobUnavailable": { "state": "unavailable" }
 }

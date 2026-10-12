@@ -211,7 +211,13 @@ pub async fn create_device_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
-    let pallets = shifts::pallets(&mut tx, pallet_request, &product).await?;
+    let pallets = shifts::pallets(
+        &mut tx,
+        pallet_request,
+        &product,
+        create.pallet_sheet_template_id.as_deref(),
+    )
+    .await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let id = shifts::insert(
         &mut tx,
@@ -269,6 +275,7 @@ struct EntryRow {
     product_id: String,
     box_template_id: String,
     pallet_template_id: Option<String>,
+    pallet_sheet_template_id: Option<String>,
     counterparty_id: Option<String>,
     snapshot: Option<String>,
     number_month_key: String,
@@ -296,8 +303,8 @@ pub async fn enter_shift(
     device.require_station_in(&mut tx, STATION_ONLY).await?;
     let shift: Option<EntryRow> = sqlx::query_as(
         "SELECT status, line_id, owner_device_id, product_id, box_template_id, \
-         pallet_template_id, counterparty_id, snapshot, number_month_key, number_seq, \
-         created_from FROM shifts WHERE id = ?",
+         pallet_template_id, pallet_sheet_template_id, counterparty_id, snapshot, \
+         number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -352,6 +359,7 @@ pub async fn enter_shift(
                 &shift.box_template_id,
                 shift.pallet_template_id.as_deref(),
                 shift.counterparty_id.as_deref(),
+                shift.pallet_sheet_template_id.as_deref(),
             )
             .await?
         }
@@ -391,6 +399,10 @@ pub async fn enter_shift(
     if let Some(pallet_template) = &snapshot.pallet_template {
         details["palletTemplateId"] = json!(pallet_template.id);
         details["palletTemplateRev"] = json!(pallet_template.rev);
+    }
+    if let Some(sheet) = &snapshot.pallet_sheet {
+        details["palletSheetTemplateId"] = json!(sheet.id);
+        details["palletSheetRevision"] = json!(sheet.revision);
     }
     audit::record(
         &mut tx,

@@ -3,13 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import type { WarehouseLookupResult } from "../src/host/protocol.js";
-import { setUpPrinting } from "./support/printing.js";
+import { openLocalDb } from "./support/local-db.js";
+import { HP_A4, setUpPrinting, TSC, ZEBRA } from "./support/printing.js";
 import {
   BOX_SOURCE,
   BOX_SSCC,
   KM,
   PALLET_SOURCE,
   PALLET_SSCC,
+  seedWarehouseCopies,
   UNIT_SOURCE,
 } from "./support/warehouse.js";
 import {
@@ -157,6 +159,31 @@ describe("a label that did not go out", () => {
     // A cancelled job leaves the code free to be looked up again.
     await at.scan(BOX_SSCC);
     expect(at.lookup).toHaveBeenCalledTimes(2);
+  });
+
+  it("says a pallet printer of A4 sheets is no printer for a reprint, and offers the workstation", async () => {
+    const seeded = openLocalDb();
+    seedWarehouseCopies(seeded.db);
+    await setUpPrinting(seeded.executor, {
+      printers: [ZEBRA, TSC, HP_A4],
+      assignments: { box: "zebra", pallet: "hp-a4", duplicate: "tsc" },
+    });
+    const at = await startedWarehouse({
+      seeded,
+      lookup: async (): Promise<WarehouseLookupResult> => ({
+        status: "found",
+        source: PALLET_SOURCE,
+      }),
+    });
+    await at.scan(PALLET_SSCC);
+    expect(await screen.findByText(/Принтер паллет настроен на листы А4/)).toBeTruthy();
+    expect(screen.getByText("Задание: не отправлено")).toBeTruthy();
+    expect(at.shell.sends).toEqual([]);
+    expect(rows(at.db, "SELECT state, error_code FROM wh_jobs")).toEqual([
+      { state: "failed", error_code: "printer_a4" },
+    ]);
+    await at.press("Рабочее место");
+    expect(at.props.onSetup).toHaveBeenCalledTimes(1);
   });
 
   it("retries a failed job on the printer assigned now, once, and says it is sent", async () => {

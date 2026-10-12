@@ -255,6 +255,12 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/org",
             get(crate::routes::org::get_org).put(crate::routes::org::put_org),
         )
+        .route(
+            "/v1/office/org/logo",
+            get(crate::routes::org_logo::get_logo)
+                .put(crate::routes::org_logo::put_logo)
+                .delete(crate::routes::org_logo::delete_logo),
+        )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(
             "/v1/office/sscc/counters/{prefix}/{extension}",
@@ -330,6 +336,20 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/template-defaults",
             get(crate::routes::template_defaults::get_template_defaults)
                 .put(crate::routes::template_defaults::put_template_defaults),
+        )
+        .route(
+            "/v1/office/pallet-sheets",
+            get(crate::routes::pallet_sheets::list_sheets)
+                .post(crate::routes::pallet_sheets::create_sheet),
+        )
+        .route(
+            "/v1/office/pallet-sheets/{id}",
+            put(crate::routes::pallet_sheets::update_sheet)
+                .delete(crate::routes::pallet_sheets::delete_sheet),
+        )
+        .route(
+            "/v1/office/pallet-sheet-default",
+            put(crate::routes::pallet_sheets::put_default),
         )
         .route(
             "/v1/office/shifts",

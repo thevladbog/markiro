@@ -43,6 +43,12 @@ pub mod actions {
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";
     pub const TEMPLATE_DEFAULTS_UPDATE: &str = "template_defaults.update";
+    pub const ORG_LOGO_SET: &str = "org.logo.set";
+    pub const ORG_LOGO_CLEAR: &str = "org.logo.clear";
+    pub const PALLET_SHEET_CREATE: &str = "pallet_sheet.create";
+    pub const PALLET_SHEET_UPDATE: &str = "pallet_sheet.update";
+    pub const PALLET_SHEET_DELETE: &str = "pallet_sheet.delete";
+    pub const PALLET_SHEET_DEFAULT: &str = "pallet_sheet.default";
     /// A shift planned in the office or created at a station.
     pub const SHIFT_CREATE: &str = "shift.create";
     pub const SHIFT_UPDATE: &str = "shift.update";

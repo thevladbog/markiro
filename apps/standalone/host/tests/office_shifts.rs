@@ -3,9 +3,10 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_row, audit_rows, audit_trail, empty, host_revision, office_template, pair_device,
-    pallet_shift_body, pallet_template, plan_shift, request, seed_office_user, shift_body,
-    shift_setup, turn_the_user_off_at_the_next_activity, with_device, Admin, ShiftSetup,
+    admin, audit_row, audit_rows, audit_trail, default_sheet_is, empty, host_revision,
+    office_template, pair_device, pallet_shift_body, pallet_template, plan_shift, request,
+    seed_office_user, shift_body, shift_setup, stock_sheet, turn_the_user_off_at_the_next_activity,
+    with_device, Admin, ShiftSetup,
 };
 
 /// The record of `shift_body(setup)` planned at `rev`: the product's box
@@ -16,7 +17,7 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "palletsEnabled": false, "createdFrom": "office", "productId": setup.product,
         "lineId": setup.line, "counterpartyId": null, "productionDate": "2026-10-08",
         "plannedQty": null, "boxCapacity": 12, "boxTemplateId": setup.template,
-        "palletBoxCapacity": null, "palletTemplateId": null,
+        "palletBoxCapacity": null, "palletTemplateId": null, "palletSheetTemplateId": null,
         "ownerDeviceId": null, "openedAt": null, "closedAt": null, "closeReasonCode": null,
         "closeReasonText": null, "lateDataAt": null, "createdAt": "2026-09-21T14:13:20Z",
         "rev": rev,
@@ -3108,4 +3109,561 @@ async fn the_pallet_tables_refuse_the_rows_no_fact_may_leave() {
             && guard.ends_with("WHERE status = 'planned'"),
         "{guard}"
     );
+}
+
+// The A4 sheet of a shift (plan А4, task 4).
+
+#[tokio::test]
+async fn a_shift_with_pallets_takes_the_named_sheet_or_the_default() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    // No default sheet: no sheet.
+    let plain = plan_shift(&admin, pallet_shift_body(&setup, &template)).await;
+    assert_eq!(plain["palletSheetTemplateId"], Value::Null);
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    default_sheet_is(&admin, &portrait).await;
+    let defaulted = plan_shift(&admin, pallet_shift_body(&setup, &template)).await;
+    assert_eq!(defaulted["palletSheetTemplateId"], json!(portrait));
+    let mut named = pallet_shift_body(&setup, &template);
+    named["palletSheetTemplateId"] = json!(landscape);
+    let named = plan_shift(&admin, named).await;
+    assert_eq!(named["palletSheetTemplateId"], json!(landscape));
+    // The shifts read back as they were planned, and the audit row names the
+    // sheet of the shifts that have one, and only of them.
+    let (status, read_back) = admin.call("GET", &path(&named), None).await;
+    assert_eq!((status, read_back), (StatusCode::OK, named.clone()));
+    let trail = audit_trail(&admin.app, "shift.create").await;
+    let detail = |shift: &Value| {
+        let id = shift["id"].as_str().unwrap();
+        let row = trail
+            .iter()
+            .find(|row| row.4.as_deref() == Some(id))
+            .unwrap();
+        row.6.clone()
+    };
+    assert!(detail(&plain).get("palletSheetTemplateId").is_none());
+    assert_eq!(detail(&defaulted)["palletSheetTemplateId"], json!(portrait));
+    assert_eq!(detail(&named)["palletSheetTemplateId"], json!(landscape));
+}
+
+#[tokio::test]
+async fn a_shift_without_pallets_names_no_sheet() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    // A default sheet does not reach a shift without pallets.
+    default_sheet_is(&admin, &sheet).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    assert_eq!(plain["palletSheetTemplateId"], Value::Null);
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let mut body = shift_body(&setup);
+    body["palletSheetTemplateId"] = json!(sheet);
+    let (status, refused) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert_eq!(refused["error"]["code"], "validation_failed");
+    assert_eq!(
+        refused["error"]["details"]["field"],
+        "palletSheetTemplateId"
+    );
+    // The refusal wrote nothing.
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_sheet_that_is_not_there_or_not_enabled_is_refused_at_planning() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/pallet-sheets/{sheet}"),
+            Some(json!({ "enabled": false, "expectedRevision": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    for id in [sheet.as_str(), "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b"] {
+        let mut body = pallet_shift_body(&setup, &template);
+        body["palletSheetTemplateId"] = json!(id);
+        let (status, refused) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+        assert_eq!(
+            refused["error"]["details"]["field"],
+            "palletSheetTemplateId"
+        );
+    }
+    let (_, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(list, json!([]));
+}
+
+#[tokio::test]
+async fn an_edit_changes_the_sheet_and_turning_pallets_off_clears_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let mut body = pallet_shift_body(&setup, &template);
+    body["palletSheetTemplateId"] = json!(portrait);
+    let shift = plan_shift(&admin, body).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "palletSheetTemplateId": landscape, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["palletSheetTemplateId"], json!(landscape));
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![admin.row(
+            "shift.update",
+            "shift",
+            &id,
+            json!({
+                "changed": ["palletSheetTemplateId"],
+                "palletSheetTemplateId": { "from": portrait, "to": landscape },
+            })
+        )]
+    );
+    // Another edit keeps the sheet, whatever it sends besides.
+    let (status, kept) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "plannedQty": 500, "expectedRev": changed["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["palletSheetTemplateId"], json!(landscape));
+    // Sending the sheet it already has changes nothing.
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "palletSheetTemplateId": landscape, "expectedRev": kept["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (status, same["rev"].clone()),
+        (StatusCode::OK, kept["rev"].clone())
+    );
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "palletsEnabled": false, "expectedRev": kept["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(off["palletSheetTemplateId"], Value::Null);
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT pallet_sheet_template_id FROM shifts WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, None);
+    // Without pallets a sheet is refused, and the refusal changes nothing.
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "palletSheetTemplateId": portrait, "expectedRev": off["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert_eq!(
+        refused["error"]["details"]["field"],
+        "palletSheetTemplateId"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+#[tokio::test]
+async fn pallets_turned_on_by_an_edit_take_the_named_sheet_or_the_default() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let first = plan_shift(&admin, shift_body(&setup)).await;
+    // No default sheet yet: pallets on, no sheet.
+    let (status, plain) = admin
+        .call(
+            "PUT",
+            &path(&first),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": template, "expectedRev": first["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{plain}");
+    assert_eq!(plain["palletSheetTemplateId"], Value::Null);
+    default_sheet_is(&admin, &portrait).await;
+    // The default reaches the shift whose pallets just turned on, not one
+    // that already had them.
+    let second = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, defaulted) = admin
+        .call(
+            "PUT",
+            &path(&second),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": template, "expectedRev": second["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{defaulted}");
+    assert_eq!(defaulted["palletSheetTemplateId"], json!(portrait));
+    let (status, kept) = admin
+        .call(
+            "PUT",
+            &path(&first),
+            Some(json!({ "plannedQty": 7, "expectedRev": plain["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["palletSheetTemplateId"], Value::Null);
+    // Turned on with a named sheet, the named one wins.
+    let third = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, named) = admin
+        .call(
+            "PUT",
+            &path(&third),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": template,
+                "palletSheetTemplateId": landscape, "expectedRev": third["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{named}");
+    assert_eq!(named["palletSheetTemplateId"], json!(landscape));
+}
+
+#[tokio::test]
+async fn an_edit_checks_a_changed_sheet_and_keeps_an_unchanged_one_even_if_disabled() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let mut body = pallet_shift_body(&setup, &template);
+    body["palletSheetTemplateId"] = json!(portrait);
+    let shift = plan_shift(&admin, body).await;
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/pallet-sheets/{portrait}"),
+            Some(json!({ "enabled": false, "expectedRevision": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/pallet-sheets/{landscape}"),
+            Some(json!({ "enabled": false, "expectedRevision": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    // The planned shift keeps the sheet turned off since...
+    let (status, kept) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "plannedQty": 9, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["palletSheetTemplateId"], json!(portrait));
+    // Naming that very sheet again is no move, so it is not checked either.
+    let (status, again) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({
+                "palletSheetTemplateId": portrait, "plannedQty": 11, "expectedRev": kept["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["palletSheetTemplateId"], json!(portrait));
+    let kept = again;
+    // ... and refuses to move to a sheet that is turned off or not there.
+    for id in [landscape.as_str(), "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b"] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                &path(&shift),
+                Some(json!({ "palletSheetTemplateId": id, "expectedRev": kept["rev"] })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+        assert_eq!(
+            refused["error"]["details"]["field"],
+            "palletSheetTemplateId"
+        );
+    }
+    let (_, now) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!(now["palletSheetTemplateId"], json!(portrait));
+}
+
+#[tokio::test]
+async fn an_open_shift_keeps_its_sheet_and_takes_no_other() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let mut body = pallet_shift_body(&setup, &template);
+    body["palletSheetTemplateId"] = json!(portrait);
+    let shift = plan_shift(&admin, body).await;
+    open_directly(&admin, &shift).await;
+    let (_, open) = admin.call("GET", &path(&shift), None).await;
+    // The plan edit of an active shift passes with the sheet it has...
+    let (status, planned) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({
+                "plannedQty": 3, "palletSheetTemplateId": portrait, "expectedRev": open["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{planned}");
+    assert_eq!(planned["palletSheetTemplateId"], json!(portrait));
+    // ... and is `shift_status` with another sheet.
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "palletSheetTemplateId": landscape, "expectedRev": planned["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "shift_status");
+    let (_, now) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!(now["palletSheetTemplateId"], json!(portrait));
+}
+
+/// `palletSheetTemplateId: null` (plan А4, final wave): a planned shift goes
+/// back to the organization's main sheet as it is at that edit — none when
+/// there is no main sheet — and keeps it; the audit row names the move.
+#[tokio::test]
+async fn a_planned_shift_goes_back_to_the_main_sheet_with_null() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let mut body = pallet_shift_body(&setup, &template);
+    body["palletSheetTemplateId"] = json!(landscape);
+    // No main sheet yet: back to «main» is no sheet.
+    let first = plan_shift(&admin, body.clone()).await;
+    let first_id = first["id"].as_str().unwrap().to_owned();
+    let (status, bare) = admin
+        .call(
+            "PUT",
+            &path(&first),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": first["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{bare}");
+    assert_eq!(bare["palletSheetTemplateId"], Value::Null);
+    // With a main sheet, «main» is that sheet, resolved at the edit.
+    default_sheet_is(&admin, &portrait).await;
+    let second = plan_shift(&admin, body).await;
+    let second_id = second["id"].as_str().unwrap().to_owned();
+    assert_eq!(second["palletSheetTemplateId"], json!(landscape));
+    let (status, main) = admin
+        .call(
+            "PUT",
+            &path(&second),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": second["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{main}");
+    assert_eq!(main["palletSheetTemplateId"], json!(portrait));
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT pallet_sheet_template_id FROM shifts WHERE id = ?")
+            .bind(&second_id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), Some(portrait.as_str()));
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![
+            admin.row(
+                "shift.update",
+                "shift",
+                &first_id,
+                json!({
+                    "changed": ["palletSheetTemplateId"],
+                    "palletSheetTemplateId": { "from": landscape, "to": null },
+                })
+            ),
+            admin.row(
+                "shift.update",
+                "shift",
+                &second_id,
+                json!({
+                    "changed": ["palletSheetTemplateId"],
+                    "palletSheetTemplateId": { "from": landscape, "to": portrait },
+                })
+            ),
+        ]
+    );
+    // `null` again, now the main sheet it holds, changes nothing: no revision,
+    // no audit row.
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&second),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": main["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (status, same["rev"].clone()),
+        (StatusCode::OK, main["rev"].clone())
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    // A later change of the main sheet does not reach the shift, and an edit
+    // that leaves the field out keeps what it holds.
+    default_sheet_is(&admin, &landscape).await;
+    let (status, kept) = admin
+        .call(
+            "PUT",
+            &path(&second),
+            Some(json!({ "plannedQty": 40, "expectedRev": main["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["palletSheetTemplateId"], json!(portrait));
+    // The shift that had none takes the main sheet of the moment it asks.
+    let (status, now) = admin
+        .call(
+            "PUT",
+            &path(&first),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": bare["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{now}");
+    assert_eq!(now["palletSheetTemplateId"], json!(landscape));
+    // Pallets turned on with `null` take the main sheet too.
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, on) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": template,
+                "palletSheetTemplateId": null, "expectedRev": plain["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(on["palletSheetTemplateId"], json!(landscape));
+}
+
+/// `null` asks for no sheet where there are no pallets, and an open shift
+/// takes it only when the main sheet is the one it holds.
+#[tokio::test]
+async fn null_without_pallets_asks_for_nothing_and_an_open_shift_keeps_its_sheet() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    default_sheet_is(&admin, &portrait).await;
+    // A shift without pallets: `null` passes and changes nothing.
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": plain["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{same}");
+    assert_eq!(
+        (same["rev"].clone(), same["palletSheetTemplateId"].clone()),
+        (plain["rev"].clone(), Value::Null)
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    // Pallets turned off in the same edit as `null`: no sheet.
+    let mut body = pallet_shift_body(&setup, &template);
+    body["palletSheetTemplateId"] = json!(landscape);
+    let sheeted = plan_shift(&admin, body).await;
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &path(&sheeted),
+            Some(json!({
+                "palletsEnabled": false, "palletSheetTemplateId": null,
+                "expectedRev": sheeted["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(
+        (
+            off["palletsEnabled"].clone(),
+            off["palletSheetTemplateId"].clone()
+        ),
+        (json!(false), Value::Null)
+    );
+    // An open shift that holds the main sheet takes `null` with its plan...
+    let held = plan_shift(&admin, pallet_shift_body(&setup, &template)).await;
+    assert_eq!(held["palletSheetTemplateId"], json!(portrait));
+    open_directly(&admin, &held).await;
+    let (_, open) = admin.call("GET", &path(&held), None).await;
+    let (status, planned) = admin
+        .call(
+            "PUT",
+            &path(&held),
+            Some(json!({
+                "plannedQty": 3, "palletSheetTemplateId": null, "expectedRev": open["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{planned}");
+    assert_eq!(
+        (
+            planned["plannedQty"].clone(),
+            planned["palletSheetTemplateId"].clone()
+        ),
+        (json!(3), json!(portrait))
+    );
+    // ... and refuses it as `shift_status` once the main sheet is another.
+    default_sheet_is(&admin, &landscape).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&held),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": planned["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"]["details"]["constraint"], "shift_status");
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, now) = admin.call("GET", &path(&held), None).await;
+    assert_eq!(now["palletSheetTemplateId"], json!(portrait));
 }

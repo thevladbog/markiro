@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
+import { buildPalletSheetPresets } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -408,6 +409,124 @@ describe("checkShiftSnapshot", () => {
     for (const raw of [{ ...snapshot, product: undefined }, fixture("device-shift-entered.json")]) {
       expect(checkShiftSnapshot(raw)).toEqual({ ok: false, reason: "shape" });
     }
+  });
+});
+
+describe("checkShiftSnapshot — the A4 sheet and the organization (plan А4)", () => {
+  const entered = enteredShiftSchema.parse(fixture("device-shift-entered-sheet.json"));
+  const [preset] = buildPalletSheetPresets();
+  if (preset === undefined) throw new Error("no stock sheet");
+
+  /** The fixture's snapshot with a stock sheet of the domain in place of the stub. */
+  function withStockSheet() {
+    const raw = structuredClone(entered.snapshot);
+    if (raw.palletSheet === undefined) throw new Error("fixture without a sheet");
+    raw.palletSheet.spec = preset?.spec;
+    return raw;
+  }
+
+  it("reads the organization's logo, and a sheet the domain does not read as none", () => {
+    const checked = checkShiftSnapshot(entered.snapshot, true);
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    // The fixture's spec is a stub, not a whole V2 layout: no sheet, the shift still works.
+    expect(checked.snapshot.palletSheet).toBeNull();
+    expect(checked.snapshot.organization).toMatchObject({
+      name: "ООО «Молочный завод»",
+      inn: "7701234567",
+    });
+    expect(checked.snapshot.organization?.logo).toMatchObject({ width: 10, height: 2, stride: 2 });
+    expect(checked.snapshot.palletTemplate).not.toBeNull();
+  });
+
+  it("reads a stock sheet with its identity and its whole layout", () => {
+    const checked = checkShiftSnapshot(withStockSheet(), true);
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    expect(checked.snapshot.palletSheet).toMatchObject({
+      id: "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+      name: "Палета А4 · вертикальная",
+      revision: 1,
+    });
+    expect(checked.snapshot.palletSheet?.spec.page.orientation).toBe("portrait");
+    expect(checked.snapshot.palletSheet?.spec).toStrictEqual(preset?.spec);
+  });
+
+  it("carries no sheet for a shift without pallets, whatever the snapshot holds", () => {
+    const checked = checkShiftSnapshot(withStockSheet(), false);
+    expect(checked.ok && checked.snapshot.palletSheet).toBeNull();
+    expect(checked.ok && checked.snapshot.palletTemplate).toBeNull();
+    expect(checked.ok && checked.snapshot.organization?.name).toBe("ООО «Молочный завод»");
+  });
+
+  it("keeps the shift working when the logo is unreadable or absent, and the organization when a host sent none", () => {
+    for (const logo of [
+      { width: 10, height: 2, pixelsBase64: "8MAPQQ==" },
+      { width: 10, height: 2, pixelsBase64: "!!!" },
+      { width: 0, height: 2, pixelsBase64: "AA==" },
+      { width: 2000, height: 2, pixelsBase64: "AA==" },
+    ]) {
+      const raw = structuredClone(entered.snapshot);
+      if (raw.organization === undefined) throw new Error("fixture without an organization");
+      raw.organization.logo = logo;
+      const checked = checkShiftSnapshot(raw, true);
+      expect(checked.ok, JSON.stringify(logo)).toBe(true);
+      expect(checked.ok && checked.snapshot.organization).toMatchObject({
+        name: "ООО «Молочный завод»",
+        logo: null,
+      });
+    }
+    const noLogo = structuredClone(entered.snapshot);
+    if (noLogo.organization === undefined) throw new Error("fixture without an organization");
+    noLogo.organization.logo = null;
+    expect(checkShiftSnapshot(noLogo, true)).toMatchObject({
+      ok: true,
+      snapshot: { organization: { logo: null } },
+    });
+    const old = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json")).snapshot;
+    expect(checkShiftSnapshot(old, true)).toMatchObject({
+      ok: true,
+      snapshot: { palletSheet: null, organization: null },
+    });
+  });
+
+  it("refuses a snapshot whose sheet part is malformed, rather than reading half of it", () => {
+    for (const sheet of [{ id: "42" }, { revision: 0 }, { name: 7 }]) {
+      const raw = structuredClone(entered.snapshot);
+      raw.palletSheet = { ...raw.palletSheet, ...sheet } as typeof raw.palletSheet;
+      expect(checkShiftSnapshot(raw, true)).toEqual({ ok: false, reason: "shape" });
+    }
+    const raw = structuredClone(entered.snapshot);
+    raw.organization = { name: "О", inn: null } as typeof raw.organization;
+    expect(checkShiftSnapshot(raw, true)).toEqual({ ok: false, reason: "shape" });
+  });
+
+  it("keeps the sheet and the organization with the shift and reads them back, whole", async () => {
+    const { executor } = openLocalDb();
+    const raw = withStockSheet();
+    await keepEnteredShift(executor, PAIRING, { ...entered, snapshot: raw }, AT, SEEN);
+    const work = await readStoredWork(executor, PAIRING, entered.id);
+    if (work.kind !== "ready") throw new Error(`not ready: ${work.kind}`);
+    expect(work.shift.snapshot.palletSheet?.spec).toStrictEqual(preset?.spec);
+    expect(work.shift.snapshot.organization?.logo?.width).toBe(10);
+    // The stored text is the answer's snapshot, the sheet and the logo included.
+    const [row] = await executor.query(
+      "SELECT snapshot FROM floor_shifts WHERE id = ?",
+      [entered.id],
+      z.object({ snapshot: z.string() }),
+    );
+    expect(JSON.parse(row?.snapshot ?? "null")).toStrictEqual(JSON.parse(JSON.stringify(raw)));
+  });
+
+  it("works a shift whose stored sheet was damaged: the thermal labels still print", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, { ...entered, snapshot: withStockSheet() }, AT, SEEN);
+    const damaged = withStockSheet();
+    if (damaged.palletSheet === undefined) throw new Error("no sheet");
+    damaged.palletSheet.spec = { schemaVersion: 2, kind: "pallet_sheet", dpi: 300, extra: 1 };
+    db.prepare("UPDATE floor_shifts SET snapshot = ?").run(JSON.stringify(damaged));
+    const work = await readStoredWork(executor, PAIRING, entered.id);
+    expect(work).toMatchObject({ kind: "ready", shift: { snapshot: { palletSheet: null } } });
   });
 });
 

@@ -16,6 +16,7 @@ import { errorProp } from "../../lib/form-error.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation } from "../office-query.js";
+import { useLabelLogo } from "../use-label-logo.js";
 import { scopeCodes } from "./category-scope.js";
 import { CategoryScopeField } from "./CategoryScopeField.js";
 import { DeleteTemplateDialog } from "./DeleteTemplateDialog.js";
@@ -100,6 +101,7 @@ export function TemplateEditor({
   const [preparing, setPreparing] = useState<"zpl" | "tspl" | null>(null);
   const [codeFailed, setCodeFailed] = useState(false);
   const { rasterizeText } = useLabelRendering();
+  const logo = useLabelLogo();
   // Set at once, so a second submit in the same moment is dropped before
   // `saving` has re-rendered the button.
   const inFlight = useRef(false);
@@ -280,7 +282,7 @@ export function TemplateEditor({
     setPreparing(language);
     setCodeFailed(false);
     const data = labelSampleData(draft.purpose);
-    const deps = { rasterizeText, ...labelRenderOptions(draft.purpose) };
+    const deps = { rasterizeText, ...labelRenderOptions(draft.purpose), logo };
     let blob: Blob;
     try {
       // The generators come with the barcode encoder, a chunk of its own.
@@ -388,7 +390,7 @@ export function TemplateEditor({
                   ? t("office.templateEditor.empty")
                   : t("office.templateEditor.elements", { n: draft.spec.elements.length })}
               </p>
-              <PreviewPane spec={draft.spec} purpose={draft.purpose} />
+              <PreviewPane spec={draft.spec} purpose={draft.purpose} logo={logo} />
               {duplicateInvalid && (
                 <Alert
                   tone="error"

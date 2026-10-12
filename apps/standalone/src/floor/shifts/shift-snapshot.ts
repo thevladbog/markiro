@@ -1,6 +1,14 @@
-import { isValidGtin, labelTemplateSpecSchema, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  isValidGtin,
+  labelTemplateSpecSchema,
+  parsePalletSheetSpec,
+  type LabelTemplateSpec,
+  type MonoBitmap,
+  type PalletSheetSpecV2,
+} from "@markiro/domain";
 
 import { shiftSnapshotSchema, type ShiftSnapshot } from "../../host/protocol.js";
+import { logoFromWire } from "../../labels/logo.js";
 
 /**
  * A snapshot this build can work a shift from: the host's frozen product,
@@ -15,6 +23,10 @@ export interface CheckedSnapshot {
   counterpartyName: string | null;
   /** The pallet layout of a shift with pallets (plan ПЛ-Ц); `null` — a shift without. */
   palletTemplate: SnapshotTemplate | null;
+  /** The A4 sheet (plan А4); `null` — none, or one this build does not read. */
+  palletSheet: SnapshotSheet | null;
+  /** The organization (plan А4); `null` — a snapshot of a host before it. */
+  organization: SnapshotOrganization | null;
 }
 
 /** A template as the snapshot froze it, with the layout the domain read. */
@@ -23,6 +35,21 @@ export interface SnapshotTemplate {
   name: string;
   rev: number;
   spec: LabelTemplateSpec;
+}
+
+/** The A4 sheet the shift froze, with the layout the domain read (plan А4). */
+export interface SnapshotSheet {
+  id: string;
+  name: string;
+  revision: number;
+  spec: PalletSheetSpecV2;
+}
+
+/** The organization the shift froze (plan А4): its logo as a bitmap, or `null`. */
+export interface SnapshotOrganization {
+  name: string;
+  inn: string | null;
+  logo: MonoBitmap | null;
 }
 
 /**
@@ -74,6 +101,22 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
   const pallet =
     parsed.data.palletTemplate === undefined ? null : readTemplate(parsed.data.palletTemplate);
   if (palletsEnabled && pallet === null) return { ok: false, reason: "layout" };
+  // A sheet or a logo this build cannot read keeps nobody out of the shift:
+  // its thermal labels still print, and only an A4 print of it fails to render.
+  const sheetRaw = parsed.data.palletSheet;
+  let palletSheet: SnapshotSheet | null = null;
+  if (palletsEnabled && sheetRaw !== undefined) {
+    try {
+      palletSheet = { ...sheetRaw, spec: parsePalletSheetSpec(sheetRaw.spec) };
+    } catch {
+      palletSheet = null;
+    }
+  }
+  const org = parsed.data.organization;
+  const organization: SnapshotOrganization | null =
+    org === undefined
+      ? null
+      : { name: org.name, inn: org.inn, logo: org.logo === null ? null : logoFromWire(org.logo) };
   return {
     ok: true,
     snapshot: {
@@ -82,6 +125,8 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
       issuerPrefix,
       counterpartyName,
       palletTemplate: palletsEnabled ? pallet : null,
+      palletSheet,
+      organization,
     },
   };
 }

@@ -20,7 +20,14 @@ import { fakeSource, SESSION } from "./support/work-screen.js";
 // A canvas is not there in jsdom: the bytes of a label are the support's plain text.
 vi.mock("../src/floor/print/label-render.js", async (importOriginal) => {
   const original = await importOriginal<Record<string, unknown>>();
-  const render: typeof renderLabel = async (spec, fields, printer, _rasterize, options = {}) =>
+  const render: typeof renderLabel = async (
+    spec,
+    fields,
+    printer,
+    _rasterize,
+    _logo,
+    options = {},
+  ) =>
     new TextEncoder().encode(
       `^XA ${printer.language} ${printer.dpi} ${spec.widthMm}x${spec.heightMm} ` +
         `${fields.sscc === "" ? "km" : fields.sscc} ${options.kmDataMatrix ?? "native"} ^XZ`,

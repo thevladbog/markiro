@@ -1,4 +1,4 @@
-import { sampleLabelData } from "@markiro/domain";
+import { parseScannedSscc, sampleLabelData, type MonoRaster } from "@markiro/domain";
 import {
   useCallback,
   useEffect,
@@ -17,13 +17,22 @@ import type {
   ScannerSnapshot,
   UsbPrinter,
 } from "../../hardware/hardware.js";
+import { paintMonoRaster } from "../../labels/sheet-render.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
 import { settleOutcome, type PrintJobCode, type RenderLabel } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
+import { printerFormatText } from "../print/printer-format.js";
 import type { ScanSource } from "../scan-source.js";
 import { playSignalTone } from "../work/signal-sound.js";
-import { draftOf, NEW_PRINTER, profileOf, type PrinterDraft } from "./printer-draft.js";
+import { a4TestSheet, makeA4TestSscc } from "./a4-test.js";
+import {
+  draftOf,
+  NEW_PRINTER,
+  profileOf,
+  settleDraft,
+  type PrinterDraft,
+} from "./printer-draft.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "./test-label.js";
 import {
   canonicalPort,
@@ -31,7 +40,9 @@ import {
   isPortName,
   MAX_SCANNERS,
   PRINT_PURPOSES,
+  printerMode,
   printerTargetKey,
+  printsPurpose,
   readWorkstationSettings,
   saveWorkstationSettings,
   sharedSerialPort,
@@ -44,6 +55,9 @@ import {
 /** The steps of the tones' level: 0, 10, … 100. */
 const VOLUME_STEP = 10;
 
+/** Dots per pixel of the A4 test sheet's preview: 2480 dots are 414 px wide. */
+const A4_PREVIEW_FACTOR = 6;
+
 export interface WorkstationSetupProps {
   local: LocalExecutor;
   hardware: Pick<
@@ -55,6 +69,8 @@ export interface WorkstationSetupProps {
   source: ScanSource;
   /** How the test label is rendered; the app's by default. */
   render?: RenderLabel;
+  /** How the A4 test sheet is made (plan А4); the app's by default. */
+  a4Sheet?: typeof a4TestSheet;
   /** «Проверить звук»: the floor's own tone at this level (0–1); the generated tone by default. */
   playTone?: (level: number) => void;
   /** The settings were stored: the floor reads them again. */
@@ -62,14 +78,18 @@ export interface WorkstationSetupProps {
   onBack: () => void;
 }
 
-/** How a test print went, in words: the printer's answer, then the scan of its code. */
+/**
+ * How a test print went, in words: the printer's answer, then the scan of its
+ * code. A test on A4 paper (plan А4) is a sheet whose SSCC is scanned back
+ * (`sheet`); any other is a label with a Code 128.
+ */
 type TestState =
   | { kind: "sending"; printerId: string }
-  | { kind: "sent"; printerId: string; name: string; code: string }
-  | { kind: "failed"; code: PrintJobCode; unknown: boolean }
-  | { kind: "render_failed" }
+  | { kind: "sent"; printerId: string; name: string; code: string; sheet: boolean }
+  | { kind: "failed"; code: PrintJobCode; unknown: boolean; sheet: boolean }
+  | { kind: "render_failed"; sheet: boolean }
   | { kind: "match" }
-  | { kind: "mismatch"; name: string; code: string };
+  | { kind: "mismatch"; name: string; code: string; sheet: boolean };
 
 type Status =
   | { kind: "saved" }
@@ -91,9 +111,11 @@ const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 /**
  * The workstation setup (stage 2a spec §5.7.8): the printers of this
  * computer — where each is, its language and resolution — which one prints
- * which label, and a test print whose code is scanned back; the COM scanners
- * with their connection as the shell reports it; the tones' level; the check
- * of a printed label. Nothing is stored until «Сохранить», which then gives
+ * which label — for a Windows queue, whether it prints in the printer's
+ * language or through the Windows driver (plan ДРВ, offered where the shell
+ * prints through Windows) — and a test print whose code is scanned back; the
+ * COM scanners with their connection as the shell reports it; the tones'
+ * level; the check of a printed label. Nothing is stored until «Сохранить», which then gives
  * the shell the whole set of scanners — a set it would refuse is never
  * stored, so a scanner that works is not dropped for a bad one; «Назад»
  * leaves at once and says when it drops a change, so the setup never holds
@@ -105,6 +127,7 @@ export function WorkstationSetup({
   printing,
   source,
   render = renderLabel,
+  a4Sheet = a4TestSheet,
   playTone = (level) => playSignalTone("ok", undefined, level),
   onSaved,
   onBack,
@@ -118,7 +141,14 @@ export function WorkstationSetup({
   const [usbPrinters, setUsbPrinters] = useState<UsbPrinter[] | null>(null);
   const [usbFailed, setUsbFailed] = useState(false);
   const [usbAsking, setUsbAsking] = useState(false);
+  // The shell prints through Windows drivers: the choice of the way of printing is offered only then.
+  const [windowsDriver, setWindowsDriver] = useState(false);
   const [test, setTestState] = useState<TestState | null>(null);
+  // The A4 test sheet as it was printed, for the screen (plan А4): the printer it was for, and its raster.
+  const [a4Preview, setA4Preview] = useState<{ printerId: string; raster: MonoRaster } | null>(
+    null,
+  );
+  const a4Canvas = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [saving, setSaving] = useState(false);
   // Two presses in one render see the same `saving`: the ref is the one that holds.
@@ -193,6 +223,11 @@ export function WorkstationSetup({
     testRef.current = next;
     setTestState(next);
   }, []);
+  // Whose test it is, and which test: a test whose printer's paper changed, or that was removed, is
+  // forgotten, and the answer of one still on its way is dropped (plan А4: «print checks reset when
+  // the paper changes»).
+  const testOwner = useRef<string | null>(null);
+  const testGeneration = useRef(0);
   useEffect(
     () =>
       source.start((raw) => {
@@ -200,10 +235,12 @@ export function WorkstationSetup({
         // The check stays open after a wrong scan, until the right code comes.
         if (now?.kind !== "sent" && now?.kind !== "mismatch") return;
         // A scan that is not this label's code is never shown: it may be a badge.
+        // A sheet's SSCC is read as any scanner hands an SSCC over; a label's Code 128 as it was printed.
+        const read = now.sheet ? parseScannedSscc(raw) : scannedTestCode(raw);
         setTest(
-          scannedTestCode(raw) === now.code
+          read === now.code
             ? { kind: "match" }
-            : { kind: "mismatch", name: now.name, code: now.code },
+            : { kind: "mismatch", name: now.name, code: now.code, sheet: now.sheet },
         );
       }),
     [source, setTest],
@@ -219,6 +256,23 @@ export function WorkstationSetup({
     onBlur: () => source.setManualTextEntryActive(false),
   };
   useLayoutEffect(() => () => source.setManualTextEntryActive(false), [source, editing]);
+
+  // The test sheet on the screen, shrunk to a sixth: drawn once its raster is there (nothing to undo).
+  useEffect(() => {
+    if (a4Preview !== null && a4Canvas.current !== null) {
+      paintMonoRaster(a4Canvas.current, a4Preview.raster, A4_PREVIEW_FACTOR);
+    }
+  }, [a4Preview]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void printing.supportsWindowsDriver().then((supported) => {
+      if (!cancelled) setWindowsDriver(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [printing]);
 
   // Only the newest ask is heard: an older answer that comes late is dropped.
   const usbAsk = useRef(0);
@@ -305,6 +359,13 @@ export function WorkstationSetup({
   const typedPort = scanner.port.trim() !== "";
   const canSave = dirty || unapplied || unopened || typedPort;
 
+  const forgetTestOf = (printerId: string) => {
+    if (a4Preview?.printerId === printerId) setA4Preview(null);
+    if (testOwner.current !== printerId) return;
+    testGeneration.current += 1;
+    setTest(null);
+  };
+
   const applyEditor = () => {
     if (editor === null) return;
     const result = profileOf(editor, () => crypto.randomUUID());
@@ -313,6 +374,7 @@ export function WorkstationSetup({
       return;
     }
     const { profile } = result;
+    const before = draft.printers.find((printer) => printer.id === profile.id);
     const clash = draft.printers.find(
       (printer) =>
         printer.id !== profile.id &&
@@ -327,18 +389,28 @@ export function WorkstationSetup({
       setEditorError(t("floor.setup.printers.errors.scannerPort", { port: scanned }));
       return;
     }
-    const exists = draft.printers.some((printer) => printer.id === profile.id);
+    const exists = before !== undefined;
+    // An A4 printer prints pallets only: the box and the duplicate it was given are taken away.
+    const assignments = { ...draft.assignments };
+    for (const purpose of PRINT_PURPOSES) {
+      if (assignments[purpose] === profile.id && !printsPurpose(profile, purpose)) {
+        assignments[purpose] = null;
+      }
+    }
+    if (exists && before.paper !== profile.paper) forgetTestOf(profile.id);
     change({
       ...draft,
       printers: exists
         ? draft.printers.map((printer) => (printer.id === profile.id ? profile : printer))
         : [...draft.printers, profile],
+      assignments,
     });
     setEditor(null);
     setEditorError(null);
   };
 
   const remove = (id: string) => {
+    forgetTestOf(id);
     const assignments = { ...draft.assignments };
     for (const purpose of PRINT_PURPOSES) {
       if (assignments[purpose] === id) assignments[purpose] = null;
@@ -353,22 +425,50 @@ export function WorkstationSetup({
   const testPrint = async (printer: PrinterProfile) => {
     // One test label at a time: a press while one is on its way does nothing.
     if (testRef.current?.kind === "sending") return;
-    const code = makeTestCode();
+    const sheet = printer.paper === "a4";
+    testOwner.current = printer.id;
+    const generation = testGeneration.current;
+    const stale = () => generation !== testGeneration.current;
     setTest({ kind: "sending", printerId: printer.id });
     let bytes: Uint8Array;
-    try {
-      bytes = await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
-    } catch {
-      setTest({ kind: "render_failed" });
-      return;
+    let code: string;
+    if (sheet) {
+      // The A4 test (plan А4): a sheet of the stock layout with a made-up SSCC, shown on the
+      // screen as it is sent, and checked by a scan of that SSCC.
+      code = makeA4TestSscc();
+      try {
+        const made = await a4Sheet("portrait", code, {
+          title: t("floor.setup.printers.a4Test.title"),
+          product: t("floor.setup.printers.a4Test.product"),
+        });
+        if (stale()) return;
+        bytes = made.bytes;
+        setA4Preview({ printerId: printer.id, raster: made.raster });
+      } catch {
+        if (!stale()) setTest({ kind: "render_failed", sheet });
+        return;
+      }
+    } else {
+      code = makeTestCode();
+      try {
+        bytes = await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
+      } catch {
+        if (!stale()) setTest({ kind: "render_failed", sheet });
+        return;
+      }
     }
-    const settled = settleOutcome(await printing.send(null, printer.target, bytes));
+    const settled = settleOutcome(
+      sheet
+        ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
+        : await printing.send(null, printer.target, bytes, printerMode(printer)),
+    );
+    if (stale()) return;
     // What was typed ahead (a letter on a list) would join the code of the label.
     source.clearPendingInput();
     setTest(
       settled.state === "sent"
-        ? { kind: "sent", printerId: printer.id, name: printer.name, code }
-        : { kind: "failed", code: settled.code, unknown: settled.state === "unknown" },
+        ? { kind: "sent", printerId: printer.id, name: printer.name, code, sheet }
+        : { kind: "failed", code: settled.code, unknown: settled.state === "unknown", sheet },
     );
   };
 
@@ -422,8 +522,12 @@ export function WorkstationSetup({
         : target.kind === "serial"
           ? t("floor.setup.printers.summary.serial", { port: target.port, baud: target.baud })
           : t("floor.setup.printers.summary.usb", { printer: target.printer });
+    // A printer of A4 sheets is told by its paper, not by a language and a resolution (plan А4).
+    if (printer.paper === "a4" && target.kind === "usb") {
+      return t("floor.setup.printers.summary.a4", { printer: target.printer });
+    }
     return `${where} · ${t("floor.setup.printers.format", {
-      language: printer.language.toUpperCase(),
+      language: printerFormatText(t, printer),
       dpi: printer.dpi,
     })}`;
   };
@@ -435,29 +539,39 @@ export function WorkstationSetup({
       case "sent":
         return {
           tone: "info",
-          text: t("floor.setup.printers.testResult.sent", { name: state.name }),
+          text: state.sheet
+            ? `${t("floor.setup.printers.testResult.sentSheet", { name: state.name })} ${t(
+                "floor.setup.printers.a4Test.scan",
+              )}`
+            : t("floor.setup.printers.testResult.sent", { name: state.name }),
         };
       case "failed":
         return {
           tone: "error",
           text: `${t(
-            state.unknown
-              ? "floor.setup.printers.testResult.unknown"
-              : "floor.setup.printers.testResult.failed",
+            `floor.setup.printers.testResult.${state.unknown ? "unknown" : "failed"}${
+              state.sheet ? "Sheet" : ""
+            }`,
           )} ${t(`floor.print.codes.${state.code}`)}`,
         };
       case "render_failed":
-        return { tone: "error", text: t("floor.setup.printers.testResult.renderFailed") };
+        return {
+          tone: "error",
+          text: t(`floor.setup.printers.testResult.renderFailed${state.sheet ? "Sheet" : ""}`),
+        };
       case "match":
         return { tone: "ok", text: t("floor.setup.printers.testResult.match") };
       case "mismatch":
-        return { tone: "warn", text: t("floor.setup.printers.testResult.mismatch") };
+        return {
+          tone: "warn",
+          text: t(`floor.setup.printers.testResult.mismatch${state.sheet ? "Sheet" : ""}`),
+        };
     }
   };
 
   const editorForm = (form: PrinterDraft) => {
     const set = (patch: Partial<PrinterDraft>) => {
-      setEditor({ ...form, ...patch });
+      setEditor(settleDraft(form, patch));
       setEditorError(null);
     };
     const usbOptions = [
@@ -554,22 +668,58 @@ export function WorkstationSetup({
             </Button>
           </>
         )}
-        <Select
-          native
-          size="floor"
-          label={t("floor.setup.printers.editor.language")}
-          value={form.language}
-          options={[
-            { value: "zpl", label: "ZPL (Zebra)" },
-            { value: "tspl", label: "TSPL (TSC)" },
-          ]}
-          onValueChange={(language) => set({ language })}
-        />
+        {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
+          <Select
+            native
+            size="floor"
+            label={t("floor.setup.printers.editor.mode")}
+            value={form.mode}
+            options={(["raw", "windows_driver"] as const).map((mode) => ({
+              value: mode,
+              label: t(`floor.setup.printers.editor.modes.${mode}`),
+            }))}
+            onValueChange={(mode) => set({ mode })}
+          />
+        )}
+        {form.kind === "usb" && form.mode === "windows_driver" && (
+          <Select
+            native
+            size="floor"
+            label={t("floor.setup.printers.editor.paper")}
+            value={form.paper}
+            options={(["label", "a4"] as const).map((paper) => ({
+              value: paper,
+              label: t(
+                paper === "a4"
+                  ? "floor.setup.printers.editor.paperA4"
+                  : "floor.setup.printers.editor.paperLabel",
+              ),
+            }))}
+            hint={t("floor.setup.printers.editor.paperHint")}
+            onValueChange={(paper) => set({ paper })}
+          />
+        )}
+        {form.kind === "usb" && form.mode === "windows_driver" ? (
+          <p>{t("floor.setup.printers.editor.driverHint")}</p>
+        ) : (
+          <Select
+            native
+            size="floor"
+            label={t("floor.setup.printers.editor.language")}
+            value={form.language}
+            options={[
+              { value: "zpl", label: "ZPL (Zebra)" },
+              { value: "tspl", label: "TSPL (TSC)" },
+            ]}
+            onValueChange={(language) => set({ language })}
+          />
+        )}
         <Select
           native
           size="floor"
           label={t("floor.setup.printers.editor.dpi")}
           value={form.dpi}
+          disabled={form.paper === "a4"}
           options={[
             { value: "203", label: "203 dpi" },
             { value: "300", label: "300 dpi" },
@@ -650,9 +800,12 @@ export function WorkstationSetup({
     change({ ...draft, sound: { ...draft.sound, volume: Math.min(100, Math.max(0, volume)) } });
   };
 
-  const purposeOptions = [
+  // An A4 printer is offered for the pallet only (plan А4); the box and the duplicate are label purposes.
+  const purposeOptions = (purpose: PrintPurpose) => [
     { value: "", label: t("floor.setup.printers.purposes.none") },
-    ...draft.printers.map((printer) => ({ value: printer.id, label: printer.name })),
+    ...draft.printers
+      .filter((printer) => printsPurpose(printer, purpose))
+      .map((printer) => ({ value: printer.id, label: printer.name })),
   ];
 
   return (
@@ -708,6 +861,14 @@ export function WorkstationSetup({
                 ))}
               </ul>
             )}
+            {a4Preview !== null && (
+              <canvas
+                ref={a4Canvas}
+                role="img"
+                aria-label={t("floor.setup.printers.a4Test.preview")}
+                className="sheet-preview"
+              />
+            )}
             {/* A region that is always there, so a reader hears what comes into it; its alert is no alert of its own. */}
             <div className="workstation-setup__live" aria-live="polite">
               {test !== null && (
@@ -727,7 +888,7 @@ export function WorkstationSetup({
                 size="floor"
                 label={t(`floor.setup.printers.purposes.${purpose}`)}
                 value={draft.assignments[purpose] ?? ""}
-                options={purposeOptions}
+                options={purposeOptions(purpose)}
                 {...(purpose === "box" ? {} : { hint: t("floor.setup.printers.purposes.later") })}
                 onValueChange={(id) => assign(purpose, id)}
               />

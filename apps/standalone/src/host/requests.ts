@@ -356,6 +356,13 @@ export function templateDefaultsUpdate(
 export interface ShiftPallets {
   boxCapacity: number;
   templateId: string;
+  /**
+   * The A4 sheet (plan А4): an id names it; `null` is «the organization's
+   * main sheet», which a new shift takes by leaving the field out and a
+   * planned one that holds a sheet goes back to with `null` (the host
+   * resolves the main sheet when it takes the edit); left out — unchanged.
+   */
+  sheetId?: string | null;
 }
 
 /**
@@ -396,6 +403,9 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
           palletsEnabled: true,
           palletBoxCapacity: shift.pallets.boxCapacity,
           palletTemplateId: shift.pallets.templateId,
+          ...(shift.pallets.sheetId === undefined || shift.pallets.sheetId === null
+            ? {}
+            : { palletSheetTemplateId: shift.pallets.sheetId }),
         }),
   };
 }
@@ -432,6 +442,7 @@ export function shiftUpdate(
     | "palletsEnabled"
     | "palletBoxCapacity"
     | "palletTemplateId"
+    | "palletSheetTemplateId"
     | "rev"
   >,
   next: ShiftChange,
@@ -462,6 +473,15 @@ export function shiftUpdate(
     }
     if (next.pallets.templateId !== shift.palletTemplateId) {
       update.palletTemplateId = next.pallets.templateId;
+    }
+    // The main sheet (`null`) goes only from a shift that holds a sheet of
+    // its own: one without keeps none, and pallets just turned on take the
+    // main sheet with the field left out.
+    const sheetId = next.pallets.sheetId;
+    if (sheetId === null) {
+      if (shift.palletSheetTemplateId !== null) update.palletSheetTemplateId = null;
+    } else if (sheetId !== undefined && sheetId !== shift.palletSheetTemplateId) {
+      update.palletSheetTemplateId = sheetId;
     }
   }
   return update;

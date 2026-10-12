@@ -201,7 +201,9 @@ export function WarehouseScreen({
       ? ""
       : code === "printer_unconfigured"
         ? t("floor.warehouse.printerUnconfigured")
-        : t(`floor.print.codes.${code}`, { defaultValue: code });
+        : code === "printer_a4"
+          ? t("floor.warehouse.printerA4")
+          : t(`floor.print.codes.${code}`, { defaultValue: code });
 
   const jobSaid = (shown: WarehouseJob, repair: WarehouseRepair | null = null): Said => {
     const note = repair === null ? "" : ` ${t("floor.warehouse.legacyRepair")}`;
@@ -754,7 +756,8 @@ export function WarehouseScreen({
             >
               {t("floor.warehouse.cancelJob")}
             </Button>
-            {current.errorCode === "printer_unconfigured" && (
+            {(current.errorCode === "printer_unconfigured" ||
+              current.errorCode === "printer_a4") && (
               <Button size="floor" variant="secondary" {...leave(onSetup)}>
                 {t("floor.warehouse.setup")}
               </Button>

@@ -20,6 +20,7 @@ import {
   PALLET,
   pickDate,
   shiftsSession,
+  stockSheets,
   WATER,
 } from "./support/shifts.js";
 
@@ -1025,5 +1026,202 @@ describe("office shifts: planning a shift", () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
     expect(lists.map((list) => list.mock.calls.length)).toEqual(before);
+  });
+});
+
+describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
+  const SHEETS = stockSheets();
+  const [PORTRAIT, LANDSCAPE, TWO_A5] = SHEETS.sheets as [
+    (typeof SHEETS.sheets)[number],
+    (typeof SHEETS.sheets)[number],
+    (typeof SHEETS.sheets)[number],
+  ];
+  const MAIN = "Основной лист организации (Палета А4 · вертикальная)";
+
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function openWithPallets(session: FakeOfficeSession): Promise<void> {
+    session.api.listPalletSheets.mockResolvedValue(SHEETS);
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+  }
+
+  it("has no sheet field without pallets, reads the sheets only when they are on, and offers the main sheet first", async () => {
+    const session = shiftsSession();
+    session.api.listPalletSheets.mockResolvedValue(SHEETS);
+    await openCreate(session);
+    expect(within(dialog()).queryByLabelText("Лист А4")).toBeNull();
+    fillMilk();
+    expect(session.api.listPalletSheets).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+    expect(options("Лист А4")).toEqual([
+      MAIN,
+      "Палета А4 · вертикальная",
+      "Палета А4 · горизонтальная",
+      "Палета А4 · две одинаковые А5",
+    ]);
+    expect(valueOf("Лист А4")).toBe("");
+    expect(session.api.listPalletSheets).toHaveBeenCalledTimes(1);
+    expect(
+      within(dialog()).getByText(
+        "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
+      ),
+    ).toBeTruthy();
+    // Off again: the field goes.
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(within(dialog()).queryByLabelText("Лист А4")).toBeNull();
+  });
+
+  it("sends no sheet for «main»", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openWithPallets(session);
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    const main = session.api.createShift.mock.calls[0]?.[1];
+    expect(main).toMatchObject({ palletsEnabled: true, palletTemplateId: PALLET.id });
+    expect(main).not.toHaveProperty("palletSheetTemplateId");
+  });
+
+  it("sends the sheet that was chosen", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openWithPallets(session);
+    set("Лист А4", LANDSCAPE.id);
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(
+      TOKEN,
+      expect.objectContaining({
+        palletsEnabled: true,
+        palletTemplateId: PALLET.id,
+        palletSheetTemplateId: LANDSCAPE.id,
+      }),
+    );
+  });
+
+  it("sends no sheet once the pallets are off again, whatever was chosen", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openWithPallets(session);
+    set("Лист А4", TWO_A5.id);
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    const sent = session.api.createShift.mock.calls[0]?.[1];
+    expect(sent).toMatchObject({ palletsEnabled: false });
+    expect(sent).not.toHaveProperty("palletSheetTemplateId");
+  });
+
+  it("offers no switched-off sheet, and says which sheet is the main one in the first choice", async () => {
+    const session = shiftsSession();
+    session.api.listPalletSheets.mockResolvedValue({
+      sheets: [PORTRAIT, { ...LANDSCAPE, enabled: false }, TWO_A5],
+      defaultId: TWO_A5.id,
+    });
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() =>
+      expect(options("Лист А4")).toEqual([
+        "Основной лист организации (Палета А4 · две одинаковые А5)",
+        "Палета А4 · вертикальная",
+        "Палета А4 · две одинаковые А5",
+      ]),
+    );
+  });
+
+  it("says the list of sheets did not load, and still plans the shift on the main sheet", async () => {
+    const session = shiftsSession();
+    session.api.listPalletSheets.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() =>
+      expect(
+        within(dialog()).getByText(
+          "Список листов не загрузился: лист смены не меняется, новая смена получит основной.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(options("Лист А4")).toEqual(["Основной лист организации (не выбран)"]);
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift.mock.calls[0]?.[1]).not.toHaveProperty("palletSheetTemplateId");
+  });
+
+  it("puts a sheet the host refused under its select, reads the sheets again and drops the refusal with the pallets", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      api("validation_failed", { field: "palletSheetTemplateId" }),
+    );
+    await openWithPallets(session);
+    set("Лист А4", LANDSCAPE.id);
+    // The sheet was switched off meanwhile: once read again it is no longer offered.
+    session.api.listPalletSheets.mockResolvedValue({
+      sheets: [PORTRAIT, { ...LANDSCAPE, enabled: false }, TWO_A5],
+      defaultId: PORTRAIT.id,
+    });
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Лист А4")).toBe(
+        "Лист выключен, удалён или не подходит смене. Выберите другой.",
+      ),
+    );
+    await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(document.activeElement).toBe(field("Лист А4")));
+    // The sheet the person chose stays visible, marked, so the select does not show another.
+    await waitFor(() =>
+      expect(options("Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
+    );
+    // The sheet does not depend on the product: a new product leaves the refusal where it is.
+    set("Товар", WATER.id);
+    expect(messageOf("Лист А4")).toBe(
+      "Лист выключен, удалён или не подходит смене. Выберите другой.",
+    );
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    // The select shows its hint again, not the refusal.
+    expect(messageOf("Лист А4")).toBe(
+      "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
+    );
+  });
+
+  it("holds the sheet select while the write is on its way", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockReturnValueOnce(new Promise<OfficeShift>(() => undefined));
+    await openWithPallets(session);
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((field("Лист А4") as HTMLSelectElement).disabled).toBe(true));
+  });
+
+  it("tells sheets of one name apart by the start of their id", async () => {
+    const session = shiftsSession();
+    session.api.listPalletSheets.mockResolvedValue({
+      sheets: [PORTRAIT, { ...LANDSCAPE, name: PORTRAIT.name }],
+      defaultId: PORTRAIT.id,
+    });
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() => expect(options("Лист А4")).toHaveLength(3));
+    expect(options("Лист А4").slice(1)).toEqual([
+      `${PORTRAIT.name} · ${PORTRAIT.id.slice(0, 8)}`,
+      `${PORTRAIT.name} · ${LANDSCAPE.id.slice(0, 8)}`,
+    ]);
   });
 });

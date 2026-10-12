@@ -356,6 +356,78 @@ export const orgProfileSchema = z.object({
 });
 export type OrgProfile = z.infer<typeof orgProfileSchema>;
 
+/** Mirrors `markiro_proto::OrgLogo`: the organization's monochrome print logo (plan А4). */
+export const orgLogoSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  pixelsBase64: z.string(),
+  updatedAt: z.iso.datetime(),
+});
+export type OrgLogo = z.infer<typeof orgLogoSchema>;
+
+/** Mirrors `markiro_proto::OrgLogoState`: `GET`/`PUT`/`DELETE /v1/office/org/logo`. */
+export const orgLogoStateSchema = z.object({ logo: orgLogoSchema.nullable() });
+export type OrgLogoState = z.infer<typeof orgLogoStateSchema>;
+
+/** Mirrors `markiro_proto::OrgLogoPut`: the whole logo, replacing any. */
+export const orgLogoPutSchema = z
+  .object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    pixelsBase64: z.string(),
+  })
+  .strict();
+export type OrgLogoPut = z.infer<typeof orgLogoPutSchema>;
+
+/**
+ * Mirrors `markiro_proto::PalletSheet` (plan А4): an A4 pallet sheet. `spec`
+ * stays unknown here — the office and the station read it with the domain's
+ * `parsePalletSheetSpec`, and a sheet a newer office made does not fail the list.
+ */
+export const palletSheetSchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1),
+  enabled: z.boolean(),
+  presetKey: z.string().nullable(),
+  revision: z.number().int().positive(),
+  spec: z.unknown(),
+});
+export type PalletSheet = z.infer<typeof palletSheetSchema>;
+
+/** Mirrors `markiro_proto::PalletSheets`: every sheet by name and the default. */
+export const palletSheetsSchema = z.object({
+  sheets: z.array(palletSheetSchema),
+  defaultId: z.uuid().nullable(),
+});
+export type PalletSheets = z.infer<typeof palletSheetsSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetCreate`. */
+export const palletSheetCreateSchema = z
+  .object({
+    name: z.string(),
+    presetKey: z.string().optional(),
+    enabled: z.boolean().optional(),
+    spec: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type PalletSheetCreate = z.infer<typeof palletSheetCreateSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetUpdate`: the name or the state, over the revision. */
+export const palletSheetUpdateSchema = z
+  .object({
+    name: z.string().optional(),
+    enabled: z.boolean().optional(),
+    expectedRevision: z.number().int(),
+  })
+  .strict();
+export type PalletSheetUpdate = z.infer<typeof palletSheetUpdateSchema>;
+
+/** Mirrors `markiro_proto::PalletSheetDefaultUpdate`. */
+export const palletSheetDefaultUpdateSchema = z
+  .object({ templateId: z.uuid().nullable() })
+  .strict();
+export type PalletSheetDefaultUpdate = z.infer<typeof palletSheetDefaultUpdateSchema>;
+
 /** One SSCC counter; `extension` 0 is a box, 1 a pallet. */
 export const ssccCounterSchema = z.object({
   issuerPrefix: z.string(),
@@ -592,6 +664,7 @@ export const officeShiftSchema = z.object({
   boxTemplateId: z.uuid(),
   palletBoxCapacity: z.number().int().positive().nullable(),
   palletTemplateId: z.uuid().nullable(),
+  palletSheetTemplateId: z.uuid().nullable(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
@@ -784,6 +857,23 @@ export const shiftSnapshotTemplateSchema = z.object({
   spec: templateSpecSchema,
 });
 
+/** Mirrors `markiro_proto::ShiftSnapshotSheet`: the A4 sheet a shift froze (plan А4). */
+export const shiftSnapshotSheetSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  revision: z.number().int().positive(),
+  spec: z.unknown(),
+});
+
+/** Mirrors `markiro_proto::ShiftSnapshotOrganization`: the organization a shift froze (plan А4). */
+export const shiftSnapshotOrganizationSchema = z.object({
+  name: z.string(),
+  inn: z.string().nullable(),
+  logo: z
+    .object({ width: z.number().int(), height: z.number().int(), pixelsBase64: z.string() })
+    .nullable(),
+});
+
 /**
  * What a shift freezes when a station opens it (`markiro_proto::ShiftSnapshot`):
  * the station prints and reprints from this alone. A response type, so a
@@ -796,6 +886,8 @@ export const shiftSnapshotSchema = z.object({
   issuerPrefix: z.string(),
   counterpartyName: z.string().nullable(),
   palletTemplate: shiftSnapshotTemplateSchema.optional(),
+  palletSheet: shiftSnapshotSheetSchema.optional(),
+  organization: shiftSnapshotOrganizationSchema.optional(),
 });
 export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
 
@@ -1311,15 +1403,17 @@ export const shiftCreateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().optional(),
   })
   .strict();
 export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
 
 /**
  * `PUT /v1/office/shifts/{id}`: only the fields sent change, over the loaded
- * revision. `plannedQty: null` and `counterpartyId: null` clear them; every
- * other field is left out or a value, never `null`, which the host would read
- * as «keep». The product never changes, so it is no field. Pallets turned
+ * revision. `plannedQty: null` and `counterpartyId: null` clear them;
+ * `palletSheetTemplateId: null` is «the organization's main sheet», resolved
+ * by the host at this edit (plan А4); every other field is left out or a
+ * value, never `null`, which the host would read as «keep». The product never changes, so it is no field. Pallets turned
  * off clear their capacity and template, which the edit then does not send.
  */
 export const shiftUpdateSchema = z
@@ -1334,6 +1428,7 @@ export const shiftUpdateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().nullable().optional(),
     expectedRev: z.number().int(),
   })
   .strict();
@@ -1386,6 +1481,7 @@ export const deviceShiftCreateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().optional(),
   })
   .strict();
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;

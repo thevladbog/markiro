@@ -639,7 +639,13 @@ describe("one send, written before and never repeated by itself (plan СКЛ tas
   it("sends a prepared job found after a restart only when the operator says so", async () => {
     const at = await station();
     // A job made and stored, never sent (the app stopped between the two).
-    const stub: PrintRuntime = { send: vi.fn(), isInFlight: () => false, inFlight: () => [] };
+    const stub: PrintRuntime = {
+      send: vi.fn(),
+      isInFlight: () => false,
+      inFlight: () => [],
+      checkWindowsJob: async () => ({ state: "no_receipt" }),
+      supportsWindowsDriver: async () => false,
+    };
     const made = await prepareWarehouseJob(
       { ...at.context, runtime: stub },
       { session: at.session, source: BOX_SOURCE, repair: null, operatorId: OPERATOR_ID },
@@ -862,6 +868,8 @@ describe("where each answer of the printer leaves a job (plan СКЛ task 5)", (
       send: vi.fn(async () => outcome),
       isInFlight: () => false,
       inFlight: () => [],
+      checkWindowsJob: async () => ({ state: "no_receipt" }),
+      supportsWindowsDriver: async () => false,
     };
     const job = printed(
       await reprintScan(
@@ -1254,7 +1262,7 @@ describe("the unit's code drawn for a reprint (plan СКЛ task 5)", () => {
       const fields = sourceFields(UNIT_SOURCE);
       const printer = { language, dpi: 203 } as const;
       const text = async (options?: { kmDataMatrix?: "native" | "raster" }) => {
-        const bytes = await renderLabel(spec, fields, printer, fakeRaster, options);
+        const bytes = await renderLabel(spec, fields, printer, fakeRaster, null, options);
         return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
       };
       const plain = await text();

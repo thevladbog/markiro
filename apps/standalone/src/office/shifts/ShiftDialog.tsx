@@ -30,6 +30,7 @@ import {
 } from "./shift-form.js";
 import { openBlocker, recordLabel } from "./shift-list.js";
 import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
+import { sheetOptions } from "./sheet-options.js";
 import { datePickerTexts } from "./shift-text.js";
 
 export interface ShiftDialogProps {
@@ -160,6 +161,12 @@ function ShiftForm({
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
   const palletsEnabled = watch("palletsEnabled");
+  // The A4 sheets matter only with pallets; they are read when the pallets are on.
+  const palletSheets = useOfficeQuery(
+    officeKeys.palletSheets,
+    (api, token) => api.listPalletSheets(token),
+    { enabled: palletsEnabled },
+  );
   const product = products.data?.find((each) => each.id === productId);
   // Pallets need the product's pallet capacity, as the cloud's switch does.
   const palletsPossible = product !== undefined && product.palletBoxCapacity !== null;
@@ -261,7 +268,7 @@ function ShiftForm({
   const choosePallets = (on: boolean, onChange: (on: boolean) => void) => {
     onChange(on);
     if (on && product !== undefined) palletsFrom(product);
-    if (!on) clearErrors(["palletBoxCapacity", "palletTemplateId"]);
+    if (!on) clearErrors(["palletBoxCapacity", "palletTemplateId", "palletSheetTemplateId"]);
   };
 
   const submit = handleSubmit(
@@ -303,6 +310,7 @@ function ShiftForm({
           if (outcome.field === "boxTemplateId" || outcome.field === "palletTemplateId") {
             void templates.refetch();
           }
+          if (outcome.field === "palletSheetTemplateId") void palletSheets.refetch();
           if (outcome.field === "counterpartyId") void counterparties.refetch();
         } else if (outdated && outcome.kind === "alert") {
           setOutdatedMessage(outcome.message);
@@ -529,6 +537,32 @@ function ShiftForm({
                   ? { hint: t("office.shifts.fields.templatesUnavailable") }
                   : {})}
                 {...fieldError(errors.palletTemplateId?.message)}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="palletSheetTemplateId"
+            render={({ field }) => (
+              <Select
+                native
+                label={t("office.shifts.fields.palletSheet")}
+                options={sheetOptions(
+                  palletSheets.data,
+                  shift?.palletSheetTemplateId ?? null,
+                  field.value,
+                  t,
+                )}
+                value={field.value}
+                onValueChange={field.onChange}
+                id={fieldId("palletSheetTemplateId")}
+                disabled={locked}
+                hint={t(
+                  palletSheets.isError
+                    ? "office.shifts.palletSheetsUnavailable"
+                    : "office.shifts.fields.palletSheetHint",
+                )}
+                {...fieldError(errors.palletSheetTemplateId?.message)}
               />
             )}
           />

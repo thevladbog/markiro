@@ -9,6 +9,7 @@ import {
   ptToMm,
   QUIET_ZONE_MODULES,
   rasterAlignOffsetDots,
+  renderLabelLogo,
   TOTAL_MODULES,
   wrapTextToWidth,
   type LabelBarcodeElement,
@@ -18,6 +19,8 @@ import {
   type LabelLineElement,
   type LabelTemplateSpec,
   type LabelTextElement,
+  type MonoBitmap,
+  type PrinterDpi,
   type RasterizeTextFn,
   type RasterResult,
 } from "@markiro/domain";
@@ -54,6 +57,12 @@ const INK = "#000000";
 const PRINT_FONT_FAMILY = "sans-serif";
 
 type TextLikeElement = LabelTextElement | LabelFieldElement;
+
+/** The domain does not export the logo box's type by name. */
+type LabelOrganizationLogoElement = Extract<
+  LabelTemplateSpec["elements"][number],
+  { kind: "organization_logo" }
+>;
 
 function textOf(element: TextLikeElement, data: Record<LabelField, string>): string {
   return element.kind === "text"
@@ -282,6 +291,24 @@ function drawBox(canvas: LabelCanvas, element: LabelBoxElement, scale: number): 
 }
 
 /**
+ * Draws an `organization_logo` box as the print does (#703): the domain's
+ * `renderLabelLogo` scales the logo into the box at the layout's resolution,
+ * its natural aspect kept and centred vertically, and its dots are painted
+ * here, each `scale × 25.4 / dpi` pixels wide.
+ */
+function drawLogo(
+  canvas: LabelCanvas,
+  element: LabelOrganizationLogoElement,
+  scale: number,
+  dpi: PrinterDpi,
+  logo: MonoBitmap,
+): void {
+  const { xDots, yDots, raster } = renderLabelLogo(element, dpi, logo);
+  const dotPx = (scale * 25.4) / dpi;
+  paintRaster(canvas, raster, xDots * dotPx, yDots * dotPx, dotPx);
+}
+
+/**
  * Draws a layout at `scale` pixels per millimetre with `data` for its fields,
  * after the cloud's `renderer.ts`: the whole label white, then each element in
  * black. Text is drawn natively here; `compositeTextRasters` puts the print's
@@ -319,8 +346,9 @@ export function drawLabel(
         drawBox(canvas, element, scale);
         break;
       case "organization_logo":
-        // The area stays white: this app has no organization logo to draw (pilot
-        // question П15), and a print without a logo leaves it empty too.
+        // The organization's logo or the bundled Markiro one (plan А4); none —
+        // the area stays white, as a print without a logo leaves it.
+        if (options.logo) drawLogo(canvas, element, scale, spec.dpi, options.logo);
         break;
     }
   }

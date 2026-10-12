@@ -7,8 +7,9 @@
 //! `test/shift-numbers.test.ts` read every one.
 
 use markiro_proto::{
-    ProductStatus, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftSnapshotProduct,
-    ShiftSnapshotTemplate, ShiftStatus, TemplatePurpose,
+    ProductStatus, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftSnapshotLogo,
+    ShiftSnapshotOrganization, ShiftSnapshotProduct, ShiftSnapshotSheet, ShiftSnapshotTemplate,
+    ShiftStatus, TemplatePurpose,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -188,6 +189,8 @@ pub async fn check_pallet_template(
 pub struct Pallets {
     pub box_capacity: u32,
     pub template_id: String,
+    /// The A4 sheet (plan А4): the request's, else the default, else none.
+    pub sheet_id: Option<String>,
 }
 
 /// What a request to plan or create a shift asks of pallets, after its own
@@ -237,23 +240,41 @@ pub fn pallet_request<'a>(
 }
 
 /// The pallets a new shift of `product` gets: its pallet template fits the
-/// product's group, and its capacity is the product's when the request names
-/// none.
+/// product's group, its capacity is the product's when the request names
+/// none, and its A4 sheet (plan А4) is the request's enabled sheet, else the
+/// organization's default one, else none. A sheet without pallets is
+/// `validation_failed` on `palletSheetTemplateId`.
 pub async fn pallets(
     conn: &mut SqliteConnection,
     request: PalletRequest<'_>,
     product: &ShiftProduct,
+    sheet_id: Option<&str>,
 ) -> Result<Option<Pallets>, ApiError> {
     match request {
-        PalletRequest::Off => Ok(None),
+        PalletRequest::Off => match sheet_id {
+            Some(_) => Err(ApiError::validation(
+                "palletSheetTemplateId",
+                "only a shift with pallets has an A4 sheet",
+            )),
+            None => Ok(None),
+        },
         PalletRequest::On {
             box_capacity,
             template_id,
         } => {
             check_pallet_template(conn, template_id, product.group).await?;
+            let sheet_id = match sheet_id {
+                Some(id) => {
+                    crate::routes::pallet_sheets::check_sheet(conn, "palletSheetTemplateId", id)
+                        .await?;
+                    Some(id.to_owned())
+                }
+                None => crate::routes::pallet_sheets::default_sheet(conn).await?,
+            };
             Ok(Some(Pallets {
                 box_capacity: box_capacity.unwrap_or(product.pallet_box_capacity),
                 template_id: template_id.to_owned(),
+                sheet_id,
             }))
         }
     }
@@ -302,8 +323,8 @@ pub async fn insert(
         "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
          created_by, create_request_id, status, mode, pallets_enabled, product_id, line_id, \
          counterparty_id, production_date, planned_qty, box_capacity, box_template_id, \
-         pallet_box_capacity, pallet_template_id, created_at, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
@@ -328,6 +349,12 @@ pub async fn insert(
             .pallets
             .as_ref()
             .map(|pallets| pallets.template_id.as_str()),
+    )
+    .bind(
+        shift
+            .pallets
+            .as_ref()
+            .and_then(|pallets| pallets.sheet_id.as_deref()),
     )
     .bind(at)
     .bind(rev)
@@ -430,13 +457,20 @@ async fn frozen_template(
 /// (still enabled and covering the product's group, or `template_not_fit`)
 /// with the whole layout, with pallets its pallet template the same way
 /// (`pallet_template_not_fit`), the issuer prefix of the organization's
-/// current GLN, and the counterparty's name.
+/// current GLN, the counterparty's name, and (plan А4) the A4 sheet the shift
+/// names and the organization's name, INN and print logo.
+///
+/// The sheet is frozen as it is now, enabled or not (turning a sheet off only
+/// stops new shifts from choosing it). A sheet that is not there (the API
+/// never deletes one a planned shift names) is frozen as none rather than
+/// refusing the entry: the shift still prints its thermal pallet labels.
 pub async fn snapshot(
     conn: &mut SqliteConnection,
     product_id: &str,
     template_id: &str,
     pallet_template_id: Option<&str>,
     counterparty_id: Option<&str>,
+    pallet_sheet_id: Option<&str>,
 ) -> Result<ShiftSnapshot, ApiError> {
     type ProductRow = (
         String,
@@ -491,6 +525,39 @@ pub async fn snapshot(
         ),
         None => None,
     };
+    let pallet_sheet = match pallet_sheet_id {
+        Some(id) => {
+            let row: Option<(String, String, i64)> = sqlx::query_as(
+                "SELECT name, spec, revision FROM pallet_sheet_templates WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            match row {
+                Some((name, spec, revision)) => Some(ShiftSnapshotSheet {
+                    id: id.to_owned(),
+                    name,
+                    revision,
+                    spec: serde_json::from_str(&spec).map_err(ApiError::internal)?,
+                }),
+                None => None,
+            }
+        }
+        None => None,
+    };
+    let (org_name, org_inn): (String, Option<String>) =
+        sqlx::query_as("SELECT name, inn FROM org_profile WHERE id = 1")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+    let logo = crate::routes::org_logo::read_logo(&mut *conn)
+        .await?
+        .map(|logo| ShiftSnapshotLogo {
+            width: logo.width,
+            height: logo.height,
+            pixels_base64: logo.pixels_base64,
+        });
     Ok(ShiftSnapshot {
         product: ShiftSnapshotProduct {
             id: product_id.to_owned(),
@@ -504,6 +571,12 @@ pub async fn snapshot(
         issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
         counterparty_name,
         pallet_template,
+        pallet_sheet,
+        organization: Some(ShiftSnapshotOrganization {
+            name: org_name,
+            inn: org_inn,
+            logo,
+        }),
     })
 }
 
@@ -512,7 +585,10 @@ mod tests {
     use axum::http::StatusCode;
 
     use super::{check_snapshot_len, snapshot_text, MAX_SNAPSHOT_BYTES};
-    use markiro_proto::{ShiftSnapshot, ShiftSnapshotProduct, ShiftSnapshotTemplate};
+    use markiro_proto::{
+        ShiftSnapshot, ShiftSnapshotLogo, ShiftSnapshotOrganization, ShiftSnapshotProduct,
+        ShiftSnapshotSheet, ShiftSnapshotTemplate,
+    };
 
     fn snapshot(filler: usize) -> ShiftSnapshot {
         ShiftSnapshot {
@@ -533,6 +609,8 @@ mod tests {
             issuer_prefix: "460068200".to_owned(),
             counterparty_name: None,
             pallet_template: None,
+            pallet_sheet: None,
+            organization: None,
         }
     }
 
@@ -560,6 +638,57 @@ mod tests {
             ),
             (StatusCode::CONFLICT, "conflict", Some("snapshot_too_large"))
         );
+    }
+
+    /// The sheet and the organization's logo count against the bound like a
+    /// layout does (plan А4): the whole snapshot text is measured.
+    #[test]
+    fn the_sheet_and_the_logo_are_measured_with_the_rest() {
+        let mut full = snapshot(0);
+        full.pallet_sheet = Some(ShiftSnapshotSheet {
+            id: "s".to_owned(),
+            name: "Лист".to_owned(),
+            revision: 1,
+            spec: serde_json::json!({ "f": "" }),
+        });
+        full.organization = Some(ShiftSnapshotOrganization {
+            name: "ООО".to_owned(),
+            inn: None,
+            logo: Some(ShiftSnapshotLogo {
+                width: 8,
+                height: 1,
+                pixels_base64: String::new(),
+            }),
+        });
+        let base = snapshot_text(&full).unwrap().len();
+        let room = MAX_SNAPSHOT_BYTES - base;
+        // The filler goes in the sheet, then in the logo's bits: each is
+        // kept up to the bound and refused one byte past it.
+        let mut in_sheet = full.clone();
+        in_sheet.pallet_sheet.as_mut().unwrap().spec = serde_json::json!({ "f": "x".repeat(room) });
+        assert_eq!(snapshot_text(&in_sheet).unwrap().len(), MAX_SNAPSHOT_BYTES);
+        in_sheet.pallet_sheet.as_mut().unwrap().spec =
+            serde_json::json!({ "f": "x".repeat(room + 1) });
+        assert_eq!(snapshot_text(&in_sheet).unwrap_err().code(), "conflict");
+        let mut in_logo = full.clone();
+        in_logo
+            .organization
+            .as_mut()
+            .unwrap()
+            .logo
+            .as_mut()
+            .unwrap()
+            .pixels_base64 = "A".repeat(room);
+        assert_eq!(snapshot_text(&in_logo).unwrap().len(), MAX_SNAPSHOT_BYTES);
+        in_logo
+            .organization
+            .as_mut()
+            .unwrap()
+            .logo
+            .as_mut()
+            .unwrap()
+            .pixels_base64 = "A".repeat(room + 1);
+        assert_eq!(snapshot_text(&in_logo).unwrap_err().code(), "conflict");
     }
 
     /// The text is measured in bytes, as the `CHECK` does: a layout of

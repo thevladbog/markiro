@@ -21,16 +21,20 @@ import type {
 } from "../../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
-import { renderLabel, type LabelFields, type LabelPrinter } from "../print/label-render.js";
+import type { LabelFields, LabelPrinter } from "../print/label-render.js";
 import { base64ToBytes, settleOutcome } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
+import { renderLogoLabel, type ShiftRenderDeps } from "../print/shift-render.js";
 import {
+  printerMode,
   readWorkstationSettings,
   resolvePrinter,
   type PrintPurpose,
   type PrinterProfile,
+  type WorkstationSettings,
 } from "../setup/workstation-settings.js";
 import { readOperatorCopy } from "../sign-in.js";
+import { readKnownOrganizationLogo } from "./warehouse-logo.js";
 import { checkTemplate, readWarehouseTemplates } from "./warehouse-templates.js";
 import {
   insertJobStatement,
@@ -50,7 +54,7 @@ import {
   type WarehouseSession,
 } from "./warehouse-store.js";
 
-/** How a label printed again is rendered: `renderLabel` by default, a test's own otherwise. */
+/** How a label printed again is rendered: `warehouseLabelRender` by default, a test's own otherwise. */
 export type RenderWarehouseLabel = (
   spec: LabelTemplateSpec,
   fields: LabelFields,
@@ -58,8 +62,30 @@ export type RenderWarehouseLabel = (
   options: { kmDataMatrix?: "native" | "raster" },
 ) => Promise<Uint8Array>;
 
-const defaultRender: RenderWarehouseLabel = (spec, fields, printer, options) =>
-  renderLabel(spec, fields, printer, undefined, options);
+/**
+ * The app's render of a label printed again (plan СКЛ × А4): the shift labels'
+ * own rule (`renderLogoLabel`) — the organization logo the station knows now
+ * (`readKnownOrganizationLogo`: the newest shift snapshot that froze it), else
+ * the bundled Markiro logo — and `renderLabel`'s choice per printer: a RAW
+ * label in its language, or a `mono-raster-v1` page for a printer in driver
+ * mode with the bundled face only (`rasterizeDriverText`), never a fallback
+ * face. `deps` replaces the app's rasterizer and logo loaders (tests).
+ */
+export function warehouseLabelRender(
+  local: LocalExecutor,
+  pairing: Pairing,
+  deps: ShiftRenderDeps = {},
+): RenderWarehouseLabel {
+  return (spec, fields, printer, options) =>
+    renderLogoLabel(
+      spec,
+      fields,
+      printer,
+      () => readKnownOrganizationLogo(local, pairing),
+      deps,
+      options,
+    );
+}
 
 /** What the warehouse work needs: the database, the pairing, the printers, a clock, ids. */
 export interface WarehouseContext {
@@ -68,7 +94,14 @@ export interface WarehouseContext {
   runtime: PrintRuntime;
   now: () => Date;
   newId: () => string;
+  /** The whole render, replaced (tests); left out, `warehouseLabelRender` with `labelDeps`. */
   render?: RenderWarehouseLabel;
+  /** What the app's render takes instead of its own rasterizer and logo loaders (tests). */
+  labelDeps?: ShiftRenderDeps;
+}
+
+function renderOf(context: WarehouseContext): RenderWarehouseLabel {
+  return context.render ?? warehouseLabelRender(context.local, context.pairing, context.labelDeps);
 }
 
 /** The printer purpose of each kind (decision Р14). */
@@ -83,14 +116,39 @@ function renderOptions(kind: WarehouseSubjectKind): { kmDataMatrix?: "raster" } 
   return kind === "unit" ? { kmDataMatrix: "raster" } : {};
 }
 
+/**
+ * Why a label cannot go to a printer: none is assigned to its kind
+ * (`printer_unconfigured`), the one assigned prints A4 sheets (`printer_a4`,
+ * plan А4: a warehouse reprint is a thermal label — a box's, a unit's or a
+ * pallet's — and never an A4 sheet, which only a shift's own pallet close
+ * prints from its frozen snapshot), or the label does not render for it.
+ */
+export type WarehousePrinterCode = "printer_unconfigured" | "printer_a4" | "render_failed";
+
 /** A retry or a new attempt has no printer for its kind, or its label does not render for it. */
 export class WarehousePrinterError extends Error {
-  readonly code: "printer_unconfigured" | "render_failed";
-  constructor(code: "printer_unconfigured" | "render_failed") {
+  readonly code: WarehousePrinterCode;
+  constructor(code: WarehousePrinterCode) {
     super(`warehouse print: ${code}`);
     this.name = "WarehousePrinterError";
     this.code = code;
   }
+}
+
+/**
+ * The printer a label of `kind` prints on, as the settings assign it now: an
+ * A4 printer — which only the purpose «Паллета» may have — is no printer for a
+ * warehouse reprint (`printer_a4`), so neither a thermal page reaches an A4
+ * printer nor an A4 page comes from this path.
+ */
+function warehousePrinter(
+  settings: Pick<WorkstationSettings, "printers" | "assignments">,
+  kind: WarehouseSubjectKind,
+): { printer: PrinterProfile } | { error: "printer_unconfigured" | "printer_a4" } {
+  const printer = resolvePrinter(settings, PRINT_PURPOSE[kind]);
+  if (printer === null) return { error: "printer_unconfigured" };
+  if (printer.paper === "a4") return { error: "printer_a4" };
+  return { printer };
 }
 
 /**
@@ -284,19 +342,14 @@ export async function prepareWarehouseJob(
   if ((await readOpenJob(local, pairing, session.id)) !== null) {
     return { kind: "refused", reason: "busy" };
   }
-  const printer = resolvePrinter(await readWorkstationSettings(local), PRINT_PURPOSE[source.kind]);
+  const assigned = warehousePrinter(await readWorkstationSettings(local), source.kind);
+  const printer = "printer" in assigned ? assigned.printer : null;
   let bytes: string | null = null;
-  let error: "printer_unconfigured" | "render_failed" | null =
-    printer === null ? "printer_unconfigured" : null;
+  let error: WarehousePrinterCode | null = "error" in assigned ? assigned.error : null;
   if (printer !== null) {
     try {
       bytes = bytesToBase64(
-        await (context.render ?? defaultRender)(
-          check.spec,
-          fields,
-          printer,
-          renderOptions(source.kind),
-        ),
+        await renderOf(context)(check.spec, fields, printer, renderOptions(source.kind)),
       );
     } catch {
       error = "render_failed";
@@ -413,8 +466,12 @@ async function moveAndRecord(
  * ended with that attempt's record: `sent` only on the shell's `{ sent: true }`.
  * A retry or a new attempt prints on the printer assigned now; the label is
  * rendered again from the frozen template and fields only when that printer's
- * language or resolution differs from the bytes' (a retry of a job with no bytes
- * always renders). Nothing here sends again by itself.
+ * mode, language or resolution differs from the bytes' (a retry of a job with no
+ * bytes always renders), so RAW bytes never reach a driver queue nor a driver
+ * page a RAW printer. The bytes go through the runtime in the printer's mode —
+ * the shell's Windows driver for a driver profile, as the floor's labels do. A
+ * printer of A4 sheets is refused (`printer_a4`) before anything is written.
+ * Nothing here sends again by itself.
  */
 export async function sendWarehouseJob(
   context: WarehouseContext,
@@ -429,11 +486,13 @@ export async function sendWarehouseJob(
   let printer: PrinterProfile | null = job.printer;
   let bytes = job.bytesBase64;
   if (intent.kind !== "first") {
-    const assigned = resolvePrinter(await readWorkstationSettings(local), PRINT_PURPOSE[job.kind]);
-    if (assigned === null) throw new WarehousePrinterError("printer_unconfigured");
+    const resolved = warehousePrinter(await readWorkstationSettings(local), job.kind);
+    if ("error" in resolved) throw new WarehousePrinterError(resolved.error);
+    const assigned = resolved.printer;
     if (
       bytes === null ||
       printer === null ||
+      printerMode(printer) !== printerMode(assigned) ||
       printer.language !== assigned.language ||
       printer.dpi !== assigned.dpi
     ) {
@@ -441,12 +500,7 @@ export async function sendWarehouseJob(
       if (!spec.success) throw new WarehousePrinterError("render_failed");
       try {
         bytes = bytesToBase64(
-          await (context.render ?? defaultRender)(
-            spec.data,
-            job.fields,
-            assigned,
-            renderOptions(job.kind),
-          ),
+          await renderOf(context)(spec.data, job.fields, assigned, renderOptions(job.kind)),
         );
       } catch {
         throw new WarehousePrinterError("render_failed");
@@ -455,6 +509,8 @@ export async function sendWarehouseJob(
     printer = assigned;
   }
   if (printer === null || bytes === null) throw new WarehouseStateError(job.id, job.state);
+  // A job prepared for an A4 printer by a build before this rule: never sent from here.
+  if (printer.paper === "a4") throw new WarehousePrinterError("printer_a4");
   const reason = intent.kind === "again" ? intent.reason : job.reason;
   try {
     await local.transaction([
@@ -478,7 +534,13 @@ export async function sendWarehouseJob(
     }
     throw error;
   }
-  const outcome = await context.runtime.send(job.id, printer.target, base64ToBytes(bytes));
+  const outcome = await context.runtime.send(
+    job.id,
+    printer.target,
+    base64ToBytes(bytes),
+    printerMode(printer),
+    printer.paper,
+  );
   const settled = settleOutcome(outcome);
   const sending: WarehouseJob = {
     ...job,

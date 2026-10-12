@@ -13,6 +13,8 @@ import { useOfficeSession } from "./office-session.js";
 /** Query keys of office data, one per host resource. */
 export const officeKeys = {
   org: ["office", "org"],
+  orgLogo: ["office", "org-logo"],
+  palletSheets: ["office", "pallet-sheets"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],
   devices: ["office", "devices"],

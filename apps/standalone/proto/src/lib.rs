@@ -906,6 +906,105 @@ pub struct OrgProfileUpdate {
     pub expected_rev: i64,
 }
 
+/// The organization's print logo (plan А4): monochrome, `width` × `height`
+/// dots, rows MSB first, 1 = ink, each row padded to whole bytes with zero
+/// bits, in standard base64. Labels with an `organization_logo` element and
+/// A4 sheets print it; without one they print the bundled Markiro logo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgLogo {
+    pub width: u32,
+    pub height: u32,
+    pub pixels_base64: String,
+    pub updated_at: String,
+}
+
+/// `GET`, `PUT` and `DELETE /v1/office/org/logo`: the logo, or `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgLogoState {
+    pub logo: Option<OrgLogo>,
+}
+
+/// `PUT /v1/office/org/logo` (administrators): the whole logo, replacing any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrgLogoPut {
+    pub width: u32,
+    pub height: u32,
+    pub pixels_base64: String,
+}
+
+/// An A4 pallet sheet (plan А4; the cloud's `PalletSheetSpecV2`, #702). The
+/// host keeps `spec` an object of `schemaVersion` 2 and `kind`
+/// "pallet_sheet" of at most 64 KiB; the domain checks the layout. A stock
+/// sheet carries its preset's key (`buildPalletSheetPresets`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletSheet {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub preset_key: Option<String>,
+    pub revision: i64,
+    pub spec: serde_json::Value,
+}
+
+/// `GET /v1/office/pallet-sheets` and `PUT /v1/office/pallet-sheet-default`:
+/// every sheet by name and the organization's default sheet, if any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletSheets {
+    pub sheets: Vec<PalletSheet>,
+    pub default_id: Option<String>,
+}
+
+fn enabled_by_default() -> bool {
+    true
+}
+
+/// `POST /v1/office/pallet-sheets`: a new sheet, or a stock one by its preset
+/// key (the same key again answers the sheet already there).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetCreate {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_key: Option<String>,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    pub spec: serde_json::Value,
+}
+
+/// `PUT /v1/office/pallet-sheets/{id}`: the name or the state, over the
+/// sheet's revision. The layout never changes: a new layout is a new sheet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    pub expected_revision: i64,
+}
+
+/// `PUT /v1/office/pallet-sheet-default`: an enabled sheet, or `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletSheetDefaultUpdate {
+    #[serde(deserialize_with = "present")]
+    pub template_id: Option<String>,
+}
+
+/// A field that may be `null` but must be there: a body without it is a
+/// refusal, not a quiet "no default" (plain serde reads an absent `Option`
+/// as `None`).
+fn present<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
 /// One SSCC counter (`GET /v1/office/sscc`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1478,6 +1577,10 @@ pub struct OfficeShift {
     /// exactly when `palletsEnabled` (plan ПЛ-Х), `null` otherwise.
     pub pallet_box_capacity: Option<u32>,
     pub pallet_template_id: Option<String>,
+    /// The A4 sheet a shift with pallets prints on an A4 printer (plan А4):
+    /// `null` for none, and always `null` without pallets.
+    #[serde(default)]
+    pub pallet_sheet_template_id: Option<String>,
     /// The station that opened the shift; `null` while it is planned.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
@@ -1544,6 +1647,10 @@ pub struct ShiftCreate {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
+    /// The shift's A4 sheet (plan А4), only with pallets; left out, a shift
+    /// with pallets takes the organization's default sheet when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_sheet_template_id: Option<String>,
 }
 
 /// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
@@ -1577,6 +1684,13 @@ pub struct ShiftUpdate {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
+    /// The shift's A4 sheet (plan А4), only with pallets: an id names that
+    /// sheet; `null` is «the organization's main sheet», resolved by the host
+    /// when it takes the edit (none when there is no main sheet) and frozen
+    /// into the snapshot at opening like any sheet; left out, the shift keeps
+    /// its sheet, and pallets just turned on take the main one.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub pallet_sheet_template_id: Option<Option<String>>,
     pub expected_rev: i64,
 }
 
@@ -1651,6 +1765,14 @@ pub struct ShiftSnapshot {
     /// only for a shift with pallets (plan ПЛ-Х); left out otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template: Option<ShiftSnapshotTemplate>,
+    /// The A4 sheet the shift froze (plan А4): only for a shift with a sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_sheet: Option<ShiftSnapshotSheet>,
+    /// The organization as the shift froze it (plan А4): its name, INN and
+    /// print logo, for the sheet's header and footer and the labels' logo
+    /// box. Left out by a host before plan А4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<ShiftSnapshotOrganization>,
 }
 
 /// The product as a shift froze it; only an active product opens a shift,
@@ -1677,6 +1799,37 @@ pub struct ShiftSnapshotTemplate {
     pub name: String,
     pub rev: i64,
     pub spec: serde_json::Value,
+}
+
+/// An A4 sheet as a shift froze it: its name, revision and whole layout. The
+/// host never checks the layout; the station reads it with the domain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshotSheet {
+    pub id: String,
+    pub name: String,
+    pub revision: i64,
+    pub spec: serde_json::Value,
+}
+
+/// The organization as a shift froze it (plan А4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshotOrganization {
+    pub name: String,
+    pub inn: Option<String>,
+    /// The organization's print logo, `null` for none (the bundled Markiro
+    /// logo prints then).
+    pub logo: Option<ShiftSnapshotLogo>,
+}
+
+/// A print logo as a shift froze it: the bits of `OrgLogo`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshotLogo {
+    pub width: u32,
+    pub height: u32,
+    pub pixels_base64: String,
 }
 
 /// `GET /v1/device/shifts`: the planned and active shifts of the station's
@@ -1711,6 +1864,10 @@ pub struct DeviceShiftCreate {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
+    /// The shift's A4 sheet (plan А4), only with pallets; left out, a shift
+    /// with pallets takes the organization's default sheet when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_sheet_template_id: Option<String>,
 }
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how

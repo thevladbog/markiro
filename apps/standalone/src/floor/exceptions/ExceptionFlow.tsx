@@ -13,6 +13,7 @@ import {
   type ReprintReason,
 } from "../exception-reasons.js";
 import { VIEW_GUARD_MS, type PanelSettings } from "../print/LabelPanel.js";
+import { printerFormatText } from "../print/printer-format.js";
 import { resolvePrinter, type PrinterProfile } from "../setup/workstation-settings.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import {
@@ -478,7 +479,7 @@ export function ExceptionFlow({
             ? t(`floor.exceptions.confirm.${action}.noPrinter`)
             : t("floor.print.target.label", {
                 name: printer.name,
-                language: printer.language.toUpperCase(),
+                language: printerFormatText(t, printer),
                 dpi: printer.dpi,
               })}
       </p>

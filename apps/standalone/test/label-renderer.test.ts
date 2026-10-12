@@ -18,6 +18,7 @@ import {
   type LabelBarcodeElement,
   type LabelElement,
   type LabelTemplateSpec,
+  type MonoBitmap,
   type RasterizeTextOptions,
   type RasterResult,
 } from "@markiro/domain";
@@ -1134,5 +1135,126 @@ describe("the standard layouts' text model (#703)", () => {
       });
       expect(printed).toBe(base);
     }
+  });
+});
+
+describe("the organization logo in a drawn layout (#703)", () => {
+  const logoBox = (dpi: 203 | 300): LabelTemplateSpec => ({
+    widthMm: 58,
+    heightMm: 40,
+    dpi,
+    language: "zpl",
+    elements: [
+      {
+        id: "logo",
+        kind: "organization_logo",
+        source: "organization",
+        fallback: "markiro",
+        xMm: 2,
+        yMm: 2,
+        widthMm: 20,
+        heightMm: 10,
+      },
+    ],
+  });
+  /** 16 × 2 dots, ink all over. */
+  const WIDE: MonoBitmap = {
+    width: 16,
+    height: 2,
+    stride: 2,
+    pixels: new Uint8Array(4).fill(0xff),
+  };
+  /** 2 × 16 dots, ink all over. */
+  const TALL: MonoBitmap = {
+    width: 2,
+    height: 16,
+    stride: 1,
+    pixels: new Uint8Array(16).fill(0xc0),
+  };
+  const inkOf = (canvas: { ops: Op[] }) =>
+    canvas.ops.filter((op) => op[0] === "fillRect" && op[1] === "#000000");
+
+  it("paints the logo's dots inside the box, scaled and centred as the print places them", () => {
+    const canvas = recordingCanvas();
+    drawLabel(logoBox(203), canvas, 3, BOX_DATA, { logo: WIDE });
+    // 160 × 80 dots of box; 16 × 2 grows by 10 to 160 × 20, 30 dots below the top (2 mm = 16 dots).
+    const dotPx = (3 * 25.4) / 203;
+    const ink = inkOf(canvas);
+    expect(ink).toHaveLength(20);
+    ink.forEach((op, row) => {
+      expect(op[2]).toBeCloseTo(16 * dotPx, 6);
+      expect(op[3]).toBeCloseTo((46 + row) * dotPx, 6);
+      expect(op[4]).toBeCloseTo(160 * dotPx, 6);
+      expect(op[5]).toBeCloseTo(dotPx, 6);
+    });
+  });
+
+  it("paints a tall logo as wide as its height allows, at the box's left edge, never past the box", () => {
+    const canvas = recordingCanvas();
+    drawLabel(logoBox(203), canvas, 3, BOX_DATA, { logo: TALL });
+    // 2 × 16 grows by 5 to 10 × 80: ten dots wide, the whole height of the box.
+    const dotPx = (3 * 25.4) / 203;
+    const ink = inkOf(canvas);
+    expect(ink).toHaveLength(80);
+    for (const op of ink) {
+      expect(op[2]).toBeCloseTo(16 * dotPx, 6);
+      expect(op[4]).toBeCloseTo(10 * dotPx, 6);
+      expect(Number(op[3])).toBeGreaterThanOrEqual(16 * dotPx - 1e-6);
+      expect(Number(op[3]) + Number(op[5])).toBeLessThanOrEqual(96 * dotPx + 1e-6);
+    }
+  });
+
+  it("uses the layout's resolution for the size of a dot, as the printer prints it", () => {
+    const canvas = recordingCanvas();
+    drawLabel(logoBox(300), canvas, 3, BOX_DATA, { logo: WIDE });
+    // 20 × 10 mm is 236 × 118 dots at 300 dpi; 16 × 2 grows by 14.75 to 236 × 30.
+    const dotPx = (3 * 25.4) / 300;
+    const ink = inkOf(canvas);
+    expect(ink).toHaveLength(30);
+    expect(ink[0]?.[4]).toBeCloseTo(236 * dotPx, 6);
+    expect(ink[0]?.[5]).toBeCloseTo(dotPx, 6);
+  });
+
+  it("leaves the box white without a logo, and nothing else of the label changes", () => {
+    const without = recordingCanvas();
+    drawLabel(logoBox(203), without, 3, BOX_DATA, {});
+    const nullLogo = recordingCanvas();
+    drawLabel(logoBox(203), nullLogo, 3, BOX_DATA, { logo: null });
+    expect(inkOf(without)).toEqual([]);
+    expect(nullLogo.ops).toEqual(without.ops);
+    // The white page is the first two operations either way.
+    expect(without.ops).toEqual([
+      ["clearRect", 0, 0, 174, 120],
+      ["fillRect", "#ffffff", 0, 0, 174, 120],
+    ]);
+  });
+
+  it("keeps the logo of every stock layout inside its box at either resolution, whatever the logo's proportions", () => {
+    const layouts = [...buildDefaultLabelTemplates(), ...buildPalletLabelTemplates()];
+    let checked = 0;
+    for (const template of layouts) {
+      for (const element of template.spec.elements) {
+        if (element.kind !== "organization_logo") continue;
+        for (const dpi of [203, 300] as const) {
+          for (const logo of [WIDE, TALL]) {
+            const canvas = recordingCanvas();
+            drawLabel({ ...template.spec, dpi, elements: [element] }, canvas, 3, BOX_DATA, {
+              logo,
+            });
+            const ink = inkOf(canvas);
+            expect(ink.length).toBeGreaterThan(0);
+            for (const op of ink) {
+              const [x = 0, y = 0, width = 0, height = 0] = op.slice(2).map(Number);
+              expect(x).toBeGreaterThanOrEqual(element.xMm * 3 - 0.5);
+              expect(x + width).toBeLessThanOrEqual((element.xMm + element.widthMm) * 3 + 0.5);
+              expect(y).toBeGreaterThanOrEqual(element.yMm * 3 - 0.5);
+              expect(y + height).toBeLessThanOrEqual((element.yMm + element.heightMm) * 3 + 0.5);
+            }
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(8);
   });
 });

@@ -91,6 +91,7 @@ import {
   UNSENT_RECORDS_SQL,
   UPDATE_SESSION_SQL,
 } from "../src/floor/warehouse/warehouse-store.js";
+import { KNOWN_ORGANIZATION_SQL } from "../src/floor/warehouse/warehouse-logo.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -1896,6 +1897,9 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     [WAREHOUSE_UNSENT_SQL, "wh_outbox_unsent"],
     [WAREHOUSE_ATTEMPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
     [WAREHOUSE_RECEIPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
+    // The organization logo a reprint prints (plan СКЛ × А4): the pairing's shifts through an
+    // index on (host_id, device_id, …) — the planner takes `floor_shifts_line` or the key.
+    [KNOWN_ORGANIZATION_SQL, "(host_id=? AND device_id=?)"],
   ];
 
   it("search an index, never a whole table", () => {
