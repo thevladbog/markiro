@@ -143,6 +143,17 @@ async fn shift_numbers(pool: &SqlitePool) -> Vec<(String, i64)> {
         .unwrap()
 }
 
+/// Copy a file a SQLite connection still holds open, byte for byte, as a
+/// power cut leaves it. `std::fs::copy` is `CopyFileExW` on Windows, which
+/// opens the source without sharing write access and so fails with a sharing
+/// violation beside SQLite's read-write handle; `File::open` shares read,
+/// write and delete on every platform.
+fn copy_open_file(from: &Path, to: &Path) {
+    let mut source = std::fs::File::open(from).unwrap();
+    let mut target = std::fs::File::create(to).unwrap();
+    std::io::copy(&mut source, &mut target).unwrap();
+}
+
 fn restore_dirs(dir: &Path) -> Vec<String> {
     names(dir)
         .into_iter()
@@ -355,7 +366,7 @@ async fn the_commits_a_crashed_host_left_in_its_wal_count_too() {
     let crashed = tempfile::tempdir().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let name = format!("host.db{suffix}");
-        std::fs::copy(admin.app.dir().join(&name), crashed.path().join(&name)).unwrap();
+        copy_open_file(&admin.app.dir().join(&name), &crashed.path().join(&name));
     }
     std::fs::write(
         crashed.path().join("host.json"),
@@ -914,7 +925,7 @@ async fn the_commits_an_interrupted_restore_left_in_a_wal_are_not_replayed_into_
     let sources = tempfile::tempdir().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let name = format!("host.db.partial{suffix}");
-        std::fs::copy(paths.data_dir.join(&name), sources.path().join(&name)).unwrap();
+        copy_open_file(&paths.data_dir.join(&name), &sources.path().join(&name));
     }
     killed.close().await.unwrap();
     for suffix in ["", "-wal", "-shm"] {
@@ -951,7 +962,7 @@ fn crashed_folder(admin: &Admin) -> tempfile::TempDir {
     let crashed = tempfile::tempdir().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let name = format!("host.db{suffix}");
-        std::fs::copy(admin.app.dir().join(&name), crashed.path().join(&name)).unwrap();
+        copy_open_file(&admin.app.dir().join(&name), &crashed.path().join(&name));
     }
     std::fs::write(
         crashed.path().join("host.json"),

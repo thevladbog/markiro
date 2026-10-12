@@ -413,7 +413,10 @@ async fn a_dot_dot_part_or_a_device_path_is_refused_even_when_the_folder_exists(
         format!("{dir}/sub/.."),
         format!("{dir}/sub/../sub"),
         format!("{dir}\\sub\\..\\sub"),
-        format!("/{dir}/sub").replacen("//", "//?/", 1),
+        // The verbatim namespace in either separator; `dir` is a drive path
+        // on Windows and a root path elsewhere.
+        format!("//?/{}/sub", dir.trim_start_matches('/')),
+        format!(r"\\?\{}\sub", dir.trim_start_matches('/')),
         "//./PhysicalDrive0".to_owned(),
     ] {
         let (status, body) =
@@ -426,8 +429,14 @@ async fn a_dot_dot_part_or_a_device_path_is_refused_even_when_the_folder_exists(
             ),
             "{text:?}"
         );
+        // As JSON writes it too: on Windows every backslash of `dir` is doubled.
+        let written = serde_json::to_string(&dir).unwrap();
+        let written = written.trim_matches('"');
+        let answer = body.to_string();
         assert!(
-            !body.to_string().contains("PhysicalDrive") && !body.to_string().contains(&dir),
+            !answer.contains("PhysicalDrive")
+                && !answer.contains(&dir)
+                && !answer.contains(written),
             "the answer does not echo the path: {body}"
         );
     }
