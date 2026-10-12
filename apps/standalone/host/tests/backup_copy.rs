@@ -8,7 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use markiro_host::backup::copy::sync_file;
 use markiro_host::backup::copy::{
     classify_io, classify_sqlite, is_copy_file_name, make_copy, make_copy_tagged, manifest_path,
     read_manifest, sha256_file, verify_database,
@@ -339,6 +338,7 @@ async fn rotation_never_takes_the_copy_it_was_asked_to_keep_even_with_newer_copi
 #[cfg(unix)]
 #[test]
 fn a_copy_is_flushed_through_a_handle_opened_for_writing() {
+    use markiro_host::backup::copy::sync_file;
     use std::os::unix::fs::PermissionsExt;
     let folder = tempfile::tempdir().unwrap();
     let file = folder.path().join("markiro-host-copy.db.partial");

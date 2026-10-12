@@ -148,6 +148,7 @@ impl PrivateFolder {
     fn new() -> std::io::Result<Self> {
         let path =
             std::env::temp_dir().join(format!("markiro-host-restore-{}", uuid::Uuid::new_v4()));
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         {
@@ -1348,6 +1349,7 @@ fn remove_identity_staging(paths: &HostPaths) {
 
 /// An owner-only folder (`0700` on Unix; the data folder's ACL on Windows).
 fn private_dir_builder() -> fs::DirBuilder {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
