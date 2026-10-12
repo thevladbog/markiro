@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { load } from "js-yaml";
+import { withoutParallelSegments } from "./support/parallel-segments.mjs";
 
 const path = "apps/admin/vite.us.config.ts";
 
 test("US CI owns readiness rules, strict contract and disposable-DB HTTP coverage", () => {
-  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const workflow = withoutParallelSegments(
+    load(readFileSync(".github/workflows/us-development.yml", "utf8")),
+  );
   assert.deepEqual(Object.keys(workflow.jobs), ["isolation"]);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   const job = workflow.jobs.isolation;
@@ -128,7 +131,9 @@ test("US readiness dev/preview proxy accepts only exact GET with four unique app
 });
 
 test("US CI owns search and card suites on disposable PostgreSQL without publication", () => {
-  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const workflow = withoutParallelSegments(
+    load(readFileSync(".github/workflows/us-development.yml", "utf8")),
+  );
   assert.deepEqual(Object.keys(workflow.jobs), ["isolation"]);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   const job = workflow.jobs.isolation;
@@ -315,7 +320,9 @@ test("US dev and preview middleware reject unknown RU API routes before fallback
 });
 
 test("US CI owns Events and Transformation browser contracts without release capabilities", () => {
-  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const workflow = withoutParallelSegments(
+    load(readFileSync(".github/workflows/us-development.yml", "utf8")),
+  );
   const steps = workflow.jobs.isolation.steps;
   const build = steps.findIndex((step) => step.run?.includes("--filter @markiro/ui build"));
   for (const name of [
@@ -355,7 +362,9 @@ test("US CI owns Events and Transformation browser contracts without release cap
 });
 
 test("US CI builds shared UI before importing its compiled components in tests", () => {
-  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const workflow = withoutParallelSegments(
+    load(readFileSync(".github/workflows/us-development.yml", "utf8")),
+  );
   const steps = workflow.jobs.isolation.steps;
   const build = steps.findIndex((step) => step.run?.includes("--filter @markiro/ui build"));
   const testIndex = steps.findIndex((step) => step.run?.includes("test/us-app.test.tsx"));
@@ -368,7 +377,9 @@ test("US CI builds shared UI before importing its compiled components in tests",
 });
 
 test("US CI runs saved Receiving CSV codec and audited endpoint checks", () => {
-  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  const workflow = withoutParallelSegments(
+    load(readFileSync(".github/workflows/us-development.yml", "utf8")),
+  );
   const commands = workflow.jobs.isolation.steps.map((step) => step.run ?? "").join("\n");
   assert.match(commands, /test\/us-receiving-csv-export\.test\.ts/);
   assert.match(commands, /test\/us-receiving-csv-export\.e2e\.test\.ts/);

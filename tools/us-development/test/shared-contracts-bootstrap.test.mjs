@@ -3,8 +3,11 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { load } from "js-yaml";
+import { withoutParallelSegmentsBytes } from "./support/parallel-segments.mjs";
 
-const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+const source = withoutParallelSegmentsBytes(
+  readFileSync(".github/workflows/us-development.yml", "utf8"),
+);
 const workflow = load(source);
 const owner = {
   name: "Build shared contracts for Node tooling checks",

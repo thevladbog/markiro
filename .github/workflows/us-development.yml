@@ -17,6 +17,11 @@ jobs:
   isolation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        segment: [foundation, dataset, cabinet]
     services:
       us-postgres:
         image: postgres:17-alpine
@@ -55,102 +60,128 @@ jobs:
       - name: Verify pure native dataset assembly input
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-native-assembly-contract.test.ts --maxWorkers=1
       - name: Verify corrected dataset Cases on disposable databases
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-corrected-cases-contract.test.ts test/us-dataset-corrected-cases-seed.e2e.test.ts --maxWorkers=1
       - name: Verify special dataset event examples on disposable databases
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-special-contract.test.ts test/us-dataset-special-seed.e2e.test.ts test/us-dataset-special-locks.e2e.test.ts test/us-dataset-corrected-transformation-contract.test.ts test/us-dataset-corrected-transformation-seed.e2e.test.ts test/us-dataset-corrected-transformation-locks.e2e.test.ts --maxWorkers=1
       - name: Verify Receiving lifecycle transaction foundation on disposable databases
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-receiving-lifecycle-transaction.e2e.test.ts --maxWorkers=1
       - name: Verify regular dataset range orchestration on disposable databases
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-regular-contract.test.ts test/us-dataset-regular-seed.e2e.test.ts --maxWorkers=1
       - name: Verify Shipping native transaction foundation on disposable databases
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-shipping-transaction-seams.e2e.test.ts test/us-shipping-transaction-locks.e2e.test.ts --maxWorkers=1
       - name: Check US Case native transaction foundation
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-case-transaction-seams.e2e.test.ts test/us-case-transaction-locks.e2e.test.ts --maxWorkers=1
       - name: Check US Transformation native transaction foundation
+        if: matrix.segment == 'foundation'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-transformation-transaction-seams.e2e.test.ts test/us-transformation-transaction-locks.e2e.test.ts --maxWorkers=1
       - name: Verify regular US dataset Transformation on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-transformation-contract.test.ts test/us-dataset-transformation-verify.e2e.test.ts test/us-dataset-transformation-locks.e2e.test.ts test/us-dataset-transformation-seed.e2e.test.ts --maxWorkers=1
       - name: Verify regular US dataset Cases on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-cases-contract.test.ts test/us-case-demo-command.e2e.test.ts test/us-dataset-cases-prepare.e2e.test.ts test/us-dataset-cases-verify.e2e.test.ts test/us-dataset-cases-locks.e2e.test.ts test/us-dataset-cases-seed.e2e.test.ts --maxWorkers=1
       - name: Verify regular dataset Shipping on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-shipping-contract.test.ts test/us-dataset-shipping-result.test.ts test/us-dataset-shipping-origin-status.e2e.test.ts test/us-dataset-shipping-seed.e2e.test.ts test/us-dataset-shipping-verify.e2e.test.ts test/us-dataset-shipping-locks.e2e.test.ts --maxWorkers=1
       - name: Verify pure six-month recipe and compiled timezone identity
+        if: matrix.segment == 'dataset'
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-six-month-references.test.ts test/us-six-month-chains.test.ts test/us-six-month-definition.test.ts --maxWorkers=1
       - name: Verify US demo descriptor and strict journal codecs
+        if: matrix.segment == 'dataset'
         run: pnpm --filter @markiro/api exec vitest run test/us-demo-definition.test.ts test/us-demo-journal-contract.test.ts test/us-dataset-contract.test.ts test/us-dataset-reference-contract.test.ts test/us-dataset-receiving-contract.test.ts --maxWorkers=1
       - name: Verify bounded US dataset progress on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-journal.e2e.test.ts test/us-dataset-atomic-stage.e2e.test.ts --maxWorkers=1
       - name: Verify regular US dataset Receiving on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-stage-read.e2e.test.ts test/us-dataset-receiving-verify.e2e.test.ts test/us-dataset-receiving-locks.e2e.test.ts test/us-dataset-receiving-seed.e2e.test.ts --maxWorkers=1
       - name: Verify exact US demo references and canonical replay on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-reference-transaction-seams.e2e.test.ts test/us-demo-atomic-stage.e2e.test.ts test/us-demo-reference-seed.e2e.test.ts test/us-dataset-reference-seed.e2e.test.ts test/us-demo-journal.e2e.test.ts test/us-master-data.e2e.test.ts test/us-catalog.e2e.test.ts test/us-catalog-operational-boundaries.e2e.test.ts test/us-product-profile.e2e.test.ts test/us-reference-document.e2e.test.ts --maxWorkers=1
       - name: Verify US demo journal schema and migration on disposable databases
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/db exec vitest run test/us-demo-seed-schema.test.ts test/us-demo-seed-migration.e2e.test.ts test/us-demo-dataset-schema.test.ts test/us-demo-dataset-migration.e2e.test.ts --maxWorkers=1
       - name: Verify guarded US demo journal and trusted owner boundaries
+        if: matrix.segment == 'dataset'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-demo-definition.test.ts test/us-demo-journal-contract.test.ts test/us-demo-journal.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts test/us-profile-store.e2e.test.ts test/us-request-tenant-origin.e2e.test.ts --maxWorkers=1
       - name: Verify API entry boundaries
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts test/us-development.e2e.test.ts test/env.test.ts test/health.e2e.test.ts
       - name: Verify bounded receiving CSV inputs
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-csv.test.ts test/us-receiving-csv-commands.test.ts test/us-receiving-csv-http.test.ts test/us-receiving-csv-export.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-transformation-http.test.ts test/us-events.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-csv-input.test.ts test/us-receiving-csv-preview.test.ts
       - name: Verify US current trace contracts and projection
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-current-trace.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-trace-project.test.ts
       - name: Verify US current trace storage history and HTTP
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-trace-store.e2e.test.ts test/us-trace-evidence.e2e.test.ts test/us-trace-history.e2e.test.ts test/us-trace-http.e2e.test.ts
       - name: Verify US search and lot card contracts and query parsing
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-search-lot-card.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-trace-search-query.test.ts
       - name: Verify US search and lot card storage and HTTP on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-trace-search.e2e.test.ts test/us-lot-card.e2e.test.ts test/us-search-lot-card-http.e2e.test.ts
       - name: Verify US readiness rules, contract and strict scope
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/domain exec vitest run test/readiness-sweep.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-readiness-sweep.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-readiness-query.test.ts
       - name: Verify US readiness evidence, assessment and HTTP on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-readiness-evidence.e2e.test.ts test/us-readiness-assessment.e2e.test.ts test/us-readiness-http.e2e.test.ts --maxWorkers=1
       - name: Verify US frozen export contracts, mapping, workbook and XLSX adapter
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
@@ -158,131 +189,175 @@ jobs:
           pnpm --filter @markiro/domain exec vitest run test/us-export-registry.test.ts test/us-export-rows.test.ts test/us-export-workbook.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-export-xlsx-writer.test.ts test/us-export-adapter.test.ts --maxWorkers=1
       - name: Verify US Plan HTTP contracts and configured fact impact
+        if: matrix.segment == 'cabinet'
         run: |
           corepack pnpm --filter @markiro/platform-contracts exec vitest run test/us-plans-http.test.ts
           corepack pnpm --filter @markiro/domain exec vitest run test/us-plan-impact.test.ts
       - name: Verify US Plan reads, inspection and canonical HTTP on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-read.e2e.test.ts test/us-plan-inspection.e2e.test.ts test/us-plan-http.e2e.test.ts test/openapi-coverage.test.ts --maxWorkers=1
       - name: Verify US pinned export source reader on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-export-source-reader.e2e.test.ts --maxWorkers=1
       - name: Build durable request worker shared dependencies
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/db build
           pnpm --filter @markiro/domain build
           pnpm --filter @markiro/platform-contracts build
       - name: Verify US request deadline rules and strict contracts
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/domain exec vitest run test/us-request-deadline.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-requests.test.ts
       - name: Verify US request schema and migration on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/db exec vitest run test/us-request-schema.test.ts test/us-request-migration.e2e.test.ts test/us-request-worker-schema.test.ts test/us-request-worker-migration.e2e.test.ts --maxWorkers=1
       - name: Verify US request selection, storage, validation, freeze and internal payloads on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-selection.e2e.test.ts test/us-request-store.e2e.test.ts test/us-request-validation.e2e.test.ts test/us-request-prepare.e2e.test.ts test/us-request-run-evidence.e2e.test.ts test/us-request-payloads.e2e.test.ts test/us-request-tenant-origin.e2e.test.ts test/us-request-versions.e2e.test.ts test/us-request-plan-reader.e2e.test.ts test/us-request-package-inputs.e2e.test.ts test/us-request-report-pdf.e2e.test.ts test/us-request-package-manifest.e2e.test.ts test/us-request-package-zip.test.ts test/us-request-package.e2e.test.ts --maxWorkers=1
       - name: Verify durable US request worker, private storage and recovery on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-worker-types.test.ts test/us-request-worker-failures.test.ts test/us-request-worker-execution.test.ts test/us-request-package-artifact-config.test.ts test/us-request-package-artifacts.test.ts test/us-request-worker-lifecycle.e2e.test.ts test/us-request-worker-checkpoint.e2e.test.ts test/us-request-worker-publication.e2e.test.ts test/us-request-worker-cleanup.e2e.test.ts test/us-request-worker.e2e.test.ts test/us-request-worker-recovery.e2e.test.ts --maxWorkers=1
       - name: Build isolated request worker entry and checked descriptor
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/api build:us-request-worker
       - name: Verify owned US HTTP setup and teardown on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts --maxWorkers=1
       - name: Verify owned US build fixture acquisition and disposal
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-build-fixture.test.ts --maxWorkers=1
       - name: Verify strict US Requests HTTP public contracts
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/platform-contracts exec vitest run test/us-requests-http.test.ts --maxWorkers=1
       - name: Verify US Requests HTTP reads, commands, resources and downloads on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-read.e2e.test.ts test/us-request-publication-read.e2e.test.ts test/us-request-http-commands.e2e.test.ts test/us-request-http-resources.test.ts test/us-request-http-resources.e2e.test.ts test/us-request-download.e2e.test.ts test/us-request-http.e2e.test.ts test/openapi-coverage.test.ts --maxWorkers=1
       - name: Verify US worker build, loop, runtime and real process recovery
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-build-descriptor.test.ts test/us-request-build-command.test.ts test/us-request-worker-loop.test.ts test/us-request-worker-runtime.test.ts test/us-request-worker-runtime.e2e.test.ts test/us-request-worker-process.e2e.test.ts --maxWorkers=1
       - name: Verify compiled request worker refusal and no-listener boundary
+        if: matrix.segment == 'cabinet'
         run: node --test tools/us-development/test/request-worker-entry.smoke.mjs
       - name: Build shared browser components
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/ui build
       - name: Verify strict US Requests JSON client
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-client.test.ts --maxWorkers=1
       - name: Verify bounded descriptor-verified US Requests downloads
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-download-client.test.ts --maxWorkers=1
       - name: Verify US Requests time, scope and form policy
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-time.test.ts test/us-requests-form.test.ts test/us-requests-copy.test.ts --maxWorkers=1
       - name: Verify read-only US Requests navigation and saved cards
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-navigation.test.tsx test/us-requests-view.test.tsx --maxWorkers=1
       - name: Verify controlled US Requests editors and recoverable CRUD
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-editor.test.tsx test/us-requests-scope.test.tsx test/us-requests-crud.test.tsx --maxWorkers=1
       - name: Verify fresh US Requests validation, stable preparation and exact sources
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-validation.test.tsx test/us-requests-prepare.test.tsx test/us-requests-source.test.ts --maxWorkers=1
       - name: Verify frozen US Requests runs, bounded polling, stable retry and downloads
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-requests-runs.test.tsx test/us-requests-polling.test.ts test/us-requests-retry.test.tsx test/us-requests-download.test.tsx --maxWorkers=1
       - name: Verify US browser flow and contracts
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-catalog-client.test.ts test/us-catalog-ui.test.tsx test/us-product-profile-client.test.ts test/us-product-profile-ui.test.tsx test/us-lot-client.test.ts test/us-lots-ui.test.tsx test/us-app.test.tsx
       - name: Verify US Plan cabinet contracts and EN/ES flow
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-plans-client.test.ts test/us-plans-pdf-client.test.ts test/us-plans-navigation.test.tsx test/us-plans-versions.test.tsx test/us-plans-editor.test.tsx test/us-plans-inspection.test.tsx test/us-plans-approval.test.tsx test/us-plans-download.test.tsx test/us-plans-flow.test.tsx
       - name: Verify US readiness office and exact source navigation
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-readiness-client.test.ts test/us-readiness-view.test.tsx test/us-readiness-picker.test.tsx test/us-readiness-navigation.test.tsx
       - name: Verify US Search, lot card, Trace and workspace navigation
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-search-trace-client.test.ts test/us-search-view.test.tsx test/us-lot-card-panel.test.tsx test/us-trace-projection.test.tsx test/us-trace-view.test.tsx test/us-search-trace-navigation.test.tsx
       - name: Verify receiving draft, finalization and exempt-review browser boundaries
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-client.test.ts test/us-receiving-command-acknowledgement.test.ts test/us-receiving-live-client.test.ts test/us-receiving-revision-acknowledgement.test.ts test/us-receiving-lifecycle-client.test.ts test/us-receiving-lifecycle.test.tsx test/us-receiving-amendment-editor.test.tsx test/us-receiving-amendment-finalization.test.tsx test/us-receiving-ui.test.tsx test/us-receiving-references.test.tsx test/us-receiving-readiness-client.test.ts test/us-receiving-readiness.test.tsx test/us-receiving-finalization-client.test.ts test/us-receiving-finalization.test.tsx test/us-receiving-exemption-client.test.ts test/us-receiving-exemption.test.tsx
       - name: Verify exact receiving revision navigation and Unicode TLC entry
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-history.test.tsx test/us-receiving-tlc-input.test.tsx
       - name: Verify receiving CSV browser confirmation and recovery
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-csv-client.test.ts test/us-receiving-csv-ui.test.tsx
       - name: Verify Events and Transformation browser contracts
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-events-client.test.ts test/us-transformation-client.test.ts test/us-cases-client.test.ts test/us-events-ui.test.tsx test/us-transformation-editor.test.tsx test/us-transformation-readiness.test.tsx test/us-transformation-finalization.test.tsx test/us-transformation-detail.test.tsx test/us-transformation-history.test.tsx test/us-transformation-cases.test.tsx test/us-transformation-genealogy.test.tsx
       - name: Verify Shipping office workflow
+        if: matrix.segment == 'cabinet'
         run: pnpm --filter @markiro/admin exec vitest run test/us-shipping-client.test.ts test/us-shipping-editor.test.tsx test/us-shipping-readiness.test.tsx test/us-shipping-detail.test.tsx test/us-shipping-history.test.tsx test/us-events-ui.test.tsx
       - name: Bootstrap pinned Requests browser verification tool
+        if: matrix.segment == 'cabinet'
         run: pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
       - name: Bootstrap Chromium for isolated Requests verification
+        if: matrix.segment == 'cabinet'
         run: pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
       - name: Verify owned Requests cabinet browser fixture
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-cabinet-browser-fixture.test.ts --maxWorkers=1
       - name: Verify Requests through real cabinet HTTP and separate worker
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-cabinet-browser.e2e.test.ts --maxWorkers=1
       - name: Build local-only US browser entry
+        if: matrix.segment == 'cabinet'
         env:
           VITE_DEPLOYMENT_EDITION: US
         run: pnpm --filter @markiro/admin build:us
       - name: Verify compiled local-only runtime
+        if: matrix.segment == 'cabinet'
         run: node --test tools/us-development/test/runtime-entry.smoke.mjs tools/us-development/test/owner-command.smoke.mjs
       - name: Verify US dev and preview encoded search transport
+        if: matrix.segment == 'cabinet'
         run: node --test tools/us-development/test/search-transport.smoke.mjs
       - name: Verify US readiness dev and preview transport
+        if: matrix.segment == 'cabinet'
         run: node --test tools/us-development/test/readiness-transport.smoke.mjs
       - name: Verify US Shipping pure rules and strict contracts
+        if: matrix.segment == 'cabinet'
         run: |
           pnpm --filter @markiro/domain exec vitest run test/us-shipping-balance.test.ts test/us-shipping-readiness.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-shipping-contracts.test.ts test/us-shipping-finalization.test.ts
       - name: Verify US Shipping storage on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
           pnpm --filter @markiro/db exec vitest run test/us-shipping-schema.test.ts test/us-shipping-migration.e2e.test.ts
       - name: Verify US Shipping API finalization and HTTP on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
           pnpm --filter @markiro/api exec vitest run test/us-shipping-balance.e2e.test.ts test/us-shipping-balance-read.e2e.test.ts test/us-shipping-draft.e2e.test.ts test/us-shipping-readiness.e2e.test.ts test/us-shipping-status-effects.e2e.test.ts test/us-shipping-finalization.e2e.test.ts test/us-shipping-finalization-concurrency.e2e.test.ts test/us-shipping-http.e2e.test.ts
       - name: Verify US profile, session and master-data persistence on disposable databases
+        if: matrix.segment == 'cabinet'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |

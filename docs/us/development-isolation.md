@@ -2516,3 +2516,19 @@ entire Receiving lifecycle file then passed 38/38 without skips in 28.66 seconds
 The 50-ms fault budgets, exact child failure/skip counts, no-reprovision guard,
 single provision, drain ordering and verified owned-database absence remain
 unchanged. This is a test-output correction, not a relaxed timeout or runtime fix.
+
+The next GitHub run verified the corrected bootstrap and Receiving witness, then
+reached the existing 30-minute job limit during canonical reference checks. The
+unchanged 82-step suite is now partitioned into three parallel matrix segments:
+transaction foundations, regular dataset checks, and cabinet/HTTP/browser checks.
+Each runner owns its own PostgreSQL service. All three run the original common
+setup, release-isolation checker and transitive shared/API builds first. Specialized
+steps retain their exact commands and have exactly one segment owner; each job
+retains the 30-minute budget, and failures are neither ignored nor fail-fast hidden.
+
+Partition tests pin every predecessor command, property and source byte, reject
+missing segments and changed guards, and preserve the earlier historical owner
+assertions through strict complete-partition normalization. A local ordinary API
+rerun also passed 4,756 tests with 3,419 opt-in skips, followed by normal owned-child
+database disposal and zero new databases remaining. Remote matrix completion is a
+separate acceptance gate, not established by these local results.

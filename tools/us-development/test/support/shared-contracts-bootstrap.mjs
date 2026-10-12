@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { withoutParallelSegments, withoutParallelSegmentsBytes } from "./parallel-segments.mjs";
 
 const owner = {
   name: "Build shared contracts for Node tooling checks",
@@ -13,7 +14,7 @@ const nodeChecks = { run: "node --test tools/us-development/test/*.test.mjs" };
 // Historical snapshots predate this prerequisite. Permit exactly this addition
 // at its checked execution boundary, never malformed, duplicate or moved steps.
 export function withoutSharedContractsBootstrap(workflow) {
-  const result = structuredClone(workflow);
+  const result = withoutParallelSegments(workflow);
   const steps = result.jobs?.isolation?.steps;
   if (!steps) return result;
   const owners = steps.filter((step) => step.name === owner.name);
@@ -28,6 +29,7 @@ export function withoutSharedContractsBootstrap(workflow) {
 }
 
 export function withoutSharedContractsBootstrapBytes(source) {
+  source = withoutParallelSegmentsBytes(source);
   const block = `      - name: ${owner.name}\n        run: ${owner.run}\n`;
   const before = `      - name: ${checker.name}\n        run: ${checker.run}\n`;
   const after = `      - run: ${nodeChecks.run}\n`;
