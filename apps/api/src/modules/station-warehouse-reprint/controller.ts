@@ -1,3 +1,18 @@
+import { WarehousePalletRenderingsService } from "./pallet-renderings.service";
+import { WarehousePalletResolutionsService } from "./pallet-resolutions.service";
+import {
+  PALLET_REPRINT_V2_PROTOCOL,
+  PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
+  palletTemplateCatalogV2Schema,
+  palletLookupV2RequestSchema,
+  palletLookupV2ResultSchema,
+  palletRenderingsV2BatchSchema,
+  palletRenderingsV2ReceiptSchema,
+  palletEventsV2BatchSchema,
+  palletEventsV2ReceiptSchema,
+  palletProductionResolutionsSchema,
+  palletProductionResolutionsReceiptSchema,
+} from "@markiro/domain";
 import { WarehousePalletService } from "./pallet.service";
 import {
   PALLET_REPRINT_PROTOCOL,
@@ -84,6 +99,8 @@ export class StationWarehouseReprintController {
     private readonly events: WarehouseEventsService,
     private readonly labelFacts: WarehouseLabelFactsService,
     private readonly pallets: WarehousePalletService,
+    private readonly renderings: WarehousePalletRenderingsService,
+    private readonly resolutions: WarehousePalletResolutionsService,
   ) {}
   @Get("source-capabilities")
   @ApiOperation({ summary: "Read supported durable label source protocols" })
@@ -95,8 +112,73 @@ export class StationWarehouseReprintController {
         LABEL_FACTS_PROTOCOL,
         PALLET_REPRINT_PROTOCOL,
         PALLET_PRODUCTION_DELIVERY_PROTOCOL,
+        PALLET_REPRINT_V2_PROTOCOL,
+        PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
       ],
     };
+  }
+  @Get("pallet-templates-v2")
+  @ApiZodResponse({ status: 200, schema: palletTemplateCatalogV2Schema })
+  @ApiHttpErrors(401, 403, 413)
+  palletTemplatesV2(@Req() req: RequestWithTenant) {
+    const { tenantId, deviceId } = scope(req);
+    return this.renderings.templates(tenantId, deviceId);
+  }
+  @Post("pallet-lookup-v2")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletLookupV2RequestSchema)
+  @ApiZodResponse({ status: 200, schema: palletLookupV2ResultSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletLookupV2(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletLookupV2RequestSchema))
+    input: z.infer<typeof palletLookupV2RequestSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.renderings.lookup(tenantId, deviceId, input.operatorId, input.raw);
+  }
+  @Post("pallet-renderings-v2")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletRenderingsV2BatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletRenderingsV2ReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletRenderingsV2(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletRenderingsV2BatchSchema))
+    input: z.infer<typeof palletRenderingsV2BatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.renderings.receive(tenantId, deviceId, input.entries);
+  }
+  @Post("pallet-events-v2")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletEventsV2BatchSchema)
+  @ApiZodResponse({ status: 200, schema: palletEventsV2ReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletEventsV2(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletEventsV2BatchSchema))
+    input: z.infer<typeof palletEventsV2BatchSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.pallets.events(tenantId, deviceId, input.entries, PALLET_REPRINT_V2_PROTOCOL);
+  }
+  @Post("pallet-production-resolutions")
+  @AllowSubscriptionRecovery("station")
+  @HttpCode(200)
+  @ApiZodBody(palletProductionResolutionsSchema)
+  @ApiZodResponse({ status: 200, schema: palletProductionResolutionsReceiptSchema })
+  @ApiHttpErrors(400, 401, 403)
+  palletProductionResolutions(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(palletProductionResolutionsSchema))
+    input: z.infer<typeof palletProductionResolutionsSchema>,
+  ) {
+    const { tenantId, deviceId } = scope(req);
+    return this.resolutions.receive(tenantId, deviceId, input.entries);
   }
   @Post("pallet-sources")
   @AllowSubscriptionRecovery("station")

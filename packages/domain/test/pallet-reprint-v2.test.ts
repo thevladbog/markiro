@@ -54,6 +54,7 @@ it("requires exact original SSCC confirmation and rejects extra fields", () => {
     sscc: source.sscc,
     sourceRevision: source.revision,
     attemptId: "production-1",
+    productionSequence: 1,
     operatorId: "00000000-0000-4000-8000-000000000011",
     reason: "not_printed",
     occurredAt: "2026-10-12T00:00:00.000Z",

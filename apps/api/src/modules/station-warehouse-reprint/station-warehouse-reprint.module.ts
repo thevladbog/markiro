@@ -1,3 +1,5 @@
+import { WarehousePalletRenderingsService } from "./pallet-renderings.service";
+import { WarehousePalletResolutionsService } from "./pallet-resolutions.service";
 import { WarehousePalletService } from "./pallet.service";
 import { WarehouseLabelFactsService } from "./label-facts.service";
 import { WarehouseEventsService } from "./events.service";
@@ -14,6 +16,8 @@ import { WarehouseTemplatesService } from "./templates.service";
     WarehouseEventsService,
     WarehouseLabelFactsService,
     WarehousePalletService,
+    WarehousePalletRenderingsService,
+    WarehousePalletResolutionsService,
   ],
 })
 export class StationWarehouseReprintModule {}

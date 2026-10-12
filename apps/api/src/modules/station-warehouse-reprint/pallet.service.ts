@@ -3,6 +3,11 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   PALLET_REPRINT_PROTOCOL,
+  PALLET_REPRINT_V2_PROTOCOL,
+  palletReprintEventV2Schema,
+  palletRenderingV2Schema,
+  palletProductionResolutionSchema,
+  assertPalletRenderingMatchesSource,
   palletCompositionDigest,
   palletLabelSourceSchema,
   resolveWarehouseReprintScan,
@@ -20,7 +25,7 @@ import {
   assertWarehouseHistoricalOperator,
 } from "./access";
 type Reader = Pick<Db, "select">;
-async function membership(db: Reader, tenantId: string, sscc: string) {
+export async function palletMembership(db: Reader, tenantId: string, sscc: string) {
   const [pallet] = await db
     .select()
     .from(schema.pallets)
@@ -99,8 +104,8 @@ async function membership(db: Reader, tenantId: string, sscc: string) {
     complete: boxes.every((b) => b.sscc && b.closedAt),
   };
 }
-function sameComposition(
-  m: NonNullable<Awaited<ReturnType<typeof membership>>>,
+export function samePalletComposition(
+  m: NonNullable<Awaited<ReturnType<typeof palletMembership>>>,
   source: PalletLabelSourceV1,
 ) {
   return (
@@ -110,6 +115,76 @@ function sameComposition(
     m.itemCount === source.itemCount &&
     JSON.stringify(m.boxes) === JSON.stringify([...source.boxSsccs].sort())
   );
+}
+export async function palletLookupIdentities(db: Reader, tenantId: string, raw: string) {
+  const scan = resolveWarehouseReprintScan(raw);
+  if (scan.kind === "invalid") return [];
+  const identities: string[] = [];
+  if (scan.kind === "box") {
+    const direct = await db
+      .select({ sscc: schema.pallets.sscc })
+      .from(schema.pallets)
+      .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.sscc, scan.sscc)));
+    const viaBox = await db
+      .select({ sscc: schema.pallets.sscc })
+      .from(schema.boxes)
+      .innerJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.boxes.tenantId, tenantId),
+          eq(schema.boxes.sscc, scan.sscc),
+          isNull(schema.boxes.disassembledAt),
+        ),
+      );
+    identities.push(
+      ...[...direct, ...viaBox].map((p) => p.sscc).filter((v): v is string => v !== null),
+    );
+  } else {
+    const viaUnit = await db
+      .select({ sscc: schema.pallets.sscc })
+      .from(schema.codeRegistry)
+      .innerJoin(
+        schema.boxItems,
+        and(
+          eq(schema.boxItems.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.boxItems.codeHash, schema.codeRegistry.codeHash),
+          eq(schema.boxItems.addedAt, schema.codeRegistry.scannedAt),
+        ),
+      )
+      .innerJoin(
+        schema.boxes,
+        and(
+          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+          eq(schema.boxes.id, schema.boxItems.boxId),
+          eq(schema.boxes.shiftId, schema.codeRegistry.shiftId),
+        ),
+      )
+      .innerJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          eq(schema.codeRegistry.codeHash, scan.codeHash),
+          isNull(schema.boxItems.displacedAt),
+          isNull(schema.boxItems.removedAt),
+          isNull(schema.boxes.disassembledAt),
+        ),
+      );
+    identities.push(...viaUnit.map((p) => p.sscc).filter((v): v is string => v !== null));
+  }
+  const unique = [...new Set(identities)];
+  return unique;
 }
 @Injectable()
 export class WarehousePalletService {
@@ -182,7 +257,7 @@ export class WarehousePalletService {
           });
           continue;
         }
-        const m = await membership(tx, tenantId, source.sscc);
+        const m = await palletMembership(tx, tenantId, source.sscc);
         if (!m) {
           results.push({ revision: source.revision, status: "retryable" });
           continue;
@@ -201,7 +276,7 @@ export class WarehousePalletService {
         // Exact active membership wins: old removals may have happened before
         // closure and reached the server much later. Server ingestion timestamps
         // cannot be compared with the device's closure clock.
-        const historicalItems = sameComposition(m, source)
+        const historicalItems = samePalletComposition(m, source)
           ? []
           : await tx
               .select({
@@ -241,7 +316,7 @@ export class WarehousePalletService {
           claimedBoxes.some(
             (box) => box.disassembledAt || (box.palletId !== null && box.palletId !== m.pallet.id),
           ) ||
-          (!sameComposition(m, source) &&
+          (!samePalletComposition(m, source) &&
             historicalItems.some((item) => item.removedAt || item.displacedAt) &&
             historicalDigest === source.compositionDigest &&
             historicalItems.length === source.itemCount)
@@ -265,7 +340,7 @@ export class WarehousePalletService {
           m.pallet.terminalId !== deviceId ||
           m.pallet.closedAt?.toISOString() !== source.closedAt ||
           m.pallet.disassembledAt ||
-          !sameComposition(m, source) ||
+          !samePalletComposition(m, source) ||
           (source.rendering.brandingJson !== null &&
             validatePalletBranding(source.rendering.brandingJson).tenantId !== tenantId)
         ) {
@@ -302,77 +377,11 @@ export class WarehousePalletService {
   async lookup(tenantId: string, deviceId: string, operatorId: string, raw: string) {
     await assertWarehouseDevice(this.db, tenantId, deviceId);
     await assertWarehouseOperator(this.db, tenantId, operatorId);
-    const scan = resolveWarehouseReprintScan(raw);
-    if (scan.kind === "invalid") return { status: "not_found" as const };
-    const identities: string[] = [];
-    if (scan.kind === "box") {
-      const direct = await this.db
-        .select({ sscc: schema.pallets.sscc })
-        .from(schema.pallets)
-        .where(and(eq(schema.pallets.tenantId, tenantId), eq(schema.pallets.sscc, scan.sscc)));
-      const viaBox = await this.db
-        .select({ sscc: schema.pallets.sscc })
-        .from(schema.boxes)
-        .innerJoin(
-          schema.pallets,
-          and(
-            eq(schema.pallets.tenantId, schema.boxes.tenantId),
-            eq(schema.pallets.id, schema.boxes.palletId),
-          ),
-        )
-        .where(
-          and(
-            eq(schema.boxes.tenantId, tenantId),
-            eq(schema.boxes.sscc, scan.sscc),
-            isNull(schema.boxes.disassembledAt),
-          ),
-        );
-      identities.push(
-        ...[...direct, ...viaBox].map((p) => p.sscc).filter((v): v is string => v !== null),
-      );
-    } else {
-      const viaUnit = await this.db
-        .select({ sscc: schema.pallets.sscc })
-        .from(schema.codeRegistry)
-        .innerJoin(
-          schema.boxItems,
-          and(
-            eq(schema.boxItems.tenantId, schema.codeRegistry.tenantId),
-            eq(schema.boxItems.codeHash, schema.codeRegistry.codeHash),
-            eq(schema.boxItems.addedAt, schema.codeRegistry.scannedAt),
-          ),
-        )
-        .innerJoin(
-          schema.boxes,
-          and(
-            eq(schema.boxes.tenantId, schema.boxItems.tenantId),
-            eq(schema.boxes.id, schema.boxItems.boxId),
-            eq(schema.boxes.shiftId, schema.codeRegistry.shiftId),
-          ),
-        )
-        .innerJoin(
-          schema.pallets,
-          and(
-            eq(schema.pallets.tenantId, schema.boxes.tenantId),
-            eq(schema.pallets.id, schema.boxes.palletId),
-          ),
-        )
-        .where(
-          and(
-            eq(schema.codeRegistry.tenantId, tenantId),
-            eq(schema.codeRegistry.codeHash, scan.codeHash),
-            isNull(schema.boxItems.displacedAt),
-            isNull(schema.boxItems.removedAt),
-            isNull(schema.boxes.disassembledAt),
-          ),
-        );
-      identities.push(...viaUnit.map((p) => p.sscc).filter((v): v is string => v !== null));
-    }
-    const unique = [...new Set(identities)];
+    const unique = await palletLookupIdentities(this.db, tenantId, raw);
     if (unique.length > 1) return { status: "unavailable" as const, code: "ambiguous" as const };
     const sscc = unique[0];
     if (!sscc) return { status: "not_found" as const };
-    const m = await membership(this.db, tenantId, sscc);
+    const m = await palletMembership(this.db, tenantId, sscc);
     if (!m) return { status: "not_found" as const };
     if (m.pallet.kind !== "production")
       return { status: "unavailable" as const, code: "not_production" as const };
@@ -417,14 +426,33 @@ export class WarehousePalletService {
     const resolved = [m.pallet.printVerifiedAt, m.pallet.printSkippedAt].some(
       (at) => at !== null && (!delivery || at.getTime() > Date.parse(delivery.occurredAt)),
     );
-    if (delivery?.state !== "sent" && !resolved)
+    const [decision] = delivery
+      ? await this.db
+          .select()
+          .from(schema.palletProductionResolutions)
+          .where(
+            and(
+              eq(schema.palletProductionResolutions.tenantId, tenantId),
+              eq(schema.palletProductionResolutions.sscc, sscc),
+              eq(schema.palletProductionResolutions.sourceDeviceId, saved.sourceDeviceId),
+              eq(schema.palletProductionResolutions.sourceRevision, saved.revision),
+              eq(schema.palletProductionResolutions.attemptId, delivery.attemptId),
+            ),
+          )
+          .limit(1)
+      : [];
+    const resolution = decision ? palletProductionResolutionSchema.parse(decision.value) : null;
+    const explicitlyResolved = Boolean(
+      delivery && resolution && resolution.productionSequence === latestDelivery?.sequence,
+    );
+    if (delivery?.state !== "sent" && !resolved && !explicitlyResolved)
       return { status: "unavailable" as const, code: "delivery_unresolved" as const };
     const source = palletLabelSourceSchema.parse(saved.value);
     if (
       source.sscc !== sscc ||
       source.shiftId !== m.pallet.shiftId ||
       saved.revision !== source.revision ||
-      !sameComposition(m, source)
+      !samePalletComposition(m, source)
     )
       return { status: "unavailable" as const, code: "composition_changed" as const };
     return { status: "found" as const, source };
@@ -432,7 +460,11 @@ export class WarehousePalletService {
   async events(
     tenantId: string,
     deviceId: string,
-    entries: z.infer<typeof palletReprintEventSchema>[],
+    entries: Array<
+      z.infer<typeof palletReprintEventSchema> | z.infer<typeof palletReprintEventV2Schema>
+    >,
+    protocol:
+      typeof PALLET_REPRINT_PROTOCOL | typeof PALLET_REPRINT_V2_PROTOCOL = PALLET_REPRINT_PROTOCOL,
   ) {
     return this.db.transaction(async (tx) => {
       await assertWarehouseDevice(tx, tenantId, deviceId);
@@ -512,11 +544,57 @@ export class WarehousePalletService {
           await reject();
           continue;
         }
-        const accepted = previous.filter((row) => row.status === "accepted");
-        const history = accepted.map((row) => palletReprintEventSchema.parse(row.value));
-        const frozen = palletLabelSourceSchema.parse(source.value);
         if (
-          (frozen.rendering.kind === "a4" && event.printFormat !== "mono-raster-v1") ||
+          previous.some(
+            (row) => "renderingRevision" in row.value !== (protocol === PALLET_REPRINT_V2_PROTOCOL),
+          )
+        ) {
+          await reject();
+          continue;
+        }
+        const accepted = previous.filter((row) => row.status === "accepted");
+        const history = accepted.map((row) =>
+          protocol === PALLET_REPRINT_V2_PROTOCOL
+            ? palletReprintEventV2Schema.parse(row.value)
+            : palletReprintEventSchema.parse(row.value),
+        );
+        const frozen = palletLabelSourceSchema.parse(source.value);
+        const [savedRendering] = await tx
+          .select()
+          .from(schema.palletReprintRenderings)
+          .where(
+            and(
+              eq(schema.palletReprintRenderings.tenantId, tenantId),
+              eq(schema.palletReprintRenderings.deviceId, deviceId),
+              eq(schema.palletReprintRenderings.jobId, event.jobId),
+            ),
+          );
+        let renderingKind = frozen.rendering.kind;
+        if (protocol === PALLET_REPRINT_V2_PROTOCOL) {
+          if (!savedRendering) {
+            results.push({ eventId: event.eventId, status: "retryable" });
+            continue;
+          }
+          if (
+            !("renderingRevision" in event) ||
+            savedRendering.renderingRevision !== event.renderingRevision
+          ) {
+            await reject();
+            continue;
+          }
+          const rendering = palletRenderingV2Schema.parse(savedRendering.value);
+          if (rendering.sscc !== frozen.sscc || rendering.sourceRevision !== frozen.revision) {
+            await reject();
+            continue;
+          }
+          assertPalletRenderingMatchesSource(frozen, rendering);
+          renderingKind = rendering.rendering.kind;
+        } else if (savedRendering || "renderingRevision" in event) {
+          await reject();
+          continue;
+        }
+        if (
+          (renderingKind === "a4" && event.printFormat !== "mono-raster-v1") ||
           history.some(
             (old) =>
               old.sscc !== event.sscc ||
@@ -588,11 +666,21 @@ export class WarehousePalletService {
           outcome: "accepted",
           targetType: "pallet",
           targetId: source.palletId,
-          after: { deviceId, ...event },
+          after: {
+            deviceId,
+            ...event,
+            ...(savedRendering
+              ? {
+                  templateId: palletRenderingV2Schema.parse(savedRendering.value).templateId,
+                  templateName: palletRenderingV2Schema.parse(savedRendering.value).templateName,
+                  templateKind: renderingKind,
+                }
+              : {}),
+          },
         });
         results.push({ eventId: event.eventId, status: "accepted" });
       }
-      return { protocol: PALLET_REPRINT_PROTOCOL, results };
+      return { protocol, results };
     });
   }
 }

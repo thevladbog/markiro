@@ -175,6 +175,7 @@ export const palletDeliveryDiagnosticSchema = z.strictObject({
     "composition_changed",
   ]),
   attemptId: z.string().min(1).max(255).nullable(),
+  productionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable(),
 });
 export type PalletDeliveryDiagnostic = z.infer<typeof palletDeliveryDiagnosticSchema>;
 export const palletLookupV2RequestSchema = palletLookupRequestSchema.extend({
@@ -226,6 +227,7 @@ export const palletProductionResolutionSchema = z
     sscc,
     sourceRevision: digest,
     attemptId: z.string().min(1).max(255),
+    productionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     operatorId: id,
     reason: warehouseReasonSchema,
     occurredAt: z.iso.datetime(),

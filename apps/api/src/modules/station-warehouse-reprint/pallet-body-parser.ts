@@ -4,7 +4,9 @@ const parse = json({ limit: 1024 * 1024 });
 export const palletSourcesBodyParser: RequestHandler = (req, res, next) => {
   if (
     req.method === "POST" &&
-    /^\/station\/warehouse-reprint\/(?:pallet-sources|label-facts)\/?$/i.test(req.path)
+    /^\/station\/warehouse-reprint\/(?:pallet-sources|pallet-renderings-v2|label-facts)\/?$/i.test(
+      req.path,
+    )
   )
     return parse(req, res, next);
   next();
