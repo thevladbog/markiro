@@ -1,4 +1,4 @@
-import { buildSscc, formatSsccHri } from "@markiro/domain";
+import { buildSscc, formatSsccHri, type LabelTemplateSpec, type MonoBitmap } from "@markiro/domain";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -73,6 +73,8 @@ interface Options {
   isLeaving?: () => boolean;
   /** How a label is rendered; the rendering of the fake printers by default. */
   render?: WorkScreenProps["render"];
+  /** The screen's own rendering (the shift's snapshot, with its logo) instead of the fake printers'. */
+  ownRender?: boolean;
 }
 
 /** The work screen over `at`, printing through `shell` (a printer that takes every label by default). */
@@ -109,14 +111,20 @@ function work(at: Station, options: Options = {}) {
     printing: runtime,
     awake: createSystemAwake(power),
     labelClock: () => clock.now,
-    render:
-      options.render ??
-      (async (spec, fields, printer) => {
-        const text = renderedText(printer, fields.sscc, `${spec.widthMm}x${spec.heightMm}`);
-        const bytes = new Uint8Array(text.length);
-        for (let index = 0; index < text.length; index += 1) bytes[index] = text.charCodeAt(index);
-        return bytes;
-      }),
+    ...(options.ownRender === true
+      ? {}
+      : {
+          render:
+            options.render ??
+            (async (spec, fields, printer) => {
+              const text = renderedText(printer, fields.sscc, `${spec.widthMm}x${spec.heightMm}`);
+              const bytes = new Uint8Array(text.length);
+              for (let index = 0; index < text.length; index += 1) {
+                bytes[index] = text.charCodeAt(index);
+              }
+              return bytes;
+            }),
+        }),
     ...(options.onSetup === undefined ? {} : { onSetup: options.onSetup }),
     ...(options.isLeaving === undefined ? {} : { isLeaving: options.isLeaving }),
   };
@@ -1403,5 +1411,93 @@ describe("a decision on the label that goes wrong, and the work after it", () =>
     // Its own label asks for its own check.
     expect(screen.getByText("Проверьте этикетку")).toBeTruthy();
     expect(screen.getByText(`SSCC короба: ${formatSsccHri(SECOND_SSCC)}`)).toBeTruthy();
+  });
+});
+
+/** A 58 × 40 label that is only a 4 × 2 mm logo box at (2, 2): its bytes are the logo's. */
+const LOGO_LABEL: LabelTemplateSpec = {
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  elements: [
+    {
+      id: "logo",
+      kind: "organization_logo",
+      source: "organization",
+      fallback: "markiro",
+      xMm: 2,
+      yMm: 2,
+      widthMm: 4,
+      heightMm: 2,
+    },
+  ],
+};
+const FROZEN_LOGO: MonoBitmap = {
+  width: 8,
+  height: 2,
+  stride: 1,
+  pixels: new Uint8Array([0xf0, 0x0f]),
+};
+/** What the ZEBRA (ZPL, 203 dpi) prints of `FROZEN_LOGO` in `LOGO_LABEL`. */
+const LOGO_GRAPHIC = "^FO16,20^GFA,32,32,4," + "FFFF0000".repeat(4) + "0000FFFF".repeat(4) + "^FS";
+
+describe("the label of a box, with the shift's logo (#703)", () => {
+  /** The printing station whose shift froze this organization and prints `LOGO_LABEL` on a box. */
+  async function logoStation(logo: MonoBitmap | null) {
+    const at = await printStation();
+    const shift = {
+      ...at.shift,
+      snapshot: {
+        ...at.shift.snapshot,
+        organization: { name: "ООО «Пример»", inn: null, logo },
+        boxTemplate: { ...at.shift.snapshot.boxTemplate, spec: LOGO_LABEL },
+      },
+    };
+    return { ...at, shift };
+  }
+
+  it("prints the organization logo the shift froze, and the work goes on", async () => {
+    const at = await logoStation(FROZEN_LOGO);
+    const screenWork = work(at, { ownRender: true });
+    await fillBox(screenWork);
+    expect(screenWork.shell.sends).toHaveLength(1);
+    expect(screenWork.shell.sends[0]?.text).toContain(LOGO_GRAPHIC);
+    expect(jobRows(at.db)).toEqual([expect.objectContaining({ state: "sent", sscc: FIRST_SSCC })]);
+    await screenWork.scan(km("P12"));
+    expect(scans(at)).toBe(13);
+  });
+
+  it("prints the same logo again on another printer, rendered for its language and resolution", async () => {
+    const at = await logoStation(FROZEN_LOGO);
+    const answers = [{ sent: false, code: "not_sent" } as const];
+    const shell = fakeHardware(async () => answers.shift() ?? { sent: true });
+    const screenWork = work(at, { shell, ownRender: true });
+    await fillBox(screenWork);
+    await screenWork.press("Другой принтер");
+    await screen.findByRole("button", { name: "TSC на COM4 · TSPL · 300 dpi" });
+    await screenWork.press("TSC на COM4 · TSPL · 300 dpi");
+    // TSPL at 300 dpi: the box 47 × 24 dots holds the logo as 47 × 12 at (24, 30).
+    expect(shell.sends.at(-1)?.text).toContain("BITMAP 24,30,6,12,0,");
+  });
+
+  it("prints the label with the logo box empty and one diagnostic line when no logo can be had", async () => {
+    // Nothing frozen, and this webview has no canvas for the bundled Markiro logo.
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const at = await logoStation(null);
+      const screenWork = work(at, { ownRender: true });
+      await fillBox(screenWork);
+      expect(screenWork.shell.sends).toHaveLength(1);
+      expect(screenWork.shell.sends[0]?.text).toContain("^XA");
+      expect(screenWork.shell.sends[0]?.text).not.toContain("^GFA");
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith("station: label logo unavailable, printing without it");
+      expect(jobRows(at.db)).toEqual([expect.objectContaining({ state: "sent" })]);
+      await screenWork.scan(km("P12"));
+      expect(scans(at)).toBe(13);
+    } finally {
+      error.mockRestore();
+    }
   });
 });

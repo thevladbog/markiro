@@ -25,7 +25,8 @@ function unexpected(name: keyof HostApi): Promise<never> {
 }
 
 /**
- * Every method a test did not stub fails loudly; `officeLogout` succeeds and
+ * Every method a test did not stub fails loudly; `officeLogout` succeeds,
+ * `getOrgLogo` answers no logo (a label preview reads it, #703) and
  * `getDeviceShifts` answers no shifts.
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
@@ -39,7 +40,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     ),
     getOrg: vi.fn<HostApi["getOrg"]>(() => unexpected("getOrg")),
     updateOrg: vi.fn<HostApi["updateOrg"]>(() => unexpected("updateOrg")),
-    getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(() => unexpected("getOrgLogo")),
+    getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(async () => ({ logo: null })),
     putOrgLogo: vi.fn<HostApi["putOrgLogo"]>(() => unexpected("putOrgLogo")),
     deleteOrgLogo: vi.fn<HostApi["deleteOrgLogo"]>(() => unexpected("deleteOrgLogo")),
     listPalletSheets: vi.fn<HostApi["listPalletSheets"]>(() => unexpected("listPalletSheets")),

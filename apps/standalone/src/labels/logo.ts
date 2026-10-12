@@ -187,16 +187,19 @@ export function loadBundledMarkiroLogo(): Promise<MonoBitmap> {
  * The logo a thermal label prints in its `organization_logo` box: the
  * organization's own, else the bundled Markiro logo (`fallback: "markiro"`),
  * else none — the box stays empty, as the domain's generators leave it
- * without a logo, and the label still prints.
+ * without a logo, and the label still prints. `onFailure` hears why the
+ * fallback could not be had (the caller words the diagnostic).
  */
 export async function labelLogo(
   own: MonoBitmap | null,
   fallback: () => Promise<MonoBitmap> = loadBundledMarkiroLogo,
+  onFailure: (error: unknown) => void = () => undefined,
 ): Promise<MonoBitmap | null> {
   if (own !== null) return own;
   try {
     return await fallback();
-  } catch {
+  } catch (error) {
+    onFailure(error);
     return null;
   }
 }

@@ -89,6 +89,7 @@ import {
   type ResolveContext,
 } from "../print/print-resolution.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
+import { shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
@@ -679,6 +680,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
+  // How the shift's labels are rendered: a test's own, else from the shift's snapshot, with
+  // the organization logo it froze or the Markiro one (plan А4, #703).
+  const render = props.render ?? shiftLabelRender(shift);
   // What a job reads when it runs, later than the render that queued it.
   const latest: Live = {
     shift,
@@ -702,7 +706,7 @@ export function WorkScreen(props: WorkScreenProps) {
     onClosed: props.onClosed,
     printing: props.printing,
     operatorName: props.operator.name,
-    render: props.render,
+    render,
     t,
   };
   const live = useRef(latest);

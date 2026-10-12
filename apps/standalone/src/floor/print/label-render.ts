@@ -4,6 +4,7 @@ import {
   withPrinterDpi,
   type LabelField,
   type LabelTemplateSpec,
+  type MonoBitmap,
   type RasterizeTextFn,
 } from "@markiro/domain";
 
@@ -104,12 +105,19 @@ export function palletLabelData(
  * `mono-raster-v1` page (`renderMonoLabel` + `encodeMonoRaster`), with
  * `rasterizeDriverText` unless a rasterizer is given; the same template,
  * fields and resolution as the RAW path.
+ *
+ * `logo` is what an `organization_logo` box prints (#703): the shift's
+ * organization logo or the bundled Markiro logo (`shiftLabelRender`); `null`
+ * leaves the box empty, as the domain does, and the label's geometry is the
+ * same with or without it. Both paths take it, so a driver page and a RAW
+ * label carry the same picture.
  */
 export async function renderLabel(
   spec: LabelTemplateSpec,
   fields: LabelFields,
   printer: LabelPrinter,
   rasterize?: RasterizeTextFn,
+  logo: MonoBitmap | null = null,
 ): Promise<Uint8Array> {
   const emitters = await import("./label-emitters.js");
   const printSpec = withPrinterDpi(spec, printer.dpi);
@@ -120,10 +128,11 @@ export async function renderLabel(
       printSpec,
       fields,
       rasterize ?? rasterizeDriverText,
+      { logo },
     );
     return emitters.encodeMonoRaster(page);
   }
-  const options = { rasterizeText: rasterize ?? rasterizeText };
+  const options = { rasterizeText: rasterize ?? rasterizeText, logo };
   const text =
     printer.language === "tspl"
       ? await emitters.generateTspl(printSpec, fields, options)

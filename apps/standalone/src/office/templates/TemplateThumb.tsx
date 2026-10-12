@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { LabelTemplateSummary } from "../../host/protocol.js";
 import { useTemplateLayout } from "../catalog-queries.js";
+import { useLabelLogo } from "../use-label-logo.js";
 import { readSpec } from "./editor-model.js";
 import { drawLabel, paintCodeRasters } from "./label-renderer.js";
 import { useLabelRendering } from "./label-rendering.js";
@@ -22,6 +23,7 @@ const BOX_HEIGHT_PX = 48;
  */
 export function TemplateThumb({ template }: { template: LabelTemplateSummary }) {
   const { context, whenVisible } = useLabelRendering();
+  const logo = useLabelLogo();
   const frame = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(false);
@@ -44,14 +46,14 @@ export function TemplateThumb({ template }: { template: LabelTemplateSummary }) 
     const drawing = canvas === null || spec === null ? null : context(canvas);
     if (drawing === null || spec === null) return undefined;
     const data = labelSampleData(template.purpose);
-    const options = labelRenderOptions(template.purpose);
+    const options = { ...labelRenderOptions(template.purpose), logo };
     drawLabel(spec, drawing, scale, data, options);
     let cancelled = false;
     void paintCodeRasters(spec, drawing, scale, data, options, () => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [context, spec, scale, template.purpose]);
+  }, [context, spec, scale, template.purpose, logo]);
 
   return (
     <span ref={frame} className="template-thumb" aria-hidden="true">

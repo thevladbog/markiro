@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { LabelTemplateSpec, MonoBitmap } from "@markiro/domain";
 import { Alert } from "@markiro/ui";
 
 import type { TemplatePurpose } from "../../host/protocol.js";
@@ -27,6 +27,11 @@ type Coverage = "ok" | "missing" | "failed";
 export interface PreviewPaneProps {
   spec: LabelTemplateSpec;
   purpose: TemplatePurpose;
+  /**
+   * What an `organization_logo` box draws (#703): the editor gives the logo a
+   * new shift would print (`useLabelLogo`); none — the box stays white.
+   */
+  logo?: MonoBitmap | null;
 }
 
 /**
@@ -40,13 +45,13 @@ export interface PreviewPaneProps {
  * the answer of the check that is running: it goes when that check ends, and
  * a later check shows its own answer only once it has one.
  */
-export function PreviewPane({ spec, purpose }: PreviewPaneProps) {
+export function PreviewPane({ spec, purpose, logo = null }: PreviewPaneProps) {
   const { t } = useTranslation();
   const { context, rasterizeText, checkFamilyCoverage } = useLabelRendering();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [coverage, setCoverage] = useState<Coverage>("ok");
   const data = labelSampleData(purpose);
-  const options = labelRenderOptions(purpose);
+  const options = useMemo(() => ({ ...labelRenderOptions(purpose), logo }), [purpose, logo]);
   const needsCheck = rasterTextElements(spec, data).length > 0;
 
   useEffect(() => {

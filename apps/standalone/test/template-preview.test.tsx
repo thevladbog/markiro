@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildDuplicateLabelTemplate,
   type LabelTemplateSpec,
+  type MonoBitmap,
   type RasterizeTextOptions,
   type RasterResult,
 } from "@markiro/domain";
@@ -117,10 +118,11 @@ function preview(
   spec: LabelTemplateSpec,
   tools: LabelRendering,
   purpose: "box" | "product_duplicate" = "box",
+  logo?: MonoBitmap | null,
 ) {
   return (
     <LabelRenderingProvider value={tools}>
-      <PreviewPane spec={spec} purpose={purpose} />
+      <PreviewPane spec={spec} purpose={purpose} {...(logo === undefined ? {} : { logo })} />
     </LabelRenderingProvider>
   );
 }
@@ -612,5 +614,78 @@ describe("the template editor's preview", () => {
       within(layout).getByRole("img", { name: "Предпросмотр этикетки 100 × 150 мм" }),
     ).toBeTruthy();
     expect(within(layout).queryByText(sample)).toBeNull();
+  });
+});
+
+describe("the layout preview's organization logo (#703)", () => {
+  /** A 58 × 40 label holding only a 20 × 10 mm logo box at (2, 2): all its ink is the logo's. */
+  const LOGO_ONLY: LabelTemplateSpec = {
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203,
+    language: "zpl",
+    elements: [
+      {
+        id: "logo",
+        kind: "organization_logo",
+        source: "organization",
+        fallback: "markiro",
+        xMm: 2,
+        yMm: 2,
+        widthMm: 20,
+        heightMm: 10,
+      },
+    ],
+  };
+  /** 16 × 2 dots, ink all over. */
+  const WIDE: MonoBitmap = {
+    width: 16,
+    height: 2,
+    stride: 2,
+    pixels: new Uint8Array(4).fill(0xff),
+  };
+  /** 8 × 8 dots, ink all over: as high as the box allows. */
+  const SQUARE: MonoBitmap = {
+    width: 8,
+    height: 8,
+    stride: 1,
+    pixels: new Uint8Array(8).fill(0xff),
+  };
+
+  const inkOf = (ops: Op[]) => ops.filter((op) => op[0] === "fillRect" && op[1] === "#000000");
+
+  it("draws the logo inside its box at 3 px per millimetre and the layout's resolution, centred in its height", () => {
+    const { canvas, tools } = drawingTools();
+    render(preview(LOGO_ONLY, tools, "box", WIDE));
+    // 20 × 10 mm is 160 × 80 dots; 16 × 2 grows by 10 to 160 × 20, 30 dots below the box's
+    // top (2 mm = 16 dots, + 30). One run a row, each dot 3 × 25.4 / 203 px.
+    const dotPx = (3 * 25.4) / 203;
+    const ink = inkOf(canvas.ops);
+    expect(ink).toHaveLength(20);
+    ink.forEach((op, row) => {
+      expect(op[2]).toBeCloseTo(16 * dotPx, 6);
+      expect(op[3]).toBeCloseTo((46 + row) * dotPx, 6);
+      expect(op[4]).toBeCloseTo(160 * dotPx, 6);
+      expect(op[5]).toBeCloseTo(dotPx, 6);
+    });
+  });
+
+  it("leaves the box white without a logo, and for a logo of null", () => {
+    const none = drawingTools();
+    render(preview(LOGO_ONLY, none.tools));
+    expect(inkOf(none.canvas.ops)).toEqual([]);
+    const nullLogo = drawingTools();
+    render(preview(LOGO_ONLY, nullLogo.tools, "box", null));
+    expect(inkOf(nullLogo.canvas.ops)).toEqual([]);
+  });
+
+  it("draws again when only the logo changes", () => {
+    const { canvas, tools } = drawingTools();
+    const { rerender } = render(preview(LOGO_ONLY, tools, "box", WIDE));
+    expect(inkOf(canvas.ops)).toHaveLength(20);
+    canvas.ops.length = 0;
+    rerender(preview(LOGO_ONLY, tools, "box", SQUARE));
+    // 8 × 8 grows by 10 to 80 × 80: the whole height of the box, 80 rows.
+    expect(inkOf(canvas.ops)).toHaveLength(80);
   });
 });

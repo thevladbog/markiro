@@ -1,8 +1,15 @@
 import {
   buildDatedBoxLabelTemplates,
+  buildDefaultLabelTemplates,
+  buildPalletLabelTemplates,
+  decodeMonoRaster,
   generateTspl,
   generateZpl,
+  mmToDots,
+  sampleLabelData,
   withPrinterDpi,
+  type LabelTemplateSpec,
+  type MonoBitmap,
   type RasterizeTextFn,
   type RasterResult,
 } from "@markiro/domain";
@@ -227,5 +234,222 @@ describe("a label's bytes", () => {
 
   it("keep every byte of a latin1 document as one byte", () => {
     expect([...latin1ToBytes("Aÿ\u0080\u001d")]).toEqual([0x41, 0xff, 0x80, 0x1d]);
+  });
+});
+
+/**
+ * A layout holding only an `organization_logo` box of 4 × 2 mm at (2, 2), on a
+ * 58 × 40 label: the dots of a logo are the whole document, so its bytes can be
+ * checked by hand.
+ */
+const LOGO_BOX: LabelTemplateSpec = {
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  elements: [
+    {
+      id: "logo",
+      kind: "organization_logo",
+      source: "organization",
+      fallback: "markiro",
+      xMm: 2,
+      yMm: 2,
+      widthMm: 4,
+      heightMm: 2,
+    },
+  ],
+};
+
+/** 8 × 2 dots: the first row is ink in its left half, the second in its right half. */
+const TWO_ROWS: MonoBitmap = {
+  width: 8,
+  height: 2,
+  stride: 1,
+  pixels: new Uint8Array([0xf0, 0x0f]),
+};
+
+describe("the organization logo on a label (#703)", () => {
+  it("is a ^GFA graphic in ZPL: scaled into its box at 203 dpi, centred in the box's height", async () => {
+    const zpl = decode(
+      await renderLabel(
+        LOGO_BOX,
+        sampleLabelData(),
+        { language: "zpl", dpi: 203 },
+        undefined,
+        TWO_ROWS,
+      ),
+    );
+    // 4 × 2 mm is 32 × 16 dots; 8 × 2 grows by 4 to 32 × 8 and sits 4 dots below the box's top
+    // (2 mm = 16 dots, + 4). Four rows of FFFF0000, then four rows of 0000FFFF.
+    expect(zpl).toBe(
+      "^XA\n^PW464\n^LL320\n^FO16,20^GFA,32,32,4," +
+        "FFFF0000".repeat(4) +
+        "0000FFFF".repeat(4) +
+        "^FS\n^XZ\n",
+    );
+  });
+
+  it("is a BITMAP in TSPL with the bits inverted, at the same place", async () => {
+    const tspl = decode(
+      await renderLabel(
+        LOGO_BOX,
+        sampleLabelData(),
+        { language: "tspl", dpi: 203 },
+        undefined,
+        TWO_ROWS,
+      ),
+    );
+    expect(tspl).toBe(
+      "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,20,4,8,0," +
+        "\u0000\u0000\u00ff\u00ff".repeat(4) +
+        "\u00ff\u00ff\u0000\u0000".repeat(4) +
+        "\nPRINT 1\n",
+    );
+  });
+
+  it("is rescaled for a 300 dpi printer from the layout's millimetres (ZPL)", async () => {
+    const zpl = decode(
+      await renderLabel(
+        LOGO_BOX,
+        sampleLabelData(),
+        { language: "zpl", dpi: 300 },
+        undefined,
+        TWO_ROWS,
+      ),
+    );
+    // 4 × 2 mm is 47 × 24 dots; 8 × 2 grows by 5.875 to 47 × 12 (6 bytes a row) and sits 6 dots
+    // below the box's top (2 mm = 24 dots, + 6). Six rows ink in the left 24 dots, six in the right 23.
+    expect(zpl).toBe(
+      "^XA\n^PW685\n^LL472\n^FO24,30^GFA,72,72,6," +
+        "FFFFFF000000".repeat(6) +
+        "000000FFFFFE".repeat(6) +
+        "^FS\n^XZ\n",
+    );
+  });
+
+  it("is rescaled for a 300 dpi printer from the layout's millimetres (TSPL)", async () => {
+    const tspl = decode(
+      await renderLabel(
+        LOGO_BOX,
+        sampleLabelData(),
+        { language: "tspl", dpi: 300 },
+        undefined,
+        TWO_ROWS,
+      ),
+    );
+    const head = "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 24,30,6,12,0,";
+    // Inverted: ink is 0. The last bit of a row is padding, white (1), so the right half ends 01.
+    expect(tspl).toBe(
+      head +
+        "\u0000\u0000\u0000\u00ff\u00ff\u00ff".repeat(6) +
+        "\u00ff\u00ff\u00ff\u0000\u0000\u0001".repeat(6) +
+        "\nPRINT 1\n",
+    );
+  });
+
+  it("leaves the box empty and the geometry as it was when there is no logo", async () => {
+    const withText: LabelTemplateSpec = {
+      ...LOGO_BOX,
+      elements: [
+        { kind: "text", id: "lot", xMm: 4, yMm: 10, text: "LOT", fontSizePt: 10 },
+        ...LOGO_BOX.elements,
+        { kind: "line", id: "rule", xMm: 4, yMm: 30, x2Mm: 54, y2Mm: 30, thicknessMm: 0.3 },
+      ],
+    };
+    const without: LabelTemplateSpec = {
+      ...withText,
+      elements: withText.elements.filter((element) => element.kind !== "organization_logo"),
+    };
+    for (const language of ["zpl", "tspl"] as const) {
+      for (const dpi of [203, 300] as const) {
+        const printer = { language, dpi };
+        const none = await renderLabel(withText, sampleLabelData(), printer);
+        const nullLogo = await renderLabel(withText, sampleLabelData(), printer, undefined, null);
+        const absent = await renderLabel(without, sampleLabelData(), printer);
+        expect(decode(none)).toBe(decode(absent));
+        expect(decode(nullLogo)).toBe(decode(absent));
+        const drawn = await renderLabel(withText, sampleLabelData(), printer, undefined, TWO_ROWS);
+        // Only the logo's own command is added: the rest of the document is the same, in order.
+        const drawnText = decode(drawn);
+        if (language === "zpl") {
+          expect(drawnText.replace(/\^FO\d+,\d+\^GFA,[^\n]*\^FS\n/, "")).toBe(decode(absent));
+          expect(drawnText).not.toBe(decode(absent));
+        } else {
+          expect(drawnText.match(/BITMAP /g)).toHaveLength(1);
+          expect(decode(absent)).not.toContain("BITMAP ");
+        }
+      }
+    }
+  });
+
+  it("keeps the logo inside its box on the stock layouts at both resolutions, for a wide, a tall and a square logo", async () => {
+    const wide: MonoBitmap = {
+      width: 64,
+      height: 8,
+      stride: 8,
+      pixels: new Uint8Array(64).fill(0xff),
+    };
+    const tall: MonoBitmap = {
+      width: 8,
+      height: 64,
+      stride: 1,
+      pixels: new Uint8Array(64).fill(0xff),
+    };
+    const square: MonoBitmap = {
+      width: 16,
+      height: 16,
+      stride: 2,
+      pixels: new Uint8Array(32).fill(0xff),
+    };
+    const layouts = [...buildDefaultLabelTemplates(), ...buildPalletLabelTemplates()].filter(
+      (template) => template.spec.elements.some((element) => element.kind === "organization_logo"),
+    );
+    expect(layouts.length).toBeGreaterThan(0);
+    let checked = 0;
+    for (const template of layouts) {
+      for (const element of template.spec.elements) {
+        if (element.kind !== "organization_logo") continue;
+        for (const dpi of [203, 300] as const) {
+          for (const logo of [wide, tall, square]) {
+            const spec = { ...template.spec, elements: [element] };
+            const zpl = decode(
+              await renderLabel(spec, sampleLabelData(), { language: "zpl", dpi }, undefined, logo),
+            );
+            const found = /\^FO(\d+),(\d+)\^GFA,(\d+),\d+,(\d+),/.exec(zpl);
+            if (found === null) throw new Error(`no graphic for ${template.name} at ${dpi}`);
+            const [x = -1, y = -1, total = -1, perRow = 1] = found.slice(1).map(Number);
+            const boxX = mmToDots(element.xMm, dpi);
+            const boxY = mmToDots(element.yMm, dpi);
+            const boxW = mmToDots(element.widthMm, dpi);
+            const boxH = mmToDots(element.heightMm, dpi);
+            expect(x).toBe(boxX);
+            expect(y).toBeGreaterThanOrEqual(boxY);
+            expect(perRow).toBeLessThanOrEqual(Math.ceil(boxW / 8));
+            expect(y + total / perRow).toBeLessThanOrEqual(boxY + boxH);
+            expect(boxX + boxW).toBeLessThanOrEqual(mmToDots(spec.widthMm, dpi));
+            expect(boxY + boxH).toBeLessThanOrEqual(mmToDots(spec.heightMm, dpi));
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(12);
+  });
+
+  it("is in a driver page (mono-raster) as the same picture, and absent without a logo", async () => {
+    const printer = {
+      language: "zpl" as const,
+      dpi: 203 as const,
+      mode: "windows_driver" as const,
+    };
+    const blank = await renderLabel(LOGO_BOX, sampleLabelData(), printer);
+    const nullLogo = await renderLabel(LOGO_BOX, sampleLabelData(), printer, undefined, null);
+    const drawn = await renderLabel(LOGO_BOX, sampleLabelData(), printer, undefined, TWO_ROWS);
+    expect(decode(nullLogo)).toBe(decode(blank));
+    const page = decodeMonoRaster(drawn);
+    // 16 dots in from the left and 20 down: the rows are the ZPL ones, 32 dots wide.
+    expect(page.requiredBounds).toEqual({ left: 16, top: 20, right: 48, bottom: 28 });
+    expect(decodeMonoRaster(blank).pixels.every((byte) => byte === 0)).toBe(true);
   });
 });

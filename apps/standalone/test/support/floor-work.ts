@@ -10,10 +10,12 @@ import {
   readStoredWork,
   type WorkShift,
 } from "../../src/floor/shifts/shift-copies.js";
+import type { SnapshotOrganization } from "../../src/floor/shifts/shift-snapshot.js";
 import type { ScanContext } from "../../src/floor/work/scan-pipeline.js";
 import { enteredShiftSchema, type CodeCheck, type EnteredShift } from "../../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../src/local/executor.js";
 import { DEVICE_ID, HOST_ID } from "./fixtures.js";
+import { openLocalDb } from "./local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const supportModuleUrl = import.meta.url;
@@ -56,6 +58,16 @@ export async function enteredShift(
   const stored = await readStoredWork(local, PAIRING, shift.id);
   if (stored.kind !== "ready") throw new Error(`the entered shift reads as ${stored.kind}`);
   return stored.shift;
+}
+
+/**
+ * The entered shift with `organization` as its snapshot froze it (plan А4):
+ * only what a render reads is replaced, the shift is not stored again.
+ */
+export async function workShift(organization: SnapshotOrganization | null): Promise<WorkShift> {
+  const { executor } = openLocalDb();
+  const shift = await enteredShift(executor);
+  return { ...shift, snapshot: { ...shift.snapshot, organization } };
 }
 
 /** A clock that moves on by one second per reading, from 06:15:00.000Z. */
