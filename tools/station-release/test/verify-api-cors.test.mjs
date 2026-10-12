@@ -110,6 +110,31 @@ const expected = [
     "POST",
     "content-type,x-api-key,x-station-capabilities",
   ],
+  [
+    "/station/warehouse-reprint/source-capabilities",
+    "GET",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/warehouse-reprint/label-facts",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/warehouse-reprint/pallet-sources",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/warehouse-reprint/pallet-lookup",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/warehouse-reprint/pallet-events",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/planning-config", "GET", "content-type,x-api-key,x-station-capabilities"],

@@ -2,6 +2,7 @@ import type { SqlExecutor } from "../mirror.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import { PRODUCT_LABEL_BATCH_KEY } from "../product-labels/sync-batch.js";
 const unpinned = `NOT EXISTS(SELECT 1 FROM station_meta WHERE key IN ('sync_pending_batch_id','${PRODUCT_LABEL_BATCH_KEY}'))`;
+// Terminal fact receipts are processed; unresolved business conflicts remain guarded below.
 function closedShift(shift: string) {
   return `EXISTS(SELECT 1 FROM shift_mirror s WHERE s.id=${shift} AND s.status='closed')
  AND NOT EXISTS(SELECT 1 FROM outbox o WHERE o.shift_id=${shift})
@@ -12,10 +13,14 @@ function closedShift(shift: string) {
  AND NOT EXISTS(SELECT 1 FROM pallet_exceptions_mirror e WHERE e.shift_id=${shift})
  AND NOT EXISTS(SELECT 1 FROM box_reconciliation_issues i WHERE i.shift_id=${shift})
  AND NOT EXISTS(SELECT 1 FROM codes_mirror c JOIN conflicts_mirror x ON x.code_hash=c.code_hash WHERE c.shift_id=${shift})
+ AND NOT EXISTS(SELECT 1 FROM unit_label_facts f JOIN conflicts_mirror x ON x.code_hash=f.code_hash WHERE f.shift_id=${shift})
+ AND NOT EXISTS(SELECT 1 FROM station_meta m WHERE m.key='sync_recovery_denied_shift:'||${shift})
+ AND NOT EXISTS(SELECT 1 FROM station_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END,'$.denied') q WHERE m.key='sync_last_recovery_denied' AND q.type='object' AND json_extract(q.value,'$.shiftId')=${shift})
  AND NOT EXISTS(SELECT 1 FROM validation_occurrences v WHERE v.shift_id=${shift} AND v.outcome IN ('pending','conflict'))
  AND NOT EXISTS(SELECT 1 FROM product_label_jobs j WHERE j.shift_id=${shift})
- AND NOT EXISTS(SELECT 1 FROM unit_label_facts f WHERE f.shift_id=${shift} AND f.receive_status<>'accepted')
- AND NOT EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL)`;
+ AND NOT EXISTS(SELECT 1 FROM unit_label_facts f WHERE f.shift_id=${shift} AND f.receive_status='pending')
+ AND NOT EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL
+   AND d.purpose IN ('box','pallet') AND CASE WHEN json_valid(d.scope) THEN json_extract(d.scope,'$[0]') END=${shift})`;
 }
 const palletHistory = `EXISTS(SELECT 1 FROM pallets_mirror p WHERE p.sscc=history.sscc AND p.closed_at IS NOT NULL AND p.acked_at IS NOT NULL AND ${closedShift("p.shift_id")})`;
 const knownPallet = `(${palletHistory} OR NOT EXISTS(SELECT 1 FROM pallets_mirror p WHERE p.sscc=history.sscc))`;
@@ -61,7 +66,7 @@ export async function purgeWarehousePalletHistory(
 }
 export async function purgeUnitLabelFacts(exec: SqlExecutor, owner: string, before: string) {
   await exec.run(
-    `DELETE FROM unit_label_facts AS history WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='accepted' AND accepted_at<? AND ${unpinned} AND ${closedShift("history.shift_id")}
+    `DELETE FROM unit_label_facts AS history WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status IN ('accepted','conflict') AND accepted_at<? AND ${unpinned} AND ${closedShift("history.shift_id")}
  AND NOT EXISTS(SELECT 1 FROM warehouse_reprint_jobs j WHERE j.identity=history.code_hash)
  AND NOT EXISTS(SELECT 1 FROM warehouse_pallet_jobs j WHERE json_extract(j.source_json,'$.shiftId')=history.shift_id)
  AND NOT EXISTS(SELECT 1 FROM warehouse_pallet_events e JOIN warehouse_pallet_closures c ON c.sscc=json_extract(e.value_json,'$.sscc') WHERE c.shift_id=history.shift_id AND e.receive_status<>'accepted')

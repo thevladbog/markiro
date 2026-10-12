@@ -1,3 +1,4 @@
+import { retainRecoveryDeniedShifts } from "./sync-recovery-denials.js";
 import { purgeUnitLabelFacts } from "./warehouse-reprint/history-retention.js";
 import { runWarehouseHistoryChannels } from "./warehouse-reprint/channels.js";
 import { purgeWarehousePalletJobs, syncWarehousePallets } from "./warehouse-reprint/pallet-sync.js";
@@ -2054,6 +2055,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               ? res.denied.filter(isDeniedStationRecord)
               : [];
             if (denied.length > 0) {
+              if (!commitIsCurrent()) break drainLoop;
+              // Fail before acknowledging rows if durable quarantine protection cannot be saved.
+              await retainRecoveryDeniedShifts(
+                commitExec,
+                denied.map((record) => record.shiftId),
+              );
               if (!commitIsCurrent()) break drainLoop;
               try {
                 await savePersistedValue(

@@ -2092,6 +2092,31 @@ describe("sync engine: pools and closures", () => {
     expect(warn).toHaveBeenCalledWith("station: 1 sync record quarantined by server");
   });
 
+  it("keeps the outbox when durable quarantine protection cannot be saved", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockPost({
+      applied: 0,
+      alreadyApplied: false,
+      conflicts: [],
+      denied: [
+        { recordKind: "item", recordIndex: 0, shiftId: SHIFT, code: "subscription_read_only" },
+      ],
+    });
+    const failingExec: SqlExecutor = {
+      all: exec.all.bind(exec),
+      run: async (sql, params) => {
+        if (sql.includes("sync_recovery_denied_shift:"))
+          throw new Error("quarantine storage failed");
+        await exec.run(sql, params);
+      },
+    };
+    await drainOnce(failingExec);
+    expect(await outboxCount(exec)).toBe(1);
+    expect(
+      await exec.all("SELECT value FROM station_meta WHERE key='sync_last_recovery_denied'"),
+    ).toEqual([]);
+  });
+
   function exception(overrides: Partial<ExceptionInput> = {}): ExceptionInput {
     return {
       kind: "undo",

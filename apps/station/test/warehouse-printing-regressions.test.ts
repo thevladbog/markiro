@@ -803,3 +803,114 @@ it("restores positive eligibility and new lookup aliases on the authorised retai
     db.close();
   }
 });
+
+it.each([
+  "terminal",
+  "test",
+  "other-shift",
+  "same-shift",
+  "pending",
+  "unresolved-conflict",
+  "removed-conflict",
+  "quarantine",
+  "durable-quarantine",
+])("scopes closed-shift retention while preserving %s evidence", async (guard) => {
+  const { db, exec } = await setup();
+  try {
+    await seedPallet(exec, false);
+    const { retainPalletClosureSource } =
+      await import("../src/lib/warehouse-reprint/pallet-sources.js");
+    const { purgeUnitLabelFacts } =
+      await import("../src/lib/warehouse-reprint/history-retention.js");
+    await retainPalletClosureSource(exec, owner, sscc, "thermal");
+    await exec.run("UPDATE warehouse_pallet_sources SET receive_status='accepted'");
+    await exec.run("UPDATE shift_mirror SET status='closed'");
+    await exec.run("UPDATE pallets_mirror SET acked_at='2026-02-28T12:02:00Z'");
+    await exec.run(
+      "UPDATE boxes_mirror SET acked_at='2026-02-28T12:02:00Z',confirmed_revision=reconciliation_revision",
+    );
+    for (const [hash, status] of [
+      ["b".repeat(64), "accepted"],
+      ["c".repeat(64), guard === "pending" ? "pending" : "conflict"],
+    ]) {
+      await exec.run(
+        "INSERT INTO unit_label_facts(owner,shift_id,code_hash,accepted_at,canonical_raw,fields_json,receive_status) VALUES(?,?,?,'2026-02-28T12:00:00Z','legacy-original','{}',?)",
+        [owner, shiftId, hash, status],
+      );
+    }
+    if (guard === "unresolved-conflict" || guard === "removed-conflict") {
+      await exec.run(
+        "INSERT INTO conflicts_mirror(code_hash,winning_scanned_at,detected_at) VALUES(?,'2026-02-28T11:00:00Z','2026-02-28T13:00:00Z')",
+        [guard === "removed-conflict" ? "c".repeat(64) : "b".repeat(64)],
+      );
+    }
+    if (guard === "durable-quarantine") {
+      const { retainRecoveryDeniedShifts } = await import("../src/lib/sync-recovery-denials.js");
+      await retainRecoveryDeniedShifts(exec, [shiftId]);
+    }
+    if (guard === "quarantine")
+      await exec.run("INSERT INTO station_meta(key,value) VALUES('sync_last_recovery_denied',?)", [
+        JSON.stringify({
+          denied: [{ shiftId, recordKind: "item", code: "ownership_conflict" }],
+        }),
+      ]);
+    if (["test", "other-shift", "same-shift"].includes(guard)) {
+      const scope =
+        guard === "test"
+          ? "setup-owner"
+          : JSON.stringify([guard === "same-shift" ? shiftId : "other-shift", null]);
+      await exec.run(
+        "INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at) VALUES(?,?,'job','attempt','delivery_unknown','{}','digest','AQ==','test','2026-02-28T12:00:00Z')",
+        [scope, guard === "test" ? "test" : "pallet"],
+      );
+    }
+    await purgeWarehousePalletJobs(exec, owner, "2026-04-01T00:00:00Z");
+    await purgeUnitLabelFacts(exec, owner, "2026-04-01T00:00:00Z");
+    const retained = [
+      "same-shift",
+      "pending",
+      "unresolved-conflict",
+      "removed-conflict",
+      "quarantine",
+      "durable-quarantine",
+    ].includes(guard);
+    expect(await exec.all("SELECT canonical_raw FROM unit_label_facts")).toHaveLength(
+      retained ? 2 : 0,
+    );
+    expect(await exec.all("SELECT 1 FROM warehouse_pallet_sources")).toHaveLength(retained ? 1 : 0);
+    expect(await exec.all("SELECT 1 FROM warehouse_pallet_closures")).toHaveLength(
+      retained ? 1 : 0,
+    );
+    if (["test", "other-shift", "same-shift"].includes(guard))
+      expect(await exec.all("SELECT state FROM printer_deliveries")).toEqual([
+        { state: "delivery_unknown" },
+      ]);
+  } finally {
+    db.close();
+  }
+});
+
+it("preserves quarantine protection across a later denial for another shift", async () => {
+  const { db, exec } = await setup();
+  try {
+    const { retainRecoveryDeniedShifts } = await import("../src/lib/sync-recovery-denials.js");
+    await exec.run("INSERT INTO station_meta(key,value) VALUES('sync_last_recovery_denied',?)", [
+      JSON.stringify({ denied: [{ shiftId, recordKind: "item", code: "ownership_conflict" }] }),
+    ]);
+    await retainRecoveryDeniedShifts(exec, ["other-shift"]);
+    await exec.run("UPDATE station_meta SET value=? WHERE key='sync_last_recovery_denied'", [
+      JSON.stringify({ denied: [{ shiftId: "other-shift" }] }),
+    ]);
+    await retainRecoveryDeniedShifts(exec, ["other-shift"]);
+    expect(
+      await exec.all(
+        "SELECT key FROM station_meta WHERE key LIKE 'sync_recovery_denied_shift:%' ORDER BY key",
+      ),
+    ).toEqual([
+      { key: `sync_recovery_denied_shift:${shiftId}` },
+      { key: "sync_recovery_denied_shift:other-shift" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
