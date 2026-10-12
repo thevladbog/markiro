@@ -93,6 +93,8 @@ async function link(options: {
   first: HostStatus | "watch_fails";
   register?: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   send?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /** The warehouse reprint's route (plan СКЛ); none — the link has none. */
+  sendWarehouse?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   database?: { db: DatabaseSync; executor: LocalExecutor };
   /** Every write of the link answers a turn later, as the shell's `local_transaction` does. */
   slowWrites?: boolean;
@@ -132,6 +134,14 @@ async function link(options: {
     order.push("facts");
     return sendImpl(records);
   });
+  const warehouseImpl = options.sendWarehouse;
+  const sendWarehouse =
+    warehouseImpl === undefined
+      ? undefined
+      : vi.fn(async (records: readonly unknown[]) => {
+          order.push("warehouse");
+          return warehouseImpl(records);
+        });
   const hook = renderHook(() =>
     useHostLink({
       hostId: HOST_ID,
@@ -143,6 +153,7 @@ async function link(options: {
       deviceShifts: async () => [],
       sendFacts: send,
       registerKnownBlocks: register,
+      ...(sendWarehouse === undefined ? {} : { sendWarehouseRecords: sendWarehouse }),
       dispatch,
     }),
   );
@@ -160,6 +171,7 @@ async function link(options: {
     changes,
     register,
     send,
+    sendWarehouse,
     hook,
     order,
     unsent,
@@ -228,6 +240,54 @@ describe("the link after a restore of the host", () => {
     });
     await waitFor(() => expect(station.unsent()).toBe(0));
     expect(station.register).toHaveBeenCalledTimes(2);
+    station.hook.unmount();
+  });
+
+  it("gives a restored host back the warehouse reprint's records it accepted, after the facts", async () => {
+    const { db, executor } = openLocalDb();
+    // Accepted an hour ago by the host the copy was taken before; one more refused.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const insert = db.prepare(
+      "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, " +
+        "outcome, outcome_code, acked_at) VALUES (?, ?, ?, 's-1', ?, ?, ?, ?, ?)",
+    );
+    insert.run(
+      "wh-accepted",
+      HOST_ID,
+      DEVICE_ID,
+      '{"id":"wh-accepted"}',
+      hourAgo,
+      "accepted",
+      null,
+      hourAgo,
+    );
+    insert.run(
+      "wh-refused",
+      HOST_ID,
+      DEVICE_ID,
+      '{"id":"wh-refused"}',
+      hourAgo,
+      "rejected",
+      "subject_unknown",
+      hourAgo,
+    );
+    const station = await link({
+      first: RESTORED,
+      database: { db, executor },
+      sendWarehouse: acceptAll,
+    });
+    await waitFor(() => expect(station.sendWarehouse).toHaveBeenCalledTimes(1));
+    expect(station.sendWarehouse?.mock.calls[0]?.[0]).toEqual([{ id: "wh-accepted" }]);
+    await waitFor(() =>
+      expect(rows(db, "SELECT id, outcome FROM wh_outbox ORDER BY id")).toEqual([
+        { id: "wh-accepted", outcome: "accepted" },
+        { id: "wh-refused", outcome: "rejected" },
+      ]),
+    );
+    expect(station.order.indexOf("warehouse")).toBeGreaterThan(station.order.indexOf("facts"));
+    expect(station.order.indexOf("facts")).toBeGreaterThan(
+      station.order.indexOf("blocks answered"),
+    );
     station.hook.unmount();
   });
 

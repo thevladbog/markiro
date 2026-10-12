@@ -3587,6 +3587,106 @@ Known limits of the pallets, and who carries each:
 - Pallets of several stations on one shift and the revocation of pallet blocks
   are stage 2b (plan ПЛ-Х, «Перенесено»).
 
+## Warehouse reprint
+
+Plan СКЛ (pilot spec §30) ports the cloud station's «Складские операции →
+Повторная печать этикеток» (#693/#695/#697) for one site. «Повторная печать
+этикеток» on the list of shifts opens a session inside the operator's floor
+session (PIN or badge, offline): its reason (`not_printed`, `damaged`, `lost`)
+and a template for each kind of label (unit — `product_duplicate`, box,
+pallet), chosen from this pairing's copies (`ref_templates`) with a search and
+a sample preview; the organization's default (or the only enabled template)
+is chosen at first. A session pauses on «К сменам» and is continued by the
+next entry, by any operator; «Завершить сеанс» needs a confirmation and no
+waiting job; a finished session is never continued (`wh_sessions_open`).
+
+A scan or a typed code is read by the domain's warehouse rule
+(`resolveWarehouseReprintScan`: a KM by its `kmHash`, an SSCC, and the old
+TSPL label `!100` + SSCC repaired once, never anything looser) and looked up on
+the host, `POST /v1/device/warehouse/lookup` (`routes/warehouse.rs`, a live
+STATION only: an office device or a handheld is `forbidden`, on this route and
+on the records' one, because the answer carries a unit's full code;
+`{ codeHash }` or `{ sscc }`): the code's owner in `code_owners`, a
+closed box by `boxes.sscc`, a closed pallet by `pallets.sscc`, of any station
+and any shift; the label's fields come from the shift's snapshot, number and
+production date, the record's own instant and counts and its operator's name,
+and a unit's full canonical code (GS and crypto tail) comes in the answer's
+body, never in a record or a log. The station keeps it in the job's frozen
+fields (`wh_jobs.fields`, `km.code`) to check a new label against and to render
+again, as the floor journal keeps `canonical`; the job's `identity` is the
+hash. A pallet's label mixes two eras on purpose (decision Р15): its box count
+is the one reported at its close (`box_count_reported`), its unit count the sum
+of its boxes not taken apart now. A code freed by an exception is `released`,
+a box or pallet taken apart `disassembled`. Without the link nothing is looked
+up and the screen says so; an old host (404) is «обновите хост»; a restored
+host holds the route (`restore_pending`).
+
+The station makes a job (`wh_jobs`, shell migration `0012`): the operator
+checked against the copies, the template checked (enabled, readable, covering
+the product's group; a unit's a valid duplicate layout, a box's or pallet's
+with the SSCC and no KM), the printer of the kind (`duplicate`, `box`,
+`pallet`), the bytes rendered by `renderLabel` (a unit's code as the GS1
+raster) — the layout and fields frozen in the job. One job of a session waits
+at a time (`wh_jobs_open`); a code the session printed is not printed again
+without «Напечатать ещё раз» and a reason. `sending` is written before the
+bytes go; a restart turns it into `unknown` (`interrupted`); a failed job is
+retried (rendered again only for a printer of another language or
+resolution) or cancelled; an unknown one is checked by a scan of the new label
+(`compareWarehouseReprintLabel`, which never takes the old `!1` label) or
+printed again with a reason. Nothing is ever sent again by itself.
+
+Each attempt's outcome (`sent`, `unknown`, `failed`, `verified`,
+`cancelled`) writes a record in `wh_outbox` in the same transaction; the link
+sends them after the facts (`sendWarehouseBatch`) to `POST
+/v1/device/warehouse/reprints`, which keeps one row per record in
+`warehouse_reprints` (host migration `0015`): receipts as the facts', with
+`invalid_record`, `payload_mismatch` and `subject_unknown`. A failed send of
+the records has a count and a retry of its own (`warehouseRetry` in
+`host-link.ts`, 2 s … 60 s, dropped when the link goes down or ends): it never
+shows as a failure of the facts and never pauses them, a scan's send of the
+facts does not ask the records' route again before that retry, and a pause of
+the facts neither cuts nor stretches it (the retry's end sends only when no
+retry of the facts runs; that one sends the records after the facts). Only
+`restore_pending` — the host holds both routes — holds the facts too
+(`factsHeld`, 60 s). A record names a
+code's hash or an SSCC, never a full code; reprint records write no audit row
+and take no revision, and change no box, pallet, code or SSCC. A finished
+session whose records were all accepted goes 30 days after its finish
+(`purgeWarehouseSessions`, in the hourly retention pass).
+
+On the floor (`FloorApp`) the reprint is a view of its own, `warehouse`, beside
+the shifts' `work`: the list shows its button only when the app hands the floor
+`warehouseLookup` (`HostApi.warehouseLookup`). It is no shift, so the shell is
+told of no `work_entered` / `work_left` (`floorWork` names a shift): a refused
+device, another host or another line therefore takes the floor at once and does
+not wait for a reprint as it waits for a shift's work. What the screen has
+written survives that (a job left in `sending` reads as `unknown` at the next
+opening); nothing is sent again. Its writes and sends go through the same work
+gate as a shift's (`track`, N9): «К сменам», «Рабочее место» (it comes back to
+the same session), a sign-out, the idle lock and a host-removed operator all
+wait for the work in hand and ask `isLeaving` for any scan meanwhile. The
+screen keeps the 400 ms press guard (`view-guard.ts`) and takes the floor's
+default clock: pass it none.
+
+Not done (recorded, not hidden): a record the host refused (`outcome =
+'rejected'`) stays in `wh_outbox` with its code, keeps its session through the
+retention and is never sent again, but nothing on screen counts or shows it —
+only the records still waiting («Записи ждут отправки на хост»). A count needs a
+new index (`wh_outbox_unsent` is partial on `acked_at IS NULL`) and so a new
+shell migration, which belongs to plan ОЧ («Очередь отправки», «Отправить
+снова»); it is left to that plan. The page of the office with the history of
+reprints, the A4 pallet sheets and the printing through the Windows driver
+(plan ДРВ; this branch has no such path: a reprint goes through
+`PrintRuntime` and `renderLabel` as a shift's label does) are also not here.
+
+Also recorded: the record of an automatic outcome (`unknown` with
+`interrupted` after a restart, a failed write's `unknown`) names the operator
+who opened the screen or whose work met it, not necessarily the one who sent:
+`wh_jobs` keeps the job's operator, not one per attempt. A session that is
+never finished, or one left open under a pairing since replaced, is never
+purged (the retention takes finished sessions only), so its jobs and records
+stay; a later stage carries that.
+
 ## Shift exports
 
 Plan ЧЗ ports the cloud's shift exports into the office; the bytes of every
@@ -4010,8 +4110,12 @@ with a serial the host refused (the box close keeps the other blocks and asks
 for a new one by the half rule); `conflict` on `no_restore` means nothing is
 owed. Then ONE transaction writes `from_zero` for the sync, puts the records
 acknowledged in the last 30 days (`RESEND_WINDOW_MS`, equal to `RETENTION_MS`,
-decision 31) back in the outbox and settles the epoch with the count of
-refused blocks, only if the epoch is still the one read (a later restore noted
+decision 31) back in the outbox — and the warehouse reprint's records the
+host accepted in those days back in `wh_outbox` (`WAREHOUSE_REOPEN_SQL`, plan
+СКЛ: only `accepted` ones, the refused stay as they are; index
+`wh_outbox_accepted`), so the restored host gets its `warehouse_reprints`
+trail back; they go after the facts, as always — and settles the epoch with
+the count of refused blocks, only if the epoch is still the one read (a later restore noted
 meanwhile fails it with `changes_mismatch` and the next run settles that one);
 which blocks were refused, each with the host's code, are kept beside the count
 (`refused_blocks`, a JSON list for support; a new epoch empties it, and nothing
@@ -4182,6 +4286,25 @@ either; a file log is stage 5.
   Until then these have run only under jsdom, with node:sqlite behind
   `LocalExecutor` and a fake `HostApi`: no WebView2, no real host, no scanner
   and no Windows has shown the list, the new shift, the entry or the leave.
+- The warehouse reprint (plan СКЛ) by hand, on Windows 10 and 11, with the
+  client's printers and scanners. None of it has been run (the screen, the
+  work and the delivery have run only under jsdom with `node:sqlite` behind
+  `LocalExecutor`, a recording canvas and a fake `HostApi`; the host's routes
+  only against `TestApp`): no Windows, WebView2, real host over a LAN, printer
+  or scanner has met them, and the Data Matrix of a unit is raster drawn by
+  `renderLabel` on a canvas that jsdom does not have. Check at least:
+  - a unit's label on the duplicate printer (ZPL and TSPL, 203 and 300 dpi):
+    the printed Data Matrix scanned back gives the full code with its GS and
+    crypto tail; a box's and a pallet's label with the original dates;
+  - an old box label with `!1` scanned with the client's scanner: the new
+    label carries the same SSCC without `!1`, and a scan of the old label
+    does not confirm an unknown print;
+  - the host's PC switched off: the screen says the code cannot be looked up;
+    a print cut by pulling the printer's cable: «Неизвестно, вышла ли
+    этикетка», the check by a scan of the new label, the records reaching the
+    host once the link is back;
+  - the template list on the touch panel with the on-screen keyboard over the
+    search, and the screen at 1024 × 768 and 1280 × 800 (64 px controls).
 - The floor's pallets (plan ПЛ-Ц) by hand, on Windows 10 and 11, with the
   client's printers. None of it has been run; check at least:
   - the pallet label on the client's pallet printer (its language and

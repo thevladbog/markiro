@@ -89,6 +89,9 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "ref_templates",
             "sync_quarantine",
             "sync_state",
+            "wh_jobs",
+            "wh_outbox",
+            "wh_sessions",
             "workstation_settings"
         ]
     );
@@ -364,13 +367,17 @@ async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
     assert_eq!(
         Value::Array(journal.into_iter().map(Value::Object).collect()),
         Value::Array(
-            (1..=MIGRATOR.iter().count())
-                .map(|version| json!({ "version": version, "success": 1 }))
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
                 .collect()
         ),
+        // Parallel plans take numbers out of order (plan СКЛ takes `0012`
+        // before `0010`/`0011` may land): the journal is the migrator's own list.
         "every migration is journaled once, in order"
     );
     assert!(MIGRATOR.iter().any(|migration| migration.version == 9));
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 12));
 }
 
 #[tokio::test]
@@ -715,7 +722,10 @@ async fn every_table_has_a_forget_class() {
             "floor_scans",
             "floor_shifts",
             "floor_sscc_blocks",
-            "outbox"
+            "outbox",
+            "wh_jobs",
+            "wh_outbox",
+            "wh_sessions"
         ]
     );
     assert_eq!(
@@ -797,7 +807,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     ])
     .await
     .unwrap();
-    // One record in each table of this device's own (`0006`–`0008`) and
+    // One record in each table of this device's own (`0006`–`0008`, `0012`) and
     // one setting of the workstation (`0007`).
     db.transaction(device_records()).await.unwrap();
     db.transaction(vec![statement(
@@ -841,6 +851,9 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
         "floor_shifts",
         "floor_sscc_blocks",
         "outbox",
+        "wh_jobs",
+        "wh_outbox",
+        "wh_sessions",
     ] {
         assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
     }
@@ -901,7 +914,7 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
 }
 
 /// One row in each table of this device's own records (migrations
-/// `0006`–`0008`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// `0006`–`0008` and `0012`), each of the pairing `(HOST, DEVICE)`, as the floor's
 /// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -971,6 +984,26 @@ fn device_records() -> Vec<LocalStatement> {
             json!([HOST, DEVICE]),
         ),
         outbox_record("record-1", HOST, DEVICE, None),
+        // The warehouse reprint's own (plan СКЛ, `0012`): a session, a job and a record.
+        statement(
+            "INSERT INTO wh_sessions (id, host_id, device_id, reason, started_by, started_at, \
+             updated_at) VALUES ('wh-session-1', ?, ?, 'damaged', 'operator-1', \
+             '2026-10-08T07:00:00.000Z', '2026-10-08T07:00:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO wh_jobs (id, host_id, device_id, session_id, kind, subject_id, identity, \
+             reason, state, template_id, template_rev, template_spec, fields, operator_id, \
+             created_at, updated_at) VALUES ('wh-job-1', ?, ?, 'wh-session-1', 'box', 'box-1', \
+             '046006820000000017', 'damaged', 'cancelled', 'template-1', 3, '{}', '{}', \
+             'operator-1', '2026-10-08T07:01:00.000Z', '2026-10-08T07:01:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+             VALUES ('wh-record-1', ?, ?, 'wh-session-1', '{}', '2026-10-08T07:01:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
     ]
 }
 
@@ -1062,6 +1095,140 @@ async fn sent_records_and_other_pairings_do_not_stop_a_forget() {
     assert_eq!(db.clear_copies(UnsentGuard::AnyPairing).await, Ok(()));
 }
 
+/// A reprint record of the warehouse (`wh_outbox`, migration `0012`) of the
+/// pairing `(host, device)`, with the host's receipt (`accepted` or `rejected`)
+/// or without one.
+fn wh_record(id: &str, host: &str, device: &str, receipt: Option<&str>) -> LocalStatement {
+    statement(
+        "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, \
+         outcome, acked_at) VALUES (?, ?, ?, 'wh-session-1', '{}', \
+         '2026-10-09T08:00:00.000Z', ?, ?)",
+        json!([
+            id,
+            host,
+            device,
+            receipt,
+            receipt.map(|_| "2026-10-09T08:00:01.000Z")
+        ]),
+    )
+}
+
+/// The warehouse reprint's records without the host's receipt stop a forget as
+/// the shift facts do (plan СКЛ task 6): this pairing's with `Pairing`, anyone's
+/// with `AnyPairing`, counted together with the facts. A record with a receipt
+/// (`accepted` or `rejected`: the host has answered it) and another pairing's
+/// do not stop this pairing's. Nothing is cleared while one stops it.
+#[tokio::test]
+async fn a_forget_refuses_while_unsent_warehouse_records_remain() {
+    let (_dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    db.transaction(vec![
+        wh_record("a", HOST, DEVICE, Some("accepted")),
+        wh_record("b", HOST, DEVICE, Some("rejected")),
+        wh_record("c", HOST, OTHER_DEVICE, None),
+        wh_record("d", OTHER_HOST, DEVICE, None),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Ok(()),
+        "a record with the host's receipt, and other pairings', do not stop it"
+    );
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+
+    db.transaction(vec![wh_record("e", HOST, DEVICE, None)])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Err(LocalDbError::UnsentRecords { count: 1 })
+    );
+    assert_eq!(
+        db.clear_copies(UnsentGuard::AnyPairing).await,
+        Err(LocalDbError::UnsentRecords { count: 3 })
+    );
+    // The facts and the reprint records are told together.
+    db.transaction(vec![outbox_record("f", HOST, DEVICE, None)])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Err(LocalDbError::UnsentRecords { count: 2 })
+    );
+    assert_eq!(
+        count(&db, "ref_lines").await,
+        json!(1),
+        "nothing was cleared"
+    );
+
+    // Confirmed: the copies go, every record stays.
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+    assert_eq!(count(&db, "ref_lines").await, json!(0));
+    assert_eq!(count(&db, "wh_outbox").await, json!(5));
+    assert_eq!(count(&db, "outbox").await, json!(1));
+}
+
+/// A `wh_outbox` the forget cannot read fails the forget and clears nothing,
+/// as an unreadable `outbox` does.
+#[tokio::test]
+async fn a_warehouse_outbox_that_cannot_be_counted_stops_a_forget() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(
+        dir.path(),
+        &[
+            "DROP TABLE wh_outbox",
+            "CREATE TABLE wh_outbox (id TEXT PRIMARY KEY)",
+        ],
+    )
+    .await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            db.clear_copies(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+}
+
+/// In a database that opened, a `wh_outbox` that is gone is not "no records": the
+/// forget cannot count it and clears nothing (only a database that did not open
+/// may lack the table, see `an_unopened_database_counts_its_warehouse_records_too`).
+#[tokio::test]
+async fn a_missing_warehouse_outbox_in_an_open_database_stops_a_forget() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(dir.path(), &["DROP TABLE wh_outbox"]).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            db.clear_copies(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+}
+
 /// An outbox the forget cannot read fails the forget and clears nothing,
 /// instead of counting it as empty: a misread must never wipe copies while
 /// records may be waiting.
@@ -1148,6 +1315,11 @@ const RESTORE_RETIRE: &str =
 const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
      NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+/// The warehouse reprint's records the host accepted in the window (plan СКЛ), sent again in the
+/// same transaction.
+const RESTORE_REOPEN_WAREHOUSE: &str =
+    "UPDATE wh_outbox SET outcome = NULL, outcome_code = NULL, acked_at = NULL WHERE host_id = ? \
+     AND device_id = ? AND outcome = 'accepted' AND acked_at >= ?";
 /// The stuck line's clamp after a restore (`src/floor/outbox-status.ts`): when the pairing last
 /// settled one, read with every status of a failing delivery.
 const RESTORE_RECONCILED_AT: &str =
@@ -1259,7 +1431,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 83] = [
+    let reads: [(&str, &str); 84] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1614,6 +1786,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             RESTORE_REOPEN,
             "outbox_settled (host_id=? AND device_id=? AND outcome>?)",
+        ),
+        (
+            RESTORE_REOPEN_WAREHOUSE,
+            "wh_outbox_accepted (host_id=? AND device_id=? AND acked_at>?)",
         ),
     ];
     for (sql, index) in reads {
@@ -2236,6 +2412,83 @@ async fn a_database_that_did_not_open_is_counted_without_being_changed() {
     }
 }
 
+/// The warehouse reprint's unsent records of a database that did not open are
+/// counted with the facts (plan СКЛ task 6), on a read-only connection: a
+/// database an older build left, without `wh_outbox`, counts its `outbox` only;
+/// a `wh_outbox` that exists and cannot be counted is an error, never 0.
+#[tokio::test]
+async fn an_unopened_database_counts_its_warehouse_records_too() {
+    let dir = tempfile::tempdir().unwrap();
+    database_file(
+        dir.path(),
+        &[
+            &outbox_sql("a", HOST, DEVICE, None),
+            "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+             VALUES ('w1', 'h', 'd', 's', '{}', '2026-10-09T08:00:00.000Z')",
+            &format!(
+                "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+                 VALUES ('w2', '{HOST}', '{DEVICE}', 's', '{{}}', '2026-10-09T08:00:00.000Z')"
+            ),
+            &format!(
+                "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, \
+                 outcome, acked_at) VALUES ('w3', '{HOST}', '{DEVICE}', 's', '{{}}', \
+                 '2026-10-09T08:00:00.000Z', 'rejected', '2026-10-09T08:00:01.000Z')"
+            ),
+        ],
+    )
+    .await;
+    corrupt_the_migrations_table(dir.path()).await;
+    let local = LocalDbState::open(dir.path()).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    assert_eq!(
+        local
+            .unopened_unsent_records(UnsentGuard::Pairing(HOST, DEVICE))
+            .await,
+        Ok(2),
+        "one fact and one unsent reprint record; the answered one and the other pairing's do not"
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(3)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::Ignore).await,
+        Ok(0)
+    );
+
+    let older = tempfile::tempdir().unwrap();
+    database_file(
+        older.path(),
+        &[&outbox_sql("a", HOST, DEVICE, None), "DROP TABLE wh_outbox"],
+    )
+    .await;
+    corrupt_the_migrations_table(older.path()).await;
+    let local = LocalDbState::open(older.path()).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(1),
+        "no wh_outbox: the outbox alone"
+    );
+
+    let unreadable = tempfile::tempdir().unwrap();
+    database_file(
+        unreadable.path(),
+        &[
+            "DROP TABLE wh_outbox",
+            "CREATE TABLE wh_outbox (id TEXT PRIMARY KEY)",
+        ],
+    )
+    .await;
+    corrupt_the_migrations_table(unreadable.path()).await;
+    let local = LocalDbState::open(unreadable.path()).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            local.unopened_unsent_records(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+}
+
 /// Two forgets at once move the files once. The lock in
 /// `set_aside_unopened_at` is what makes the second one see the new database;
 /// without it the second races the first between its checks and its renames
@@ -2361,4 +2614,307 @@ async fn a_split_set_aside_is_not_added_to() {
     .unwrap();
     assert!(local.set_aside_unopened_at(1_790_000_000_005).await.is_ok());
     assert!(local.get().is_ok());
+}
+
+/// Plan СКЛ takes shell migration `0012` while `0010` and `0011` belong to other plans that
+/// may land later (and `0010`/`0011` do not exist on this branch). sqlx runs every migration
+/// the journal lacks, in version order, and refuses only one that was applied and is gone
+/// (`VersionMissing`) or edited (`VersionMismatch`): a database that holds `0012` but lacks a
+/// lower number takes it late, keeps its data (the warehouse rows included) and its journal
+/// of `0012`. `0009` stands in for the lower number that is absent.
+#[tokio::test]
+async fn a_database_that_already_has_0012_takes_a_lower_migration_late() {
+    let dir = tempfile::tempdir().unwrap();
+    let without_0009: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version != 9)
+        .cloned()
+        .collect();
+    assert_eq!(
+        without_0009.len() + 1,
+        MIGRATOR.iter().count(),
+        "0009 exists and is the one left out"
+    );
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(without_0009),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap();
+    assert!(
+        versions.contains(&12) && !versions.contains(&9),
+        "0012 applied while 0009 is absent: {versions:?}"
+    );
+    for sql in [
+        "INSERT INTO wh_sessions (id, host_id, device_id, reason, started_by, started_at, \
+         updated_at) VALUES ('wh-session-1', 'host', 'device', 'lost', 'operator-1', \
+         '2026-10-12T07:00:00.000Z', '2026-10-12T07:00:00.000Z')",
+        "INSERT INTO ref_lines (id, name, archived, rev) VALUES ('line-1', 'Линия 1', 0, 3)",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    let at_gap: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'floor_restore_epochs'")
+            .fetch_optional(&mut raw)
+            .await
+            .unwrap();
+    assert_eq!(at_gap, None, "the lower migration has not run yet");
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let journal = db
+        .query(
+            "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
+                .collect()
+        ),
+        "the late migration is journaled beside 0012"
+    );
+    assert_eq!(count(&db, "floor_restore_epochs").await, json!(0));
+    assert_eq!(
+        count(&db, "wh_sessions").await,
+        json!(1),
+        "0012's row stays"
+    );
+    assert_eq!(count(&db, "ref_lines").await, json!(1));
+}
+
+/// The warehouse reprint's reads and writes (plan СКЛ, `src/floor/warehouse/warehouse-store.ts`
+/// and `src/local/warehouse-sender.ts`; `test/floor-schema.test.ts` checks the texts agree)
+/// search an index, never a whole table: jobs and records grow with every label printed again
+/// and stay 30 days after their session finished.
+#[tokio::test]
+async fn the_warehouse_reads_search_an_index() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    let jobs = "SELECT id, session_id, kind, subject_id, identity, repair, reason, state, \
+                template_id, template_rev, template_spec, fields, printer, bytes_base64, \
+                error_code, attempts, operator_id, created_at, updated_at FROM wh_jobs";
+    let open_job = format!(
+        "{jobs} WHERE host_id = ? AND device_id = ? AND session_id = ? \
+         AND state IN ('prepared', 'sending', 'failed', 'unknown')"
+    );
+    let by_identity = format!(
+        "{jobs} WHERE host_id = ? AND device_id = ? AND session_id = ? AND identity = ? \
+         AND state <> 'cancelled' ORDER BY rowid DESC LIMIT 1"
+    );
+    let by_id = format!("{jobs} WHERE host_id = ? AND device_id = ? AND id = ?");
+    // (the statement, what its plan must name)
+    let reads: Vec<(String, &str)> = vec![
+        (
+            "SELECT id, reason, unit_template_id, box_template_id, pallet_template_id, \
+             started_by, started_at FROM wh_sessions WHERE host_id = ? AND device_id = ? \
+             AND finished_at IS NULL"
+                .to_owned(),
+            "wh_sessions_open",
+        ),
+        (open_job, "(host_id=? AND device_id=? AND session_id=?)"),
+        (
+            by_identity,
+            "wh_jobs_session (host_id=? AND device_id=? AND session_id=? AND identity=?)",
+        ),
+        (by_id, "sqlite_autoindex_wh_jobs_1 (id=?)"),
+        (
+            "SELECT count(*) AS n FROM wh_jobs WHERE host_id = ? AND device_id = ? \
+             AND session_id = ? AND state IN ('sent', 'verified')"
+                .to_owned(),
+            "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)",
+        ),
+        (
+            "SELECT count(*) AS n FROM wh_outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL"
+                .to_owned(),
+            "wh_outbox_unsent",
+        ),
+        (
+            "UPDATE wh_jobs SET state = ?, error_code = ?, attempts = ?, reason = ?, \
+             printer = ?, bytes_base64 = ?, updated_at = ? WHERE host_id = ? AND device_id = ? \
+             AND id = ? AND state = ? AND attempts = ?"
+                .to_owned(),
+            "sqlite_autoindex_wh_jobs_1 (id=?)",
+        ),
+        (
+            "UPDATE wh_sessions SET reason = ?, unit_template_id = ?, box_template_id = ?, \
+             pallet_template_id = ?, updated_at = ? WHERE host_id = ? AND device_id = ? \
+             AND id = ? AND finished_at IS NULL"
+                .to_owned(),
+            // By its key or by the pairing's one open session: either is one row.
+            "SEARCH wh_sessions USING",
+        ),
+        (
+            "UPDATE wh_sessions SET finished_at = ?, finished_by = ?, updated_at = ? \
+             WHERE host_id = ? AND device_id = ? AND id = ? AND finished_at IS NULL \
+             AND NOT EXISTS (SELECT 1 FROM wh_jobs j WHERE j.host_id = wh_sessions.host_id \
+             AND j.device_id = wh_sessions.device_id AND j.session_id = wh_sessions.id \
+             AND j.state IN ('prepared', 'sending', 'failed', 'unknown'))"
+                .to_owned(),
+            "SEARCH wh_sessions USING",
+        ),
+        (
+            "SELECT s.id FROM wh_sessions s WHERE s.host_id = ? AND s.device_id = ? \
+             AND s.finished_at IS NOT NULL AND s.finished_at <= ? AND NOT EXISTS (SELECT 1 \
+             FROM wh_outbox o WHERE o.host_id = s.host_id AND o.device_id = s.device_id \
+             AND o.session_id = s.id AND o.outcome IS NOT 'accepted')"
+                .to_owned(),
+            "wh_sessions_finished (host_id=? AND device_id=? AND finished_at",
+        ),
+        (
+            "DELETE FROM wh_sessions WHERE host_id = ? AND device_id = ? AND id = ? \
+             AND finished_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wh_outbox o \
+             WHERE o.host_id = wh_sessions.host_id AND o.device_id = wh_sessions.device_id \
+             AND o.session_id = wh_sessions.id AND o.outcome IS NOT 'accepted')"
+                .to_owned(),
+            "SEARCH wh_sessions USING",
+        ),
+        (
+            "DELETE FROM wh_jobs WHERE host_id = ? AND device_id = ? AND session_id = ?".to_owned(),
+            "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)",
+        ),
+        (
+            "DELETE FROM wh_outbox WHERE host_id = ? AND device_id = ? AND session_id = ?"
+                .to_owned(),
+            "wh_outbox_session (session_id=? AND host_id=? AND device_id=?)",
+        ),
+        (
+            "SELECT id, payload FROM wh_outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL ORDER BY seq LIMIT ?"
+                .to_owned(),
+            "wh_outbox_unsent",
+        ),
+        (
+            "UPDATE wh_outbox SET attempts = attempts + 1, sent_at = ? WHERE +host_id = ? \
+             AND +device_id = ? AND id IN (SELECT value FROM json_each(?))"
+                .to_owned(),
+            "sqlite_autoindex_wh_outbox_1 (id=?)",
+        ),
+        (
+            "UPDATE wh_outbox SET outcome = r.value ->> 'outcome', outcome_code = r.value ->> \
+             'code', acked_at = ? FROM json_each(?) AS r WHERE wh_outbox.id = r.value ->> 'id' \
+             AND +wh_outbox.host_id = ? AND +wh_outbox.device_id = ? AND +wh_outbox.acked_at \
+             IS NULL"
+                .to_owned(),
+            "sqlite_autoindex_wh_outbox_1 (id=?)",
+        ),
+    ];
+    for (sql, index) in &reads {
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..sql.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{sql}\n  should use {index}, its plan is {plan:?}"
+        );
+        // `json_each` (alias `r` in the receipt's `UPDATE … FROM`) is the batch's own list.
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN ")
+                && !step.contains("json_each")
+                && !step.starts_with("SCAN r ")),
+            "{sql}\n  scans a table: {plan:?}"
+        );
+    }
+    raw.close().await.unwrap();
+}
+
+/// The counts of records without a receipt that stop a forget (final review of plan СКЛ, m5):
+/// the webview's `countUnsentRecords` (`src/local/outbox.ts`, `FORGET_UNSENT_*_SQL`: the outbox
+/// and `wh_outbox` in one statement) and this shell's own `count_unsent` over `wh_outbox` (its
+/// `format!` with `{table}`, pinned by text in `test/floor-schema.test.ts`), each for one pairing
+/// and for every pairing. Each reads the partial `*_unsent` indexes only: the every-pairing form
+/// walks those indexes whole, which hold only the records still waiting.
+/// `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite.
+#[tokio::test]
+async fn the_forget_counts_read_only_the_unsent_indexes() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    let counts: [(&str, &[&str]); 4] = [
+        (
+            "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? \
+             AND device_id = ?) + (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL \
+             AND host_id = ? AND device_id = ?) AS n",
+            &[
+                "SCAN CONSTANT ROW",
+                "SCALAR SUBQUERY 1",
+                "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
+                "SCALAR SUBQUERY 2",
+                "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+            ],
+        ),
+        (
+            "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL) + \
+             (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) AS n",
+            &[
+                "SCAN CONSTANT ROW",
+                "SCALAR SUBQUERY 1",
+                "SCAN outbox USING INDEX outbox_unsent",
+                "SCALAR SUBQUERY 2",
+                "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+            ],
+        ),
+        (
+            "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL AND host_id = ? \
+             AND device_id = ?",
+            &["SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)"],
+        ),
+        (
+            "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL",
+            &["SCAN wh_outbox USING INDEX wh_outbox_unsent"],
+        ),
+    ];
+    for (sql, expected) in counts {
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..sql.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert_eq!(plan, expected, "{sql}");
+    }
+    raw.close().await.unwrap();
 }

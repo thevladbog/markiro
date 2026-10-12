@@ -18,6 +18,8 @@ import {
   type SyncState,
 } from "../app/shell.js";
 import type {
+  WarehouseLookup,
+  WarehouseLookupResult,
   CodeCheck,
   DeviceShift,
   DeviceShiftCreate,
@@ -46,6 +48,7 @@ import { ShiftList } from "./shifts/ShiftList.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
+import { WarehouseScreen } from "./warehouse/WarehouseScreen.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
 /**
@@ -58,7 +61,9 @@ type Leave =
   | { kind: "list" }
   | { kind: "sign_out"; notice: FloorNotice | null }
   | { kind: "line_changed" }
-  | { kind: "setup"; shift: WorkShift };
+  | { kind: "setup"; shift: WorkShift }
+  // From the warehouse reprint to the workstation setup, and back to its session (plan СКЛ).
+  | { kind: "warehouse_setup" };
 
 /**
  * The floor's screens; in the work of a shift, `officeClosed` says the
@@ -68,7 +73,9 @@ type FloorView =
   | { kind: "list" }
   | { kind: "new_shift" }
   | { kind: "work"; shift: WorkShift; leaving: boolean; officeClosed: boolean }
-  | { kind: "setup"; back: WorkShift | null };
+  // The warehouse reprint (plan СКЛ): no shift, its work gated like a shift's.
+  | { kind: "warehouse"; leaving: boolean }
+  | { kind: "setup"; back: WorkShift | "warehouse" | null };
 
 export interface FloorAppProps {
   operator: FloorSession;
@@ -97,6 +104,8 @@ export interface FloorAppProps {
   checkCode: (codeHash: string) => Promise<CodeCheck>;
   /** `HostApi.requestSsccBlock`: the work screen's serials for its boxes. */
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
+  /** `HostApi.warehouseLookup` (plan СКЛ); none — the list offers no warehouse reprint. */
+  warehouseLookup?: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
   /** The link's delivery of the outbox, asked after every local write (`useHostLink`). */
   requestFacts: () => void;
   /** The floor's scanner: a new shift's product is chosen by a scan. */
@@ -146,6 +155,7 @@ export function FloorApp({
   create,
   checkCode,
   requestBlock,
+  warehouseLookup,
   requestFacts,
   source,
   printing,
@@ -202,13 +212,20 @@ export function FloorApp({
       setView({ kind: "setup", back: leave.shift });
       return;
     }
+    if (leave.kind === "warehouse_setup") {
+      setView({ kind: "setup", back: "warehouse" });
+      return;
+    }
     setView({ kind: "list" });
   }, []);
 
   /** Leaves the work (or, outside it, the floor) once its tracked work has settled. */
   const leave = useCallback(
     (reason: Leave) => {
-      if (current.current.view.kind !== "work") {
+      const from = current.current.view.kind;
+      // The warehouse reprint's work is tracked by the same gate as a shift's (N9),
+      // but it is no shift: the shell is told of no work entered or left.
+      if (from !== "work" && from !== "warehouse") {
         finish(reason);
         return;
       }
@@ -223,12 +240,14 @@ export function FloorApp({
         return;
       }
       standing.current = reason;
-      setView((now) => (now.kind === "work" ? { ...now, leaving: true } : now));
+      setView((now) =>
+        now.kind === "work" || now.kind === "warehouse" ? { ...now, leaving: true } : now,
+      );
       void gate.drain().then(() => {
         const ending = standing.current ?? reason;
         standing.current = null;
         if (!alive.current) return;
-        current.current.dispatch({ type: "work_left", sessionId });
+        if (from === "work") current.current.dispatch({ type: "work_left", sessionId });
         finish(ending);
       });
     },
@@ -360,9 +379,14 @@ export function FloorApp({
   // eyes on the host's list. A shift that cannot be read again is left for the list.
   const returning = useRef(false);
   const backFromSetup = useCallback(
-    (back: WorkShift | null) => {
+    (back: WorkShift | "warehouse" | null) => {
       if (back === null) {
         setView({ kind: "list" });
+        return;
+      }
+      if (back === "warehouse") {
+        ending.current = false;
+        setView({ kind: "warehouse", leaving: false });
         return;
       }
       if (returning.current) return;
@@ -436,6 +460,26 @@ export function FloorApp({
       />
     );
   }
+  if (view.kind === "warehouse" && warehouseLookup !== undefined) {
+    return (
+      <WarehouseScreen
+        operator={operator}
+        local={local}
+        pairing={{ hostId, deviceId }}
+        online={online}
+        track={gate.track}
+        touch={lock.touch}
+        isLeaving={isLeaving}
+        source={source}
+        lookup={warehouseLookup}
+        onHostError={hostError}
+        onRecorded={recorded}
+        printing={printing}
+        onLeave={() => leave({ kind: "list" })}
+        onSetup={() => leave({ kind: "warehouse_setup" })}
+      />
+    );
+  }
   if (view.kind === "new_shift") {
     return (
       <NewShift
@@ -469,6 +513,14 @@ export function FloorApp({
       onHostError={hostError}
       onNew={() => setView({ kind: "new_shift" })}
       onSetup={() => setView({ kind: "setup", back: null })}
+      {...(warehouseLookup === undefined
+        ? {}
+        : {
+            onWarehouse: () => {
+              ending.current = false;
+              setView({ kind: "warehouse", leaving: false });
+            },
+          })}
       onSignOut={() => leave({ kind: "sign_out", notice: null })}
     />
   );

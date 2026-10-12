@@ -42,6 +42,7 @@ import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
+import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
 import {
   BLOCKS_SQL,
   DUE_SQL,
@@ -49,6 +50,7 @@ import {
   RETIRE_SQL,
   SETTLE_SQL,
   STATUS_SQL,
+  WAREHOUSE_REOPEN_SQL,
 } from "../src/local/restore-reconcile.js";
 import {
   DUE_SHIFTS_SQL,
@@ -56,7 +58,27 @@ import {
   purgeTableSql,
   RETAINED_TABLES,
 } from "../src/local/retention.js";
+import {
+  WAREHOUSE_ATTEMPT_SQL,
+  WAREHOUSE_RECEIPT_SQL,
+  WAREHOUSE_UNSENT_SQL,
+} from "../src/local/warehouse-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
+import {
+  DUE_SESSIONS_SQL,
+  FINISH_SESSION_SQL,
+  JOB_BY_IDENTITY_SQL,
+  JOB_SQL,
+  MOVE_JOB_SQL,
+  OPEN_JOB_SQL,
+  OPEN_SESSION_SQL,
+  PURGE_JOBS_SQL,
+  PURGE_RECORDS_SQL,
+  PURGE_SESSION_SQL,
+  SENT_COUNT_SQL,
+  UNSENT_RECORDS_SQL,
+  UPDATE_SESSION_SQL,
+} from "../src/floor/warehouse/warehouse-store.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -79,6 +101,9 @@ const DEVICE_TABLES = [
   "floor_sscc_blocks",
   "outbox",
 ];
+
+/** The warehouse reprint's tables (migration `0012`; `TableClass::DeviceData`), tagged the same way. */
+const WAREHOUSE_TABLES = ["wh_jobs", "wh_outbox", "wh_sessions"];
 
 function shift(id: string, overrides: Record<string, unknown> = {}): LocalStatement {
   const row: Record<string, unknown> = {
@@ -210,10 +235,12 @@ describe("the station's own production tables (migration 0006)", () => {
     // `floor_restore_epochs` (migration `0009`) is a pairing's own
     // bookkeeping that a forget empties, tagged the same way.
     expect(columns).toEqual(
-      [...DEVICE_TABLES, "floor_restore_epochs"].sort().flatMap((tableName) => [
-        { tableName, columnName: "device_id", required: 1 },
-        { tableName, columnName: "host_id", required: 1 },
-      ]),
+      [...DEVICE_TABLES, ...WAREHOUSE_TABLES, "floor_restore_epochs"]
+        .sort()
+        .flatMap((tableName) => [
+          { tableName, columnName: "device_id", required: 1 },
+          { tableName, columnName: "host_id", required: 1 },
+        ]),
     );
     const keys = await executor.query(
       "SELECT t.name AS name FROM pragma_table_list AS t, pragma_foreign_key_list(t.name) AS k " +
@@ -1219,6 +1246,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome>?)",
     );
     expect(reopen.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
+    // The warehouse reprint's records to send again (plan СКЛ) are the pairing's accepted ones
+    // from the window's first instant, not the whole `wh_outbox`.
+    expect(plan(WAREHOUSE_REOPEN_SQL)).toEqual([
+      "SEARCH wh_outbox USING INDEX wh_outbox_accepted (host_id=? AND device_id=? AND acked_at>?)",
+    ]);
   });
 
   it("are pinned on the shell's SQLite with the reconciliation's own statements", () => {
@@ -1231,10 +1263,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       BLOCKS_SQL,
       RETIRE_SQL,
       REOPEN_SQL,
+      WAREHOUSE_REOPEN_SQL,
       SETTLE_SQL,
       RECONCILED_AT_SQL,
     ];
-    expect(new Set(statements).size).toBe(7);
+    expect(new Set(statements).size).toBe(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });
@@ -1628,5 +1661,136 @@ describe("the restore obligation (migration 0009)", () => {
     );
     await refused(executor, obligation({ device_id: "device-3", refused_blocks: "[" }));
     await refused(executor, obligation({ device_id: "device-4", refused_blocks: null }));
+  });
+});
+
+// The warehouse reprint (plan СКЛ, migration 0012): every read and write of its growing tables
+// searches an index; pinned on the shell's SQLite too (`the_warehouse_reads_search_an_index`
+// in `tests/local_db.rs`), with the same texts.
+describe("the warehouse reprint's statements (migration 0012)", () => {
+  const STATEMENTS: readonly (readonly [string, string])[] = [
+    [OPEN_SESSION_SQL, "wh_sessions_open"],
+    [OPEN_JOB_SQL, "(host_id=? AND device_id=? AND session_id=?)"],
+    [
+      JOB_BY_IDENTITY_SQL,
+      "wh_jobs_session (host_id=? AND device_id=? AND session_id=? AND identity=?)",
+    ],
+    [JOB_SQL, "sqlite_autoindex_wh_jobs_1 (id=?)"],
+    [SENT_COUNT_SQL, "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)"],
+    [UNSENT_RECORDS_SQL, "wh_outbox_unsent"],
+    [MOVE_JOB_SQL, "sqlite_autoindex_wh_jobs_1 (id=?)"],
+    // A session by its key, or by the pairing's one open session: either is one row.
+    [UPDATE_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [FINISH_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [DUE_SESSIONS_SQL, "wh_sessions_finished (host_id=? AND device_id=? AND finished_at"],
+    [PURGE_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [PURGE_JOBS_SQL, "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)"],
+    [PURGE_RECORDS_SQL, "wh_outbox_session (session_id=? AND host_id=? AND device_id=?)"],
+    // The sender's statements (task 6): the unsent read, the attempt count and the receipts.
+    [WAREHOUSE_UNSENT_SQL, "wh_outbox_unsent"],
+    [WAREHOUSE_ATTEMPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
+    [WAREHOUSE_RECEIPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
+  ];
+
+  it("search an index, never a whole table", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    for (const [sql, index] of STATEMENTS) {
+      expect(
+        plan(sql).some((step) => step.includes(index)),
+        `${sql}\n${plan(sql).join("\n")}`,
+      ).toBe(true);
+      // `json_each` (alias `r` in the receipt's `UPDATE … FROM`) is the batch's own list.
+      expect(
+        plan(sql).filter(
+          (step) =>
+            step.startsWith("SCAN ") && !step.includes("json_each") && !step.startsWith("SCAN r "),
+        ),
+        sql,
+      ).toEqual([]);
+    }
+    expect(plan(JOB_BY_IDENTITY_SQL).filter((step) => step.includes("TEMP"))).toEqual([]);
+  });
+
+  // Final review of plan СКЛ, m5: the counts that stop a forget — the webview's (both outboxes in
+  // one statement) and the shell's own `count_unsent` over `wh_outbox` — read only the partial
+  // `*_unsent` indexes; the every-pairing form walks those indexes whole, which hold only the
+  // records still waiting. Pinned on the shell's SQLite too
+  // (`the_forget_counts_read_only_the_unsent_indexes`), with the same texts.
+  const SHELL_COUNT_SQL =
+    "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?";
+  const SHELL_COUNT_ANY_SQL = "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL";
+
+  it("count the records that stop a forget through the unsent indexes only", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    expect(plan(FORGET_UNSENT_SQL)).toEqual([
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
+      "SCALAR SUBQUERY 2",
+      "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+    ]);
+    expect(plan(FORGET_UNSENT_ANY_SQL)).toEqual([
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SCAN outbox USING INDEX outbox_unsent",
+      "SCALAR SUBQUERY 2",
+      "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+    ]);
+    expect(plan(SHELL_COUNT_SQL)).toEqual([
+      "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+    ]);
+    expect(plan(SHELL_COUNT_ANY_SQL)).toEqual(["SCAN wh_outbox USING INDEX wh_outbox_unsent"]);
+  });
+
+  it("count the records that stop a forget with the texts the shell runs and pins", () => {
+    const collapse = (path: string) =>
+      readFileSync(new URL(path, testModuleUrl), "utf8")
+        // A line continuation of a Rust string drops the newline and the next line's indent.
+        .replace(/\\\n\s*/g, "");
+    const pins = collapse("../src-tauri/tests/local_db.rs");
+    for (const sql of [
+      FORGET_UNSENT_SQL,
+      FORGET_UNSENT_ANY_SQL,
+      SHELL_COUNT_SQL,
+      SHELL_COUNT_ANY_SQL,
+    ]) {
+      expect(pins).toContain(`"${sql}"`);
+    }
+    // The shell's `count_unsent` builds its two counts with `format!` over its tables.
+    const shell = collapse("../src-tauri/src/local_db.rs");
+    for (const sql of [SHELL_COUNT_SQL, SHELL_COUNT_ANY_SQL]) {
+      expect(shell).toContain(`"${sql.replace("wh_outbox", "{table}")}"`);
+    }
+    expect(shell).toContain('const UNSENT_TABLES: [&str; 2] = ["outbox", "wh_outbox"];');
+  });
+
+  it("are pinned on the shell's SQLite with the same texts", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    // The job reads are built from one column list in the Rust test (`let jobs = "…"`):
+    // the list itself, then each read's tail after `{jobs}`.
+    const columns =
+      "SELECT id, session_id, kind, subject_id, identity, repair, reason, state, template_id, " +
+      "template_rev, template_spec, fields, printer, bytes_base64, error_code, attempts, " +
+      "operator_id, created_at, updated_at FROM wh_jobs";
+    expect(source).toContain(`"${columns}"`);
+    for (const sql of [OPEN_JOB_SQL, JOB_BY_IDENTITY_SQL, JOB_SQL]) {
+      expect(sql.startsWith(columns), sql).toBe(true);
+      expect(source).toContain(`{jobs}${sql.slice(columns.length)}`);
+    }
+    for (const [sql] of STATEMENTS.filter(([sql]) => !sql.startsWith(columns))) {
+      expect(source, sql).toContain(`"${sql}"`);
+    }
   });
 });

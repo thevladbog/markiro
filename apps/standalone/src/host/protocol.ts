@@ -921,6 +921,94 @@ export type FactReceipt = z.infer<typeof factReceiptSchema>;
 /** The answer of `POST /v1/device/facts`: a receipt per record, in the records' order. */
 export const factReceiptsSchema = z.object({ receipts: z.array(factReceiptSchema) });
 
+// --- Warehouse label reprint (plan СКЛ) ---
+
+/**
+ * What `POST /v1/device/warehouse/lookup` asks (`markiro_proto::WarehouseLookup`):
+ * the hash of a unit's code (`kmHash`) or the SSCC of a box or a pallet, one of the two.
+ */
+export const warehouseLookupSchema = z.union([
+  z.object({ codeHash: z.string() }).strict(),
+  z.object({ sscc: z.string() }).strict(),
+]);
+export type WarehouseLookup = z.infer<typeof warehouseLookupSchema>;
+
+/** What a warehouse reprint prints (`markiro_proto::WarehouseSubjectKind`). */
+export const WAREHOUSE_SUBJECT_KINDS = ["unit", "box", "pallet"] as const;
+export type WarehouseSubjectKind = (typeof WAREHOUSE_SUBJECT_KINDS)[number];
+
+/**
+ * A record the host found (`markiro_proto::WarehouseSource`): what its label is
+ * rendered from, the full canonical code of a unit, the SSCC of a box or a pallet.
+ */
+export const warehouseSourceSchema = z.object({
+  kind: z.enum(WAREHOUSE_SUBJECT_KINDS),
+  subjectId: z.string().min(1),
+  identity: z.string().min(1),
+  canonical: z.string().optional(),
+  sscc: z.string().optional(),
+  product: shiftSnapshotProductSchema,
+  counterpartyName: z.string().nullable(),
+  shiftId: z.uuid(),
+  shiftNumber: z.string(),
+  productionDate: z.string(),
+  at: z.string(),
+  itemCount: z.number().int().nonnegative(),
+  boxCount: z.number().int().nonnegative().optional(),
+  operatorName: z.string().nullable(),
+  deviceId: z.uuid(),
+});
+export type WarehouseSource = z.infer<typeof warehouseSourceSchema>;
+
+/** Why a found record is not printed again (`markiro_proto::WarehouseUnavailable`). */
+export const WAREHOUSE_UNAVAILABLE = ["released", "disassembled"] as const;
+
+/** The answer of `POST /v1/device/warehouse/lookup`. */
+export const warehouseLookupResultSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("found"), source: warehouseSourceSchema }),
+  z.object({ status: z.literal("not_found") }),
+  z.object({ status: z.literal("unavailable"), reason: z.enum(WAREHOUSE_UNAVAILABLE) }),
+]);
+export type WarehouseLookupResult = z.infer<typeof warehouseLookupResultSchema>;
+
+/** `markiro_proto::WAREHOUSE_REASONS`: why a label is printed again. */
+export const WAREHOUSE_REASONS = ["not_printed", "damaged", "lost"] as const;
+/** `markiro_proto::WAREHOUSE_OUTCOMES`: where one attempt ended. */
+export const WAREHOUSE_OUTCOMES = ["sent", "unknown", "failed", "verified", "cancelled"] as const;
+/** `markiro_proto::warehouse_receipt_codes` (`proto/fixtures/warehouse-receipt-codes.json`). */
+export const WAREHOUSE_RECEIPT_CODES = [
+  "invalid_record",
+  "payload_mismatch",
+  "subject_unknown",
+] as const;
+
+/** One attempt of a reprint as recorded (`markiro_proto::WarehouseRecord`). */
+export const warehouseRecordSchema = z
+  .object({
+    id: z.uuid(),
+    sessionId: z.uuid(),
+    jobId: z.uuid(),
+    attempt: z.number().int().nonnegative(),
+    subjectKind: z.enum(WAREHOUSE_SUBJECT_KINDS),
+    subjectId: z.string().min(1),
+    identity: z.string().min(1),
+    reasonCode: z.enum(WAREHOUSE_REASONS),
+    repair: z.literal("legacy_tspl_fnc1_literal").nullable(),
+    templateId: z.string().min(1),
+    templateRev: z.number().int().nonnegative(),
+    outcome: z.enum(WAREHOUSE_OUTCOMES),
+    errorCode: z.string().nullable(),
+    operatorId: z.uuid().nullable(),
+    occurredAt: z.string(),
+  })
+  .strict();
+export type WarehouseRecord = z.infer<typeof warehouseRecordSchema>;
+
+/** `POST /v1/device/warehouse/reprints`; the answer is `factReceiptsSchema`. */
+export const warehouseBatchSchema = z
+  .object({ records: z.array(warehouseRecordSchema).min(1).max(100) })
+  .strict();
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z

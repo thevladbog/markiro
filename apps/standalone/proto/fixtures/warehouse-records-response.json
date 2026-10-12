@@ -1,0 +1,10 @@
+{
+  "receipts": [
+    { "id": "6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b", "outcome": "accepted" },
+    {
+      "id": "7f8a9b0c-1d2e-4f3a-9b4c-5d6e7f8a9b0c",
+      "outcome": "rejected",
+      "code": "subject_unknown"
+    }
+  ]
+}

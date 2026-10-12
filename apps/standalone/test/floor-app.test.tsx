@@ -38,6 +38,8 @@ import {
   type HostStatus,
   type SsccBlock,
   type SsccBlockRequest,
+  type WarehouseLookup,
+  type WarehouseLookupResult,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
@@ -130,6 +132,7 @@ interface Options {
   rejectionPending?: boolean;
   idleTimeoutMs?: number;
   workScreen?: ComponentType<WorkScreenProps>;
+  warehouseLookup?: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
 }
 
 function floorOf(
@@ -153,6 +156,9 @@ function floorOf(
         checkCode={handlers.checkCode}
         requestBlock={handlers.requestBlock}
         requestFacts={handlers.requestFacts}
+        {...(options.warehouseLookup === undefined
+          ? {}
+          : { warehouseLookup: options.warehouseLookup })}
         source={options.source ?? SILENT_SOURCE}
         printing={handlers.printing}
         hardware={handlers.hardware}
@@ -686,6 +692,33 @@ describe("the work screen's product", () => {
     await enterPlanned();
     expect(await screen.findByText("Молоко из снимка · GTIN 04600682000013")).toBeTruthy();
     expect(screen.queryByText(/Молоко 3,2% 0,9 л/)).toBeNull();
+  });
+});
+
+/** The warehouse screen takes no press for 400 ms after its view changed (`useViewGuard`). */
+async function pastTheViewGuard(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 450));
+  });
+}
+
+describe("the warehouse reprint on the floor (plan СКЛ)", () => {
+  it("opens from the list of shifts only when the host can be asked, and comes back to it", async () => {
+    const handlers = handlersOf();
+    const { unmount } = render(floorOf(await floorCopies(), handlers));
+    expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Повторная печать этикеток" })).toBeNull();
+    unmount();
+    const lookup = vi.fn(async (): Promise<WarehouseLookupResult> => ({ status: "not_found" }));
+    render(floorOf(await floorCopies(), handlers, { warehouseLookup: lookup }));
+    fireEvent.click(await screen.findByRole("button", { name: "Повторная печать этикеток" }));
+    expect(await screen.findByRole("heading", { name: "Повторная печать этикеток" })).toBeTruthy();
+    // The screen holds a press that lands just after its view changed (400 ms).
+    await pastTheViewGuard();
+    fireEvent.click(await screen.findByRole("button", { name: "К сменам" }));
+    expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
+    expect(types(handlers)).not.toContain("work_entered");
+    expect(types(handlers)).not.toContain("work_left");
   });
 });
 

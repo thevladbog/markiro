@@ -67,6 +67,8 @@ interface Options {
   outboxVersion?: number;
   /** The workstation setup's entry (plan 2a7); none — no button. */
   onSetup?: () => void;
+  /** The warehouse reprint's entry (plan СКЛ); none — no button. */
+  onWarehouse?: () => void;
 }
 
 function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, options: Options) {
@@ -86,6 +88,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         onNew={handlers.onNew}
         onSignOut={handlers.onSignOut}
         {...(options.onSetup === undefined ? {} : { onSetup: options.onSetup })}
+        {...(options.onWarehouse === undefined ? {} : { onWarehouse: options.onWarehouse })}
       />
     </ThemeProvider>
   );
@@ -896,6 +899,41 @@ describe("the workstation setup's entry", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await screen.findByText("Открываем смену…");
     expect(setup).toHaveProperty("disabled", true);
+    // Leaving is never held by an entry that does not answer.
+    expect(screen.getByRole("button", { name: "Сменить оператора" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+});
+
+describe("the warehouse reprint's entry (plan СКЛ)", () => {
+  it("has no button when the floor gives no warehouse reprint", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, { onSetup: vi.fn() });
+    await screen.findByRole("button", { name: "Открыть" });
+    expect(screen.queryByRole("button", { name: "Повторная печать этикеток" })).toBeNull();
+  });
+
+  it("opens the reprint at the floor's size beside the setup, and waits while a shift is being entered", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const onWarehouse = vi.fn();
+    const onSetup = vi.fn();
+    renderList(executor, {
+      onWarehouse,
+      onSetup,
+      enter: () => new Promise<EnteredShift>(() => undefined),
+    });
+    const reprint = await screen.findByRole("button", { name: "Повторная печать этикеток" });
+    expect(reprint.className).toContain("mk-btn--floor");
+    // Beside the setup, not in its place.
+    expect(screen.getByRole("button", { name: "Рабочее место" })).toBeTruthy();
+    fireEvent.click(reprint);
+    expect(onWarehouse).toHaveBeenCalledTimes(1);
+    expect(onSetup).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    await screen.findByText("Открываем смену…");
+    expect(reprint).toHaveProperty("disabled", true);
     // Leaving is never held by an entry that does not answer.
     expect(screen.getByRole("button", { name: "Сменить оператора" })).toHaveProperty(
       "disabled",

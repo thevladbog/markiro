@@ -105,12 +105,15 @@ export async function renderLabel(
   fields: LabelFields,
   printer: LabelPrinter,
   rasterize: RasterizeTextFn = rasterizeText,
+  // A unit's code printed again (plan СКЛ) is drawn as the shared GS1 raster, as the
+  // cloud's duplicate and the office's preview of a product duplicate draw it.
+  options: { kmDataMatrix?: "native" | "raster" } = {},
 ): Promise<Uint8Array> {
   const { generateTspl, generateZpl } = await import("./label-emitters.js");
   const printSpec = withPrinterDpi(spec, printer.dpi);
   const text =
     printer.language === "tspl"
-      ? await generateTspl(printSpec, fields, { rasterizeText: rasterize })
-      : await generateZpl(printSpec, fields, { rasterizeText: rasterize });
+      ? await generateTspl(printSpec, fields, { rasterizeText: rasterize, ...options })
+      : await generateZpl(printSpec, fields, { rasterizeText: rasterize, ...options });
   return latin1ToBytes(text);
 }

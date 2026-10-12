@@ -213,6 +213,60 @@ async fn send_facts(
     body["receipts"].as_array().unwrap().clone()
 }
 
+/// `POST /v1/device/warehouse/lookup` with `body`: the status and the body.
+async fn looked_up(
+    client: &reqwest::Client,
+    base: &str,
+    protocol: &(&str, String),
+    key: &str,
+    body: serde_json::Value,
+) -> (u16, serde_json::Value) {
+    let answer = client
+        .post(format!("{base}/v1/device/warehouse/lookup"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(key)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = answer.status().as_u16();
+    (status, answer.json().await.unwrap())
+}
+
+/// `POST /v1/device/warehouse/reprints` with `records`: the status and the
+/// body.
+async fn recorded(
+    client: &reqwest::Client,
+    base: &str,
+    protocol: &(&str, String),
+    key: &str,
+    records: &[serde_json::Value],
+) -> (u16, serde_json::Value) {
+    let answer = client
+        .post(format!("{base}/v1/device/warehouse/reprints"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(key)
+        .json(&json!({ "records": records }))
+        .send()
+        .await
+        .unwrap();
+    let status = answer.status().as_u16();
+    (status, answer.json().await.unwrap())
+}
+
+/// Record `n` of a reprint of `subject_id`/`identity` of `kind`, sent.
+fn reprint_record(n: &str, kind: &str, subject_id: &str, identity: &str) -> serde_json::Value {
+    json!({
+        "id": format!("00000000-0000-4000-8000-{n:0>12}"),
+        "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+        "jobId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a", "attempt": 1,
+        "subjectKind": kind, "subjectId": subject_id, "identity": identity,
+        "reasonCode": "damaged", "repair": null, "templateId": "template-1",
+        "templateRev": 3, "outcome": "sent", "errorCode": null, "operatorId": null,
+        "occurredAt": "2026-10-08T06:00:20.000Z"
+    })
+}
+
 /// The receipt answers record `id` with `outcome`, and `code` when refused.
 fn assert_receipt(
     receipt: &serde_json::Value,
@@ -1186,6 +1240,84 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(malformed.status(), 400);
 
+    // The warehouse lookup answers a unit's full code, a box's and a
+    // pallet's labels, and refuses a malformed hash and SSCC: none of them
+    // reaches the log (plan СКЛ).
+    let (status, found_unit) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "codeHash": km_a.hash }),
+    )
+    .await;
+    assert_eq!(status, 200, "{found_unit}");
+    assert_eq!(found_unit["status"], "found", "{found_unit}");
+    assert_eq!(found_unit["source"]["canonical"], km_a.canonical);
+    // What the station then records of its reprints names the code's hash
+    // and the SSCCs (never the full code): kept records, a repeat, a record
+    // of a subject the host does not have, and one it cannot read.
+    let mut reprints = vec![reprint_record(
+        "1",
+        "unit",
+        found_unit["source"]["subjectId"].as_str().unwrap(),
+        &km_a.hash,
+    )];
+    for (n, (sscc, kind)) in [(&sscc_one, "box"), (&pallet_sscc, "pallet")]
+        .into_iter()
+        .enumerate()
+    {
+        let (status, found) =
+            looked_up(&client, &base, &protocol, &key, json!({ "sscc": sscc })).await;
+        assert_eq!(status, 200, "{found}");
+        assert_eq!(found["source"]["kind"], kind, "{found}");
+        reprints.push(reprint_record(
+            &(n + 2).to_string(),
+            kind,
+            found["source"]["subjectId"].as_str().unwrap(),
+            sscc,
+        ));
+    }
+    let mut unknown_subject = reprint_record("5", "box", "x", &sscc_one);
+    unknown_subject["subjectId"] = json!("b0000000-0000-4000-8000-0000000000ff");
+    let mut unreadable = reprint_record("6", "unit", "x", &km_a.hash);
+    unreadable["identity"] = json!(km_a.canonical);
+    reprints.extend([unknown_subject, unreadable]);
+    for round in 0..2 {
+        let (status, kept) = recorded(&client, &base, &protocol, &key, &reprints).await;
+        assert_eq!(status, 200, "{kept}");
+        let receipts = kept["receipts"].as_array().unwrap();
+        assert_eq!(receipts.len(), 5, "{kept}");
+        for receipt in &receipts[..3] {
+            assert_eq!(receipt["outcome"], "accepted", "round {round}: {kept}");
+        }
+        assert_eq!(receipts[3]["code"], "subject_unknown", "{kept}");
+        assert_eq!(receipts[4]["code"], "invalid_record", "{kept}");
+    }
+    let mut changed = reprints[0].clone();
+    changed["reasonCode"] = json!("lost");
+    let (status, mismatch) = recorded(&client, &base, &protocol, &key, &[changed]).await;
+    assert_eq!(status, 200, "{mismatch}");
+    assert_eq!(mismatch["receipts"][0]["code"], "payload_mismatch");
+    let (status, refused) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "codeHash": malformed_hash }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    let (status, refused) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "sscc": &sscc_one[..17] }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
     // The totals the facts gave: one shift read, and the list.
     let totals_of_shift: serde_json::Value = client
         .get(format!("{base}/v1/office/shifts/{shift_id}"))
@@ -1851,10 +1983,11 @@ fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
 /// and the totals) has exactly the two `warn!` calls `facts::receive` makes
 /// for a refusal, by the record's id and the receipt's code, and the one
 /// `error!` of the batch route for a record that failed in the database, by
-/// the device and the record's position. A new logging call there is a
+/// the device and the record's position (the warehouse records' batch has the
+/// same one). A new logging call there is a
 /// decision for this test and the walk, not a quiet line.
 #[test]
-fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines() {
+fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     rust_files(&src, &mut files);
@@ -1863,6 +1996,7 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
         "routes/facts.rs",
         "routes/codes.rs",
         "routes/office_shifts.rs",
+        "routes/warehouse.rs",
     ];
     let mut facts_files = 0;
     for file in &files {
@@ -1886,6 +2020,8 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
             let audited = match relative.as_str() {
                 "facts/mod.rs" => 2,
                 "routes/facts.rs" => 1,
+                // The error! of the records' batch route, as the facts' one.
+                "routes/warehouse.rs" => 1,
                 _ => 0,
             };
             assert_eq!(
@@ -1897,6 +2033,8 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
     }
     // The facts path: the 12 files of 2a2 and the five pallet modules of
     // plan ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
-    // `pallet_exception`); none of them logs.
-    assert_eq!(facts_files, 17);
+    // `pallet_exception`); none of them logs. And the warehouse route of
+    // plan СКЛ: the lookup answers a unit's full code and logs nothing, the
+    // records' batch has the one `error!` by device and position.
+    assert_eq!(facts_files, 18);
 }

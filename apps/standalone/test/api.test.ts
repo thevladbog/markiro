@@ -789,6 +789,39 @@ describe("HostApi floor work", () => {
     ]);
   });
 
+  it("looks a label up and sends the warehouse records in the body, with the device key only", async () => {
+    const lookup = recording(fixture("warehouse-lookup-found-unit.json"));
+    await expect(lookup.api.warehouseLookup({ sscc: "046006820000015000" })).resolves.toEqual(
+      fixture("warehouse-lookup-found-unit.json"),
+    );
+    const records = (fixture("warehouse-records-request.json") as { records: unknown[] }).records;
+    const sent = recording(fixture("warehouse-records-response.json"));
+    await expect(sent.api.sendWarehouseRecords(records)).resolves.toEqual(
+      (fixture("warehouse-records-response.json") as { receipts: unknown[] }).receipts,
+    );
+    expect([...lookup.sent, ...sent.sent]).toEqual([
+      {
+        method: "POST",
+        path: "/v1/device/warehouse/lookup",
+        body: { sscc: "046006820000015000" },
+        officeToken: undefined,
+      },
+      {
+        method: "POST",
+        path: "/v1/device/warehouse/reprints",
+        body: { records },
+        officeToken: undefined,
+      },
+    ]);
+  });
+
+  it("refuses a warehouse answer of another shape", async () => {
+    await expect(
+      recording({ status: "found" }).api.warehouseLookup({ sscc: "046006820000015000" }),
+    ).rejects.toThrow();
+    await expect(recording({ receipts: "none" }).api.sendWarehouseRecords([])).rejects.toThrow();
+  });
+
   it("limits the code check's request and no other", async () => {
     const block = recording(fixture("sscc-block.json"));
     await block.api.requestSsccBlock(BLOCK_REQUEST);

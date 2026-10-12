@@ -158,6 +158,24 @@ function reopenStatement(pairing: Pairing, since: string): LocalStatement {
 }
 
 /**
+ * The warehouse reprint's records (`wh_outbox`, plan СКЛ) the host accepted
+ * since an instant: waiting again, so a host restored from a copy gets back
+ * the reprint trail it lost (`warehouse_reprints`). Only the accepted ones:
+ * a refused record was never kept by the host and is not sent again on its
+ * own. `outcome = 'accepted'` lets the search use `wh_outbox_accepted`, the
+ * pairing's accepted records by their receipt, instead of reading the whole
+ * table. Parameters: host id, device id, the instant (as `Date.toISOString`
+ * writes `acked_at`).
+ */
+export const WAREHOUSE_REOPEN_SQL =
+  "UPDATE wh_outbox SET outcome = NULL, outcome_code = NULL, acked_at = NULL " +
+  "WHERE host_id = ? AND device_id = ? AND outcome = 'accepted' AND acked_at >= ?";
+
+function warehouseReopenStatement(pairing: Pairing, since: string): LocalStatement {
+  return { sql: WAREHOUSE_REOPEN_SQL, values: [pairing.hostId, pairing.deviceId, since] };
+}
+
+/**
  * Settles the epoch the run read, once: only while it is still that epoch
  * and still owed. Parameters: the instant, the refused count, the refused
  * blocks (a JSON list of `{id, code}`), host id, device id, the epoch.
@@ -200,7 +218,10 @@ export type ReconcileResult =
  * 2. then, in ONE transaction: the next sync starts from zero
  *    (`FROM_ZERO_SQL`), the records acknowledged in the last 30 days wait to
  *    go again (the host answers a record it has with the receipt it keeps,
- *    and takes one it lost), and the epoch is settled with the count of the
+ *    and takes one it lost) — the warehouse reprint's records the host
+ *    accepted in those days too (`WAREHOUSE_REOPEN_SQL`; they go after the
+ *    facts, so the boxes and codes they name are back on the host first) —
+ *    and the epoch is settled with the count of the
  *    refused blocks — only if it is still the epoch this run read, or a later
  *    restore noted meanwhile fails the batch (`changes_mismatch`) and is
  *    settled by the next run. Which blocks were refused, and the host's code
@@ -259,9 +280,11 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
   }
   const refused = refusedBlocks.length;
   const at = now();
+  const since = new Date(at.getTime() - RESEND_WINDOW_MS).toISOString();
   await local.transaction([
     { sql: FROM_ZERO_SQL, values: [due.epoch] },
-    reopenStatement(pairing, new Date(at.getTime() - RESEND_WINDOW_MS).toISOString()),
+    reopenStatement(pairing, since),
+    warehouseReopenStatement(pairing, since),
     {
       sql: SETTLE_SQL,
       values: [

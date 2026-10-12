@@ -60,6 +60,37 @@ describe("the unsent records of the outbox", () => {
     expect(await countUnsentRecords(executor, null)).toBe(2);
   });
 
+  it("count the warehouse reprint's records without the host's receipt with the facts (plan СКЛ)", async () => {
+    const { executor } = openLocalDb();
+    const warehouse = (id: string, deviceId: string, receipt: string | null) => ({
+      sql:
+        "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, " +
+        "outcome, acked_at) VALUES (?, ?, ?, 's', '{}', ?, ?, ?)",
+      values: [
+        id,
+        HOST_ID,
+        deviceId,
+        "2026-10-09T08:00:00.000Z",
+        receipt,
+        receipt === null ? null : "2026-10-09T08:00:01.000Z",
+      ],
+    });
+    await executor.transaction([
+      record("a", DEVICE_ID, false),
+      warehouse("w1", DEVICE_ID, null),
+      warehouse("w2", DEVICE_ID, null),
+      warehouse("w3", DEVICE_ID, "accepted"),
+      warehouse("w4", DEVICE_ID, "rejected"),
+      warehouse("w5", OTHER_DEVICE, null),
+      {
+        ...warehouse("w6", DEVICE_ID, null),
+        values: ["w6", "another-host", DEVICE_ID, "2026-10-09T08:00:00.000Z", null, null],
+      },
+    ]);
+    expect(await countUnsentRecords(executor, PAIRING)).toBe(3);
+    expect(await countUnsentRecords(executor, null)).toBe(5);
+  });
+
   it("are unknown when the database cannot be read", async () => {
     const failing: LocalExecutor = {
       query: () => Promise.reject(new Error("disk")),

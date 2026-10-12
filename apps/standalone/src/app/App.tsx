@@ -37,6 +37,7 @@ import {
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { countUnsentRecords } from "../local/outbox.js";
 import { restoreDue } from "../local/restore-reconcile.js";
+import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
 import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
@@ -234,8 +235,24 @@ export function App({
     if (keptHostId === null || keptDeviceId === null) return;
     const pairing = { hostId: keptHostId, deviceId: keptDeviceId };
     return scheduleRetention(async () => {
-      if ((await purgeAcknowledged(localDb, pairing, new Date())) > 0) {
-        dispatch({ type: "outbox_changed" });
+      // The warehouse sessions done with (plan СКЛ) go in the same hourly pass.
+      // Neither purge waits for the other: one that fails does not hold the
+      // other's pass back, and the pass fails (to be tried again) all the same.
+      let purged = 0;
+      let failure: unknown = null;
+      try {
+        purged += await purgeAcknowledged(localDb, pairing, new Date());
+      } catch (error) {
+        failure = error;
+      }
+      try {
+        purged += await purgeWarehouseSessions(localDb, pairing, new Date());
+      } catch (error) {
+        failure ??= error;
+      }
+      if (purged > 0) dispatch({ type: "outbox_changed" });
+      if (failure !== null) {
+        throw failure instanceof Error ? failure : new Error("retention pass failed");
       }
     });
   }, [localDb, keptHostId, keptDeviceId]);
@@ -250,6 +267,7 @@ export function App({
     deviceShifts: hostApi.getDeviceShifts,
     sendFacts: hostApi.sendFacts,
     registerKnownBlocks: hostApi.registerKnownBlocks,
+    sendWarehouseRecords: hostApi.sendWarehouseRecords,
     dispatch,
   });
 
@@ -730,6 +748,7 @@ export function App({
               create={hostApi.createDeviceShift}
               checkCode={hostApi.checkCode}
               requestBlock={hostApi.requestSsccBlock}
+              warehouseLookup={hostApi.warehouseLookup}
               requestFacts={requestFacts}
               source={scanner}
               printing={printing}
