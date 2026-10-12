@@ -15,23 +15,32 @@ const source = readFileSync(".github/workflows/us-development.yml", "utf8");
 const workflow = load(source);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 
-test("all unchanged US checks run in exactly three isolated segments with original budgets", () => {
+test("all unchanged US checks run in exactly five isolated segments with original budgets", () => {
   assert.ok(hasExactParallelSegments(workflow));
   const job = workflow.jobs.isolation;
+  assert.deepEqual(job.strategy.matrix.segment, [
+    "foundation",
+    "dataset",
+    "office",
+    "requests",
+    "browser",
+  ]);
   assert.equal(job["timeout-minutes"], 30);
   assert.equal(job.if, undefined);
   assert.equal(job["continue-on-error"], undefined);
   assert.deepEqual(workflow.permissions, { contents: "read" });
   for (const [index, step] of job.steps.entries()) {
     const owners = job.strategy.matrix.segment.filter(
-      (segment) => step.if === undefined || step.if === segmentGuard(segment),
+      (segment) => step.if === undefined || step.if.split(" || ").includes(segmentGuard(segment)),
     );
-    assert.equal(owners.length, segmentForStep(index) ? 1 : 3);
+    assert.equal(owners.length, index === 46 ? 2 : segmentForStep(index) ? 1 : 5);
     assert.equal(step["continue-on-error"], undefined);
     assert.equal(step["timeout-minutes"], undefined);
   }
   assert.equal(job.steps[6].run, "pnpm turbo build --filter '@markiro/platform-contracts...'");
   assert.equal(job.steps[10].run, "pnpm turbo build --filter '@markiro/api...'");
+  assert.equal(job.steps[46].if, "matrix.segment == 'requests' || matrix.segment == 'browser'");
+  assert.equal(job.steps[46].name, "Build isolated request worker entry and checked descriptor");
   assert.deepEqual(job.services["us-postgres"].ports, ["127.0.0.1:55432:5432"]);
 });
 
@@ -52,7 +61,7 @@ test("partition normalization preserves every predecessor command, byte and prop
 test("missing segments, duplicate ownership and bypass guards cannot hide behind historical pins", () => {
   for (const mutate of [
     (job) => job.strategy.matrix.segment.pop(),
-    (job) => job.strategy.matrix.segment.push("cabinet"),
+    (job) => job.strategy.matrix.segment.push("browser"),
     (job) => {
       job.strategy.matrix.exclude = [{ segment: "foundation" }];
     },
@@ -63,13 +72,22 @@ test("missing segments, duplicate ownership and bypass guards cannot hide behind
       job.steps[12].if = "false";
     },
     (job) => {
-      job.steps[12].if = segmentGuard("cabinet");
+      job.steps[12].if = segmentGuard("browser");
     },
     (job) => {
       delete job.steps[12].if;
     },
     (job) => {
       job.steps[5].if = segmentGuard("dataset");
+    },
+    (job) => {
+      job.steps[46].if = segmentGuard("requests");
+    },
+    (job) => {
+      job.steps[46].if = segmentGuard("browser");
+    },
+    (job) => {
+      job.steps[47].if = "matrix.segment == 'requests' || matrix.segment == 'browser'";
     },
     (job) => job.steps.splice(12, 1),
     (job) => job.steps.push(structuredClone(job.steps[12])),
@@ -80,7 +98,10 @@ test("missing segments, duplicate ownership and bypass guards cannot hide behind
     assert.deepEqual(withoutParallelSegments(changed), changed);
   }
   for (const changed of [
-    source.replace("segment: [foundation, dataset, cabinet]", "segment: [dataset, cabinet]"),
+    source.replace(
+      "segment: [foundation, dataset, office, requests, browser]",
+      "segment: [dataset, office, requests, browser]",
+    ),
     source.replace("if: matrix.segment == 'foundation'", "if: false"),
   ])
     assert.equal(withoutParallelSegmentsBytes(changed), changed);

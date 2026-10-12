@@ -2532,3 +2532,13 @@ assertions through strict complete-partition normalization. A local ordinary API
 rerun also passed 4,756 tests with 3,419 opt-in skips, followed by normal owned-child
 database disposal and zero new databases remaining. Remote matrix completion is a
 separate acceptance gate, not established by these local results.
+
+The first three-segment remote run completed foundations in 16m2s, but dataset
+and cabinet both reached the unchanged 30-minute job limit. No assertion failure
+preceded those cancellations. The partition is refined to five segments with the
+same maximum of three concurrent runners: foundations, regular dataset,
+references/office, Requests storage/HTTP, and worker/browser. All 82 predecessor
+steps and their byte/AST pins remain unchanged. Only the worker-entry build runs
+in both Requests and worker/browser, as an explicit failure-propagating prerequisite;
+every specialized verification still has exactly one owner. The original
+30-minute job and test budgets remain unchanged.

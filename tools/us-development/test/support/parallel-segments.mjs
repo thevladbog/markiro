@@ -4,28 +4,47 @@ import { load } from "js-yaml";
 export const segmentStrategy = {
   "fail-fast": false,
   "max-parallel": 3,
-  matrix: { segment: ["foundation", "dataset", "cabinet"] },
+  matrix: { segment: ["foundation", "dataset", "office", "requests", "browser"] },
 };
 const anchors = new Map([
   [12, "Verify corrected dataset Cases on disposable databases"],
   [18, "Check US Transformation native transaction foundation"],
   [19, "Verify regular US dataset Transformation on disposable databases"],
-  [28, "Verify guarded US demo journal and trusted owner boundaries"],
-  [29, "Verify API entry boundaries"],
+  [21, "Verify regular dataset Shipping on disposable databases"],
+  [22, "Verify pure six-month recipe and compiled timezone identity"],
+  [40, "Verify US pinned export source reader on disposable databases"],
+  [41, "Build durable request worker shared dependencies"],
+  [46, "Build isolated request worker entry and checked descriptor"],
+  [50, "Verify US Requests HTTP reads, commands, resources and downloads on disposable databases"],
+  [51, "Verify US worker build, loop, runtime and real process recovery"],
   [81, "Verify US profile, session and master-data persistence on disposable databases"],
 ]);
 export function segmentForStep(index) {
-  return index < 12 ? undefined : index < 19 ? "foundation" : index < 29 ? "dataset" : "cabinet";
+  return index < 12
+    ? undefined
+    : index < 19
+      ? "foundation"
+      : index < 22
+        ? "dataset"
+        : index < 41
+          ? "office"
+          : index < 51
+            ? "requests"
+            : "browser";
 }
 export const segmentGuard = (segment) => `matrix.segment == '${segment}'`;
+export function guardForStep(index) {
+  if (index === 46) return "matrix.segment == 'requests' || matrix.segment == 'browser'";
+  const segment = segmentForStep(index);
+  return segment ? segmentGuard(segment) : undefined;
+}
 
 export function hasExactParallelSegments(workflow) {
   const job = workflow.jobs?.isolation;
   if (!isDeepStrictEqual(job?.strategy, segmentStrategy) || job.steps?.length !== 82) return false;
   for (const [index, name] of anchors) if (job.steps[index].name !== name) return false;
   return job.steps.every((step, index) => {
-    const segment = segmentForStep(index);
-    return step.if === (segment ? segmentGuard(segment) : undefined);
+    return step.if === guardForStep(index);
   });
 }
 
@@ -42,9 +61,12 @@ export function withoutParallelSegments(workflow) {
 export function withoutParallelSegmentsBytes(source) {
   if (!hasExactParallelSegments(load(source))) return source;
   const block =
-    "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, cabinet]\n";
+    "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, office, requests, browser]\n";
   if (source.split(block).length !== 2) return source;
   return source
     .replace(block, "")
-    .replace(/^ {8}if: matrix\.segment == '(foundation|dataset|cabinet)'\n/gm, "");
+    .replace(
+      /^ {8}if: matrix\.segment == '(foundation|dataset|office|requests|browser)'(?: \|\| matrix\.segment == 'browser')?\n/gm,
+      "",
+    );
 }
