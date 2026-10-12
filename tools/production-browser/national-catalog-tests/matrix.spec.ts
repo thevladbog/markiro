@@ -101,6 +101,14 @@ for (const width of [390, 768, 1280, 1600])
         });
         await page.route(`${origin}/api/**`, async (route) => {
           const path = new URL(route.request().url()).pathname;
+          if (
+            route.request().method() === "GET" &&
+            ["/api/inventories", "/api/shifts?status=active"].includes(
+              new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+            )
+          ) {
+            return route.fulfill({ json: { items: [] } });
+          }
           // Support chat is disabled in these unrelated cabinet scenarios.
           if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
             return route.fulfill({

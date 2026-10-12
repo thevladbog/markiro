@@ -33,6 +33,14 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories", "/api/shifts?status=active"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated cabinet scenarios.
     if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({
@@ -251,6 +259,14 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   });
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories", "/api/shifts?status=active"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated cabinet scenarios.
     if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({

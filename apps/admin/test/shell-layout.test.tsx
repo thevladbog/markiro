@@ -20,6 +20,72 @@ import type { DashboardOverviewDto } from "../src/pages/dashboard/api.js";
 import { SettingsPage } from "../src/pages/settings/index.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
 import { ShellPage } from "../src/pages/Shell.js";
+import type { Inventory } from "../src/pages/inventory/schemas.js";
+import type { ShiftDto } from "../src/pages/shifts/api.js";
+
+let shifts: ShiftDto[] = [];
+let inventories: Inventory[] = [];
+let canReadOperations = true;
+
+function activeShift(id: string): ShiftDto {
+  return {
+    id,
+    number: id,
+    status: "active",
+    mode: "validation",
+    productId: "product",
+    productName: "Product",
+    lineId: null,
+    lineName: null,
+    counterpartyId: null,
+    counterpartyName: null,
+    ssccIssuerCounterpartyId: null,
+    boxLabelTemplateId: null,
+    palletLabelTemplateId: null,
+    plannedQty: null,
+    plannedDate: null,
+    productionDate: null,
+    boxCapacity: null,
+    palletBoxCapacity: null,
+    palletsEnabled: false,
+    createdFrom: "admin",
+    openedAt: "2026-10-12T09:00:00.000Z",
+    closedAt: null,
+    lateDataAt: null,
+    closeReason: null,
+    createdAt: "2026-10-12T09:00:00.000Z",
+    output: { mode: "validation", acceptedUnits: 0 },
+    validationPrint: {
+      mode: "none",
+      verification: "none",
+      templateId: null,
+      snapshot: null,
+      policyRevision: null,
+    },
+  };
+}
+
+function inventory(status: Inventory["status"]): Inventory {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    number: "INV-001",
+    status,
+    mode: "check",
+    productId: "22222222-2222-4222-8222-222222222222",
+    gtin14: "04680089900383",
+    productName: "Product",
+    lineId: "33333333-3333-4333-8333-333333333333",
+    lineName: "Line",
+    productionDateFrom: "2026-10-01",
+    productionDateTo: "2026-10-12",
+    boxLabelTemplateId: null,
+    boxLabelTemplate: null,
+    activeSnapshotId: null,
+    resultRevision: 0,
+    createdAt: "2026-10-12T09:00:00.000Z",
+    updatedAt: "2026-10-12T09:00:00.000Z",
+  };
+}
 
 const ACTIVE_SESSION: SessionData = {
   session: { activeOrganizationId: "org_1" },
@@ -95,11 +161,12 @@ function dashboardOverviewFixture(): DashboardOverviewDto {
 
 beforeEach(() => {
   localStorage.clear();
+  shifts = [];
+  inventories = [];
+  canReadOperations = true;
   supportResponse = async () => jsonResponse(200, { items: [], nextCursor: null });
-  // AppShell's nav badge reads usePendingOrderCount() (Task 14), which fires
-  // a GET /pickup-orders?status=pending on every render regardless of route
-  // -- stub it to an empty list so these layout/navigation tests don't hit
-  // the network.
+  // The shell loads navigation counters regardless of the current route.
+  // Keep their default lists empty and let counter tests supply active work.
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -116,10 +183,16 @@ beforeEach(() => {
       if (url.endsWith("/api/access/me")) {
         return jsonResponse(200, {
           roles: ["manager"],
-          capabilities: ["operations.read", "operations.write"],
+          capabilities: canReadOperations
+            ? ["operations.read", "operations.write"]
+            : ["integrations.read"],
         });
       }
       if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      if (url.endsWith("/api/shifts?status=active")) {
+        return jsonResponse(200, { items: shifts.filter((shift) => shift.status === "active") });
+      }
+      if (url.endsWith("/api/inventories")) return jsonResponse(200, { items: inventories });
       if (url.endsWith("/api/dashboard/overview?period=7d")) {
         return jsonResponse(200, dashboardOverviewFixture());
       }
@@ -166,15 +239,17 @@ function createFakeAuthClient(overrides: Partial<AuthClientLike> = {}): AuthClie
  * header's theme toggle has a context to write to) and a location tracker
  * (so sign-out's redirect is observable).
  */
-function renderApp(client: AuthClientLike, initialPath = "/") {
+function renderApp(client: AuthClientLike, initialPath = "/", cache?: QueryClient) {
   function LocationTracker() {
     const location = useLocation();
     return <div data-testid="location-pathname">{location.pathname}</div>;
   }
 
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  const queryClient =
+    cache ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
 
   return render(
     <QueryClientProvider client={queryClient}>
@@ -200,6 +275,66 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
+  it("counts only active shifts and running inventories in desktop and mobile navigation", async () => {
+    shifts = [
+      activeShift("one"),
+      activeShift("two"),
+      { ...activeShift("planned"), status: "planned" },
+      { ...activeShift("closed"), status: "closed" },
+    ];
+    const statuses: Inventory["status"][] = [
+      "draft",
+      "preparing",
+      "ready",
+      "running",
+      "closed",
+      "completed",
+      "cancelled",
+    ];
+    inventories = statuses.map(inventory);
+    renderApp(createFakeAuthClient());
+    const nav = await screen.findByRole("navigation", { name: "Основная навигация" });
+    expect(await within(nav).findByRole("link", { name: /^Смены\s*2$/ })).toBeDefined();
+    expect(await within(nav).findByRole("link", { name: /^Инвентаризации\s*1$/ })).toBeDefined();
+    await userEvent.click(screen.getByRole("button", { name: "Открыть мобильную навигацию" }));
+    const mobile = screen.getByRole("navigation", { name: "Мобильная навигация" });
+    expect(within(mobile).getByRole("link", { name: /^Смены\s*2$/ })).toBeDefined();
+    expect(within(mobile).getByRole("link", { name: /^Инвентаризации\s*1$/ })).toBeDefined();
+  });
+
+  it("removes counters when refreshed lists have no active work", async () => {
+    shifts = [activeShift("one")];
+    inventories = [inventory("running")];
+    const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderApp(createFakeAuthClient(), "/", cache);
+    const nav = await screen.findByRole("navigation", { name: "Основная навигация" });
+    await within(nav).findByRole("link", { name: /^Смены\s*1$/ });
+    await within(nav).findByRole("link", { name: /^Инвентаризации\s*1$/ });
+    shifts = [{ ...activeShift("one"), status: "closed" }];
+    inventories = [inventory("closed")];
+    await act(async () => {
+      await cache.invalidateQueries({ queryKey: ["shifts"] });
+      await cache.invalidateQueries({ queryKey: ["inventories"] });
+    });
+    await waitFor(() => {
+      expect(within(nav).getByRole("link", { name: "Смены" }).textContent).toBe("Смены");
+      expect(within(nav).getByRole("link", { name: "Инвентаризации" }).textContent).toBe(
+        "Инвентаризации",
+      );
+    });
+  });
+
+  it("does not fetch production counters without operations access", async () => {
+    canReadOperations = false;
+    renderApp(createFakeAuthClient());
+    const nav = await screen.findByRole("navigation", { name: "Основная навигация" });
+    expect(within(nav).queryByRole("link", { name: /Смены|Инвентаризации/ })).toBeNull();
+    const requests = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(
+      requests.some((url) => url.includes("/api/shifts") || url.includes("/api/inventories")),
+    ).toBe(false);
+  });
+
   it("hides support in desktop and mobile navigation when the episode list returns 503", async () => {
     supportResponse = async () => jsonResponse(503, { message: "Support chat disabled" });
     renderApp(createFakeAuthClient());

@@ -316,6 +316,14 @@ function fixtures(locale: AdminLocale) {
           body: Buffer.from(photoFixtureBase64, "base64"),
         });
       }
+      if (
+        route.request().method() === "GET" &&
+        ["/api/inventories", "/api/shifts?status=active"].includes(
+          new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+        )
+      ) {
+        return route.fulfill({ json: { items: [] } });
+      }
       // Support chat is disabled in these unrelated screen scenarios.
       if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
         return route.fulfill({

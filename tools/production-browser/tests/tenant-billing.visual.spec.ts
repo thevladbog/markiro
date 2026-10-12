@@ -191,6 +191,14 @@ async function installStrictApi(page: Page, scenario = "ready") {
   await page.route(/^http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    if (
+      route.request().method() === "GET" &&
+      ["/api/inventories", "/api/shifts?status=active"].includes(
+        new URL(route.request().url()).pathname + new URL(route.request().url()).search,
+      )
+    ) {
+      return route.fulfill({ json: { items: [] } });
+    }
     // Support chat is disabled in these unrelated screen scenarios.
     if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
       return route.fulfill({

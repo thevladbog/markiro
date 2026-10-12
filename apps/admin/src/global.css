@@ -152,6 +152,12 @@ body {
     font-weight: 600;
   }
 }
+@media (max-width: 480px) {
+  .mk-mobile-navigation__groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Equipment workspace */
 .devices-page {
   min-width: 0;
