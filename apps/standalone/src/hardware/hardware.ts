@@ -283,11 +283,16 @@ export type PrintResultCode = PrintFailureCode | DriverFailedCode | "driver_unkn
 export interface WindowsPrinting {
   /** `true` exactly on Windows; `false` when the shell cannot be asked. */
   supportsWindowsPrinting: () => Promise<boolean>;
-  /** One `mono-raster-v1` page to the queue, as the document `documentName`; never throws. */
+  /**
+   * One `mono-raster-v1` page to the queue, as the document `documentName`; never throws.
+   * `paper: "a4"` asks the driver for an A4 sheet (plan А4: the page must be a 300 dpi A4
+   * page); absent, the page is a label printed at its own size.
+   */
   printWindowsRaster: (
     queue: string,
     bytes: Uint8Array,
     documentName: string,
+    paper?: "a4",
   ) => Promise<PrintResult>;
   /** The spooler's word on the job; never throws (`unavailable`). */
   getWindowsPrintJob: (receipt: WindowsPrintReceipt) => Promise<WindowsJobObservation>;
@@ -358,7 +363,7 @@ export function createTauriWindowsPrinting(call: Invoke = invoke): WindowsPrinti
         return false;
       }
     },
-    printWindowsRaster: async (queue, bytes, documentName) => {
+    printWindowsRaster: async (queue, bytes, documentName, paper) => {
       let payloadBase64: string;
       try {
         payloadBase64 = bytesToBase64(bytes);
@@ -367,7 +372,12 @@ export function createTauriWindowsPrinting(call: Invoke = invoke): WindowsPrinti
         return { sent: false, code: "invalid_payload" };
       }
       try {
-        const raw = await call("print_windows_raster", { queue, payloadBase64, documentName });
+        const raw = await call("print_windows_raster", {
+          queue,
+          payloadBase64,
+          documentName,
+          ...(paper === undefined ? {} : { paper }),
+        });
         return windowsPrintResult(raw, queue, documentName);
       } catch {
         // The call may have reached the shell: a label may come out.

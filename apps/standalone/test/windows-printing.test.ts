@@ -133,6 +133,42 @@ describe("createTauriWindowsPrinting", () => {
     });
   });
 
+  it("asks the driver for an A4 page only when told", async () => {
+    const call = vi.fn(async (_command: string, _args?: Record<string, unknown>) => ({
+      ok: true,
+      receipt: RECEIPT,
+    }));
+    const windows = createTauriWindowsPrinting(call);
+    await windows.printWindowsRaster(QUEUE, new Uint8Array([65]), DOCUMENT, "a4");
+    expect(call).toHaveBeenLastCalledWith("print_windows_raster", {
+      queue: QUEUE,
+      payloadBase64: "QQ==",
+      documentName: DOCUMENT,
+      paper: "a4",
+    });
+    await windows.printWindowsRaster(QUEUE, new Uint8Array([65]), DOCUMENT);
+    // No `paper` key at all, not a `paper: undefined` one: the label path is as it was.
+    const labelArgs = call.mock.lastCall?.[1];
+    expect(Object.keys(labelArgs ?? {}).sort()).toEqual(["documentName", "payloadBase64", "queue"]);
+    await windows.printWindowsRaster(QUEUE, new Uint8Array([65]), DOCUMENT, undefined);
+    expect(Object.keys(call.mock.lastCall?.[1] ?? {})).not.toContain("paper");
+  });
+
+  it("answers an A4 print like any other: the receipt of the job, or its refusal", async () => {
+    const refused = { ok: false, error: { code: "geometry_mismatch", phase: "before_start" } };
+    const call = vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(
+      async () => refused,
+    );
+    const windows = createTauriWindowsPrinting(call);
+    await expect(
+      windows.printWindowsRaster(QUEUE, new Uint8Array([65]), DOCUMENT, "a4"),
+    ).resolves.toEqual({ sent: false, code: "geometry_mismatch" });
+    call.mockResolvedValueOnce({ ok: true, receipt: RECEIPT });
+    await expect(
+      windows.printWindowsRaster(QUEUE, new Uint8Array([65]), DOCUMENT, "a4"),
+    ).resolves.toEqual({ sent: true, receipt: RECEIPT });
+  });
+
   it("never throws: a failed call is unknown for a print, false and unavailable for questions", async () => {
     const call = vi.fn(async () => {
       throw new Error("ipc");

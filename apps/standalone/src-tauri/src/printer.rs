@@ -22,6 +22,7 @@
 //!
 //! Printing through a Windows printer driver (a `mono-raster-v1` page drawn
 //! with GDI, plan ДРВ) lives in `printer/driver.rs`; this module stays RAW.
+//! The checks of an A4 sheet on that path (plan А4) are `printer/sheet.rs`.
 
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -37,6 +38,7 @@ use serde_json::Value;
 pub mod driver;
 pub mod driver_commands;
 pub mod raster;
+pub mod sheet;
 pub mod spooler;
 
 /// The longest label `print_bytes` takes: 32 MiB of decoded bytes (a 100 x 150

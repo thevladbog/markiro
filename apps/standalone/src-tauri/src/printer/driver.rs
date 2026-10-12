@@ -17,8 +17,15 @@
 //! [`submit`], generic over [`WindowsPrintApi`], so they run and are tested on
 //! every OS. Only `native` (everything unsafe) is `cfg(windows)`: it uses
 //! `std` and `windows-sys` only and compiles in `standalone-windows-build`.
+//!
+//! An A4 sheet (plan А4, `paper: "a4"`) takes the same path with another page
+//! request: the driver's paper is `DMPAPER_A4` in the sheet's orientation, one
+//! copy, 100 %, simplex; the sheet is drawn whole-number times larger
+//! (`super::sheet`) and refused before `StartDocW` when the device's page or
+//! printable area does not hold it. The label path is unchanged.
 
-use super::raster::{decode, Caps, Raster, MAX_BYTES};
+use super::raster::{check_geometry, decode, Caps, Raster, MAX_BYTES};
+use super::sheet::{self, sheet_draw_plan, sheet_orientation, DrawPlan, Orientation, SheetRaster};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
@@ -102,6 +109,131 @@ struct DriverMode {
     paper_length: i16,
     quality: i16,
     y_resolution: i16,
+    /// `dmDuplex`, only when the merged DEVMODE says it is set (`DM_DUPLEX`).
+    duplex: Option<i16>,
+}
+
+/// The paper a print asks for (`print_windows_raster`'s `paper`): the label's
+/// own size by default, or an A4 sheet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Paper {
+    Label,
+    A4,
+}
+
+/// What the print asks of the driver's page, once the page is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Request {
+    /// User paper of the page's millimetres, portrait.
+    Label,
+    /// `DMPAPER_A4` in this orientation.
+    Sheet(Orientation),
+}
+
+impl Request {
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn name(self) -> &'static str {
+        match self {
+            Request::Label => "label",
+            Request::Sheet(Orientation::Portrait) => "a4_portrait",
+            Request::Sheet(Orientation::Landscape) => "a4_landscape",
+        }
+    }
+}
+
+/// `paper`: absent is the label, `"a4"` a sheet; any other word is refused
+/// before the page is even read (and is not echoed into the log).
+fn paper_of(value: Option<&str>) -> Result<Paper, Step> {
+    match value {
+        None => Ok(Paper::Label),
+        Some("a4") => Ok(Paper::A4),
+        Some(_) => Err(Step {
+            name: "paper",
+            error: 0,
+            detail: "reason=unknown_paper".into(),
+        }),
+    }
+}
+
+/// The request a checked page makes for `paper`: a sheet must be a 300 dpi
+/// A4 page, in either orientation.
+fn request_of(paper: Paper, page: &Raster<'_>) -> Result<Request, Step> {
+    match paper {
+        Paper::Label => Ok(Request::Label),
+        Paper::A4 => sheet_orientation(&SheetRaster::from(page))
+            .map(Request::Sheet)
+            .map_err(|_| Step {
+                name: "paper",
+                error: 0,
+                detail: format!(
+                    "reason=not_a4 page_dpi={} page_dots={}x{} page_mm={}x{}",
+                    page.dpi, page.width, page.height, page.width_mm, page.height_mm
+                ),
+            }),
+    }
+}
+
+/// Whether the driver's merged DEVMODE kept what was asked: the orientation,
+/// one copy, 100 %, and for a sheet A4 paper and, if the driver has the
+/// setting at all, simplex.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn mode_holds(request: Request, mode: &DriverMode) -> bool {
+    let orientation = match request {
+        Request::Label => sheet::DMORIENT_PORTRAIT,
+        Request::Sheet(o) => o.devmode(),
+    };
+    mode.orientation == orientation
+        && mode.copies == 1
+        && mode.scale == 100
+        && match request {
+            Request::Label => true,
+            Request::Sheet(_) => {
+                mode.paper == sheet::DMPAPER_A4
+                    && mode.duplex.is_none_or(|d| d == sheet::DMDUP_SIMPLEX)
+            }
+        }
+}
+
+/// The page against the device context's `Caps`: the label's 1:1 check, or the
+/// sheet's whole-number draw plan. The refusal is the failure code.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn plan_of(
+    request: Request,
+    page: &Raster<'_>,
+    caps: Caps,
+) -> Result<Option<DrawPlan>, &'static str> {
+    match request {
+        Request::Label => check_geometry(page, caps)
+            .map(|()| None)
+            .map_err(|()| "geometry_mismatch"),
+        Request::Sheet(_) => sheet_draw_plan(&SheetRaster::from(page), caps.into())
+            .map(Some)
+            .map_err(|e| e.code()),
+    }
+}
+
+/// A DEVMODE the driver filled claims a size of at least `minimum` bytes and
+/// keeps its private tail inside the `needed` bytes `DocumentPropertiesW`
+/// asked the buffer to have.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn devmode_fits(size: usize, driver_extra: usize, needed: usize, minimum: usize) -> bool {
+    size >= minimum && size + driver_extra <= needed
+}
+
+/// `StretchDIBits` of a sheet copies scan lines: more than none is a blit.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sheet_blit_ok(drawn: i32) -> bool {
+    drawn > 0
+}
+
+/// The numbers of a sheet blit for the diagnostic line.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sheet_blit_detail(drawn: i32, plan: &DrawPlan) -> String {
+    format!(
+        "returned={drawn} expected>0 scale={} at={},{} blit={}x{}",
+        plan.scale, plan.x, plan.y, plan.width, plan.height
+    )
 }
 
 /// One diagnostic line for a failed driver call, `job` once the spooler has
@@ -125,9 +257,14 @@ fn step_line(step: &Step, job: Option<u32>) -> String {
 
 /// The page against what the driver reported: the page's dots, resolution and
 /// required bounds, the device context's `Caps` (unread when the DEVMODE
-/// already refused) and the merged DEVMODE's mode.
+/// already refused), the merged DEVMODE's mode and what was requested.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn geometry_line(page: &Raster<'_>, caps: Option<Caps>, mode: &DriverMode) -> String {
+fn geometry_line(
+    page: &Raster<'_>,
+    request: Request,
+    caps: Option<Caps>,
+    mode: &DriverMode,
+) -> String {
     let [l, t, r, b] = page.bounds;
     let reported = match caps {
         Some(c) => format!(
@@ -143,10 +280,15 @@ fn geometry_line(page: &Raster<'_>, caps: Option<Caps>, mode: &DriverMode) -> St
         ),
         None => "caps=unread".to_owned(),
     };
+    let duplex = mode
+        .duplex
+        .map_or_else(|| "none".to_owned(), |d| d.to_string());
     format!(
-        "standalone: driver print step=geometry error=0 page_dots={}x{} page_dpi={} \
+        "standalone: driver print step=geometry error=0 request={} page_dots={}x{} page_dpi={} \
          page_bounds={l},{t},{r},{b} {reported} mode_orientation={} mode_copies={} \
-         mode_scale={} mode_paper={} mode_paper_size={}x{} mode_quality={} mode_y_resolution={}",
+         mode_scale={} mode_paper={} mode_paper_size={}x{} mode_quality={} mode_y_resolution={} \
+         mode_duplex={duplex}",
+        request.name(),
         page.width,
         page.height,
         page.dpi,
@@ -205,8 +347,14 @@ fn artifact(payload: &str) -> Result<Vec<u8>, Failure> {
 
 /// Prints one page to `queue`, blocking. Every refusal before `StartDocW` is
 /// `before_start`; from `StartDocW` on, `delivery_unknown`. Never retries.
-pub fn print(queue: String, payload_base64: String, document_name: String) -> Outcome {
-    print_logged(queue, payload_base64, document_name, &mut |line| {
+/// `paper` is absent for a label and `"a4"` for an A4 sheet.
+pub fn print(
+    queue: String,
+    payload_base64: String,
+    document_name: String,
+    paper: Option<String>,
+) -> Outcome {
+    print_logged(queue, payload_base64, document_name, paper, &mut |line| {
         eprintln!("{line}")
     })
 }
@@ -217,11 +365,20 @@ fn print_logged(
     queue: String,
     payload_base64: String,
     document_name: String,
+    paper: Option<String>,
     log: &mut dyn FnMut(String),
 ) -> Outcome {
     let result = (|| {
+        // A paper or a sheet that is no A4 page is an unusable artifact; the
+        // line says why, with numbers only.
+        let refuse_paper = |step: Step, log: &mut dyn FnMut(String)| {
+            log(step_line(&step, None));
+            Failure::before("invalid_artifact")
+        };
+        let paper = paper_of(paper.as_deref()).map_err(|step| refuse_paper(step, &mut *log))?;
         let bytes = artifact(&payload_base64)?;
         let page = decode(&bytes).map_err(|_| Failure::before("invalid_artifact"))?;
+        let request = request_of(paper, &page).map_err(|step| refuse_paper(step, &mut *log))?;
         if !valid_name(&queue) {
             return Err(Failure::before("queue_unavailable"));
         }
@@ -230,12 +387,12 @@ fn print_logged(
         }
         #[cfg(windows)]
         {
-            let mut device = native::Device::open(&queue, &page, &mut *log)?;
+            let mut device = native::Device::open(&queue, &page, request, &mut *log)?;
             submit(&mut device, &page, &queue, &document_name, &mut *log)
         }
         #[cfg(not(windows))]
         {
-            let _ = page;
+            let _ = (page, request);
             Err(Failure::before("unsupported_platform"))
         }
     })();
@@ -318,7 +475,7 @@ fn submit(
 
 #[cfg(windows)]
 mod native {
-    use super::super::raster::{check_geometry, dib_pixels, Caps};
+    use super::super::raster::{dib_pixels, Caps};
     use super::*;
     use std::{
         mem::size_of,
@@ -327,6 +484,14 @@ mod native {
     use windows_sys::Win32::{
         Graphics::{Gdi::*, Printing::*},
         Storage::Xps::*,
+    };
+
+    // The host-side values of `super::super::sheet` are the ones Windows has.
+    const _: () = {
+        assert!(sheet::DMPAPER_A4 == DMPAPER_A4 as i16);
+        assert!(sheet::DMORIENT_PORTRAIT == DMORIENT_PORTRAIT as i16);
+        assert!(sheet::DMORIENT_LANDSCAPE == DMORIENT_LANDSCAPE as i16);
+        assert!(sheet::DMDUP_SIMPLEX == DMDUP_SIMPLEX);
     };
 
     fn wide(s: &str) -> Vec<u16> {
@@ -382,6 +547,8 @@ mod native {
     pub(super) struct Device {
         dc: HDC,
         caps: Caps,
+        /// How a sheet is drawn; `None` for a label.
+        plan: Option<DrawPlan>,
     }
 
     impl Drop for Device {
@@ -393,13 +560,16 @@ mod native {
     }
 
     impl Device {
-        /// The queue's device context with the driver set to the page:
-        /// user paper of the page's millimetres, portrait, one copy, 100 %,
-        /// the page's resolution. The driver-private tail of DEVMODE is kept
-        /// (a separate output buffer), and the driver's answer is checked.
+        /// The queue's device context with the driver set to the page: for a
+        /// label user paper of the page's millimetres, portrait, one copy,
+        /// 100 %, the page's resolution; for a sheet `DMPAPER_A4` in the
+        /// sheet's orientation, one copy, 100 %, simplex. The driver-private
+        /// tail of DEVMODE is kept (a separate output buffer), and the
+        /// driver's answer is checked.
         pub fn open(
             name: &str,
             p: &Raster<'_>,
+            request: Request,
             log: &mut dyn FnMut(String),
         ) -> Result<Self, Failure> {
             unsafe {
@@ -433,9 +603,12 @@ mod native {
                         "driver_failure",
                     ));
                 }
-                if ((*dm).dmSize as usize) < size_of::<DEVMODEW>()
-                    || (*dm).dmSize as usize + (*dm).dmDriverExtra as usize > needed as usize
-                {
+                if !devmode_fits(
+                    (*dm).dmSize as usize,
+                    (*dm).dmDriverExtra as usize,
+                    needed as usize,
+                    size_of::<DEVMODEW>(),
+                ) {
                     return Err(refuse(
                         log,
                         "DEVMODE.size",
@@ -448,24 +621,47 @@ mod native {
                         "driver_failure",
                     ));
                 }
-                (*dm).dmFields = ((*dm).dmFields & !DM_FORMNAME)
-                    | DM_ORIENTATION
-                    | DM_PAPERSIZE
-                    | DM_PAPERWIDTH
-                    | DM_PAPERLENGTH
-                    | DM_COPIES
-                    | DM_PRINTQUALITY
-                    | DM_YRESOLUTION
-                    | DM_SCALE;
-                let v = &mut (*dm).Anonymous1.Anonymous1;
-                v.dmOrientation = DMORIENT_PORTRAIT as i16;
-                v.dmPaperSize = DMPAPER_USER as i16;
-                v.dmPaperWidth = (p.width_mm * 10.).round() as i16;
-                v.dmPaperLength = (p.height_mm * 10.).round() as i16;
-                v.dmCopies = 1;
-                v.dmScale = 100;
-                v.dmPrintQuality = p.dpi as i16;
-                (*dm).dmYResolution = p.dpi as i16;
+                match request {
+                    Request::Label => {
+                        (*dm).dmFields = ((*dm).dmFields & !DM_FORMNAME)
+                            | DM_ORIENTATION
+                            | DM_PAPERSIZE
+                            | DM_PAPERWIDTH
+                            | DM_PAPERLENGTH
+                            | DM_COPIES
+                            | DM_PRINTQUALITY
+                            | DM_YRESOLUTION
+                            | DM_SCALE;
+                        let v = &mut (*dm).Anonymous1.Anonymous1;
+                        v.dmOrientation = DMORIENT_PORTRAIT as i16;
+                        v.dmPaperSize = DMPAPER_USER as i16;
+                        v.dmPaperWidth = (p.width_mm * 10.).round() as i16;
+                        v.dmPaperLength = (p.height_mm * 10.).round() as i16;
+                        v.dmCopies = 1;
+                        v.dmScale = 100;
+                        v.dmPrintQuality = p.dpi as i16;
+                        (*dm).dmYResolution = p.dpi as i16;
+                    }
+                    Request::Sheet(orientation) => {
+                        // A named paper, not a size of the page's own: the
+                        // label's width, length and form name are dropped, and
+                        // the resolution stays the driver's (the plan scales
+                        // the sheet to it).
+                        (*dm).dmFields = ((*dm).dmFields
+                            & !(DM_FORMNAME | DM_PAPERWIDTH | DM_PAPERLENGTH))
+                            | DM_ORIENTATION
+                            | DM_PAPERSIZE
+                            | DM_COPIES
+                            | DM_SCALE
+                            | DM_DUPLEX;
+                        let v = &mut (*dm).Anonymous1.Anonymous1;
+                        v.dmOrientation = orientation.devmode();
+                        v.dmPaperSize = DMPAPER_A4 as i16;
+                        v.dmCopies = 1;
+                        v.dmScale = 100;
+                        (*dm).dmDuplex = DMDUP_SIMPLEX;
+                    }
+                }
                 let mut output = buffer.clone();
                 let out = output.as_mut_ptr().cast::<DEVMODEW>();
                 let merged = DocumentPropertiesW(
@@ -486,6 +682,26 @@ mod native {
                         "driver_failure",
                     ));
                 }
+                if matches!(request, Request::Sheet(_))
+                    && !devmode_fits(
+                        (*out).dmSize as usize,
+                        (*out).dmDriverExtra as usize,
+                        needed as usize,
+                        size_of::<DEVMODEW>(),
+                    )
+                {
+                    return Err(refuse(
+                        log,
+                        "DEVMODE.size.merged",
+                        0,
+                        format!(
+                            "dm_size={} dm_driver_extra={} needed={needed}",
+                            (*out).dmSize,
+                            (*out).dmDriverExtra
+                        ),
+                        "driver_failure",
+                    ));
+                }
                 let v = (*out).Anonymous1.Anonymous1;
                 let mode = DriverMode {
                     orientation: v.dmOrientation,
@@ -496,12 +712,10 @@ mod native {
                     paper_length: v.dmPaperLength,
                     quality: v.dmPrintQuality,
                     y_resolution: (*out).dmYResolution,
+                    duplex: ((*out).dmFields & DM_DUPLEX != 0).then_some((*out).dmDuplex),
                 };
-                if v.dmOrientation != DMORIENT_PORTRAIT as i16
-                    || v.dmCopies != 1
-                    || v.dmScale != 100
-                {
-                    log(geometry_line(p, None, &mode));
+                if !mode_holds(request, &mode) {
+                    log(geometry_line(p, request, None, &mode));
                     return Err(Failure::before("geometry_mismatch"));
                 }
                 let dc = CreateDCW(wide("WINSPOOL").as_ptr(), name.as_ptr(), null(), out);
@@ -520,10 +734,19 @@ mod native {
                     printable_width: cap(HORZRES),
                     printable_height: cap(VERTRES),
                 };
-                let device = Self { dc, caps };
-                if check_geometry(p, caps).is_err() {
-                    log(geometry_line(p, Some(caps), &mode));
-                    return Err(Failure::before("geometry_mismatch"));
+                // The device owns the context from here: every refusal below
+                // drops it (`DeleteDC`).
+                let mut device = Self {
+                    dc,
+                    caps,
+                    plan: None,
+                };
+                match plan_of(request, p, caps) {
+                    Ok(plan) => device.plan = plan,
+                    Err(code) => {
+                        log(geometry_line(p, request, Some(caps), &mode));
+                        return Err(Failure::before(code));
+                    }
                 }
                 Ok(device)
             }
@@ -593,6 +816,42 @@ mod native {
                 ],
             };
             let data = dib_pixels(p);
+            if let Some(plan) = self.plan {
+                // COLORONCOLOR drops or repeats whole dots: no smoothing, no fit.
+                if unsafe { SetStretchBltMode(self.dc, COLORONCOLOR) } == 0 {
+                    return Err(Step {
+                        name: "SetStretchBltMode",
+                        error: last_error(),
+                        detail: "returned=0".into(),
+                    });
+                }
+                let drawn = unsafe {
+                    StretchDIBits(
+                        self.dc,
+                        plan.x,
+                        plan.y,
+                        plan.width,
+                        plan.height,
+                        0,
+                        0,
+                        p.width,
+                        p.height,
+                        data.as_ptr().cast(),
+                        (&info as *const Info).cast(),
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    )
+                };
+                return if sheet_blit_ok(drawn) {
+                    Ok(())
+                } else {
+                    Err(Step {
+                        name: "StretchDIBits",
+                        error: last_error(),
+                        detail: sheet_blit_detail(drawn, &plan),
+                    })
+                };
+            }
             let c = self.caps;
             let w = (p.width - c.offset_x).min(c.printable_width);
             let h = (p.height - c.offset_y).min(c.printable_height);
@@ -843,7 +1102,7 @@ mod tests {
 
     #[test]
     fn a_page_that_is_not_mono_raster_never_reaches_a_queue() {
-        let refused = print("Godex G500".into(), "AAAA".into(), DOCUMENT.into());
+        let refused = print("Godex G500".into(), "AAAA".into(), DOCUMENT.into(), None);
         assert_eq!(
             serde_json::to_value(&refused).unwrap(),
             serde_json::json!({
@@ -876,7 +1135,7 @@ mod tests {
     }
 
     fn refusal(queue: &str, payload: String, name: &str) -> serde_json::Value {
-        serde_json::to_value(print(queue.into(), payload, name.into())).unwrap()
+        serde_json::to_value(print(queue.into(), payload, name.into(), None)).unwrap()
     }
 
     fn failed(code: &str) -> serde_json::Value {
@@ -1082,6 +1341,7 @@ mod tests {
             paper_length: 100,
             quality: 203,
             y_resolution: 203,
+            duplex: None,
         };
         let caps = Caps {
             dpi_x: 200,
@@ -1094,13 +1354,26 @@ mod tests {
             printable_height: 71,
         };
         assert_eq!(
-            geometry_line(&page, Some(caps), &mode),
-            "standalone: driver print step=geometry error=0 page_dots=80x80 page_dpi=203 \
-             page_bounds=1,2,70,71 caps_dpi=200x201 caps_paper=79x78 caps_offset=3,4 \
-             caps_printable=70x71 mode_orientation=1 mode_copies=1 mode_scale=100 \
-             mode_paper=256 mode_paper_size=100x100 mode_quality=203 mode_y_resolution=203"
+            geometry_line(&page, Request::Label, Some(caps), &mode),
+            "standalone: driver print step=geometry error=0 request=label page_dots=80x80 \
+             page_dpi=203 page_bounds=1,2,70,71 caps_dpi=200x201 caps_paper=79x78 \
+             caps_offset=3,4 caps_printable=70x71 mode_orientation=1 mode_copies=1 \
+             mode_scale=100 mode_paper=256 mode_paper_size=100x100 mode_quality=203 \
+             mode_y_resolution=203 mode_duplex=none"
         );
-        assert!(geometry_line(&page, None, &mode).contains(" caps=unread mode_orientation=1 "));
+        assert!(geometry_line(&page, Request::Label, None, &mode)
+            .contains(" caps=unread mode_orientation=1 "));
+        let sheet = DriverMode {
+            duplex: Some(2),
+            ..mode
+        };
+        let line = geometry_line(&page, Request::Sheet(Orientation::Landscape), None, &sheet);
+        assert!(line.contains(" request=a4_landscape "), "{line}");
+        assert!(line.ends_with(" mode_duplex=2"), "{line}");
+        assert!(
+            geometry_line(&page, Request::Sheet(Orientation::Portrait), None, &mode)
+                .contains(" request=a4_portrait ")
+        );
     }
 
     #[test]
@@ -1131,6 +1404,7 @@ mod tests {
             "Godex G500".into(),
             "AAAA".into(),
             DOCUMENT.into(),
+            None,
             &mut |l| lines.push(l),
         );
         assert!(matches!(outcome, Outcome::Failed { .. }));
@@ -1140,9 +1414,13 @@ mod tests {
         );
         // The queue, the document and the page never reach the log.
         let mut lines = Vec::new();
-        print_logged("Godex G500".into(), payload(), DOCUMENT.into(), &mut |l| {
-            lines.push(l)
-        });
+        print_logged(
+            "Godex G500".into(),
+            payload(),
+            DOCUMENT.into(),
+            None,
+            &mut |l| lines.push(l),
+        );
         assert!(!lines.is_empty());
         for line in &lines {
             assert!(line.starts_with("standalone: driver print "), "{line}");
@@ -1159,13 +1437,435 @@ mod tests {
         #[cfg(not(windows))]
         {
             let mut lines = Vec::new();
-            print_logged("Godex G500".into(), payload(), DOCUMENT.into(), &mut |l| {
-                lines.push(l)
-            });
+            print_logged(
+                "Godex G500".into(),
+                payload(),
+                DOCUMENT.into(),
+                None,
+                &mut |l| lines.push(l),
+            );
             assert_eq!(
                 lines,
                 ["standalone: driver print refused code=unsupported_platform phase=before_start"]
             );
+        }
+    }
+
+    // ---- plan А4: the sheet request ----
+
+    use super::super::sheet::{a4_page_bytes, blank_page_bytes};
+
+    fn mode() -> DriverMode {
+        DriverMode {
+            orientation: 1,
+            copies: 1,
+            scale: 100,
+            paper: 9,
+            paper_width: 0,
+            paper_length: 0,
+            quality: 600,
+            y_resolution: 600,
+            duplex: None,
+        }
+    }
+
+    fn base64_of(bytes: &[u8]) -> String {
+        STANDARD.encode(bytes)
+    }
+
+    fn a4_payload(orientation: Orientation) -> String {
+        base64_of(&a4_page_bytes(orientation, [118, 118, 2000, 2000]))
+    }
+
+    /// The lines a print leaves, with the paper it was asked for.
+    fn print_paper(
+        queue: &str,
+        payload: String,
+        name: &str,
+        paper: Option<&str>,
+    ) -> (serde_json::Value, Vec<String>) {
+        let mut lines = Vec::new();
+        let outcome = print_logged(
+            queue.into(),
+            payload,
+            name.into(),
+            paper.map(str::to_owned),
+            &mut |l| lines.push(l),
+        );
+        (serde_json::to_value(outcome).unwrap(), lines)
+    }
+
+    #[test]
+    fn the_paper_is_absent_for_a_label_or_exactly_a4() {
+        assert_eq!(paper_of(None).unwrap(), Paper::Label);
+        assert_eq!(paper_of(Some("a4")).unwrap(), Paper::A4);
+        for word in ["A4", "a5", "", " a4", "a4 ", "label", "a4\0", "letter"] {
+            let step = paper_of(Some(word)).unwrap_err();
+            assert_eq!(
+                step_line(&step, None),
+                "standalone: driver print step=paper error=0 reason=unknown_paper",
+                "{word:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sheet_page_must_be_a_300_dpi_a4_page_and_names_its_orientation() {
+        for (orientation, request) in [
+            (Orientation::Portrait, Request::Sheet(Orientation::Portrait)),
+            (
+                Orientation::Landscape,
+                Request::Sheet(Orientation::Landscape),
+            ),
+        ] {
+            let bytes = a4_page_bytes(orientation, [118, 118, 2000, 2000]);
+            let page = decode(&bytes).unwrap();
+            assert_eq!(request_of(Paper::A4, &page).unwrap(), request);
+            // The same page asked as a label stays a label, whatever its size.
+            assert_eq!(request_of(Paper::Label, &page).unwrap(), Request::Label);
+        }
+        // A label page, an A4 page at 203 dpi, an A5 page at 300 dpi.
+        let fixture: Vec<u8> = STANDARD.decode(payload()).unwrap();
+        let label = decode(&fixture).unwrap();
+        let step = request_of(Paper::A4, &label).unwrap_err();
+        assert_eq!(
+            step_line(&step, None),
+            "standalone: driver print step=paper error=0 reason=not_a4 page_dpi=203 \
+             page_dots=80x80 page_mm=10x10"
+        );
+        for bytes in [
+            blank_page_bytes(203, (210.0, 297.0), [0; 4]),
+            blank_page_bytes(300, (148.0, 210.0), [0; 4]),
+        ] {
+            let page = decode(&bytes).unwrap();
+            assert!(request_of(Paper::A4, &page).is_err());
+        }
+        // The line names the page's dots and millimetres, width first.
+        let a5 = blank_page_bytes(300, (148.0, 210.0), [0; 4]);
+        let step = request_of(Paper::A4, &decode(&a5).unwrap()).unwrap_err();
+        assert_eq!(
+            step_line(&step, None),
+            "standalone: driver print step=paper error=0 reason=not_a4 page_dpi=300 \
+             page_dots=1748x2480 page_mm=148x210"
+        );
+    }
+
+    #[test]
+    fn the_request_names_are_what_the_geometry_line_prints() {
+        assert_eq!(Request::Label.name(), "label");
+        assert_eq!(Request::Sheet(Orientation::Portrait).name(), "a4_portrait");
+        assert_eq!(
+            Request::Sheet(Orientation::Landscape).name(),
+            "a4_landscape"
+        );
+    }
+
+    #[test]
+    fn a_label_keeps_what_it_asked_of_the_driver_and_only_that() {
+        assert!(mode_holds(Request::Label, &mode()));
+        for broken in [
+            DriverMode {
+                orientation: 2,
+                ..mode()
+            },
+            DriverMode {
+                copies: 2,
+                ..mode()
+            },
+            DriverMode {
+                copies: 0,
+                ..mode()
+            },
+            DriverMode {
+                scale: 99,
+                ..mode()
+            },
+            DriverMode { scale: 0, ..mode() },
+        ] {
+            assert!(!mode_holds(Request::Label, &broken));
+        }
+        // Paper and duplex are the sheet's concern, not the label's.
+        for free in [
+            DriverMode {
+                paper: 256,
+                ..mode()
+            },
+            DriverMode {
+                duplex: Some(2),
+                ..mode()
+            },
+        ] {
+            assert!(mode_holds(Request::Label, &free));
+        }
+    }
+
+    #[test]
+    fn a_sheet_keeps_a4_the_orientation_one_copy_full_scale_and_simplex() {
+        let portrait = Request::Sheet(Orientation::Portrait);
+        let landscape = Request::Sheet(Orientation::Landscape);
+        assert!(mode_holds(portrait, &mode()));
+        assert!(mode_holds(
+            portrait,
+            &DriverMode {
+                duplex: Some(1),
+                ..mode()
+            }
+        ));
+        assert!(mode_holds(
+            landscape,
+            &DriverMode {
+                orientation: 2,
+                ..mode()
+            }
+        ));
+        // The driver turned the page, or kept the other orientation.
+        assert!(!mode_holds(landscape, &mode()));
+        assert!(!mode_holds(
+            portrait,
+            &DriverMode {
+                orientation: 2,
+                ..mode()
+            }
+        ));
+        for broken in [
+            DriverMode { paper: 8, ..mode() },
+            DriverMode {
+                paper: 256,
+                ..mode()
+            },
+            DriverMode { paper: 0, ..mode() },
+            DriverMode {
+                duplex: Some(2),
+                ..mode()
+            },
+            DriverMode {
+                duplex: Some(3),
+                ..mode()
+            },
+            DriverMode {
+                copies: 2,
+                ..mode()
+            },
+            DriverMode {
+                scale: 50,
+                ..mode()
+            },
+        ] {
+            assert!(!mode_holds(portrait, &broken), "{broken:?}");
+        }
+    }
+
+    fn laser_caps() -> Caps {
+        Caps {
+            dpi_x: 600,
+            dpi_y: 600,
+            width: 4960,
+            height: 7016,
+            offset_x: 100,
+            offset_y: 100,
+            printable_width: 4760,
+            printable_height: 6816,
+        }
+    }
+
+    #[test]
+    fn the_plan_of_a_label_is_the_labels_geometry_check_and_of_a_sheet_the_draw_plan() {
+        // A label page of 80 x 80 dots on a device that holds it 1:1.
+        let fixture: Vec<u8> = STANDARD.decode(payload()).unwrap();
+        let label = decode(&fixture).unwrap();
+        let fits = Caps {
+            dpi_x: 203,
+            dpi_y: 203,
+            width: 80,
+            height: 80,
+            offset_x: 0,
+            offset_y: 0,
+            printable_width: 80,
+            printable_height: 80,
+        };
+        assert_eq!(plan_of(Request::Label, &label, fits), Ok(None));
+        let off = Caps { dpi_y: 300, ..fits };
+        assert_eq!(
+            plan_of(Request::Label, &label, off),
+            Err("geometry_mismatch")
+        );
+        // A sheet.
+        let bytes = a4_page_bytes(Orientation::Portrait, [118, 118, 2362, 3390]);
+        let sheet = decode(&bytes).unwrap();
+        let request = Request::Sheet(Orientation::Portrait);
+        assert_eq!(
+            plan_of(request, &sheet, laser_caps()),
+            Ok(Some(DrawPlan {
+                scale: 2,
+                x: -100,
+                y: -100,
+                width: 4960,
+                height: 7016,
+            }))
+        );
+        let letter = Caps {
+            width: 5100,
+            height: 6600,
+            ..laser_caps()
+        };
+        assert_eq!(plan_of(request, &sheet, letter), Err("geometry_mismatch"));
+        // A label's geometry check does not accept a sheet's device, and the
+        // other way round: an 80 dot device is no A4.
+        assert_eq!(plan_of(request, &sheet, fits), Err("geometry_mismatch"));
+    }
+
+    #[test]
+    fn a_driver_devmode_must_claim_a_size_that_fits_its_buffer() {
+        // 220 bytes is the struct, 300 the buffer asked for.
+        assert!(devmode_fits(220, 80, 300, 220));
+        assert!(devmode_fits(220, 0, 300, 220));
+        assert!(!devmode_fits(219, 0, 300, 220));
+        assert!(!devmode_fits(220, 81, 300, 220));
+        assert!(!devmode_fits(301, 0, 300, 220));
+        assert!(devmode_fits(300, 0, 300, 220));
+    }
+
+    #[test]
+    fn a_sheet_blit_is_a_positive_number_of_scan_lines() {
+        assert!(sheet_blit_ok(1));
+        assert!(sheet_blit_ok(3508));
+        assert!(!sheet_blit_ok(0));
+        assert!(!sheet_blit_ok(-1));
+        let plan = DrawPlan {
+            scale: 2,
+            x: -100,
+            y: -90,
+            width: 4960,
+            height: 7016,
+        };
+        assert_eq!(
+            sheet_blit_detail(0, &plan),
+            "returned=0 expected>0 scale=2 at=-100,-90 blit=4960x7016"
+        );
+        let step = Step {
+            name: "StretchDIBits",
+            error: 87,
+            detail: sheet_blit_detail(-1, &plan),
+        };
+        assert_eq!(
+            step_line(&step, Some(5)),
+            "standalone: driver print step=StretchDIBits error=87 job=5 returned=-1 \
+             expected>0 scale=2 at=-100,-90 blit=4960x7016"
+        );
+    }
+
+    #[test]
+    fn an_a4_page_goes_through_the_same_calls_and_answers_its_receipt() {
+        let bytes = a4_page_bytes(Orientation::Portrait, [118, 118, 2362, 3390]);
+        let page = decode(&bytes).unwrap();
+        assert!(plan_of(Request::Sheet(Orientation::Portrait), &page, laser_caps()).is_ok());
+        let mut f = Fake::default();
+        let mut lines = Vec::new();
+        let receipt = submit(&mut f, &page, "HP LaserJet", DOCUMENT, &mut |l| {
+            lines.push(l)
+        })
+        .unwrap();
+        assert_eq!(receipt.job_id, 42);
+        assert_eq!(f.calls, ["begin", "page", "draw", "end_page", "end"]);
+        assert!(lines.is_empty());
+        // A failing blit leaves the one line with the job, aborts, never retries.
+        for step in ["draw", "end"] {
+            let mut f = Fake {
+                fail: Some(step),
+                ..Default::default()
+            };
+            let e = submit(&mut f, &page, "HP LaserJet", DOCUMENT, &mut |_| {}).unwrap_err();
+            assert_eq!(e.phase, "delivery_unknown", "{step}");
+            assert_eq!(f.calls.last(), Some(&"abort"));
+            assert_eq!(f.calls.iter().filter(|s| **s == "begin").count(), 1);
+        }
+    }
+
+    #[test]
+    fn an_unknown_paper_is_refused_before_the_page_with_one_line_and_no_echo() {
+        for word in ["a5", "A4", "secret-paper-word"] {
+            let (outcome, lines) = print_paper("Godex G500", "AAAA".into(), DOCUMENT, Some(word));
+            assert_eq!(outcome, failed("invalid_artifact"), "{word}");
+            assert_eq!(
+                lines,
+                [
+                    "standalone: driver print step=paper error=0 reason=unknown_paper",
+                    "standalone: driver print refused code=invalid_artifact phase=before_start"
+                ],
+                "{word}"
+            );
+        }
+        // Even with a good page and an A4 name the wrong word does not print.
+        let (outcome, _) = print_paper(
+            "Godex G500",
+            a4_payload(Orientation::Portrait),
+            DOCUMENT,
+            Some("a5"),
+        );
+        assert_eq!(outcome, failed("invalid_artifact"));
+    }
+
+    #[test]
+    fn a_page_that_is_not_a4_never_reaches_a_queue_as_a_sheet() {
+        let (outcome, lines) = print_paper("Godex G500", payload(), DOCUMENT, Some("a4"));
+        assert_eq!(outcome, failed("invalid_artifact"));
+        assert_eq!(
+            lines,
+            [
+                "standalone: driver print step=paper error=0 reason=not_a4 page_dpi=203 \
+                 page_dots=80x80 page_mm=10x10",
+                "standalone: driver print refused code=invalid_artifact phase=before_start"
+            ]
+        );
+        // The sheet check comes before the queue's.
+        let (outcome, _) = print_paper(" ", payload(), DOCUMENT, Some("a4"));
+        assert_eq!(outcome, failed("invalid_artifact"));
+        // A bad artifact is still the artifact's refusal, with no paper line.
+        let (outcome, lines) = print_paper("Godex G500", "AAAA".into(), DOCUMENT, Some("a4"));
+        assert_eq!(outcome, failed("invalid_artifact"));
+        assert_eq!(
+            lines,
+            ["standalone: driver print refused code=invalid_artifact phase=before_start"]
+        );
+    }
+
+    #[test]
+    fn a_good_sheet_then_meets_the_queue_and_the_document_checks_in_their_order() {
+        for orientation in [Orientation::Portrait, Orientation::Landscape] {
+            let sheet = a4_payload(orientation);
+            let (outcome, _) = print_paper(" ", sheet.clone(), DOCUMENT, Some("a4"));
+            assert_eq!(outcome, failed("queue_unavailable"));
+            let (outcome, _) = print_paper("HP LaserJet", sheet.clone(), "Markiro:x", Some("a4"));
+            assert_eq!(outcome, failed("invalid_artifact"));
+            // The A4 page asked as a label is a label: the queue check follows.
+            let (outcome, _) = print_paper(" ", sheet, DOCUMENT, None);
+            assert_eq!(outcome, failed("queue_unavailable"));
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_a_good_sheet_is_unsupported_not_invalid() {
+        for orientation in [Orientation::Portrait, Orientation::Landscape] {
+            let sheet = a4_payload(orientation);
+            let (outcome, lines) = print_paper("HP LaserJet", sheet.clone(), DOCUMENT, Some("a4"));
+            assert_eq!(outcome, failed("unsupported_platform"));
+            assert_eq!(
+                lines,
+                ["standalone: driver print refused code=unsupported_platform phase=before_start"]
+            );
+            let (outcome, _) = print_paper("HP LaserJet", sheet, DOCUMENT, None);
+            assert_eq!(outcome, failed("unsupported_platform"));
+        }
+    }
+
+    #[test]
+    fn an_a4_page_at_300_dpi_is_inside_the_pages_limits() {
+        // The raster limit is 2 MiB and the sides 10-300 mm: A4 is 1.04 MiB.
+        for orientation in [Orientation::Portrait, Orientation::Landscape] {
+            let bytes = a4_page_bytes(orientation, [0; 4]);
+            assert!(bytes.len() < MAX_BYTES);
+            assert!(artifact(&base64_of(&bytes)).is_ok());
         }
     }
 }

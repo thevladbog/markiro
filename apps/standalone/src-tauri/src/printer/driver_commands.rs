@@ -64,14 +64,17 @@ async fn observe_within(
 
 /// Prints one `mono-raster-v1` page to the Windows queue `queue` as the
 /// document `documentName` (`Markiro:<uuid>`). Always answers an [`Outcome`].
+/// `paper` is absent for a label and `"a4"` for an A4 sheet (plan А4); any
+/// other word is `invalid_artifact` before the queue is opened.
 #[tauri::command]
 pub async fn print_windows_raster(
     queue: String,
     payload_base64: String,
     document_name: String,
+    paper: Option<String>,
 ) -> Result<Outcome, String> {
     Ok(print_within(DRIVER_WAIT, move || {
-        driver::print(queue, payload_base64, document_name)
+        driver::print(queue, payload_base64, document_name, paper)
     })
     .await)
 }
