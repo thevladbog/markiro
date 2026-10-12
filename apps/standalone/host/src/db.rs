@@ -126,3 +126,25 @@ pub async fn commit_with_revision(
     })
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// sqlx records the checksum of each migration file's bytes: a CRLF
+    /// checkout (Windows with `core.autocrlf`) would build a host whose
+    /// checksums differ from every other build's, so a database or a copy
+    /// made by one build would be refused by the other. `.gitattributes`
+    /// pins the migrations to LF; on a checkout that lost the pin this fails.
+    #[test]
+    fn the_migrations_are_embedded_with_lf_line_endings() {
+        assert!(MIGRATOR.iter().count() > 0);
+        for migration in MIGRATOR.iter() {
+            assert!(
+                !migration.sql.contains('\r'),
+                "migration {} has a carriage return",
+                migration.version
+            );
+        }
+    }
+}

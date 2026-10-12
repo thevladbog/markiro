@@ -829,6 +829,23 @@ fn decode<'r, T: sqlx::Decode<'r, Sqlite>>(
 mod tests {
     use super::*;
 
+    /// sqlx records the checksum of each migration file's bytes: a CRLF
+    /// checkout (Windows with `core.autocrlf`) would build a shell whose
+    /// checksums differ from every other build's, and a local database made
+    /// by one build would not open in the other. `.gitattributes` pins the
+    /// migrations to LF; on a checkout that lost the pin this fails.
+    #[test]
+    fn the_migrations_are_embedded_with_lf_line_endings() {
+        assert!(MIGRATOR.iter().count() > 0);
+        for migration in MIGRATOR.iter() {
+            assert!(
+                !migration.sql.contains('\r'),
+                "migration {} has a carriage return",
+                migration.version
+            );
+        }
+    }
+
     #[test]
     fn single_statements_with_parameters_pass() {
         for sql in [
