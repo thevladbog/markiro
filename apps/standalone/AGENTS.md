@@ -3112,7 +3112,8 @@ again after a full batch, and after a failed send by the sync's waits (2, 4, 8,
 request after a local write does not cut a failed send's pause short
 (`factsNow` returns while `factRetry` is set; going online, a revision, the
 reconciler and the pause's own end still send at once), so the stuck line's
-attempts count retries and not scans; a refused key ends the link. It lives as long as the link: a refusal or another
+attempts count retries and not scans (except in the `watchFailed` mode, where
+no pause is armed; see «Outbox recovery»); a refused key ends the link. It lives as long as the link: a refusal or another
 host that waits for the operator to leave the shift stops the link and the
 delivery, and the work screen asks the host nothing meanwhile (`FloorApp`'s
 `rejectionPending`). Every local write of the floor and every batch of receipts
@@ -3470,11 +3471,28 @@ Known limits of the retention, and who carries each:
   `resolved_at IS NULL`. The outbox has no quarantined state; the reference
   copies' `sync_quarantine` is not a shift's and the retention never reads it.
   The clause `r` that says so plans on the index `outbox_shift`, which is not
-  covering, so the hourly pass reads the payload rows
-  of every shift a refusal holds (O(records of that shift) every hour, tens of
-  ms for tens of thousands of records; not measured at 600 000). A covering
-  partial index on the unresolved refusals would take a new shell migration;
-  none was added.
+  covering, so the hourly pass reads the rows of every shift a refusal holds.
+  Measured in the final review (node:sqlite 3.53, no `ANALYZE`, `DUE_SHIFTS_SQL`
+  over 600 000 records): about 0.2 µs per record of a held shift — 131 ms
+  without `r` against 289 ms with it when all 12 shifts of 50 000 records are
+  held, 132 against 200 ms with 10 of 300 shifts of 2 000 held, and 57 against
+  117 ms at 300 000 records with none held. The base of about 130 ms is plan
+  ХП's walk of every accepted record (`outbox_settled`) and dominates either
+  way. The pass runs at start and at most once an hour, on a reader connection
+  of the WAL pool, so it never blocks a floor write. A covering partial index
+  on `outbox (shift_id, host_id, device_id)` over the unresolved refused and
+  conflicting records (160 ms in the worst case above) needs a new shell
+  migration and is deferred: take it with the next one, together with the
+  receipt's index below.
+- The receipt's fifth statement (it clears `needs_fix` of a box none of whose
+  scans is in conflict any more) checks `NOT EXISTS … conflict` through
+  `floor_scans_shift (host_id, device_id, shift_id)`, which walks the box's
+  whole shift for each marked box: 0.4 ms with no box marked, about 10 ms per
+  marked box in a shift of 100 000 scans (995 ms for a batch of 100 accepted
+  scans of 100 marked boxes), inside the single-writer receipt transaction.
+  Realistic only after a restore re-sends scans that conflicted before, so for
+  few boxes. Not done: an index `floor_scans (box_id) WHERE conflict = 1` with
+  the next shell migration.
 - A station clock set forward purges early (the cutoff is the clock's);
   checking the clock is not part of plan РК-С and stays open.
 - A pass that fails leaves no trace but the next pass trying again: plan 2b or
@@ -3572,8 +3590,22 @@ Known limits of the queue screen, none of it hidden by a green test:
   sign-out while a decision is written unmounts the screen; the write still
   completes (the module is crash-safe and its parts are resumable) and the
   status bar is told. Judged against N9/N13 and accepted.
+- For the same reason the queue screen is a fact writer that the forget's
+  conditions («Two windows stay by design»: the fact writer stopped) do not
+  cover: neither the work gate tracks it nor stopping the link stops it. A
+  refusal of the device while it is open ends the session at once (`reject`
+  with `floorWork` null) and unmounts it, while a resend may still be writing
+  its parts. The forget counts and clears in one `BEGIN IMMEDIATE`
+  transaction, so the only window is a part committed between that clear and
+  the removal of `device.json`: those copies stay under the old pairing (an
+  older pairing's records, named on the status bar), their originals are
+  marked `resent`, and the device was refused anyway. Harmless; accepted.
 - Offline scans do not count attempts: the outbox sends nothing while the link
   is not `online` (plan РК-С), and an attempt is counted only when a send goes.
+- In the degraded `watchFailed` mode (the app cannot watch the link at all)
+  `online` stays false, so a failed send arms no pause (`factRetry`) and every
+  screen's request sends at once: there the stuck line's attempts count
+  requests again, as before plan ОЧ.
 - A second block with the same id keeps the first one's reason in
   `floor_block_drops` (`ON CONFLICT DO NOTHING`); `floor_block_drops` has no
   `shift_id`, so the retention never purges it, and a forget keeps it.
@@ -4065,7 +4097,10 @@ included (`block_overlap`). One revision when anything was registered, one
 whatever became of each block. Only a station, only after a restore (`conflict`
 on `no_restore`), 0–64 blocks, none only in the last part (an empty part with
 `more` is `blocks`); every part but the last says `more`, which the last never
-writes (an older host still reads what a new station sends). An empty last part
+writes. An older host reads the last part of a new station only:
+`KnownBlocksRequest` is `deny_unknown_fields`, so a host built before plan ОЧ
+refuses a part with `more: true`, which only a station holding more than 64
+blocks sends; host and stations ship in one version. An empty last part
 (a station that never took a block, plan ХП) only marks the station.
 
 A receipt is kept for good (plan 2a2), and a copy may lack the shift, the

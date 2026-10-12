@@ -671,8 +671,8 @@ describe("«Отправить снова», beyond the plan's examples", () => 
     expect(count(db)).toBe(1);
   });
 
-  it("carries a part of at most a megabyte, whatever the records weigh", () => {
-    // A part is bound as one JSON text, each record at most MAX_RECORD_BYTES.
+  it("carries at most a megabyte of payloads in a part, whatever the records weigh", () => {
+    // Each record at most MAX_RECORD_BYTES; the JSON list around them adds their escaping.
     expect(RESEND_CHUNK * MAX_RECORD_BYTES).toBeLessThanOrEqual(1024 * 1024);
   });
 

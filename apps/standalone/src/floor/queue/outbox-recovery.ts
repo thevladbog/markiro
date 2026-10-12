@@ -5,8 +5,12 @@ import { LocalDbError, type LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 
 /**
- * The most refused records one transaction carries again: a record is at most
- * 16 KiB (`MAX_RECORD_BYTES`), so a part stays under a megabyte of bound JSON.
+ * The most refused records one transaction carries again. A record is at most
+ * 16 KiB (`MAX_RECORD_BYTES`), so a part's payloads stay under a megabyte; the
+ * JSON list that carries them escapes each payload once more (up to about
+ * twice its size) and is bound twice, by the insert and by the mark. The shell
+ * bounds the SQL text (`MAX_SQL_BYTES`) and the number of values, not the size
+ * of one, so the part's size costs memory and the transaction's length only.
  */
 export const RESEND_CHUNK = 50;
 
