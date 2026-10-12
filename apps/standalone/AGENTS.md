@@ -942,9 +942,20 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   left out), so no badge code ever reaches the file. The SSCC start of each
   prefix and extension is one above the highest serial the cloud handed out
   (counter − 1, any block's end, revoked ones included, and any box's or
-  pallet's SSCC), rounded up to the next 10 000; the file's `cutover` names
-  the value the cloud's counter moves to (start + 1 000 000 boxes or 100 000
-  pallets) for the runbook (`docs/runbooks/standalone-cloud-cutover.md`).
+  pallet's SSCC, under any prefix), rounded up to the next 10 000; the file's
+  `cutover` names the value the cloud's counter moves to (start + 1 000 000
+  boxes or 100 000 pallets) for the runbook
+  (`docs/runbooks/standalone-cloud-cutover.md`). The organization's GLN prefix
+  always has BOTH rows (boxes and pallets), even an extension the cloud never
+  issued under (start at its first serial): the standalone issues under both,
+  so a rollback must find both cloud counters moved. Any serial another cloud
+  tenant holds under the organization's prefix stops the export
+  (`sscc_prefix_shared`, the other tenant keeps issuing in the live cloud)
+  unless `--accept-shared-prefix`, which adds a note of that code; under a
+  counterparty's prefix it is only reported. The cloud's A4 pallet sheets
+  (`format = 'pallet_sheet_v2'`) are left out (`template_dropped`, reason
+  `pallet_sheet`; their defaults counted in `pallet_sheet_defaults_lost`), and
+  the host refuses a template whose spec is a sheet.
   Shift-number counters move for every month the cloud drew a number in; a
   month whose shifts are past its counter (`shift_counter_behind`) or whose
   counter cannot be read (`shift_counter_unreadable`) stops the export. The
@@ -952,12 +963,17 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   without `checksum`; `src/host/cloud-import.ts` computes the same.
   `test/export-sql.test.mjs` runs only with `STANDALONE_EXPORT_TEST_DATABASE_URL`
   (CI's `verify-api-tests`, after the cloud migrations) and seeds two tenants
-  of its own. The CLI (`cli.mjs`) writes the file with `wx` and mode 0600
-  (a no-op on Windows), prints a summary without a secret on stdout and, on
-  stderr, a warning for every other cloud tenant that issued SSCC under one of
-  this tenant's prefixes (it is NOT in the file) and the credential-verifier
-  warning. A file whose cloud was not clean (`--rehearsal`) carries
-  `rehearsal: true`.
+  of its own. The CLI (`cli.mjs`) needs `--out-dir` (no default: the working
+  directory may be a repository, whose `.gitignore` ignores
+  `markiro-cloud-export-*.json` anyway) and writes the file whole or not at
+  all (`writeWhole`: an owner-only temporary file next to it, fsync, then a
+  hard link that never replaces a file, or a checked rename where the file
+  system has no hard links; the temporary file is removed on any failure;
+  mode 0600 is a no-op on Windows). It prints a summary without a secret on
+  stdout and, on stderr, a line for every other cloud tenant that issues SSCC
+  under one of this tenant's prefixes (its numbers are NOT in the file) and
+  the credential-verifier warning. A file whose cloud was not clean
+  (`--rehearsal`) carries `rehearsal: true`.
 - `POST /v1/office/import` (`routes/cloud_import.rs`, administrators, its
   own 32 MiB body limit): its extractor checks the office session and the
   administrator role BEFORE the body is read, and answers every unreadable
@@ -1000,7 +1016,11 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   `useOfficeMutation`, because a mutation keeps its `variables`), not in a
   log or `console`, and it is dropped when the flow ends, the file is
   replaced or removed, or the page closes. A done import resets the office's
-  cached data.
+  cached data. A rehearsal file is imported only after a checkbox of the
+  confirmation dialog (asked again at each opening; a submit of the form
+  without it is refused too), and its done card says to remove the trial
+  site; a file exported more than 12 hours before it was read is shown with
+  its age.
 
 Never log, store or print a verifier, the salt or a badge code in any of the
 three parts; an error names a field path, never a value. The transfer file is
