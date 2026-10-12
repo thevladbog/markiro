@@ -925,6 +925,93 @@ bring bwip-js, about 0.9 MB) and the font check (opentype.js, about 0.2 MB)
 load on demand as chunks of their own (`label-print.ts`,
 `BROWSER_LABEL_RENDERING`), so the main chunk stays near 876 kB.
 
+## Cloud import
+
+Plan IMP moves a cloud tenant into a new site (pilot spec §8, §31). Three parts,
+tied by one golden file, `proto/fixtures/cloud-export-file.json`:
+
+- `tools/standalone-export` (root `pnpm test:standalone-export`): `export.sql`
+  reads one tenant through psql in one read-only REPEATABLE READ transaction
+  from a RESTORED COPY of the cloud database (libpq environment, never a
+  password argument), and `transform.mjs` turns it into the file. Its
+  `payload` passes the host's rules as it stands: what the standalone cannot
+  keep is changed or left out there and named in `notes` (the office shows
+  them by code). PIN hashes move byte for byte; the tenant's badge salt
+  becomes the site's, and a badge whose hash is missing or carries another
+  salt is hashed again from its code (trimmed; a code a station cannot read is
+  left out), so no badge code ever reaches the file. The SSCC start of each
+  prefix and extension is one above the highest serial the cloud handed out
+  (counter − 1, any block's end, revoked ones included, and any box's or
+  pallet's SSCC), rounded up to the next 10 000; the file's `cutover` names
+  the value the cloud's counter moves to (start + 1 000 000 boxes or 100 000
+  pallets) for the runbook (`docs/runbooks/standalone-cloud-cutover.md`).
+  Shift-number counters move for every month the cloud drew a number in; a
+  month whose shifts are past its counter (`shift_counter_behind`) or whose
+  counter cannot be read (`shift_counter_unreadable`) stops the export. The
+  checksum is SHA-256 of the canonical JSON (sorted keys) of the whole file
+  without `checksum`; `src/host/cloud-import.ts` computes the same.
+  `test/export-sql.test.mjs` runs only with `STANDALONE_EXPORT_TEST_DATABASE_URL`
+  (CI's `verify-api-tests`, after the cloud migrations) and seeds two tenants
+  of its own. The CLI (`cli.mjs`) writes the file with `wx` and mode 0600
+  (a no-op on Windows), prints a summary without a secret on stdout and, on
+  stderr, a warning for every other cloud tenant that issued SSCC under one of
+  this tenant's prefixes (it is NOT in the file) and the credential-verifier
+  warning. A file whose cloud was not clean (`--rehearsal`) carries
+  `rehearsal: true`.
+- `POST /v1/office/import` (`routes/cloud_import.rs`, administrators, its
+  own 32 MiB body limit): its extractor checks the office session and the
+  administrator role BEFORE the body is read, and answers every unreadable
+  body with a fixed text that quotes nothing. `cloud_import::check` refuses any
+  row the office routes would refuse, with the request's JSON path
+  (`payload.products.2.gtin14`); inside one `begin_write` transaction the route
+  re-checks the administrator, answers a repeat of the same `importId` with the
+  stored summary (no write, no revision, no audit row) and any other import
+  after one with `conflict` `already_imported`, refuses a site that holds a
+  shift, an SSCC block, a category default, a product, a template of its own,
+  an operator or a counterparty (`site_not_empty` with `details.entity`; the
+  wizard's lines and stock templates may be there) and an organization whose
+  GLN is not the file's (`org_gln`), checks the product groups, and then writes
+  every row at one revision and wakes the streams. A file line whose name an
+  active line has is kept as the wizard made it (`linesPresent`). The
+  organization's box and pallet defaults become the file's when it names them;
+  the organization's name, INN, GS1 prefixes and time zone are never
+  rewritten. The site's badge salt becomes the file's (no badge exists yet, so
+  nothing breaks; the `site` record takes it to stations; a file without a salt
+  keeps the site's). SSCC and shift-number counters only move forward. `dryRun`
+  runs all of it and rolls back: no revision, no wake, no audit row. The audit
+  row `import.cloud` (target `site`/`1`, details `importId`, `exportedAt`,
+  `rehearsal`, `sourceTenantId` and the summary) is the import's record: a
+  repeat reads its summary from there, so it must never be deleted (a future
+  audit retention must exclude it), and it holds no hash and no salt. Neither
+  import module may log (`no_secrets_in_logs.rs` walks the sources);
+  `cloud_import_logs.rs` (outside the sandbox) walks a refused, a tried, a done
+  and a repeated import through the process log. Unlike the wizard, the route
+  is not loopback-only: any administrator office session can call it (an
+  open owner question, runbook §9). It accepts a `rehearsal` file.
+- «Сервис → Перенос из облака» (`src/office/import/CloudImportPage.tsx`,
+  administrators): reads the file (`readCloudExportBlob` caps the size at the
+  host's 32 MiB before it reads; then `readCloudExportFile`: JSON, format,
+  version, checksum, then the strict schema), shows its organization (and a
+  site GLN that differs), the SSCC table, the shift numbers and the notes,
+  sends a check (`dryRun`) and only after a passed check the import, with one
+  `importId` per file read, so a retry after a lost answer is the same import.
+  The parsed file (verifiers, salt) lives only in a `useRef`: not in React
+  state, not in the query or mutation cache (it sends through `call`, not
+  `useOfficeMutation`, because a mutation keeps its `variables`), not in a
+  log or `console`, and it is dropped when the flow ends, the file is
+  replaced or removed, or the page closes. A done import resets the office's
+  cached data.
+
+Never log, store or print a verifier, the salt or a badge code in any of the
+three parts; an error names a field path, never a value. The transfer file is
+a credential: it lives on the owner's flash drive and machine only and is
+deleted after the import.
+
+Not verified: a real cloud copy and its volume, `psql` on the CI runner, the
+file chooser in WebView2, a real 32 MiB file and the import of a large catalog
+over IPC. The tool's Postgres test ran on a disposable Postgres 17 container
+only.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
