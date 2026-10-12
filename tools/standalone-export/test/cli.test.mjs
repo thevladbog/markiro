@@ -45,11 +45,27 @@ test("arguments: a tenant is required and nothing unknown is taken", () => {
     tenantId: "imp-test-atoll",
     outDir: ".",
     rehearsal: false,
+    acceptSharedPrefix: false,
     psql: "psql",
   });
   assert.deepEqual(
-    parseArgs(["--rehearsal", "--tenant", "t1", "--out-dir", "/media/usb", "--psql", "/opt/psql"]),
-    { tenantId: "t1", outDir: "/media/usb", rehearsal: true, psql: "/opt/psql" },
+    parseArgs([
+      "--rehearsal",
+      "--tenant",
+      "t1",
+      "--out-dir",
+      "/media/usb",
+      "--accept-shared-prefix",
+      "--psql",
+      "/opt/psql",
+    ]),
+    {
+      tenantId: "t1",
+      outDir: "/media/usb",
+      rehearsal: true,
+      acceptSharedPrefix: true,
+      psql: "/opt/psql",
+    },
   );
   assert.throws(() => parseArgs([]), /--tenant/u);
   assert.throws(() => parseArgs(["--tenant", "a'b"]), /--tenant/u);
@@ -78,6 +94,7 @@ test("the file is written owner-only under its name and the summary names no sec
       "  460068200, короба (0), организация: выдано облаком до 21003, напечатано до 21003, автоном начнёт с 30000, облако перевести на 1030000",
       "  460068200, паллеты (1), организация: выдано облаком до 400, напечатано до 250, автоном начнёт с 10000, облако перевести на 110000",
       "  460123400, короба (0), контрагент «ООО «Берег»»: выдано облаком до —, напечатано до —, автоном начнёт с 1, облако перевести на 1000001",
+      "  460999900, короба (0), неизвестно: выдано облаком до 777, напечатано до 777, автоном начнёт с 10000, облако перевести на 1010000",
       `Замечаний: 26 (их показывает офис автонома перед переносом)`,
       `Контрольная сумма: ${golden.checksum}`,
     ]);
@@ -178,6 +195,8 @@ test("--help prints the usage, the libpq connection, 0600 and the Windows rule, 
   assert.match(text, /папку своего\s+профиля/u);
   assert.match(text, /удалить/u);
   assert.match(text, /--rehearsal/u);
+  assert.match(text, /--accept-shared-prefix/u);
+  assert.match(text, /sscc_prefix_shared/u);
 });
 
 test("every file written is followed by a warning that it holds credential verifiers", async () => {
@@ -204,42 +223,23 @@ test("every file written is followed by a warning that it holds credential verif
   }
 });
 
-test("another tenant's serials under a prefix of this one are warned about, never written", async () => {
+test("another tenant's serials under another prefix are only reported; the file never holds them", async () => {
   const dir = mkdtempSync(join(tmpdir(), "standalone-export-"));
   try {
     const { code, err } = await run(["--tenant", "imp-test-atoll", "--out-dir", dir]);
     assert.equal(code, 0, err.join("\n"));
-    const tail = " — номера могут повториться: решите до переноса (памятка переключения)";
+    const tail = "; автоном под этим префиксом SSCC не выпускает";
     assert.deepEqual(err.slice(0, -CREDENTIAL_WARNING.length), [
-      "Внимание: под префиксом 460068200, короба (0) номера выдавал и другой арендатор этой базы, наибольший 900000; автоном начнёт с 30000" +
+      "Справка: под префиксом 460123400, короба (0) номера выдаёт и другой арендатор этой базы, наибольший 950000" +
         tail,
-      "Внимание: под префиксом 460068200, паллеты (1) номера выдавал и другой арендатор этой базы, наибольший 700000; автоном начнёт с 10000" +
+      "Справка: под префиксом 460123400, паллеты (1) номера выдаёт и другой арендатор этой базы, наибольший 700000" +
         tail,
-      "Внимание: под префиксом 460123400, короба (0) номера выдавал и другой арендатор этой базы, наибольший 500000; автоном начнёт с 1" +
+      "Справка: под префиксом 460700000, короба (0) номера выдаёт и другой арендатор этой базы, наибольший 40" +
         tail,
-      "Внимание: под префиксом 460123400, паллеты (1) номера выдавал и другой арендатор этой базы, наибольший 600000; автоном начнёт с —",
     ]);
     const file = JSON.parse(readFileSync(join(dir, readdirSync(dir)[0]), "utf8"));
     assert.deepEqual(file, golden);
-    assert.ok(!JSON.stringify(file).includes("900000"));
-
-    // The boundary: the first serial the standalone issues is taken at 30000, free at 29999.
-    for (const [maxSerial, overlaps] of [
-      [29_999, false],
-      [30_000, true],
-    ]) {
-      const raw = JSON.parse(rawText);
-      raw.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 0, maxSerial }];
-      const other = mkdtempSync(join(dir, "boundary-"));
-      const result = await run(
-        ["--tenant", "imp-test-atoll", "--out-dir", other],
-        JSON.stringify(raw),
-      );
-      assert.equal(result.code, 0);
-      const line = result.err[0];
-      assert.match(line, new RegExp(`наибольший ${maxSerial}; автоном начнёт с 30000`, "u"));
-      assert.equal(line.endsWith(tail), overlaps, line);
-    }
+    assert.ok(!JSON.stringify(file).includes("950000"));
 
     // No other tenant, no warning (only the credential one).
     const alone = JSON.parse(rawText);
@@ -249,6 +249,52 @@ test("another tenant's serials under a prefix of this one are warned about, neve
       JSON.stringify(alone),
     );
     assert.deepEqual(quiet.err, CREDENTIAL_WARNING);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("another tenant under the organization's prefix stops the export with exit 2, unless accepted", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "standalone-export-"));
+  try {
+    const raw = JSON.parse(rawText);
+    raw.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 1, maxSerial: 12 }];
+    const refused = await run(
+      ["--tenant", "imp-test-atoll", "--out-dir", dir],
+      JSON.stringify(raw),
+    );
+    assert.equal(refused.code, 2);
+    assert.deepEqual(refused.out, []);
+    assert.deepEqual(refused.err, [
+      "Выгрузка невозможна: sscc_prefix_shared: another tenant of this database issues SSCC under the organization's prefix 460068200",
+      "  под префиксом организации 460068200, паллеты (1) номера выдаёт другой арендатор этой базы, наибольший 12",
+      "  решение владельца до переноса (памятка переключения, 4.3); выгрузить вопреки: --accept-shared-prefix",
+    ]);
+    assert.deepEqual(readdirSync(dir), []);
+    // A rehearsal is no way around it.
+    const rehearsal = await run(
+      ["--tenant", "imp-test-atoll", "--out-dir", dir, "--rehearsal"],
+      JSON.stringify(raw),
+    );
+    assert.equal(rehearsal.code, 2);
+    assert.deepEqual(readdirSync(dir), []);
+
+    const accepted = await run(
+      ["--tenant", "imp-test-atoll", "--out-dir", dir, "--accept-shared-prefix"],
+      JSON.stringify(raw),
+    );
+    assert.equal(accepted.code, 0, accepted.err.join("\n"));
+    assert.deepEqual(accepted.err.slice(0, -CREDENTIAL_WARNING.length), [
+      "Внимание: под префиксом 460068200, паллеты (1) номера выдаёт и другой арендатор этой базы, наибольший 12; " +
+        "автоном начнёт с 10000. Файл записан с --accept-shared-prefix: до первой смены автонома тот арендатор " +
+        "остановлен и его счётчик переведён за окно автонома (памятка переключения, 4.3), иначе SSCC повторятся",
+    ]);
+    const file = JSON.parse(readFileSync(join(dir, readdirSync(dir)[0]), "utf8"));
+    assert.deepEqual(
+      file.notes.filter((note) => note.code === "sscc_prefix_shared"),
+      [{ code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 1 }],
+    );
+    assertNoSecret([...accepted.out, ...accepted.err, ...refused.err]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

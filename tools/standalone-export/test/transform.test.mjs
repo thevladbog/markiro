@@ -1369,17 +1369,17 @@ test("the rollback windows come from the options and reach the cutover and the n
   assert.equal(custom.cutover.palletWindow, 7_000);
   assert.deepEqual(
     custom.cutover.ssccCounters.map((row) => row.cloudReseedTo),
-    [35_000, 17_000, 5_001],
+    [35_000, 17_000, 5_001, 15_000],
   );
   assert.equal(notesOf(custom, "sscc_window_does_not_fit").length, 0);
   assert.deepEqual(
     custom.payload.ssccCounters.map((row) => row.nextSerial),
-    [30_000, 10_000, 1],
+    [30_000, 10_000, 1, 10_000],
   );
   const huge = build(() => {}, { windows: { box: 9_980_000, pallet: 100_000 } });
   assert.deepEqual(
     huge.cutover.ssccCounters.map((row) => row.cloudReseedTo),
-    [null, 110_000, 9_980_001],
+    [null, 110_000, 9_980_001, 9_990_000],
   );
   assert.deepEqual(notesOf(huge, "sscc_window_does_not_fit"), [
     { code: "sscc_window_does_not_fit", issuerPrefix: "460068200", extension: 0 },
@@ -1672,10 +1672,69 @@ test("shifts that hold numbers past their month's counter stop the export, rehea
   );
 });
 
-test("the other tenants' serials are read for a warning, never carried into the file", () => {
+test("the other tenants' serials under any other prefix are read for a warning, never carried into the file", () => {
   const source = raw();
-  source.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 0, maxSerial: 99_999_999 }];
+  source.otherTenantsSscc = [
+    { issuerPrefix: "460123400", extension: 0, maxSerial: 9_999_999 },
+    { issuerPrefix: "460999900", extension: 1, maxSerial: 5 },
+  ];
   assert.deepEqual(buildExportFile(source, { exportedAt: EXPORTED_AT }), golden());
+});
+
+test("another tenant under the organization's prefix stops the export, unless the owner accepts it", () => {
+  const source = raw();
+  source.otherTenantsSscc = [
+    ...raw().otherTenantsSscc,
+    { issuerPrefix: "460068200", extension: 1, maxSerial: 3 },
+  ];
+  let error;
+  try {
+    buildExportFile(source, { exportedAt: EXPORTED_AT });
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error instanceof ExportError, String(error));
+  assert.equal(error.code, "sscc_prefix_shared");
+  assert.equal(
+    error.message,
+    "another tenant of this database issues SSCC under the organization's prefix 460068200",
+  );
+  // Only the organization's prefix is named: the standalone issues nothing under the others.
+  assert.deepEqual(error.shared, [{ issuerPrefix: "460068200", extension: 1, maxSerial: 3 }]);
+  // Far below the standalone's start or not, the other tenant keeps issuing:
+  // any serial of it stops, and a rehearsal is no exception.
+  for (const maxSerial of [0, 9_999, 9_999_999]) {
+    const each = raw();
+    each.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 0, maxSerial }];
+    for (const rehearsal of [false, true]) {
+      assert.throws(
+        () => buildExportFile(each, { exportedAt: EXPORTED_AT, rehearsal }),
+        (thrown) => thrown instanceof ExportError && thrown.code === "sscc_prefix_shared",
+        `${maxSerial} ${rehearsal}`,
+      );
+    }
+  }
+
+  // Accepted: the file is the golden one plus a note per shared extension,
+  // and it never holds the other tenant's number.
+  source.otherTenantsSscc.push({ issuerPrefix: "460068200", extension: 0, maxSerial: 77_777 });
+  const accepted = buildExportFile(source, { exportedAt: EXPORTED_AT, acceptSharedPrefix: true });
+  const expected = golden();
+  const at = expected.notes.findIndex((note) => note.code === "counterparty_sscc_used");
+  expected.notes.splice(
+    at,
+    0,
+    { code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 1 },
+    { code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 0 },
+  );
+  expected.checksum = fileChecksum({ ...expected, checksum: "" });
+  assert.deepEqual(accepted, expected);
+  assert.ok(!JSON.stringify(accepted).includes("77777"));
+  assert.deepEqual(
+    buildExportFile(raw(), { exportedAt: EXPORTED_AT, acceptSharedPrefix: true }),
+    golden(),
+    "nothing shared, nothing noted",
+  );
 });
 
 test("an A4 pallet sheet stays in the cloud with a note, and so do the defaults that name one", () => {

@@ -14,7 +14,8 @@
   "ssccCounters": [
     { "issuerPrefix": "460068200", "extension": 0, "nextSerial": 30000 },
     { "issuerPrefix": "460068200", "extension": 1, "nextSerial": 10000 },
-    { "issuerPrefix": "460123400", "extension": 0, "nextSerial": 1 }
+    { "issuerPrefix": "460123400", "extension": 0, "nextSerial": 1 },
+    { "issuerPrefix": "460999900", "extension": 0, "nextSerial": 10000 }
   ],
   "shiftNumberCounters": [
     { "monthKey": "NOV26", "lastSeq": 1 },

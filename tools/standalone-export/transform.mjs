@@ -72,7 +72,9 @@ const PALLET_SHEET_FORMAT = "pallet_sheet_v2";
  * (the cloud used every serial of a prefix), `sscc_input_invalid` (a prefix,
  * an extension or a serial the export cannot read) and
  * `shift_counter_unreadable` (a shift-number counter that drew numbers but
- * cannot be carried over), `shift_counter_behind` (shifts already hold
+ * cannot be carried over), `sscc_prefix_shared` (another tenant of the
+ * database holds serials under the organization's prefix; with `shared`),
+ * `shift_counter_behind` (shifts already hold
  * numbers past their month's counter) and `export_output_invalid` (what
  * `export.sql` printed lacks a list or a count). A message never holds a
  * hash, a salt or a code.
@@ -166,14 +168,18 @@ function assertRawShape(raw) {
 
 /**
  * The import file of `raw`. Throws `ExportError` when no file can be made
- * (no tenant, no organization profile or GLN, a used-up prefix) and, unless
+ * (no tenant, no organization profile or GLN, a used-up prefix), unless
  * `rehearsal`, when the cloud is not clean (an active shift, a station with a
- * live block that has not synced since the last close: pilot spec §8.6).
+ * live block that has not synced since the last close: pilot spec §8.6), and
+ * unless `acceptSharedPrefix`, when another tenant of the database holds
+ * serials under the organization's prefix: the standalone issues there, and
+ * the other tenant goes on issuing in the cloud after the cut-over.
  */
 export function buildExportFile(raw, options) {
   const {
     exportedAt,
     rehearsal = false,
+    acceptSharedPrefix = false,
     windows = { box: BOX_WINDOW, pallet: PALLET_WINDOW },
     randomBytes = nodeRandomBytes,
   } = options;
@@ -485,8 +491,9 @@ export function buildExportFile(raw, options) {
     note({ code: "badges_not_operators", count: raw.nonOperatorBadges });
 
   // SSCC and shift numbers (§8.4, §8.5).
+  const organizationPrefix = gln.slice(0, 9);
   const owners = (prefix) => {
-    if (prefix === gln.slice(0, 9)) return { kind: "organization" };
+    if (prefix === organizationPrefix) return { kind: "organization" };
     const counterparty = counterparties.find((each) => each.gln.slice(0, 9) === prefix);
     return counterparty === undefined
       ? { kind: "unknown" }
@@ -496,7 +503,7 @@ export function buildExportFile(raw, options) {
   try {
     cutoverCounters = planSsccCounters(
       {
-        organizationPrefix: gln.slice(0, 9),
+        organizationPrefix,
         counters: raw.ssccCounters,
         blocks: raw.ssccBlocks,
         printed: raw.ssccPrinted,
@@ -512,6 +519,29 @@ export function buildExportFile(raw, options) {
       error.message,
       { cause: error },
     );
+  }
+  // Another tenant of this database under the organization's prefix: its
+  // serials are invisible to this export, and it keeps issuing in the live
+  // cloud after the cut-over, so no start this tool picks can be safe. Under
+  // a counterparty's prefix the standalone issues nothing (owner question
+  // П4), so that is only reported (cli.mjs).
+  const shared = raw.otherTenantsSscc
+    .filter((row) => row.issuerPrefix === organizationPrefix)
+    .map((row) => ({
+      issuerPrefix: row.issuerPrefix,
+      extension: row.extension,
+      maxSerial: row.maxSerial,
+    }));
+  if (shared.length > 0 && !acceptSharedPrefix) {
+    const error = new ExportError(
+      "sscc_prefix_shared",
+      `another tenant of this database issues SSCC under the organization's prefix ${organizationPrefix}`,
+    );
+    error.shared = shared;
+    throw error;
+  }
+  for (const row of shared) {
+    note({ code: "sscc_prefix_shared", issuerPrefix: row.issuerPrefix, extension: row.extension });
   }
   for (const row of cutoverCounters) {
     if (row.cloudReseedTo === null) {

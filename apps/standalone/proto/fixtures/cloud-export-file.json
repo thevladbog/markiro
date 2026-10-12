@@ -4,7 +4,7 @@
   "tool": "standalone-export/1",
   "exportedAt": "2026-10-09T18:30:00.000Z",
   "rehearsal": false,
-  "checksum": "sha256:f679947ff4d77ea58c682bd5c72d12637c1ce5929a16dcb30f238d16b8bdea0e",
+  "checksum": "sha256:99628cca2f1715e1744c2c07fd887bd62236634926fe98c6880516e3a494469a",
   "source": {
     "tenantId": "imp-test-atoll",
     "tenantName": "ООО «Атолл»"
@@ -238,6 +238,11 @@
         "issuerPrefix": "460123400",
         "extension": 0,
         "nextSerial": 1
+      },
+      {
+        "issuerPrefix": "460999900",
+        "extension": 0,
+        "nextSerial": 10000
       }
     ],
     "shiftNumberCounters": [
@@ -293,6 +298,17 @@
         "printedMax": null,
         "standaloneStart": 1,
         "cloudReseedTo": 1000001
+      },
+      {
+        "issuerPrefix": "460999900",
+        "extension": 0,
+        "owner": {
+          "kind": "unknown"
+        },
+        "issuedMax": 777,
+        "printedMax": 777,
+        "standaloneStart": 10000,
+        "cloudReseedTo": 1010000
       }
     ]
   },

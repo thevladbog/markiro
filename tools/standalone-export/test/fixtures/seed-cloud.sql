@@ -4,7 +4,10 @@
 -- stale station, a higher shift number) must not reach it, except the
 -- serials it holds under the first tenant's prefixes, which the export lists
 -- apart as `otherTenantsSscc` (one per source: counter, block, box, pallet;
--- an extension and a prefix that do not count; a malformed box SSCC). Fixed
+-- a block whose end is the highest; a counterparty's GLN prefix the first
+-- tenant has no counter under; an extension and a prefix that do not count;
+-- a malformed box SSCC). The other tenant holds nothing under the first
+-- tenant's own GLN prefix: that stops the export, and the test adds it. Fixed
 -- ids, so cleanup-cloud.sql removes exactly these rows. Run on a database
 -- with the cloud's migrations applied.
 \set ON_ERROR_STOP on
@@ -156,8 +159,9 @@ INSERT INTO sscc_counters (tenant_id, issuer_prefix, extension_digit, next_seria
   ('imp-test-atoll', '460068200', 0, 18500),
   ('imp-test-atoll', '460068200', 1, 301),
   ('imp-test-atoll', '460123400', 0, 1),
-  ('imp-test-other', '460068200', 0, 900001),
+  ('imp-test-other', '460123400', 0, 900001),
   ('imp-test-other', '460068200', 3, 2000),
+  ('imp-test-other', '460700000', 0, 41),
   ('imp-test-other', '461111100', 0, 5);
 
 INSERT INTO sscc_blocks (id, allocation_order, tenant_id, issuer_prefix, extension_digit, device_id,
@@ -168,10 +172,10 @@ INSERT INTO sscc_blocks (id, allocation_order, tenant_id, issuer_prefix, extensi
     '0a0d0000-0000-4000-8000-000000000001', 16000, 17999, 17999, NULL),
   ('0bb00000-0000-4000-8000-000000000003', 1, 'imp-test-atoll', '460068200', 1,
     '0a0d0000-0000-4000-8000-000000000001', 201, 400, 250, NULL),
-  ('0bb00000-0000-4000-8000-000000000099', 1, 'imp-test-other', '460068200', 1,
+  ('0bb00000-0000-4000-8000-000000000099', 1, 'imp-test-other', '460123400', 1,
     '0a0d0000-0000-4000-8000-000000000099', 700000, 700000, NULL, NULL),
-  ('0bb00000-0000-4000-8000-000000000098', 2, 'imp-test-other', '460068200', 0,
-    '0a0d0000-0000-4000-8000-000000000099', 800000, 800000, NULL, NULL);
+  ('0bb00000-0000-4000-8000-000000000098', 2, 'imp-test-other', '460123400', 0,
+    '0a0d0000-0000-4000-8000-000000000099', 800000, 950000, NULL, NULL);
 
 INSERT INTO shifts (id, tenant_id, product_id, line_id, mode, status, number_month_key, number_seq,
     sscc_issuer_counterparty_id, closed_at) VALUES

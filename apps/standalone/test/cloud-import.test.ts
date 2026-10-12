@@ -178,9 +178,9 @@ afterEach(() => {
 });
 
 describe("the checksum is the tool's, byte for byte", () => {
-  it("is the golden file's own checksum, sha256:f679947f...ea0e", async () => {
+  it("is the golden file's own checksum, sha256:99628cca...469a", async () => {
     const parsed = JSON.parse(GOLDEN) as Record<string, unknown>;
-    expect(parsed.checksum).toMatch(/^sha256:f679947f[0-9a-f]{52}ea0e$/);
+    expect(parsed.checksum).toMatch(/^sha256:99628cca[0-9a-f]{52}469a$/);
     expect(await fileChecksum(parsed)).toBe(parsed.checksum);
   });
 

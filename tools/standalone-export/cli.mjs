@@ -4,7 +4,8 @@
  * through psql against a RESTORED COPY of the cloud database, builds the
  * import file and writes it next to nothing else:
  *
- *   node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal] [--psql <path>]
+ *   node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal]
+ *     [--accept-shared-prefix] [--psql <path>]
  *
  * The connection comes from libpq's environment (PGHOST, PGPORT, PGUSER,
  * PGPASSWORD or ~/.pgpass, PGDATABASE, PGSSLMODE), never from an argument,
@@ -30,10 +31,12 @@ const EXTENSIONS = { 0: "короба", 1: "паллеты" };
 
 /** What `--help` prints: the options, where the connection comes from, and what the file is. */
 export const USAGE = [
-  "Использование: node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal] [--psql <path>]",
+  "Использование: node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal] [--accept-shared-prefix] [--psql <path>]",
   "  --tenant <id>    organization.id организации в облаке (обязательно)",
   "  --out-dir <dir>  каталог файла переноса (по умолчанию текущий)",
   "  --rehearsal      пробный файл из нечистого облака; не для переключения",
+  "  --accept-shared-prefix  выгружать, хотя другой арендатор базы выпускал SSCC под префиксом",
+  "                   организации (только по решению владельца, памятка переключения, 4.3)",
   "  --psql <path>    путь к psql (по умолчанию psql из PATH)",
   "  --help, -h       эта справка",
   "Подключение к ВОССТАНОВЛЕННОЙ КОПИИ базы облака только переменными libpq: PGHOST, PGPORT,",
@@ -42,7 +45,8 @@ export const USAGE = [
   "Он создаётся только для владельца (права 0600 на macOS и Linux) и никогда поверх существующего файла.",
   "На Windows права 0600 не действуют: файл наследует права каталога, поэтому пишите в папку своего",
   "профиля пользователя, а не на общий диск. После переноса файл нужно удалить.",
-  "Коды выхода: 0 файл записан; 1 сбой; 2 выгрузка невозможна (в том числе нечистое облако); 64 неверные аргументы.",
+  "Коды выхода: 0 файл записан; 1 сбой; 2 выгрузка невозможна (в том числе нечистое облако или",
+  "общий с другим арендатором префикс, sscc_prefix_shared); 64 неверные аргументы.",
 ];
 
 /** Printed to stderr after every file written, so it is read before the file travels. */
@@ -52,10 +56,17 @@ export const CREDENTIAL_WARNING = [
 ];
 
 export function parseArgs(argv) {
-  const options = { tenantId: null, outDir: ".", rehearsal: false, psql: "psql" };
+  const options = {
+    tenantId: null,
+    outDir: ".",
+    rehearsal: false,
+    acceptSharedPrefix: false,
+    psql: "psql",
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--rehearsal") options.rehearsal = true;
+    else if (arg === "--accept-shared-prefix") options.acceptSharedPrefix = true;
     else if (arg === "--tenant" || arg === "--out-dir" || arg === "--psql") {
       const value = argv[index + 1];
       if (value === undefined) throw new Error(`${arg} needs a value`);
@@ -143,9 +154,12 @@ export function summary(file, path) {
 }
 
 /**
- * Other tenants of the same database that issue under a prefix this tenant
- * uses. The file never carries their numbers, so the person running the export
- * is told: a serial the standalone would hand out may already be taken there.
+ * Other tenants of the same database that issue under a prefix of this
+ * tenant. The file never carries their numbers. Under the organization's
+ * prefix the export only gets here with `--accept-shared-prefix` (the
+ * transform stops otherwise), and the line says what must happen before the
+ * first shift; under any other prefix the standalone issues nothing, and the
+ * line is for the record.
  */
 export function sharedPrefixWarnings(raw, file) {
   const starts = new Map(
@@ -154,15 +168,20 @@ export function sharedPrefixWarnings(raw, file) {
       row.standaloneStart,
     ]),
   );
+  const organizationPrefix = file.payload.organization.gln.slice(0, 9);
   return raw.otherTenantsSscc.map((row) => {
-    const start = starts.get(`${row.issuerPrefix}/${row.extension}`);
-    const text =
-      `Внимание: под префиксом ${row.issuerPrefix}, ${EXTENSIONS[row.extension]} (${row.extension}) ` +
-      `номера выдавал и другой арендатор этой базы, наибольший ${row.maxSerial}; ` +
-      `автоном начнёт с ${start ?? "—"}`;
-    return start !== undefined && row.maxSerial >= start
-      ? `${text} — номера могут повториться: решите до переноса (памятка переключения)`
-      : text;
+    const head =
+      `под префиксом ${row.issuerPrefix}, ${EXTENSIONS[row.extension]} (${row.extension}) ` +
+      `номера выдаёт и другой арендатор этой базы, наибольший ${row.maxSerial}`;
+    if (row.issuerPrefix !== organizationPrefix) {
+      return `Справка: ${head}; автоном под этим префиксом SSCC не выпускает`;
+    }
+    const start = starts.get(`${row.issuerPrefix}/${row.extension}`) ?? "—";
+    return (
+      `Внимание: ${head}; автоном начнёт с ${start}. Файл записан с --accept-shared-prefix: ` +
+      `до первой смены автонома тот арендатор остановлен и его счётчик переведён за окно автонома ` +
+      `(памятка переключения, 4.3), иначе SSCC повторятся`
+    );
   });
 }
 
@@ -191,6 +210,7 @@ export async function main(argv, deps = {}) {
     const file = buildExportFile(raw, {
       exportedAt: now().toISOString(),
       rehearsal: options.rehearsal,
+      acceptSharedPrefix: options.acceptSharedPrefix,
     });
     const path = join(options.outDir, fileName(file));
     writeFile(path, `${JSON.stringify(file, null, 2)}\n`);
@@ -206,6 +226,17 @@ export async function main(argv, deps = {}) {
           blocker.code === "active_shift"
             ? `  смена ${blocker.number} не закрыта`
             : `  станция «${blocker.name}» не синхронизирована после последнего закрытия смены`,
+        );
+      }
+      for (const row of error.shared ?? []) {
+        stderr(
+          `  под префиксом организации ${row.issuerPrefix}, ${EXTENSIONS[row.extension]} ` +
+            `(${row.extension}) номера выдаёт другой арендатор этой базы, наибольший ${row.maxSerial}`,
+        );
+      }
+      if (error.code === "sscc_prefix_shared") {
+        stderr(
+          "  решение владельца до переноса (памятка переключения, 4.3); выгрузить вопреки: --accept-shared-prefix",
         );
       }
       return 2;

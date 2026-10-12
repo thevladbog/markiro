@@ -384,7 +384,7 @@ describe("«Перенос из облака»", () => {
 
     expect(await screen.findByText("ООО «Атолл», ИНН 7701234567, GLN 4600682000010")).toBeTruthy();
     expect(screen.queryByText(/не совпадает с файлом/)).toBeNull();
-    expect(valueOf("Контрольная сумма")).toBe("sha256:f679947f…");
+    expect(valueOf("Контрольная сумма")).toBe("sha256:99628cca…");
     expect(valueOf("Организация в облаке")).not.toBe("");
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
@@ -396,6 +396,7 @@ describe("«Перенос из облака»", () => {
       ["460068200", "короба", "организации", "21003", "30000", "1030000"],
       ["460068200", "паллеты", "организации", "400", "10000", "110000"],
       ["460123400", "короба", "контрагента «ООО «Берег»»", "—", "1", "1000001"],
+      ["460999900", "короба", "неизвестно", "777", "10000", "1010000"],
     ]);
     expect(
       screen.getByText("Номера смен продолжат облачные: NOV26 → 1, OCT26 → 7, SEP26 → 41."),
@@ -1014,6 +1015,9 @@ describe("the notes of the export tool", () => {
       }),
     ).toBe(
       "Товар «Молоко 3,2% 0,9 л»: в поле «название для печати» убраны управляющие символы или текст сокращён до допустимой длины.",
+    );
+    expect(say({ code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 1 })).toBe(
+      "Под префиксом организации 460068200 (паллеты) номера выдаёт и другой арендатор облака; выгрузку сделали вопреки этому. До первой смены автонома тот арендатор должен быть остановлен, а его счётчик переведён за окно автонома, иначе SSCC повторятся.",
     );
     expect(say({ code: "something_new" })).toBe("Замечание «something_new».");
     // A word the tool grows before the office knows it is shown as it stands, not as a missing text.

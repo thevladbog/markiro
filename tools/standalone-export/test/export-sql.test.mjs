@@ -240,6 +240,57 @@ test(
       assert.notEqual(lacking.status, 0, "export.sql ran without a column it needs");
       assert.match(lacking.stderr, /print_name/u);
       assert.equal(lacking.stdout, "");
+
+      // The organization's own GLN prefix is watched even when this tenant
+      // never issued under it: here it has no counter, block or printed code
+      // there (a legacy box printed before blocks is the only trace), and the
+      // other tenant holds a counter under it. The legacy box still counts,
+      // and the other tenant stops the export.
+      const shared = exportAfter(env, [
+        "DELETE FROM boxes WHERE tenant_id = 'imp-test-atoll' AND sscc LIKE '_460068200%';",
+        "DELETE FROM pallets WHERE tenant_id = 'imp-test-atoll' AND sscc LIKE '_460068200%';",
+        "DELETE FROM sscc_blocks WHERE tenant_id = 'imp-test-atoll' AND issuer_prefix = '460068200';",
+        "DELETE FROM sscc_counters WHERE tenant_id = 'imp-test-atoll' AND issuer_prefix = '460068200';",
+        "INSERT INTO boxes (id, tenant_id, shift_id, device_box_id, sscc) VALUES ('0b0c0000-0000-4000-8000-000000000007', 'imp-test-atoll', '05050000-0000-4000-8000-000000000001', 'box-7', '046006820000312344');",
+        "INSERT INTO sscc_counters (tenant_id, issuer_prefix, extension_digit, next_serial) VALUES ('imp-test-other', '460068200', 1, 13);",
+      ]);
+      assert.deepEqual(
+        shared.ssccCounters.map((each) => each.issuerPrefix),
+        ["460123400"],
+        "this tenant has no counter under its own prefix",
+      );
+      assert.deepEqual(
+        shared.ssccPrinted.filter((each) => each.issuerPrefix === "460068200"),
+        [{ issuerPrefix: "460068200", extension: 0, maxSerial: 31234 }],
+      );
+      assert.deepEqual(
+        shared.otherTenantsSscc.filter((each) => each.issuerPrefix === "460068200"),
+        [{ issuerPrefix: "460068200", extension: 1, maxSerial: 12 }],
+      );
+      assert.throws(
+        // The earlier steps left this tenant's cloud dirty: a rehearsal reads past
+        // that, and the shared prefix still stops it.
+        () => buildExportFile(shared, { exportedAt: "2026-10-09T18:30:00.000Z", rehearsal: true }),
+        (error) => error instanceof ExportError && error.code === "sscc_prefix_shared",
+      );
+      const sharedFile = buildExportFile(shared, {
+        exportedAt: "2026-10-09T18:30:00.000Z",
+        rehearsal: true,
+        acceptSharedPrefix: true,
+      });
+      assert.deepEqual(
+        sharedFile.cutover.ssccCounters
+          .filter((each) => each.issuerPrefix === "460068200")
+          .map((each) => [each.extension, each.issuedMax, each.standaloneStart]),
+        [
+          [0, 31234, 40000],
+          [1, null, 0],
+        ],
+      );
+      assert.deepEqual(
+        sharedFile.notes.filter((note) => note.code === "sscc_prefix_shared"),
+        [{ code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 1 }],
+      );
     } finally {
       psqlRun(env, ["-f", fixture("cleanup-cloud.sql")]);
     }

@@ -64,7 +64,7 @@ fn the_golden_file_passes_whole() {
             valid.sscc_counters.len(),
             valid.shift_number_counters.len(),
         ),
-        (2, 5, 2, 3, 3, 3, 3, 3)
+        (2, 5, 2, 3, 3, 3, 4, 3)
     );
     // The archived product keeps the GTIN of a product in use.
     assert_eq!(valid.products[0].gtin14, valid.products[2].gtin14);
@@ -654,7 +654,8 @@ fn the_golden_files_values_reach_the_import_as_written() {
         [
             ("460068200", 0, 30_000),
             ("460068200", 1, 10_000),
-            ("460123400", 0, 1)
+            ("460123400", 0, 1),
+            ("460999900", 0, 10_000)
         ]
     );
     assert_eq!(

@@ -4,7 +4,9 @@
 -- One read-only REPEATABLE READ transaction, so every table is read at one
 -- snapshot. Every query is scoped to :'tenant_id', except one that looks at
 -- the other tenants of the database, read-only, for the serials they hold
--- under this tenant's prefixes ('otherTenantsSscc'). The output holds badge
+-- under this tenant's prefixes ('otherTenantsSscc'): the prefixes of its
+-- counters and blocks, of its organization's GLN and of its counterparties'
+-- GLNs, whether or not this tenant ever issued under them. The output holds badge
 -- codes in clear text: cli.mjs reads it from psql's stdout into memory and
 -- never writes it anywhere. It prints every key every time (an empty list
 -- is [], never absent): transform.mjs refuses output that lacks one.
@@ -14,6 +16,12 @@ WITH prefixes AS (
   SELECT issuer_prefix::text AS issuer_prefix FROM sscc_counters WHERE tenant_id = :'tenant_id'
   UNION
   SELECT issuer_prefix::text FROM sscc_blocks WHERE tenant_id = :'tenant_id'
+  UNION
+  SELECT substr(btrim(gln), 1, 9) FROM org_profiles
+  WHERE tenant_id = :'tenant_id' AND btrim(gln) ~ '^[0-9]{13}$'
+  UNION
+  SELECT substr(btrim(gln), 1, 9) FROM counterparties
+  WHERE tenant_id = :'tenant_id' AND btrim(gln) ~ '^[0-9]{13}$'
 ),
 printed AS (
   SELECT substr(sscc, 2, 9) AS issuer_prefix, substr(sscc, 1, 1)::int AS extension,
@@ -102,11 +110,13 @@ SELECT json_build_object(
         max(to_serial) AS max_to, max(consumed_through_serial) AS max_consumed
       FROM sscc_blocks WHERE tenant_id = :'tenant_id'
       GROUP BY issuer_prefix, extension_digit) g), '[]'::json),
+  -- Every SSCC this tenant printed, under any prefix: boxes printed before
+  -- blocks existed have no counter or block row to name their prefix.
   'ssccPrinted', coalesce((SELECT json_agg(json_build_object(
       'issuerPrefix', g.issuer_prefix, 'extension', g.extension, 'maxSerial', g.max_serial)
       ORDER BY g.issuer_prefix, g.extension)
     FROM (SELECT issuer_prefix, extension, max(serial) AS max_serial FROM printed
-      WHERE extension IN (0, 1) AND issuer_prefix IN (SELECT issuer_prefix FROM prefixes)
+      WHERE extension IN (0, 1)
       GROUP BY issuer_prefix, extension) g), '[]'::json),
   'shiftNumberCounters', coalesce((SELECT json_agg(json_build_object(
       'monthKey', n.month_key, 'lastSeq', n.last_seq) ORDER BY n.month_key)
@@ -119,8 +129,9 @@ SELECT json_build_object(
       FROM shifts WHERE tenant_id = :'tenant_id' GROUP BY number_month_key) g), '[]'::json),
   -- Read-only look at the OTHER tenants of this database: the highest serial
   -- any of them holds (counter, block or printed box/pallet) under a 9-digit
-  -- prefix this tenant uses. Nothing of theirs but prefix, extension and a
-  -- serial leaves the query; cli.mjs warns about it and the file never holds it.
+  -- prefix of this tenant. Nothing of theirs but prefix, extension and a
+  -- serial leaves the query; under the organization's prefix it stops the
+  -- export (transform.mjs, sscc_prefix_shared), and the file never holds it.
   'otherTenantsSscc', coalesce((SELECT json_agg(json_build_object(
       'issuerPrefix', g.issuer_prefix, 'extension', g.extension, 'maxSerial', g.max_serial)
       ORDER BY g.issuer_prefix, g.extension)

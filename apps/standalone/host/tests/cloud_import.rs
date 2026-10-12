@@ -484,6 +484,7 @@ async fn counters_only_move_forward() {
             { "issuerPrefix": "460068200", "extension": 0, "nextSerial": 50_000 },
             { "issuerPrefix": "460068200", "extension": 1, "nextSerial": 10_000 },
             { "issuerPrefix": "460123400", "extension": 0, "nextSerial": 1 },
+            { "issuerPrefix": "460999900", "extension": 0, "nextSerial": 10_000 },
         ])
     );
     assert_eq!(
@@ -508,6 +509,7 @@ async fn counters_only_move_forward() {
             ("460068200".to_owned(), 0, moved_rev),
             ("460068200".to_owned(), 1, import_rev),
             ("460123400".to_owned(), 0, import_rev),
+            ("460999900".to_owned(), 0, import_rev),
         ]
     );
     let (_, sscc) = admin.call("GET", "/v1/office/sscc", None).await;
@@ -529,6 +531,7 @@ async fn counters_only_move_forward() {
             ("460068200".to_owned(), 0, 50_000),
             ("460068200".to_owned(), 1, 10_000),
             ("460123400".to_owned(), 0, 1),
+            ("460999900".to_owned(), 0, 10_000),
         ]
     );
 }

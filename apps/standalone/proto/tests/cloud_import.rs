@@ -63,7 +63,7 @@ fn the_request_of_the_golden_file_round_trips() {
             payload.sscc_counters.len(),
             payload.shift_number_counters.len(),
         ),
-        (3, 2, 5, 3, 3, 3, 3, 3)
+        (3, 2, 5, 3, 3, 3, 4, 3)
     );
 }
 

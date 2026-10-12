@@ -369,6 +369,11 @@
       "issuerPrefix": "460068200",
       "extension": 1,
       "maxSerial": 250
+    },
+    {
+      "issuerPrefix": "460999900",
+      "extension": 0,
+      "maxSerial": 777
     }
   ],
   "shiftNumberCounters": [
@@ -405,24 +410,19 @@
   ],
   "otherTenantsSscc": [
     {
-      "issuerPrefix": "460068200",
+      "issuerPrefix": "460123400",
       "extension": 0,
-      "maxSerial": 900000
+      "maxSerial": 950000
     },
     {
-      "issuerPrefix": "460068200",
+      "issuerPrefix": "460123400",
       "extension": 1,
       "maxSerial": 700000
     },
     {
-      "issuerPrefix": "460123400",
+      "issuerPrefix": "460700000",
       "extension": 0,
-      "maxSerial": 500000
-    },
-    {
-      "issuerPrefix": "460123400",
-      "extension": 1,
-      "maxSerial": 600000
+      "maxSerial": 40
     }
   ],
   "activeShifts": [],
