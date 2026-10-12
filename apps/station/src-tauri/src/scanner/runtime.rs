@@ -290,12 +290,22 @@ fn run_port(
             if !core.set_status(&config.port, id, ConnectionStatus::Connected) {
                 return;
             }
-            let mut buffer = Vec::new();
+            let mut framer = Framer::default();
             let mut chunk = [0u8; 256];
             while !cancellation.is_cancelled() {
                 match handle.read(&mut chunk) {
                     Ok(0) => break,
-                    Ok(n) => core.scans(&config.port, id, absorb_chunk(&mut buffer, &chunk[..n])),
+                    Ok(n) => {
+                        let scans = framer.absorb_chunk(&chunk[..n]);
+                        if framer.take_oversize() {
+                            // The port's name only: never a byte of the frame.
+                            eprintln!(
+                                "station: scanner {} dropped a frame over {MAX_BUFFER_BYTES} bytes",
+                                config.port
+                            );
+                        }
+                        core.scans(&config.port, id, scans);
+                    }
                     Err(error)
                         if matches!(
                             error.kind(),
@@ -322,32 +332,58 @@ fn run_port(
     }
 }
 
+/// The longest frame a scanner may send, terminator excluded, and so the
+/// most a connection ever buffers. A longer frame is dropped whole.
 const MAX_BUFFER_BYTES: usize = 4096;
 
-/// Frame bytes before decoding UTF-8 so an OS read splitting a multibyte
-/// character cannot corrupt the payload. Only CR/LF framing bytes are removed.
-fn split_lines(buffer: &mut Vec<u8>) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut consumed = 0;
-    for (index, byte) in buffer.iter().enumerate() {
-        if *byte == b'\r' || *byte == b'\n' {
-            if index > consumed {
-                lines.push(String::from_utf8_lossy(&buffer[consumed..index]).into_owned());
-            }
-            consumed = index + 1;
-        }
-    }
-    buffer.drain(..consumed);
-    lines
+/// Assembles scans from the serial byte stream. A frame ends at CR, LF or any
+/// run of them (CRLF, LFCR, a scanner's double terminator) and empty frames
+/// are skipped. Bytes are decoded as UTF-8 with replacement only once the
+/// frame is whole, so a read that splits a multibyte character, a CRLF pair
+/// or the GS byte `0x1D` cannot change the scan: nothing depends on how the
+/// operating system chops the stream into reads.
+///
+/// A frame longer than `MAX_BUFFER_BYTES` (a scanner without a terminator,
+/// noise on a floating line) is dropped whole, through its terminator: its
+/// tail is never emitted as a scan of its own, and memory stays bounded.
+#[derive(Default)]
+struct Framer {
+    pending: Vec<u8>,
+    /// Inside an oversize frame: skip bytes up to the next terminator.
+    discarding: bool,
+    /// Oversize frames dropped since `take_oversize` last asked.
+    oversize: usize,
 }
 
-fn absorb_chunk(buffer: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
-    buffer.extend_from_slice(chunk);
-    let lines = split_lines(buffer);
-    if buffer.len() > MAX_BUFFER_BYTES {
-        buffer.clear();
+impl Framer {
+    fn absorb_chunk(&mut self, chunk: &[u8]) -> Vec<String> {
+        let mut scans = Vec::new();
+        for &byte in chunk {
+            if byte == b'\r' || byte == b'\n' {
+                // `pending` is empty while discarding, so a dropped frame is
+                // never emitted.
+                if !self.pending.is_empty() {
+                    scans.push(String::from_utf8_lossy(&self.pending).into_owned());
+                }
+                self.pending.clear();
+                self.discarding = false;
+            } else if self.discarding {
+                continue;
+            } else if self.pending.len() >= MAX_BUFFER_BYTES {
+                self.pending.clear();
+                self.discarding = true;
+                self.oversize += 1;
+            } else {
+                self.pending.push(byte);
+            }
+        }
+        scans
     }
-    lines
+
+    /// Whether an oversize frame was dropped since the last call.
+    fn take_oversize(&mut self) -> bool {
+        std::mem::take(&mut self.oversize) > 0
+    }
 }
 
 #[cfg(test)]
