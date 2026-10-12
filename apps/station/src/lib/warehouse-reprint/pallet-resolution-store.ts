@@ -21,6 +21,7 @@ export async function recordPalletProductionResolution(
        AND s.revision=? AND s.eligibility_denied=0 AND s.receive_status<>'conflict'
        AND json_extract(s.production_delivery_json,'$.sourceRevision')=s.revision
        AND json_extract(s.production_delivery_json,'$.attemptId')=?
+       AND json_extract(s.production_delivery_json,'$.sequence')=?
        AND json_extract(s.production_delivery_json,'$.state') IN ('delivery_unknown','sent','failed_before_send')
        AND (?='skipped' OR json_extract(s.production_delivery_json,'$.state')<>'failed_before_send')
      ON CONFLICT(owner,event_id) DO UPDATE SET value_json=excluded.value_json,digest=excluded.digest`,
@@ -36,6 +37,7 @@ export async function recordPalletProductionResolution(
       value.sscc,
       value.sourceRevision,
       value.attemptId,
+      value.productionSequence,
       value.outcome,
     ],
   );

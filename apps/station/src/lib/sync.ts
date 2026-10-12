@@ -1,3 +1,7 @@
+import {
+  syncWarehousePalletV2,
+  syncPalletProductionResolutions,
+} from "./warehouse-reprint/pallet-v2-sync.js";
 import { retainRecoveryDeniedShifts } from "./sync-recovery-denials.js";
 import { purgeUnitLabelFacts } from "./warehouse-reprint/history-retention.js";
 import { runWarehouseHistoryChannels } from "./warehouse-reprint/channels.js";
@@ -1686,6 +1690,22 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               },
             };
             await runWarehouseHistoryChannels([
+              async () => {
+                await syncWarehousePalletV2(
+                  warehouseExec,
+                  deps.client,
+                  owner,
+                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                );
+              },
+              async () => {
+                await syncPalletProductionResolutions(
+                  warehouseExec,
+                  deps.client,
+                  owner,
+                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                );
+              },
               async () => {
                 await purgeWarehousePalletJobs(
                   warehouseExec,
