@@ -345,7 +345,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
         name="defaultCounterpartyId"
         render={({ field }) => (
           <Select
-            native
+            {...searchableSelect(t)}
             label={t("office.products.fields.counterparty")}
             hint={
               counterparties.isError

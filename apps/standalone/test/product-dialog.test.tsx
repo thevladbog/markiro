@@ -18,7 +18,14 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
-import { chooseValue, openSelect, optionTextOf, optionTexts, valueOf } from "./support/select.js";
+import {
+  chooseValue,
+  openSelect,
+  optionTextOf,
+  optionTexts,
+  selectTrigger,
+  valueOf,
+} from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 13, alias: "water", name: "Упакованная вода" },
@@ -861,20 +868,20 @@ describe("office product dialog: default templates", () => {
       expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", false),
     );
     // Right after the pallet template, its alternative.
-    const fields = [...dialog().querySelectorAll("select")].map(
-      (select) => select.labels?.[0]?.textContent ?? "",
+    const fields = within(dialog()).getAllByRole("combobox");
+    expect(fields.indexOf(selectTrigger("Лист А4 паллеты"))).toBe(
+      fields.indexOf(selectTrigger("Шаблон паллеты")) + 1,
     );
-    expect(fields.indexOf("Лист А4 паллеты")).toBe(fields.indexOf("Шаблон паллеты") + 1);
     expect(choices("Лист А4 паллеты")).toEqual([
       "Не выбран",
       "Палета А4 · вертикальная",
       "Две А5 — выключен",
     ]);
-    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("value", off);
+    expect(valueOf("Лист А4 паллеты")).toBe(off);
     // Pallet labels are not sheets, and the sheets are no pallet labels.
     expect(choices("Шаблон паллеты")).not.toContain("Палета А4 · вертикальная");
     expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
-    type("Лист А4 паллеты", portrait);
+    chooseValue("Лист А4 паллеты", portrait);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
     expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
@@ -948,7 +955,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     fake.api.createProduct.mockResolvedValue(BEER);
     await openCreate(fake);
     expect(screen.queryByLabelText("Код ЕГАИС")).toBeNull();
-    type("Товарная группа", "15");
+    chooseValue("Товарная группа", "15");
     const field = screen.getByLabelText("Код ЕГАИС");
     expect(
       screen.getByText("Печатается на этикетке короба и паллеты. Обычно 19 цифр."),
@@ -976,7 +983,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     expect(await screen.findByText("Код ЕГАИС — не длиннее 64 символов")).toBeTruthy();
     expect(fake.api.updateProduct).not.toHaveBeenCalled();
     type("Код ЕГАИС", EGAIS);
-    type("Товарная группа", "8");
+    chooseValue("Товарная группа", "8");
     expect(screen.queryByLabelText("Код ЕГАИС")).toBeNull();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
@@ -992,7 +999,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     fake.api.updateProduct.mockResolvedValue({ ...BEER, chzProductGroupCode: 8, egaisCode: null });
     await openEdit(fake, "Пиво светлое 0,5 л");
     type("Код ЕГАИС", "1".repeat(65));
-    type("Товарная группа", "8");
+    chooseValue("Товарная группа", "8");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
     expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
@@ -1060,7 +1067,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
       "ООО «Юг»",
       "Альфа (в архиве)",
     ]);
-    expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("value", OLD.id);
+    expect(valueOf("Контрагент по умолчанию")).toBe(OLD.id);
     expect(
       screen.getByText("Подставляется в смену этого товара, если контрагент не выбран"),
     ).toBeTruthy();
@@ -1077,7 +1084,7 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     await waitFor(() =>
       expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("disabled", false),
     );
-    type("Контрагент по умолчанию", SOUTH.id);
+    chooseValue("Контрагент по умолчанию", SOUTH.id);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(2));
     expect(fake.api.updateProduct.mock.calls[1]?.[2]).toMatchObject({
