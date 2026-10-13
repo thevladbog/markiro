@@ -1321,10 +1321,9 @@ compact JWS with ES256, checked by `markiro_proto::trust` here and by
 `@markiro/domain` (`verifyCompactJws`, `verifyStandaloneLicense`,
 `verifyStandaloneUpdateManifest`) in TypeScript. The order is size, form,
 `kid`, signature, then the payload, read strictly; both sides refuse a struct
-given as a JSON array (serde alone would take one, so Rust reads through a
-`Value`), a byte order mark, a `__proto__` key and a lone surrogate (the
+given as a JSON array and an enum given as a one-key object (serde alone would take both; Rust reads through a `Value` and reads `plan` and `channel` from strings only), a byte order mark, a `__proto__` key and a lone surrogate (the
 domain's `parseJsonStrict` reads JSON as serde_json does), and keep a
-repeated key's last value. The license's `tenantId` and `siteId` are opaque
+repeated key's last value. Zod still takes `1.0`, `-0`, `1e0` and over-precise forms of an integer that serde refuses; no signer writes them. The license's `tenantId` and `siteId` are opaque
 ids the counterparty chooses (`STANDALONE_OPAQUE_ID_PATTERN`,
 `trust::is_opaque_id`: 1-64 of `A-Za-z0-9._:-`, compared byte for byte);
 `licenseId`, `planVersionId`, `replaces` and `hostId` are lower-case UUIDs.

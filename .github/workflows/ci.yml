@@ -783,7 +783,9 @@ jobs:
         run: |
           kids="$(apps/standalone/target/release/markiro-host.exe trust-keys)"
           printf '%s\n' "$kids"
-          if printf '%s\n' "$kids" | grep -q '^test-'; then
+          # A here-string, not a pipe: under pipefail an early `grep -q` exit
+          # could SIGPIPE printf and hide a match.
+          if grep -q '^test-' <<<"$kids"; then
             echo "the release host trusts a test key" >&2
             exit 1
           fi

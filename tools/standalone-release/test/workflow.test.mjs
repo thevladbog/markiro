@@ -411,6 +411,6 @@ test("the release host is checked to trust no test key before it is bundled", ()
     step.run,
     /"\$\(apps\/standalone\/target\/release\/markiro-host\.exe trust-keys\)"/u,
   );
-  assert.match(step.run, /grep -q '\^test-'/u);
+  assert.match(step.run, /grep -q '\^test-' <<<"\$kids"/u);
   assert.match(step.run, /exit 1/u);
 });
