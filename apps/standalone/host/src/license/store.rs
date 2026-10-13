@@ -227,17 +227,22 @@ pub async fn set_wrong_host_since(
 }
 
 /// The emergency extension of `key` (a file's id or `trial`) until `until`.
+/// An update of no row (the clock's row is gone) is an error: the caller
+/// must not record or answer an extension that was not stored.
 pub async fn set_emergency(
     conn: &mut SqliteConnection,
     key: &str,
     until: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    let done = sqlx::query(
         "UPDATE license_clock SET emergency_used_for = ?, emergency_until = ? WHERE id = 1",
     )
     .bind(key)
     .bind(until)
     .execute(conn)
     .await?;
+    if done.rows_affected() != 1 {
+        return Err(sqlx::Error::RowNotFound);
+    }
     Ok(())
 }

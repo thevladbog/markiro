@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use support::app::{
     accepted, admin, audit_rows, audit_trail, box_id, close_from_office, device_shift_body, empty,
     fact, host_revision, instant, issue_block, json as json_request, login, ok_scan, open_floor,
-    pair_device, plan_shift, receipts, record_id, request, shift_body, shift_setup, with_device,
-    Admin, AuditRow,
+    pair_device, plan_shift, receipts, record_id, request, shift_body, shift_closed, shift_setup,
+    with_device, Admin, AuditRow, Floor, ShiftSetup,
 };
 use support::license::{
     expire, expired_file, file, license_id, load_ok, office_license, set_org_inn, text, DAY_MS,
@@ -88,6 +88,78 @@ async fn shifts_state(admin: &Admin, id: &str) -> (String, Option<String>, i64) 
 /// again after the clock moved hours or days.
 async fn sign_in_again(admin: &mut Admin) {
     admin.token = login(&admin.app, &admin.key, "admin", "correct horse battery").await;
+}
+
+/// A second station inside an open shift on `setup`'s other line, opened
+/// while new shifts still open.
+async fn floor_on_other_line(admin: &Admin, setup: &ShiftSetup) -> Floor {
+    let (_, key) = pair_device(&admin.app, "station").await;
+    open_floor(admin, setup, &key, &setup.other_line).await
+}
+
+/// While new shifts are closed in `state` (refused with `expected`): the
+/// station's new shift is refused too and none is made; the device reads
+/// its record with the state; the owner of `floor`'s open shift enters it
+/// again and closes it with a fact.
+async fn only_new_shifts_close(
+    admin: &Admin,
+    setup: &ShiftSetup,
+    floor: &Floor,
+    state: &str,
+    expected: (Value, Value),
+) {
+    let shifts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shifts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = create(admin, &admin.key, device_shift_body(setup, REQUEST)).await;
+    assert_eq!((status, refusal(&body)), (StatusCode::CONFLICT, expected));
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shifts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, shifts);
+    let (status, device) = device_call(admin, &floor.key, "GET", "/v1/device", None).await;
+    assert_eq!(
+        (status, device["license"]["state"].clone()),
+        (StatusCode::OK, json!(state)),
+        "{device}"
+    );
+    let open = json!({ "id": floor.shift });
+    let (status, body) = enter(admin, &floor.key, &open).await;
+    assert_eq!(
+        (status, body["id"].clone(), body["status"].clone()),
+        (StatusCode::OK, json!(floor.shift), json!("active")),
+        "{body}"
+    );
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                fact(
+                    &record_id(1),
+                    "scan",
+                    &floor.shift,
+                    ok_scan(1, &box_id(1), &instant(1, 0))
+                ),
+                fact(
+                    &record_id(2),
+                    "shift_closed",
+                    &floor.shift,
+                    shift_closed(None, 1, 0, None, &instant(60, 0))
+                ),
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM shifts WHERE id = ?")
+        .bind(&floor.shift)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "closed");
 }
 
 #[tokio::test]
@@ -199,20 +271,20 @@ async fn what_runs_goes_on_while_restricted() {
 async fn the_trial_ends_after_fourteen_days_and_closes_the_opening() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
+    let floor = floor_on_other_line(&admin, &setup).await;
     put_on_line(&admin, &admin.key, &setup.line).await;
     let shift = plan_shift(&admin, shift_body(&setup)).await;
     admin.app.clock.advance(time::Duration::days(14));
+    let expected = (
+        json!("conflict"),
+        restricted("trial_expired", START_MS + 14 * DAY_MS),
+    );
     let (status, body) = enter(&admin, &admin.key, &shift).await;
     assert_eq!(
         (status, refusal(&body)),
-        (
-            StatusCode::CONFLICT,
-            (
-                json!("conflict"),
-                restricted("trial_expired", START_MS + 14 * DAY_MS)
-            )
-        )
+        (StatusCode::CONFLICT, expected.clone())
     );
+    only_new_shifts_close(&admin, &setup, &floor, "trial_expired", expected).await;
 }
 
 #[tokio::test]
@@ -221,16 +293,16 @@ async fn an_inn_that_no_longer_matches_closes_the_opening() {
     let setup = shift_setup(&admin).await;
     put_on_line(&admin, &admin.key, &setup.line).await;
     load_ok(&admin, &file(&admin.app.state.host_id, |_| {})).await;
+    let floor = floor_on_other_line(&admin, &setup).await;
     set_org_inn(&admin, json!(OTHER_INN)).await;
     let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let expected = (json!("conflict"), restricted("inn_mismatch", START_MS));
     let (status, body) = enter(&admin, &admin.key, &shift).await;
     assert_eq!(
         (status, refusal(&body)),
-        (
-            StatusCode::CONFLICT,
-            (json!("conflict"), restricted("inn_mismatch", START_MS))
-        )
+        (StatusCode::CONFLICT, expected.clone())
     );
+    only_new_shifts_close(&admin, &setup, &floor, "inn_mismatch", expected).await;
 }
 
 #[tokio::test]
@@ -395,4 +467,106 @@ async fn the_trials_emergency_is_its_own() {
         [row]
     );
     assert_eq!(enter(&admin, &admin.key, &shift).await.0, StatusCode::OK);
+}
+
+/// The extension's columns as stored.
+async fn emergency_columns(admin: &Admin) -> (Option<String>, Option<i64>) {
+    sqlx::query_as("SELECT emergency_used_for, emergency_until FROM license_clock WHERE id = 1")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_extension_without_the_clock_row_stores_nothing() {
+    let admin = admin().await;
+    sqlx::query("DELETE FROM license_clock")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut conn = admin.app.state.pool.acquire().await.unwrap();
+    assert!(
+        markiro_host::license::store::set_emergency(&mut conn, "trial", START_MS)
+            .await
+            .is_err(),
+        "an update of no row is no extension"
+    );
+}
+
+#[tokio::test]
+async fn an_extension_that_stored_nothing_answers_500_without_a_row_or_a_revision() {
+    let admin = admin().await;
+    load_ok(&admin, &expired_file(&admin.app.state.host_id)).await;
+    // The update of the clock's row changes no row.
+    sqlx::query(
+        "CREATE TRIGGER keep_the_clock BEFORE UPDATE ON license_clock \
+         WHEN NEW.emergency_used_for IS NOT NULL BEGIN SELECT RAISE(IGNORE); END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let rows = audit_rows(&admin.app).await;
+    let rev = host_revision(&admin.app).await;
+    let (status, body) = admin
+        .call("POST", "/v1/office/license/emergency", None)
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{body}"
+    );
+    assert_eq!(
+        (
+            audit_rows(&admin.app).await,
+            host_revision(&admin.app).await,
+            emergency_columns(&admin).await
+        ),
+        (rows, rev, (None, None))
+    );
+}
+
+#[tokio::test]
+async fn an_extension_kept_answers_from_what_it_knew_when_the_read_after_fails() {
+    let admin = admin().await;
+    load_ok(&admin, &expired_file(&admin.app.state.host_id)).await;
+    // The read after the commit fails: the clock's row is gone with the
+    // extension's write.
+    sqlx::query(
+        "CREATE TRIGGER lose_the_clock AFTER UPDATE ON license_clock \
+         WHEN NEW.emergency_used_for IS NOT NULL BEGIN DELETE FROM license_clock; END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let rev = host_revision(&admin.app).await;
+    let (status, body) = admin
+        .call("POST", "/v1/office/license/emergency", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let until = text(START_MS + HOURS_72_MS);
+    assert_eq!(
+        (
+            body["state"].clone(),
+            body["opensNewShifts"].clone(),
+            body["emergency"].clone(),
+            body["license"]["licenseId"].clone()
+        ),
+        (
+            json!("restricted"),
+            json!(true),
+            json!({ "available": false, "until": until }),
+            json!(license_id(1))
+        )
+    );
+    // The extension was committed with its row and its revision.
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    assert_eq!(
+        audit_trail(&admin.app, actions::LICENSE_EMERGENCY).await,
+        [admin.row(
+            actions::LICENSE_EMERGENCY,
+            "license",
+            &license_id(1),
+            json!({ "until": until, "licenseId": license_id(1) })
+        )]
+    );
 }

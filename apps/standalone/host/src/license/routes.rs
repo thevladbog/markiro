@@ -620,9 +620,12 @@ pub async fn enable_emergency(
         .reading
         .effective
         .saturating_add(state::EMERGENCY_MS);
+    // Nothing stored (no clock row) is a 500: the transaction rolls back,
+    // no row, no revision.
     store::set_emergency(&mut tx, &evaluation.emergency_key, until)
         .await
         .map_err(ApiError::internal)?;
+    let usage = seats::usage(&mut tx).await.map_err(ApiError::internal)?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     audit::record(
         &mut tx,
@@ -645,5 +648,28 @@ pub async fn enable_emergency(
         .await
         .map_err(ApiError::internal)?;
     tracing::info!(key = %evaluation.emergency_key, "the license's emergency extension was enabled");
-    app.license.office_license_now(&app).await.map(Json)
+    // The extension is kept: a read after the commit that fails must not
+    // answer 500 (as after a load). The answer is then built from what the
+    // extension knew, its columns set, at the same time; the reason is
+    // logged.
+    match app.license.office_license_now(&app).await {
+        Ok(answer) => Ok(Json(answer)),
+        Err(_) => {
+            tracing::warn!(
+                key = %evaluation.emergency_key,
+                "the license was not read after the emergency extension; answered from the extension"
+            );
+            let mut clock_row = snapshot.clock_row.clone();
+            clock_row.emergency_used_for = Some(evaluation.emergency_key.clone());
+            clock_row.emergency_until = Some(until);
+            let known = app.license.evaluate_known(
+                &app,
+                snapshot.reading,
+                snapshot.licenses.clone(),
+                clock_row,
+                snapshot.org_inn.clone(),
+            );
+            Ok(Json(office_license(&app, &known, &usage)))
+        }
+    }
 }
