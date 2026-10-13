@@ -33,6 +33,9 @@ import {
   type ReviewedFilter,
 } from "./conflict-list.js";
 
+/** Counts with the thousands apart by a no-break space: «10 000». */
+const COUNT = new Intl.NumberFormat("ru");
+
 /**
  * «Конфликты» (plan КНФ, the cloud's `/conflicts`): two accepted scans of one
  * code, the earlier won it. Newest detection first, a page of 50, narrowed by
@@ -69,6 +72,9 @@ export function ConflictsPage() {
   }, [notice, noticeId]);
 
   const setFilter = (next: { shift?: string; state?: ReviewedFilter; page?: number }) => {
+    // A notice or a refusal is about the list it was given on.
+    setNotice(null);
+    setFailure(null);
     const merged = new URLSearchParams(params);
     if (next.shift !== undefined) merged.set("shift", next.shift);
     if (next.state !== undefined) merged.set("state", next.state);
@@ -97,8 +103,10 @@ export function ConflictsPage() {
     });
   };
 
+  // A shift a link named that the list does not hold — or a list that did not load yet or at
+  // all: the select must still show what the page is narrowed to, never «Все смены».
   const linkedShiftUnknown =
-    shiftId !== "" && shifts.data !== undefined && !shifts.data.some((s) => s.id === shiftId);
+    shiftId !== "" && !(shifts.data?.some((s) => s.id === shiftId) ?? false);
   const shiftOptions = [
     { value: "", label: t("office.conflicts.filters.shiftAll") },
     ...(shifts.data ?? []).map((shift) => ({ value: shift.id, label: shift.number })),
@@ -171,7 +179,8 @@ export function ConflictsPage() {
               <Button
                 variant="secondary"
                 size="compact"
-                disabled={review.isPending}
+                // Also while the list reads again after a review: its row is still on screen.
+                disabled={review.isPending || (review.isSuccess && conflicts.isFetching)}
                 aria-label={t("office.conflicts.reviewNamed", { serial: row.serial })}
                 onClick={() => onReview(row)}
               >
@@ -185,7 +194,8 @@ export function ConflictsPage() {
 
   const filtered = shiftId !== "" || reviewed !== "unreviewed";
   const content = () => {
-    if (conflicts.isPending) return <PageLoading />;
+    // The instants are the organization's: the rows wait for its zone.
+    if (conflicts.isPending || org.isPending) return <PageLoading />;
     if (conflicts.isError) {
       return <LoadError error={conflicts.error} onRetry={() => void conflicts.refetch()} />;
     }
@@ -224,12 +234,18 @@ export function ConflictsPage() {
       <FilterBar
         label={t("office.conflicts.filters.label")}
         resultSummary={
-          conflicts.isSuccess ? t("office.conflicts.found", { total: conflicts.data.total }) : ""
+          conflicts.isSuccess
+            ? t("office.conflicts.found", { total: COUNT.format(conflicts.data.total) })
+            : ""
         }
         {...(filtered
           ? {
               resetLabel: t("office.conflicts.filters.reset"),
-              onReset: () => setParams(new URLSearchParams()),
+              onReset: () => {
+                setNotice(null);
+                setFailure(null);
+                setParams(new URLSearchParams());
+              },
             }
           : {})}
       >

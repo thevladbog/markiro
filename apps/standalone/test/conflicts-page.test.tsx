@@ -57,6 +57,20 @@ function cell(row: number, title: string): HTMLElement {
   return found;
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
 function lastQuery(value: FakeOfficeSession): unknown {
   return value.api.listConflicts.mock.calls.at(-1)?.[1];
 }
@@ -70,6 +84,8 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(value.api.listConflicts).toHaveBeenCalledWith(TOKEN, { reviewed: false, page: 1 });
     expect(screen.getByText(/Код остаётся за самым ранним сканом/)).toBeTruthy();
     expect(screen.getByText("Найдено: 2")).toBeTruthy();
+    // One page: no pages to turn.
+    expect(screen.queryByRole("navigation", { name: "Страницы конфликтов" })).toBeNull();
   });
 
   it("names the code by GTIN and serial and both scans with shift, station, operator, instant and box", async () => {
@@ -131,16 +147,22 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     const value = session();
     const reviewed = PAGE.items[1];
     if (reviewed === undefined) throw new Error("fixture");
-    value.api.reviewConflict.mockResolvedValue({
+    const answer = deferred<typeof reviewed>();
+    value.api.reviewConflict.mockReturnValue(answer.promise);
+    await openConflicts(value);
+    expect(value.api.listConflicts).toHaveBeenCalledTimes(1);
+    const button = screen.getByRole("button", {
+      name: "Отметить разобранным конфликт кода S000008",
+    });
+    fireEvent.click(button);
+    // A second press while the host answers sends nothing more.
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    fireEvent.click(button);
+    answer.resolve({
       ...reviewed,
       reviewedAt: "2026-10-08T10:00:00Z",
       reviewedByName: "Ирина Смирнова",
     });
-    await openConflicts(value);
-    expect(value.api.listConflicts).toHaveBeenCalledTimes(1);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Отметить разобранным конфликт кода S000008" }),
-    );
     await expectFocusedNotice("Конфликт кода S000008 отмечен разобранным.");
     expect(value.api.reviewConflict).toHaveBeenCalledTimes(1);
     expect(value.api.reviewConflict).toHaveBeenCalledWith(TOKEN, LATE);
@@ -149,14 +171,17 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
 
   it("explains a refused review above the list without reading it again, and lets it be tried again", async () => {
     const value = session();
-    value.api.reviewConflict.mockRejectedValue(
-      new HostError({ kind: "api", code: "not_found", status: 404, message: "no such conflict" }),
-    );
+    const answer = deferred<never>();
+    value.api.reviewConflict.mockReturnValue(answer.promise);
     await openConflicts(value);
     const button = screen.getByRole("button", {
       name: "Отметить разобранным конфликт кода S000008",
     });
     fireEvent.click(button);
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    answer.reject(
+      new HostError({ kind: "api", code: "not_found", status: 404, message: "no such conflict" }),
+    );
     expect(await screen.findByText("Запись не найдена.")).toBeTruthy();
     expect(value.api.listConflicts).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
@@ -189,9 +214,18 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     await waitFor(() =>
       expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: false, page: 1 }),
     );
+    // A filter on page 2 goes back to the first page.
+    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "reviewed" } });
+    await waitFor(() =>
+      expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: true, page: 1 }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 1 }));
     expect(screen.queryByRole("button", { name: "Сбросить" })).toBeNull();
+    const shift = screen.getByLabelText("Смена");
+    const state = screen.getByLabelText("Состояние");
+    expect(shift instanceof HTMLSelectElement && shift.value).toBe("");
+    expect(state instanceof HTMLSelectElement && state.value).toBe("unreviewed");
   });
 
   it("names a shift a link brought that the list does not hold", async () => {
@@ -210,10 +244,25 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     });
   });
 
+  it("names the shift of a link even when the list of shifts does not load", async () => {
+    const value = session();
+    value.api.listShifts.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    renderOffice(value, { initialPath: `/conflicts?shift=${ACTIVE.id}` });
+    await screen.findByRole("heading", { name: "Конфликты", level: 1 });
+    const shift = screen.getByLabelText("Смена");
+    await waitFor(() => expect(shift instanceof HTMLSelectElement && shift.value).toBe(ACTIVE.id));
+    expect(within(shift).getByRole("option", { name: "Смена из ссылки" })).toBeTruthy();
+  });
+
   it("pages through the conflicts", async () => {
     const value = session({ ...PAGE, pageCount: 3, total: 120 });
     await openConflicts(value);
     const pager = screen.getByRole("navigation", { name: "Страницы конфликтов" });
+    expect(within(pager).getByRole("button", { name: "Назад" }).hasAttribute("disabled")).toBe(
+      true,
+    );
     fireEvent.click(within(pager).getByRole("button", { name: "Вперёд" }));
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 2 }));
   });
@@ -249,5 +298,17 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(state.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.getAttribute("tabindex")).not.toBe("-1");
     expect(button.hasAttribute("disabled")).toBe(false);
+    // (jsdom has no Tab order and the package has no user-event: the order is checked in the DOM.)
+    const reviewed = PAGE.items[1];
+    if (reviewed === undefined) throw new Error("fixture");
+    value.api.reviewConflict.mockResolvedValue({
+      ...reviewed,
+      reviewedAt: "2026-10-08T10:00:00Z",
+      reviewedByName: TECHNOLOGIST.name,
+    });
+    button.focus();
+    fireEvent.click(button);
+    await expectFocusedNotice("Конфликт кода S000008 отмечен разобранным.");
+    expect(value.api.reviewConflict).toHaveBeenCalledWith(TOKEN, LATE);
   });
 });

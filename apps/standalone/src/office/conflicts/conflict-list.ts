@@ -1,4 +1,8 @@
-import type { ConflictQuery, OfficeConflictScan } from "../../host/review.js";
+import {
+  CONFLICT_MAX_PAGE,
+  type ConflictQuery,
+  type OfficeConflictScan,
+} from "../../host/review.js";
 
 /** The «Состояние» filter of «Конфликты», unreviewed first (the cloud's default). */
 export const REVIEWED_FILTERS = ["unreviewed", "reviewed", "all"] as const;
@@ -9,11 +13,11 @@ export function readReviewed(text: string | null): ReviewedFilter {
   return text === "reviewed" || text === "all" ? text : "unreviewed";
 }
 
-/** A page the address names: a positive whole number, the first otherwise. */
+/** A page the address names: a whole number the list reaches (`CONFLICT_MAX_PAGE`), the first otherwise. */
 export function readPage(text: string | null): number {
   if (text === null || !/^\d+$/.test(text)) return 1;
   const page = Number(text);
-  return page >= 1 ? page : 1;
+  return Number.isSafeInteger(page) && page >= 1 && page <= CONFLICT_MAX_PAGE ? page : 1;
 }
 
 /** What the host is asked: only what is narrowed. */

@@ -33,6 +33,10 @@ describe("the conflicts' filters and links (plan КНФ)", () => {
     expect([readPage(null), readPage("3"), readPage("0"), readPage("x"), readPage("2.5")]).toEqual([
       1, 3, 1, 1, 1,
     ]);
+    // The host answers pages 1 to 200 only.
+    expect([readPage("200"), readPage("201"), readPage("99999999999999999999")]).toEqual([
+      200, 1, 1,
+    ]);
   });
 
   it("opens the loser's box in its shift's card until plan КРТ gives a box a card of its own", () => {
