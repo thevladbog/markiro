@@ -3,7 +3,7 @@ import type { TFunction } from "i18next";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button } from "@markiro/ui";
+import { Alert, Button, VisuallyHidden } from "@markiro/ui";
 
 import { REPRINT_REASONS } from "../exception-reasons.js";
 import {
@@ -15,6 +15,7 @@ import {
 import type { PrintJob } from "./print-jobs.js";
 import { awaitsCheck, printerForAgain, type PrintAgain } from "./print-resolution.js";
 import type { WindowsQueueCheck } from "./print-runtime.js";
+import "./label-panel.css";
 import { printerFormatText } from "./printer-format.js";
 
 /** What the panel says under the label: a scan that did not match, a decision that could not be done. */
@@ -80,6 +81,11 @@ type Settings = { kind: "loading" } | { kind: "ready"; value: PanelSettings } | 
 
 /** A button that is waiting for a decision's answer: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+
+/** The SSCC in the cloud's PrintVerification groups: extension, prefix and serial, check digit. */
+function groupedSscc(value: string): string {
+  return `${value.slice(0, 1)} ${value.slice(1, 10)} ${value.slice(10, 17)} ${value.slice(17)}`;
+}
 
 function noteText(note: LabelNote, t: TFunction, pallet: boolean): string {
   switch (note.kind) {
@@ -283,73 +289,123 @@ export function LabelPanel({
       </Button>
     ) : null;
 
+  /** The SSCC as the cloud's dialogs show it: a quiet caption over the number in large digits. */
+  const ssccBlock = (
+    <p className="label-panel__sscc">
+      <VisuallyHidden>{sscc}</VisuallyHidden>
+      <span aria-hidden="true">
+        {t(pallet ? "floor.print.pallet.ssccCaption" : "floor.print.ssccCaption")}
+      </span>
+      {/* The bare 18 digits, as the cloud shows them; grouped while a scan is awaited. */}
+      <strong aria-hidden="true">{checking ? groupedSscc(job.sscc) : job.sscc}</strong>
+    </p>
+  );
+  /**
+   * One state of the label in the cloud station's full-screen print dialog layout
+   * (BoxPrintRecovery, PalletClose, PrintVerification): the title with its main action across
+   * the top, the label's words and its SSCC in the middle, the other actions at the bottom.
+   * A pallet's label is announced as the cloud's «Паллета закрыта», its state said inside.
+   */
+  const dialog = (view: {
+    tone: "info" | "warn" | "error";
+    title: string;
+    headerAction?: ReactNode;
+    children: ReactNode;
+    footer?: ReactNode;
+    variant?: "verify";
+  }) => (
+    <div
+      role="presentation"
+      className={`work-screen__label label-panel label-panel--${view.tone}${
+        view.variant === "verify" ? " label-panel--verify" : ""
+      }`}
+    >
+      <header className="label-panel__header">
+        <h2>{pallet ? t("floor.print.pallet.closed") : view.title}</h2>
+        {view.headerAction}
+      </header>
+      <div className="label-panel__body">
+        {pallet && <Alert tone={view.tone} role="presentation" title={view.title} />}
+        {view.children}
+      </div>
+      {view.footer === undefined ? null : (
+        <footer className="label-panel__footer">{view.footer}</footer>
+      )}
+    </div>
+  );
+
   let body: ReactNode;
   if (mode.kind === "reason") {
     const target = targetText(t, job, settings, mode.printer, mayExist);
-    body = (
-      <Alert
-        tone="warn"
-        role="presentation"
-        title={t("floor.print.reason.title")}
-        className="work-screen__label"
-      >
-        <p>{t(pallet ? "floor.print.pallet.reasonHint" : "floor.print.reason.hint")}</p>
-        <p>{sscc}</p>
-        {target !== null && <p>{target}</p>}
-        <div className="standalone-form__actions work-screen__reasons">
-          {REPRINT_REASONS.map((reason) => (
-            <Button
-              key={reason}
-              size="floor"
-              {...press(() => {
-                show({ kind: "main" });
-                onPrintAgain({ reason, printer: mode.printer });
-              })}
-            >
-              {t(`floor.print.reason.${reason}`)}
-            </Button>
-          ))}
-          {back}
-        </div>
-      </Alert>
-    );
+    body = dialog({
+      tone: "warn",
+      title: t("floor.print.reason.title"),
+      children: (
+        <>
+          <p>{t(pallet ? "floor.print.pallet.reasonHint" : "floor.print.reason.hint")}</p>
+          {ssccBlock}
+          {target !== null && <p className="label-panel__target">{target}</p>}
+          <div className="label-panel__choices work-screen__reasons">
+            {REPRINT_REASONS.map((reason) => (
+              <Button
+                key={reason}
+                size="floor"
+                variant="secondary"
+                {...press(() => {
+                  show({ kind: "main" });
+                  onPrintAgain({ reason, printer: mode.printer });
+                })}
+              >
+                {t(`floor.print.reason.${reason}`)}
+              </Button>
+            ))}
+          </div>
+        </>
+      ),
+      footer: back,
+    });
   } else if (mode.kind === "printers") {
     // A printer of A4 sheets (plan А4) is offered for a pallet's label only.
     const choices = mode.printers?.filter((printer) => printsPurpose(printer, job.purpose)) ?? null;
-    body = (
-      <Alert
-        tone="warn"
-        role="presentation"
-        title={t("floor.print.printers.title")}
-        className="work-screen__label"
-      >
-        <p>{sscc}</p>
-        {choices !== null && choices.length === 0 && <p>{t("floor.print.printers.none")}</p>}
-        <div className="standalone-form__actions">
-          {(choices ?? []).map((printer) => (
-            <Button key={printer.id} size="floor" {...press(() => again(printer))}>
-              {t("floor.print.printers.option", {
-                name: printer.name,
-                language: printerFormatText(t, printer),
-                dpi: printer.dpi,
-              })}
-            </Button>
-          ))}
-          {back}
-        </div>
-      </Alert>
-    );
+    body = dialog({
+      tone: "warn",
+      title: t("floor.print.printers.title"),
+      children: (
+        <>
+          {ssccBlock}
+          {choices !== null && choices.length === 0 && <p>{t("floor.print.printers.none")}</p>}
+          <div className="label-panel__choices">
+            {(choices ?? []).map((printer) => (
+              <Button
+                key={printer.id}
+                size="floor"
+                variant="secondary"
+                {...press(() => again(printer))}
+              >
+                {t("floor.print.printers.option", {
+                  name: printer.name,
+                  language: printerFormatText(t, printer),
+                  dpi: printer.dpi,
+                })}
+              </Button>
+            ))}
+          </div>
+        </>
+      ),
+      footer: back,
+    });
   } else if (mode.kind === "skip") {
-    body = (
-      <Alert
-        tone="warn"
-        role="presentation"
-        title={t("floor.print.skipConfirm.title")}
-        className="work-screen__label"
-      >
-        <p>{t(pallet ? "floor.print.pallet.skipBody" : "floor.print.skipConfirm.body")}</p>
-        <p>{sscc}</p>
-        <div className="standalone-form__actions">
+    body = dialog({
+      tone: "warn",
+      title: t("floor.print.skipConfirm.title"),
+      children: (
+        <>
+          <p>{t(pallet ? "floor.print.pallet.skipBody" : "floor.print.skipConfirm.body")}</p>
+          {ssccBlock}
+        </>
+      ),
+      footer: (
+        <>
           {back}
           <Button
             size="floor"
@@ -360,105 +416,128 @@ export function LabelPanel({
           >
             {t("floor.print.skipConfirm.confirm")}
           </Button>
-        </div>
-      </Alert>
-    );
+        </>
+      ),
+    });
   } else if (onRecover !== undefined) {
     // The send's end was not written and no send of this app holds the bytes:
     // nobody is going to answer. Only the operator's act (never an automatic one)
     // turns it into an unknown label to decide on.
-    body = (
-      <Alert
-        tone="warn"
-        role="presentation"
-        title={t("floor.print.stalled.title")}
-        className="work-screen__label"
-      >
-        <p>{t("floor.print.stalled.body")}</p>
-        <p>{sscc}</p>
-        <div className="standalone-form__actions">
-          <Button size="floor" {...press(onRecover)}>
-            {t("floor.print.stalled.action")}
-          </Button>
-        </div>
-      </Alert>
-    );
+    body = dialog({
+      tone: "warn",
+      title: t("floor.print.stalled.title"),
+      children: (
+        <>
+          <p>{t("floor.print.stalled.body")}</p>
+          {ssccBlock}
+        </>
+      ),
+      footer: (
+        <Button size="floor" {...press(onRecover)}>
+          {t("floor.print.stalled.action")}
+        </Button>
+      ),
+    });
   } else if (job.state === "prepared" || job.state === "sending") {
     // On its way to the printer, or a send whose answer is still to come: nothing
     // to decide yet (a restart reads a send left so as unknown).
-    body = (
-      <Alert
-        tone="info"
-        role="presentation"
-        title={t("floor.print.pending.title")}
-        className="work-screen__label"
-      >
-        <p>{t("floor.print.pending.body")}</p>
-        <p>{sscc}</p>
-      </Alert>
-    );
+    body = dialog({
+      tone: "info",
+      title: t("floor.print.pending.title"),
+      children: (
+        <>
+          {ssccBlock}
+          <p className="label-panel__waiting">
+            <span aria-hidden="true" />
+            {t("floor.print.pending.body")}
+          </p>
+        </>
+      ),
+    });
   } else if (checking) {
-    body = (
-      <Alert
-        tone="info"
-        role="presentation"
-        title={t("floor.print.check.title")}
-        className="work-screen__label"
-      >
-        <p>{t(pallet ? "floor.print.pallet.checkBody" : "floor.print.check.body")}</p>
-        <p>{sscc}</p>
-        {note !== null && <p>{noteText(note, t, pallet)}</p>}
-        {queueText}
-        <div className="standalone-form__actions">
-          <Button size="floor" variant="secondary" {...press(() => again(null))}>
-            {t("floor.print.printAgain")}
-          </Button>
-          {queueButton}
+    body = dialog({
+      tone: "info",
+      variant: "verify",
+      title: t("floor.print.check.title"),
+      children: (
+        <section className="label-panel__stage">
+          <div className="label-panel__scanner" aria-hidden="true">
+            <span />
+          </div>
+          <p className="label-panel__instruction">
+            {t(pallet ? "floor.print.pallet.checkBody" : "floor.print.check.body")}
+          </p>
+          {ssccBlock}
+          {note !== null ? (
+            <p className="label-panel__note">{noteText(note, t, pallet)}</p>
+          ) : (
+            <p className="label-panel__waiting">
+              <span aria-hidden="true" />
+              {t("floor.print.check.waiting")}
+            </p>
+          )}
+          {queueText}
+        </section>
+      ),
+      footer: (
+        <>
           <Button size="floor" variant="secondary" {...press(onSkip)}>
             {t("floor.print.check.skip")}
           </Button>
-        </div>
-      </Alert>
-    );
-  } else {
-    const target = targetText(t, job, settings, null, mayExist);
-    body = (
-      <Alert
-        tone="error"
-        role="presentation"
-        title={t(
-          job.state === "unknown"
-            ? "floor.print.unknownTitle"
-            : pallet
-              ? "floor.print.pallet.failedTitle"
-              : "floor.print.failedTitle",
-        )}
-        className="work-screen__label"
-      >
-        {job.errorCode !== null && (
-          <p>
-            {pallet && job.errorCode === "printer_unconfigured"
-              ? t("floor.print.pallet.printerUnconfigured")
-              : t(`floor.print.codes.${job.errorCode}`)}
-          </p>
-        )}
-        <p>{sscc}</p>
-        {target !== null && <p>{target}</p>}
-        {note !== null && <p>{noteText(note, t, pallet)}</p>}
-        {job.state === "unknown" && queueText}
-        <div className="standalone-form__actions">
-          {job.state === "unknown" && (
-            <Button size="floor" {...press(onPrinted)}>
-              {t("floor.print.printed")}
-            </Button>
-          )}
-          {job.state === "unknown" && queueButton}
+          {queueButton}
           <Button size="floor" {...press(() => again(null))}>
             {t("floor.print.printAgain")}
           </Button>
+        </>
+      ),
+    });
+  } else {
+    const target = targetText(t, job, settings, null, mayExist);
+    const unknown = job.state === "unknown";
+    body = dialog({
+      tone: unknown ? "warn" : "error",
+      title: t(
+        unknown
+          ? "floor.print.unknownTitle"
+          : pallet
+            ? "floor.print.pallet.failedTitle"
+            : "floor.print.failedTitle",
+      ),
+      headerAction: unknown ? (
+        <Button size="floor" {...press(onPrinted)}>
+          {t("floor.print.printed")}
+        </Button>
+      ) : (
+        <Button size="floor" {...press(() => again(null))}>
+          {t("floor.print.printAgain")}
+        </Button>
+      ),
+      children: (
+        <>
+          {target !== null && <p className="label-panel__target">{target}</p>}
           <Button size="floor" variant="secondary" {...press(choosePrinter)}>
             {t("floor.print.otherPrinter")}
           </Button>
+          {job.errorCode !== null && (
+            <p className="label-panel__message">
+              {pallet && job.errorCode === "printer_unconfigured"
+                ? t("floor.print.pallet.printerUnconfigured")
+                : t(`floor.print.codes.${job.errorCode}`)}
+            </p>
+          )}
+          {ssccBlock}
+          {note !== null && <p className="label-panel__note">{noteText(note, t, pallet)}</p>}
+          {unknown && queueText}
+        </>
+      ),
+      footer: (
+        <>
+          {unknown && queueButton}
+          {unknown && (
+            <Button size="floor" variant="secondary" {...press(() => again(null))}>
+              {t("floor.print.printAgain")}
+            </Button>
+          )}
           {onSetup !== undefined && (
             <Button size="floor" variant="secondary" {...press(onSetup)}>
               {t("floor.print.setup")}
@@ -467,12 +546,12 @@ export function LabelPanel({
           <Button size="floor" variant="secondary" {...press(() => show({ kind: "skip" }))}>
             {t("floor.print.skip")}
           </Button>
-        </div>
-      </Alert>
-    );
+        </>
+      ),
+    });
   }
   return (
-    <div ref={root} tabIndex={-1} data-label-panel="" style={{ outline: "none" }}>
+    <div ref={root} tabIndex={-1} data-label-panel="" className="label-panel-root">
       {body}
     </div>
   );

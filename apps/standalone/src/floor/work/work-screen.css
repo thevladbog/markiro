@@ -658,24 +658,6 @@
 }
 
 /*
- * A label that waits takes the screen as the cloud's print recovery does (BoxPrintRecovery,
- * PalletClose): a large card in the middle with floor-sized words. The panel itself is the
- * label's (src/floor/print/LabelPanel.tsx); only its size on this stage is set here.
+ * A label that waits takes the stage as the cloud's print dialogs do (BoxPrintRecovery,
+ * PalletClose, PrintVerification): the panel lays itself out (src/floor/print/label-panel.css).
  */
-.work-screen__label-stage .work-screen__label {
-  padding: var(--sp-5) !important;
-  gap: var(--sp-3) !important;
-}
-
-/* The card's title, which @markiro/ui's Alert sets at its office size. */
-.work-screen__label-stage .work-screen__label > div > span:first-child {
-  font: var(--floor-title) !important;
-}
-
-.work-screen__label-stage .work-screen__label p {
-  font: var(--floor-body);
-}
-
-.work-screen__label-stage .work-screen__label .standalone-form__actions {
-  margin-top: var(--sp-2);
-}

@@ -396,7 +396,7 @@ describe("the workstation setup from the warehouse reprint", () => {
     fireEvent.click(screen.getByRole("button", { name: "Рабочее место" }));
     await settle();
     expect(lastProps().isLeaving()).toBe(true);
-    expect(screen.queryByRole("heading", { name: "Рабочее место" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Настройка рабочего места" })).toBeNull();
     await act(async () => releaseWork());
     expect(await screen.findByRole("button", { name: "Добавить принтер" })).toBeTruthy();
     expect(screens.unmounts).toBe(1);
