@@ -199,6 +199,9 @@ pub async fn create_device_shift(
             .map(Json)
             .ok_or_else(|| ApiError::internal("shift vanished"));
     }
+    // A new shift the station could not open (plan ЛЦ-2, spec §3.3): a
+    // retried create above still answers the shift it made.
+    crate::license::gate::require_new_shifts(&state, &mut tx).await?;
     let line_id: Option<String> = sqlx::query_scalar("SELECT line_id FROM devices WHERE id = ?")
         .bind(&device.id)
         .fetch_one(&mut *tx)
@@ -354,6 +357,9 @@ pub async fn enter_shift(
             return Ok(Json(entered));
         }
         None => {
+            // Opening is the one move a license that ran out closes (plan
+            // ЛЦ-2, spec §3.3); the owner's entry again above never is.
+            crate::license::gate::require_new_shifts(&state, &mut tx).await?;
             shifts::snapshot(
                 &mut tx,
                 &shift.product_id,

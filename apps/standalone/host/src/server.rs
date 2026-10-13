@@ -483,6 +483,10 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/license/activation-request",
             get(crate::license::routes::activation_request),
         )
+        .route(
+            "/v1/office/license/emergency",
+            post(crate::license::routes::enable_emergency),
+        )
 }
 
 /// The protocol version the client sent, set by [`protocol_guard`] for every

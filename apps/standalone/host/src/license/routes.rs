@@ -7,6 +7,7 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::codes;
+use markiro_proto::license::constraints;
 use markiro_proto::license::{
     plans, DeviceLicense, LicenseBinding, LicenseCustomer, LicenseEmergency, LicenseFeatures,
     LicenseFlags, LicenseLoadRequest, LicensePreview, LicenseQuotas, LicenseSummary, LicenseTerms,
@@ -19,7 +20,7 @@ use markiro_proto::trust::{
 use serde_json::{json, Value};
 
 use super::seats::{self, Usage};
-use super::state::{Evaluation, Features, Quotas, StoredLicense};
+use super::state::{self, Evaluation, Features, Quotas, StoredLicense};
 use super::verify::{self, Admission, Refusal};
 use super::{clock, ms_text, store, Snapshot};
 use crate::audit::{self, actions, Entry, Outcome};
@@ -554,4 +555,68 @@ pub async fn load_license(
     let mut answer = app.license.office_license_now(&app).await?;
     answer.warnings = warnings;
     Ok(Json(answer))
+}
+
+/// `POST /v1/office/license/emergency` (administrators, spec §3.5): new
+/// shifts open 72 hours more, once per file and once for the trial (the key
+/// is the file in force's `licenseId` or `"trial"`; it only moves forward, so
+/// the one stored key is enough). A repeat is `emergency_used`, checked
+/// first (also while the extension runs and new shifts open); a state that
+/// opens new shifts is `emergency_not_needed`; neither writes a row.
+pub async fn enable_emergency(
+    State(app): State<AppState>,
+    context: OfficeContext,
+) -> Result<Json<OfficeLicense>, ApiError> {
+    context.require_admin()?;
+    let at = app.timestamp();
+    let mut tx = begin_write(&app.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let snapshot = app
+        .license
+        .snapshot(&app, &mut tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let evaluation = &snapshot.evaluation;
+    if evaluation.emergency_used {
+        return Err(ApiError::conflict(
+            constraints::EMERGENCY_USED,
+            "the emergency extension of this license was used",
+        ));
+    }
+    if evaluation.opens_new_shifts {
+        return Err(ApiError::conflict(
+            constraints::EMERGENCY_NOT_NEEDED,
+            "new shifts open: there is nothing to extend",
+        ));
+    }
+    let until = snapshot
+        .reading
+        .effective
+        .saturating_add(state::EMERGENCY_MS);
+    store::set_emergency(&mut tx, &evaluation.emergency_key, until)
+        .await
+        .map_err(ApiError::internal)?;
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::LICENSE_EMERGENCY,
+            target_type: Some("license"),
+            target_id: evaluation
+                .license
+                .as_ref()
+                .map(|license| license.license_id.as_str()),
+            outcome: Outcome::Ok,
+            details: json!({ "until": ms_text(until), "licenseId": evaluation.emergency_key }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    commit_with_revision(tx, &app.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    tracing::info!(key = %evaluation.emergency_key, "the license's emergency extension was enabled");
+    app.license.office_license_now(&app).await.map(Json)
 }

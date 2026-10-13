@@ -4,6 +4,7 @@
 //! decides the state; devices read it (`GET /v1/device`).
 
 pub mod clock;
+pub mod gate;
 pub mod routes;
 pub mod seats;
 pub mod state;

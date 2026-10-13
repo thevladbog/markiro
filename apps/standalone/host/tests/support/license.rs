@@ -149,6 +149,20 @@ pub fn file(host_id: &str, edit: impl FnOnce(&mut Value)) -> String {
     sign(&payload)
 }
 
+/// Make `terms` a file that ended a day before the clock's start, issued a
+/// month before it, without grace.
+pub fn expire(terms: &mut Value) {
+    terms["issuedAt"] = json!(START_MS - 30 * DAY_MS);
+    terms["validFrom"] = json!(START_MS - 30 * DAY_MS);
+    terms["validUntil"] = json!(START_MS - DAY_MS);
+    terms["graceDays"] = json!(0);
+}
+
+/// `terms(host_id)` expired by [`expire`], signed.
+pub fn expired_file(host_id: &str) -> String {
+    file(host_id, expire)
+}
+
 /// The payload of a compact file, as JSON.
 pub fn payload_of(file: &str) -> Value {
     let segment = file.split('.').nth(1).expect("three segments");

@@ -516,6 +516,16 @@ pub fn shift_body(setup: &ShiftSetup) -> Value {
     })
 }
 
+/// The smallest shift a station creates on its own line with `request_id`.
+pub fn device_shift_body(setup: &ShiftSetup, request_id: &str) -> Value {
+    serde_json::json!({
+        "requestId": request_id,
+        "productId": setup.product,
+        "boxTemplateId": setup.template,
+        "productionDate": "2026-10-09"
+    })
+}
+
 /// A label template of `purpose` made through the office API, enabled or
 /// not, for the product groups `codes` (`Value::Null`: every group);
 /// returns its id.

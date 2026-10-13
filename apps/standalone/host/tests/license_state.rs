@@ -19,8 +19,8 @@ use support::app::{
     request, with_device, Admin, AuditRow, TestApp, IMPORT_ID,
 };
 use support::license::{
-    file, license_id, load_ok, office_license, refresh, seed, set_org_inn, terms, text, DAY_MS,
-    INN, OTHER_INN, START_MS,
+    expired_file, file, license_id, load_ok, office_license, refresh, seed, set_org_inn, terms,
+    text, DAY_MS, INN, OTHER_INN, START_MS,
 };
 
 const OTHER_HOST: &str = "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f";
@@ -39,16 +39,6 @@ fn state_row(license_id: Option<&str>, from: &str, to: &str, at_ms: i64) -> Audi
             "clockBehindDays": null, "clockAhead": false
         }),
     )
-}
-
-/// A file that ended a day before the clock's start, without grace.
-fn expired(host: &str) -> String {
-    file(host, |terms| {
-        terms["issuedAt"] = json!(START_MS - 30 * DAY_MS);
-        terms["validFrom"] = json!(START_MS - 30 * DAY_MS);
-        terms["validUntil"] = json!(START_MS - DAY_MS);
-        terms["graceDays"] = json!(0);
-    })
 }
 
 /// `GET /v1/office/license` as the host answers it, without a session (an
@@ -186,7 +176,7 @@ async fn a_device_reads_the_license_with_its_record_and_not_with_its_line() {
             "phaseEndsAt": text(START_MS + 14 * DAY_MS), "emergencyUntil": null
         })
     );
-    load_ok(&admin, &expired(&admin.app.state.host_id)).await;
+    load_ok(&admin, &expired_file(&admin.app.state.host_id)).await;
     // New shifts are closed, the device works on.
     assert_eq!(
         device_record(&admin).await["license"],
