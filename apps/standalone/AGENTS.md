@@ -3619,6 +3619,27 @@ transaction, so the next entry of the screen finds it (`readOpenJob`). The box's
 label is «Floor printing»; the exceptions and the shift's close are «Floor
 exceptions and close».
 
+A validation shift (plan РЕЖ, A7) is worked on the same screen, which chooses by
+`shift.copy.mode` in one place. The scan path is the same up to the box:
+`processScan` reads the scan, checks the product, the local duplicate and the
+host's, and an accepted code is written without a box — `floor_codes.box_id`
+and `floor_scans.box_id` NULL, the `scan` record with `boxId: null`, in the same
+ONE `local_transaction` — and answers `{ kind: "accepted", boxId: null,
+acceptedCount }` (the shift's codes, `SHIFT_CODES_SQL`, read in the queue's turn
+plus one). The screen shows `ValidationPanel` where the box stands: the accepted
+codes against the plan, the refused scans by kind (`VALIDATION_COUNTS_SQL` over
+`floor_scans_shift`, pinned in both query-plan lists) and this entry's last five
+outcomes in words, in the aggregation path's texts but the accept's own
+(«Принят: в смене N шт.»). It has no box, pallet, label or exceptions (Р9), asks
+for no SSCC block (neither supply is asked; the status bar's `readShiftStock`
+answers `null` for it), and recovers no label on entry. The plan notice offers
+«Закрыть смену» beside «Продолжить», as the cloud station does. The close is the
+aggregation close: `actualQty` is the shift's codes, `closedBoxCount` 0, no open
+box can block it, and the domain asks a reason when the fact differs from the
+plan; the summary and the closed panel name no box (`boxless`). Entering a
+validation shift names `validation-v1` (`STATION_SHIFT_ENTER`); a host that
+refuses it as `station_update` is said on the list, which stays.
+
 ## Floor printing
 
 Stage 2a, plan 2a7 (`src/floor/print`, `src/floor/setup`, `src/hardware/awake.ts`).

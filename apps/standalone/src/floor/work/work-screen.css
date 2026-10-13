@@ -470,6 +470,118 @@
   text-align: right;
 }
 
+/*
+ * A validation shift's panel where the box stands (plan РЕЖ): the accepted codes against the
+ * plan, the refused ones by kind in the figures' row style, and the last outcomes in words on
+ * their tone, the newest on top.
+ */
+.work-validation {
+  display: grid;
+  padding: var(--sp-3);
+  overflow: auto;
+  gap: var(--sp-2);
+  align-content: start;
+  /* Sized by its row alone: a long list scrolls inside the panel, never pushes the footer. */
+  contain: size;
+}
+
+/* «12 из 1 200 шт.»: the numbers in the counter's face, the words in the interface's (the box's). */
+.work-validation__count {
+  font: var(--floor-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-validation__count .work-of-count__number {
+  font: var(--floor-counter-sm);
+}
+
+.work-validation__count .work-of-count__word {
+  color: var(--fg-2);
+}
+
+.work-validation__hint,
+.work-validation__empty {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.work-validation__figures {
+  display: grid;
+  margin: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.work-validation__figures > div {
+  display: flex;
+  min-width: 0;
+  min-height: 56px;
+  padding-inline: var(--sp-3);
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.work-validation__figures dt {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.work-validation__figures dd {
+  margin: 0;
+  font: 600 24px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-validation h3 {
+  margin: var(--sp-1) 0 0;
+  font: var(--floor-lg);
+}
+
+.work-validation__recent {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--sp-1);
+  list-style: none;
+}
+
+.work-validation__recent > li {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-3);
+  gap: var(--sp-3);
+  align-items: center;
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  font: var(--floor-body);
+}
+
+.work-validation__recent > li[data-verdict="ok"] {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.work-validation__recent > li[data-verdict="error"] {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+.work-validation__time {
+  flex: 0 0 auto;
+  font: 500 16px/1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-validation__word {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* The fixed floor action row: never a scroll region, never the screen's content. */
 .work-screen .station-floor-footer {
   display: flex;
@@ -498,6 +610,12 @@
 }
 
 .work-footer__action:nth-child(3) {
+  justify-self: end;
+}
+
+/* A validation shift has no exceptions: the leave on the left, the close on the right. */
+.work-footer--two .work-footer__action:nth-child(2) {
+  grid-column: 3;
   justify-self: end;
 }
 

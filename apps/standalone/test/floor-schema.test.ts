@@ -53,7 +53,7 @@ import {
 } from "../src/floor/queue/outbox-recovery.js";
 import { BLOCKS_WITH_ROOM_SQL, NEWEST_BLOCK_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
-import { SHIFT_CODES_SQL } from "../src/floor/work/work-reads.js";
+import { SHIFT_CODES_SQL, VALIDATION_COUNTS_SQL } from "../src/floor/work/work-reads.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
@@ -848,6 +848,15 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(SHIFT_CODES_SQL)).toContain(
       "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
     );
+    // A validation shift's refused scans by kind, after every scan (plan РЕЖ): one row, by shift.
+    expect(plan(VALIDATION_COUNTS_SQL)).toContain(
+      "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
+    );
+    expect(
+      plan(VALIDATION_COUNTS_SQL)
+        .split("\n")
+        .filter((step) => step.startsWith("SCAN ") || step.includes("TEMP B-TREE")),
+    ).toEqual([]);
     expect(
       plan(
         "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
@@ -1259,8 +1268,9 @@ describe("the shape of the production tables (migration 0006)", () => {
       BLOCK_DROPS_COUNT_SQL,
       NEWEST_BLOCK_SQL,
       SHIFT_CODES_SQL,
+      VALIDATION_COUNTS_SQL,
     ];
-    expect(new Set(statements).size).toBe(31);
+    expect(new Set(statements).size).toBe(32);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, every table's delete by shift as a literal (each

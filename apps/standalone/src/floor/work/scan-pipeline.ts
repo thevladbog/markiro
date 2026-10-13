@@ -6,7 +6,7 @@ import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, scanRecord, scannedCode, type RecordHead } from "../facts.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
-import { readOpenBox } from "./work-reads.js";
+import { readOpenBox, SHIFT_CODES_SQL } from "./work-reads.js";
 
 /**
  * The longest serial the host keeps, in bytes of UTF-8 (`MAX_SERIAL_BYTES`,
@@ -56,15 +56,22 @@ export interface ScanContext {
   newId: () => string;
 }
 
-/** What became of a scan; every outcome is in `floor_scans` and the outbox. */
+/**
+ * What became of a scan; every outcome is in `floor_scans` and the outbox. An accepted code of
+ * an aggregation shift is in its open box (`itemCount`: the box's codes now); one of a
+ * validation shift is in no box (`boxId: null`, plan РЕЖ), and `acceptedCount` is the codes this
+ * station holds in the shift now.
+ */
 export type ScanOutcome =
   | { kind: "accepted"; boxId: string; itemCount: number }
+  | { kind: "accepted"; boxId: null; acceptedCount: number }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
   | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
   | { kind: "wrong_gtin"; gtin14: string }
   | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> };
 
 const localOwnerRow = z.object({ scanned_at: z.string() });
+const countRow = z.object({ n: z.number().int().nonnegative() });
 
 /** When this station accepted the code, if it holds it in a box of this pairing. */
 async function readLocalOwner(
@@ -136,7 +143,8 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
  * time (`createWorkQueue`): read it; a code of another product is
  * `wrong_gtin`; a code this station holds is a local duplicate; a code
  * another device's scan owns on the host is a host duplicate; otherwise it
- * is accepted into the shift's open box, which opens with it. Every scan is
+ * is accepted into the shift's open box, which opens with it — or, in a
+ * validation shift (plan РЕЖ), into no box at all. Every scan is
  * journalled with its outbox record in ONE transaction: the accepted one with
  * its box and its place in `floor_codes`, whose key keeps a code in one box
  * of the pairing at most — a second accept of a code the check missed fails
@@ -194,6 +202,33 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       shiftNumber: owner.shiftNumber,
     };
   }
+  const claim = (boxId: string | null): LocalStatement => ({
+    sql:
+      "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, " +
+      "scanned_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    values: [
+      pairing.hostId,
+      pairing.deviceId,
+      code.codeHash,
+      shift.copy.id,
+      boxId,
+      head.id,
+      scannedAt,
+    ],
+    expectedChanges: 1,
+  });
+  if (shift.copy.mode === "validation") {
+    // A validation shift takes the code without a box (plan РЕЖ, Р8): its place, its journal
+    // row and its record name none, and no box is opened. Read in the queue's turn, where
+    // nothing else writes the shift's codes, so the count after the write is one more.
+    const [held] = await local.query(
+      SHIFT_CODES_SQL,
+      [pairing.hostId, pairing.deviceId, shift.copy.id],
+      countRow,
+    );
+    await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId: null }, [claim(null)]);
+    return { kind: "accepted", boxId: null, acceptedCount: (held?.n ?? 0) + 1 };
+  }
   const box = await readOpenBox(local, pairing, shift.copy.id);
   const boxId = box?.id ?? context.newId();
   const intoBox: LocalStatement =
@@ -212,21 +247,9 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
           values: [boxId, pairing.hostId, pairing.deviceId],
           expectedChanges: 1,
         };
-  const claim: LocalStatement = {
-    sql:
-      "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, " +
-      "scanned_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-    values: [
-      pairing.hostId,
-      pairing.deviceId,
-      code.codeHash,
-      shift.copy.id,
-      boxId,
-      head.id,
-      scannedAt,
-    ],
-    expectedChanges: 1,
-  };
-  await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId }, [intoBox, claim]);
+  await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId }, [
+    intoBox,
+    claim(boxId),
+  ]);
   return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1 };
 }

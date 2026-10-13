@@ -292,6 +292,19 @@
         "palletLeft_other": "Осталось {{count}} короба"
       }
     },
+    "validation": {
+      "title": "Проверка",
+      "unit": "шт.",
+      "hint": "Каждый код проверяется и принимается без короба и паллеты.",
+      "duplicates": "Повторы",
+      "errors": "Ошибки",
+      "recent": "Последние сканы",
+      "recentEmpty": "Сканов после входа в смену ещё не было.",
+      "accepted": "Принят: в смене {{quantity}} шт.",
+      "actions": "Выход из смены, закрытие смены",
+      "closeShift": "Закрыть смену",
+      "closedNumbers": "Принято: {{quantity}} шт."
+    },
     "print": {
       "sscc": "SSCC короба: {{sscc}}",
       "ssccCaption": "SSCC короба",

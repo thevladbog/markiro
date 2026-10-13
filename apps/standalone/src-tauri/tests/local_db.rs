@@ -2272,6 +2272,12 @@ const OPEN_JOB_READ: &str =
 const SHIFT_CODES: &str =
     "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?";
 
+/// A validation shift's refused scans by kind (`VALIDATION_COUNTS_SQL`,
+/// `src/floor/work/work-reads.ts`, plan РЕЖ): the work screen reads it after every scan.
+const VALIDATION_COUNTS: &str = "SELECT coalesce(sum(verdict = 'duplicate'), 0) AS duplicates, \
+     coalesce(sum(verdict IN ('wrong_gtin', 'invalid')), 0) AS errors FROM floor_scans \
+     WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
@@ -2286,7 +2292,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 101] = [
+    let reads: [(&str, &str); 102] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -2403,6 +2409,10 @@ async fn the_floors_repeating_reads_search_an_index() {
             "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         (
+            VALIDATION_COUNTS,
+            "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
             "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? \
              AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
             "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
@@ -2482,7 +2492,7 @@ async fn the_floors_repeating_reads_search_an_index() {
             "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
         ),
         (
-            "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts \
+            "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled, mode FROM floor_shifts \
              WHERE host_id = ? AND device_id = ? AND id = ?",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),

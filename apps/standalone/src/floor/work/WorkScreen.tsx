@@ -111,7 +111,14 @@ import {
 import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline.js";
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
-import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
+import { ValidationPanel, type ValidationOutcome } from "./ValidationPanel.js";
+import {
+  readOpenBox,
+  readValidationCounts,
+  readWorkTotals,
+  type ValidationCounts,
+  type WorkTotals,
+} from "./work-reads.js";
 import {
   BoxFill,
   FooterAction,
@@ -375,10 +382,17 @@ export function scanTime(iso: string): string {
   return TIME.format(new Date(iso));
 }
 
+/** How many outcomes the validation panel lists (plan РЕЖ). */
+const VALIDATION_OUTCOMES = 5;
+
 /** The last scan in words. */
 function lastText(last: Last, t: TFunction, capacity: number): string {
   switch (last.kind) {
     case "accepted":
+      // A validation shift's code is in no box (plan РЕЖ): the shift's count is said instead.
+      if (last.boxId === null) {
+        return t("floor.validation.accepted", { quantity: formatQuantity(last.acceptedCount) });
+      }
       return t("floor.work.last.accepted", {
         quantity: formatQuantity(last.itemCount),
         capacity: formatQuantity(capacity),
@@ -710,10 +724,14 @@ export function WorkScreen(props: WorkScreenProps) {
   const [cued, setCued] = useState(false);
   // A close waits for the host's serials.
   const [waitingSerials, setWaitingSerials] = useState(false);
+  // The one point where the screen chooses by the shift's mode (plan РЕЖ): a validation shift
+  // takes its codes without a box, so it has no box, pallet, label, exceptions or SSCC serials;
+  // its panel stands where the box does. The mode never changes once the shift is open.
+  const validation = shift.copy.mode === "validation";
   // The shift's pallets (plan ПЛ-Ц): what its copy and snapshot give. A shift that
   // works with pallets and gives none is a stop from the first render, never boxes alone.
-  const pallets = shiftPallets(shift);
-  const palletsMissing = shift.copy.palletsEnabled && pallets === null;
+  const pallets = validation ? null : shiftPallets(shift);
+  const palletsMissing = !validation && shift.copy.palletsEnabled && pallets === null;
   const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
   const [planReached, setPlanReached] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
@@ -732,6 +750,10 @@ export function WorkScreen(props: WorkScreenProps) {
   // Shown only while the pallet that `refresh` reads is still full (see `palletWaitsNow`),
   // so it cannot outlive the pallet it speaks of.
   const [palletWaits, setPalletWaits] = useState<"no_serials" | "invalid" | null>(null);
+  // A validation shift's refused scans by kind, and the outcomes of this entry, newest first.
+  const [counts, setCounts] = useState<ValidationCounts | null>(null);
+  const [outcomes, setOutcomes] = useState<readonly ValidationOutcome[]>([]);
+  const outcomeId = useRef(0);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
@@ -870,9 +892,14 @@ export function WorkScreen(props: WorkScreenProps) {
       now.pallets === null
         ? null
         : await readOpenPallet(now.local, pairingOf(now), now.shift.copy.id);
+    const refusals =
+      now.shift.copy.mode === "validation"
+        ? await readValidationCounts(now.local, pairingOf(now), now.shift.copy.id)
+        : null;
     if (alive.current) {
       setTotals(next);
       setPallet(open);
+      setCounts(refusals);
     }
     return next;
   }, []);
@@ -1279,9 +1306,21 @@ export function WorkScreen(props: WorkScreenProps) {
       const boxCapacity = live.current.shift.copy.boxCapacity;
       const text = lastText(outcome, say, boxCapacity);
       setLast(outcome);
+      if (live.current.shift.copy.mode === "validation" && alive.current) {
+        outcomeId.current += 1;
+        const said: ValidationOutcome = {
+          id: outcomeId.current,
+          time: scanTime(new Date().toISOString()),
+          text,
+          tone: lastTone(outcome),
+        };
+        setOutcomes((before) => [said, ...before].slice(0, VALIDATION_OUTCOMES));
+      }
       if (outcome.kind === "accepted") {
         show("ok", say("floor.work.signal.ok"), text);
-        if (boxIsFull(outcome.itemCount, boxCapacity)) await closeBox(true);
+        if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
+          await closeBox(true);
+        }
         const next = await refreshQuietly();
         const planned = live.current.shift.copy.plannedQty;
         if (next !== null && planned !== null && !planShown.current && next.accepted >= planned) {
@@ -1292,17 +1331,19 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       if (outcome.kind === "duplicate") {
         show("duplicate", say("floor.work.signal.duplicate"), text);
-        return;
+      } else {
+        show(
+          "error",
+          say(
+            outcome.kind === "wrong_gtin"
+              ? "floor.work.signal.wrongGtin"
+              : "floor.work.signal.invalid",
+          ),
+          text,
+        );
       }
-      show(
-        "error",
-        say(
-          outcome.kind === "wrong_gtin"
-            ? "floor.work.signal.wrongGtin"
-            : "floor.work.signal.invalid",
-        ),
-        text,
-      );
+      // A validation shift's panel counts the refused scans too (plan РЕЖ).
+      if (live.current.shift.copy.mode === "validation") await refreshQuietly();
     },
     [closeBox, refreshQuietly, show],
   );
@@ -1411,10 +1452,13 @@ export function WorkScreen(props: WorkScreenProps) {
         refuse(false, stopped.kind === "closed");
         return;
       }
-      await closeBox(true);
-      if (stopRef.current !== null) {
-        refuse(false);
-        return;
+      // A validation shift has no box to close first (plan РЕЖ).
+      if (live.current.shift.copy.mode !== "validation") {
+        await closeBox(true);
+        if (stopRef.current !== null) {
+          refuse(false);
+          return;
+        }
       }
       // A shift the office closed takes no new code: nothing is journalled.
       if (live.current.officeClosed) {
@@ -1934,6 +1978,9 @@ export function WorkScreen(props: WorkScreenProps) {
           await refresh();
           // Pallets that are missing stop the work before anything is written.
           if (stopRef.current?.kind === "pallets_missing") return;
+          // A validation shift prints nothing and has no box (plan РЕЖ): nothing to recover,
+          // settle or close.
+          if (live.current.shift.copy.mode === "validation") return;
           try {
             await recoverInterruptedJobs(printContextOf(live));
           } catch {
@@ -1963,7 +2010,8 @@ export function WorkScreen(props: WorkScreenProps) {
   // that waited for them goes again.
   const online = props.online;
   useEffect(() => {
-    if (!online) return;
+    // A validation shift numbers no box: it never asks for serials (plan РЕЖ).
+    if (!online || validation) return;
     void live.current
       .track(
         Promise.resolve()
@@ -1983,7 +2031,7 @@ export function WorkScreen(props: WorkScreenProps) {
           }),
       )
       .catch(() => undefined);
-  }, [online, supply, queue, closeBox, refreshQuietly, setStop]);
+  }, [online, validation, supply, queue, closeBox, refreshQuietly, setStop]);
 
   // Pallet serials by the half rule on entry and whenever the link is back (plan
   // ПЛ-Ц): a pallet that waited for them closes, and an early close that stopped
@@ -2087,16 +2135,20 @@ export function WorkScreen(props: WorkScreenProps) {
     stop?.kind === "close" ||
     stop?.kind === "closed" ||
     stop?.kind === "label";
-  const facts = [
-    { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
-    {
-      term: t("floor.work.plan"),
-      value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
-    },
-    ...(totals !== null && totals.lastSscc !== null
-      ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
-      : []),
-  ];
+  const planFact = {
+    term: t("floor.work.plan"),
+    value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
+  };
+  // A validation shift has no box to count (plan РЕЖ): its figures are in its panel.
+  const facts = validation
+    ? [planFact]
+    : [
+        { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
+        planFact,
+        ...(totals !== null && totals.lastSscc !== null
+          ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
+          : []),
+      ];
   /** A stop's card over the work: the cloud's overlay alert, its action row under the words. */
   const card = (
     tone: "ok" | "warn" | "error",
@@ -2154,52 +2206,62 @@ export function WorkScreen(props: WorkScreenProps) {
           )}
           <div className="work-screen__instruments">
             <div className="work-screen__primary">
-              <BoxFill
-                items={items}
-                capacity={capacity}
-                acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
-                actions={
-                  <>
-                    {!confirming && (
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        data-action="close-box"
-                        disabled={!canClose}
-                        onClick={() => setStop({ kind: "confirm_close" })}
-                      >
-                        {t("floor.work.closeBox")}
-                      </Button>
-                    )}
-                    {/*
+              {validation ? (
+                <ValidationPanel
+                  accepted={totals?.accepted ?? 0}
+                  duplicates={counts?.duplicates ?? 0}
+                  errors={counts?.errors ?? 0}
+                  plannedQty={plannedQty}
+                  outcomes={outcomes}
+                />
+              ) : (
+                <BoxFill
+                  items={items}
+                  capacity={capacity}
+                  acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
+                  actions={
+                    <>
+                      {!confirming && (
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          data-action="close-box"
+                          disabled={!canClose}
+                          onClick={() => setStop({ kind: "confirm_close" })}
+                        >
+                          {t("floor.work.closeBox")}
+                        </Button>
+                      )}
+                      {/*
                       The cloud's box instrument: the open box's two exceptions under it, the
                       same actions as their cards (gone under a stage, which has them itself).
                     */}
-                    {!staged && (
-                      <>
-                        <Button
-                          size="floor"
-                          variant="secondary"
-                          data-action="box-undo"
-                          disabled={!canClose}
-                          onClick={() => openExceptions("box-undo")}
-                        >
-                          {t("floor.exceptions.actions.undo")}
-                        </Button>
-                        <Button
-                          size="floor"
-                          variant="secondary"
-                          data-action="box-clear"
-                          disabled={!canClose}
-                          onClick={() => openExceptions("box-clear")}
-                        >
-                          {t("floor.exceptions.actions.clear")}
-                        </Button>
-                      </>
-                    )}
-                  </>
-                }
-              />
+                      {!staged && (
+                        <>
+                          <Button
+                            size="floor"
+                            variant="secondary"
+                            data-action="box-undo"
+                            disabled={!canClose}
+                            onClick={() => openExceptions("box-undo")}
+                          >
+                            {t("floor.exceptions.actions.undo")}
+                          </Button>
+                          <Button
+                            size="floor"
+                            variant="secondary"
+                            data-action="box-clear"
+                            disabled={!canClose}
+                            onClick={() => openExceptions("box-clear")}
+                          >
+                            {t("floor.exceptions.actions.clear")}
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  }
+                />
+              )}
               {pallets !== null && (
                 <PalletStrip
                   boxCount={palletBoxes}
@@ -2238,15 +2300,21 @@ export function WorkScreen(props: WorkScreenProps) {
           </div>
         </div>
       </div>
-      <FloorFooter className="work-footer" ariaLabel={t("floor.work.layout.actions")}>
-        <FooterAction
-          variant="secondary"
-          data-action="exceptions"
-          disabled={stop !== null || leaving}
-          onClick={() => openExceptions()}
-        >
-          {t("floor.exceptions.open")}
-        </FooterAction>
+      <FloorFooter
+        className={validation ? "work-footer work-footer--two" : "work-footer"}
+        ariaLabel={t(validation ? "floor.validation.actions" : "floor.work.layout.actions")}
+      >
+        {/* A validation shift has no exceptions (plan РЕЖ, Р9: the cloud's are its boxes'). */}
+        {!validation && (
+          <FooterAction
+            variant="secondary"
+            data-action="exceptions"
+            disabled={stop !== null || leaving}
+            onClick={() => openExceptions()}
+          >
+            {t("floor.exceptions.open")}
+          </FooterAction>
+        )}
         {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
         <FooterAction
           variant="warning-outline"
@@ -2341,13 +2409,26 @@ export function WorkScreen(props: WorkScreenProps) {
               planned: formatQuantity(plannedQty ?? 0),
             }),
             null,
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => dismiss(() => setPlanReached(false))}
-            >
-              {t("floor.work.continue")}
-            </Button>,
+            <>
+              {/* A validation shift is offered its close at the plan, as at the cloud station. */}
+              {validation && (
+                <Button
+                  size="floor"
+                  aria-disabled={leaving || stop !== null ? true : undefined}
+                  style={leaving || stop !== null ? WAITING_STYLE : undefined}
+                  onClick={openClose}
+                >
+                  {t("floor.validation.closeShift")}
+                </Button>
+              )}
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => dismiss(() => setPlanReached(false))}
+              >
+                {t("floor.work.continue")}
+              </Button>
+            </>,
           )}
         {waitingSerials && (
           <p className="work-overlay--note work-screen__waiting">
@@ -2410,6 +2491,7 @@ export function WorkScreen(props: WorkScreenProps) {
               onLabel={toLabel}
               palletCapacity={pallets?.capacity ?? null}
               onClosePallet={confirmPalletClose}
+              boxless={validation}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
@@ -2422,6 +2504,7 @@ export function WorkScreen(props: WorkScreenProps) {
               linkHeld={linkHeld}
               leaving={leaving}
               onDone={onLeave}
+              boxless={validation}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>

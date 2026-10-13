@@ -84,3 +84,40 @@ export async function readWorkTotals(
     lastSscc: last[0]?.sscc ?? null,
   };
 }
+
+/** A validation shift's refused scans on this station (plan РЕЖ): its panel's figures. */
+export interface ValidationCounts {
+  /** Codes refused as taken already, here or on the host. */
+  duplicates: number;
+  /** Codes of another product and scans that are no code of marking. */
+  errors: number;
+}
+
+/**
+ * The refused scans of a shift on this station, by kind, from its journal (`floor_scans`); one
+ * row, searched through `floor_scans_shift`. Pinned with this exact text in
+ * `test/floor-schema.test.ts` and `src-tauri/tests/local_db.rs`. Parameters: host id, device id,
+ * shift id.
+ */
+export const VALIDATION_COUNTS_SQL =
+  "SELECT coalesce(sum(verdict = 'duplicate'), 0) AS duplicates, " +
+  "coalesce(sum(verdict IN ('wrong_gtin', 'invalid')), 0) AS errors FROM floor_scans " +
+  "WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
+const countsRow = z.object({
+  duplicates: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+});
+
+export async function readValidationCounts(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+): Promise<ValidationCounts> {
+  const [row] = await local.query(
+    VALIDATION_COUNTS_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId],
+    countsRow,
+  );
+  return { duplicates: row?.duplicates ?? 0, errors: row?.errors ?? 0 };
+}

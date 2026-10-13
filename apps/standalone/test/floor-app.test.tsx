@@ -317,6 +317,25 @@ describe("the floor after an operator signed in", () => {
     view.unmount();
   });
 
+  it("enters a validation shift into the validation work screen, which asks for no serials", async () => {
+    // The host opened the planned shift as a validation shift (plan РЕЖ, A7).
+    const handlers = handlersOf({
+      enter: async () => ({ ...OPENED, mode: "validation", palletsEnabled: false }),
+    });
+    const view = render(floorOf(await floorCopies(), handlers));
+    await enterPlanned();
+    expect(await screen.findByRole("region", { name: "Проверка" })).toBeTruthy();
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, { supports: ["validation-v1"] });
+    await settle();
+    expect(screen.queryByText("Открытый короб")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Исключения" })).toBeNull();
+    // The link is online, and still no SSCC block is asked for: the shift numbers no box.
+    expect(handlers.requestBlock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
+    view.unmount();
+  });
+
   /** The list's title takes the focus; the operator is named in the status bar. */
   const LIST_TITLE = { name: "Смены линии" } as const;
 
