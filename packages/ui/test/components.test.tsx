@@ -616,6 +616,30 @@ describe("Select", () => {
     expect(onValueChange).toHaveBeenCalledWith("Вода");
   });
 
+  it("says so when the searchable filter matches no option, and starts afresh at the next opening", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select
+        label="Категория"
+        searchable
+        searchLabel="Поиск категории"
+        searchEmptyLabel="Ничего не найдено"
+        options={["Соки", "Нектары"]}
+      />,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Категория" });
+    await user.click(trigger);
+    await user.type(screen.getByRole("searchbox", { name: "Поиск категории" }), "яблоко");
+    expect(screen.getByRole("status").textContent).toBe("Ничего не найдено");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+
+    await user.keyboard("{Escape}");
+    await user.click(trigger);
+    expect(screen.getByRole("searchbox", { name: "Поиск категории" })).toHaveProperty("value", "");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("edits a searchable select filter with selection, caret movement and paste", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
