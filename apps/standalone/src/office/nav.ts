@@ -82,18 +82,6 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     roles: ["admin", "technologist"],
   },
   {
-    to: "/template-defaults",
-    labelKey: "office.nav.templateDefaults",
-    sectionKey: "office.nav.sections.catalog",
-    roles: ["admin", "technologist"],
-  },
-  {
-    to: "/pallet-sheets",
-    labelKey: "office.nav.palletSheets",
-    sectionKey: "office.nav.sections.catalog",
-    roles: ["admin", "technologist"],
-  },
-  {
     to: "/users",
     labelKey: "office.nav.users",
     sectionKey: "office.nav.sections.access",

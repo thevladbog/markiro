@@ -189,7 +189,8 @@ pub async fn check_pallet_template(
 pub struct Pallets {
     pub box_capacity: u32,
     pub template_id: String,
-    /// The A4 sheet (plan А4): the request's, else the default, else none.
+    /// The A4 sheet (plan А4): the request's, else the product's default
+    /// (`default_sheet_for_product`), else none.
     pub sheet_id: Option<String>,
 }
 
@@ -242,11 +243,14 @@ pub fn pallet_request<'a>(
 /// The pallets a new shift of `product` gets: its pallet template fits the
 /// product's group, its capacity is the product's when the request names
 /// none, and its A4 sheet (plan А4) is the request's enabled sheet, else the
-/// organization's default one, else none. A sheet without pallets is
-/// `validation_failed` on `palletSheetTemplateId`.
+/// default for the product (`default_sheet_for_product`: the product's
+/// preferred sheet, its category's, the organization's, the first enabled),
+/// else none. A sheet without pallets is `validation_failed` on
+/// `palletSheetTemplateId`.
 pub async fn pallets(
     conn: &mut SqliteConnection,
     request: PalletRequest<'_>,
+    product_id: &str,
     product: &ShiftProduct,
     sheet_id: Option<&str>,
 ) -> Result<Option<Pallets>, ApiError> {
@@ -269,7 +273,10 @@ pub async fn pallets(
                         .await?;
                     Some(id.to_owned())
                 }
-                None => crate::routes::pallet_sheets::default_sheet(conn).await?,
+                None => {
+                    crate::routes::pallet_sheets::default_sheet_for_product(conn, product_id)
+                        .await?
+                }
             };
             Ok(Some(Pallets {
                 box_capacity: box_capacity.unwrap_or(product.pallet_box_capacity),

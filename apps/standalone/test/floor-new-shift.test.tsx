@@ -167,6 +167,60 @@ async function chooseMilk(): Promise<void> {
   expect(screen.getByText("04600682000013")).toBeTruthy();
 }
 
+/**
+ * «Далее»: from the details to the box template's step, and from there to the
+ * pallet template's for a shift with pallets (the cloud station's order). The
+ * plan and the capacity are checked on the first one.
+ */
+function next(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+}
+
+/** Back to the details from a template step, through «Предыдущий шаг». */
+function backToDetails(): void {
+  for (let step = 0; step < 2; step += 1) {
+    const previous = screen.queryByRole("button", { name: "Предыдущий шаг" });
+    if (previous === null) return;
+    fireEvent.click(previous);
+  }
+}
+
+/** The last step's «Создать и открыть», reached through «Далее» (at most the two template steps). */
+function createButton(): HTMLElement {
+  for (let step = 0; step < 2; step += 1) {
+    const forward = screen.queryByRole("button", { name: "Далее" });
+    if (forward === null || (forward as HTMLButtonElement).disabled) break;
+    fireEvent.click(forward);
+  }
+  return screen.getByRole("button", { name: "Создать и открыть" });
+}
+
+/** «Создать и открыть», from wherever the form stands. */
+function createShift(): void {
+  fireEvent.click(createButton());
+}
+
+/** The production date the picker shows, in words («10 октября 2026»). */
+function shownDate(): string {
+  return screen.getByRole("button", { name: "Дата производства" }).textContent ?? "";
+}
+
+/** Picks a production date in the cloud's DatePicker: opens it and presses the day. */
+async function pickDate(day: string): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: "Дата производства" }));
+  fireEvent.click(await screen.findByRole("button", { name: day }));
+}
+
+/**
+ * The buttons of the screen but the date picker's own (its trigger is held at
+ * the floor's 64 px by the screen's stylesheet; its clearing «×» is hidden there).
+ */
+function screenButtons(container: HTMLElement): HTMLButtonElement[] {
+  return Array.from(container.querySelectorAll("button")).filter(
+    (button) => button.closest(".mk-date-picker") === null,
+  );
+}
+
 const CREATED_BODY: DeviceShiftCreate = {
   requestId: REQUEST_ID,
   productId: MILK,
@@ -247,12 +301,18 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
       "false",
     );
     expect(screen.getByText("Коробов на паллете: 40")).toBeTruthy();
-    // One pallet template fits the milk's group: the rule leaves nothing to choose.
-    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
-    for (const button of view.container.querySelectorAll("button")) {
+    for (const button of screenButtons(view.container)) {
       expect(button.className).toContain("mk-btn--floor");
     }
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    // The box template, then the pallet template, each a step of its own (the cloud's order).
+    next();
+    next();
+    // One pallet template fits the milk's group: the rule leaves nothing to choose.
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
+    for (const button of screenButtons(view.container)) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls).toEqual([
       [
@@ -275,7 +335,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     fireEvent.click(screen.getByRole("button", { name: "С паллетами" }));
     expect(screen.getByText("Коробов на паллете: 40")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
   });
@@ -288,11 +348,10 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
       ]),
     );
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(createButton()).toHaveProperty("disabled", true);
     // The box template is fixed; the pallet's undecided choice does not hold a shift without pallets.
     fireEvent.click(screen.getByRole("button", { name: "Паллета 120×80" }));
     expect(
@@ -301,7 +360,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     expect(
       screen.getByRole("button", { name: "Паллета 100×150" }).getAttribute("aria-pressed"),
     ).toBe("false");
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({
       palletTemplateId: OTHER_PALLET_TEMPLATE,
@@ -317,7 +376,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     );
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
   });
@@ -335,12 +394,16 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
       ]),
     );
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
     expect(screen.queryByText("Выберите шаблон этикетки паллеты.")).toBeNull();
     preferred.view.unmount();
     // No preference: the two fit, the rule finds none, and the operator chooses.
     renderNew(await copiesOf([...CATALOG, ...both]));
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
   });
 
@@ -360,6 +423,8 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     // The organization's default alone.
     const first = renderNew(await copiesOf([...withOrganization(OTHER_PALLET_TEMPLATE), ...both]));
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
     first.view.unmount();
     // The category's pallet default wins over it, and a category default for boxes is no pallet default.
@@ -377,12 +442,16 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
       ]),
     );
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
     second.view.unmount();
     renderNew(
       await copiesOf([...CATALOG, ...both, categoryDefault("pallet", OTHER_PALLET_TEMPLATE)]),
     );
     await chooseMilk();
+    next();
+    next();
     expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
   });
 
@@ -399,8 +468,10 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
       },
     );
     await chooseMilk();
+    next();
+    next();
     fireEvent.click(screen.getByRole("button", { name: "Паллета 120×80" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByRole("button", { name: /Открыть смену/ });
     expect(screen.getByRole("button", { name: "Паллета 120×80" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Паллета 100×150" })).toHaveProperty(
@@ -426,7 +497,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     await chooseMilk();
     expect(screen.queryByRole("button", { name: "С паллетами" })).toBeNull();
     expect(screen.queryByText(/Коробов на паллете/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(second.handlers.create).toHaveBeenCalledTimes(1));
     expect(second.handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
   });
@@ -475,7 +546,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     });
     renderNew(await copiesOf(PALLET_COPIES), { create: async () => Promise.reject(refused) });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(
       await screen.findByText(
         "Шаблон этикетки паллеты больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
@@ -483,10 +554,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     ).toBeTruthy();
     // The rule's choice is withdrawn: the operator chooses among those that fit.
     expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(createButton()).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Паллета 100×150" })).toBeTruthy();
   });
 
@@ -500,12 +568,16 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     });
     renderNew(await copiesOf(PALLET_COPIES), { create: async () => Promise.reject(refused) });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(
       await screen.findByText(
         "Шаблон этикетки больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
       ),
     ).toBeTruthy();
+    // Back on the box template's step, its choice given back; the pallet template stays the rule's.
+    expect(screen.getByText("Выберите шаблон этикетки короба.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Коробка 58×40" }));
+    next();
     expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
   });
 
@@ -516,9 +588,10 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
         Promise.reject(new HostError({ kind: "transport", code: "timeout", message: "x" })),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByRole("button", { name: /Открыть смену/ });
     expect(handlers.create).toHaveBeenCalledTimes(1);
+    backToDetails();
     expect(screen.getByRole("button", { name: "С паллетами" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Без паллет" })).toHaveProperty("disabled", true);
   });
@@ -527,7 +600,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     // The first request of this id made a shift WITHOUT pallets; the form now asks for pallets.
     const { handlers } = renderNew(await copiesOf(PALLET_COPIES), { create: async () => MADE });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({ palletsEnabled: true });
     expect(
@@ -546,7 +619,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText(/уже была создана раньше/);
     expect(switchOnly.handlers.enter).not.toHaveBeenCalled();
     switchOnly.view.unmount();
@@ -555,7 +628,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
     });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(
       await screen.findByText(
@@ -576,7 +649,7 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
         create: async () => other,
       });
       await chooseMilk();
-      fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+      createShift();
       expect(await screen.findByText(/уже была создана раньше/)).toBeTruthy();
       expect(handlers.enter).not.toHaveBeenCalled();
       view.unmount();
@@ -595,11 +668,12 @@ describe("a new shift on the station", () => {
       await screen.findByText("Ничего не нашли. Проверьте название или отсканируйте товар."),
     ).toBeTruthy();
     await chooseMilk();
-    // The product's own template fits its group, so the rule picks it.
-    expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
-    expect(screen.getByText("Дата производства: 10.10.2026")).toBeTruthy();
+    expect(shownDate()).toContain("10 октября 2026");
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("value", "12");
     expect(screen.getByLabelText("План, шт.")).toHaveProperty("value", "");
+    // The product's own template fits its group, so the rule picks it.
+    next();
+    expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
   });
 
   it("chooses the product a scan names, by its barcode or its code of marking", async () => {
@@ -661,7 +735,7 @@ describe("a new shift on the station", () => {
     const local = await copiesOf(CATALOG);
     const { handlers } = renderNew(local);
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls).toEqual([[CREATED_BODY]]);
     expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
@@ -675,13 +749,12 @@ describe("a new shift on the station", () => {
   it("sends the plan, the capacity and another day as the operator set them", async () => {
     const { handlers } = renderNew(await copiesOf(CATALOG));
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "На день раньше" }));
-    fireEvent.click(screen.getByRole("button", { name: "На день раньше" }));
-    fireEvent.click(screen.getByRole("button", { name: "На день позже" }));
-    expect(screen.getByText("Дата производства: 09.10.2026")).toBeTruthy();
+    await pickDate("8 октября 2026");
+    await pickDate("9 октября 2026");
+    expect(shownDate()).toContain("9 октября 2026");
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: " 1200 " } });
     fireEvent.change(screen.getByLabelText("В коробе, шт."), { target: { value: "6" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toEqual({
       ...CREATED_BODY,
@@ -696,11 +769,13 @@ describe("a new shift on the station", () => {
     await chooseMilk();
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "0" } });
     fireEvent.change(screen.getByLabelText("В коробе, шт."), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    // «Далее» checks them: the form stays on its details with the fields marked.
+    next();
     expect(
       await screen.findByText("Укажите целое число от 1 до 10 000 000 или оставьте пустым"),
     ).toBeTruthy();
     expect(screen.getByText("Укажите целое число от 1 до 100 000")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Создать и открыть" })).toBeNull();
     expect(handlers.create).not.toHaveBeenCalled();
   });
 
@@ -739,8 +814,10 @@ describe("a new shift on the station", () => {
       target: { value: "смет" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Сметана 20% — 04600682000037" }));
+    await screen.findByRole("heading", { name: "Сметана 20%" });
+    next();
     expect(await screen.findByText("Выберите шаблон этикетки короба.")).toBeTruthy();
-    const create = screen.getByRole("button", { name: "Создать и открыть" });
+    const create = createButton();
     expect(create).toHaveProperty("disabled", true);
     const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
     fireEvent.click(within(group).getByRole("button", { name: "Короб 100×150" }));
@@ -748,7 +825,7 @@ describe("a new shift on the station", () => {
       "ariaPressed",
       "true",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({
       boxTemplateId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1b",
@@ -766,24 +843,19 @@ describe("a new shift on the station", () => {
     );
     renderNew(await copiesOf(items));
     await chooseMilk();
+    next();
     expect(
       screen.getByText(
         "Для этого товара нет подходящего шаблона этикетки короба. Шаблоны настраивают в офисе.",
       ),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(createButton()).toHaveProperty("disabled", true);
   });
 
   it("creates nothing without the host, and says why", async () => {
     renderNew(await copiesOf(CATALOG), { online: false });
     await chooseMilk();
-    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(createButton()).toHaveProperty("disabled", true);
     expect(screen.getByText("Создать смену можно только при связи с хостом.")).toBeTruthy();
   });
 
@@ -817,7 +889,7 @@ describe("a new shift on the station", () => {
       create: async () => Promise.reject(error),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(await screen.findByText(text)).toBeTruthy();
     expect(handlers.enter).not.toHaveBeenCalled();
   });
@@ -830,15 +902,10 @@ describe("a new shift on the station", () => {
       .mockResolvedValue(MADE);
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Нет связи с хостом. Создать смену можно только при связи с ним.");
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-        "disabled",
-        false,
-      ),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(createButton()).toHaveProperty("disabled", false));
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(create.mock.calls.map(([body]) => body.requestId)).toEqual([REQUEST_ID, REQUEST_ID]);
   });
@@ -853,7 +920,7 @@ describe("a new shift on the station", () => {
     });
     renderNew(await copiesOf(CATALOG), { enter: async () => Promise.reject(busy) });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(
       await screen.findByText(
         "Смена OCT26-005/S создана, но не открыта. Эту смену уже открыла другая станция.",
@@ -866,7 +933,7 @@ describe("a new shift on the station", () => {
     renderNew(await copiesOf(CATALOG), { create: async () => Promise.reject(down) });
     await chooseMilk();
     const before = new Set(document.querySelectorAll('[aria-live="polite"]'));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     const text = await screen.findByText(
       "Нет связи с хостом. Создать смену можно только при связи с ним.",
     );
@@ -891,18 +958,13 @@ describe("a new shift on the station", () => {
       );
     renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     const refusal = await screen.findByText(
       "Нет связи с хостом. Создать смену можно только при связи с ним.",
     );
     const region = refusal.closest('[aria-live="polite"]');
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-        "disabled",
-        false,
-      ),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(createButton()).toHaveProperty("disabled", false));
+    createShift();
     const progress = await screen.findByText("Создаём смену…");
     expect(progress.closest('[aria-live="polite"]')).toBe(region);
     await act(async () => {
@@ -922,7 +984,7 @@ describe("a new shift on the station", () => {
       create: async () => Promise.reject(rejected),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onHostError).toHaveBeenCalledWith(rejected));
   });
 
@@ -936,7 +998,7 @@ describe("a new shift on the station", () => {
     );
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    const button = screen.getByRole("button", { name: "Создать и открыть" });
+    const button = createButton();
     act(() => {
       fireEvent.click(button);
       fireEvent.click(button);
@@ -985,9 +1047,19 @@ describe("a new shift on the station", () => {
   it("keeps every button at the floor's 64 px", async () => {
     const { view } = renderNew(await copiesOf(CATALOG));
     await chooseMilk();
-    const buttons = view.container.querySelectorAll("button");
-    expect(buttons.length).toBeGreaterThan(3);
+    // «Далее», «Другой товар», «Назад».
+    const buttons = screenButtons(view.container);
+    expect(buttons.length).toBeGreaterThanOrEqual(3);
     for (const button of buttons) expect(button.className).toContain("mk-btn--floor");
+    // The cloud's DatePicker: its trigger stands inside the screen's date row (held at 64 px there).
+    expect(
+      screen.getByRole("button", { name: "Дата производства" }).closest(".new-shift__date"),
+    ).not.toBeNull();
+    // And on the template step too.
+    next();
+    const templateButtons = screenButtons(view.container);
+    expect(templateButtons.length).toBeGreaterThan(3);
+    for (const button of templateButtons) expect(button.className).toContain("mk-btn--floor");
   });
 });
 
@@ -1226,6 +1298,7 @@ describe("the template, the date and the capacity of a new shift", () => {
   it("takes the category's template when the product has none of its own", async () => {
     renderNew(await copiesOf(changed("products", { defaultBoxTemplateId: null }, MILK)));
     await chooseMilk();
+    next();
     // The organization's default, «Коробка 58×40», fits too, and comes after.
     expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
   });
@@ -1242,6 +1315,8 @@ describe("the template, the date and the capacity of a new shift", () => {
       target: { value: "смет" },
     });
     fireEvent.click(screen.getByRole("button", { name: `Сметана 20% — ${GTINS[3]}` }));
+    await screen.findByRole("heading", { name: "Сметана 20%" });
+    next();
     expect(await screen.findByText("Шаблон этикетки короба: Коробка 58×40")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
   });
@@ -1257,9 +1332,11 @@ describe("the template, the date and the capacity of a new shift", () => {
       target: { value: "соль" },
     });
     fireEvent.click(screen.getByRole("button", { name: `Соль — ${GTINS[4]}` }));
+    await screen.findByRole("heading", { name: "Соль" });
+    next();
     expect(await screen.findByText("Шаблон этикетки короба: Коробка 58×40")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({
       boxTemplateId: "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
@@ -1279,6 +1356,8 @@ describe("the template, the date and the capacity of a new shift", () => {
       target: { value: "смет" },
     });
     fireEvent.click(screen.getByRole("button", { name: `Сметана 20% — ${GTINS[3]}` }));
+    await screen.findByRole("heading", { name: "Сметана 20%" });
+    next();
     const group = await screen.findByRole("group", { name: "Шаблон этикетки короба" });
     expect(
       within(group)
@@ -1294,8 +1373,8 @@ describe("the template, the date and the capacity of a new shift", () => {
   });
 
   it.each([
-    ["Pacific/Kiritimati", "10.10.2026"],
-    ["Pacific/Pago_Pago", "09.10.2026"],
+    ["Pacific/Kiritimati", "10 октября 2026"],
+    ["Pacific/Pago_Pago", "9 октября 2026"],
   ])(
     "takes the date where the organization is, not where this computer is (%s)",
     async (timeZone, date) => {
@@ -1303,7 +1382,7 @@ describe("the template, the date and the capacity of a new shift", () => {
       // this computer is in, one of the two is not its own date.
       renderNew(await copiesOf(changed("org_profile", { timeZone })));
       await chooseMilk();
-      expect(screen.getByText(`Дата производства: ${date}`)).toBeTruthy();
+      expect(shownDate()).toContain(date);
     },
   );
 
@@ -1313,7 +1392,7 @@ describe("the template, the date and the capacity of a new shift", () => {
       now: new Date(2026, 9, 9, 12, 0),
     });
     await chooseMilk();
-    expect(screen.getByText("Дата производства: 09.10.2026")).toBeTruthy();
+    expect(shownDate()).toContain("9 октября 2026");
     expect(
       screen.getByText("Часовой пояс организации неизвестен: взята дата этого компьютера."),
     ).toBeTruthy();
@@ -1325,11 +1404,11 @@ describe("the template, the date and the capacity of a new shift", () => {
     );
     await chooseMilk();
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("value", "");
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    next();
     expect(await screen.findByText("Укажите целое число от 1 до 100 000")).toBeTruthy();
     expect(handlers.create).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("В коробе, шт."), { target: { value: "8" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({ boxCapacity: 8, plannedQty: null });
   });
@@ -1340,7 +1419,7 @@ describe("the template, the date and the capacity of a new shift", () => {
     const plan = screen.getByLabelText("План, шт.");
     const capacity = screen.getByLabelText("В коробе, шт.");
     fireEvent.change(plan, { target: { value: "много" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    next();
     expect(
       await screen.findByText("Укажите целое число от 1 до 10 000 000 или оставьте пустым"),
     ).toBeTruthy();
@@ -1349,7 +1428,7 @@ describe("the template, the date and the capacity of a new shift", () => {
     expect(capacity.getAttribute("aria-invalid")).toBeNull();
     fireEvent.change(plan, { target: { value: "" } });
     fireEvent.change(capacity, { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    next();
     expect(await screen.findByText("Укажите целое число от 1 до 100 000")).toBeTruthy();
     expect(
       screen.queryByText("Укажите целое число от 1 до 10 000 000 или оставьте пустым"),
@@ -1362,7 +1441,7 @@ describe("the template, the date and the capacity of a new shift", () => {
     const { handlers } = renderNew(await copiesOf(CATALOG));
     await chooseMilk();
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    next();
     await screen.findByText("Укажите целое число от 1 до 10 000 000 или оставьте пустым");
     // Another product: a form of its own, with none of the old complaints.
     fireEvent.click(screen.getByRole("button", { name: "Другой товар" }));
@@ -1370,10 +1449,10 @@ describe("the template, the date and the capacity of a new shift", () => {
     await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
     expect(screen.queryByText(/Укажите целое число/)).toBeNull();
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    next();
     await screen.findByText("Укажите целое число от 1 до 10 000 000 или оставьте пустым");
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/Укажите целое число/)).toBeNull();
   });
@@ -1437,7 +1516,7 @@ describe("a request to create a shift", () => {
       create: async () => Promise.reject(error),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(await screen.findByText(text)).toBeTruthy();
     expect(handlers.enter).not.toHaveBeenCalled();
     expect(handlers.onHostError).not.toHaveBeenCalled();
@@ -1457,20 +1536,15 @@ describe("a request to create a shift", () => {
       target: { value: "смет" },
     });
     fireEvent.click(screen.getByRole("button", { name: `Сметана 20% — ${GTINS[3]}` }));
+    await screen.findByRole("heading", { name: "Сметана 20%" });
+    next();
     fireEvent.click(await screen.findByRole("button", { name: "Короб 100×150" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Создаём смену…");
-    for (const name of [
-      "Короб 100×150",
-      "Коробка 58×40",
-      "На день раньше",
-      "На день позже",
-      "Другой товар",
-    ]) {
+    // The step it runs on stands still, and no step back to the details is open meanwhile.
+    for (const name of ["Короб 100×150", "Коробка 58×40", "Предыдущий шаг", "Другой товар"]) {
       expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
     }
-    expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
-    expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Назад" })).toHaveProperty("disabled", false);
     await act(async () => {
       answer({
@@ -1492,7 +1566,7 @@ describe("a request to create a shift", () => {
     );
     const { handlers } = renderNew(await copiesOf(CATALOG), { enter });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(await screen.findByText("Открываем смену…")).toBeTruthy();
     expect(screen.queryByText("Создаём смену…")).toBeNull();
     await act(async () => {
@@ -1506,7 +1580,7 @@ describe("a request to create a shift", () => {
     const database = watched(await copiesOf(CATALOG));
     const { handlers, view } = renderNew(database.local, { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Создаём смену…");
     view.unmount();
     const asked = database.calls.length;
@@ -1531,7 +1605,7 @@ describe("a request to create a shift", () => {
     const database = watched(await copiesOf(CATALOG));
     const { handlers, view } = renderNew(database.local, { enter });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Открываем смену…");
     view.unmount();
     const asked = database.calls.length;
@@ -1549,7 +1623,7 @@ describe("a request to create a shift", () => {
     const { create, answer } = hanging();
     const { handlers, later } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Создаём смену…");
     later({ online: false });
     await act(async () => {
@@ -1567,7 +1641,7 @@ describe("a request to create a shift", () => {
     const { create, answer } = hanging();
     const { handlers, later } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Создаём смену…");
     const newer = vi.fn<(shift: WorkShift) => void>();
     later({ onEntered: newer });
@@ -1582,7 +1656,7 @@ describe("a request to create a shift", () => {
     const { create, fail } = hanging();
     const { handlers, later } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Создаём смену…");
     const newer = vi.fn<(error: unknown) => void>();
     later({ onHostError: newer });
@@ -1611,7 +1685,7 @@ describe("a request to create a shift", () => {
     );
     const { handlers, later } = renderNew(await copiesOf(CATALOG), { enter });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Открываем смену…");
     const newer = vi.fn<(error: unknown) => void>();
     later({ onHostError: newer });
@@ -1640,7 +1714,7 @@ describe("a request to create a shift", () => {
       create: async () => Promise.reject(changedCertificate),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onHostError).toHaveBeenCalledWith(changedCertificate));
     expect(screen.queryByText(/Нет связи с хостом/)).toBeNull();
   });
@@ -1652,18 +1726,14 @@ describe("a request to create a shift", () => {
       .mockResolvedValue(MADE);
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Нет связи с хостом. Создать смену можно только при связи с ним.");
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-        "disabled",
-        false,
-      ),
-    );
+    await waitFor(() => expect(createButton()).toHaveProperty("disabled", false));
     // The form stays the operator's after a lost answer, under the same id.
+    backToDetails();
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "500" } });
-    fireEvent.click(screen.getByRole("button", { name: "На день позже" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await pickDate("11 октября 2026");
+    createShift();
     // The host answers the first shift for this id whatever the body says now;
     // that shift is not the form on the screen, so it is not entered in silence.
     expect(
@@ -1693,7 +1763,7 @@ describe("a request to create a shift", () => {
       create: async () => ({ ...MADE, ...patch }),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(await screen.findByText(/Смена OCT26-005\/S уже была создана раньше/)).toBeTruthy();
     await database.quiet();
     expect(handlers.enter).not.toHaveBeenCalled();
@@ -1712,14 +1782,17 @@ describe("a request to create a shift", () => {
       }),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(
       await screen.findByText(
         "Смена OCT26-005/S уже была создана раньше: дата 09.10.2026, в коробе 6 шт., план 500 шт. Откройте её или выберите другой товар.",
       ),
     ).toBeTruthy();
     // The form is the host's shift now, and stays still.
+    backToDetails();
     expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
+    // Forward again to the step that opens it.
+    next();
     fireEvent.click(await screen.findByRole("button", { name: "Открыть смену OCT26-005/S" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
@@ -1731,7 +1804,7 @@ describe("a request to create a shift", () => {
       create: async () => ({ ...MADE, boxCapacity: 6 }),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText(/уже была создана раньше/);
     fireEvent.click(await screen.findByRole("button", { name: "Другой товар" }));
     expect(await screen.findByLabelText("Название товара")).toBeTruthy();
@@ -1740,7 +1813,7 @@ describe("a request to create a shift", () => {
     // A form of its own after that, with a request of its own.
     await chooseMilk();
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", false);
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(2));
     expect(handlers.create.mock.calls.map(([body]) => body.requestId)).toEqual([
       REQUEST_ID,
@@ -1758,10 +1831,10 @@ describe("a request to create a shift", () => {
       }),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "На день раньше" }));
+    await pickDate("9 октября 2026");
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "1200" } });
     fireEvent.change(screen.getByLabelText("В коробе, шт."), { target: { value: "6" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/уже была создана раньше/)).toBeNull();
     expect(screen.queryByText(/создана, но не открыта/)).toBeNull();
@@ -1781,7 +1854,7 @@ describe("a request to create a shift", () => {
       .mockResolvedValue(OPENED);
     const { handlers } = renderNew(await copiesOf(CATALOG), { enter });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText(
       "Смена OCT26-005/S создана, но не открыта. Эту смену уже открыла другая станция.",
     );
@@ -1793,11 +1866,14 @@ describe("a request to create a shift", () => {
     );
     // The shift is made; the date, the capacity and the plan are its own now.
     expect(screen.queryByRole("button", { name: "Создать и открыть" })).toBeNull();
-    for (const name of ["На день раньше", "На день позже"]) {
-      expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
-    }
+    backToDetails();
+    expect(screen.getByRole("button", { name: "Дата производства" })).toHaveProperty(
+      "disabled",
+      true,
+    );
     expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
+    next();
     fireEvent.click(screen.getByRole("button", { name: "Открыть смену OCT26-005/S" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     // The second press made nothing: it entered the shift that was kept.
@@ -1832,8 +1908,10 @@ describe("a request to create a shift", () => {
       target: { value: "смет" },
     });
     fireEvent.click(screen.getByRole("button", { name: `Сметана 20% — ${GTINS[3]}` }));
+    await screen.findByRole("heading", { name: "Сметана 20%" });
+    next();
     fireEvent.click(await screen.findByRole("button", { name: "Короб 100×150" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText(/создана, но не открыта/);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Открыть смену OCT26-005/S" })).toHaveProperty(
@@ -1860,10 +1938,11 @@ describe("a request to create a shift", () => {
       .mockImplementation(async (body) => ({ ...MADE, boxTemplateId: body.boxTemplateId }));
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
+    next();
     // The rule fixed the template: there is nothing to choose, yet.
     expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     expect(
       await screen.findByText(
         "Шаблон этикетки больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
@@ -1873,14 +1952,9 @@ describe("a request to create a shift", () => {
     const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
     expect(screen.getByText("Выберите шаблон этикетки короба.")).toBeTruthy();
     expect(within(group).getByRole("button", { name: "Молоко 58×40" })).toBeTruthy();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
-        "disabled",
-        true,
-      ),
-    );
+    await waitFor(() => expect(createButton()).toHaveProperty("disabled", true));
     fireEvent.click(within(group).getByRole("button", { name: "Коробка 58×40" }));
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     // Nothing was made by the refusal, so the id is the same.
     expect(create.mock.calls.map(([body]) => body.requestId)).toEqual([REQUEST_ID, REQUEST_ID]);
@@ -1901,13 +1975,13 @@ describe("a request to create a shift", () => {
         ),
     });
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await screen.findByText("Товар выключен или в архиве: смену не создать. Обратитесь в офис.");
     fireEvent.click(screen.getByRole("button", { name: "Другой товар" }));
     // The refusal belongs to the form it was for.
     expect(screen.queryByText(/Товар выключен/)).toBeNull();
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(2));
     expect(handlers.create.mock.calls.map(([body]) => body.requestId)).toEqual([
       REQUEST_ID,
@@ -1926,7 +2000,7 @@ describe("a request to create a shift", () => {
     // Only the keep of the copy is the one that fails; the sync above ran on `real`.
     const { handlers } = renderNew(flaky);
     await chooseMilk();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(transactions).toBe(2);
   });

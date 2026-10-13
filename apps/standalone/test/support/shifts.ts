@@ -84,6 +84,7 @@ export const MILK: OfficeProduct = {
   shelfLifeDays: 10,
   defaultBoxTemplateId: MILK_BOX.id,
   defaultPalletTemplateId: null,
+  defaultPalletSheetId: null,
   archived: false,
   status: "active",
   rev: 65,
@@ -143,6 +144,8 @@ export const DEFAULTS: TemplateDefaults = {
   defaultPalletTemplateId: PALLET.id,
   defaultDuplicateTemplateId: null,
   categories: [],
+  defaultPalletSheetId: null,
+  palletSheetCategories: [],
   rev: 80,
 };
 

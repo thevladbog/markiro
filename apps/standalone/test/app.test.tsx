@@ -2178,7 +2178,21 @@ describe("the operator on the floor", () => {
       data: { operatorId: ANNA, badgePhc: BADGE_PHC, label: null },
     },
   ];
-  const SIGNED_IN = "Вошёл: Анна Кузнецова, табельный номер 0042.";
+  /**
+   * Signed in: the status bar names the operator (beta feedback 2026-10-13: the
+   * hub's own «Вошёл: …» line is gone, as on the cloud station). Gone again
+   * once the operator is signed out — the bar then says nobody is in.
+   */
+  const SIGNED_IN = "Анна Кузнецова, табельный номер 0042";
+  /** The hub of the line: its title, under the status bar that names the operator. */
+  const onTheList = async () => {
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Смены линии" })).toBeTruthy();
+  };
+  const isOnTheList = () => {
+    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Смены линии" })).toBeTruthy();
+  };
   /** A gap far longer than the burst test's real time, so that its boundaries are never close. */
   const GAP_MS = 30_000;
 
@@ -2217,7 +2231,7 @@ describe("the operator on the floor", () => {
     expect(within(bar).getByText("Никто не вошёл")).toBeTruthy();
     await screen.findByText("Отсканируйте бейдж для входа");
     scan("MRK-000742");
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
     expect(
       within(screen.getByRole("region", { name: "Строка состояния цеха" })).getByText(
         "Анна Кузнецова, табельный номер 0042",
@@ -2228,7 +2242,7 @@ describe("the operator on the floor", () => {
   it("signs an operator in with a badge without asking the host, shows the line's shifts and signs out on request", async () => {
     const { host } = await onTheFloor();
     scan("MRK-000742");
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
     // The sign-in read the local copies only: the one feed request is the start's sync.
     expect(host.getChanges).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Офис" })).toBeNull();
@@ -2240,21 +2254,21 @@ describe("the operator on the floor", () => {
   it("keeps the operator signed in while the host is away", async () => {
     const { link } = await onTheFloor();
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     await link.status({
       state: "offline",
       lastContactAt: 1_790_000_000_000,
       lastError: "unreachable",
       seq: 2,
     });
-    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    isOnTheList();
   });
 
   it("opens the warehouse reprint from the list of shifts and asks the host about a scanned box (plan СКЛ)", async () => {
     const { host } = await onTheFloor();
     host.warehouseLookup.mockResolvedValue({ status: "not_found" });
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     // The screen takes no press and no scan for 400 ms after its view changed.
     const pause = () =>
       act(async () => {
@@ -2276,7 +2290,7 @@ describe("the operator on the floor", () => {
   it("signs the operator out after the idle timeout and says so", async () => {
     await onTheFloor(50);
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     expect(await screen.findByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
     expect(screen.queryByText(SIGNED_IN)).toBeNull();
   });
@@ -2284,7 +2298,7 @@ describe("the operator on the floor", () => {
   it("signs the operator out once a sync brings the host's tombstone for them", async () => {
     const { link, host } = await onTheFloor();
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     host.getChanges.mockResolvedValueOnce(
       feedPage(43, [{ entity: "operators", id: ANNA, rev: 43, deleted: true }]),
     );
@@ -2299,7 +2313,7 @@ describe("the operator on the floor", () => {
   it("comes back from the office to the sign-in, with nobody signed in", async () => {
     await onTheFloor();
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
@@ -2417,7 +2431,7 @@ describe("the operator on the floor", () => {
     await checked();
     expect(screen.queryByText(SIGNED_IN)).toBeNull();
     scanner.read("MRK-000742");
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
   });
 
   it("reads the shell's COM scanners next to the keyboard when given no scan source", async () => {
@@ -2451,7 +2465,7 @@ describe("the operator on the floor", () => {
     act(() => {
       comListener?.("MRK-000742");
     });
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
   });
 
   /** The shell's hardware as a COM scan subscription is the only thing the app asks of it. */
@@ -2521,7 +2535,7 @@ describe("the operator on the floor", () => {
     await flush();
     expect(shell.onScan).not.toHaveBeenCalled();
     scanner.read("MRK-000742");
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
   });
 
   it("takes a keyboard scan while it also listens to the COM scanners", async () => {
@@ -2538,7 +2552,7 @@ describe("the operator on the floor", () => {
     await screen.findByText(PROMPT);
     await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(0));
     scan("MRK-000742");
-    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    await onTheList();
   });
 
   it("gives the shell the COM scanners of the workstation's settings when it starts", async () => {
@@ -2576,7 +2590,7 @@ describe("the operator on the floor", () => {
     fakeRetryTimers();
     await onTheFloor(4_000);
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     await flush();
     // The fake clock also runs with real time (`shouldAdvanceTime`), so the
     // margins on both sides of the touch are 1 500 ms: the touch lands before
@@ -2587,7 +2601,7 @@ describe("the operator on the floor", () => {
       fireEvent.touchStart(window);
     });
     await elapse(2_500);
-    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    isOnTheList();
     await elapse(1_700);
     expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
   });
@@ -2596,7 +2610,7 @@ describe("the operator on the floor", () => {
     fakeRetryTimers();
     const { link } = await onTheFloor(2_000);
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     await flush();
     await elapse(800);
     await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
@@ -2611,13 +2625,13 @@ describe("the operator on the floor", () => {
   it("ends only its own session: an earlier session's late sign-out leaves the next one", async () => {
     await onTheFloor();
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     await flush();
     const earlier = signOutHandles.at(-1);
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
     await screen.findByText(PROMPT);
     scan("MRK-000742");
-    await screen.findByText(SIGNED_IN);
+    await onTheList();
     await flush();
     expect(signOutHandles).toHaveLength(2);
     expect(earlier).toBeDefined();
@@ -2626,7 +2640,7 @@ describe("the operator on the floor", () => {
       earlier?.("idle");
     });
     await flush();
-    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    isOnTheList();
     expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
     act(() => {
       signOutHandles.at(-1)?.("idle");
@@ -2857,7 +2871,7 @@ describe("the operator on the floor", () => {
     expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
-    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    isOnTheList();
   });
 
   it("gives the floor a print runtime over the shell's driver printing it was given (plan ДРВ)", async () => {
@@ -3179,7 +3193,9 @@ describe("the operator on the floor", () => {
     await flush();
     scan("4600682000013");
     expect(await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    // The details, then the box template's step (the cloud station's order).
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Создать и открыть" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
     expect(host.createDeviceShift).toHaveBeenCalledTimes(1);
     expect(host.createDeviceShift.mock.calls[0]?.[0]).toMatchObject({

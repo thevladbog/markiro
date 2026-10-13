@@ -403,6 +403,9 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
   }
 }
 
+/** The button the exceptions were opened by (its `data-action`), where the focus returns. */
+type ExceptionsOpener = "exceptions" | "box-undo" | "box-clear";
+
 /** The tone of the last scan's verdict: accepted, refused, not taken, or none yet. */
 function lastTone(last: Last | null): LastTone {
   if (last === null) return "neutral";
@@ -780,6 +783,8 @@ export function WorkScreen(props: WorkScreenProps) {
   } | null>(null);
   // The same, said to the operator: the label's panel tells the shift closes after it.
   const [closeAfterLabel, setCloseAfterLabel] = useState(false);
+  // Which button opened the exceptions: the footer's, or one of the open box's own.
+  const [exceptionsFrom, setExceptionsFrom] = useState<ExceptionsOpener>("exceptions");
   const setPendingClose = useCallback((next: typeof pendingClose.current) => {
     pendingClose.current = next;
     setCloseAfterLabel(next !== null);
@@ -1530,8 +1535,14 @@ export function WorkScreen(props: WorkScreenProps) {
    * the order of its panel is what keeps that from happening — so the panel
    * takes the screen instead; otherwise the shift's closed boxes are read.
    */
-  const openExceptions = () => {
+  /**
+   * «Исключения» from the footer, or the open box's own «Снять последний код» /
+   * «Очистить короб» (the cloud's box instrument), which open the same
+   * exceptions on that action; the focus comes back to the button pressed.
+   */
+  const openExceptions = (from: ExceptionsOpener = "exceptions") => {
     if (leavingNow() || stopRef.current !== null) return;
+    setExceptionsFrom(from);
     setStop({ kind: "exceptions", boxes: null, pallets: null });
     void live.current
       .track(
@@ -1863,12 +1874,14 @@ export function WorkScreen(props: WorkScreenProps) {
   const exceptionsWere = useRef(false);
   useEffect(() => {
     if (exceptionsWere.current && !exceptionsOpen && stop === null) {
-      actionsRef.current
-        ?.querySelector<HTMLButtonElement>('[data-action="exceptions"]:not(:disabled)')
-        ?.focus();
+      const pick = (action: string) =>
+        actionsRef.current?.querySelector<HTMLButtonElement>(
+          `[data-action="${action}"]:not(:disabled)`,
+        );
+      (pick(exceptionsFrom) ?? pick("exceptions"))?.focus();
     }
     exceptionsWere.current = exceptionsOpen;
-  }, [exceptionsOpen, stop]);
+  }, [exceptionsOpen, stop, exceptionsFrom]);
 
   /** The work goes on, after the label that may wait is read again (its panel takes the screen). */
   const resumeWork = () => {
@@ -2146,17 +2159,45 @@ export function WorkScreen(props: WorkScreenProps) {
                 capacity={capacity}
                 acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
                 actions={
-                  !confirming && (
-                    <Button
-                      size="floor"
-                      variant="secondary"
-                      data-action="close-box"
-                      disabled={!canClose}
-                      onClick={() => setStop({ kind: "confirm_close" })}
-                    >
-                      {t("floor.work.closeBox")}
-                    </Button>
-                  )
+                  <>
+                    {!confirming && (
+                      <Button
+                        size="floor"
+                        variant="secondary"
+                        data-action="close-box"
+                        disabled={!canClose}
+                        onClick={() => setStop({ kind: "confirm_close" })}
+                      >
+                        {t("floor.work.closeBox")}
+                      </Button>
+                    )}
+                    {/*
+                      The cloud's box instrument: the open box's two exceptions under it, the
+                      same actions as their cards (gone under a stage, which has them itself).
+                    */}
+                    {!staged && (
+                      <>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          data-action="box-undo"
+                          disabled={!canClose}
+                          onClick={() => openExceptions("box-undo")}
+                        >
+                          {t("floor.exceptions.actions.undo")}
+                        </Button>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          data-action="box-clear"
+                          disabled={!canClose}
+                          onClick={() => openExceptions("box-clear")}
+                        >
+                          {t("floor.exceptions.actions.clear")}
+                        </Button>
+                      </>
+                    )}
+                  </>
                 }
               />
               {pallets !== null && (
@@ -2202,7 +2243,7 @@ export function WorkScreen(props: WorkScreenProps) {
           variant="secondary"
           data-action="exceptions"
           disabled={stop !== null || leaving}
-          onClick={openExceptions}
+          onClick={() => openExceptions()}
         >
           {t("floor.exceptions.open")}
         </FooterAction>
@@ -2345,6 +2386,11 @@ export function WorkScreen(props: WorkScreenProps) {
               registerScan={registerScan}
               onTextEntry={textEntry}
               onBack={() => setStop(null)}
+              {...(exceptionsFrom === "box-undo"
+                ? { start: "undo" as const }
+                : exceptionsFrom === "box-clear"
+                  ? { start: "clear" as const }
+                  : {})}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>

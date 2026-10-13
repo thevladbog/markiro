@@ -720,6 +720,9 @@ async fn the_wizard_keeps_the_stock_templates_and_the_organizations_defaults() {
             "defaultPalletTemplateId": id_of("Паллета 100×150"),
             "defaultDuplicateTemplateId": null,
             "categories": [],
+            // The wizard sows no A4 sheet (the office adds the stock sheets).
+            "defaultPalletSheetId": null,
+            "palletSheetCategories": [],
             "rev": 1
         })
     );
@@ -983,6 +986,8 @@ async fn a_wizard_takes_32_stock_templates_and_a_default_of_every_purpose() {
             "defaultPalletTemplateId": template_id(&app, "Паллета по умолчанию").await,
             "defaultDuplicateTemplateId": template_id(&app, "Дубликат по умолчанию").await,
             "categories": [],
+            "defaultPalletSheetId": null,
+            "palletSheetCategories": [],
             "rev": 1
         })
     );

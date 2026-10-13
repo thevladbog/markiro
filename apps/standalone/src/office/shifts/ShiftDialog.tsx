@@ -30,6 +30,7 @@ import {
 } from "./shift-form.js";
 import { openBlocker, recordLabel } from "./shift-list.js";
 import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
+import { defaultSheetFor } from "../sheet-choice.js";
 import { sheetOptions } from "./sheet-options.js";
 import { datePickerTexts } from "./shift-text.js";
 
@@ -552,6 +553,7 @@ function ShiftForm({
                   shift?.palletSheetTemplateId ?? null,
                   field.value,
                   t,
+                  defaultSheetFor(product, defaults.data, palletSheets.data),
                 )}
                 value={field.value}
                 onValueChange={field.onChange}

@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { buildPalletSheetPresets } from "@markiro/domain";
+
 import { HostError } from "../src/host/client.js";
 import type {
   CounterpartyRecord,
@@ -53,6 +55,7 @@ const MILK: OfficeProduct = {
   shelfLifeDays: 10,
   defaultBoxTemplateId: MILK_58,
   defaultPalletTemplateId: null,
+  defaultPalletSheetId: null,
   archived: false,
   status: "active",
   rev: 65,
@@ -204,6 +207,7 @@ describe("office product dialog", () => {
           shelfLifeDays: 10,
           defaultBoxTemplateId: null,
           defaultPalletTemplateId: null,
+          defaultPalletSheetId: null,
         },
       ],
     ]);
@@ -399,6 +403,7 @@ describe("office product dialog", () => {
           shelfLifeDays: 10,
           defaultBoxTemplateId: MILK_58,
           defaultPalletTemplateId: PALLET,
+          defaultPalletSheetId: null,
           archived: true,
           expectedRev: 65,
         },
@@ -526,6 +531,7 @@ describe("office product dialog", () => {
       shelfLifeDays: null,
       defaultBoxTemplateId: null,
       defaultPalletTemplateId: null,
+      defaultPalletSheetId: null,
     });
   });
 
@@ -786,5 +792,82 @@ describe("office product dialog: default templates", () => {
         "Данные изменились, пока вы их редактировали. Обновите их и повторите.",
       ),
     ).toBeTruthy();
+  });
+
+  it("offers the pallet's A4 sheet beside the pallet template: the enabled sheets, a held one that is off marked, and sends the choice as a sheet", async () => {
+    const [preset] = buildPalletSheetPresets();
+    if (preset === undefined) throw new Error("no stock sheet");
+    const portrait = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+    const off = "7b4a1d6f-2c3e-4f9a-8b8c-1d2e3f4a5b6c";
+    const fake = session();
+    fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletSheetId: off }, AYRAN]);
+    fake.api.listPalletSheets.mockResolvedValue({
+      sheets: [
+        {
+          id: off,
+          name: "Две А5",
+          enabled: false,
+          presetKey: null,
+          revision: 2,
+          spec: preset.spec,
+        },
+        {
+          id: portrait,
+          name: "Палета А4 · вертикальная",
+          enabled: true,
+          presetKey: preset.key,
+          revision: 1,
+          spec: preset.spec,
+        },
+      ],
+      defaultId: portrait,
+    });
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, defaultPalletSheetId: portrait, rev: 66 });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", false),
+    );
+    // Right after the pallet template, its alternative.
+    const fields = [...dialog().querySelectorAll("select")].map(
+      (select) => select.labels?.[0]?.textContent ?? "",
+    );
+    expect(fields.indexOf("Лист А4 паллеты")).toBe(fields.indexOf("Шаблон паллеты") + 1);
+    expect(choices("Лист А4 паллеты")).toEqual([
+      "Не выбран",
+      "Палета А4 · вертикальная",
+      "Две А5 — выключен",
+    ]);
+    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("value", off);
+    // Pallet labels are not sheets, and the sheets are no pallet labels.
+    expect(choices("Шаблон паллеты")).not.toContain("Палета А4 · вертикальная");
+    expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
+    type("Лист А4 паллеты", portrait);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultPalletTemplateId: null,
+      defaultPalletSheetId: portrait,
+    });
+  });
+
+  it("leaves the sheet as it is while the sheets do not load, and says why", async () => {
+    const sheet = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+    const fake = session();
+    fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletSheetId: sheet }, AYRAN]);
+    fake.api.listPalletSheets.mockRejectedValue(new Error("offline"));
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, name: "Молоко", rev: 66 });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+    expect(
+      await screen.findByText("Список листов А4 не загрузился: лист останется как есть."),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", true);
+    type("Название", "Молоко");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultPalletSheetId: sheet,
+    });
   });
 });

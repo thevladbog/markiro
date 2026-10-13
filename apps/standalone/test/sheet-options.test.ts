@@ -34,7 +34,7 @@ describe("the choices of a shift's A4 sheet", () => {
     const list = lists([sheet(2), sheet(0), sheet(1)], sheet(0).id);
     const options = sheetOptions(list, null, "", t);
     expect(options).toEqual([
-      { value: "", label: "Основной лист организации (Лист 0)" },
+      { value: "", label: "По умолчанию для товара (Лист 0)" },
       { value: sheet(0).id, label: "Лист 0" },
       { value: sheet(1).id, label: "Лист 1" },
       { value: sheet(2).id, label: "Лист 2" },
@@ -43,12 +43,12 @@ describe("the choices of a shift's A4 sheet", () => {
 
   it("says when there is no main sheet", () => {
     expect(labels(sheetOptions(lists([sheet(0)]), null, "", t))[0]).toBe(
-      "Основной лист организации (не выбран)",
+      "По умолчанию для товара (не выбран)",
     );
     // A main sheet that is switched off is not one the host would take.
     expect(
       labels(sheetOptions(lists([sheet(0, { enabled: false })], sheet(0).id), null, "", t))[0],
-    ).toBe("Основной лист организации (не выбран)");
+    ).toBe("По умолчанию для товара (не выбран)");
   });
 
   it("offers «main» to a shift that already has a sheet too: the edit sends it back with `null`", () => {
@@ -59,7 +59,7 @@ describe("the choices of a shift's A4 sheet", () => {
       t,
     );
     expect(options).toEqual([
-      { value: "", label: "Основной лист организации (Лист 0)" },
+      { value: "", label: "По умолчанию для товара (Лист 0)" },
       { value: sheet(0).id, label: "Лист 0" },
       { value: sheet(1).id, label: "Лист 1" },
     ]);
@@ -88,7 +88,7 @@ describe("the choices of a shift's A4 sheet", () => {
     expect(gone).toContainEqual({ value: sheet(1).id, label: "Лист 1a3f0c5e" });
     // While the list did not load, «main» and the held sheet are the choices.
     expect(sheetOptions(undefined, sheet(1).id, sheet(1).id, t)).toEqual([
-      { value: "", label: "Основной лист организации (не выбран)" },
+      { value: "", label: "По умолчанию для товара (не выбран)" },
       { value: sheet(1).id, label: "Лист 1a3f0c5e" },
     ]);
   });
@@ -134,7 +134,7 @@ describe("the choices of a shift's A4 sheet", () => {
     );
     expect([...labels(options)].sort()).toEqual(
       [
-        "Основной лист организации (не выбран)",
+        "По умолчанию для товара (не выбран)",
         "Лист цеха · 0a3f0c5e",
         "лист ЦЕХА · 1a3f0c5e",
         "Лист 2",
@@ -145,7 +145,7 @@ describe("the choices of a shift's A4 sheet", () => {
 
   it("shows only «main» while the list did not load, for a shift without a sheet", () => {
     expect(sheetOptions(undefined, null, "", t)).toEqual([
-      { value: "", label: "Основной лист организации (не выбран)" },
+      { value: "", label: "По умолчанию для товара (не выбран)" },
     ]);
   });
 });

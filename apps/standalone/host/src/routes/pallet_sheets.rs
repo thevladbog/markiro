@@ -10,6 +10,16 @@
 //! while a planned shift names it (`template_in_use`); an open or closed shift
 //! has the sheet in its snapshot. Sheets take no feed revision: no station
 //! copies them, a shift freezes its sheet when it opens.
+//!
+//! Since the beta feedback a sheet is chosen by default as a pallet label is:
+//! the organization's, each category's (`category_pallet_sheet_defaults`,
+//! set through the templates' defaults document) and a product's preference
+//! (`products.default_pallet_sheet_id`). A category's default sheet is held
+//! as the organization's (`template_is_default` with `organizationDefault`
+//! and `categoryDefaults`, as a label template's); deleting a sheet clears
+//! the products that prefer it at the delete's revision, so they ride the
+//! feed. A shift that names no sheet takes them in that order
+//! (`default_sheet_for_product`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -22,7 +32,7 @@ use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::db::begin_write;
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::validate;
@@ -42,6 +52,23 @@ pub const PLANNED_SHIFTS_SQL: &str = "SELECT id FROM shifts \
 /// The default sheet while it is enabled: two primary-key lookups.
 pub const DEFAULT_SHEET_SQL: &str = "SELECT s.id FROM org_profile o JOIN pallet_sheet_templates s \
      ON s.id = o.default_pallet_sheet_template_id WHERE o.id = 1 AND s.enabled = 1";
+
+/// The sheet a shift of a product gets when it names none: the product's
+/// preferred sheet while it is enabled, else its category's default sheet,
+/// else the organization's, each only while enabled; `NULL` for none. Primary
+/// keys only: the product, the category, the organization, the sheets.
+pub const PRODUCT_SHEET_SQL: &str = "SELECT COALESCE(\
+     (SELECT s.id FROM products p JOIN pallet_sheet_templates s \
+        ON s.id = p.default_pallet_sheet_id WHERE p.id = ?1 AND s.enabled = 1), \
+     (SELECT s.id FROM products p JOIN category_pallet_sheet_defaults c \
+        ON c.chz_group_code = p.chz_group_code JOIN pallet_sheet_templates s \
+        ON s.id = c.sheet_id WHERE p.id = ?1 AND s.enabled = 1), \
+     (SELECT s.id FROM org_profile o JOIN pallet_sheet_templates s \
+        ON s.id = o.default_pallet_sheet_template_id WHERE o.id = 1 AND s.enabled = 1))";
+
+/// The products that prefer a sheet: the partial index finds them.
+pub const PRODUCTS_PREFERRING_SQL: &str =
+    "SELECT COUNT(*) FROM products WHERE default_pallet_sheet_id = ?";
 
 type SheetRow = (String, String, bool, Option<String>, i64, String);
 
@@ -97,6 +124,70 @@ pub async fn default_sheet(conn: &mut SqliteConnection) -> Result<Option<String>
     Ok(id)
 }
 
+/// The sheet a new shift of `product_id` with pallets gets when its request
+/// names none (`PRODUCT_SHEET_SQL`): the product's, the category's, the
+/// organization's, the first that is enabled, or none.
+pub async fn default_sheet_for_product(
+    conn: &mut SqliteConnection,
+    product_id: &str,
+) -> Result<Option<String>, ApiError> {
+    let id: Option<String> = sqlx::query_scalar(PRODUCT_SHEET_SQL)
+        .bind(product_id)
+        .fetch_one(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(id)
+}
+
+/// `validation_failed` on `field` unless `id` names a sheet, enabled or not:
+/// what a product's preference must name.
+pub async fn check_sheet_exists(
+    conn: &mut SqliteConnection,
+    field: &str,
+    id: &str,
+) -> Result<(), ApiError> {
+    let found: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM pallet_sheet_templates WHERE id = ?")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+            .map_err(ApiError::internal)?;
+    match found {
+        Some(_) => Ok(()),
+        None => Err(ApiError::validation(field, "an A4 sheet is required")),
+    }
+}
+
+/// The defaults a sheet holds: the organization's, and the categories whose
+/// default it is, ascending.
+async fn usage(conn: &mut SqliteConnection, id: &str) -> Result<crate::templates::Usage, ApiError> {
+    let organization = default_id(&mut *conn).await?.as_deref() == Some(id);
+    let categories: Vec<u32> = sqlx::query_scalar(
+        "SELECT chz_group_code FROM category_pallet_sheet_defaults WHERE sheet_id = ? \
+         ORDER BY chz_group_code",
+    )
+    .bind(id)
+    .fetch_all(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(crate::templates::Usage {
+        organization,
+        categories,
+    })
+}
+
+/// `conflict` on `template_is_default` when the sheet is a default.
+async fn require_not_default(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
+    let usage = usage(conn, id).await?;
+    if usage.organization || !usage.categories.is_empty() {
+        return Err(crate::templates::is_default(
+            usage.organization,
+            usage.categories,
+        ));
+    }
+    Ok(())
+}
+
 /// `validation_failed` on `field` unless `id` names an enabled sheet.
 pub async fn check_sheet(
     conn: &mut SqliteConnection,
@@ -113,13 +204,6 @@ pub async fn check_sheet(
         Some(true) => Ok(()),
         _ => Err(ApiError::validation(field, "no such enabled sheet")),
     }
-}
-
-fn is_default() -> ApiError {
-    ApiError::conflict(
-        "template_is_default",
-        "the sheet is the organization's default",
-    )
 }
 
 pub async fn list_sheets(
@@ -215,8 +299,8 @@ pub async fn update_sheet(
     }
     let next_name = name.unwrap_or_else(|| current.name.clone());
     let next_enabled = update.enabled.unwrap_or(current.enabled);
-    if !next_enabled && default_id(&mut tx).await?.as_deref() == Some(id.as_str()) {
-        return Err(is_default());
+    if !next_enabled {
+        require_not_default(&mut tx, &id).await?;
     }
     let Some(details) = audit::update_details(&[
         ("name", json!(current.name), json!(next_name)),
@@ -269,9 +353,7 @@ pub async fn delete_sheet(
     let current = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("no such sheet"))?;
-    if default_id(&mut tx).await?.as_deref() == Some(id.as_str()) {
-        return Err(is_default());
-    }
+    require_not_default(&mut tx, &id).await?;
     // A planned shift prints its pallets on this sheet once a station opens
     // it; an open or closed shift has the sheet in its snapshot.
     let planned: Vec<String> = sqlx::query_scalar(PLANNED_SHIFTS_SQL)
@@ -286,11 +368,40 @@ pub async fn delete_sheet(
         )
         .with_details(json!({ "constraint": "template_in_use", "shiftIds": planned })));
     }
+    // The products that prefer the sheet lose the preference and take a
+    // revision, so a station's copy of each product moves too (the sheet
+    // itself takes none: no station copies it).
+    let preferring: i64 = sqlx::query_scalar(PRODUCTS_PREFERRING_SQL)
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let rev = if preferring > 0 {
+        let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+        sqlx::query(
+            "UPDATE products SET default_pallet_sheet_id = NULL, rev = ? \
+             WHERE default_pallet_sheet_id = ?",
+        )
+        .bind(rev)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+        Some(rev)
+    } else {
+        None
+    };
     sqlx::query("DELETE FROM pallet_sheet_templates WHERE id = ?")
         .bind(&id)
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    // Named only by a delete that cleared some, so the rows of the others
+    // keep their shape.
+    let mut details = json!({ "name": current.name });
+    if preferring > 0 {
+        details["productsCleared"] = json!(preferring);
+    }
     audit::record(
         &mut tx,
         &at,
@@ -300,12 +411,17 @@ pub async fn delete_sheet(
             target_type: Some("pallet_sheet"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "name": current.name }),
+            details,
         },
     )
     .await
     .map_err(ApiError::internal)?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    match rev {
+        Some(rev) => commit_with_revision(tx, &state.revisions, rev)
+            .await
+            .map_err(ApiError::internal)?,
+        None => tx.commit().await.map_err(ApiError::internal)?,
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

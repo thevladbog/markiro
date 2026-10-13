@@ -3,7 +3,9 @@
 //! written by nobody. Products: `GET /v1/office/products` (every role,
 //! archived products included), `POST` and `PUT …/{id}` (administrators and
 //! technologists; `PUT` takes every field and `expectedRev`). A product is
-//! archived instead of deleted and rides the station feed with its flag.
+//! archived instead of deleted and rides the station feed with its flag. Its
+//! preferred A4 sheet (`defaultPalletSheetId`, beta feedback) is the office's
+//! only: the feed's record does not carry it, and a `PUT` without it keeps it.
 
 use axum::extract::State;
 use axum::Json;
@@ -37,7 +39,7 @@ pub async fn list_product_groups(
 
 const SELECT: &str = "SELECT id, gtin14, name, print_name, chz_group_code, box_capacity, \
      pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, \
-     archived, status, rev FROM products";
+     default_pallet_sheet_id, archived, status, rev FROM products";
 
 #[derive(sqlx::FromRow)]
 struct ProductRow {
@@ -51,6 +53,7 @@ struct ProductRow {
     shelf_life_days: Option<u32>,
     default_box_template_id: Option<String>,
     default_pallet_template_id: Option<String>,
+    default_pallet_sheet_id: Option<String>,
     archived: bool,
     status: String,
     rev: i64,
@@ -68,6 +71,7 @@ fn record(row: ProductRow) -> Result<OfficeProduct, ApiError> {
         shelf_life_days: row.shelf_life_days,
         default_box_template_id: row.default_box_template_id,
         default_pallet_template_id: row.default_pallet_template_id,
+        default_pallet_sheet_id: row.default_pallet_sheet_id,
         archived: row.archived,
         status: row.status.parse().map_err(ApiError::internal)?,
         rev: row.rev,
@@ -94,6 +98,8 @@ struct Sent<'a> {
     shelf_life_days: Option<u32>,
     default_box_template_id: Option<&'a str>,
     default_pallet_template_id: Option<&'a str>,
+    /// `None`: keep the stored sheet (an update that leaves it out).
+    default_pallet_sheet_id: Option<Option<&'a str>>,
 }
 
 impl<'a> From<&'a ProductCreate> for Sent<'a> {
@@ -108,6 +114,7 @@ impl<'a> From<&'a ProductCreate> for Sent<'a> {
             shelf_life_days: create.shelf_life_days,
             default_box_template_id: create.default_box_template_id.as_deref(),
             default_pallet_template_id: create.default_pallet_template_id.as_deref(),
+            default_pallet_sheet_id: Some(create.default_pallet_sheet_id.as_deref()),
         }
     }
 }
@@ -124,6 +131,10 @@ impl<'a> From<&'a ProductUpdate> for Sent<'a> {
             shelf_life_days: update.shelf_life_days,
             default_box_template_id: update.default_box_template_id.as_deref(),
             default_pallet_template_id: update.default_pallet_template_id.as_deref(),
+            default_pallet_sheet_id: update
+                .default_pallet_sheet_id
+                .as_ref()
+                .map(|id| id.as_deref()),
         }
     }
 }
@@ -139,6 +150,8 @@ struct Fields {
     shelf_life_days: Option<u32>,
     default_box_template_id: Option<String>,
     default_pallet_template_id: Option<String>,
+    /// `None`: keep the stored sheet.
+    default_pallet_sheet_id: Option<Option<String>>,
 }
 
 impl Sent<'_> {
@@ -167,6 +180,7 @@ impl Sent<'_> {
             shelf_life_days: self.shelf_life_days,
             default_box_template_id: self.default_box_template_id.map(str::to_owned),
             default_pallet_template_id: self.default_pallet_template_id.map(str::to_owned),
+            default_pallet_sheet_id: self.default_pallet_sheet_id.map(|id| id.map(str::to_owned)),
         })
     }
 }
@@ -176,7 +190,9 @@ impl Sent<'_> {
 /// enabled and covers the product's group is the domain's rule: the office
 /// applies it when choosing one and the station before using one, so a
 /// template disabled or narrowed later never blocks editing or archiving
-/// the product. Deleting a template clears the pointers (`templates`).
+/// the product. Deleting a template clears the pointers (`templates`). The
+/// preferred A4 sheet names a sheet, enabled or not, for the same reason;
+/// deleting it clears the pointer (`pallet_sheets`).
 async fn check_references(conn: &mut SqliteConnection, fields: &Fields) -> Result<(), ApiError> {
     if let Some(code) = fields.chz_product_group_code {
         let known: Option<i64> =
@@ -220,6 +236,10 @@ async fn check_references(conn: &mut SqliteConnection, fields: &Fields) -> Resul
             ));
         }
     }
+    // A sheet, never a label template: the slot reads the sheets' table.
+    if let Some(Some(id)) = &fields.default_pallet_sheet_id {
+        crate::routes::pallet_sheets::check_sheet_exists(conn, "defaultPalletSheetId", id).await?;
+    }
     Ok(())
 }
 
@@ -259,7 +279,8 @@ pub async fn create_product(
     sqlx::query(
         "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
          pallet_box_capacity, shelf_life_days, default_box_template_id, \
-         default_pallet_template_id, archived, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+         default_pallet_template_id, default_pallet_sheet_id, archived, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
     )
     .bind(&id)
     .bind(&fields.gtin14)
@@ -271,6 +292,12 @@ pub async fn create_product(
     .bind(fields.shelf_life_days)
     .bind(&fields.default_box_template_id)
     .bind(&fields.default_pallet_template_id)
+    .bind(
+        fields
+            .default_pallet_sheet_id
+            .as_ref()
+            .and_then(Option::as_deref),
+    )
     .bind(rev)
     .execute(&mut *tx)
     .await
@@ -316,6 +343,10 @@ pub async fn update_product(
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
+    let default_pallet_sheet_id = fields
+        .default_pallet_sheet_id
+        .clone()
+        .unwrap_or_else(|| current.default_pallet_sheet_id.clone());
     let Some(details) = audit::update_details(&[
         ("gtin14", json!(current.gtin14), json!(fields.gtin14)),
         ("name", json!(current.name), json!(fields.name)),
@@ -354,6 +385,11 @@ pub async fn update_product(
             json!(current.default_pallet_template_id),
             json!(fields.default_pallet_template_id),
         ),
+        (
+            "defaultPalletSheetId",
+            json!(current.default_pallet_sheet_id),
+            json!(default_pallet_sheet_id),
+        ),
         ("archived", json!(current.archived), json!(update.archived)),
     ]) else {
         // Nothing actually changed: report the product as-is without bumping
@@ -364,8 +400,8 @@ pub async fn update_product(
     sqlx::query(
         "UPDATE products SET gtin14 = ?, name = ?, print_name = ?, chz_group_code = ?, \
          box_capacity = ?, pallet_box_capacity = ?, shelf_life_days = ?, \
-         default_box_template_id = ?, default_pallet_template_id = ?, archived = ?, rev = ? \
-         WHERE id = ?",
+         default_box_template_id = ?, default_pallet_template_id = ?, \
+         default_pallet_sheet_id = ?, archived = ?, rev = ? WHERE id = ?",
     )
     .bind(&fields.gtin14)
     .bind(&fields.name)
@@ -376,6 +412,7 @@ pub async fn update_product(
     .bind(fields.shelf_life_days)
     .bind(&fields.default_box_template_id)
     .bind(&fields.default_pallet_template_id)
+    .bind(&default_pallet_sheet_id)
     .bind(update.archived)
     .bind(rev)
     .bind(&id)

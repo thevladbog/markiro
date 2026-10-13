@@ -12,11 +12,13 @@ export interface SheetOption {
 /**
  * The choices of a shift's «Лист А4» (plan А4):
  *
- * - «Основной лист организации (…)» (`""`), always: a new shift takes the
- *   main sheet, and a planned one that holds a sheet goes back to it
- *   (`ShiftUpdate.palletSheetTemplateId: null`; the host resolves the main
- *   sheet when it takes the edit, so a later change of the main sheet does
- *   not reach the shift).
+ * - «По умолчанию для товара (…)» (`""`), always: a new shift takes the
+ *   default sheet for its product (the product's, its category's or the
+ *   organization's, `defaultSheetFor`, passed as `defaultId`; without it the
+ *   organization's), and a planned one that holds a sheet goes back to it
+ *   (`ShiftUpdate.palletSheetTemplateId: null`; the host resolves the
+ *   default when it takes the edit, so a later change of it does not reach
+ *   the shift).
  * - the sheets in use that this build can read, by name; a name two sheets
  *   share carries the start of the sheet's id, so the two can be told apart.
  * - the sheet the shift already holds, and the one the form holds, even when
@@ -31,9 +33,11 @@ export function sheetOptions(
   ownId: string | null,
   chosenId: string,
   t: TFunction,
+  defaultId?: string | null,
 ): SheetOption[] {
   const sheets = lists?.sheets ?? [];
-  const main = sheets.find((sheet) => sheet.id === lists?.defaultId && sheet.enabled);
+  const mainId = defaultId === undefined ? lists?.defaultId : defaultId;
+  const main = sheets.find((sheet) => sheet.id === mainId && sheet.enabled);
   const options: SheetOption[] = [];
   options.push({
     value: "",
