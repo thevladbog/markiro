@@ -30,6 +30,17 @@ export class BackupTimeoutError extends Error {
   }
 }
 
+/** The page that started the update is gone: nothing more is reported or started. */
+export class UpdateCancelledError extends Error {
+  constructor() {
+    super("the update was left before it started");
+    this.name = "UpdateCancelledError";
+  }
+}
+
+/** How far before its request a copy that already ended may have been made and still be the one asked for. */
+const ENDED_COPY_SLACK_MS = 60_000;
+
 /** What the confirmation before the launch says (spec §9.3 item 3, §10.7). */
 export interface InstallWarnings {
   /** The host's PC: a copy first, and the host stops for 1-3 minutes. */
@@ -82,11 +93,18 @@ export interface BackupDeps {
   api: Pick<HostApi, "startBackup" | "getBackups">;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** `true` once the page that started the update is gone (unmounted): the flow stops at its next step. */
+  cancelled?: () => boolean;
+}
+
+function stopIfCancelled(deps: BackupDeps): void {
+  if (deps.cancelled?.() === true) throw new UpdateCancelledError();
 }
 
 async function waitIdle(deps: BackupDeps, deadline: number): Promise<BackupState> {
   for (;;) {
     const state = await deps.call((token) => deps.api.getBackups(token));
+    stopIfCancelled(deps);
     if (state.running === null) return state;
     if (deps.now() >= deadline) throw new BackupTimeoutError();
     await deps.sleep(BACKUP_POLL_MS);
@@ -109,18 +127,30 @@ function copyRunning(error: unknown): boolean {
  */
 export async function awaitFreshBackup(deps: BackupDeps): Promise<void> {
   const deadline = deps.now() + BACKUP_WAIT_MS;
-  let started: BackupState;
-  try {
-    started = await deps.call((token) => deps.api.startBackup(token));
-  } catch (error) {
-    if (!copyRunning(error)) throw error;
-    await waitIdle(deps, deadline);
-    started = await deps.call((token) => deps.api.startBackup(token));
+  let requestedAt = deps.now();
+  let started: BackupState | null = null;
+  // Another copy (a scheduled one) may start between our wait and our ask: ask again until the deadline.
+  while (started === null) {
+    try {
+      requestedAt = deps.now();
+      started = await deps.call((token) => deps.api.startBackup(token));
+    } catch (error) {
+      if (!copyRunning(error)) throw error;
+      await waitIdle(deps, deadline);
+      // A host that keeps refusing while it reports no copy must not spin: the deadline holds.
+      if (deps.now() >= deadline) throw new BackupTimeoutError();
+      await deps.sleep(BACKUP_POLL_MS);
+    }
   }
-  const since = started.running === null ? null : Date.parse(started.running.startedAt);
+  // Ours runs: its last attempt must not be older than its start. Ours already ended: not
+  // older than the request (this is the host's PC, one clock).
+  const since =
+    started.running === null
+      ? requestedAt - ENDED_COPY_SLACK_MS
+      : Date.parse(started.running.startedAt);
   const settled = started.running === null ? started : await waitIdle(deps, deadline);
   const attempt = settled.local.lastAttempt;
-  if (attempt === null || !attempt.ok || (since !== null && Date.parse(attempt.at) < since)) {
+  if (attempt === null || !attempt.ok || Date.parse(attempt.at) < since) {
     throw new BackupFailedError(attempt !== null && !attempt.ok ? attempt.code : null);
   }
 }
@@ -149,6 +179,7 @@ export async function runUpdate(
     deps.onPhase("backup");
     await awaitFreshBackup(deps);
   }
+  stopIfCancelled(deps);
   deps.onPhase("reporting");
   try {
     await deps.call((token) =>
@@ -171,6 +202,7 @@ export async function runUpdate(
       report.confirmations.includes("host_unreachable");
     if (!withoutHost) throw error;
   }
+  stopIfCancelled(deps);
   deps.onPhase("launching");
   await deps.shell.install(report.path, report.confirmations);
 }

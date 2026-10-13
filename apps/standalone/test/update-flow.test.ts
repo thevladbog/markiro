@@ -11,6 +11,7 @@ import {
   BACKUP_WAIT_MS,
   BackupFailedError,
   BackupTimeoutError,
+  UpdateCancelledError,
   awaitFreshBackup,
   installWarnings,
   runUpdate,
@@ -287,5 +288,98 @@ describe("an update the office starts (spec §10.4)", () => {
     const unconfirmed = deps({ recordUpdateStarted });
     await expect(runUpdate(unconfirmed.deps, report(), "station")).rejects.toBe(silent);
     expect(unconfirmed.install).not.toHaveBeenCalled();
+  });
+});
+
+describe("what review of the flow added (plan ОБН-2)", () => {
+  const conflict = (constraint: string) =>
+    new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "conflict",
+      details: { constraint },
+    });
+
+  it("asks again while another copy keeps starting, and rethrows any other refusal", async () => {
+    const startBackup = vi
+      .fn<HostApi["startBackup"]>()
+      .mockRejectedValueOnce(conflict("backup_running"))
+      .mockRejectedValueOnce(conflict("backup_running"))
+      .mockResolvedValueOnce(RUNNING);
+    const getBackups = vi
+      .fn<HostApi["getBackups"]>()
+      .mockResolvedValueOnce(HEALTHY_BACKUPS)
+      .mockResolvedValueOnce(HEALTHY_BACKUPS)
+      .mockResolvedValueOnce(DONE);
+    await awaitFreshBackup(deps({ startBackup, getBackups }).deps);
+    expect(startBackup).toHaveBeenCalledTimes(3);
+    for (const refusal of [
+      conflict("something_else"),
+      new HostError({ kind: "api", code: "forbidden", status: 403, message: "no" }),
+    ]) {
+      const refused = vi.fn<HostApi["startBackup"]>(async () => {
+        throw refusal;
+      });
+      await expect(awaitFreshBackup(deps({ startBackup: refused }).deps)).rejects.toBe(refusal);
+    }
+  });
+
+  it("gives up on a host that keeps refusing to copy while it says no copy runs", async () => {
+    const startBackup = vi.fn<HostApi["startBackup"]>(async () => {
+      throw conflict("backup_running");
+    });
+    await expect(
+      awaitFreshBackup(deps({ startBackup, getBackups: async () => HEALTHY_BACKUPS }).deps),
+    ).rejects.toBeInstanceOf(BackupTimeoutError);
+    expect(startBackup.mock.calls.length).toBe(BACKUP_WAIT_MS / BACKUP_POLL_MS + 1);
+  });
+
+  it("takes a copy that ended before its answer only when it is that copy's", async () => {
+    // The host answered the start with no copy running: the attempt must be at least as recent as the request.
+    const ended = deps({ startBackup: async () => DONE, getBackups: async () => DONE });
+    const later = new Date(Date.parse("2026-10-09T14:21:04Z") + 120_000).getTime();
+    ended.deps.now = () => later;
+    await expect(awaitFreshBackup(ended.deps)).rejects.toBeInstanceOf(BackupFailedError);
+    const fresh = deps({ startBackup: async () => DONE, getBackups: async () => DONE });
+    fresh.deps.now = () => Date.parse("2026-10-09T14:21:00Z");
+    await expect(awaitFreshBackup(fresh.deps)).resolves.toBeUndefined();
+  });
+
+  it("stops before the report and before the launch once the page that started it is gone", async () => {
+    const gone = deps({});
+    gone.deps.cancelled = () => true;
+    await expect(runUpdate(gone.deps, report(), "station")).rejects.toBeInstanceOf(
+      UpdateCancelledError,
+    );
+    expect(gone.deps.api.recordUpdateStarted).not.toHaveBeenCalled();
+    expect(gone.install).not.toHaveBeenCalled();
+    // Gone while the host copies: no report, no launch.
+    let left = false;
+    const during = deps({
+      getBackups: vi.fn<HostApi["getBackups"]>(async () => {
+        left = true;
+        return DONE;
+      }),
+    });
+    during.deps.cancelled = () => left;
+    await expect(runUpdate(during.deps, report(), "host")).rejects.toBeInstanceOf(
+      UpdateCancelledError,
+    );
+    expect(during.deps.api.recordUpdateStarted).not.toHaveBeenCalled();
+    expect(during.install).not.toHaveBeenCalled();
+  });
+
+  it("goes on without the host only for a host that did not answer, never for one that refused", async () => {
+    const refused = new HostError({ kind: "api", code: "forbidden", status: 403, message: "no" });
+    const run = deps({
+      recordUpdateStarted: vi.fn<HostApi["recordUpdateStarted"]>(async () => {
+        throw refused;
+      }),
+    });
+    await expect(
+      runUpdate(run.deps, report({ confirmations: ["host_unreachable"] }), "station"),
+    ).rejects.toBe(refused);
+    expect(run.install).not.toHaveBeenCalled();
   });
 });

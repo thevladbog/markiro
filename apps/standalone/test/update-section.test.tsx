@@ -96,10 +96,13 @@ function fakeShell(overrides: Partial<FakeShell> = {}): FakeShell {
   };
 }
 
-function fakeAbout(role: "host" | "station" | "office"): AboutApi {
+function fakeAbout(role: "host" | "station" | "office" | "unreadable"): AboutApi {
   return {
     appVersion: async () => "0.1.0",
-    installRole: async () => role,
+    installRole: async () => {
+      if (role === "unreadable") throw new Error("no shell");
+      return role;
+    },
     pairing: async () => DEVICE_STATUS,
     hello: async () => observation(true),
     system: async () => ({ os: "Windows 11", arch: "x64", webview: null }),
@@ -110,7 +113,7 @@ function fakeAbout(role: "host" | "station" | "office"): AboutApi {
 function renderUpdate(options: {
   shell?: FakeShell;
   api?: FakeHostApi;
-  role?: "host" | "station" | "office";
+  role?: "host" | "station" | "office" | "unreadable";
   technologist?: boolean;
 }) {
   const shell = options.shell ?? fakeShell();
@@ -155,8 +158,11 @@ function copied(ok: boolean, code: string | null = null): BackupState {
   };
 }
 
+/** The check button of the signed package names its file (one «Проверить» per row). */
+const CHECK = "Проверить: markiro-standalone-0.2.0.update.jws";
+
 async function checkAndOpenTheDialog() {
-  fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+  fireEvent.click(await screen.findByRole("button", { name: CHECK }));
   await screen.findByText("Подпись проверена: выпуск Маркиро.");
   fireEvent.click(screen.getByRole("button", { name: "Установить обновление" }));
   // `ConfirmDialog` of @markiro/ui is an alert dialog.
@@ -299,7 +305,7 @@ describe("«Обновление»", () => {
         })),
       }),
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+    fireEvent.click(await screen.findByRole("button", { name: CHECK }));
     await screen.findByText("Эта версия старее установленной (0.3.0): понижать версию нельзя.");
     expect(screen.getByRole("button", { name: "Установить обновление" })).toHaveProperty(
       "disabled",
@@ -345,5 +351,72 @@ describe("«Обновление»", () => {
     fireEvent.click(screen.getByRole("button", { name: "Скрыть" }));
     await waitFor(() => expect(screen.queryByText(text)).toBeNull());
     expect(shell.dismissOutcome).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the package each check button checks, and the checked package in its card", async () => {
+    renderUpdate({});
+    const check = await screen.findByRole("button", { name: CHECK });
+    expect(check.textContent).toBe("Проверить");
+    fireEvent.click(check);
+    await screen.findByText("Подпись проверена: выпуск Маркиро.");
+    expect(screen.getAllByText("markiro-standalone-0.2.0.update.jws").length).toBe(2);
+  });
+
+  it("installs nothing while this PC's role is unknown: the host's PC would skip its copy", async () => {
+    const { shell, api } = renderUpdate({ role: "unreadable" });
+    fireEvent.click(await screen.findByRole("button", { name: CHECK }));
+    await screen.findByText(/Роль этого ПК не удалось определить/);
+    expect(screen.getByRole("button", { name: "Установить обновление" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(api.recordUpdateStarted).not.toHaveBeenCalled();
+    expect(shell.install).not.toHaveBeenCalled();
+  });
+
+  it("cancels at the confirmation and starts nothing", async () => {
+    const { shell, api } = renderUpdate({});
+    const dialog = await checkAndOpenTheDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(api.recordUpdateStarted).not.toHaveBeenCalled();
+    expect(shell.install).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Установить обновление" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("moves the focus to the reason when the install fails", async () => {
+    const shell = fakeShell({
+      install: vi.fn<UpdateShell["install"]>(async () => {
+        throw new UpdateShellError("launch_failed", "update_install: launch_failed");
+      }),
+    });
+    renderUpdate({ shell });
+    const dialog = await checkAndOpenTheDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Установить" }));
+    const reason = await screen.findByText(
+      "Windows не запустила установщик. Запустите его вручную (ниже).",
+    );
+    await waitFor(() => expect(document.activeElement?.contains(reason)).toBe(true));
+  });
+
+  it("announces the phases in the polite live region", async () => {
+    let finish: () => void = () => undefined;
+    const shell = fakeShell({
+      install: vi.fn<UpdateShell["install"]>(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    });
+    renderUpdate({ shell });
+    const dialog = await checkAndOpenTheDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Установить" }));
+    const phase = await screen.findByText("Запуск установщика. Программа закроется.");
+    expect(phase.getAttribute("aria-live")).toBe("polite");
+    finish();
   });
 });

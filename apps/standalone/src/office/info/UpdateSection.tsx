@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -27,6 +27,7 @@ import {
   type InstallWarnings,
   type UpdatePhase,
 } from "./update-flow.js";
+import type { InstallRole } from "../../host/device.js";
 import {
   UpdateShellError,
   type FoundPackage,
@@ -141,6 +142,25 @@ function OutcomeAlert({
   );
 }
 
+/** The roles an update knows: an unknown one installs nothing (the host's PC must copy first). */
+type KnownRole = NonNullable<InstallRole>;
+
+function knownRole(role: InstallRole | "unknown" | undefined): KnownRole | null {
+  return role === "host" || role === "station" || role === "office" ? role : null;
+}
+
+/** The file name of a package's path, Windows or not. */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/u).pop() ?? path;
+}
+
+/** A checked package the person is asked to confirm, with what the warnings were computed for. */
+interface Pending {
+  report: VerifiedReport;
+  warnings: InstallWarnings;
+  role: KnownRole;
+}
+
 function UpdateFromFile() {
   const { t } = useTranslation();
   const session = useOfficeSession();
@@ -150,14 +170,46 @@ function UpdateFromFile() {
   const packages = useQuery({ queryKey: UPDATE_PACKAGES_KEY, queryFn: () => shell.scan() });
   const [checking, setChecking] = useState<string | null>(null);
   const [report, setReport] = useState<VerifiedReport | null>(null);
-  const [warnings, setWarnings] = useState<InstallWarnings | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<UpdatePhase | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
-  const role = about.data?.role ?? "unknown";
+  const [focusFailure, setFocusFailure] = useState(false);
+  const failureRef = useRef<HTMLDivElement>(null);
+  // Bumped by every new check or search: a warning computed for an older report is dropped.
+  const generation = useRef(0);
+  // `true` once the section is gone: a running update stops before its report and its launch.
+  const left = useRef(false);
+  const role = knownRole(about.data?.role);
+
+  useEffect(() => {
+    left.current = false;
+    return () => {
+      left.current = true;
+    };
+  }, []);
+
+  // After a failed install the dialog is gone and its opener disabled: focus the reason.
+  useEffect(() => {
+    if (focusFailure && failure !== null) {
+      failureRef.current?.focus();
+      setFocusFailure(false);
+    }
+  }, [focusFailure, failure]);
+
+  const search = () => {
+    generation.current += 1;
+    setReport(null);
+    setPending(null);
+    setFailure(null);
+    void packages.refetch();
+  };
 
   const check = async (found: FoundPackage) => {
+    generation.current += 1;
     setChecking(found.path);
     setReport(null);
+    setPending(null);
     setFailure(null);
     try {
       setReport(await shell.verify(found.path));
@@ -169,7 +221,10 @@ function UpdateFromFile() {
   };
 
   const prepare = async (checked: VerifiedReport) => {
+    if (role === null) return;
+    const mine = generation.current;
     setFailure(null);
+    setPreparing(true);
     try {
       const [devices, shifts] = await Promise.all([
         role === "host"
@@ -178,14 +233,22 @@ function UpdateFromFile() {
         // Without the host there is no list: no shift to name, the shell's own warning says the rest.
         session.call((token) => session.api.listShifts(token)).catch(() => []),
       ]);
-      setWarnings(installWarnings({ report: checked, role, devices, shifts, thisDeviceId }));
+      if (mine === generation.current) {
+        setPending({
+          report: checked,
+          role,
+          warnings: installWarnings({ report: checked, role, devices, shifts, thisDeviceId }),
+        });
+      }
     } catch (error) {
-      setFailure(error);
+      if (mine === generation.current) setFailure(error);
+    } finally {
+      setPreparing(false);
     }
   };
 
-  const install = async (checked: VerifiedReport) => {
-    setWarnings(null);
+  const install = async (confirmed: Pending) => {
+    setPending(null);
     setFailure(null);
     try {
       await runUpdate(
@@ -199,13 +262,16 @@ function UpdateFromFile() {
               setTimeout(resolve, ms);
             }),
           onPhase: setPhase,
+          cancelled: () => left.current,
         },
-        checked,
-        role,
+        confirmed.report,
+        confirmed.role,
       );
     } catch (error) {
+      if (left.current) return;
       setFailure(error);
       setPhase(null);
+      setFocusFailure(true);
     }
   };
 
@@ -218,18 +284,13 @@ function UpdateFromFile() {
     }
   };
 
-  const busy = checking !== null || phase !== null;
+  const busy = checking !== null || preparing || phase !== null;
   return (
     <section aria-labelledby="update-from-file">
       <h3 id="update-from-file">{t("office.about.update.fromFile")}</h3>
       <p className="office-note">{t("office.about.update.hint")}</p>
       <div>
-        <Button
-          variant="secondary"
-          loading={packages.isFetching}
-          disabled={busy}
-          onClick={() => void packages.refetch()}
-        >
+        <Button variant="secondary" loading={packages.isFetching} disabled={busy} onClick={search}>
           {t("office.about.update.search")}
         </Button>{" "}
         <Button variant="secondary" onClick={() => void openFolder()}>
@@ -279,6 +340,7 @@ function UpdateFromFile() {
                   <Button
                     size="compact"
                     variant="secondary"
+                    aria-label={t("office.about.update.checkPackage", { file: found.fileName })}
                     loading={checking === found.path}
                     disabled={busy}
                     onClick={() => void check(found)}
@@ -292,9 +354,18 @@ function UpdateFromFile() {
         </ul>
       )}
       {report !== null ? (
-        <ReportCard report={report} busy={busy} onInstall={() => void prepare(report)} />
+        <ReportCard
+          report={report}
+          busy={busy}
+          roleKnown={role !== null}
+          onInstall={() => void prepare(report)}
+        />
       ) : null}
-      {failure !== null ? <Alert tone="error">{updateErrorText(t, failure)}</Alert> : null}
+      {failure !== null ? (
+        <div ref={failureRef} tabIndex={-1}>
+          <Alert tone="error">{updateErrorText(t, failure)}</Alert>
+        </div>
+      ) : null}
       {/* A polite live region without the status role: the page's loading
           spinner is the one status there (test/about-page.test.tsx waits for it to go). */}
       <p aria-live="polite">
@@ -304,20 +375,20 @@ function UpdateFromFile() {
             ? t(`office.about.update.phase.${phase}`)
             : ""}
       </p>
-      {report !== null && warnings !== null ? (
+      {pending !== null ? (
         <ConfirmDialog
           open
           title={t(
-            warnings.reinstall
+            pending.warnings.reinstall
               ? "office.about.update.confirm.reinstallTitle"
               : "office.about.update.confirm.title",
-            { version: report.manifest.version },
+            { version: pending.report.manifest.version },
           )}
-          description={<WarningList warnings={warnings} />}
+          description={<WarningList warnings={pending.warnings} />}
           confirmLabel={t("office.about.update.confirm.go")}
           cancelLabel={t("office.about.update.confirm.cancel")}
-          onConfirm={() => void install(report)}
-          onCancel={() => setWarnings(null)}
+          onConfirm={() => void install(pending)}
+          onCancel={() => setPending(null)}
         />
       ) : null}
     </section>
@@ -327,15 +398,24 @@ function UpdateFromFile() {
 function ReportCard({
   report,
   busy,
+  roleKnown,
   onInstall,
 }: {
   report: VerifiedReport;
   busy: boolean;
+  /** Whether this PC's role is known: without it nothing is installed (the host's PC copies first). */
+  roleKnown: boolean;
   onInstall: () => void;
 }) {
   const { t } = useTranslation();
   const refusal = refusalText(t, report);
   const facts: DefinitionGridItem[] = [
+    {
+      id: "package",
+      term: t("office.about.update.packageTerm"),
+      description: fileNameOf(report.path),
+      mono: true,
+    },
     {
       id: "version",
       term: t("office.about.update.versionTerm"),
@@ -358,14 +438,25 @@ function ReportCard({
         <Badge tone="warn">{t("office.about.update.beta")}</Badge>
       ) : null}
       <DefinitionGrid items={facts} />
-      <h4>{t("office.about.update.notes")}</h4>
-      <ul>
-        {report.manifest.notes.map((note, index) => (
-          <li key={`${index}:${note}`}>{note}</li>
-        ))}
-      </ul>
+      {report.manifest.notes.length > 0 ? (
+        <>
+          <h4>{t("office.about.update.notes")}</h4>
+          <ul>
+            {report.manifest.notes.map((note, index) => (
+              <li key={`${index}:${note}`}>{note}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {refusal === null ? null : <Alert tone="error">{refusal}</Alert>}
-      <Button variant="primary" disabled={refusal !== null || busy} onClick={onInstall}>
+      {refusal === null && !roleKnown ? (
+        <Alert tone="warn">{t("office.about.update.roleUnknown")}</Alert>
+      ) : null}
+      <Button
+        variant="primary"
+        disabled={refusal !== null || !roleKnown || busy}
+        onClick={onInstall}
+      >
         {t("office.about.update.install")}
       </Button>
       <details>
