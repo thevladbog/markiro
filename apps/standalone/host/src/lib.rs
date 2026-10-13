@@ -11,6 +11,7 @@ pub mod db;
 pub mod error;
 pub mod facts;
 pub mod feed;
+pub mod inn;
 pub mod install;
 #[cfg(windows)]
 pub mod install_windows;

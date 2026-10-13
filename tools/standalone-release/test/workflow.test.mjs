@@ -394,3 +394,23 @@ test("the smoke test covers an uninstall with a running host, exit 4 and data ke
   // The data survives the station role's uninstall at the very end too.
   assert.match(smoke, /'the host data from the first install is still there'/u);
 });
+
+test("the release host is checked to trust no test key before it is bundled", () => {
+  const compile = runs.findIndex((run) => run.startsWith("cargo build --release"));
+  const check = runs.findIndex((run) => run.includes("markiro-host.exe trust-keys"));
+  const sidecar = runs.findIndex((run) =>
+    run.includes("mkdir -p apps/standalone/src-tauri/binaries"),
+  );
+  assert.ok(
+    compile >= 0 && compile < check && check < sidecar,
+    `${compile} < ${check} < ${sidecar}`,
+  );
+  const step = stepRunning("markiro-host.exe trust-keys");
+  assert.equal(step.shell, "bash");
+  assert.match(
+    step.run,
+    /"\$\(apps\/standalone\/target\/release\/markiro-host\.exe trust-keys\)"/u,
+  );
+  assert.match(step.run, /grep -q '\^test-' <<<"\$kids"/u);
+  assert.match(step.run, /exit 1/u);
+});
