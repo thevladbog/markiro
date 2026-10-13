@@ -1,8 +1,13 @@
 // The installer of «Markiro Автоном» as a self-verifying artifact (plan УСТ):
 // the NSIS installer under a stable name, `release-evidence.json` (version,
-// source commit, roles, hash and size, Authenticode status) and `SHA256SUMS`.
+// source commit, roles, hash and size, Authenticode status), the unsigned
+// draft of its update manifest (plan ОБН-2, spec §10.3) and `SHA256SUMS`.
 // The `standalone-windows-build` job runs it after the installer's smoke test
-// and uploads the directory; nothing is published anywhere else.
+// and uploads the directory; nothing is published anywhere else. The draft
+// holds what the build knows — the version, the commit, the installer and the
+// protocol range of `apps/standalone/proto/src/lib.rs` — and the owner adds
+// the channel, the date, `minUpgradeFrom` and the notes and signs it on their
+// own machine (`sign-update.mjs`). No key reaches CI.
 //
 //   node tools/standalone-release/prepare.mjs --bundle-dir <nsis dir> --output-dir <dir> \
 //     --source-repository <owner/repo> --source-sha <40 hex> --authenticode <status>
@@ -14,8 +19,12 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 export const STANDALONE_TAURI_CONFIG = "apps/standalone/src-tauri/tauri.conf.json";
+/** The wire crate the host and the app share: its protocol range goes into the draft. */
+export const STANDALONE_PROTO_LIB = "apps/standalone/proto/src/lib.rs";
 export const EVIDENCE_FILE = "release-evidence.json";
 export const CHECKSUM_FILE = "SHA256SUMS";
+/** The product an update manifest names (`markiro_proto::update::PRODUCT`). */
+export const UPDATE_PRODUCT = "markiro-standalone";
 /** The installer's roles (`src-tauri/windows/installer-hooks.nsh`). */
 export const ROLES = Object.freeze(["host", "station", "office"]);
 /** `Get-AuthenticodeSignature`'s status for a signed and for an unsigned file. */
@@ -28,6 +37,12 @@ export function standaloneInstallerName(version) {
   return `markiro-standalone-${version}-windows-x86_64-setup.exe`;
 }
 
+/** The draft beside the installer: `markiro-standalone-<version>.update-draft.json`. */
+export function updateDraftName(version) {
+  standaloneInstallerName(version);
+  return `markiro-standalone-${version}.update-draft.json`;
+}
+
 /** The single source of the version: the app's Tauri config. */
 export async function readStandaloneVersion(configPath = STANDALONE_TAURI_CONFIG) {
   const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -35,6 +50,58 @@ export async function readStandaloneVersion(configPath = STANDALONE_TAURI_CONFIG
     throw new Error(`${configPath} has no usable version`);
   }
   return config.version;
+}
+
+function validateProtocolRange(range) {
+  const { protocol, minProtocol } = range ?? {};
+  if (
+    !Number.isSafeInteger(protocol) ||
+    !Number.isSafeInteger(minProtocol) ||
+    minProtocol < 1 ||
+    minProtocol > protocol
+  ) {
+    throw new Error("the protocol range is invalid: 1 <= minProtocol <= protocol");
+  }
+}
+
+/** `PROTOCOL_VERSION` and `MIN_PROTOCOL_VERSION` of this build, read from the wire crate's source. */
+export async function readProtocolRange(path = STANDALONE_PROTO_LIB) {
+  const source = (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
+  const constant = (name) => {
+    const match = new RegExp(`^pub const ${name}: u32 = ([0-9]+);$`, "mu").exec(source);
+    if (match === null) throw new Error(`${path} has no ${name}`);
+    return Number(match[1]);
+  };
+  const range = {
+    protocol: constant("PROTOCOL_VERSION"),
+    minProtocol: constant("MIN_PROTOCOL_VERSION"),
+  };
+  validateProtocolRange(range);
+  return range;
+}
+
+/**
+ * The unsigned manifest draft (spec §10.2, §10.3): exactly what the build
+ * knows, in the order the signed manifest keeps it.
+ */
+export function buildUpdateDraft({
+  version,
+  sourceSha,
+  name,
+  sha256,
+  size,
+  protocol,
+  minProtocol,
+}) {
+  return {
+    v: 1,
+    product: UPDATE_PRODUCT,
+    version,
+    sourceSha,
+    installer: { name, sha256, sizeBytes: size },
+    protocol,
+    minProtocol,
+  };
 }
 
 function sha256(bytes) {
@@ -50,6 +117,16 @@ function validateSource(repository, sha) {
   }
 }
 
+function readDraft(bytes) {
+  try {
+    const draft = JSON.parse(bytes.toString("utf8"));
+    validateProtocolRange(draft);
+    return draft;
+  } catch {
+    throw new Error("prepared standalone update draft is invalid");
+  }
+}
+
 export async function prepareStandaloneRelease({
   version,
   sourceRepository,
@@ -57,9 +134,12 @@ export async function prepareStandaloneRelease({
   bundleDir,
   outputDir,
   authenticode,
+  protocol,
+  minProtocol,
 }) {
   validateSource(sourceRepository, sourceSha);
   const name = standaloneInstallerName(version);
+  validateProtocolRange({ protocol, minProtocol });
   if (!AUTHENTICODE_STATUSES.includes(authenticode)) {
     throw new Error(`Authenticode status ${String(authenticode)} is neither signed nor unsigned`);
   }
@@ -73,6 +153,7 @@ export async function prepareStandaloneRelease({
   }
   const bytes = await readFile(join(bundleDir, installers[0]));
   await writeFile(join(outputDir, name), bytes);
+  const hash = sha256(bytes);
   const evidence = {
     schemaVersion: 1,
     product: "standalone",
@@ -80,13 +161,26 @@ export async function prepareStandaloneRelease({
     source: { repository: sourceRepository, sha: sourceSha },
     roles: [...ROLES],
     authenticode,
-    assets: { [name]: { sha256: sha256(bytes), size: bytes.length } },
+    assets: { [name]: { sha256: hash, size: bytes.length } },
   };
   const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
   await writeFile(join(outputDir, EVIDENCE_FILE), evidenceBytes);
+  const draftName = updateDraftName(version);
+  const draft = buildUpdateDraft({
+    version,
+    sourceSha,
+    name,
+    sha256: hash,
+    size: bytes.length,
+    protocol,
+    minProtocol,
+  });
+  const draftBytes = Buffer.from(`${JSON.stringify(draft, null, 2)}\n`, "utf8");
+  await writeFile(join(outputDir, draftName), draftBytes);
   const sums = [
     [EVIDENCE_FILE, sha256(evidenceBytes)],
-    [name, sha256(bytes)],
+    [name, hash],
+    [draftName, sha256(draftBytes)],
   ]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([file, hash]) => `${hash}  ${file}\n`)
@@ -97,7 +191,8 @@ export async function prepareStandaloneRelease({
 
 export async function verifyPreparedStandaloneRelease({ directory, version }) {
   const name = standaloneInstallerName(version);
-  const expected = [CHECKSUM_FILE, EVIDENCE_FILE, name].sort();
+  const draftName = updateDraftName(version);
+  const expected = [CHECKSUM_FILE, EVIDENCE_FILE, name, draftName].sort();
   const entries = (await readdir(directory)).sort();
   if (entries.join("\n") !== expected.join("\n")) {
     throw new Error("prepared standalone release has an unexpected asset set");
@@ -133,7 +228,7 @@ export async function verifyPreparedStandaloneRelease({ directory, version }) {
     if (!match || sums.has(match[2])) throw new Error("prepared standalone SHA256SUMS is invalid");
     sums.set(match[2], match[1]);
   }
-  if ([...sums.keys()].sort().join("\n") !== [EVIDENCE_FILE, name].sort().join("\n")) {
+  if ([...sums.keys()].sort().join("\n") !== [EVIDENCE_FILE, name, draftName].sort().join("\n")) {
     throw new Error("prepared standalone SHA256SUMS names unexpected assets");
   }
   for (const [file, hash] of sums) {
@@ -141,7 +236,20 @@ export async function verifyPreparedStandaloneRelease({ directory, version }) {
       throw new Error(`prepared standalone release checksum mismatch: ${file}`);
     }
   }
-  return { directory, name, evidence };
+  const draft = readDraft(bytes[draftName]);
+  const described = buildUpdateDraft({
+    version,
+    sourceSha: evidence.source.sha,
+    name,
+    sha256: asset.sha256,
+    size: asset.size,
+    protocol: draft.protocol,
+    minProtocol: draft.minProtocol,
+  });
+  if (JSON.stringify(draft) !== JSON.stringify(described)) {
+    throw new Error("prepared standalone update draft is invalid");
+  }
+  return { directory, name, evidence, draft, draftName };
 }
 
 async function main() {
@@ -162,6 +270,7 @@ async function main() {
     bundleDir: values["bundle-dir"],
     outputDir: values["output-dir"],
     authenticode: values.authenticode,
+    ...(await readProtocolRange()),
   });
   process.stdout.write(
     `${prepared.name} ${prepared.evidence.assets[prepared.name].sha256} (${prepared.evidence.authenticode})\n`,
