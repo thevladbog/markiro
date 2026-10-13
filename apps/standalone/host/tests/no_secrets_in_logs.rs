@@ -6,8 +6,9 @@
 //! hash, a box's SSCC or the words of a reason (stage 2a spec §4.11): a
 //! rejected record is logged by its id and its receipt code alone; nor do the
 //! routes of a shift's exports (plan ЧЗ) and of its printed forms (plan О-Ф),
-//! which answer with codes and SSCCs. Its own binary, because it installs the
-//! global tracing subscriber.
+//! which answer with codes and SSCCs. Nor a license file, its segments, the
+//! activation request, the organization's INN or the file's customer (plan
+//! ЛЦ-2). Its own binary, because it installs the global tracing subscriber.
 
 mod support;
 
@@ -332,6 +333,52 @@ async fn secrets_never_reach_the_process_log() {
     assert_eq!(wizard.status(), 200);
     let session: serde_json::Value = wizard.json().await.unwrap();
     let token = session["session"]["token"].as_str().unwrap().to_owned();
+
+    // A license file accepted (the state moves from the trial) and one
+    // refused (plan ЛЦ-2), and the activation request: the log holds the
+    // file's id, the state and the refusal's code, never a file, its
+    // segments, the request, the INN or the customer.
+    let accepted_file = support::license::file(&host.host_id, |terms| {
+        terms["customer"]["name"] = json!("ООО «Лицензия-маркер»");
+    });
+    let refused_file = support::license::file(&host.host_id, |terms| {
+        terms["licenseId"] = json!(support::license::license_id(2));
+        terms["sequence"] = json!(2);
+        terms["hostId"] = json!("9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f");
+        terms["customer"]["name"] = json!("ООО «Лицензия-маркер»");
+    });
+    for (file, expected) in [(&accepted_file, 200), (&refused_file, 400)] {
+        let answer = client
+            .put(format!("{base}/v1/office/license"))
+            .header(protocol.0, &protocol.1)
+            .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+            .bearer_auth(&key)
+            .json(&json!({ "file": file }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(answer.status(), expected);
+    }
+    let activation_request = client
+        .get(format!("{base}/v1/office/license/activation-request"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(activation_request.status(), 200);
+    let activation_request = activation_request.text().await.unwrap();
+    assert!(activation_request.contains(support::license::INN));
+    let mut license_needles = vec![
+        "ООО «Лицензия-маркер»".to_owned(),
+        support::license::INN.to_owned(),
+        activation_request,
+    ];
+    for file in [&accepted_file, &refused_file] {
+        license_needles.push(file.clone());
+        license_needles.extend(file.split('.').skip(1).map(str::to_owned));
+    }
     let wrong = client
         .post(format!("{base}/v1/office/login"))
         .header(protocol.0, &protocol.1)
@@ -1791,6 +1838,21 @@ async fn secrets_never_reach_the_process_log() {
     for secret in secrets {
         assert!(!log.contains(&secret), "the process log contains a secret");
     }
+    // The license's lines are there, by the file's id and the state alone.
+    for line in [
+        "a license file was loaded",
+        "a license file was refused",
+        "license state changed",
+    ] {
+        assert!(log.contains(line), "the log lacks {line:?}");
+    }
+    for needle in license_needles {
+        assert!(
+            !log.contains(&needle),
+            "the process log contains a license file's text, the activation request, its INN \
+             or its customer"
+        );
+    }
     for layout in [
         "layout-marker-stock",
         "layout-marker-office-1",
@@ -2002,6 +2064,7 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
     ];
     let import_path = ["cloud_import.rs", "routes/cloud_import.rs"];
     let mut import_files = 0;
+    let mut license_files = 0;
     let mut facts_files = 0;
     for file in &files {
         let relative = file
@@ -2017,6 +2080,35 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
                     !text.contains(print),
                     "{relative} writes past the log with {print}"
                 );
+            }
+        }
+        // The license (plan ЛЦ-2) logs by the file's id, the state and the
+        // refusal's code: its calls are counted, and no field holds the file,
+        // the payload, an INN or the customer.
+        if relative.starts_with("license/") {
+            license_files += 1;
+            let expected = match relative.as_str() {
+                "license/mod.rs" => 13,
+                "license/routes.rs" => 5,
+                "license/store.rs" => 3,
+                _ => 0,
+            };
+            assert_eq!(
+                text.matches("tracing::").count(),
+                expected,
+                "{relative} has a logging call this test does not know"
+            );
+            for field in [
+                "%compact",
+                "?compact",
+                "?payload",
+                "%payload",
+                "%inn",
+                "?inn",
+                "%org_inn",
+                "customer_name =",
+            ] {
+                assert!(!text.contains(field), "{relative} logs {field}");
             }
         }
         if import_path.contains(&relative.as_str()) {
@@ -2050,4 +2142,5 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
     // records' batch has the one `error!` by device and position.
     assert_eq!(facts_files, 18);
     assert_eq!(import_files, 2, "the import modules were not found");
+    assert_eq!(license_files, 9, "the license's modules were not found");
 }
