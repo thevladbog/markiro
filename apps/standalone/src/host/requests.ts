@@ -429,7 +429,8 @@ export interface ShiftInput {
   lineId: string;
   productionDate: string;
   boxTemplateId: string;
-  boxCapacity: number;
+  /** Left out only by a validation shift whose hidden capacity the form refuses: the product's. */
+  boxCapacity?: number;
   plannedQty: number | null;
   counterpartyId: string | null;
   pallets: ShiftPallets | null;
@@ -450,7 +451,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     lineId: shift.lineId,
     productionDate: shift.productionDate,
     boxTemplateId: shift.boxTemplateId,
-    boxCapacity: shift.boxCapacity,
+    ...(shift.boxCapacity === undefined ? {} : { boxCapacity: shift.boxCapacity }),
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,
     mode: shift.mode ?? "aggregation",
@@ -479,6 +480,8 @@ export interface ShiftChange {
   plannedQty?: number | null;
   counterpartyId?: string | null;
   pallets?: ShiftPallets | null;
+  /** The mode (plan РЕЖ); a planned shift's alone changes (Р1). */
+  mode?: ShiftMode;
 }
 
 /**
@@ -500,11 +503,13 @@ export function shiftUpdate(
     | "palletBoxCapacity"
     | "palletTemplateId"
     | "palletSheetTemplateId"
+    | "mode"
     | "rev"
   >,
   next: ShiftChange,
 ): ShiftUpdate {
   const update: ShiftUpdate = { expectedRev: shift.rev };
+  if (next.mode !== undefined && next.mode !== shift.mode) update.mode = next.mode;
   if (next.lineId !== undefined && next.lineId !== shift.lineId) update.lineId = next.lineId;
   if (next.productionDate !== undefined && next.productionDate !== shift.productionDate) {
     update.productionDate = next.productionDate;

@@ -43,7 +43,7 @@ import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftDialog } from "./ShiftDialog.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
-import { datePickerTexts } from "./shift-text.js";
+import { datePickerTexts, shiftOutput } from "./shift-text.js";
 
 /**
  * The export dialog comes with the domain's renderers, the source rules and the
@@ -274,13 +274,7 @@ export function ShiftsPage() {
       title: t("office.shifts.table.output"),
       mono: true,
       align: "right",
-      render: (shift) =>
-        shift.status === "planned"
-          ? t("office.common.none")
-          : t("office.shifts.output", {
-              units: UNITS.format(shift.totals.unitsInClosedBoxes),
-              boxes: UNITS.format(shift.totals.closedBoxes),
-            }),
+      render: (shift) => shiftOutput(shift, t),
     },
     // Every role reads a shift's figures; the writes are `planShifts`.
     {

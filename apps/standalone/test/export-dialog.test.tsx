@@ -281,6 +281,49 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     }
   });
 
+  it("offers a validation shift the flat TXT and CSV alone, and never the box formats' refusal (plan РЕЖ, Р11)", async () => {
+    // A validation shift owns its codes in no box: the host's source has no box, item or pallet.
+    const source = rows();
+    source.shift.palletsEnabled = false;
+    source.boxes = [];
+    source.items = [];
+    source.pallets = [];
+    const files = fakeFiles();
+    const session = await openExport(
+      { ...CLOSED_PALLETS, mode: "validation", palletsEnabled: false, palletBoxCapacity: null },
+      source,
+      files,
+    );
+    expect(
+      within(dialog())
+        .getAllByRole("radio")
+        .map((radio) => ({
+          label: document.getElementById(radio.getAttribute("aria-labelledby") ?? "")?.textContent,
+          disabled: radio.hasAttribute("disabled"),
+        })),
+    ).toEqual([
+      { label: "[TXT][Без коробов] Отчет смены", disabled: false },
+      { label: "[CSV][Без коробов] Отчет смены", disabled: false },
+    ]);
+    expect(
+      within(dialog()).queryByText("Не все коды смены распределены по закрытым коробам."),
+    ).toBeNull();
+    fireEvent.click(
+      within(dialog()).getByRole("radio", { name: "[CSV][Без коробов] Отчет смены" }),
+    );
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    expect(files.save.mock.calls[0]?.[1]).toEqual(
+      expectedParts(source, {
+        formatId: "shift_csv_flat",
+        formatVersion: 1,
+        maxLines: null,
+        palletId: null,
+      }),
+    );
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+  });
+
   it("offers each format with its refusal and splits a format the source allows into parts", async () => {
     const source = rows();
     // Code C in the open box 3: no box format can cover it.

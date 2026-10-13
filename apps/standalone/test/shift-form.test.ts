@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HostError } from "../src/host/client.js";
 import { shiftCreate, shiftUpdate } from "../src/host/requests.js";
 import {
+  newShiftFields,
   SHIFT_CONFLICTS,
   SHIFT_FIELD_ORDER,
   SHIFT_FIELDS,
@@ -34,6 +35,7 @@ describe("a shift's form", () => {
       palletTemplateId: "",
       palletSheetTemplateId: "",
       counterpartyId: ACTIVE.counterpartyId,
+      mode: "aggregation",
     });
     const withPallets = {
       ...PLANNED,
@@ -69,6 +71,7 @@ describe("a shift's form", () => {
       plannedQty: 900,
       counterpartyId: null,
       pallets: null,
+      mode: "aggregation",
     });
     expect(
       toShiftInput({
@@ -119,6 +122,85 @@ describe("a shift's form", () => {
         }).success,
       ).toBe(true);
     }
+  });
+
+  it("starts a new shift as aggregation, and takes a planned shift's own mode (plan РЕЖ)", () => {
+    expect(newShiftFields("2026-10-09").mode).toBe("aggregation");
+    expect(shiftFields({ ...PLANNED, mode: "validation" }).mode).toBe("validation");
+    expect(SHIFT_FIELD_ORDER.indexOf("mode")).toBe(SHIFT_FIELD_ORDER.indexOf("productId") + 1);
+    expect(shiftFieldsSchema.safeParse({ ...shiftFields(PLANNED), mode: "manual" }).success).toBe(
+      false,
+    );
+  });
+
+  it("sends a validation shift without pallets and without checking its hidden counts (plan РЕЖ, Р4)", () => {
+    const validation = {
+      ...shiftFields(PLANNED),
+      mode: "validation" as const,
+      // What the hidden pallet fields still hold, from an aggregation chosen before.
+      palletsEnabled: true,
+      palletBoxCapacity: "сорок",
+      palletTemplateId: "",
+    };
+    expect(shiftFieldsSchema.safeParse(validation).success).toBe(true);
+    const input = toShiftInput(validation);
+    expect(input).toMatchObject({ mode: "validation", pallets: null, boxCapacity: 24 });
+    expect(shiftCreate(input)).toStrictEqual({
+      productId: PLANNED.productId,
+      lineId: PLANNED.lineId,
+      productionDate: "2026-10-09",
+      boxTemplateId: PLANNED.boxTemplateId,
+      boxCapacity: 24,
+      plannedQty: null,
+      counterpartyId: null,
+      mode: "validation",
+      palletsEnabled: false,
+    });
+    // The box capacity is hidden too: one the rule refuses is not checked and not sent,
+    // so the host keeps the product's on a create and the shift's own on a change.
+    for (const capacity of ["", "0", "сорок"]) {
+      const hidden = { ...validation, boxCapacity: capacity };
+      expect(shiftFieldsSchema.safeParse(hidden).success).toBe(true);
+      expect(toShiftInput(hidden)).not.toHaveProperty("boxCapacity");
+      expect(shiftCreate(toShiftInput(hidden))).not.toHaveProperty("boxCapacity");
+      expect(toShiftChange(hidden)).not.toHaveProperty("boxCapacity");
+    }
+    // Aggregation checks both, and reports them with the other refused fields.
+    const refused = shiftFieldsSchema.safeParse({
+      ...validation,
+      mode: "aggregation",
+      productId: "",
+      boxCapacity: "0",
+    });
+    expect(refused.error?.issues.map((issue) => issue.path.join("."))).toEqual([
+      "productId",
+      "boxCapacity",
+      "palletBoxCapacity",
+      "palletTemplateId",
+    ]);
+  });
+
+  it("sends a mode only when it changed (plan РЕЖ)", () => {
+    expect(
+      shiftUpdate(PLANNED, toShiftChange({ ...shiftFields(PLANNED), mode: "validation" })),
+    ).toStrictEqual({ mode: "validation", expectedRev: PLANNED.rev });
+    const validation = { ...PLANNED, mode: "validation" as const };
+    expect(shiftUpdate(validation, toShiftChange(shiftFields(validation)))).toStrictEqual({
+      expectedRev: validation.rev,
+    });
+    expect(
+      shiftUpdate(validation, toShiftChange({ ...shiftFields(validation), mode: "aggregation" })),
+    ).toStrictEqual({ mode: "aggregation", expectedRev: validation.rev });
+    // A planned aggregation with pallets that becomes a validation turns its pallets off.
+    const withPallets = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    expect(
+      shiftUpdate(withPallets, toShiftChange({ ...shiftFields(withPallets), mode: "validation" })),
+    ).toStrictEqual({ mode: "validation", palletsEnabled: false, expectedRev: withPallets.rev });
   });
 
   it("puts a refused pallet template under its select and a refused pallet capacity under its field", () => {

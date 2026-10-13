@@ -60,6 +60,40 @@ describe("a format's check (plan ЧЗ, the dialog's one pass)", () => {
       "shift_xml_gismt_aggregation",
     ]);
   });
+
+  it("offers a validation shift the flat TXT and CSV alone, each allowed (plan РЕЖ, Р11)", async () => {
+    // A validation shift owns codes and no box, item or pallet.
+    const shift = rows();
+    shift.shift.palletsEnabled = false;
+    shift.boxes = [];
+    shift.items = [];
+    shift.pallets = [];
+    expect(offeredFormats(shift, "validation").map((format) => format.id)).toEqual([
+      "shift_txt_flat",
+      "shift_csv_flat",
+    ]);
+    expect(formatOffers(shift, FORMED_AT, "validation")).toEqual(
+      offeredFormats(shift, "validation").map((format) => ({ format, refusal: null })),
+    );
+    // So the aggregation's refusal of the box formats is never said of it.
+    const plan = await planExport(
+      shift,
+      FORMED_AT,
+      { pause: async () => undefined, live: () => true, progress: () => undefined },
+      "validation",
+    );
+    expect(plan?.checks.map((check) => [check.format.id, check.refusal])).toEqual([
+      ["shift_txt_flat", null],
+      ["shift_csv_flat", null],
+    ]);
+    const { result } = renderHook(() => useExportPlan(shift, "validation"));
+    expect(result.current).toEqual({ status: "working", done: 0, total: 4 });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(
+      result.current.status === "ready" &&
+        result.current.plan.checks.map((check) => check.format.id),
+    ).toEqual(["shift_txt_flat", "shift_csv_flat"]);
+  });
 });
 
 describe("the dialog's plan (plan ЧЗ), made in turns", () => {
@@ -168,7 +202,7 @@ describe("a failure that is no domain refusal (plan ЧЗ, minors of task 5)", ()
 describe("the plan of the rows on screen (plan ЧЗ)", () => {
   it("waits for rows, is made after they arrive, and starts over for others rather than show the first's", async () => {
     const { result, rerender } = renderHook(
-      ({ shift }: { shift: ShiftExportRows | undefined }) => useExportPlan(shift),
+      ({ shift }: { shift: ShiftExportRows | undefined }) => useExportPlan(shift, "aggregation"),
       { initialProps: { shift: undefined as ShiftExportRows | undefined } },
     );
     expect(result.current).toEqual({ status: "working", done: 0, total: 0 });
@@ -186,7 +220,7 @@ describe("the plan of the rows on screen (plan ЧЗ)", () => {
     const broken = rows();
     broken.shift.stationClosedAt = null;
     broken.shift.closedAt = "not an instant";
-    const { result } = renderHook(() => useExportPlan(broken));
+    const { result } = renderHook(() => useExportPlan(broken, "aggregation"));
     await waitFor(() => expect(result.current).toEqual({ status: "failed", reason: "RangeError" }));
   });
 });

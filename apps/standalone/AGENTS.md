@@ -2761,6 +2761,26 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   to «Не выбран» on the person's behalf: a resend would plan a shift without
   the counterparty that is printed on the box label. A lost answer to a create
   reads the lists of shifts again, since the host may have planned the shift.
+- «Режим работы» (plan РЕЖ, A8) comes right after the product (`RadioGroup`:
+  «Проверка», then «Агрегация», as the cloud orders them; «Агрегация» for a
+  new shift, the shift's own for a change). «Проверка» keeps the box template
+  with «В режиме проверки этикетки коробов не печатаются» (Р4) and hides the
+  box capacity and «С паллетами» with its fields; the form keeps what they
+  hold, so «Агрегация» chosen again shows them as they were, and checks none
+  of it while hidden (`shiftFieldsSchema` checks the box capacity and the
+  pallets for an aggregation only; a refusal of them is cleared when
+  «Проверка» hides them). A validation shift sends no pallets
+  (`palletsEnabled: false`) and its box capacity as the form holds it (the
+  product's, or the planned shift's own: the host keeps the column) when the
+  rule takes it, and leaves it out otherwise; a change sends `mode` only when
+  it changed. The page opens the dialog for planned shifts only; a shift
+  that is no longer planned would show its mode with both choices off (Р1).
+  `validationPrint` and «Печатать дубликат Data Matrix» come with part B
+  (B7); the rest of the cloud's order of fields (Р16) is not this task's.
+  The list and the card call the mode «Проверка» / «Агрегация»
+  (`office.shifts.modes`); a validation shift's «Выпуск» is the codes it
+  accepted («1 300 шт», `shiftOutput`), its «Итоги» show «Принято кодов»
+  without box figures, and its card has no box capacity, pallets or «Короба».
 - A row's actions follow its status. A planned shift has «Изменить»: the same
   dialog on the shift's own values, the product shown as text because it never
   changes, its own line, counterparty and template kept as marked choices when
@@ -4463,10 +4483,10 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   port renders its codes flat and refuses every format with boxes or pallets
   (`BOX_COVERAGE_INCOMPLETE`: no box covers its codes), so a box or pallet
   file of it is never written with empty groups. The office's export dialog
-  does not read the mode yet: it lists every format, one with boxes or
-  pallets disabled with that refusal's text (written for an aggregation
-  shift: «Не все коды смены распределены по закрытым коробам.»); offering a
-  validation shift only the flat TXT and CSV comes with plan РЕЖ's A8. The
+  offers a validation shift the flat TXT and CSV alone (`offeredFormats` with
+  the dialog shift's mode, plan РЕЖ's A8: the source carries no mode), so
+  that refusal, whose text is written for an aggregation shift («Не все коды
+  смены распределены по закрытым коробам.»), is never shown for it. The
   codes come by their scan instant, then their hash, the order the port sorts them in. Each
   query searches by an index (`every_query_of_the_source_searches_by_an_index`
   runs `EXPLAIN QUERY PLAN` on them), so a year of facts costs one shift's

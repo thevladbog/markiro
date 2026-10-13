@@ -1981,9 +1981,10 @@
       },
       "forCounterparty": "для: {{name}}",
       "output": "{{units}} шт · {{boxes}} кор.",
+      "outputUnits": "{{units}} шт",
       "modes": {
         "aggregation": "Агрегация",
-        "validation": "Валидация"
+        "validation": "Проверка"
       },
       "statuses": {
         "planned": "Запланирована",
@@ -2073,6 +2074,7 @@
       "fields": {
         "product": "Товар",
         "productPlaceholder": "Выберите товар",
+        "mode": "Режим работы",
         "productsUnavailable": "Список товаров не загрузился. Закройте окно и откройте его снова.",
         "productFixed": "Товар: {{name}}. Товар смены не меняется.",
         "line": "Линия",
@@ -2087,6 +2089,7 @@
         "boxCapacity": "Вместимость короба, шт",
         "boxCapacityHint": "Берётся из товара; можно изменить",
         "boxTemplate": "Шаблон этикетки короба",
+        "boxTemplateValidationHint": "В режиме проверки этикетки коробов не печатаются",
         "templatePlaceholder": "Выберите шаблон",
         "templateAfterProduct": "Сначала выберите товар",
         "templatesUnavailable": "Список шаблонов не загрузился. Закройте окно и откройте его снова.",

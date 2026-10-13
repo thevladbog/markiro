@@ -40,6 +40,7 @@ import {
   type PackState,
 } from "./shift-card.js";
 import { civilDateLabel, recordLabel } from "./shift-list.js";
+import { shiftOutput } from "./shift-text.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 
 /**
@@ -143,6 +144,7 @@ export function ShiftCardPage() {
   }
 
   const current = shift.data;
+  const validation = current.mode === "validation";
   const zone = formTimeZone(org.data);
   const time = new Intl.DateTimeFormat("ru", {
     dateStyle: "short",
@@ -245,32 +247,32 @@ export function ShiftCardPage() {
                 : UNITS.format(current.plannedQty),
             mono: true,
           },
-          {
-            id: "boxCapacity",
-            term: t("office.shiftCard.boxCapacity"),
-            description: UNITS.format(current.boxCapacity),
-            mono: true,
-          },
-          {
-            id: "pallets",
-            term: t("office.shiftCard.palletsFact"),
-            description:
-              current.palletBoxCapacity === null
-                ? t("office.shiftCard.noPallets")
-                : t("office.shiftCard.palletCapacity", {
-                    boxes: UNITS.format(current.palletBoxCapacity),
-                  }),
-          },
+          // A validation shift has no boxes and no pallets (plan РЕЖ, Р11): the capacity it
+          // keeps (Р4) means nothing to it.
+          ...(validation
+            ? []
+            : [
+                {
+                  id: "boxCapacity",
+                  term: t("office.shiftCard.boxCapacity"),
+                  description: UNITS.format(current.boxCapacity),
+                  mono: true,
+                },
+                {
+                  id: "pallets",
+                  term: t("office.shiftCard.palletsFact"),
+                  description:
+                    current.palletBoxCapacity === null
+                      ? t("office.shiftCard.noPallets")
+                      : t("office.shiftCard.palletCapacity", {
+                          boxes: UNITS.format(current.palletBoxCapacity),
+                        }),
+                },
+              ]),
           {
             id: "output",
             term: t("office.shifts.table.output"),
-            description:
-              current.status === "planned"
-                ? t("office.common.none")
-                : t("office.shifts.output", {
-                    units: UNITS.format(current.totals.unitsInClosedBoxes),
-                    boxes: UNITS.format(current.totals.closedBoxes),
-                  }),
+            description: shiftOutput(current, t),
             mono: true,
           },
           {
@@ -285,7 +287,9 @@ export function ShiftCardPage() {
           },
         ]}
       />
-      {current.status !== "planned" && <ShiftBoxes shift={current} at={at} onForm={setForm} />}
+      {current.status !== "planned" && !validation && (
+        <ShiftBoxes shift={current} at={at} onForm={setForm} />
+      )}
       {current.status !== "planned" && current.palletsEnabled && (
         <ShiftPallets shift={current} at={at} onForm={setForm} />
       )}

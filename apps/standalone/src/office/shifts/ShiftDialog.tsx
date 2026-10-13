@@ -3,9 +3,14 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { Checkbox, DatePicker, Input, Select } from "@markiro/ui";
+import { Checkbox, DatePicker, Input, RadioGroup, Select } from "@markiro/ui";
 
-import type { OfficeShift, ShiftCreate, ShiftUpdate } from "../../host/protocol.js";
+import {
+  shiftModeSchema,
+  type OfficeShift,
+  type ShiftCreate,
+  type ShiftUpdate,
+} from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
@@ -53,6 +58,15 @@ export interface ShiftDialogProps {
  * dialog waits for the organization's profile; when the profile does not
  * load, or names a zone this PC does not know, it starts as this PC's date
  * and says so. A changed shift needs no "today": it starts on its own values.
+ *
+ * «Режим работы» (plan РЕЖ, Р2, Р16) comes right after the product:
+ * «Проверка» or «Агрегация», aggregation unless chosen. A validation shift
+ * keeps its box template, with a word that it prints no box label (Р4), and
+ * hides the box capacity and the pallets, whose values the form keeps for an
+ * aggregation chosen again. The mode of a shift that is no longer planned is
+ * shown, never changed (Р1): the page opens this dialog for planned shifts
+ * only, so that is a guard. «Печатать дубликат Data Matrix» under
+ * «Проверка» comes with part B.
  */
 export function ShiftDialog(props: ShiftDialogProps) {
   const { t } = useTranslation();
@@ -162,11 +176,14 @@ function ShiftForm({
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
   const palletsEnabled = watch("palletsEnabled");
-  // The A4 sheets matter only with pallets; they are read when the pallets are on.
+  const validation = watch("mode") === "validation";
+  // An open or closed shift's mode is fixed (Р1).
+  const modeFixed = shift !== null && shift.status !== "planned";
+  // The A4 sheets matter only with pallets, which a validation shift has none of.
   const palletSheets = useOfficeQuery(
     officeKeys.palletSheets,
     (api, token) => api.listPalletSheets(token),
-    { enabled: palletsEnabled },
+    { enabled: palletsEnabled && !validation },
   );
   const product = products.data?.find((each) => each.id === productId);
   // Pallets need the product's pallet capacity, as the cloud's switch does.
@@ -263,6 +280,21 @@ function ShiftForm({
       setValue("palletsEnabled", false, { shouldDirty: true });
     } else if (palletsEnabled) {
       palletsFrom(chosen);
+    }
+  };
+
+  const chooseMode = (value: string, onChange: (mode: ShiftFields["mode"]) => void) => {
+    const next = shiftModeSchema.safeParse(value);
+    if (!next.success) return;
+    onChange(next.data);
+    // What «Проверка» hides is not checked, so a refusal of it does not stay behind.
+    if (next.data === "validation") {
+      clearErrors([
+        "boxCapacity",
+        "palletBoxCapacity",
+        "palletTemplateId",
+        "palletSheetTemplateId",
+      ]);
     }
   };
 
@@ -385,6 +417,24 @@ function ShiftForm({
       )}
       <Controller
         control={control}
+        name="mode"
+        render={({ field }) => (
+          <RadioGroup
+            label={t("office.shifts.fields.mode")}
+            // The cloud's order: «Проверка», then «Агрегация».
+            options={[
+              { value: "validation", label: t("office.shifts.modes.validation") },
+              { value: "aggregation", label: t("office.shifts.modes.aggregation") },
+            ]}
+            value={field.value}
+            onValueChange={(value) => chooseMode(value, field.onChange)}
+            id={fieldId("mode")}
+            disabled={locked || modeFixed}
+          />
+        )}
+      />
+      <Controller
+        control={control}
         name="lineId"
         render={({ field }) => (
           <Select
@@ -433,16 +483,18 @@ function ShiftForm({
         {...fieldError(errors.plannedQty?.message)}
         {...register("plannedQty")}
       />
-      <Input
-        label={t("office.shifts.fields.boxCapacity")}
-        hint={t("office.shifts.fields.boxCapacityHint")}
-        inputMode="numeric"
-        mono
-        id={fieldId("boxCapacity")}
-        disabled={locked}
-        {...fieldError(errors.boxCapacity?.message)}
-        {...register("boxCapacity")}
-      />
+      {!validation && (
+        <Input
+          label={t("office.shifts.fields.boxCapacity")}
+          hint={t("office.shifts.fields.boxCapacityHint")}
+          inputMode="numeric"
+          mono
+          id={fieldId("boxCapacity")}
+          disabled={locked}
+          {...fieldError(errors.boxCapacity?.message)}
+          {...register("boxCapacity")}
+        />
+      )}
       <Controller
         control={control}
         name="boxTemplateId"
@@ -479,31 +531,35 @@ function ShiftForm({
                 ? { hint: t("office.shifts.fields.productsUnavailable") }
                 : shift === null && defaults.isError
                   ? { hint: t("office.shifts.fields.defaultsUnavailable") }
-                  : {})}
+                  : validation
+                    ? { hint: t("office.shifts.fields.boxTemplateValidationHint") }
+                    : {})}
             {...fieldError(errors.boxTemplateId?.message)}
           />
         )}
       />
-      <Controller
-        control={control}
-        name="palletsEnabled"
-        render={({ field }) => (
-          <Checkbox
-            label={t("office.shifts.fields.pallets")}
-            hint={t(
-              product !== undefined && !palletsPossible
-                ? "office.shifts.fields.palletsUnavailable"
-                : "office.shifts.fields.palletsHint",
-            )}
-            checked={field.value}
-            onCheckedChange={(on) => choosePallets(on, field.onChange)}
-            id={fieldId("palletsEnabled")}
-            // A changed shift's own pallets can always be turned off.
-            disabled={locked || ((!palletsPossible || !templates.isSuccess) && !field.value)}
-          />
-        )}
-      />
-      {palletsEnabled && (
+      {!validation && (
+        <Controller
+          control={control}
+          name="palletsEnabled"
+          render={({ field }) => (
+            <Checkbox
+              label={t("office.shifts.fields.pallets")}
+              hint={t(
+                product !== undefined && !palletsPossible
+                  ? "office.shifts.fields.palletsUnavailable"
+                  : "office.shifts.fields.palletsHint",
+              )}
+              checked={field.value}
+              onCheckedChange={(on) => choosePallets(on, field.onChange)}
+              id={fieldId("palletsEnabled")}
+              // A changed shift's own pallets can always be turned off.
+              disabled={locked || ((!palletsPossible || !templates.isSuccess) && !field.value)}
+            />
+          )}
+        />
+      )}
+      {palletsEnabled && !validation && (
         <>
           <Input
             label={t("office.shifts.fields.palletBoxCapacity")}

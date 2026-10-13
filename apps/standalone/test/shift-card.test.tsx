@@ -285,6 +285,32 @@ describe("the card of a shift (plan О-Ф)", () => {
     expect(facts()["Контрагент"]).toBe("—");
   });
 
+  it("shows a validation shift as «Проверка» with the codes it accepted, and without boxes or pallets (plan РЕЖ, Р11)", async () => {
+    const validation: OfficeShift = {
+      ...ACTIVE,
+      mode: "validation",
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 1300,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+      },
+    };
+    const session = cardSession(validation, []);
+    await openCard(session, "OCT26-004");
+    await waitFor(() => expect(session.api.getShift).toHaveBeenCalled());
+    expect(facts()["Режим"]).toBe("Проверка");
+    expect(facts()["Выпуск"]).toBe("1\u00a0300 шт");
+    expect(facts()).not.toHaveProperty("Вместимость короба, шт");
+    expect(facts()).not.toHaveProperty("Паллеты");
+    expect(screen.queryByRole("region", { name: "Короба" })).toBeNull();
+    expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
+    // Its figures and exports stay.
+    expect(screen.getByRole("button", { name: "Итоги" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выгрузка" })).toBeTruthy();
+  });
+
   it("has no pallets of a planned shift, whatever it plans", async () => {
     const session = cardSession({ ...PLANNED, palletsEnabled: true, palletBoxCapacity: 40 });
     session.api.listShifts.mockResolvedValue([PLANNED]);

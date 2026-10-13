@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { HostError } from "../../host/client.js";
-import type { OfficeShift } from "../../host/protocol.js";
+import { shiftModeSchema, type OfficeShift } from "../../host/protocol.js";
 import type { ShiftChange, ShiftInput } from "../../host/requests.js";
 import {
   plannedQtyRule,
@@ -14,17 +14,21 @@ import { writeFailure, type FieldMessage, type WriteFailure } from "../form-erro
 
 /**
  * A shift as the form holds it: the ids its selects hold (`""` for none), the
- * production date `YYYY-MM-DD` and the counts as typed. With pallets (plan
- * О-Ф) their capacity and template are required; without, whatever the two
- * fields still hold is neither checked nor sent.
+ * production date `YYYY-MM-DD`, the counts as typed and the mode (plan РЕЖ).
+ * With pallets (plan О-Ф) their capacity and template are required; without,
+ * whatever the two fields still hold is neither checked nor sent. A
+ * validation shift hides its box capacity and its pallets (Р16): the form
+ * keeps what they hold, for an aggregation chosen again, but checks none of
+ * it.
  */
 export const shiftFieldsSchema = z
   .object({
     productId: z.string().min(1, "office.shifts.errors.productRequired"),
+    mode: shiftModeSchema,
     lineId: z.string().min(1, "office.shifts.errors.lineRequired"),
     productionDate: productionDateRule,
     plannedQty: plannedQtyRule,
-    boxCapacity: shiftBoxCapacityRule,
+    boxCapacity: z.string(),
     boxTemplateId: z.string().min(1, "office.shifts.errors.templateRequired"),
     palletsEnabled: z.boolean(),
     palletBoxCapacity: z.string(),
@@ -34,6 +38,14 @@ export const shiftFieldsSchema = z
     counterpartyId: z.string(),
   })
   .superRefine((values, context) => {
+    if (values.mode === "validation") return;
+    if (!shiftBoxCapacityRule.safeParse(values.boxCapacity).success) {
+      context.addIssue({
+        code: "custom",
+        path: ["boxCapacity"],
+        message: "rules.shiftBoxCapacity",
+      });
+    }
     if (!values.palletsEnabled) return;
     const capacity = shiftPalletBoxCapacityRule.safeParse(values.palletBoxCapacity);
     if (!capacity.success) {
@@ -56,6 +68,7 @@ export type ShiftFields = z.input<typeof shiftFieldsSchema>;
 /** The fields in the order the form shows them: the first one refused takes the focus. */
 export const SHIFT_FIELD_ORDER = [
   "productId",
+  "mode",
   "lineId",
   "productionDate",
   "plannedQty",
@@ -72,6 +85,7 @@ export const SHIFT_FIELD_ORDER = [
 export function newShiftFields(today: string): ShiftFields {
   return {
     productId: "",
+    mode: "aggregation",
     lineId: "",
     productionDate: today,
     plannedQty: "",
@@ -89,6 +103,7 @@ export function newShiftFields(today: string): ShiftFields {
 export function shiftFields(shift: OfficeShift): ShiftFields {
   return {
     productId: shift.productId,
+    mode: shift.mode,
     lineId: shift.lineId,
     productionDate: shift.productionDate,
     plannedQty: shift.plannedQty === null ? "" : String(shift.plannedQty),
@@ -104,25 +119,37 @@ export function shiftFields(shift: OfficeShift): ShiftFields {
 
 /**
  * The host's fields for values the form accepted: the counts as numbers,
- * `null` for no plan, no counterparty or no pallets.
+ * `null` for no plan, no counterparty or no pallets, and the mode. A
+ * validation shift has no pallets; its box capacity, hidden, goes as the
+ * form holds it (the product's, or the planned shift's own: the host keeps
+ * the column, Р4) when it is a count the rule takes, and is left out
+ * otherwise, so the host keeps the product's on a create and the shift's own
+ * on a change. `validationPrint` comes with part B (B7).
  */
 export function toShiftInput(values: ShiftFields): ShiftInput {
+  const validation = values.mode === "validation";
+  const boxCapacity =
+    !validation || shiftBoxCapacityRule.safeParse(values.boxCapacity).success
+      ? { boxCapacity: Number(values.boxCapacity.trim()) }
+      : {};
   return {
     productId: values.productId,
     lineId: values.lineId,
     productionDate: values.productionDate,
     boxTemplateId: values.boxTemplateId,
-    boxCapacity: Number(values.boxCapacity.trim()),
+    ...boxCapacity,
     plannedQty: toCount(values.plannedQty),
     counterpartyId: values.counterpartyId === "" ? null : values.counterpartyId,
-    pallets: values.palletsEnabled
-      ? {
-          boxCapacity: Number(values.palletBoxCapacity.trim()),
-          templateId: values.palletTemplateId,
-          // «Основной лист организации» (`""`) is the main sheet, never an empty id.
-          sheetId: values.palletSheetTemplateId === "" ? null : values.palletSheetTemplateId,
-        }
-      : null,
+    mode: values.mode,
+    pallets:
+      values.palletsEnabled && !validation
+        ? {
+            boxCapacity: Number(values.palletBoxCapacity.trim()),
+            templateId: values.palletTemplateId,
+            // «Основной лист организации» (`""`) is the main sheet, never an empty id.
+            sheetId: values.palletSheetTemplateId === "" ? null : values.palletSheetTemplateId,
+          }
+        : null,
   };
 }
 
@@ -158,7 +185,8 @@ export const SHIFT_CONFLICTS = {
 
 /**
  * What a planned shift is to become, for `shiftUpdate`: every field the form
- * holds but the product, which never changes.
+ * holds but the product, which never changes (`shiftUpdate` sends the mode,
+ * like the rest, only when it changed).
  */
 export function toShiftChange(values: ShiftFields): ShiftChange {
   const input = toShiftInput(values);
@@ -166,10 +194,11 @@ export function toShiftChange(values: ShiftFields): ShiftChange {
     lineId: input.lineId,
     productionDate: input.productionDate,
     boxTemplateId: input.boxTemplateId,
-    boxCapacity: input.boxCapacity,
+    ...(input.boxCapacity === undefined ? {} : { boxCapacity: input.boxCapacity }),
     plannedQty: input.plannedQty,
     counterpartyId: input.counterpartyId,
     pallets: input.pallets,
+    mode: values.mode,
   };
 }
 

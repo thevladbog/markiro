@@ -366,6 +366,17 @@ describe("the blank's data (plan О-Ф)", () => {
     });
   });
 
+  it("heads a validation shift's blank «Проверка», as the cloud's, and an aggregation's «Агрегация» (plan РЕЖ)", () => {
+    const html = (mode: "aggregation" | "validation") =>
+      renderForm({
+        kind: "task",
+        inputs: { ...inputs, shift: { ...PLANNED, mode } },
+        generatedAt: at,
+      })?.html ?? "";
+    expect(html("validation")).toContain(`<p class="subtitle">Проверка · `);
+    expect(html("aggregation")).toContain(`<p class="subtitle">Агрегация · `);
+  });
+
   it("passes the pallet switch and the capacity as two facts: a capacity left behind a switch turned off stays", () => {
     const off = taskFormData(
       { ...inputs, shift: { ...ACTIVE, palletsEnabled: false, palletBoxCapacity: 40 } },

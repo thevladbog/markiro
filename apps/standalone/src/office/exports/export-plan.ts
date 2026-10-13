@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type { ShiftExportRows } from "../../host/protocol.js";
+import type { ShiftExportRows, ShiftMode } from "../../host/protocol.js";
 import {
   exportCounts,
   formatCheck,
@@ -56,22 +56,24 @@ export function yieldToUi(): Promise<void> {
 }
 
 /** The steps of a plan: the counts, each format the shift is offered, the pallets. */
-export function planSteps(rows: ShiftExportRows): number {
-  return offeredFormats(rows).length + 2;
+export function planSteps(rows: ShiftExportRows, mode: ShiftMode = "aggregation"): number {
+  return offeredFormats(rows, mode).length + 2;
 }
 
 /**
- * The plan of `rows`, made one step at a time — the counts, each format, the
- * pallets — with a pause before each. `null`: it was no longer wanted at a
- * pause, and nothing after that pause was done.
+ * The plan of `rows`, made one step at a time — the counts, each format the
+ * shift of `mode` is offered (`offeredFormats`), the pallets — with a pause
+ * before each. `null`: it was no longer wanted at a pause, and nothing after
+ * that pause was done.
  */
 export async function planExport(
   rows: ShiftExportRows,
   formedAt: string,
   turns: PlanTurns,
+  mode: ShiftMode = "aggregation",
 ): Promise<ExportPlan | null> {
-  const formats = offeredFormats(rows);
-  const total = planSteps(rows);
+  const formats = offeredFormats(rows, mode);
+  const total = planSteps(rows, mode);
   let done = 0;
   async function step<T>(work: () => T): Promise<{ value: T } | null> {
     await turns.pause();
@@ -107,20 +109,26 @@ export type PlanState =
   | { status: "failed"; reason: string };
 
 /**
- * The plan of the rows on screen, made in turns after they arrive. A new
- * `rows` starts over; leaving ends the work at its next turn. A failure is
- * kept as its kind (`failureReason`), for the dialog to say.
+ * The plan of the rows on screen, for a shift of `mode` (the export source
+ * does not carry it: the dialog's shift does), made in turns after they
+ * arrive. A new `rows` starts over; leaving ends the work at its next turn. A
+ * failure is kept as its kind (`failureReason`), for the dialog to say.
  */
-export function useExportPlan(rows: ShiftExportRows | undefined): PlanState {
+export function useExportPlan(rows: ShiftExportRows | undefined, mode: ShiftMode): PlanState {
   const [job, setJob] = useState<{ rows: ShiftExportRows; state: PlanState } | null>(null);
   useEffect(() => {
     if (rows === undefined) return undefined;
     let wanted = true;
-    planExport(rows, new Date().toISOString(), {
-      pause: yieldToUi,
-      live: () => wanted,
-      progress: ({ done, total }) => setJob({ rows, state: { status: "working", done, total } }),
-    }).then(
+    planExport(
+      rows,
+      new Date().toISOString(),
+      {
+        pause: yieldToUi,
+        live: () => wanted,
+        progress: ({ done, total }) => setJob({ rows, state: { status: "working", done, total } }),
+      },
+      mode,
+    ).then(
       (plan) => {
         if (plan !== null && wanted) setJob({ rows, state: { status: "ready", plan } });
       },
@@ -131,7 +139,7 @@ export function useExportPlan(rows: ShiftExportRows | undefined): PlanState {
     return () => {
       wanted = false;
     };
-  }, [rows]);
+  }, [rows, mode]);
   if (job !== null && job.rows === rows) return job.state;
-  return { status: "working", done: 0, total: rows === undefined ? 0 : planSteps(rows) };
+  return { status: "working", done: 0, total: rows === undefined ? 0 : planSteps(rows, mode) };
 }

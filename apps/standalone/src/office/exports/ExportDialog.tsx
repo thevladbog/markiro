@@ -90,7 +90,7 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
     (api, token) => api.listShiftPallets(token, shift.id),
     { enabled: rows?.shift.palletsEnabled === true },
   );
-  const plan = useExportPlan(rows);
+  const plan = useExportPlan(rows, shift.mode);
   const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
     api.recordShiftExport(token, shift.id, body),
   );

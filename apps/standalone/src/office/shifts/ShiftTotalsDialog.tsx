@@ -136,24 +136,29 @@ function ShiftFigures({
             description: UNITS.format(totals.acceptedUnits),
             mono: true,
           },
-          {
-            id: "inClosedBoxes",
-            term: t("office.shifts.totals.inClosedBoxes"),
-            description: UNITS.format(totals.unitsInClosedBoxes),
-            mono: true,
-          },
-          {
-            id: "closedBoxes",
-            term: t("office.shifts.totals.closedBoxes"),
-            description: UNITS.format(totals.closedBoxes),
-            mono: true,
-          },
-          {
-            id: "openBoxes",
-            term: t("office.shifts.totals.openBoxes"),
-            description: UNITS.format(totals.openBoxes),
-            mono: true,
-          },
+          // A validation shift puts its codes in no box (plan РЕЖ, Р11): no box figure is its.
+          ...(shift.mode === "validation"
+            ? []
+            : [
+                {
+                  id: "inClosedBoxes",
+                  term: t("office.shifts.totals.inClosedBoxes"),
+                  description: UNITS.format(totals.unitsInClosedBoxes),
+                  mono: true,
+                },
+                {
+                  id: "closedBoxes",
+                  term: t("office.shifts.totals.closedBoxes"),
+                  description: UNITS.format(totals.closedBoxes),
+                  mono: true,
+                },
+                {
+                  id: "openBoxes",
+                  term: t("office.shifts.totals.openBoxes"),
+                  description: UNITS.format(totals.openBoxes),
+                  mono: true,
+                },
+              ]),
           {
             id: "lastFact",
             term: t("office.shifts.totals.lastFact"),

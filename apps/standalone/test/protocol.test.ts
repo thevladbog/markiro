@@ -1275,6 +1275,7 @@ describe("request builders send only what changes", () => {
       palletBoxCapacity: null,
       palletTemplateId: null,
       palletSheetTemplateId: null,
+      mode: "aggregation" as const,
       rev: 71,
     };
     const same = {
@@ -1299,6 +1300,12 @@ describe("request builders send only what changes", () => {
         { boxTemplateId: other, expectedRev: 71 },
       ],
       [shiftUpdate(shift, { ...same, boxCapacity: 24 }), { boxCapacity: 24, expectedRev: 71 }],
+      // The mode (plan РЕЖ) goes only when it changes.
+      [shiftUpdate(shift, { ...same, mode: "aggregation" }), { expectedRev: 71 }],
+      [
+        shiftUpdate(shift, { ...same, mode: "validation" }),
+        { mode: "validation", expectedRev: 71 },
+      ],
       [shiftUpdate(shift, { ...same, plannedQty: 1500 }), { plannedQty: 1500, expectedRev: 71 }],
       [shiftUpdate(shift, { ...same, plannedQty: null }), { plannedQty: null, expectedRev: 71 }],
       [
