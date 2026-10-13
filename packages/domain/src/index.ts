@@ -517,3 +517,5 @@ export {
   PALLET_SHEET_FOOTER_CAPABILITY,
   palletSheetRequiresFooterCapability,
 } from "./labels/pallet-sheet-model.js";
+
+export { isValidInn, normalizeInn } from "./inn.js";
