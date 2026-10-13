@@ -130,14 +130,18 @@ mod tests {
             Err(ProbeError::HostTooOld)
         );
         // A host of stage 1 speaks protocol 1 only, a host of stage 2a up to
-        // 2: a station that knows pallets (protocol 3, plan ПЛ-Х) asks for
-        // an update of the host.
+        // 2, a host of pallets (plan ПЛ-Х) up to 3: a station that knows
+        // shift modes (protocol 4, plan РЕЖ) asks for an update of the host.
         assert_eq!(
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 1, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
         );
         assert_eq!(
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 2, "minProtocol": 1})),
+            Err(ProbeError::HostTooOld)
+        );
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
         );
     }

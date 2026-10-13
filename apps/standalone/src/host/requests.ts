@@ -590,13 +590,13 @@ export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
   };
 }
 
-/** What a station's new shift carries: the operator's choices and the request's id. */
 /**
  * The body of every shift entry this station sends (`shift-enter.json`, plan
  * РЕЖ): it works validation shifts, so the host lets it enter one.
  */
 export const STATION_SHIFT_ENTER: ShiftEnter = { supports: [SHIFT_SUPPORTS.validation] };
 
+/** What a station's new shift carries: the operator's choices and the request's id. */
 export interface DeviceShiftInput {
   requestId: string;
   productId: string;
