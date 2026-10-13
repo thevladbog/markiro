@@ -290,7 +290,7 @@ describe("a configured station", () => {
 
   it("stays an ordinary window where the shell forbids kiosk mode (`kiosk: false`, `--windowed`)", async () => {
     const { kiosk } = renderStation({ status: DEVICE_STATUS, permitted: false });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await settle();
     expect(kiosk.commands).toEqual([]);
   });
@@ -306,10 +306,10 @@ describe("a configured station", () => {
 describe("the host's PC", () => {
   it("never locks: not on the floor, not in the office, not on leaving it", async () => {
     const { kiosk } = renderStation({ status: DEVICE_STATUS, role: "host" });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await signInToOffice();
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await settle();
     expect(kiosk.commands).toEqual([]);
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
