@@ -7,6 +7,22 @@ import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import { isNativeAssemblyOwner } from "./support/native-assembly-owner.mjs";
 import { withoutSharedContractsBootstrap } from "./support/shared-contracts-bootstrap.mjs";
+import {
+  assertSupplementalOwnership,
+  withoutCasesRegressionWorkflow,
+} from "./support/cases-regression-owner.mjs";
+
+const rawSources = () =>
+  Object.fromEntries(
+    readdirSync(".github/workflows")
+      .filter((name) => /\.ya?ml$/.test(name))
+      .map((name) => [name, readFileSync(`.github/workflows/${name}`, "utf8")]),
+  );
+
+const historicalInventory = (allWorkflows, sources = rawSources()) => {
+  if (allWorkflows["us-cases-native.yml"]) assertSupplementalOwnership(allWorkflows, sources);
+  return withoutCasesRegressionWorkflow(allWorkflows, sources);
+};
 
 const workflows = () =>
   Object.fromEntries(
@@ -34,7 +50,37 @@ const datasetShippingFiles = [
   "test/us-dataset-shipping-locks.e2e.test.ts",
 ];
 
-const assertDatasetShippingOwnership = (allWorkflows) => {
+test("primary Cases and Shipping owners reject a changed supplement and third selector", () => {
+  for (const assertOwner of [assertDatasetShippingOwnership, assertDatasetCasesOwnership]) {
+    const changed = workflows();
+    changed["us-cases-native.yml"].jobs.cases_native.steps.find(
+      (step) => step.name === "Verify complete Cases native regression on disposable databases",
+    ).if = "false";
+    assert.throws(() => assertOwner(changed), /parsed workflow differs/);
+    const bytes = rawSources();
+    bytes["us-cases-native.yml"] += "\n";
+    assert.throws(() => assertOwner(workflows(), bytes), /bytes differ/);
+  }
+  const thirdCases = workflows();
+  thirdCases["third.yml"] = {
+    jobs: { third: { steps: [{ run: "vitest run test/us-dataset-cases-seed.e2e.test.ts" }] } },
+  };
+  assert.throws(
+    () => assertDatasetCasesOwnership(thirdCases),
+    /runs exactly once across workflows/,
+  );
+  const thirdShipping = workflows();
+  thirdShipping["third.yml"] = {
+    jobs: { third: { steps: [{ run: "vitest run test/us-dataset-shipping-seed.e2e.test.ts" }] } },
+  };
+  assert.throws(
+    () => assertDatasetShippingOwnership(thirdShipping),
+    /runs exactly once across workflows/,
+  );
+});
+
+const assertDatasetShippingOwnership = (allWorkflows, sources = rawSources()) => {
+  allWorkflows = historicalInventory(allWorkflows, sources);
   const workflow = allWorkflows["us-development.yml"];
   const job = workflow.jobs.isolation;
   const owners = job.steps.filter((step) => step.name === datasetShippingOwner);
@@ -581,7 +627,8 @@ const datasetCasesFiles = [
   "test/us-dataset-cases-locks.e2e.test.ts",
   "test/us-dataset-cases-seed.e2e.test.ts",
 ];
-const assertDatasetCasesOwnership = (allWorkflows) => {
+const assertDatasetCasesOwnership = (allWorkflows, sources = rawSources()) => {
+  allWorkflows = historicalInventory(allWorkflows, sources);
   const workflow = allWorkflows["us-development.yml"];
   const job = workflow.jobs.isolation;
   const owners = job.steps.filter((step) => step.name === datasetCasesOwner);
@@ -3433,7 +3480,12 @@ test("Requests cabinet JSON and proxy suites have unconditional CI ownership", (
 });
 
 test("every inherited operational job is unconditionally locked before it can obtain credentials", () => {
-  const safe = new Set(["ci.yml", "dependency-review.yml", "us-development.yml"]);
+  const safe = new Set([
+    "ci.yml",
+    "dependency-review.yml",
+    "us-development.yml",
+    "us-cases-native.yml",
+  ]);
   for (const [name, workflow] of Object.entries(workflows())) {
     if (safe.has(name)) continue;
     for (const [jobId, job] of Object.entries(workflow.jobs)) {

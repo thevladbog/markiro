@@ -23,6 +23,7 @@ test("every repository workflow has an explicit reviewed event scope", () => {
     "station-stable-release.yml": ["workflow_dispatch"],
     "yandex-infrastructure.yml": ["pull_request", "workflow_dispatch"],
     "us-development.yml": ["pull_request", "push", "workflow_dispatch"],
+    "us-cases-native.yml": ["push", "workflow_dispatch"],
   };
   const workflowFiles = readdirSync(".github/workflows")
     .filter((name) => name.endsWith(".yml"))
@@ -32,6 +33,20 @@ test("every repository workflow has an explicit reviewed event scope", () => {
   for (const name of workflowFiles) {
     assert.deepEqual(Object.keys(workflow(name).on).sort(), expectedEvents[name].sort(), name);
   }
+});
+
+test("supplemental Cases gate only selects the US branch with ordinary dispatch", () => {
+  const value = workflow("us-cases-native.yml");
+  assert.deepEqual(value.on, {
+    push: { branches: ["codex/us-mvp"] },
+    workflow_dispatch: null,
+  });
+  assert.deepEqual(value.concurrency, {
+    group: "us-cases-native-${{ github.ref }}",
+    "cancel-in-progress": true,
+  });
+  assert.equal(value.on.pull_request, undefined);
+  assert.equal(value.on.workflow_dispatch?.inputs, undefined);
 });
 
 test("dependency review runs only for supported dependency surface changes", () => {

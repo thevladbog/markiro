@@ -5,6 +5,10 @@ import test from "node:test";
 import { load } from "js-yaml";
 import { checkWorkflows } from "../check-isolation.mjs";
 import {
+  assertSupplementalOwnership,
+  withoutCasesRegressionWorkflow,
+} from "./support/cases-regression-owner.mjs";
+import {
   hasExactPreparedServicesOwner,
   preparedServicesCommand,
   preparedServicesFiles,
@@ -93,7 +97,16 @@ const readWorkflows = () =>
       .map((name) => [name, load(readFileSync(`.github/workflows/${name}`, "utf8"))]),
   );
 
-function assertOwnership(all) {
+const rawSources = () =>
+  Object.fromEntries(
+    readdirSync(".github/workflows")
+      .filter((name) => /\.ya?ml$/.test(name))
+      .map((name) => [name, readFileSync(`.github/workflows/${name}`, "utf8")]),
+  );
+
+function assertOwnership(all, sources = rawSources()) {
+  if (all["us-cases-native.yml"]) assertSupplementalOwnership(all, sources);
+  all = withoutCasesRegressionWorkflow(all, sources);
   const w = all["us-development.yml"];
   const job = w.jobs[preparedServicesJobId];
   assert.ok(job, "prepared services dedicated native job is present");
@@ -147,6 +160,24 @@ test("prepared services have an explicit native owner", () => {
     "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts --maxWorkers=1",
   );
   assertOwnership(readWorkflows());
+});
+
+test("prepared primary ownership checks current supplemental mutation and third selector", () => {
+  const changed = readWorkflows();
+  changed["us-cases-native.yml"].jobs.cases_native.steps.find(
+    (step) => step.name === "Verify complete Cases native regression on disposable databases",
+  ).if = "false";
+  assert.throws(() => assertOwnership(changed), /parsed workflow differs/);
+  const bytes = rawSources();
+  bytes["us-cases-native.yml"] += "\n";
+  assert.throws(() => assertOwnership(readWorkflows(), bytes), /bytes differ/);
+  const third = readWorkflows();
+  third["third.yml"] = {
+    jobs: {
+      third: { steps: [{ run: "vitest run test/us-case-demo-owned-application.e2e.test.ts" }] },
+    },
+  };
+  assert.throws(() => assertOwnership(third), /exactly one explicit native selection/);
 });
 
 test("successful contracts build precedes every Node tool and API build precedes native execution", () => {

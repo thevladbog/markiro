@@ -8,6 +8,17 @@ import { load } from "js-yaml";
 import ts from "typescript";
 import { checkWorkflows } from "../check-isolation.mjs";
 import { withoutNativeAssemblyOwner } from "./support/native-assembly-owner.mjs";
+import {
+  assertSupplementalOwnership,
+  withoutCasesRegressionWorkflow,
+} from "./support/cases-regression-owner.mjs";
+
+const rawSources = () =>
+  Object.fromEntries(
+    readdirSync(".github/workflows")
+      .filter((name) => /\.ya?ml$/.test(name))
+      .map((name) => [name, readFileSync(`.github/workflows/${name}`, "utf8")]),
+  );
 
 const ownerName = "Verify regular dataset range orchestration on disposable databases";
 const files = [
@@ -38,7 +49,9 @@ const workflows = () =>
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 // Deleting this step or making its run a printed/conditional command must fail.
-const assertOwnership = (all) => {
+const assertOwnership = (all, sources = rawSources()) => {
+  if (all["us-cases-native.yml"]) assertSupplementalOwnership(all, sources);
+  all = withoutCasesRegressionWorkflow(all, sources);
   const workflow = all["us-development.yml"];
   const job = workflow.jobs.isolation;
   const owners = job.steps.filter((step) => step.name === ownerName);
@@ -173,6 +186,22 @@ const assertOwnership = (all) => {
 
 test("regular range has one unconditional dedicated owner with globally unique explicit selections", () => {
   assertOwnership(workflows());
+});
+
+test("regular primary ownership checks current supplemental mutation and third selector", () => {
+  const changed = workflows();
+  changed["us-cases-native.yml"].jobs.cases_native.steps.find(
+    (step) => step.name === "Verify complete Cases native regression on disposable databases",
+  ).if = "false";
+  assert.throws(() => assertOwnership(changed), /parsed workflow differs/);
+  const bytes = rawSources();
+  bytes["us-cases-native.yml"] += "\n";
+  assert.throws(() => assertOwnership(workflows(), bytes), /bytes differ/);
+  const third = workflows();
+  third["third.yml"] = {
+    jobs: { third: { steps: [{ run: "vitest run test/us-dataset-regular-seed.e2e.test.ts" }] } },
+  };
+  assert.throws(() => assertOwnership(third), /exactly one explicit suite path selection/);
 });
 
 test("dedicated explicit selections coexist with aggregate API collection and native fixture gating", () => {

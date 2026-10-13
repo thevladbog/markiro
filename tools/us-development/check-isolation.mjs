@@ -3,7 +3,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { load } from "js-yaml";
 
-const checksOnly = new Set(["ci.yml", "dependency-review.yml", "us-development.yml"]);
+const checksOnly = new Set([
+  "ci.yml",
+  "dependency-review.yml",
+  "us-development.yml",
+  "us-cases-native.yml",
+]);
 
 export function checkWorkflows(workflows, baseRef = "") {
   const errors = [];
