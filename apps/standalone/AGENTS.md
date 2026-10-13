@@ -2785,9 +2785,16 @@ draft or an archived one is `conflict` on `product_inactive`, an unknown one
 none, a box template that fits the product (`templates::fits`: enabled, of
 the box purpose, covering the product's group), the production date, a box
 capacity (the product's when left out; at most `MAX_BOX_CAPACITY`) and a plan
-or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` is the cloud's shape;
-only `aggregation` is taken (`validation_failed` on `mode` otherwise), so
-stage 3 needs no new shape. A shift with pallets (`palletsEnabled`, plan
+or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` is the cloud's shape:
+`aggregation` (the default) or, since plan РЕЖ, `validation`, which puts codes
+in no box and so has no pallets (`validation_failed` on `palletsEnabled`,
+checked before either pallet field, on a create and on an edit alike; without
+pallets a shift takes no A4 sheet, the default one included); its box template
+and capacity stay, unprinted. A planned shift changes its mode by an edit
+(`details.changed` names `mode` with its `{ from, to }`; `shift.create` names
+`mode` only for a validation shift, as it names a sheet only for a shift with
+one); an active one keeps it (`conflict` on `shift_status`). A station's own
+shift (`DeviceShiftCreate`) is always aggregation. A shift with pallets (`palletsEnabled`, plan
 ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
 product (`templates::fits` for the pallet purpose; `validation_failed` on
 `palletTemplateId` otherwise, a missing one included) and a pallet capacity of

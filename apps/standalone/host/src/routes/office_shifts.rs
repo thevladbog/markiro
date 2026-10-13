@@ -221,13 +221,19 @@ pub async fn get_shift(
         .ok_or_else(|| ApiError::not_found("no such shift"))
 }
 
-/// Only aggregation is taken (spec decision 6), with or without pallets
-/// (plan ПЛ-Х): validation (stage 3) needs no new shape.
-pub fn check_mode(mode: ShiftMode) -> Result<(), ApiError> {
-    if mode != ShiftMode::Aggregation {
+/// The rules of a shift's mode (plan РЕЖ, Р1): aggregation, with or without
+/// pallets (plan ПЛ-Х), or validation, which puts codes in no box and so in
+/// no pallet: a validation shift with pallets is `validation_failed` on
+/// `palletsEnabled`. Without pallets a shift has neither pallet field nor an
+/// A4 sheet (`shifts::pallet_request`, `shifts::pallets`), so a validation
+/// shift never takes the default sheet either. Its box template and box
+/// capacity stay (Р4): the shift's columns need them, and a validation shift
+/// prints no box label.
+pub fn check_mode_rules(mode: ShiftMode, pallets_enabled: bool) -> Result<(), ApiError> {
+    if mode == ShiftMode::Validation && pallets_enabled {
         return Err(ApiError::validation(
-            "mode",
-            "only aggregation shifts are taken for now",
+            "palletsEnabled",
+            "a validation shift has no pallets",
         ));
     }
     Ok(())
@@ -242,7 +248,7 @@ pub async fn create_shift(
     ApiJson(create): ApiJson<ShiftCreate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(create.mode)?;
+    check_mode_rules(create.mode, create.pallets_enabled)?;
     let pallet_request = shifts::pallet_request(
         create.pallets_enabled,
         create.pallet_box_capacity,
@@ -277,6 +283,7 @@ pub async fn create_shift(
         &mut tx,
         &NewShift {
             origin: markiro_proto::ShiftOrigin::Office,
+            mode: create.mode,
             created_by: &context.user.id,
             request_id: None,
             product_id: &create.product_id,
@@ -305,6 +312,11 @@ pub async fn create_shift(
     // one keep their shape.
     if let Some(sheet_id) = &created.pallet_sheet_template_id {
         details["palletSheetTemplateId"] = json!(sheet_id);
+    }
+    // Named only by a validation shift (plan РЕЖ), for the same reason: a row
+    // without a mode is an aggregation shift's.
+    if created.mode != ShiftMode::Aggregation {
+        details["mode"] = json!(created.mode);
     }
     audit::record(
         &mut tx,
@@ -345,7 +357,6 @@ pub async fn update_shift(
     ApiJson(update): ApiJson<ShiftUpdate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(update.mode.unwrap_or_default())?;
     validate::count(
         "palletBoxCapacity",
         update.pallet_box_capacity,
@@ -392,6 +403,10 @@ pub async fn update_shift(
     // Pallets that stay on keep what the edit does not send; turned off, the
     // edit sends neither field.
     let pallets_enabled = update.pallets_enabled.unwrap_or(current.pallets_enabled);
+    // The mode the shift would have and its pallets, checked together before
+    // either pallet field is, so the refusal names the flag (plan РЕЖ).
+    let mode = update.mode.unwrap_or(current.mode);
+    check_mode_rules(mode, pallets_enabled)?;
     let pallet_request = if pallets_enabled {
         shifts::pallet_request(
             true,
@@ -442,7 +457,8 @@ pub async fn update_shift(
         }
         None
     };
-    let fixed_changed = line_id != current.line_id
+    let fixed_changed = mode != current.mode
+        || line_id != current.line_id
         || production_date != current.production_date
         || box_template_id != current.box_template_id
         || box_capacity != current.box_capacity
@@ -514,6 +530,7 @@ pub async fn update_shift(
             json!(current.counterparty_id),
             json!(counterparty_id),
         ),
+        ("mode", json!(current.mode), json!(mode)),
         (
             "palletsEnabled",
             json!(current.pallets_enabled),
@@ -542,7 +559,7 @@ pub async fn update_shift(
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
-         box_capacity = ?, planned_qty = ?, counterparty_id = ?, pallets_enabled = ?, \
+         box_capacity = ?, planned_qty = ?, counterparty_id = ?, mode = ?, pallets_enabled = ?, \
          pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, rev = ? \
          WHERE id = ?",
     )
@@ -552,6 +569,7 @@ pub async fn update_shift(
     .bind(box_capacity)
     .bind(planned_qty)
     .bind(&counterparty_id)
+    .bind(mode.as_str())
     .bind(pallets_enabled)
     .bind(pallet_box_capacity)
     .bind(&pallet_template_id)

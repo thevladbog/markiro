@@ -290,6 +290,9 @@ pub async fn pallets(
 /// A new shift after the request's own checks and the references' checks.
 pub struct NewShift<'a> {
     pub origin: ShiftOrigin,
+    /// The office's choice (plan РЕЖ); a station's own shift is always
+    /// aggregation (`DeviceShiftCreate` names no mode).
+    pub mode: ShiftMode,
     /// The office user's id or the station's.
     pub created_by: &'a str,
     /// A station's request id; the office sends none.
@@ -341,7 +344,7 @@ pub async fn insert(
     .bind(shift.created_by)
     .bind(shift.request_id)
     .bind(ShiftStatus::Planned.as_str())
-    .bind(ShiftMode::Aggregation.as_str())
+    .bind(shift.mode.as_str())
     .bind(shift.pallets.is_some())
     .bind(shift.product_id)
     .bind(shift.line_id)

@@ -1729,10 +1729,11 @@ pub struct ShiftTotals {
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
-/// product's; `mode` left out is aggregation (the only mode taken) and
-/// `palletsEnabled` false. A shift with pallets names its pallet template
-/// and may name its pallet capacity (the product's when left out); one
-/// without sends neither.
+/// product's; `mode` left out is aggregation and `palletsEnabled` false. A
+/// shift with pallets names its pallet template and may name its pallet
+/// capacity (the product's when left out); one without sends neither. A
+/// validation shift (plan РЕЖ) has no pallets: `validation_failed` on
+/// `palletsEnabled`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftCreate {

@@ -505,7 +505,12 @@ async fn a_plan_needs_an_active_product_an_active_line_and_a_fitting_template() 
         (json!({ "plannedQty": 10_000_001 }), field("plannedQty")),
         (json!({ "boxCapacity": 0 }), field("boxCapacity")),
         (json!({ "boxCapacity": 100_001 }), field("boxCapacity")),
-        (json!({ "mode": "validation" }), field("mode")),
+        // A validation shift has no pallets (plan РЕЖ): refused on the flag,
+        // before the pallet template, which fits here, is looked at.
+        (
+            json!({ "mode": "validation", "palletsEnabled": true, "palletTemplateId": ids[0] }),
+            field("palletsEnabled"),
+        ),
         (json!({ "palletsEnabled": true }), field("palletTemplateId")),
     ] {
         let mut body = shift_body(&setup);
@@ -870,7 +875,10 @@ async fn an_edit_checks_a_changed_line_template_or_counterparty_and_keeps_unchan
         ),
         (json!({ "plannedQty": 0 }), field("plannedQty")),
         (json!({ "boxCapacity": 100_001 }), field("boxCapacity")),
-        (json!({ "mode": "validation" }), field("mode")),
+        (
+            json!({ "mode": "validation", "palletsEnabled": true }),
+            field("palletsEnabled"),
+        ),
         (json!({ "palletsEnabled": true }), field("palletTemplateId")),
     ] {
         let mut body = change.clone();
@@ -1039,6 +1047,289 @@ async fn an_active_shift_takes_only_its_plan_and_a_closed_one_nothing() {
             StatusCode::CONFLICT,
             (json!("conflict"), status_conflict("closed"))
         )
+    );
+}
+
+/// The office plans a validation shift (plan РЕЖ, Р1): stored and read back
+/// with its mode, audited with it, and never with pallets, so never with an
+/// A4 sheet either, not even the organization's default one.
+#[tokio::test]
+async fn the_office_plans_a_validation_shift_without_pallets() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    default_sheet_is(&admin, &sheet).await;
+    let mut body = shift_body(&setup);
+    body["mode"] = json!("validation");
+    let shift = plan_shift(&admin, body.clone()).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let mut expected = planned(&id, "OCT26-001", &setup, shift["rev"].as_i64().unwrap());
+    expected["mode"] = json!("validation");
+    assert_eq!(shift, expected);
+    let (status, read_back) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!((status, read_back), (StatusCode::OK, expected));
+    let mode: String = sqlx::query_scalar("SELECT mode FROM shifts WHERE id = ?")
+        .bind(&id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(mode, "validation");
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![admin.row(
+            "shift.create",
+            "shift",
+            &id,
+            json!({
+                "number": "OCT26-001", "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08", "mode": "validation"
+            })
+        )]
+    );
+    // Pallets, a pallet field or an A4 sheet: each refused, nothing written.
+    let template = pallet_template(&admin).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let field = |name: &str| (json!("validation_failed"), json!({ "field": name }));
+    for (change, expected) in [
+        (json!({ "palletsEnabled": true }), field("palletsEnabled")),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": template }),
+            field("palletsEnabled"),
+        ),
+        (
+            json!({ "palletTemplateId": template }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletSheetTemplateId": sheet }),
+            field("palletSheetTemplateId"),
+        ),
+    ] {
+        let mut refused_body = body.clone();
+        for (key, value) in change.as_object().unwrap() {
+            refused_body[key] = value.clone();
+        }
+        let (status, refused) = admin
+            .call("POST", "/v1/office/shifts", Some(refused_body))
+            .await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (StatusCode::BAD_REQUEST, expected),
+            "{change}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+/// A planned shift changes its mode (plan РЕЖ, Р1): to validation only
+/// without pallets, which the same edit may turn off; the change is audited
+/// with its `{ from, to }`. A validation shift takes no pallets by an edit,
+/// and an active shift keeps its mode (`shift_status`).
+#[tokio::test]
+async fn a_planned_shift_changes_its_mode_and_an_active_one_keeps_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = pallet_template(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    default_sheet_is(&admin, &sheet).await;
+    let field = |name: &str| (json!("validation_failed"), json!({ "field": name }));
+
+    // Pallets on: validation is refused until the same edit turns them off.
+    let pallets = plan_shift(&admin, pallet_shift_body(&setup, &template)).await;
+    assert_eq!(pallets["palletSheetTemplateId"], json!(sheet));
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&pallets),
+            Some(json!({ "mode": "validation", "expectedRev": pallets["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (StatusCode::BAD_REQUEST, field("palletsEnabled"))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (status, switched) = admin
+        .call(
+            "PUT",
+            &path(&pallets),
+            Some(json!({
+                "mode": "validation", "palletsEnabled": false, "expectedRev": pallets["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{switched}");
+    assert_eq!(
+        [
+            switched["mode"].clone(),
+            switched["palletsEnabled"].clone(),
+            switched["palletTemplateId"].clone(),
+            switched["palletBoxCapacity"].clone(),
+            switched["palletSheetTemplateId"].clone(),
+        ],
+        [
+            json!("validation"),
+            json!(false),
+            Value::Null,
+            Value::Null,
+            Value::Null
+        ]
+    );
+    let pallets_id = pallets["id"].as_str().unwrap();
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![admin.row(
+            "shift.update",
+            "shift",
+            pallets_id,
+            json!({
+                "changed": [
+                    "mode", "palletsEnabled", "palletBoxCapacity", "palletTemplateId",
+                    "palletSheetTemplateId"
+                ],
+                "mode": { "from": "aggregation", "to": "validation" },
+                "palletsEnabled": { "from": true, "to": false },
+                "palletBoxCapacity": { "from": 40, "to": null },
+                "palletTemplateId": { "from": template, "to": null },
+                "palletSheetTemplateId": { "from": sheet, "to": null },
+            })
+        )]
+    );
+    // A validation shift takes no pallets by an edit, nor an A4 sheet; the
+    // default sheet (`null`) asks for nothing and passes.
+    let rows = audit_rows(&admin.app).await;
+    for (change, expected) in [
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": template }),
+            field("palletsEnabled"),
+        ),
+        (json!({ "palletsEnabled": true }), field("palletsEnabled")),
+        (
+            json!({ "palletSheetTemplateId": sheet }),
+            field("palletSheetTemplateId"),
+        ),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = switched["rev"].clone();
+        let (status, refused) = admin.call("PUT", &path(&switched), Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (StatusCode::BAD_REQUEST, expected),
+            "{change}"
+        );
+    }
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&switched),
+            Some(json!({ "palletSheetTemplateId": null, "expectedRev": switched["rev"] })),
+        )
+        .await;
+    assert_eq!((status, same), (StatusCode::OK, switched.clone()));
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    // Back to aggregation, pallets turned on in the same edit.
+    let (status, back) = admin
+        .call(
+            "PUT",
+            &path(&switched),
+            Some(json!({
+                "mode": "aggregation", "palletsEnabled": true, "palletTemplateId": template,
+                "expectedRev": switched["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{back}");
+    assert_eq!(
+        [back["mode"].clone(), back["palletsEnabled"].clone()],
+        [json!("aggregation"), json!(true)]
+    );
+
+    // Without pallets the mode alone changes, named alone in the row.
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let plain_id = plain["id"].as_str().unwrap().to_owned();
+    let (status, validation) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({ "mode": "validation", "expectedRev": plain["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{validation}");
+    let mut expected = planned(
+        &plain_id,
+        "OCT26-002",
+        &setup,
+        validation["rev"].as_i64().unwrap(),
+    );
+    expected["mode"] = json!("validation");
+    assert_eq!(validation, expected);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update")
+            .await
+            .last()
+            .cloned(),
+        Some(admin.row(
+            "shift.update",
+            "shift",
+            &plain_id,
+            json!({
+                "changed": ["mode"],
+                "mode": { "from": "aggregation", "to": "validation" },
+            })
+        ))
+    );
+    // The same mode again changes nothing.
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({ "mode": "validation", "expectedRev": validation["rev"] })),
+        )
+        .await;
+    assert_eq!((status, same), (StatusCode::OK, validation.clone()));
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+
+    // Open, the shift keeps its mode either way; its plan still changes.
+    open_directly(&admin, &validation).await;
+    let status_conflict = json!({ "constraint": "shift_status", "status": "active" });
+    for change in [
+        json!({ "mode": "aggregation" }),
+        json!({ "mode": "aggregation", "plannedQty": 10 }),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = validation["rev"].clone();
+        let (status, refused) = admin.call("PUT", &path(&validation), Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::CONFLICT,
+                (json!("conflict"), status_conflict.clone())
+            ),
+            "{change}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    let (status, more) = admin
+        .call(
+            "PUT",
+            &path(&validation),
+            Some(json!({
+                "mode": "validation", "plannedQty": 10, "expectedRev": validation["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(
+        (status, more["mode"].clone(), more["plannedQty"].clone()),
+        (StatusCode::OK, json!("validation"), json!(10)),
+        "{more}"
     );
 }
 

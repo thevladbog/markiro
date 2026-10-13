@@ -10,8 +10,8 @@
 use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
-    DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftOrigin, ShiftSnapshot,
-    ShiftStatus,
+    DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftMode, ShiftOrigin,
+    ShiftSnapshot, ShiftStatus,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -224,6 +224,7 @@ pub async fn create_device_shift(
         &mut tx,
         &NewShift {
             origin: ShiftOrigin::Station,
+            mode: ShiftMode::Aggregation,
             created_by: &device.id,
             request_id: Some(&create.request_id),
             product_id: &create.product_id,
