@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { FloorApp } from "../floor/FloorApp.js";
@@ -51,7 +59,11 @@ import type { WindowMode } from "../office/window-mode.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
-import { createLockdownLifecycle, type LockdownLifecycle } from "./lockdown.js";
+import {
+  createLockdownLifecycle,
+  shouldOpenOfficeWindowed,
+  type LockdownLifecycle,
+} from "./lockdown.js";
 import { NetworkPairing } from "./NetworkPairing.js";
 import {
   ConfigErrorScreen,
@@ -573,6 +585,25 @@ export function App({
     return mode === "windowed";
   }, [kiosk]);
   const officeAdmin = session?.user.role === "admin";
+  // The office is a mouse-and-keyboard app, not a touch one: on a PC that
+  // locks (a host or a station), an administrator's office session opens in an
+  // ordinary, resizable window by itself, without «Оконный режим». Once per
+  // session (its token): a window the person locked again by hand, or one that
+  // refused, is not forced open again; «Оконный режим» stays the way out when
+  // the automatic one failed. A technologist's session stays in the locked
+  // window, as before: only an administrator leaves kiosk mode.
+  const windowedFor = useRef<string | null>(null);
+  const officeToken = session?.token ?? null;
+  useEffect(() => {
+    if (officeToken === null) {
+      windowedFor.current = null;
+      return;
+    }
+    if (!shouldOpenOfficeWindowed({ enabled: kiosk.enabled, officePc, officeAdmin })) return;
+    if (windowedFor.current === officeToken) return;
+    windowedFor.current = officeToken;
+    void leaveKiosk();
+  }, [kiosk.enabled, officePc, officeAdmin, officeToken, leaveKiosk]);
   const windowMode = useMemo<WindowMode | null>(
     () => (kiosk.enabled && officeAdmin ? { mode: kioskSnapshot.mode, leave: leaveKiosk } : null),
     [kiosk.enabled, officeAdmin, kioskSnapshot.mode, leaveKiosk],
@@ -731,6 +762,7 @@ export function App({
             factsFailure={state.factsFailure}
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
+            watchScanners={hardwareApi.watchScanners}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -745,6 +777,7 @@ export function App({
               onSignedIn={operatorSignedIn}
               onSync={signInSync.request}
               onOffice={() => dispatch({ type: "office_requested" })}
+              watchScanners={hardwareApi.watchScanners}
             />
           ) : (
             <FloorApp

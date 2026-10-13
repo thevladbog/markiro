@@ -54,10 +54,10 @@ describe("backupWarnings", () => {
     });
   });
 
-  it("warns of no copy, a copy older than 26 hours and no second folder", () => {
+  it("warns of no copy and a copy older than 26 hours, and not of a second folder nobody set", () => {
     expect(
       backupWarnings(state({ local: { ...HEALTHY_BACKUPS.local, copies: [] }, second: null })),
-    ).toEqual([{ kind: "noCopies" }, { kind: "noSecond" }]);
+    ).toEqual([{ kind: "noCopies" }]);
     const old = [backupCopy("2026-10-08T12:19:59Z")];
     const exactly = [backupCopy("2026-10-08T12:20:00Z")];
     expect(
@@ -77,7 +77,6 @@ describe("backupWarnings", () => {
       ),
     ).toEqual([]);
     expect(warningTone({ kind: "stale" })).toBe("warn");
-    expect(warningText({ kind: "noSecond" })).toEqual({ key: "office.backups.warnings.noSecond" });
   });
 
   it("does not repeat a stale second folder whose last attempt failed", () => {
@@ -181,10 +180,7 @@ describe("backupWarnings", () => {
       second: null,
     });
     const warnings = backupWarnings(held);
-    expect(warnings).toEqual([
-      { kind: "held", since: "2026-10-09T15:00:00Z", stations: 2 },
-      { kind: "noSecond" },
-    ]);
+    expect(warnings).toEqual([{ kind: "held", since: "2026-10-09T15:00:00Z", stations: 2 }]);
     expect(warningTone(warnings[0]!)).toBe("error");
     expect(warningText(warnings[0]!)).toEqual({
       key: "office.backups.warnings.held",
@@ -204,7 +200,28 @@ describe("backupWarnings", () => {
     expect(warningToneKey({ kind: "held", since: "2026-10-09T15:00:00Z", stations: 0 })).toBe(
       "office.backups.tone.error",
     );
-    expect(warningToneKey({ kind: "noSecond" })).toBe("office.backups.tone.warn");
+    expect(warningToneKey({ kind: "stale" })).toBe("office.backups.tone.warn");
+  });
+
+  it("keeps a fresh install quiet about the second folder, and still names one that is set but broken", () => {
+    // Nobody set a second folder: the folder's own card says so, calmly.
+    expect(backupWarnings(state({ second: null }))).toEqual([]);
+    // A folder that is set and refused the last copy is an error, with its reason.
+    const broken = state({
+      second: {
+        ...HEALTHY_BACKUPS.local,
+        dir: "E:\\Markiro",
+        lastAttempt: {
+          at: "2026-10-09T14:00:03Z",
+          trigger: "scheduled",
+          ok: false,
+          code: "destination_unavailable",
+        },
+      },
+    });
+    const warnings = backupWarnings(broken);
+    expect(warnings).toEqual([{ kind: "secondFailed", reason: "destination_unavailable" }]);
+    expect(warningTone(warnings[0]!)).toBe("error");
   });
 
   it("reads only the failure codes it has words for", () => {

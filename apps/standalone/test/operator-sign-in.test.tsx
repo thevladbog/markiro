@@ -70,9 +70,10 @@ interface Options {
   sync?: SyncState;
   notice?: FloorNotice | null;
   source?: ScanSource;
+  watchScanners?: OperatorSignInProps["watchScanners"];
 }
 
-function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) {
+function renderSignIn({ local, sync = SYNCED, notice = null, source, watchScanners }: Options) {
   const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
   const onSync = vi.fn<() => void>();
   const onOffice = vi.fn<() => void>();
@@ -89,6 +90,7 @@ function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) 
         onSignedIn={onSignedIn}
         onSync={onSync}
         onOffice={onOffice}
+        {...(watchScanners === undefined ? {} : { watchScanners })}
       />
     </ThemeProvider>,
   );
@@ -1348,5 +1350,143 @@ describe("the size of the screen's controls", () => {
     renderSignIn({ local });
     await screen.findByText("Не удалось прочитать справочник операторов на этом компьютере.");
     allFloorSized();
+  });
+});
+
+describe("the welcome screen's layout, the same on every step", () => {
+  /** «Офис» and, off the badge step, «Назад»: present, floor-sized, and «Офис» in one place. */
+  function officeInHeader() {
+    const office = screen.getByRole("button", { name: "Офис" });
+    expect(office.className).toContain("mk-btn--floor");
+    expect(office.closest(".operator-login__header")).not.toBeNull();
+    return office;
+  }
+
+  function backInActions() {
+    const back = screen.getByRole("button", { name: "Назад" });
+    expect(back.className).toContain("mk-btn--floor");
+    expect(back.closest(".operator-login__actions")).not.toBeNull();
+  }
+
+  it("keeps «Офис» in the header and «Назад» in the action row on every step", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(screen.getByRole("heading", { name: "Вход оператора" })).toBeTruthy();
+    officeInHeader();
+    expect(screen.queryByRole("button", { name: "Назад" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
+    officeInHeader();
+    backInActions();
+    press("0", "0", "4", "2");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    officeInHeader();
+    backInActions();
+
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    officeInHeader();
+    backInActions();
+    // The name field is labelled.
+    expect(screen.getByLabelText("Имя оператора").tagName).toBe("INPUT");
+  });
+
+  it("offers the name search from the number step and the number from the name search, as the cloud station does", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    expect(screen.getByText("Наберите первые буквы имени или фамилии.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
+    expect(screen.getByText("Наберите табельный номер.")).toBeTruthy();
+    expect(screen.getByLabelText("Набранный табельный номер").textContent).toBe("");
+  });
+
+  it("shows the badge cue on the badge step only", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(screen.getByText("Поднесите бейдж к сканеру")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
+    expect(screen.queryByText("Поднесите бейдж к сканеру")).toBeNull();
+  });
+});
+
+describe("the scanner's state on the welcome screen", () => {
+  function snapshotOf(...statuses: Array<"connected" | "disconnected">) {
+    return {
+      revision: 1,
+      scanners: statuses.map((status, index) => ({
+        port: `COM${index + 3}`,
+        baud: 9600,
+        status,
+      })),
+    };
+  }
+
+  function watching(...statuses: Array<"connected" | "disconnected">) {
+    return (onSnapshot: (next: ReturnType<typeof snapshotOf>) => void) => {
+      onSnapshot(snapshotOf(...statuses));
+      return Promise.resolve(() => undefined);
+    };
+  }
+
+  function chip() {
+    return screen.getByTestId("scanner-state");
+  }
+
+  it("says the scanner is ready with only the keyboard wedge", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().textContent).toContain("Сканер штрихкодов готов");
+    expect(chip().getAttribute("data-tone")).toBe("ok");
+  });
+
+  it("follows the COM scanners the shell reports", async () => {
+    const local = await synced([SITE, OPERATOR]);
+    const view = renderSignIn({ local, watchScanners: watching("connected") });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().textContent).toContain("Сканер штрихкодов готов");
+    view.unmount();
+
+    renderSignIn({ local, watchScanners: watching("disconnected") });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().getAttribute("data-tone")).toBe("error"));
+    expect(chip().textContent).toContain("Сканер не на связи");
+  });
+
+  it("warns when only a part of the scanners answers, and when the shell cannot say", async () => {
+    const local = await synced([SITE, OPERATOR]);
+    const view = renderSignIn({ local, watchScanners: watching("connected", "disconnected") });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().textContent).toContain("Часть сканеров недоступна"));
+    expect(chip().getAttribute("data-tone")).toBe("warn");
+    view.unmount();
+
+    renderSignIn({ local, watchScanners: () => Promise.reject(new Error("no shell")) });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().textContent).toContain("Состояние сканера неизвестно"));
+  });
+
+  it("says the sign-in is paused while the station is locked out, and still takes the scan's answer", async () => {
+    const local = await synced([SITE, OPERATOR, BADGE]);
+    await local.transaction([
+      {
+        sql:
+          "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) " +
+          "VALUES ('station', 10, ?, ?)",
+        values: [NOW - 1_000, NOW - 1_000],
+      },
+    ]);
+    renderSignIn({ local });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().getAttribute("data-tone")).toBe("ok");
+    act(() => scan("MRK-000742"));
+    expect(
+      await screen.findByText(
+        "Слишком много неудачных попыток. Вход на этой станции приостановлен на 1 мин.",
+      ),
+    ).toBeTruthy();
+    expect(chip().textContent).toContain("Вход приостановлен");
+    expect(chip().getAttribute("data-tone")).toBe("error");
   });
 });

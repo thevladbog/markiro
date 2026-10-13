@@ -141,6 +141,31 @@ async fn a_scheduled_copy_comes_once_an_hour_while_the_data_changes_and_once_a_d
     assert_eq!(names(&local).len(), 6);
 }
 
+/// A fresh install has no second folder: that is a choice not yet made, not a
+/// failure. The first copy is `ok`, no folder reports an attempt that failed,
+/// and the state carries no second folder for the office to complain about.
+#[tokio::test]
+async fn a_fresh_host_without_a_second_folder_has_nothing_to_report_about_it() {
+    let admin = admin().await;
+    let local = local_folder(&admin);
+    let backups = backups_in(&admin, &local);
+    let mut worker = worker(&admin, &backups);
+
+    let report = worker.tick().await.expect("no copy yet: one is due");
+    assert!(report.local.is_ok());
+    assert_eq!(report.second, None, "no second folder, no second attempt");
+    let status = state(&admin, &backups, None);
+    assert_eq!(status.second, None);
+    assert_eq!(
+        status.local.last_attempt,
+        attempt(T0, BackupTrigger::Scheduled, None)
+    );
+    let rows = audit_trail(&admin.app, "backup.create").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].5, "ok");
+    assert_eq!(rows[0].6["second"], serde_json::Value::Null);
+}
+
 #[tokio::test]
 async fn a_failed_copy_is_in_the_status_and_the_audit_and_the_next_hour_tries_again() {
     let admin = admin().await;

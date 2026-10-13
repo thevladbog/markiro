@@ -23,7 +23,6 @@ export type BackupWarning =
   | { kind: "secondFailed"; reason: BackupFailure | "unknown" }
   | { kind: "noCopies" }
   | { kind: "stale" }
-  | { kind: "noSecond" }
   | { kind: "secondStale" }
   | { kind: "localNoIdentity" }
   | { kind: "secondNoIdentity" }
@@ -65,7 +64,7 @@ function ahead(destination: BackupDestination | null, now: number): boolean {
 /**
  * The warnings of a backup state: the stations' facts held since a restore,
  * a failed last attempt in either folder, no copy at all, a newest copy
- * older than a day and a bit, no second folder, a newest copy without the host
+ * older than a day and a bit, a newest copy without the host
  * identity in either folder, a host clock behind the newest
  * copy of either folder, a copy running for more than half an hour. A copy in progress hides nothing: the last attempt still
  * counts until it ends. The held facts name how many stations the host
@@ -88,9 +87,11 @@ export function backupWarnings(state: BackupState): BackupWarning[] {
   } else if (stale(state.local, now)) {
     warnings.push({ kind: "stale" });
   }
-  if (state.second === null) {
-    warnings.push({ kind: "noSecond" });
-  } else if (second === null && stale(state.second, now)) {
+  // No second folder is a choice the administrator has not made (a fresh
+  // install has none), not a fault: the Backups page says so as a calm hint
+  // beside the folder's form, never as a warning here. A folder that IS set
+  // and cannot take a copy is `secondFailed` above.
+  if (state.second !== null && second === null && stale(state.second, now)) {
     warnings.push({ kind: "secondStale" });
   }
   if (withoutIdentity(state.local)) warnings.push({ kind: "localNoIdentity" });
