@@ -12,12 +12,16 @@ import type {
 } from "../../host/code-search.js";
 import { ssccText } from "../shifts/shift-card.js";
 
-/** A placement's state in its phase: a code taken out is retired, one taken elsewhere wants a look. */
+/**
+ * A placement's state in its phase: a code taken out is retired, one taken elsewhere wants a
+ * look; a validation shift's accepted code (no box, plan РЕЖ) is done, as a packed one.
+ */
 export const PLACEMENT_PHASE = {
   open_box: "active",
   packed: "done",
   removed: "retired",
   displaced: "attention",
+  checked: "done",
 } as const satisfies Record<CodePlacementState, TagPhase>;
 
 /** An instant the host reported, in the organization's zone, to the second. */
@@ -49,8 +53,12 @@ export function PlacementChip({ state }: { state: CodePlacementState }) {
   );
 }
 
-/** A box as a row names it: its SSCC, or that it is open, and that it was taken apart. */
+/**
+ * A box as a row names it: its SSCC, or that it is open, and that it was taken apart; «—» for a
+ * validation shift's scan, which has no box.
+ */
 export function boxLabel(item: OfficeCodeItem, t: TFunction): string {
+  if (item.boxId === null) return t("office.common.none");
   const sscc = item.boxSscc === null ? t("office.codeSearch.openBox") : ssccText(item.boxSscc);
   return item.boxDisassembledAt === null
     ? sscc
@@ -80,7 +88,8 @@ function eventText(event: OfficeCodeEvent, t: TFunction): string {
     case "scan": {
       const verdict = t(`office.codeSearch.verdict.${event.verdict}`);
       if (event.verdict === "ok" && !event.placed) {
-        return t("office.codeSearch.event.scanLost", { verdict });
+        const key = event.boxId === null ? "scanLostUnboxed" : "scanLost";
+        return t(`office.codeSearch.event.${key}`, { verdict });
       }
       if (event.verdict === "duplicate" && event.duplicateSource !== null) {
         return t(`office.codeSearch.event.duplicate.${event.duplicateSource}`);
@@ -102,7 +111,11 @@ function eventText(event: OfficeCodeEvent, t: TFunction): string {
       return reason === null ? kind : t("office.codeSearch.event.withReason", { kind, reason });
     }
     case "displaced":
-      return t("office.codeSearch.event.displaced");
+      return t(
+        event.boxId === null
+          ? "office.codeSearch.event.displacedUnboxed"
+          : "office.codeSearch.event.displaced",
+      );
     case "reprint":
       return t("office.codeSearch.event.reprint", {
         outcome: t(`office.codeSearch.reprintOutcome.${event.outcome}`, {
@@ -122,7 +135,7 @@ function eventWhere(event: OfficeCodeEvent, t: TFunction): string {
     parts.push(t("office.codeSearch.event.shift", { number: event.shiftNumber }));
     parts.push(event.deviceName);
   }
-  if (event.type === "removed" || event.type === "displaced") {
+  if (event.type === "removed" || (event.type === "displaced" && event.boxId !== null)) {
     parts.push(
       event.boxSscc === null
         ? t("office.codeSearch.event.openBox")

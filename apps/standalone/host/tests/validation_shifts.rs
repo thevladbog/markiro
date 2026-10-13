@@ -627,3 +627,223 @@ async fn a_unit_of_a_validation_shift_is_found_for_a_warehouse_reprint() {
     assert_eq!(source["shiftId"], floor.shift);
     assert_eq!(source["itemCount"], 1);
 }
+
+/// (ж2): the code search finds the accepted scans of a validation shift,
+/// which put their codes into no box: one that owns its code is `checked`,
+/// one an earlier scan of another shift took is `displaced` (the host's
+/// instant, from the conflict) with no box either; a validation scan that
+/// lost its code on arrival is no placement, as an aggregation scan that
+/// lost it is not. The card tells the same.
+#[tokio::test]
+async fn the_code_search_finds_the_accepted_scans_of_a_validation_shift() {
+    let (admin, setup, floor) = validation_floor().await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let aggregation = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let checked = |n: u32, code: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            &floor.shift,
+            checked_scan(code, &instant(second, 0)),
+        )
+    };
+    let boxed = |n: u32, code: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            &aggregation.shift,
+            ok_scan(code, &box_id(1), &instant(second, 0)),
+        )
+    };
+    let outcomes = |answered: Vec<Value>| -> Vec<String> {
+        answered
+            .iter()
+            .map(|receipt| receipt["outcome"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(
+        outcomes(
+            receipts(
+                &admin.app,
+                &floor.key,
+                &[checked(1, 1, 10), checked(2, 2, 20)]
+            )
+            .await
+        ),
+        ["accepted", "accepted"]
+    );
+    admin.app.clock.advance(time::Duration::minutes(1));
+    let displaced_at = admin.app.state.timestamp();
+    // An earlier scan of code 2 takes it; a later one of code 1 loses.
+    assert_eq!(
+        outcomes(
+            receipts(
+                &admin.app,
+                &aggregation.key,
+                &[boxed(3, 2, 5), boxed(4, 1, 40)]
+            )
+            .await
+        ),
+        ["accepted", "conflict"]
+    );
+    // The validation shift's own later scan of code 1 loses it too.
+    assert_eq!(
+        outcomes(receipts(&admin.app, &floor.key, &[checked(5, 1, 50)]).await),
+        ["conflict"]
+    );
+
+    let search = |query: String| {
+        let admin = &admin;
+        async move {
+            let (status, page) = admin
+                .call("GET", &format!("/v1/office/codes?{query}"), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{query}: {page}");
+            page
+        }
+    };
+    let rows = |page: &Value| -> Vec<(String, String, String, Value, Value)> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                (
+                    item["codeHash"].as_str().unwrap().to_owned(),
+                    item["scannedAt"].as_str().unwrap().to_owned(),
+                    item["state"].as_str().unwrap().to_owned(),
+                    item["boxId"].clone(),
+                    item["leftAt"].clone(),
+                )
+            })
+            .collect()
+    };
+    let page = search(format!("codeHash={}", code_hash(1))).await;
+    assert_eq!(
+        rows(&page),
+        [(
+            code_hash(1),
+            instant(10, 0),
+            "checked".to_owned(),
+            Value::Null,
+            Value::Null
+        )]
+    );
+    let item = &page["items"][0];
+    for field in [
+        "boxSscc",
+        "boxClosedAt",
+        "boxDisassembledAt",
+        "palletId",
+        "palletSscc",
+    ] {
+        assert_eq!(item[field], Value::Null, "{field}");
+    }
+    assert_eq!(
+        (&item["shiftId"], &item["shiftNumber"], &item["deviceId"]),
+        (
+            &json!(floor.shift),
+            &json!(floor.number),
+            &json!(floor.station)
+        )
+    );
+    let code_2 = vec![
+        (
+            code_hash(2),
+            instant(20, 0),
+            "displaced".to_owned(),
+            Value::Null,
+            json!(displaced_at),
+        ),
+        (
+            code_hash(2),
+            instant(5, 0),
+            "open_box".to_owned(),
+            json!(box_id(1)),
+            Value::Null,
+        ),
+    ];
+    assert_eq!(
+        rows(&search(format!("codeHash={}", code_hash(2))).await),
+        code_2
+    );
+    let shift_page = search(format!("shift={}", floor.number)).await;
+    assert_eq!(
+        rows(&shift_page),
+        [
+            code_2[0].clone(),
+            (
+                code_hash(1),
+                instant(10, 0),
+                "checked".to_owned(),
+                Value::Null,
+                Value::Null
+            )
+        ]
+    );
+    assert_eq!(shift_page["total"], 2);
+    for query in ["gtin=04600682000013".to_owned(), "fromMs=0".to_owned()] {
+        let page = search(query.clone()).await;
+        assert_eq!(page["total"], 3, "{query}: {page}");
+    }
+
+    let card = |n: u32| {
+        let admin = &admin;
+        async move {
+            let (status, card) = admin
+                .call("GET", &format!("/v1/office/codes/{}", code_hash(n)), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{card}");
+            card
+        }
+    };
+    let first = card(1).await;
+    assert_eq!(first["ownerScanId"], first["placements"][0]["scanId"]);
+    assert_eq!(first["placements"].as_array().unwrap().len(), 1);
+    let scans: Vec<(Value, Value, Value)> = first["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| {
+            assert_eq!(event["type"], "scan", "{event}");
+            (
+                event["at"].clone(),
+                event["boxId"].clone(),
+                event["placed"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        scans,
+        [
+            (json!(instant(10, 0)), Value::Null, json!(true)),
+            (json!(instant(40, 0)), json!(box_id(1)), json!(false)),
+            (json!(instant(50, 0)), Value::Null, json!(false)),
+        ]
+    );
+    let second = card(2).await;
+    let displaced: Vec<&Value> = second["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["type"] == "displaced")
+        .collect();
+    assert_eq!(
+        displaced,
+        [&json!({ "type": "displaced", "at": displaced_at, "boxId": null, "boxSscc": null })]
+    );
+    let placed: Vec<(Value, Value)> = second["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["type"] == "scan")
+        .map(|event| (event["at"].clone(), event["placed"].clone()))
+        .collect();
+    assert_eq!(
+        placed,
+        [
+            (json!(instant(5, 0)), json!(true)),
+            (json!(instant(20, 0)), json!(true))
+        ]
+    );
+}

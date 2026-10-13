@@ -23,6 +23,7 @@ function fixture<T>(name: string): T {
 
 const PAGE = fixture<OfficeCodePage>("office-code-page.json");
 const CARD = fixture<OfficeCodeCard>("office-code-card.json");
+const VALIDATION_CARD = fixture<OfficeCodeCard>("office-code-card-validation.json");
 const GS = "\u001d";
 const KM = `010460068200001321S000002${GS}93Tail`;
 
@@ -102,6 +103,37 @@ describe("«Поиск кодов» in the office", () => {
     expect(items[5]).toContain(
       "Перепечатка на складе: напечатана и проверена, причина — Повреждена",
     );
+  });
+
+  it("shows a validation shift's code without a box (plan РЕЖ): «—» for the box, no open box", async () => {
+    const value = session();
+    value.api.getCodeCard.mockResolvedValue(VALIDATION_CARD);
+    await openSearch(value);
+    search(KM);
+    await screen.findByText("010460068200001321S000017<GS>93Tail");
+    expect(screen.queryByText(/Открыт, без SSCC/)).toBeNull();
+    expect(screen.getAllByText("Принят без короба").length).toBeGreaterThan(0);
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    const boxColumn = within(table)
+      .getAllByRole("columnheader")
+      .findIndex((cell) => cell.textContent === "Короб");
+    for (const row of rows) {
+      expect(within(row).getAllByRole("cell")[boxColumn]?.textContent).toBe("—");
+    }
+    expect(rows[0]?.textContent).toContain("Забран другим сканом");
+    expect(rows[1]?.textContent).toContain("Принят без короба");
+    const history = screen.getByRole("heading", { name: "История" }).parentElement;
+    if (history === null) throw new Error("no history");
+    const items = within(history)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toContain("Скан: принят");
+    expect(items[0]).not.toContain("в другом коробе");
+    expect(items[2]).toContain("Забран: тот же код раньше принят другим сканом");
+    expect(items[2]).not.toContain("короб");
   });
 
   it("says a code the host never saw is not here, with why", async () => {

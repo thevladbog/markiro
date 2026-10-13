@@ -23,6 +23,8 @@ function fixture(name: string): Record<string, unknown> {
 
 const PAGE = fixture("office-code-page.json");
 const CARD = fixture("office-code-card.json");
+/** A validation shift's code (plan РЕЖ): placements without a box, `checked` and `displaced`. */
+const VALIDATION_CARD = fixture("office-code-card-validation.json");
 const ITEM = (PAGE.items as Record<string, unknown>[])[0] as Record<string, unknown>;
 
 describe("the code search's wire (proto/fixtures/office-code-*.json)", () => {
@@ -30,6 +32,21 @@ describe("the code search's wire (proto/fixtures/office-code-*.json)", () => {
     expect(officeCodePageSchema.parse(PAGE)).toEqual(PAGE);
     expect(officeCodeCardSchema.parse(CARD)).toEqual(CARD);
     expect(officeCodeCardSchema.parse(CARD).canonical).toContain("\u001d");
+  });
+
+  it("parses a validation shift's placements and displacement, which name no box", () => {
+    const card = officeCodeCardSchema.parse(VALIDATION_CARD);
+    expect(card).toEqual(VALIDATION_CARD);
+    expect(card.placements.map((item) => [item.state, item.boxId])).toEqual([
+      ["displaced", null],
+      ["checked", null],
+    ]);
+    expect(card.events.at(-1)).toEqual({
+      type: "displaced",
+      at: "2026-10-13T07:20:00Z",
+      boxId: null,
+      boxSscc: null,
+    });
   });
 
   it("tolerates a field a newer host adds", () => {
