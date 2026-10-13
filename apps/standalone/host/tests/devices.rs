@@ -5,8 +5,8 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_trail, empty, host_revision, login, pair_device, request, seed_office_user,
-    with_device, with_session, Admin,
+    admin, audit_rows, audit_trail, code_hash, empty, host_revision, login, pair_device, request,
+    seed_office_user, with_device, with_session, Admin,
 };
 
 async fn line_ids(admin: &Admin) -> Vec<String> {
@@ -577,4 +577,138 @@ async fn migration_0031_keeps_every_device_and_adds_an_empty_version_seen_at() {
             .await
             .unwrap();
     assert_eq!(row, ("d1".to_owned(), "0.1.0".to_owned(), 2, None));
+}
+
+/// `GET /v1/device` with `key`, naming `version` in the app's header when
+/// given (plan ОБН-1).
+async fn ask_device(admin: &Admin, key: &str, version: Option<&str>) -> StatusCode {
+    let mut builder = with_device(request("GET", "/v1/device"), key);
+    if let Some(version) = version {
+        builder = builder.header(markiro_proto::APP_VERSION_HEADER, version);
+    }
+    admin.app.send(empty(builder)).await.0
+}
+
+/// A device's version, protocol and when they were seen, as the office reads
+/// them.
+async fn version_of(admin: &Admin, id: &str) -> (Value, Value, Value) {
+    let record = device(admin, id).await;
+    (
+        record["appVersion"].clone(),
+        record["protocol"].clone(),
+        record["versionSeenAt"].clone(),
+    )
+}
+
+/// Every device request records the version the app names, once it changes
+/// (plan ОБН-1, spec §10.11.7): no revision, no audit row, a request without
+/// the header or with a version that is no plain text changes nothing, and
+/// the code check, which writes nothing, does not record it either.
+#[tokio::test]
+async fn a_device_request_records_the_version_the_app_names_once_it_changes() {
+    let admin = admin().await;
+    let (station, key) = pair_device(&admin.app, "station").await;
+    let protocol = json!(markiro_proto::PROTOCOL_VERSION);
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+
+    let first = admin.app.state.timestamp();
+    assert_eq!(
+        ask_device(&admin, &key, Some("0.2.0")).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.2.0"), protocol.clone(), json!(first))
+    );
+    // The same version later: nothing is written, the time stays the first.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    assert_eq!(
+        ask_device(&admin, &key, Some("0.2.0")).await,
+        StatusCode::OK
+    );
+    assert_eq!(ask_device(&admin, &key, None).await, StatusCode::OK);
+    let long = "9".repeat(51);
+    assert_eq!(ask_device(&admin, &key, Some(&long)).await, StatusCode::OK);
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.2.0"), protocol.clone(), json!(first))
+    );
+    // The code check answers within 300 ms and never writes.
+    let (status, _) = admin
+        .app
+        .send(empty(
+            with_device(
+                request("GET", &format!("/v1/device/codes/{}", code_hash(1))),
+                &key,
+            )
+            .header(markiro_proto::APP_VERSION_HEADER, "0.4.0"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.2.0"), protocol.clone(), json!(first))
+    );
+    // A new version: recorded with the time it was first heard.
+    let second = admin.app.state.timestamp();
+    assert_eq!(
+        ask_device(&admin, &key, Some("0.3.0-beta.1")).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.3.0-beta.1"), protocol.clone(), json!(second))
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// An office request records the version of the device it comes from: the
+/// office session rides on the device's key (`OfficeContext`).
+#[tokio::test]
+async fn an_office_request_records_the_version_of_its_device() {
+    let admin = admin().await;
+    let (status, _) = admin
+        .app
+        .send(empty(
+            with_session(request("GET", "/v1/office/me"), &admin.key, &admin.token)
+                .header(markiro_proto::APP_VERSION_HEADER, "0.5.0"),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = admin.call("GET", "/v1/office/devices", None).await;
+    let own = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|device| device["appVersion"] == "0.5.0")
+        .cloned();
+    assert!(own.is_some(), "{list}");
+}
+
+/// A device that names the version already stored takes no write lock for
+/// it (plan ОБН-1): a working station asks while a writer holds the lock and
+/// is answered at once, once its `last_seen_at` is not due. Deterministic:
+/// the test clock is advanced and the lock is held.
+#[tokio::test]
+async fn a_device_naming_its_stored_version_does_not_wait_for_a_writer() {
+    let admin = admin().await;
+    let (_, key) = pair_device(&admin.app, "station").await;
+    assert_eq!(
+        ask_device(&admin, &key, Some("0.2.0")).await,
+        StatusCode::OK
+    );
+    admin.app.clock.advance(time::Duration::seconds(30));
+    let holder = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let status = tokio::time::timeout(
+        Duration::from_secs(1),
+        ask_device(&admin, &key, Some("0.2.0")),
+    )
+    .await
+    .expect("the request waited for the writer");
+    holder.commit().await.unwrap();
+    assert_eq!(status, StatusCode::OK);
 }
