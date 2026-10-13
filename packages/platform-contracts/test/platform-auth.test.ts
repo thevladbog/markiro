@@ -18,6 +18,7 @@ const ADMIN_CAPABILITIES = [
   "catalog.read",
   "catalog.write",
   "offlineGrants.activate",
+  "standaloneLicenses.manage",
   "services.read",
   "services.write",
   "billing.read",
@@ -266,5 +267,13 @@ describe("offline grant activation capabilities", () => {
     expect(platformCapabilitiesForRole.platform_admin).toContain("offlineGrants.activate");
     expect(platformCapabilitiesForRole.support).not.toContain("offlineGrants.activate");
     expect(platformCapabilitiesForRole.accountant).not.toContain("offlineGrants.activate");
+  });
+});
+
+describe("standalone license capabilities (plan ЛЦ-0)", () => {
+  it("lets only platform administrators register standalone sites and issue offline licenses", () => {
+    expect(platformCapabilitiesForRole.platform_admin).toContain("standaloneLicenses.manage");
+    expect(platformCapabilitiesForRole.support).not.toContain("standaloneLicenses.manage");
+    expect(platformCapabilitiesForRole.accountant).not.toContain("standaloneLicenses.manage");
   });
 });
