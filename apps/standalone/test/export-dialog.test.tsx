@@ -608,6 +608,58 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     expect(region?.querySelectorAll('[role="presentation"]').length).toBeGreaterThan(0);
   });
 
+  it("warns of the shift's unreviewed conflicts at every shift format and still forms and records (plan КНФ, ПР-12)", async () => {
+    const files = fakeFiles();
+    const session = await openExport(
+      CLOSED_PALLETS,
+      warnedExportRows(),
+      files,
+      undefined,
+      [],
+      (prepared) =>
+        prepared.api.listConflicts.mockResolvedValue({
+          items: [],
+          page: 1,
+          pageCount: 1,
+          total: 2,
+        }),
+    );
+    expect(session.api.listConflicts).toHaveBeenCalledWith(TOKEN, {
+      shiftId: CLOSED_PALLETS.id,
+      reviewed: false,
+      page: 1,
+    });
+    const warning =
+      "Неразобранных конфликтов кодов в смене: 2. Короб, где проиграл скан, может отличаться от выгруженного. Проверьте их в разделе «Конфликты»; выгрузку это не запрещает.";
+    expect(await within(dialog()).findByText(warning)).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("radio", { name: "[TXT][Паллеты] Отчет смены" }));
+    expect(within(dialog()).getByText(warning)).toBeTruthy();
+    const button = within(dialog()).getByRole("button", { name: "Сформировать и сохранить" });
+    expect(button.hasAttribute("disabled")).toBe(false);
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    expect(files.save).toHaveBeenCalledTimes(1);
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the conflicts' warning out when their list does not load, and forms anyway", async () => {
+    const files = fakeFiles();
+    const session = await openExport(
+      CLOSED_PALLETS,
+      warnedExportRows(),
+      files,
+      undefined,
+      [],
+      (prepared) => prepared.api.listConflicts.mockRejectedValue(new Error("unreachable")),
+    );
+    await waitFor(() => expect(session.api.listConflicts).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(within(dialog()).queryByText(/Неразобранных конфликтов/)).toBeNull();
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the dialog whole when the host's list of pallets does not load", async () => {
     const files = fakeFiles();
     const session = await openExport(
@@ -664,6 +716,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
       disassembled_pallets: true,
       late_boxes: true,
       pallet_count_mismatch: true,
+      unreviewed_conflicts: true,
     };
     const files: Record<OfficeFilesCode, true> = {
       invalid_request: true,

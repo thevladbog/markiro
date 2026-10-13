@@ -60,6 +60,10 @@ export const officeKeys = {
   shiftPallets: (id: string) => ["office", "shift-pallets", id],
   /** A shift's boxes for its card (`GET /v1/office/shifts/{id}/boxes`, plan О-Ф); the pallets are `shiftPallets`. */
   shiftBoxes: (id: string) => ["office", "shift-boxes", id],
+  /** A shift's box and pallet exceptions (`GET /v1/office/shifts/{id}/exceptions`, plan КНФ). */
+  shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
+  /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
+  shiftRejections: (id: string) => ["office", "shift-rejections", id],
   /** What a box's and a shift's pallets' forms print (`…/report-data`, plan О-Ф). */
   boxReport: (id: string) => ["office", "box-report", id],
   shiftPalletReport: (id: string) => ["office", "shift-pallet-report", id],
