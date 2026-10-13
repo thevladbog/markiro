@@ -13,6 +13,8 @@ import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.j
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import { activeFirstByName } from "../records.js";
+import { recordLabel } from "../shifts/shift-list.js";
 import { sheetChoices } from "../sheet-choice.js";
 import { templateOptions } from "../template-options.js";
 import {
@@ -22,6 +24,7 @@ import {
   PRODUCT_STALE_FIELDS,
   productFields,
   productFieldsSchema,
+  showsEgais,
   staysDraft,
   toProductInput,
   type GtinOwner,
@@ -60,6 +63,10 @@ export interface ProductDialogProps {
  * the pallet template, on a par with it (a pallet prints one or the other, by
  * the station printer's paper): the enabled sheets, a held one that is off or
  * gone kept as a marked choice, and left as it is while the sheets do not load.
+ * The EGAIS code shows only for ЧЗ group 15 (plan ТОВ) and is sent only then;
+ * the default counterparty offers those in use, keeps one the product names
+ * that is archived (or missing) as a marked choice, and is left as it is while
+ * the counterparties do not load.
  */
 export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDialogProps) {
   const { t } = useTranslation();
@@ -139,6 +146,22 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     : templates.isError
       ? t("office.products.templatesUnavailable")
       : t("office.products.templatesLoading");
+
+  // Those in use by name; the product's own and the chosen one stay choices, marked.
+  const counterpartyOptions: { value: string; label: string }[] = [
+    { value: "", label: t("office.products.fields.counterpartyNone") },
+    ...activeFirstByName(counterparties.data ?? [])
+      .filter((each) => !each.archived)
+      .map((each) => ({ value: each.id, label: each.name })),
+  ];
+  for (const id of [product?.defaultCounterpartyId ?? "", watch("defaultCounterpartyId")]) {
+    if (id !== "" && !counterpartyOptions.some((option) => option.value === id)) {
+      counterpartyOptions.push({
+        value: id,
+        label: recordLabel("counterparty", counterparties.data, id, t),
+      });
+    }
+  }
 
   const sheetsHint = sheets.isSuccess
     ? t("office.products.fields.palletSheetHint")
@@ -220,6 +243,16 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           />
         )}
       />
+      {showsEgais(group) && (
+        <Input
+          label={t("office.products.fields.egaisCode")}
+          hint={t("office.products.fields.egaisHint")}
+          inputMode="numeric"
+          mono
+          {...fieldError(errors.egaisCode?.message)}
+          {...register("egaisCode")}
+        />
+      )}
       <Input
         label={t("office.products.fields.boxCapacity")}
         hint={t("office.products.fields.optional")}
@@ -293,6 +326,26 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
             value={field.value}
             onValueChange={field.onChange}
             disabled={!sheets.isSuccess}
+          />
+        )}
+      />
+      <Controller
+        control={control}
+        name="defaultCounterpartyId"
+        render={({ field }) => (
+          <Select
+            native
+            label={t("office.products.fields.counterparty")}
+            hint={
+              counterparties.isError
+                ? t("office.products.fields.counterpartiesUnavailable")
+                : t("office.products.fields.counterpartyHint")
+            }
+            options={counterpartyOptions}
+            value={field.value}
+            onValueChange={field.onChange}
+            disabled={!counterparties.isSuccess}
+            {...fieldError(errors.defaultCounterpartyId?.message)}
           />
         )}
       />

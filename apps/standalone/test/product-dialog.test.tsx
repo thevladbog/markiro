@@ -880,3 +880,192 @@ describe("office product dialog: default templates", () => {
     });
   });
 });
+
+describe("office product dialog: EGAIS code and default counterparty (plan ТОВ)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  const BEER_GROUP: ProductGroup = {
+    code: 15,
+    alias: "beer",
+    name: "Пиво, напитки на основе пива",
+  };
+  const EGAIS = "0150320000001234567";
+  const BEER: OfficeProduct = {
+    ...MILK,
+    id: "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f",
+    gtin14: "04607001234562",
+    name: "Пиво светлое 0,5 л",
+    printName: null,
+    chzProductGroupCode: 15,
+    defaultBoxTemplateId: null,
+    egaisCode: EGAIS,
+    defaultCounterpartyId: NORTH.id,
+    rev: 70,
+  };
+
+  function beerSession(): FakeOfficeSession {
+    const fake = session();
+    fake.api.listProductGroups.mockResolvedValue([...GROUPS, BEER_GROUP]);
+    fake.api.listProducts.mockResolvedValue([MILK, BEER]);
+    return fake;
+  }
+
+  async function openEdit(fake: FakeOfficeSession, name: string): Promise<void> {
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить товар «${name}»` }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("disabled", false),
+    );
+  }
+
+  it("shows «Код ЕГАИС» only for group 15, and sends the trimmed code", async () => {
+    const fake = beerSession();
+    fake.api.createProduct.mockResolvedValue(BEER);
+    await openCreate(fake);
+    expect(screen.queryByLabelText("Код ЕГАИС")).toBeNull();
+    type("Товарная группа", "15");
+    const field = screen.getByLabelText("Код ЕГАИС");
+    expect(
+      screen.getByText("Печатается на этикетке короба и паллеты. Обычно 19 цифр."),
+    ).toBeTruthy();
+    type("Код ЕГАИС", ` ${EGAIS} `);
+    type("GTIN", "4607001234562");
+    type("Название", "Пиво светлое 0,5 л");
+    expect(field.tagName).toBe("INPUT");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(fake.api.createProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.createProduct.mock.calls[0]?.[1]).toMatchObject({
+      chzProductGroupCode: 15,
+      egaisCode: EGAIS,
+      defaultCounterpartyId: null,
+    });
+  });
+
+  it("hides the code when the group moves away from 15 and sends none, and refuses a code of 65 characters", async () => {
+    const fake = beerSession();
+    fake.api.updateProduct.mockResolvedValue({ ...BEER, chzProductGroupCode: 8, egaisCode: null });
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    expect(screen.getByLabelText("Код ЕГАИС")).toHaveProperty("value", EGAIS);
+    type("Код ЕГАИС", "1".repeat(65));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Код ЕГАИС — не длиннее 64 символов")).toBeTruthy();
+    expect(fake.api.updateProduct).not.toHaveBeenCalled();
+    type("Код ЕГАИС", EGAIS);
+    type("Товарная группа", "8");
+    expect(screen.queryByLabelText("Код ЕГАИС")).toBeNull();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      chzProductGroupCode: 8,
+      egaisCode: null,
+      defaultCounterpartyId: NORTH.id,
+    });
+  });
+
+  it("keeps the code and the counterparty of an edit that changes something else", async () => {
+    const fake = beerSession();
+    fake.api.updateProduct.mockResolvedValue({ ...BEER, name: "Пиво", rev: 71 });
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    type("Название", "Пиво");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      egaisCode: EGAIS,
+      defaultCounterpartyId: NORTH.id,
+    });
+  });
+
+  it("puts the host's refusal of the code or the counterparty under its field", async () => {
+    const fake = beerSession();
+    fake.api.updateProduct.mockRejectedValueOnce(VALIDATION("egaisCode"));
+    fake.api.updateProduct.mockRejectedValueOnce(VALIDATION("defaultCounterpartyId"));
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    type("Название", "Пиво");
+    for (const label of ["Код ЕГАИС", "Контрагент по умолчанию"]) {
+      fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+      await waitFor(() => {
+        const described = screen.getByLabelText(label).getAttribute("aria-describedby");
+        expect(document.getElementById(described ?? "")?.textContent).toBe(
+          "Хост не принял это значение. Проверьте его.",
+        );
+      });
+    }
+  });
+
+  it("offers the counterparties in use by name and none, keeps an archived one the product names, and sends a choice", async () => {
+    const fake = beerSession();
+    const SOUTH: CounterpartyRecord = {
+      ...NORTH,
+      id: "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6",
+      name: "ООО «Юг»",
+      rev: 13,
+    };
+    fake.api.listCounterparties.mockResolvedValue([SOUTH, NORTH, OLD]);
+    fake.api.listProducts.mockResolvedValue([MILK, { ...BEER, defaultCounterpartyId: OLD.id }]);
+    fake.api.updateProduct.mockResolvedValue({ ...BEER, rev: 71 });
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    expect(choices("Контрагент по умолчанию")).toEqual([
+      "Не выбран",
+      "ООО «Северный берег»",
+      "ООО «Юг»",
+      "Альфа (в архиве)",
+    ]);
+    expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("value", OLD.id);
+    expect(
+      screen.getByText("Подставляется в смену этого товара, если контрагент не выбран"),
+    ).toBeTruthy();
+    type("Название", "Пиво");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
+    // The archived one is not lost on a save that does not touch it.
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultCounterpartyId: OLD.id,
+    });
+    // The dialog closed on the save; another one chooses another counterparty.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Пиво светлое 0,5 л»" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("disabled", false),
+    );
+    type("Контрагент по умолчанию", SOUTH.id);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(2));
+    expect(fake.api.updateProduct.mock.calls[1]?.[2]).toMatchObject({
+      defaultCounterpartyId: SOUTH.id,
+    });
+  });
+
+  it("leaves the counterparty as it is while the list does not load", async () => {
+    const fake = beerSession();
+    fake.api.listCounterparties.mockRejectedValue(new Error("offline"));
+    fake.api.updateProduct.mockResolvedValue({ ...BEER, rev: 71 });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Пиво светлое 0,5 л»" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
+    );
+    expect(screen.getByLabelText("Контрагент по умолчанию")).toHaveProperty("disabled", true);
+    type("Название", "Пиво");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultCounterpartyId: NORTH.id,
+    });
+  });
+
+  it("reaches both fields with the keyboard, each with its label", async () => {
+    const fake = beerSession();
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    const code = screen.getByLabelText("Код ЕГАИС");
+    const counterparty = screen.getByLabelText("Контрагент по умолчанию");
+    const tabbable = [...dialog().querySelectorAll<HTMLElement>("input, select, button")].filter(
+      (element) => !element.hasAttribute("disabled") && element.tabIndex >= 0,
+    );
+    expect(tabbable).toContain(code);
+    expect(tabbable).toContain(counterparty);
+    act(() => code.focus());
+    expect(document.activeElement).toBe(code);
+  });
+});

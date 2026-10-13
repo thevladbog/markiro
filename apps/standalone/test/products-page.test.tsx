@@ -163,6 +163,14 @@ describe("office products", () => {
     expect(screen.getAllByText(/^Для печати:/)).toHaveLength(1);
   });
 
+  it("says in words which products have a photo (plan ТОВ)", async () => {
+    const photo = "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd";
+    await openProducts(session([{ ...MILK, photoChecksum: photo }, WATER_2]));
+    expect(within(rowOf(MILK.name)).getByText("Есть фото")).toBeTruthy();
+    expect(within(rowOf(WATER_2.name)).queryByText("Есть фото")).toBeNull();
+    expect(screen.getAllByText("Есть фото")).toHaveLength(1);
+  });
+
   it("finds products by name, print name or GTIN, without case and with spaces in a GTIN", async () => {
     await openProducts(session());
     const search = screen.getByLabelText("Поиск");

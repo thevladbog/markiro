@@ -1754,7 +1754,7 @@ describe("catalog shapes", () => {
       defaultCounterpartyId: null,
     });
     expect(body).toStrictEqual({
-      gtin14: "04607001234560",
+      gtin14: "04607001234562",
       name: "Пиво светлое фильтрованное 0,5 л",
       printName: "Пиво светлое 0,5",
       chzProductGroupCode: 15,

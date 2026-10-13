@@ -20,6 +20,7 @@ import {
   PALLET,
   pickDate,
   shiftsSession,
+  SOUTH_ARCHIVED,
   stockSheets,
   WATER,
 } from "./support/shifts.js";
@@ -1225,5 +1226,86 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
       `${PORTRAIT.name} · ${PORTRAIT.id.slice(0, 8)}`,
       `${PORTRAIT.name} · ${LANDSCAPE.id.slice(0, 8)}`,
     ]);
+  });
+});
+
+describe("office shifts: the product's default counterparty (plan ТОВ)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const EAST = {
+    ...NORTH,
+    id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    name: "ООО «Восток»",
+    rev: 14,
+  };
+  const NORTH_MILK = { ...MILK, defaultCounterpartyId: NORTH.id };
+
+  function session(products = [NORTH_MILK, WATER]) {
+    const fake = shiftsSession();
+    fake.api.listProducts.mockResolvedValue(products);
+    fake.api.listCounterparties.mockResolvedValue([NORTH, EAST, SOUTH_ARCHIVED]);
+    return fake;
+  }
+
+  it("a product chosen with no counterparty yet offers its own", async () => {
+    await openCreate(session());
+    expect(valueOf("Контрагент")).toBe("");
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
+  it("a counterparty the person chose stays", async () => {
+    await openCreate(session());
+    set("Контрагент", EAST.id);
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(EAST.id);
+  });
+
+  it("an archived default is not offered", async () => {
+    await openCreate(session([{ ...MILK, defaultCounterpartyId: SOUTH_ARCHIVED.id }, WATER]));
+    set("Товар", MILK.id);
+    expect(valueOf("Контрагент")).toBe("");
+  });
+
+  it("a counterparty the product offered follows the product, until the person changes it", async () => {
+    const eastWater = {
+      ...WATER,
+      id: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      name: "Вода «Восток»",
+      defaultCounterpartyId: EAST.id,
+    };
+    await openCreate(session([NORTH_MILK, eastWater, WATER]));
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+    set("Товар", eastWater.id);
+    expect(valueOf("Контрагент")).toBe(EAST.id);
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+    // A product without one takes the offered one away again.
+    set("Товар", WATER.id);
+    expect(valueOf("Контрагент")).toBe("");
+    set("Товар", eastWater.id);
+    set("Контрагент", NORTH.id);
+    set("Товар", NORTH_MILK.id);
+    set("Товар", eastWater.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
+  it("is sent with the plan", async () => {
+    const fake = session();
+    fake.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(fake);
+    set("Товар", NORTH_MILK.id);
+    set("Линия", LINE_2.id);
+    submit();
+    await waitFor(() => expect(fake.api.createShift).toHaveBeenCalledTimes(1));
+    expect(fake.api.createShift.mock.calls[0]?.[1]).toMatchObject({ counterpartyId: NORTH.id });
   });
 });
