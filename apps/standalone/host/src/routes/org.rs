@@ -128,5 +128,7 @@ pub async fn put_org(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // Another INN may no longer be the license's (plan ЛЦ-2, spec §4.9).
+    state.license.refresh_after_write(&state).await;
     Ok(Json(updated))
 }

@@ -471,5 +471,8 @@ pub async fn import(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // The import never writes the organization's INN; the license is looked
+    // at again all the same (plan ЛЦ-2, spec §4.9).
+    state.license.refresh_after_write(&state).await;
     Ok(Json(summary))
 }

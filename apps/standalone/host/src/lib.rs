@@ -83,6 +83,8 @@ pub struct RunningHost {
     task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// The backup worker (plan РК); it ends with `stopping`.
     backups: tokio::task::JoinHandle<()>,
+    /// The license's minute look (plan ЛЦ-2); it ends with `stopping`.
+    license: tokio::task::JoinHandle<()>,
     pool: SqlitePool,
     _lock: std::fs::File,
 }
@@ -108,6 +110,14 @@ impl RunningHost {
         {
             tracing::warn!("the backup worker did not stop in time; aborting it");
             backups.abort();
+        }
+        let mut license = self.license;
+        if tokio::time::timeout(SHUTDOWN_DEADLINE, &mut license)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the license look did not stop in time; aborting it");
+            license.abort();
         }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
@@ -143,6 +153,10 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         .with_backups(backups.clone());
     let stopping = state.stopping.clone();
     let backup_worker = backup::worker::spawn(backups, clock, stopping.subscribe());
+    // The license (plan ЛЦ-2): the trial of a site from before it, the state
+    // and the INN at the start, then a look every minute.
+    state.license.startup(&state).await;
+    let license_ticker = license::spawn_ticker(state.clone(), stopping.subscribe());
     let mut stopped = state.stopping.subscribe();
     let task = tokio::spawn(server::serve(listener, state, async move {
         let _ = stopped.wait_for(|stopping| *stopping).await;
@@ -161,6 +175,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         stopping,
         task,
         backups: backup_worker,
+        license: license_ticker,
         pool,
         _lock: lock,
     })

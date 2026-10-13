@@ -261,6 +261,9 @@ pub async fn bootstrap(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // The license's first look: the state later looks compare with (plan
+    // ЛЦ-2, Д7), written without a row or a revision.
+    state.license.refresh_after_write(&state).await;
 
     Ok(Json(BootstrapResponse {
         session: OfficeSession {

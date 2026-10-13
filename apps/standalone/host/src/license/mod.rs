@@ -18,10 +18,41 @@ use markiro_proto::trust::Keyset;
 use sqlx::SqliteConnection;
 use time::OffsetDateTime;
 
+use serde_json::json;
+
 use self::state::{Evaluation, Inputs, Phase, StoredLicense};
+use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::clock::format_timestamp;
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::ApiError;
 use crate::server::AppState;
+
+/// How often the host looks at the state: a phase that ends by time (the
+/// grace at midnight) gets its row and wakes the stations within a minute.
+pub const TICK: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The minute's look, until the host stops (`stopping` turns true). A look
+/// in progress finishes first: it is one short write.
+pub fn spawn_ticker(
+    app: AppState,
+    mut stopping: tokio::sync::watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(TICK);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // The first tick is at once: the start looked already.
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                // The `Ref` the wait answers is not `Send`: drop it inside.
+                () = async {
+                    let _ = stopping.wait_for(|stopping| *stopping).await;
+                } => break,
+                _ = interval.tick() => app.license.refresh_after_write(&app).await,
+            }
+        }
+    })
+}
 
 /// `Number.MAX_SAFE_INTEGER`: the latest instant the file, the wire and the
 /// domain count, in ms.
@@ -145,6 +176,125 @@ impl LicenseService {
             clock_row,
             org_inn,
         })
+    }
+
+    /// Write what changed since the last look (spec §8.2): a new state with
+    /// one `license.state` row of the host and one revision, so open streams
+    /// wake and stations read `GET /v1/device` again; the first look sets
+    /// the state to compare with and writes no row and no revision (plan
+    /// Д7); the time's mark at most once an hour and with every change; when
+    /// a file of another host was first seen. Only the state's word is
+    /// compared: its `since` may move (a trial before the wizard counts from
+    /// now) without being a change.
+    pub async fn refresh(&self, app: &AppState) -> Result<(), sqlx::Error> {
+        let mut tx = begin_write(&app.pool).await?;
+        let snapshot = self.snapshot(app, &mut tx).await?;
+        let now = snapshot.reading.effective;
+        let evaluation = &snapshot.evaluation;
+        let phase = evaluation.phase.as_str();
+        let row = &snapshot.clock_row;
+        let mut wrote = false;
+        if evaluation.wrong_host_since != row.wrong_host_since {
+            store::set_wrong_host_since(&mut tx, evaluation.wrong_host_since).await?;
+            wrote = true;
+        }
+        match row.last_state.as_deref() {
+            None => {
+                store::set_state(&mut tx, phase, now).await?;
+                tx.commit().await?;
+            }
+            Some(last) if last == phase => {
+                let due = row
+                    .max_seen_at
+                    .is_none_or(|seen| now.saturating_sub(seen) >= clock::PERSIST_EVERY_MS);
+                if due {
+                    store::persist_mark(&mut tx, now).await?;
+                }
+                if due || wrote {
+                    tx.commit().await?;
+                }
+            }
+            Some(last) => {
+                let rev = next_revision(&mut tx).await?;
+                store::set_state(&mut tx, phase, now).await?;
+                let license_id = evaluation
+                    .license
+                    .as_ref()
+                    .map(|license| license.license_id.as_str());
+                audit::record(
+                    &mut tx,
+                    &app.timestamp(),
+                    Entry {
+                        actor: Actor::System,
+                        action: actions::LICENSE_STATE,
+                        target_type: Some("license"),
+                        target_id: license_id,
+                        outcome: Outcome::Ok,
+                        details: json!({
+                            "from": last,
+                            "to": phase,
+                            "licenseId": license_id,
+                            "effectiveAt": ms_text(now),
+                            "clockBehindDays": snapshot.reading.behind_days(),
+                            "clockAhead": snapshot.reading.ahead,
+                        }),
+                    },
+                )
+                .await?;
+                commit_with_revision(tx, &app.revisions, rev).await?;
+                tracing::info!(from = last, to = phase, "license state changed");
+            }
+        }
+        Ok(())
+    }
+
+    /// [`Self::refresh`] after a write that may change the state (a file,
+    /// the organization's INN, an import, the wizard) and for the minute's
+    /// look: its failure is logged and left to the next look, never to the
+    /// write that is done.
+    pub async fn refresh_after_write(&self, app: &AppState) {
+        if let Err(error) = self.refresh(app).await {
+            tracing::warn!(%error, "the license state was not refreshed");
+        }
+    }
+
+    /// At the service's start (spec §3.4, §4.9): a site whose wizard ran
+    /// before the build with the license starts its trial now (with the
+    /// organization's INN); then the state, with the INN, is looked at and
+    /// logged by its word and the file's id only.
+    pub async fn startup(&self, app: &AppState) {
+        if let Err(error) = self.start_inner(app).await {
+            tracing::warn!(%error, "the license could not be checked at start");
+        }
+    }
+
+    async fn start_inner(&self, app: &AppState) -> Result<(), sqlx::Error> {
+        let at = to_ms(app.now());
+        let mut tx = begin_write(&app.pool).await?;
+        sqlx::query(
+            "UPDATE license_clock SET trial_started_at = ?, \
+             trial_inn = (SELECT inn FROM org_profile WHERE id = 1) \
+             WHERE id = 1 AND trial_started_at IS NULL \
+             AND (SELECT initialized_at FROM site WHERE id = 1) IS NOT NULL",
+        )
+        .bind(at)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        self.refresh(app).await?;
+        let mut tx = app.pool.begin().await?;
+        let snapshot = self.snapshot(app, &mut tx).await?;
+        tx.rollback().await?;
+        tracing::info!(
+            state = snapshot.evaluation.phase.as_str(),
+            license_id = snapshot
+                .evaluation
+                .license
+                .as_ref()
+                .map_or("none", |license| license.license_id.as_str()),
+            "license state"
+        );
+        Ok(())
     }
 
     /// `GET /v1/office/license` as of now, read in one transaction.

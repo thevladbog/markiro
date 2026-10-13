@@ -256,3 +256,8 @@ pub async fn pairing_code(admin: &Admin) -> Value {
     assert_eq!(status, StatusCode::OK, "{code}");
     code
 }
+
+/// What the minute's look does (`LicenseService::refresh`).
+pub async fn refresh(app: &TestApp) {
+    app.state.license.refresh(&app.state).await.unwrap();
+}

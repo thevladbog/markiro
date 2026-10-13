@@ -221,7 +221,8 @@ async fn an_accepted_file_is_kept_with_one_row_and_a_revision() {
         (json!("active"), json!(1))
     );
     assert!(body.get("warnings").is_none(), "{body}");
-    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    // The load takes one revision, the state's change (trial → active) another.
+    assert_eq!(host_revision(&admin.app).await, rev + 2);
     assert_eq!(
         audit_trail(&admin.app, actions::LICENSE_LOAD).await,
         [admin.row(

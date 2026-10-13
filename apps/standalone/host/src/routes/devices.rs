@@ -45,8 +45,17 @@ pub async fn device_info(
     State(state): State<AppState>,
     device: AuthDevice,
 ) -> Result<Json<DeviceInfo>, ApiError> {
-    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
-    read_info(&mut conn, &device).await.map(Json)
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let mut info = read_info(&mut tx, &device).await?;
+    // The site's license as the host computes it (plan ЛЦ-2). It only
+    // informs, so a license the host cannot read costs the device nothing:
+    // the record goes without the line, and the reason is logged.
+    match state.license.snapshot(&state, &mut tx).await {
+        Ok(snapshot) => info.license = Some(crate::license::routes::device_license(&snapshot)),
+        Err(error) => tracing::warn!(%error, "the license was not read for a device"),
+    }
+    tx.rollback().await.map_err(ApiError::internal)?;
+    Ok(Json(info))
 }
 
 /// `line_id` names an existing, active line: `validation_failed` on

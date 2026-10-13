@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::codes;
 use markiro_proto::license::{
-    plans, LicenseBinding, LicenseCustomer, LicenseEmergency, LicenseFeatures, LicenseFlags,
-    LicenseLoadRequest, LicensePreview, LicenseQuotas, LicenseSummary, LicenseTerms, OfficeLicense,
-    QuotaUse, TrialInfo,
+    plans, DeviceLicense, LicenseBinding, LicenseCustomer, LicenseEmergency, LicenseFeatures,
+    LicenseFlags, LicenseLoadRequest, LicensePreview, LicenseQuotas, LicenseSummary, LicenseTerms,
+    OfficeLicense, QuotaUse, TrialInfo,
 };
 use markiro_proto::trust::{
     ActivationLicense, ActivationOrganization, ActivationRequest, ActivationTrial, ActivationUsage,
@@ -113,6 +113,19 @@ pub fn office_license(app: &AppState, snapshot: &Snapshot, usage: &Usage) -> Off
             until: evaluation.emergency_until.map(ms_text),
         },
         warnings: Vec::new(),
+    }
+}
+
+/// The license line of `GET /v1/device` (plan ЛЦ-2): the state as the host
+/// computes it, so a station explains a refusal before it asks. The line
+/// only informs: whatever the state, the device works on (soft enforcement).
+pub fn device_license(snapshot: &Snapshot) -> DeviceLicense {
+    let evaluation = &snapshot.evaluation;
+    DeviceLicense {
+        state: evaluation.phase.as_str().to_owned(),
+        since: ms_text(evaluation.since),
+        phase_ends_at: evaluation.phase_ends_at.map(ms_text),
+        emergency_until: evaluation.emergency_until.map(ms_text),
     }
 }
 
@@ -510,6 +523,7 @@ pub async fn load_license(
         sequence = license.sequence,
         "a license file was loaded"
     );
+    app.license.refresh_after_write(&app).await;
     let mut answer = app.license.office_license_now(&app).await?;
     answer.warnings = warnings;
     Ok(Json(answer))
