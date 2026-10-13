@@ -516,3 +516,65 @@ async fn an_unknown_device_is_not_found_once_the_body_is_valid() {
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
 }
+
+/// The office reads a device's protocol and when its version was last
+/// reported (plan ОБН-1): a device paired now spoke protocol 3 at pairing
+/// and has reported nothing since.
+#[tokio::test]
+async fn the_office_reads_a_devices_protocol_and_when_its_version_was_seen() {
+    let admin = admin().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    let record = device(&admin, &station).await;
+    assert_eq!(
+        (
+            record["appVersion"].clone(),
+            record["protocol"].clone(),
+            record["versionSeenAt"].clone()
+        ),
+        (
+            json!("0.1.0"),
+            json!(markiro_proto::PROTOCOL_VERSION),
+            Value::Null
+        )
+    );
+}
+
+/// `0031` adds `version_seen_at` to the devices a host already has: each
+/// keeps its row, and the column stays empty until the device reports.
+#[tokio::test]
+async fn migration_0031_keeps_every_device_and_adds_an_empty_version_seen_at() {
+    use sqlx::migrate::Migrator;
+    use sqlx::{Connection, SqliteConnection};
+
+    let before = Migrator {
+        migrations: markiro_host::db::MIGRATOR
+            .iter()
+            .filter(|migration| migration.version != 31)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    };
+    assert_eq!(
+        before.iter().count() + 1,
+        markiro_host::db::MIGRATOR.iter().count()
+    );
+    let mut old = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+    before.run(&mut old).await.unwrap();
+    sqlx::query(
+        "INSERT INTO devices (id, kind, name, key_hash, app_version, protocol, paired_at) \
+         VALUES ('d1', 'station', 'Станция', 'hash-1', '0.1.0', 2, '2026-10-01T08:00:00Z')",
+    )
+    .execute(&mut old)
+    .await
+    .unwrap();
+
+    markiro_host::db::MIGRATOR.run(&mut old).await.unwrap();
+
+    let row: (String, String, i64, Option<String>) =
+        sqlx::query_as("SELECT id, app_version, protocol, version_seen_at FROM devices")
+            .fetch_one(&mut old)
+            .await
+            .unwrap();
+    assert_eq!(row, ("d1".to_owned(), "0.1.0".to_owned(), 2, None));
+}

@@ -298,6 +298,18 @@ fn device_line_and_record_fixtures_round_trip() {
     let record: DeviceRecord = round_trip("device-record.json");
     assert_eq!(record.kind, DeviceKind::Station);
     assert_eq!(record.revoked_at, None);
+    // Plan ОБН-1: what the device reported on its last request.
+    assert_eq!(
+        (record.protocol, record.version_seen_at.as_deref()),
+        (3, Some("2026-09-26T10:40:00Z"))
+    );
+}
+
+/// The header every request of the shell carries (plan ОБН-1): one name for
+/// the shell, which sends it, and the host, which records it.
+#[test]
+fn the_app_version_header_has_one_name() {
+    assert_eq!(markiro_proto::APP_VERSION_HEADER, "x-markiro-app-version");
 }
 
 #[test]
