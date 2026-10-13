@@ -1,8 +1,10 @@
 import { Navigate, type RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
+import { CodeSearchPage } from "./codes/CodeSearchPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
+import { AboutPage } from "./info/AboutPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
 import { OfficeOverview } from "./OfficeOverview.js";
@@ -38,6 +40,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
+      { path: "codes", element: <CodeSearchPage /> },
       {
         path: "operators",
         element: (
@@ -80,6 +83,7 @@ export const officeRoutes: RouteObject[] = [
         ),
       },
       { path: "backups", element: <BackupsPage /> },
+      { path: "about", element: <AboutPage /> },
       {
         path: "import",
         element: (

@@ -1,0 +1,501 @@
+/*
+ * The floor's sign-in, forked from the cloud station's approved screen
+ * (`apps/station/src/station.css`: `.operator-login*`, `.badge-scan-illustration*`,
+ * `.operator-name-search*`, `.station-brand`). Class names, spacing, sizes and
+ * hierarchy are the cloud's; the differences are the standalone's own:
+ * the status bar sits above the screen (so the screen fills what is left, not
+ * the whole viewport), «Офис» and the scanner chip share the header's right
+ * column (where the cloud's window chrome and its fixed chip sit), and two
+ * small-panel steps keep the keypad whole down to 1024×600.
+ * Colours, type and spacing come from @markiro/ui tokens only.
+ */
+
+.operator-login {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-4);
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: auto 64px minmax(0, 1fr) auto;
+  background: var(--surface-page);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+}
+
+.operator-login__header {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.operator-login__brand {
+  overflow: hidden;
+  align-self: start;
+  justify-self: start;
+}
+
+.station-brand__logo {
+  display: block;
+  width: auto;
+  height: 48px;
+}
+
+.operator-login__prompt {
+  min-width: 0;
+  max-width: 640px;
+  align-self: center;
+  text-align: center;
+}
+
+.operator-login__prompt h1,
+.operator-login__prompt p,
+.operator-name-search__hint {
+  margin: 0;
+}
+
+.operator-login__prompt h1 {
+  font: var(--floor-title);
+}
+
+.operator-login__prompt p {
+  margin-top: var(--sp-2);
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+/* «Офис» and the scanner chip: the same place on every step. */
+.operator-login__aside {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.operator-login__scanner-status {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  max-width: 300px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-1);
+  color: var(--fg-1);
+  font: var(--text-body);
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.operator-login__scanner-status[data-tone="warn"] {
+  border-color: var(--warn-border);
+}
+
+.operator-login__scanner-status[data-tone="error"] {
+  border-color: var(--err-border);
+}
+
+.operator-login__scanner-status-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  color: var(--fg-on-ok-solid);
+  font: var(--text-h3);
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.operator-login__scanner-status[data-tone="warn"] .operator-login__scanner-status-icon {
+  background: var(--warn-solid);
+  color: var(--fg-on-warn-solid);
+}
+
+.operator-login__scanner-status[data-tone="error"] .operator-login__scanner-status-icon {
+  background: var(--err-solid);
+  color: var(--fg-on-err-solid);
+}
+
+.operator-login__message {
+  display: grid;
+  width: min(720px, 100%);
+  min-width: 0;
+  min-height: 64px;
+  margin-inline: auto;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.operator-login__message p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.operator-login__body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: 64px minmax(0, 1fr);
+  justify-items: center;
+}
+
+/*
+ * On purpose unlike the cloud: the readout and the keypad stay together and
+ * the pair is centred, instead of the keypad floating in the middle of the
+ * free height with a dead gap under the readout (the owner's «лишние отступы»).
+ */
+.operator-login__body--pad {
+  grid-template-rows: 64px auto;
+  align-content: center;
+}
+
+.operator-login__body--badge,
+.operator-login__body--state,
+.operator-login__body--search {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Loading, a copy that cannot be read, no copies yet, no operators. */
+.operator-login__state {
+  display: grid;
+  width: min(720px, 100%);
+  align-self: center;
+  justify-items: center;
+  gap: var(--sp-4);
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.operator-login__state p {
+  margin: 0;
+}
+
+.operator-login__state .mk-alert {
+  width: 100%;
+  text-align: start;
+}
+
+.operator-login__readout {
+  display: flex;
+  width: min(360px, 100%);
+  height: 64px;
+  padding-inline: var(--sp-4);
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  font: var(--floor-lg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-login__keypad-zone {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+}
+
+.operator-login__badge-panel {
+  display: grid;
+  width: min(560px, 64vw);
+  min-width: 240px;
+  height: min(260px, 100%);
+  min-height: 180px;
+  padding: var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.75fr);
+  align-items: center;
+}
+
+.operator-login__badge-copy {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.operator-login__badge-copy h2,
+.operator-login__badge-copy p {
+  margin: 0;
+}
+
+.operator-login__badge-copy h2 {
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+}
+
+.operator-login__badge-copy p {
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.badge-scan-illustration {
+  display: block;
+  width: min(100%, 280px);
+  max-height: 180px;
+  color: var(--fg-2);
+  justify-self: center;
+}
+
+.badge-scan-illustration__badge,
+.badge-scan-illustration__barcode,
+.badge-scan-illustration__scanner {
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.5;
+}
+
+.badge-scan-illustration__barcode,
+.badge-scan-illustration__field,
+.badge-scan-illustration__slot {
+  stroke-width: 3;
+}
+
+.badge-scan-illustration__field,
+.badge-scan-illustration__slot {
+  opacity: 0.55;
+}
+
+.badge-scan-illustration__aperture {
+  fill: var(--accent-module);
+  stroke: none;
+  opacity: 0.75;
+}
+
+/* Re-scopes currentcolor so the scan cue reads as the module accent. */
+.badge-scan-illustration__beam {
+  color: var(--accent-module);
+}
+
+.badge-scan-illustration__wave {
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-width: 3.5;
+  transform-box: fill-box;
+  transform-origin: 100% 50%;
+  animation: badge-scan-wave 2600ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.badge-scan-illustration__wave:nth-of-type(2) {
+  animation-delay: 200ms;
+}
+
+.badge-scan-illustration__wave:nth-of-type(3) {
+  animation-delay: 400ms;
+}
+
+.badge-scan-illustration__sweep {
+  fill: currentcolor;
+  animation: badge-scan-sweep 2600ms cubic-bezier(0.32, 0.72, 0, 1) infinite;
+}
+
+/*
+ * A scanner that is not ready shows no live beam: the cue stays, still and
+ * dim, so the picture does not promise a scan the station will not take.
+ */
+.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__beam {
+  opacity: 0.25;
+}
+
+.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__wave,
+.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__sweep {
+  animation: none;
+}
+
+.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__aperture {
+  fill: var(--fg-3);
+}
+
+@keyframes badge-scan-wave {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scaleX(0.88);
+  }
+
+  40% {
+    opacity: 0.8;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes badge-scan-sweep {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+
+  16% {
+    opacity: 0.85;
+  }
+
+  72% {
+    opacity: 0.85;
+  }
+
+  88%,
+  100% {
+    opacity: 0;
+    transform: translateY(102px);
+  }
+}
+
+.operator-login__actions {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: center;
+  grid-template-columns: repeat(var(--operator-login-action-columns), minmax(0, 320px));
+}
+
+.operator-name-search__result-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-name-search {
+  display: grid;
+  width: min(720px, 100%);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-row: 1 / -1;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.operator-name-search__results {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.operator-name-search__hint {
+  display: grid;
+  min-height: var(--control-floor);
+  color: var(--fg-3);
+  font: var(--floor-body);
+  place-items: center;
+}
+
+/* The cloud's compact step (`--control-keypad: 80px`), below a full-HD height. */
+@media (max-width: 1100px), (max-height: 899px) {
+  .operator-login {
+    --control-keypad: 80px;
+  }
+}
+
+@media (max-width: 1100px) {
+  /* The mark alone: the word mark would push the title against «Офис». */
+  .operator-login__brand {
+    width: 48px;
+  }
+
+  /* The title takes what the mark and the right column leave. */
+  .operator-login__header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .operator-login__scanner-status {
+    max-width: none;
+    white-space: nowrap;
+  }
+}
+
+/*
+ * A small panel (1024×600): the floor's 64 px keys, tighter rhythm, and the
+ * readout beside the keypad instead of above it, so the keypad stays whole.
+ */
+@media (max-height: 760px) {
+  .operator-login {
+    --control-keypad: 64px;
+
+    padding: var(--sp-2) var(--sp-4);
+    gap: var(--sp-2);
+    grid-template-rows: auto 56px minmax(0, 1fr) auto;
+  }
+
+  .operator-login__prompt h1 {
+    font: var(--floor-lg);
+  }
+
+  .operator-login__prompt p {
+    margin-top: 0;
+  }
+
+  .operator-login__message {
+    min-height: 56px;
+  }
+
+  .operator-login__body--pad {
+    grid-template-rows: auto;
+    grid-template-columns: minmax(0, 360px) auto;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-6);
+  }
+
+  .operator-login__badge-panel {
+    height: min(220px, 100%);
+    min-height: 160px;
+  }
+
+  /*
+   * «Стереть» and «Сброс» on a 64 px key: the PinPad writes its 18 px
+   * caption inline, so the smaller caption needs `!important`.
+   */
+  .operator-login__keypad-zone [role="group"] > button:nth-child(10),
+  .operator-login__keypad-zone [role="group"] > button:nth-child(12) {
+    padding: 0 2px !important;
+    font-size: 13px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-scan-illustration__wave,
+  .badge-scan-illustration__sweep {
+    animation: none;
+  }
+
+  .badge-scan-illustration__wave {
+    opacity: 0.55;
+  }
+
+  .badge-scan-illustration__sweep {
+    opacity: 0.85;
+    transform: translateY(51px);
+  }
+}

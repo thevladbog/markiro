@@ -109,3 +109,18 @@ export function createLockdownLifecycle({
     },
   };
 }
+
+/**
+ * Whether an office session opens the window ordinary by itself (owner
+ * feedback of the first beta: the office is not a touch app and must not fill
+ * the screen). Only where the build locks the window at all, and only for an
+ * administrator, the one role that may leave kiosk mode. An office PC is never
+ * locked, so there is nothing to leave.
+ */
+export function shouldOpenOfficeWindowed(options: {
+  enabled: boolean;
+  officePc: boolean;
+  officeAdmin: boolean;
+}): boolean {
+  return options.enabled && !options.officePc && options.officeAdmin;
+}

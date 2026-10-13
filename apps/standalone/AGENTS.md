@@ -703,7 +703,7 @@ whatever its revision (fail-closed).
   it brought. The asks go through a gate in `App` (`SIGN_IN_SYNC_GAP_MS`,
   2 s: the first at once, asks inside the wait fold into one more sync at its
   end), so a burst of stray scans does not hammer the host.
-- The name search (plan 1f2; «Найти себя по имени»,
+- The name search (plan 1f2; «Найти по имени»,
   `src/floor/operator-search.ts`) only fills in a personnel number: the PIN
   is then checked by `signInWithPin` like a typed one, under the same
   lockouts, and «Назад» on the PIN goes back to the search. It reads
@@ -780,6 +780,33 @@ physical wedge scanner in WebView2, and how the search step and the status
 bar lay out on a real screen and touch panel, are unverified (the styles were
 not looked at in a browser). Kiosk mode and the floor's status bar are under
 "App shell".
+
+The screen's presentation is forked from the cloud station's approved sign-in
+(`apps/station/src/pages/OperatorLogin.tsx`, `ui/BadgeScanIllustration.tsx`,
+`ui/StationBrand.tsx` and their rules in `station.css`), owner decision of
+2026-10-13: «Вход оператора» with the brand, the step's prompt, the badge cue,
+the readout and keypad or the name search, and one row of equal actions in the
+cloud's order. Its CSS lives beside it (`src/floor/sign-in/operator-sign-in.css`,
+cloud class names); the logo is drawn inline, so the screen holds no `<img>`.
+The differences are the standalone's own: «Офис» and the scanner chip share the
+header's right column on every step; the readout and keypad are centred
+together (no gap under the readout); below 900 px of height the keys are the
+cloud's compact 80 px, and below 760 px they are 64 px with the readout beside
+the keypad, so a 1024×600 panel shows the keypad whole; the number step offers
+the name search and the name search the number, as the cloud's steps do. The step texts are the
+cloud's (owner decision 2026-10-13: «Ввести табельный номер», «Найти по
+имени», «Сброс», «Отсканируйте бейдж для входа», «Введите …»); the PIN
+prompts keep the personnel number, which the cloud's «Введите PIN» drops. The
+chip (`src/floor/scanner-indicator.ts`) says what the floor honestly knows:
+«ready» for the keyboard wedge (it cannot be seen) and for connected COM
+scanners, a warning for a part of them or a shell that cannot be asked, an
+error for COM scanners off the link, and «Вход приостановлен» while the last
+attempt was answered by the station's lockout (an operator's PIN lockout
+leaves the badge working and does not count). The watch is the shell's
+`watchScanners`, passed by `App`; a watch that throws or answers with no stop
+never takes the screen down. Verified in a browser (Chromium, a harness with a
+fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
+real panel or a real scanner.
 
 ## Catalog and label templates
 
@@ -1704,7 +1731,15 @@ is still named, since the station works on it until the office moves it; read
 again after every sync, and a failed read leaves the names out), the operator
 signed in or «Никто не вошёл», and `HostStatusLine`, which the floor screens
 no longer show themselves. It holds nothing to press, so the 64 px rule has
-nothing to apply to. Since plan 2a5 it also names the device
+nothing to apply to. Its presentation is forked from the cloud station's
+one-row header (`apps/station/src/ui/StatusBar.tsx`, `.station-status-*` in
+`src/floor/floor-status-bar.css`): the device and the line strong on the first
+row, the operator, the shift and the organization quieter on the second (the
+labels stay for assistive tech, unpainted), then the link to the host and the
+pills (serials, unsent, refused, conflicts, records of an older pairing, and
+the scanner, «Клавиатурный» without COM scanners), and the warnings in a
+full-width row under it, flat while empty. The same file makes the floor fill
+the window edge to edge, as the cloud's `.station-root`. Since plan 2a5 it also names the device
 (`DeviceStatus.deviceName`, left out for an older pairing file), the number of
 the shift the operator works in (read from the copies, by
 `ShellState.floorWork`) and, in a polite region of its own that is on the
@@ -1766,8 +1801,17 @@ pairing. The host's own PC is the site's station (pilot spec §3) and stays
 locked. A technologist on a station cannot leave the locked window (only an
 administrator can).
 
-An office session opens with the window still locked; the way out is «Оконный
-режим» (`src/office/WindowModeButton.tsx`, in the office header), shown only
+The office is a mouse-and-keyboard app (owner feedback of the first beta), so
+on a host or station PC an administrator's office session opens in an ordinary,
+resizable window by itself (`shouldOpenOfficeWindowed` in `src/app/lockdown.ts`,
+an effect in `App`, once per session token); leaving kiosk mode restores an
+ordinary window of 1280x800 at most, inside the monitor's work area and
+centred (`lockdown::settle_ordinary_window` — the monitor-sized window kiosk
+mode left must not stay), and the app also starts that way (`tauri.conf.json`:
+centred, not maximized, minimum 960x600). A technologist's session stays in the
+locked window, and so do the first-run wizard and the repair screens. When the
+automatic exit failed, the manual way is «Оконный режим»
+(`src/office/WindowModeButton.tsx`, in the office header), shown only
 to an administrator while the window is locked and never in a build that does
 not lock it. It asks first (`FormDialog`), reads the user from the host again
 (`GET /v1/office/me`) and opens the window only if the host still says
@@ -4471,8 +4515,11 @@ the host and the held restore; it reads the state with its own polling loop
 (1 s while a copy runs, slower when idle, paused while the window is hidden)
 and writes times in the organization's zone. «Обзор» repeats the warnings (a
 held restore, a failed copy, no copy, a newest copy older than 26 hours by the
-host's clock, no second folder, a host clock behind the newest copy, a copy
-running for more than 30 minutes). The page lists per station whether it
+host's clock, a host clock behind the newest copy, a copy
+running for more than 30 minutes). No second folder is not among them: a fresh
+install has none, so «Резервные копии» says so as a calm hint beside the
+folder's form (`secondNotSetHint`), and only a second folder that is set and
+refused the last copy (`secondFailed`) is an error. The page lists per station whether it
 sent its blocks back (`reconciled`, plan РК-С); the host sets the flag on the
 last part of a station's blocks (`more` absent), which is empty for a station
 that never got a block.

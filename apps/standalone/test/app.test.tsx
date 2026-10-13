@@ -349,7 +349,7 @@ describe("App", () => {
         </ThemeProvider>
       </StrictMode>,
     );
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
 
@@ -357,7 +357,7 @@ describe("App", () => {
     const device = fakeDevice(null);
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device, host });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
@@ -369,7 +369,7 @@ describe("App", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
   });
 
@@ -495,7 +495,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledTimes(1);
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
 
@@ -513,7 +513,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
     // The swallow itself is guarded by Vitest failing the run on an unhandled rejection.
     expect(
@@ -526,7 +526,7 @@ describe("App", () => {
     device.pairLocally.mockRejectedValueOnce(new DeviceError("already_paired", "raced"));
     device.status.mockResolvedValueOnce(null).mockResolvedValueOnce(DEVICE_STATUS);
     renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
   });
 
   it("sends a rejected device back to pairing", async () => {
@@ -547,7 +547,7 @@ describe("App", () => {
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
@@ -623,7 +623,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
     expect(await screen.findByText("Настройки подключения повреждены")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить подключение" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
@@ -652,7 +652,7 @@ describe("App", () => {
       connection: link.connection,
       local: withUnsentRecords(),
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     expect(
@@ -662,7 +662,7 @@ describe("App", () => {
     ).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined]]);
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
   });
 
@@ -678,7 +678,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить подключение" }));
     expect(await screen.findByText(/не отправлено на хост записей смен: 3\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
   });
 
@@ -699,7 +699,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
     expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
   });
 
@@ -722,7 +722,7 @@ describe("App", () => {
       connection: link.connection,
       local,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     expect(
@@ -731,7 +731,7 @@ describe("App", () => {
       ),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
   });
 
   it("keeps the confirmation on screen with the reason when the confirmed reset fails too", async () => {
@@ -747,7 +747,7 @@ describe("App", () => {
       connection: link.connection,
       local: withUnsentRecords(),
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить всё равно" }));
@@ -772,11 +772,11 @@ describe("App", () => {
       connection: link.connection,
       local: withUnsentRecords(),
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 3 });
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
@@ -821,13 +821,13 @@ describe("App", () => {
       connection: link.connection,
       local: owingBlocks().executor,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     expect(await screen.findByText(OWED)).toBeTruthy();
     expect(device.forget).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined]]);
   });
 
@@ -847,7 +847,7 @@ describe("App", () => {
       connection: link.connection,
       local: executor,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сбросить, не вернув блоки" }));
@@ -855,7 +855,7 @@ describe("App", () => {
     // The blocks were answered for; the records are a question of their own.
     expect(screen.queryByText(OWED)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
   });
 
@@ -882,7 +882,7 @@ describe("App", () => {
         connection: link.connection,
         local,
       });
-      await screen.findByText("Цех");
+      await screen.findByText("Вход оператора");
       await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
       fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
       await waitFor(() => expect(device.forget.mock.calls).toEqual([[undefined]]));
@@ -908,7 +908,7 @@ describe("App", () => {
     expect(await screen.findByText(OWED)).toBeTruthy();
     expect(device.forget).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget.mock.calls).toEqual([[undefined]]);
   });
 
@@ -982,7 +982,7 @@ describe("App", () => {
     expect(await screen.findByText("Служба хоста не отвечает")).toBeTruthy();
     expect(screen.getByText("Нет соединения.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(probe.hello).toHaveBeenCalledWith(ADDRESS);
   });
 
@@ -1007,7 +1007,7 @@ describe("App", () => {
     expect(screen.getByText("Хост отказал в подключении этого устройства.")).toBeTruthy();
     const helloCallsBeforeRetry = probe.hello.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(probe.hello.mock.calls.length).toBe(helloCallsBeforeRetry + 1);
     expect(device.pairLocally).toHaveBeenCalledTimes(2);
   });
@@ -1050,14 +1050,14 @@ describe("App", () => {
     ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
 
     // Let the sync against the reinstalled host actually finish before
     // checking that the floor is the settled screen, not a fleeting one.
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
     expect(screen.queryByText("Устройство подключено к другому хосту")).toBeNull();
   });
 
@@ -1071,7 +1071,7 @@ describe("App", () => {
     expect(
       screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
     ).toBeTruthy();
-    expect(screen.queryByText("Цех")).toBeNull();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
   });
 
   it("ignores a late answer from a session the user already left", async () => {
@@ -1160,7 +1160,7 @@ describe("App", () => {
       host,
       connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     // The sync starts in the link effect, which runs after the floor shows.
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
     // Exactly once: settle, then check again. React runs passive effects in
@@ -1194,7 +1194,7 @@ describe("App", () => {
       host,
       connection,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await waitFor(() => expect(connection.watch).toHaveBeenCalledTimes(1));
     // Flush pending microtasks: with `watch` still unresolved, no sync must
     // have started.
@@ -1221,7 +1221,7 @@ describe("App", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({ state: "offline", lastContactAt: null, lastError: "key_rejected", seq: 2 });
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(
@@ -1268,7 +1268,7 @@ describe("App", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await link.status({
       state: "offline",
       lastContactAt: 1_790_000_000_000,
@@ -1327,7 +1327,7 @@ describe("App", () => {
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
   });
@@ -1372,7 +1372,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device, host });
     expect(await screen.findByText("Выбор линии")).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.selectLine).toHaveBeenCalledWith(LINE_ID);
   });
 
@@ -1438,7 +1438,7 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Подключить" }));
     fireEvent.click(await screen.findByRole("button", { name: "Линия 1" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.claim).toHaveBeenCalledWith({
       address: REMOTE_ADDRESS,
       fingerprint: "ab".repeat(32),
@@ -1746,7 +1746,7 @@ describe("reference sync health on screen", () => {
     host.getChanges.mockResolvedValueOnce(feedPage(42, [unreadable]));
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
   });
 
   it("shows the quarantine count after a run that failed with the host away, as after a restart", async () => {
@@ -1778,7 +1778,7 @@ describe("reference sync health on screen", () => {
     // The run fails (the host is unreachable and the link is offline), but
     // the count it read before failing still shows.
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
 
     // Reachable offline too: the office header shows it after signing in.
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
@@ -1810,7 +1810,7 @@ describe("the line the office assigns", () => {
     const host = fakeHost();
     host.getChanges.mockResolvedValue(feedPage(42, [lineItem(42, "Линия 1")]));
     renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
 
     device.refresh.mockResolvedValueOnce(NEW_STATION);
@@ -1819,7 +1819,7 @@ describe("the line the office assigns", () => {
 
     device.refresh.mockResolvedValueOnce(DEVICE_STATUS);
     await link.revision(44);
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(device.selectLine).not.toHaveBeenCalled();
   });
 
@@ -1832,7 +1832,7 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
     expect(device.refresh).toHaveBeenCalledTimes(1);
@@ -1898,12 +1898,12 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    await screen.findByText("Цех");
+    await screen.findByText("Вход оператора");
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await link.revision(43);
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
     await settle();
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
     expect(link.stop).not.toHaveBeenCalled();
   });
@@ -1923,11 +1923,11 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await elapse(500);
     expect(device.refresh).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
     await elapse(2000);
     expect(device.refresh).toHaveBeenCalledTimes(2);
     // The retried read finds the line the office cleared meanwhile.
@@ -1947,7 +1947,7 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
     // The failed read armed a retry.
@@ -2003,14 +2003,14 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
     // No pairing, nothing to read again: no retry is armed.
     expect(vi.getTimerCount()).toBe(0);
     await elapse(60_000);
     expect(device.refresh).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.getByText("Вход оператора")).toBeTruthy();
   });
 
   it("waits longer after each failed read in a row, and starts over after a read succeeds", async () => {
@@ -2029,7 +2029,7 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     // The first failure waits 2 s; the second, in a row, twice as long.
     await elapse(2500);
@@ -2061,7 +2061,7 @@ describe("the line the office assigns", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     // The first failure armed a retry 2 s away. A revision reads again before
     // it fires; that read fails too, so the wait is now 4 s for two failures
@@ -2082,7 +2082,7 @@ describe("the line the office assigns", () => {
       }),
     };
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), connection });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     // The read starts in the link effect, which runs after the floor shows.
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
@@ -2101,7 +2101,7 @@ describe("the line the office assigns", () => {
       }),
     };
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), connection });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
     // `online` never became true, so the failed read armed no retry.
@@ -2202,7 +2202,7 @@ describe("the operator on the floor", () => {
       ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
       ...(signInSyncGapMs === undefined ? {} : { signInSyncGapMs }),
     });
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     return { link, host };
   }
 
@@ -2215,7 +2215,7 @@ describe("the operator on the floor", () => {
     const bar = await screen.findByRole("region", { name: "Строка состояния цеха" });
     expect(await within(bar).findByText("Линия розлива 2")).toBeTruthy();
     expect(within(bar).getByText("Никто не вошёл")).toBeTruthy();
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     scan("MRK-000742");
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
     expect(
@@ -2233,9 +2233,7 @@ describe("the operator on the floor", () => {
     expect(host.getChanges).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Офис" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
-    expect(
-      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
     expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
   });
 
@@ -2307,12 +2305,10 @@ describe("the operator on the floor", () => {
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(
-      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
   });
 
-  const PROMPT = "Приложите бейдж к сканеру или войдите по табельному номеру.";
+  const PROMPT = "Отсканируйте бейдж для входа";
   const WRONG_BADGE =
     "Бейдж не найден. Если бейдж новый, дождитесь синхронизации или обратитесь к администратору.";
 
@@ -2741,15 +2737,15 @@ describe("the operator on the floor", () => {
       connection: link.connection,
     });
     await screen.findByText(PROMPT);
-    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
-    expect(await screen.findByText("Наберите табельный номер.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
+    expect(await screen.findByText("Введите табельный номер")).toBeTruthy();
     device.refresh.mockResolvedValueOnce({
       ...DEVICE_STATUS,
       lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
     });
     await link.revision(43);
     expect(await screen.findByText(PROMPT)).toBeTruthy();
-    expect(screen.queryByText("Наберите табельный номер.")).toBeNull();
+    expect(screen.queryByText("Введите табельный номер")).toBeNull();
   });
 
   it("does not sign an operator in on the new line when the answer lands in the batch of the line change", async () => {
@@ -3182,7 +3178,7 @@ describe("the operator on the floor", () => {
     await screen.findByLabelText("Название товара");
     await flush();
     scan("4600682000013");
-    expect(await screen.findByText("Молоко 3,2% 0,9 л, GTIN 04600682000013")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
     expect(host.createDeviceShift).toHaveBeenCalledTimes(1);
@@ -3868,7 +3864,7 @@ async function leaveKioskMode(): Promise<void> {
 }
 
 describe("kiosk mode", () => {
-  it("locks the window once at start, under StrictMode too, and keeps it locked through the office", async () => {
+  it("locks the window once at start, under StrictMode too, opens an administrator's office in an ordinary window and locks again on leaving it", async () => {
     const kiosk = recordingLockdown();
     render(
       <StrictMode>
@@ -3885,16 +3881,20 @@ describe("kiosk mode", () => {
         </ThemeProvider>
       </StrictMode>,
     );
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    // The office is a mouse-and-keyboard app: it never fills the screen.
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
-    // Already locked: neither the office nor the way back sends anything.
-    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
   });
 
   it("tries a lock that failed again when the office closes", async () => {
@@ -3912,9 +3912,13 @@ describe("kiosk mode", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
-    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+    // The failed lock may have left the window half-locked: the office's own
+    // exit is sent whatever the confirmed mode says.
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "enter_lockdown"]));
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
   });
 
   it("sends no kiosk command in development, where the window stays ordinary", async () => {
@@ -3930,14 +3934,13 @@ describe("kiosk mode", () => {
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("lets the administrator out in the office and locks the window again on leaving", async () => {
+  it("opens the administrator's office in an ordinary window at once, once per session, and locks the window again on leaving", async () => {
     const kiosk = recordingLockdown();
     const host = fakeHost();
-    host.officeMe.mockResolvedValue(SESSION.user);
     renderApp({
       probe: probeAnswering(true),
       device: fakeDevice(DEVICE_STATUS),
@@ -3946,13 +3949,13 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    await leaveKioskMode();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
-    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull());
+    // No confirmation and no button: the sign-in already proved the administrator.
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+    expect(host.officeMe).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() =>
       expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
     );
@@ -3961,7 +3964,6 @@ describe("kiosk mode", () => {
   it("locks the window again when the office session ends while it is windowed", async () => {
     const kiosk = recordingLockdown();
     const host = fakeHost();
-    host.officeMe.mockResolvedValue(SESSION.user);
     host.officeChangePassword.mockRejectedValueOnce(
       new HostError({
         kind: "api",
@@ -3979,7 +3981,6 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    await leaveKioskMode();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
 
     fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
@@ -4053,6 +4054,8 @@ describe("kiosk mode", () => {
     });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
+    // The automatic exit refused; «Оконный режим» stays as the manual way.
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
     await leaveKioskMode();
     expect(
       await screen.findByText("Окно не вышло из киоск-режима. Попробуйте ещё раз."),
@@ -4062,7 +4065,12 @@ describe("kiosk mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
     await waitFor(() =>
-      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+      expect(kiosk.commands).toEqual([
+        "enter_lockdown",
+        "exit_lockdown",
+        "exit_lockdown",
+        "enter_lockdown",
+      ]),
     );
   });
 });
@@ -4225,7 +4233,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
-    expect(screen.queryByText("Цех")).toBeNull();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(device.installRole).toHaveBeenCalled();
     expect(kiosk.commands).toEqual([]);
   });
@@ -4238,7 +4246,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
       host: fakeHost(),
       lockdown: kiosk.lockdown,
     });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
   });
 
@@ -4247,7 +4255,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     const device = fakeDevice(DEVICE_STATUS);
     device.installRole.mockRejectedValue(new DeviceError("invalid_response", "role"));
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
   });
 
@@ -4337,7 +4345,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
         }),
     );
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
-    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(device.installRole).toHaveBeenCalled());
     expect(kiosk.commands).toEqual([]);
     act(() => answer("station"));
@@ -4360,6 +4368,29 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     },
   );
 
+  it.each(["host", "station"] as const)(
+    "opens a %s PC's office session in an ordinary window, and the floor stays locked",
+    async (role) => {
+      const kiosk = recordingLockdown();
+      const device = fakeDevice(DEVICE_STATUS);
+      device.installRole.mockResolvedValue(role);
+      renderApp({
+        probe: probeAnswering(true),
+        device,
+        host: fakeHost(),
+        lockdown: kiosk.lockdown,
+      });
+      await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+      fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+      await signIn();
+      await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+      fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
+      await waitFor(() =>
+        expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+      );
+    },
+  );
+
   it("shows no floor on an office PC whose disk holds a station pairing", async () => {
     const kiosk = recordingLockdown();
     const device = fakeDevice(DEVICE_STATUS);
@@ -4367,12 +4398,12 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
     // Never the operator's sign-in, the line choice or the station's bar.
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
-    expect(screen.queryByText("Цех")).toBeNull();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
     await signIn();
     fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
-    expect(screen.queryByText("Цех")).toBeNull();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(kiosk.commands).toEqual([]);
   });
 

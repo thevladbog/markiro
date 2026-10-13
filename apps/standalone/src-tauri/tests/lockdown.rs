@@ -82,6 +82,21 @@ fn the_kiosk_commands_turn_the_flag_on_and_off() {
     assert!(!locked(&app));
 }
 
+/// Leaving kiosk mode (the office's «Оконный режим», and every office
+/// session of an administrator) answers `Ok` with the size step included: the
+/// mock window has no monitor and does not keep a size, so what the step sets
+/// is pinned by `lockdown::ordinary_window_size`'s unit tests, and what the
+/// real window does by the manual check on Windows.
+#[cfg(not(windows))]
+#[test]
+fn leaving_kiosk_mode_restores_an_ordinary_window() {
+    let (_app, webview) = mock_app(MAIN_WINDOW);
+    assert_eq!(invoke(&webview, "enter_lockdown"), Ok(Value::Null));
+    assert_eq!(invoke(&webview, "exit_lockdown"), Ok(Value::Null));
+    assert!(!webview.is_maximized().unwrap());
+    assert!(!webview.is_fullscreen().unwrap());
+}
+
 /// `SetWindowPos` refuses the mock window's handle (or Windows finds no
 /// monitor for it): the enter is refused and rolled back, the flag stays off.
 /// Should a Windows version accept it, the flag must be on instead.
