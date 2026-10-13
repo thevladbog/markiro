@@ -4725,9 +4725,16 @@ transaction on one connection that is closed before the swap):
   emergency extension when it took one (else the copy's), the current
   database's wrong-host sighting when there is one (the 30-day window goes
   on); `last_state` stays the copy's, so the first look writes one
-  `license.state` row. The summary says how many files were carried, or (the
-  current database not read, not the copy's history) that files loaded after
-  the copy must be loaded again in the office;
+  `license.state` row. The license is read apart (`read_license`): a value
+  that does not read (text in an INTEGER column) carries no file and no clock
+  and fails nothing else — the revocations and numbers still count, and a
+  database set aside counts with its numbers only (`read_floors_at`). The
+  summary says how many files were carried; else that the previous
+  database's license could not be read, that the copy's files are bound to
+  another host (the copy made by another host), that the copy holds the files
+  up to its time (no previous database, or the copy's identity put in place),
+  or (the current database not read, not the copy's history) that files
+  loaded after the copy must be loaded again in the office;
 - a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
   `host.restore` row (the host as the actor; `carried`, `licensesCarried` — a
   number, or `null` when nothing could be carried — and `sessionsEnded` are
@@ -4960,7 +4967,11 @@ its record).
   on a route in neither; `LIMITED` names the routes that refuse additions.
   The emergency extension opens new shifts for 72 hours once per file and
   once for the trial (also in `inn_mismatch`, an open question in the spec's
-  §19).
+  §19). Its end keeps the state's word but closes new shifts: the look
+  compares `opensNewShifts` with its last look in this process (the
+  extension's route sets it) and takes a revision without an audit row, so
+  the stations read `GET /v1/device` again; after a restart there is nothing
+  to compare with, and the first look wakes nobody.
 - Seats and features (`license/seats.rs`) refuse additions only, in any state
   and inside the writer's transaction (`conflict` on `seat_limit` or
   `feature_disabled`, no row): stations and handhelds share `stations`
@@ -4979,12 +4990,13 @@ its record).
   answer in time) is neither used nor written. Only a key read without a
   start gets the database's trial (its start, never after the trusted time,
   and its INN; `StartedAt` last). The trial starts at the earlier of the
-  database's and the mark's start, with that start's INN. `markiro-host
+  database's and the mark's start, with that start's INN (a mark's start
+  without a valid INN takes the database's). `markiro-host
 install` makes the key ("Installer and service"). Other systems have no
   mark.
 - `markiro-host restore` carries the files the current database loaded after
   the copy and merges its license clock, only when it is the copy's history
-  ("Backups and restore", `licensesCarried`).
+  and its license reads ("Backups and restore", `licensesCarried`).
 - The log holds a file's id, the state and a refusal's code: never the file,
   its signature, the activation request, the INN or the customer's name
   (`no_secrets_in_logs.rs` loads an accepted and a refused file, asks the

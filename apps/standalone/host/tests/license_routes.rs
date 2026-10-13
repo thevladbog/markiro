@@ -8,16 +8,36 @@ use std::collections::BTreeSet;
 
 use markiro_host::license::gate::{GATED, LIMITED, NEVER};
 
+/// `src/server.rs` without its unit tests (which build probe routes of their
+/// own).
+fn router_source() -> &'static str {
+    include_str!("../src/server.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("the source of the router")
+}
+
+/// Where `call` stands in `text` as a call of its own (not the tail of a
+/// longer name: `Json(` is no `on(`).
+fn calls(text: &str, call: &str) -> usize {
+    let mut count = 0;
+    let mut search = text;
+    while let Some(at) = search.find(call) {
+        let before = search[..at].chars().next_back();
+        if !before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            count += 1;
+        }
+        search = &search[at + call.len()..];
+    }
+    count
+}
+
 /// `(method, path)` of every `.route("<path>", <methods>)` in
 /// `src/server.rs` (the path on the same line or the next): the method calls
 /// (`get(`, `post(`, `put(`, `delete(`) up to the next route or the end of
 /// the function, outside the unit tests.
 fn routed() -> BTreeSet<(String, String)> {
-    // The router only: the module of unit tests builds probe routes of its own.
-    let source = include_str!("../src/server.rs")
-        .split("#[cfg(test)]")
-        .next()
-        .expect("the source of the router");
+    let source = router_source();
     let mut found = BTreeSet::new();
     let mut rest = source;
     while let Some(start) = rest.find(".route(") {
@@ -41,18 +61,60 @@ fn routed() -> BTreeSet<(String, String)> {
             ("PUT", "put("),
             ("DELETE", "delete("),
         ] {
-            let mut search = segment;
-            while let Some(at) = search.find(call) {
-                let before = search[..at].chars().next_back();
-                if !before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-                    found.insert((method.to_owned(), path.to_owned()));
-                }
-                search = &search[at + call.len()..];
+            if calls(segment, call) > 0 {
+                found.insert((method.to_owned(), path.to_owned()));
             }
         }
         rest = &after[end..];
     }
     found
+}
+
+/// The parser above reads `.route(path, get(..).post(..)…)` only. Any other
+/// way to add a route — another method (`patch`, `head`, …), `any`, `on`, a
+/// service, a nested or another merged router — would escape the tables, so
+/// the router may hold none (final review of plan ЛЦ-2): the only `merge` is
+/// the protected routes', and the only routers are the two it builds.
+#[test]
+fn the_router_adds_routes_only_in_the_form_the_parser_reads() {
+    const OTHER_FORMS: [&str; 11] = [
+        "patch(",
+        "head(",
+        "options(",
+        "trace(",
+        "connect(",
+        "any(",
+        "on(",
+        "route_service(",
+        "nest(",
+        "nest_service(",
+        "fallback_service(",
+    ];
+    // The check finds what it looks for, and not inside a longer name.
+    assert_eq!(calls(".route(\"/x\", get(a).patch(b))", "patch("), 1);
+    assert_eq!(calls("Ok(Json(hello))", "on("), 0);
+    let source = router_source();
+    for form in OTHER_FORMS {
+        assert_eq!(calls(source, form), 0, "the router uses {form}");
+    }
+    assert!(
+        !source.contains("_service("),
+        "the router routes to a service"
+    );
+    assert_eq!(
+        source.matches(".merge(").count(),
+        1,
+        "a router merged besides the protected routes"
+    );
+    assert!(
+        source.contains(".merge(protected_routes().route_layer("),
+        "the one merge is the protected routes'"
+    );
+    assert_eq!(
+        source.matches("Router::new(").count(),
+        2,
+        "the router and the protected routes are the only routers"
+    );
 }
 
 fn pairs(table: &[(&str, &str, &str)]) -> BTreeSet<(String, String)> {

@@ -459,10 +459,7 @@ async fn an_unreadable_current_database_leaves_the_margins_over_the_copy() {
         ),
         (None, None, 1)
     );
-    assert!(lines.contains(&format!(
-        "license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
-        report.copy_made
-    )), "{lines:#?}");
+    assert!(lines.contains(&license_lost_line(&report)), "{lines:#?}");
     // The revision is the copy's next one; the audit ids, which are never
     // issued twice, jump far above the copy's (what the dead database
     // issued is unknown).
@@ -520,6 +517,13 @@ async fn a_new_computer_gets_the_copy_and_a_new_identity() {
     assert!(summary(&report).contains(
         &"the copy was made by another host: the stations pair with this one again".to_owned()
     ));
+    // No previous database: no line about files it would have had; the
+    // copy's files are another host's.
+    let licenses: Vec<String> = summary(&report)
+        .into_iter()
+        .filter(|line| line.contains("license file"))
+        .collect();
+    assert_eq!(licenses, [LICENSE_OF_ANOTHER_HOST]);
     let rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision")
         .fetch_one(&pool)
         .await
@@ -1675,6 +1679,29 @@ async fn a_rollback_stands_when_the_restore_after_it_fails() {
 /// but is not the copy's history.
 const NOT_THE_HISTORY: &str = "the current database is not this copy's history (a new host, one whose wizard never finished, or another host's): every SSCC counter is at least 100000 above the copy's highest number";
 
+/// The summary's license line when the current database was not read as the
+/// copy's history but was this host's: files loaded after the copy are lost.
+fn license_lost_line(report: &RestoreReport) -> String {
+    format!(
+        "license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
+        report.copy_made
+    )
+}
+
+/// The summary's license line when the copy was made by another host than
+/// this one: its files are bound to that host (final review of plan ЛЦ-2).
+const LICENSE_OF_ANOTHER_HOST: &str = "the copy's license files, if any, are bound to the host that made it: this host needs a license file of its own (Информация → Лицензия, the activation request)";
+
+/// The summary's license line when there was no database of the copy's host
+/// before (no database, or the copy's identity put in place on another
+/// computer): the copy holds what it holds (final review of plan ЛЦ-2).
+fn license_in_copy_line(report: &RestoreReport) -> String {
+    format!(
+        "the copy holds the license files loaded up to {}: a license file loaded later on the copy's host is loaded again in the office (Информация → Лицензия)",
+        report.copy_made
+    )
+}
+
 /// The highest audit id `app`'s database issued.
 async fn newest_audit_id(app: &TestApp) -> i64 {
     sqlx::query_scalar("SELECT max(id) FROM audit_log")
@@ -1686,7 +1713,12 @@ async fn newest_audit_id(app: &TestApp) -> i64 {
 /// What a restore whose current database says nothing of what the copy's
 /// host issued after the copy must give: the margins of an unread database,
 /// no revocations carried, and the lines that say so.
-async fn assert_unread_margins(paths: &HostPaths, report: &RestoreReport, copy_audit: i64) {
+async fn assert_unread_margins(
+    paths: &HostPaths,
+    report: &RestoreReport,
+    copy_audit: i64,
+    license_line: &str,
+) {
     assert_eq!(
         report.current,
         Current::Read,
@@ -1704,10 +1736,15 @@ async fn assert_unread_margins(paths: &HostPaths, report: &RestoreReport, copy_a
     );
     assert_eq!((report.carried, report.licenses_carried), (None, None));
     let lines = summary(report);
-    assert!(lines.contains(&format!(
-        "license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
-        report.copy_made
-    )), "{lines:#?}");
+    assert!(lines.contains(&license_line.to_owned()), "{lines:#?}");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.contains("license file"))
+            .count(),
+        1,
+        "{lines:#?}"
+    );
     assert!(lines.contains(&NOT_THE_HISTORY.to_owned()), "{lines:#?}");
     assert!(lines.contains(&format!(
         "the previous database was not read: devices, operators, badges and office users revoked after {} are active again: check them in the office",
@@ -1754,7 +1791,7 @@ async fn a_restore_over_a_host_that_never_finished_its_wizard_takes_the_unread_m
     let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
 
     assert!(report.saved_as.is_some(), "the empty database goes aside");
-    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert_unread_margins(&paths, &report, copy_audit, LICENSE_OF_ANOTHER_HOST).await;
 }
 
 /// A copy of host A restored over host B, whose wizard was done: B's numbers
@@ -1772,7 +1809,7 @@ async fn a_copy_of_another_host_restored_over_an_initialized_host_takes_the_unre
     let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
 
     assert!(report.other_host);
-    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert_unread_margins(&paths, &report, copy_audit, LICENSE_OF_ANOTHER_HOST).await;
 }
 
 /// This host's own data folder, whose database was lost and made again by a
@@ -1795,7 +1832,7 @@ async fn a_restore_over_this_hosts_database_made_again_by_a_start_takes_the_unre
     let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
 
     assert!(!report.other_host, "the copy is of this host");
-    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert_unread_margins(&paths, &report, copy_audit, &license_lost_line(&report)).await;
 }
 
 /// Plan I1: `verify_copy` reads the identity the manifest names, says when it
@@ -2087,7 +2124,7 @@ async fn a_new_computer_takes_the_copys_identity_and_keeps_the_unread_margins() 
 
     let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
 
-    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert_unread_margins(&paths, &report, copy_audit, &license_in_copy_line(&report)).await;
     let aside = report
         .saved_as
         .clone()
@@ -2203,7 +2240,7 @@ async fn over_a_working_host_of_another_identity_the_copys_identity_waits_for_ta
     assert!(HostIdentity::read(&paths).unwrap().same_as(&own));
 
     let report = restore_choosing(&paths, &copy_path, IdentityChoice::Take).await;
-    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert_unread_margins(&paths, &report, copy_audit, &license_in_copy_line(&report)).await;
     assert!(
         matches!(&report.identity, IdentityOutcome::Restored { replaced: Some(host_id), saved_in: Some(_), .. } if host_id == &b.app.state.host_id),
         "{:?}",
@@ -2968,4 +3005,182 @@ async fn another_hosts_license_is_not_carried() {
     assert_eq!(files, 0);
     assert_eq!(license_clock(&pool).await, copied);
     assert_eq!(restore_details(&pool).await["licensesCarried"], Value::Null);
+}
+
+/// The summary's line when the license files of the current database could
+/// not be read although the database itself was (final review of plan ЛЦ-2).
+fn license_unread_line(report: &RestoreReport) -> String {
+    format!(
+        "the previous database's license files could not be read: license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
+        report.copy_made
+    )
+}
+
+/// A current database whose license cannot be read (a value edited by hand:
+/// text in an INTEGER column of `license_clock`) still counts with its
+/// numbers and its revocations: only its license files and its license
+/// clock stay out, and the summary says so (final review of plan ЛЦ-2).
+#[tokio::test]
+async fn a_license_the_current_database_cannot_read_leaves_its_revocations_and_numbers() {
+    let admin = admin().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let copied = license_clock(&admin.app.state.pool).await;
+    let host = admin.app.state.host_id.clone();
+    // After the copy: a block, a revoked station, a license file, and a
+    // license clock edited by hand.
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (status, body) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/devices/{station}/revoke"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    support::license::load_ok(&admin, &support::license::file(&host, |_| {})).await;
+    sqlx::query("UPDATE license_clock SET max_seen_at = 'x'")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.current, Current::Read);
+    assert!(report.history_known, "the database was read");
+    assert_eq!(
+        (report.carried, report.licenses_carried),
+        (
+            Some(Carried {
+                devices: 1,
+                operators: 0,
+                badges: 0,
+                office_users: 0
+            }),
+            None
+        )
+    );
+    let pool = reopen(&paths).await;
+    // The current database issued to 3499: two blocks above it, not the
+    // margins of an unread database.
+    assert_eq!(
+        counters(&pool).await,
+        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+    );
+    let revoked: Option<String> = sqlx::query_scalar("SELECT revoked_at FROM devices WHERE id = ?")
+        .bind(&station)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(revoked.is_some(), "the revocation is carried");
+    let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM licenses")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(files, 0, "no license file is carried");
+    assert_eq!(license_clock(&pool).await, copied, "nor the license clock");
+    let details = restore_details(&pool).await;
+    assert_eq!(
+        (
+            details["carried"]["devices"].clone(),
+            details["licensesCarried"].clone()
+        ),
+        (json!(1), Value::Null)
+    );
+    let lines = summary(&report);
+    assert!(lines.contains(&license_unread_line(&report)), "{lines:#?}");
+    assert!(
+        lines.contains(&"revocations carried over from the previous database: 1 devices, 0 operators, 0 badges, 0 office users".to_owned()),
+        "{lines:#?}"
+    );
+}
+
+/// A database an earlier restore set aside counts with its numbers even when
+/// its license does not read: only the numbers are read there.
+#[tokio::test]
+async fn a_database_set_aside_counts_even_when_its_license_does_not_read() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    // 1500..3499.
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    sqlx::query("UPDATE license_clock SET max_seen_at = 'x'")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let paths = stop(&admin.app).await;
+    let aside = paths.data_dir.join("restore-20261001T000000Z");
+    std::fs::create_dir(&aside).unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let name = format!("host.db{suffix}");
+        if paths.data_dir.join(&name).exists() {
+            std::fs::rename(paths.data_dir.join(&name), aside.join(&name)).unwrap();
+        }
+    }
+    std::fs::copy(&copy_path, paths.database_file()).unwrap();
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.current, Current::Read);
+    // The aside database issued to 3499: two blocks above 3500, not two
+    // above the copy's 1500.
+    assert_eq!(
+        counters(&reopen(&paths).await).await,
+        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+    );
+}
+
+/// A renewal loaded after the copy (plan ЛЦ-2 spec §4.4): the copy holds file
+/// 1, the current database files 1 and 2. File 2 is carried, both rows are
+/// there, and file 2 is in force.
+#[tokio::test]
+async fn a_renewal_loaded_after_the_copy_is_carried_and_in_force() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    support::license::load_ok(&admin, &support::license::file(&host, |_| {})).await;
+    let (copy_path, _) = copy(&admin.app).await;
+    support::license::load_ok(
+        &admin,
+        &support::license::file(&host, |terms| {
+            terms["licenseId"] = json!(support::license::license_id(2));
+            terms["sequence"] = json!(2);
+            terms["quotas"]["stations"] = json!(5);
+            terms["replaces"] = json!(support::license::license_id(1));
+        }),
+    )
+    .await;
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.licenses_carried, Some(1));
+    assert!(summary(&report)
+        .contains(&"license files carried over from the previous database: 1".to_owned()));
+    let pool = reopen(&paths).await;
+    let files: Vec<(String, i64)> =
+        sqlx::query_as("SELECT license_id, sequence FROM licenses ORDER BY sequence")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        files,
+        [
+            (support::license::license_id(1), 1),
+            (support::license::license_id(2), 2)
+        ]
+    );
+    assert_eq!(restore_details(&pool).await["licensesCarried"], 1);
+    let clock = Arc::new(ManualClock::new(
+        time::OffsetDateTime::from_unix_timestamp(support::app::START).unwrap(),
+    ));
+    let state = AppState::new(pool.clone(), host, clock);
+    let mut conn = pool.acquire().await.unwrap();
+    let snapshot = state.license.snapshot(&state, &mut conn).await.unwrap();
+    assert_eq!(snapshot.evaluation.phase, Phase::Active);
+    let in_force = snapshot.evaluation.license.expect("a file in force");
+    assert_eq!(
+        (in_force.license_id, in_force.sequence),
+        (support::license::license_id(2), 2)
+    );
+    assert_eq!(snapshot.evaluation.quotas.stations, Some(5));
 }

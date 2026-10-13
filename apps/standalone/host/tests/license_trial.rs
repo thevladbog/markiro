@@ -181,10 +181,11 @@ async fn the_same_start_in_both_keeps_the_databases_inn() {
     assert_eq!(office_license(&admin).await["trial"]["inn"], json!(INN));
 }
 
-/// A mark without an INN that wins names none: never the database's INN
-/// under the mark's start.
+/// A mark without an INN that wins keeps its start and takes the database's
+/// INN: better than an empty `trial.inn` in the activation request (final
+/// review of plan ЛЦ-2; it named none before).
 #[tokio::test]
-async fn an_earlier_mark_without_an_inn_names_none() {
+async fn an_earlier_mark_without_an_inn_takes_the_databases_inn() {
     let mark = FakeMark::holding(START_MS - DAY_MS, None);
     let admin = admin_of(host_with(mark).await).await;
     assert_eq!(
@@ -192,18 +193,19 @@ async fn an_earlier_mark_without_an_inn_names_none() {
         json!({
             "startedAt": text(START_MS - DAY_MS),
             "endsAt": text(START_MS + 13 * DAY_MS),
-            "inn": null
+            "inn": INN
         })
     );
     assert_eq!(
         activation_trial(&admin).await,
-        json!({ "startedAt": text(START_MS - DAY_MS), "inn": "" })
+        json!({ "startedAt": text(START_MS - DAY_MS), "inn": INN })
     );
 }
 
 /// What the host cannot use of a mark is no mark (plan ЛЦ-2: the registry is
 /// read as the database is): a start out of range is absent, so the wizard
-/// writes over it; an INN that is no INN is none.
+/// writes over it; an INN that is no INN is none, and the database's INN
+/// stands under the mark's earlier start.
 #[tokio::test]
 async fn a_mark_out_of_range_is_no_mark_and_an_inn_that_is_no_inn_is_none() {
     let mark = FakeMark::holding(-1, Some(INN));
@@ -220,8 +222,12 @@ async fn a_mark_out_of_range_is_no_mark_and_an_inn_that_is_no_inn_is_none() {
         json!({
             "startedAt": text(START_MS - DAY_MS),
             "endsAt": text(START_MS + 13 * DAY_MS),
-            "inn": null
+            "inn": INN
         })
+    );
+    assert_eq!(
+        activation_trial(&admin).await,
+        json!({ "startedAt": text(START_MS - DAY_MS), "inn": INN })
     );
 }
 

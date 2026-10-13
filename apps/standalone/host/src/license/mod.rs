@@ -137,6 +137,9 @@ pub struct LicenseService {
     registry: Mutex<Registry>,
     /// [`MARK_TIMEOUT`]; shorter in tests.
     mark_timeout: std::time::Duration,
+    /// Whether new shifts opened at the last look (or after the emergency
+    /// extension's write); `None` until this process looked once.
+    opens_new_shifts: Mutex<Option<bool>>,
 }
 
 impl Snapshot {
@@ -158,7 +161,14 @@ impl LicenseService {
             clock: Mutex::new(None),
             registry: Mutex::new(Registry::Unread),
             mark_timeout: MARK_TIMEOUT,
+            opens_new_shifts: Mutex::new(None),
         }
+    }
+
+    /// A write that took its own revision made new shifts open (or not):
+    /// the next look compares with it and does not wake the stations again.
+    pub fn opened_new_shifts(&self, opens: bool) {
+        *self.opens_new_shifts.lock().expect("opens lock") = Some(opens);
     }
 
     /// The same service waiting `timeout` for the registry's mark (tests).
@@ -238,11 +248,18 @@ impl LicenseService {
         // The trial is the earlier start of the database's and the
         // registry's, with that start's INN (the database's on a tie): a
         // reinstall buys no trial, and the INN told is the one the trial
-        // started with.
+        // started with. A registry's start without an INN (none written, or
+        // one that is no INN) takes the database's: better than none in the
+        // activation request.
         let stored = clock_row
             .trial_started_at
             .map(|started_at| (started_at, clock_row.trial_inn.clone()));
-        let marked = registry.map(|mark| (mark.started_at, mark.inn));
+        let marked = registry.map(|mark| {
+            (
+                mark.started_at,
+                mark.inn.or_else(|| clock_row.trial_inn.clone()),
+            )
+        });
         let trial = match (stored, marked) {
             (Some(stored), Some(marked)) => Some(if marked.0 < stored.0 { marked } else { stored }),
             (stored, marked) => stored.or(marked),
@@ -291,7 +308,12 @@ impl LicenseService {
     /// compared: its `since` may move (a trial before the wizard counts from
     /// now) without being a change. Before the wizard the time's mark is not
     /// kept: there is nothing to protect yet, and a PC's wrong clock (a flat
-    /// battery's year 2000) must not become the floor of the time.
+    /// battery's year 2000) must not become the floor of the time. Whether new
+    /// shifts open is compared too, with this process's last look: the end of
+    /// an emergency extension keeps the state's word but closes new shifts,
+    /// so it takes a revision (the stations read `GET /v1/device` again)
+    /// without an audit row; after a restart there is nothing to compare
+    /// with, and the first look wakes nobody.
     pub async fn refresh(&self, app: &AppState) -> Result<(), sqlx::Error> {
         let mut tx = begin_write(&app.pool).await?;
         let initialized = store::initialized(&mut tx).await?;
@@ -301,6 +323,12 @@ impl LicenseService {
         let evaluation = &snapshot.evaluation;
         let phase = evaluation.phase.as_str();
         let row = &snapshot.clock_row;
+        let opens = evaluation.opens_new_shifts;
+        let flipped = self
+            .opens_new_shifts
+            .lock()
+            .expect("opens lock")
+            .is_some_and(|known| known != opens);
         // A stored start after the trusted time is counted from it (above);
         // when the PC's own clock is behind it too (set back after the
         // wizard), it is written so, and no longer slides with the time.
@@ -322,7 +350,10 @@ impl LicenseService {
                 if due {
                     store::persist_mark(&mut tx, now).await?;
                 }
-                if due || wrote {
+                if flipped {
+                    let rev = next_revision(&mut tx).await?;
+                    commit_with_revision(tx, &app.revisions, rev).await?;
+                } else if due || wrote {
                     tx.commit().await?;
                 }
             }
@@ -357,6 +388,7 @@ impl LicenseService {
                 tracing::info!(from = last, to = phase, "license state changed");
             }
         }
+        self.opened_new_shifts(opens);
         Ok(())
     }
 

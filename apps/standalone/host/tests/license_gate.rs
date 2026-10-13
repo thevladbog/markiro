@@ -16,8 +16,8 @@ use support::app::{
     with_device, Admin, AuditRow, Floor, ShiftSetup,
 };
 use support::license::{
-    expire, expired_file, file, license_id, load_ok, office_license, set_org_inn, text, DAY_MS,
-    OTHER_INN, START_MS,
+    expire, expired_file, file, license_id, load_ok, office_license, refresh, set_org_inn, text,
+    DAY_MS, OTHER_INN, START_MS,
 };
 
 const REQUEST: &str = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
@@ -426,6 +426,66 @@ async fn the_emergency_opens_new_shifts_for_72_hours_once_per_file() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["emergency"]["until"], text(START_MS + 2 * HOURS_72_MS));
     assert_eq!(enter(&admin, &other_key, &other).await.0, StatusCode::OK);
+}
+
+/// The end of an emergency extension keeps the state's word (`restricted`)
+/// but closes new shifts again: the look that sees it takes a revision, so
+/// the stations read `GET /v1/device` again, and writes no audit row (the
+/// extension's own row told its end). A look while it runs takes none, and
+/// a service that never saw it run (started after it) has nothing to compare
+/// with and wakes nobody (final review of plan ЛЦ-2).
+#[tokio::test]
+async fn the_end_of_an_emergency_wakes_the_stations_without_a_row() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    load_ok(&admin, &expired_file(&host)).await;
+    let (status, body) = admin
+        .call("POST", "/v1/office/license/emergency", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (rows, rev) = (
+        audit_rows(&admin.app).await,
+        host_revision(&admin.app).await,
+    );
+    refresh(&admin.app).await;
+    assert_eq!(
+        (
+            audit_rows(&admin.app).await,
+            host_revision(&admin.app).await
+        ),
+        (rows, rev),
+        "a look while the extension runs changes nothing"
+    );
+    admin.app.clock.advance(time::Duration::hours(72));
+    let restarted = markiro_host::server::AppState::new(
+        admin.app.state.pool.clone(),
+        host.clone(),
+        admin.app.clock.clone(),
+    );
+    restarted.license.refresh(&restarted).await.unwrap();
+    assert_eq!(
+        host_revision(&admin.app).await,
+        rev,
+        "a service that never saw the extension run wakes nobody"
+    );
+    let mut wake = admin.app.state.revisions.subscribe();
+    refresh(&admin.app).await;
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    assert_eq!(*wake.borrow_and_update(), rev + 1);
+    assert_eq!(audit_rows(&admin.app).await, rows, "no audit row");
+    let (status, device) = device_call(&admin, &admin.key, "GET", "/v1/device", None).await;
+    assert_eq!(status, StatusCode::OK, "{device}");
+    assert_eq!(
+        (
+            device["license"]["state"].clone(),
+            device["license"]["emergencyUntil"].clone()
+        ),
+        (json!("restricted"), Value::Null),
+        "{device}"
+    );
+    // Once: the next look has nothing new.
+    refresh(&admin.app).await;
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
 }
 
 #[tokio::test]

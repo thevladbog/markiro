@@ -655,6 +655,8 @@ pub async fn enable_emergency(
         .await
         .map_err(ApiError::internal)?;
     tracing::info!(key = %evaluation.emergency_key, "the license's emergency extension was enabled");
+    // Its revision woke the stations: the next look compares with it.
+    app.license.opened_new_shifts(true);
     // The extension is kept: a read after the commit that fails must not
     // answer 500 (as after a load). The answer is then built from what the
     // extension knew, its columns set, at the same time; the reason is
