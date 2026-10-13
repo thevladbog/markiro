@@ -587,7 +587,8 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     let snapshot = json!({
         "product": {
             "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
-            "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+            "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10,
+            "egaisCode": null
         },
         "boxTemplate": {
             "id": setup.template, "name": "Короб 58×40", "rev": 2,
@@ -1109,7 +1110,8 @@ async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_i
         json!({
             "product": {
                 "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
-                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10,
+                "egaisCode": null
             },
             "boxTemplate": {
                 "id": setup.template, "name": "Короб 58×40", "rev": template_rev,

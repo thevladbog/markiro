@@ -27,6 +27,7 @@ import {
   operatorCreateSchema,
   operatorUpdateSchema,
   orgLogoPutSchema,
+  productPhotoPutSchema,
   palletSheetCreateSchema,
   palletSheetDefaultUpdateSchema,
   palletSheetUpdateSchema,
@@ -83,6 +84,7 @@ const TOKEN = "office-session-token";
 const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
 const LOGO_PUT = orgLogoPutSchema.parse(fixture("org-logo-put.json"));
+const PHOTO_PUT = productPhotoPutSchema.parse(fixture("product-photo-put.json"));
 const SHEET_ID = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
 const SHEET_CREATE = palletSheetCreateSchema.parse(fixture("pallet-sheet-create.json"));
 const SHEET_UPDATE = palletSheetUpdateSchema.parse(fixture("pallet-sheet-update.json"));
@@ -164,6 +166,24 @@ const CASES: Case[] = [
     { logo: null },
     (api) => api.deleteOrgLogo(TOKEN),
     { method: "DELETE", path: "/v1/office/org/logo", body: undefined },
+  ],
+  [
+    "getProductPhoto",
+    fixture("product-photo-state.json"),
+    (api) => api.getProductPhoto(TOKEN, PRODUCT.id),
+    { method: "GET", path: `/v1/office/products/${PRODUCT.id}/photo`, body: undefined },
+  ],
+  [
+    "putProductPhoto",
+    fixture("product-photo-state.json"),
+    (api) => api.putProductPhoto(TOKEN, PRODUCT.id, PHOTO_PUT),
+    { method: "PUT", path: `/v1/office/products/${PRODUCT.id}/photo`, body: PHOTO_PUT },
+  ],
+  [
+    "deleteProductPhoto",
+    { photo: null },
+    (api) => api.deleteProductPhoto(TOKEN, PRODUCT.id),
+    { method: "DELETE", path: `/v1/office/products/${PRODUCT.id}/photo`, body: undefined },
   ],
   [
     "listPalletSheets",
@@ -589,6 +609,21 @@ describe("HostApi office endpoints", () => {
     const logo = fixture("org-logo.json") as { logo: Record<string, unknown> };
     const stale = { logo: { ...logo.logo, updatedAt: "yesterday" } };
     await expect(recording(stale).api.putOrgLogo(TOKEN, LOGO_PUT)).rejects.toThrow();
+  });
+
+  it("reads a product's photo as the host sent it, none as null, and refuses anything else (plan ТОВ)", async () => {
+    await expect(
+      recording(fixture("product-photo-state.json")).api.getProductPhoto(TOKEN, PRODUCT.id),
+    ).resolves.toEqual(fixture("product-photo-state.json"));
+    await expect(
+      recording({ photo: null }).api.getProductPhoto(TOKEN, PRODUCT.id),
+    ).resolves.toEqual({ photo: null });
+    await expect(recording({}).api.getProductPhoto(TOKEN, PRODUCT.id)).rejects.toThrow();
+    const state = fixture("product-photo-state.json") as { photo: Record<string, unknown> };
+    const wrong = { photo: { ...state.photo, checksum: "ABC" } };
+    await expect(
+      recording(wrong).api.putProductPhoto(TOKEN, PRODUCT.id, PHOTO_PUT),
+    ).rejects.toThrow();
   });
 
   it("rejects a sheet answer that is not a sheet, and a list without its default", async () => {

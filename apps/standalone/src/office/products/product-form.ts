@@ -104,6 +104,8 @@ export function toProductInput(values: ProductFields): ProductInput {
     defaultPalletTemplateId:
       values.defaultPalletTemplateId === "" ? null : values.defaultPalletTemplateId,
     defaultPalletSheetId: values.defaultPalletSheetId === "" ? null : values.defaultPalletSheetId,
+    egaisCode: null,
+    defaultCounterpartyId: null,
   };
 }
 

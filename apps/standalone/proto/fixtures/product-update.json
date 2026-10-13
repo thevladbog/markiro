@@ -9,6 +9,8 @@
   "defaultBoxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
   "defaultPalletTemplateId": null,
   "defaultPalletSheetId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+  "egaisCode": null,
+  "defaultCounterpartyId": null,
   "archived": true,
   "expectedRev": 65
 }

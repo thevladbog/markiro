@@ -56,6 +56,9 @@ const MILK: OfficeProduct = {
   defaultBoxTemplateId: MILK_58,
   defaultPalletTemplateId: null,
   defaultPalletSheetId: null,
+  egaisCode: null,
+  defaultCounterpartyId: null,
+  photoChecksum: null,
   archived: false,
   status: "active",
   rev: 65,
@@ -208,6 +211,8 @@ describe("office product dialog", () => {
           defaultBoxTemplateId: null,
           defaultPalletTemplateId: null,
           defaultPalletSheetId: null,
+          egaisCode: null,
+          defaultCounterpartyId: null,
         },
       ],
     ]);
@@ -404,6 +409,8 @@ describe("office product dialog", () => {
           defaultBoxTemplateId: MILK_58,
           defaultPalletTemplateId: PALLET,
           defaultPalletSheetId: null,
+          egaisCode: null,
+          defaultCounterpartyId: null,
           archived: true,
           expectedRev: 65,
         },
@@ -532,6 +539,8 @@ describe("office product dialog", () => {
       defaultBoxTemplateId: null,
       defaultPalletTemplateId: null,
       defaultPalletSheetId: null,
+      egaisCode: null,
+      defaultCounterpartyId: null,
     });
   });
 

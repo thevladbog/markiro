@@ -75,6 +75,9 @@ import {
   passwordChangeSchema,
   passwordSetSchema,
   productCreateSchema,
+  productPhotoPutSchema,
+  productPhotoStateSchema,
+  shiftSnapshotProductSchema,
   productGroupSchema,
   productRecordSchema,
   productUpdateSchema,
@@ -286,6 +289,8 @@ const RESPONSES = [
   ["badge-salt.json", badgeSaltSchema],
   ["product-group.json", productGroupSchema],
   ["office-product.json", officeProductSchema],
+  ["office-product-egais.json", officeProductSchema],
+  ["product-photo-state.json", productPhotoStateSchema],
   ["template-summary.json", labelTemplateSummarySchema],
   ["label-template.json", labelTemplateSchema],
   ["template-defaults.json", templateDefaultsSchema],
@@ -312,6 +317,7 @@ const REQUESTS = [
   ["bootstrap-request.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
+  ["product-photo-put.json", productPhotoPutSchema],
   ["pallet-sheet-create.json", palletSheetCreateSchema],
   ["pallet-sheet-update.json", palletSheetUpdateSchema],
   ["pallet-sheet-default-update.json", palletSheetDefaultUpdateSchema],
@@ -656,6 +662,8 @@ describe("request builders produce their fixtures exactly", () => {
       defaultBoxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
       defaultPalletTemplateId: null,
       defaultPalletSheetId: null,
+      egaisCode: null,
+      defaultCounterpartyId: null,
       gtin: "4600682000013",
     };
     expect(productCreate(typed)).toStrictEqual(fixture("product-create.json"));
@@ -1737,6 +1745,73 @@ describe("catalog shapes", () => {
     expect(officeProductSchema.parse(product).defaultPalletSheetId).toBeNull();
   });
 
+  it("a beer product's EGAIS code and default counterparty go as typed (plan ТОВ)", () => {
+    const beer = officeProductSchema.parse(fixture("office-product-egais.json"));
+    expect(beer.egaisCode).toBe("0150320000001234567");
+    const body = productCreate({
+      ...beer,
+      egaisCode: "0150320000001234567",
+      defaultCounterpartyId: null,
+    });
+    expect(body).toStrictEqual({
+      gtin14: "04607001234560",
+      name: "Пиво светлое фильтрованное 0,5 л",
+      printName: "Пиво светлое 0,5",
+      chzProductGroupCode: 15,
+      boxCapacity: 20,
+      palletBoxCapacity: 60,
+      shelfLifeDays: 180,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      defaultPalletSheetId: null,
+      egaisCode: "0150320000001234567",
+      defaultCounterpartyId: null,
+    });
+    expect(productCreateSchema.parse(body)).toStrictEqual(body);
+    const update = productUpdate(beer, false, beer.rev);
+    expect([update.egaisCode, update.defaultCounterpartyId]).toStrictEqual([
+      "0150320000001234567",
+      "0b9e7c1a-2d3f-4a5b-9c8d-7e6f5a4b3c2d",
+    ]);
+    // A code longer than the cloud's 64 characters, or empty, is no code.
+    expect(productCreateSchema.safeParse({ ...body, egaisCode: "1".repeat(65) }).success).toBe(
+      false,
+    );
+    expect(productCreateSchema.safeParse({ ...body, egaisCode: "" }).success).toBe(false);
+    expect(officeProductSchema.safeParse({ ...beer, photoChecksum: "ABC" }).success).toBe(false);
+    expect(officeProductSchema.safeParse({ ...beer, defaultCounterpartyId: "x" }).success).toBe(
+      false,
+    );
+  });
+
+  it("a product from a host before plan ТОВ reads as having no code, counterparty or photo", () => {
+    const product = { ...(fixture("office-product.json") as Record<string, unknown>) };
+    delete product["egaisCode"];
+    delete product["defaultCounterpartyId"];
+    delete product["photoChecksum"];
+    const read = officeProductSchema.parse(product);
+    expect([read.egaisCode, read.defaultCounterpartyId, read.photoChecksum]).toStrictEqual([
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("a snapshot of a host before plan ТОВ reads without an EGAIS code, and a photo put is strict", () => {
+    const entered = fixture("device-shift-entered.json") as {
+      snapshot: { product: Record<string, unknown> };
+    };
+    const older = { ...entered.snapshot.product };
+    delete older["egaisCode"];
+    expect(shiftSnapshotProductSchema.parse(older).egaisCode).toBeUndefined();
+    expect(
+      shiftSnapshotProductSchema.parse({ ...older, egaisCode: "0150320000001234567" }).egaisCode,
+    ).toBe("0150320000001234567");
+    const put = fixture("product-photo-put.json") as Record<string, unknown>;
+    expect(productPhotoPutSchema.safeParse({ ...put, mime: "image/png" }).success).toBe(false);
+    expect(productPhotoPutSchema.safeParse({ ...put, width: 641 }).success).toBe(false);
+  });
+
   it("whole bodies name every field: leave one out and the schema refuses", () => {
     for (const [name, schema] of [
       ["product-create.json", productCreateSchema],
@@ -2358,8 +2433,18 @@ describe("a station's shifts", () => {
       (value) => enteredShiftSchema.safeParse({ ...answer, snapshot: value }),
       "snapshot",
     );
+    // The EGAIS code is the one optional part (plan ТОВ): a snapshot frozen by
+    // a host before it has none and still reads.
+    const { egaisCode, ...required } = answer.snapshot.product;
+    expect(egaisCode).toBeNull();
+    expect(
+      enteredShiftSchema.safeParse({
+        ...answer,
+        snapshot: { ...answer.snapshot, product: required },
+      }).success,
+    ).toBe(true);
     withoutEach(
-      answer.snapshot.product,
+      required,
       (value) =>
         enteredShiftSchema.safeParse({
           ...answer,

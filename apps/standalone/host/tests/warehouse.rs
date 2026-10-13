@@ -89,7 +89,8 @@ async fn closed_shift_with_a_box() -> (Admin, Floor, String, String) {
 fn product(admin_product: &str) -> Value {
     json!({
         "id": admin_product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
-        "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+        "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10,
+        "egaisCode": null
     })
 }
 

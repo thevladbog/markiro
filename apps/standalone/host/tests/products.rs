@@ -28,6 +28,7 @@ fn milk_record(id: &str, rev: i64) -> Value {
         "chzProductGroupCode": 8, "boxCapacity": 12, "palletBoxCapacity": 40, "shelfLifeDays": 10,
         "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
         "defaultPalletSheetId": null,
+        "egaisCode": null, "defaultCounterpartyId": null, "photoChecksum": null,
         "archived": false, "status": "active", "rev": rev
     })
 }
@@ -36,7 +37,7 @@ fn milk_record(id: &str, rev: i64) -> Value {
 fn full(record: &Value, expected_rev: i64) -> Value {
     let mut body = record.clone();
     let fields = body.as_object_mut().unwrap();
-    for computed in ["id", "status", "rev"] {
+    for computed in ["id", "status", "rev", "photoChecksum"] {
         fields.remove(computed);
     }
     fields.insert("expectedRev".to_owned(), json!(expected_rev));

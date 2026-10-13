@@ -251,6 +251,10 @@ export interface ProductInput {
   defaultPalletTemplateId: string | null;
   /** The A4 sheet the pallets print on: a sheet's id, never a label template's. */
   defaultPalletSheetId: string | null;
+  /** The EGAIS code (plan ТОВ): only for ЧЗ group 15, `null` otherwise. */
+  egaisCode: string | null;
+  /** The counterparty the shift dialog offers (plan ТОВ). */
+  defaultCounterpartyId: string | null;
 }
 
 /** `POST /v1/office/products` (`product-create.json`): every field, `null` for none. */
@@ -266,6 +270,8 @@ export function productCreate(product: ProductInput): ProductCreate {
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
     defaultPalletSheetId: product.defaultPalletSheetId,
+    egaisCode: product.egaisCode,
+    defaultCounterpartyId: product.defaultCounterpartyId,
   };
 }
 
@@ -289,6 +295,8 @@ export function productUpdate(
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
     defaultPalletSheetId: product.defaultPalletSheetId,
+    egaisCode: product.egaisCode,
+    defaultCounterpartyId: product.defaultCounterpartyId,
     archived,
     expectedRev,
   };

@@ -573,6 +573,7 @@ pub async fn snapshot(
             print_name,
             chz_product_group_code: group,
             shelf_life_days,
+            egais_code: None,
         },
         box_template,
         issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
@@ -606,6 +607,7 @@ mod tests {
                 print_name: None,
                 chz_product_group_code: 8,
                 shelf_life_days: None,
+                egais_code: None,
             },
             box_template: ShiftSnapshotTemplate {
                 id: "t".to_owned(),
