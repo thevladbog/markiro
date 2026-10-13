@@ -31,7 +31,8 @@ export interface EmployeeDialogProps {
   /** The operator the employee is linked to, when there is one. */
   operator: OfficeOperator | null;
   onClose: () => void;
-  onSaved: (employee: EmployeeRecord) => void;
+  /** `turnedOff`: the archive also turned the linked operator off. */
+  onSaved: (employee: EmployeeRecord, turnedOff: boolean) => void;
   /** The employee changed on the host: close and load the list again. */
   onReload: () => void;
 }
@@ -40,8 +41,9 @@ export interface EmployeeDialogProps {
  * Adds an employee, or changes one: the host takes the whole record with the
  * loaded revision. Archiving is the `archived` flag (no delete), and an
  * archived employee is linked to no operator, so archiving a linked one
- * unlinks it in the same write; the operator keeps signing in, which the
- * dialog says before the write.
+ * unlinks it in the same write, and the host turns an active linked
+ * operator off with it (owner decision В1). The dialog says so before the
+ * write, and its button names the turn-off: the save is the confirmation.
  */
 export function EmployeeDialog({
   employee,
@@ -82,6 +84,7 @@ export function EmployeeDialog({
     },
   });
   const archiving = useWatch({ control, name: "archived" }) && employee?.archived === false;
+  const turningOff = archiving && operator !== null && operator.active;
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
@@ -97,7 +100,7 @@ export function EmployeeDialog({
       }
       return;
     }
-    onSaved(saved);
+    onSaved(saved, turningOff);
   });
 
   return (
@@ -107,7 +110,14 @@ export function EmployeeDialog({
           ? t("office.employees.createTitle")
           : t("office.employees.editTitle", { name: employee.name })
       }
-      submitLabel={employee === null ? t("office.employees.create") : t("office.common.save")}
+      submitLabel={
+        employee === null
+          ? t("office.employees.create")
+          : turningOff
+            ? t("office.employees.archiveSubmit")
+            : t("office.common.save")
+      }
+      submitVariant={turningOff ? "destructive" : "primary"}
       submitDisabled={employee !== null && !isDirty}
       onSubmit={submit}
       onClose={onClose}
@@ -139,7 +149,12 @@ export function EmployeeDialog({
       )}
       {archiving && operator !== null && (
         <Alert tone="warn">
-          {t("office.employees.archiveUnlinks", { operator: operatorLabel(operator) })}
+          {t(
+            operator.active
+              ? "office.employees.archiveTurnsOff"
+              : "office.employees.archiveUnlinksOff",
+            { operator: operatorLabel(operator) },
+          )}
         </Alert>
       )}
     </FormDialog>

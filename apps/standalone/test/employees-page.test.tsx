@@ -224,7 +224,7 @@ describe("office employees", () => {
     });
   });
 
-  it("archives a linked employee together with the unlink and warns the operator still signs in", async () => {
+  it("archives a linked employee, saying first that its operator will be turned off", async () => {
     const session = adminSession();
     session.api.updateEmployee.mockResolvedValue({
       ...ANNA,
@@ -233,19 +233,26 @@ describe("office employees", () => {
       rev: 64,
     });
     await openEmployees(session);
+    expect(session.api.listOperators).toHaveBeenCalledTimes(1);
     fireEvent.click(
       within(rowOf("Анна Кузнецова")).getByRole("button", {
         name: "Изменить сотрудника «Анна Кузнецова»",
       }),
     );
+    expect(within(dialog()).getByRole("button", { name: "Сохранить" })).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "В архиве" }));
     expect(
       within(dialog()).getByText(
-        "Сотрудник будет отвязан от оператора 0042 · Анна Кузнецова. Оператор по-прежнему сможет входить на станциях — выключите его на странице «Операторы», если человек больше не работает.",
+        "Сотрудник будет отвязан от оператора 0042 · Анна Кузнецова, а оператор — выключен: он больше не сможет входить на станциях, как только они получат изменение. Включить его снова можно на странице «Операторы».",
       ),
     ).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
-    await screen.findByText("Изменения сохранены.");
+    // The write itself is the confirmation, and its button says what it does.
+    fireEvent.click(
+      within(dialog()).getByRole("button", { name: "Сохранить и выключить оператора" }),
+    );
+    await screen.findByText(
+      "Сотрудник «Анна Кузнецова» в архиве, оператор 0042 · Анна Кузнецова выключен.",
+    );
     expect(session.api.updateEmployee).toHaveBeenCalledWith(expect.any(String), ANNA.id, {
       name: "Анна Кузнецова",
       role: "Упаковщик",
@@ -253,6 +260,29 @@ describe("office employees", () => {
       archived: true,
       expectedRev: 61,
     });
+    // The host turned the operator off: the operators are read again.
+    await waitFor(() => expect(session.api.listOperators).toHaveBeenCalledTimes(2));
+  });
+
+  it("archives an employee whose operator is off already without a turn-off", async () => {
+    const session = adminSession();
+    const off: EmployeeRecord = { ...PETR, operatorId: BORIS_OP.id };
+    session.api.listEmployees.mockResolvedValue([off]);
+    session.api.updateEmployee.mockResolvedValue({ ...off, operatorId: null, archived: true });
+    await openEmployees(session);
+    fireEvent.click(
+      within(rowOf("Пётр Иванов")).getByRole("button", {
+        name: "Изменить сотрудника «Пётр Иванов»",
+      }),
+    );
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "В архиве" }));
+    expect(
+      within(dialog()).getByText(
+        "Сотрудник будет отвязан от оператора 100 · Борис Орлов (оператор уже выключен).",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
   });
 
   it("creates an operator from an employee and links the two", async () => {
