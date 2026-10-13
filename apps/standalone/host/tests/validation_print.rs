@@ -66,7 +66,8 @@ async fn shift_count(admin: &Admin) -> i64 {
 
 /// What a refused office request must leave as it was.
 async fn untouched(admin: &Admin) -> (i64, i64, i64, Value) {
-    let rows: Vec<(String, i64, String, Option<String>, Option<String>)> = sqlx::query_as(
+    type PolicyRow = (String, i64, String, Option<String>, Option<String>);
+    let rows: Vec<PolicyRow> = sqlx::query_as(
         "SELECT id, rev, validation_print_mode, validation_print_verification, \
          validation_print_template_id FROM shifts ORDER BY id",
     )

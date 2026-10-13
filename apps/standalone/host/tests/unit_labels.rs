@@ -630,3 +630,197 @@ async fn an_event_after_the_close_marks_the_shift_late() {
     assert_eq!(late["lateDataAt"], json!(admin.app.state.timestamp()));
     assert_eq!(event_count(&admin).await, 1);
 }
+
+/// The `data` of event `kind` of job `job` (a UUID of `job`) of code `n`.
+fn job_event(job: u32, n: u32, attempt: u32, kind: &str, at: &str) -> Value {
+    let mut data = label(n, attempt, kind, at);
+    data["jobId"] = json!(format!("10000000-0000-4000-8000-{job:012}"));
+    data["errorCode"] = match kind {
+        "failed_before_send" => json!("printer_changed"),
+        "delivery_unknown" => json!("interrupted"),
+        "verification_rejected" => json!("mismatch"),
+        _ => Value::Null,
+    };
+    if kind == "prepared" && attempt > 1 {
+        data["reason"] = json!("damaged");
+    }
+    data
+}
+
+/// The shift's totals as the office reads them.
+async fn totals(admin: &Admin, shift: &str) -> Value {
+    let (status, record) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{record}");
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let listed = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|each| each["id"] == shift)
+        .map(|each| each["totals"].clone());
+    assert_eq!(listed.as_ref(), Some(&record["totals"]), "the list agrees");
+    record["totals"]
+        .get("unitLabels")
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+/// Send `events` (`(job, code, attempt, kind, second)`) of the shift of
+/// `floor` from record `first` on, after an accepted scan of each code.
+async fn send_events(
+    admin: &Admin,
+    floor: &Floor,
+    first: u32,
+    events: &[(u32, u32, u32, &str, u32)],
+) {
+    let mut codes: Vec<u32> = events.iter().map(|event| event.1).collect();
+    codes.sort_unstable();
+    codes.dedup();
+    let scans: Vec<Value> = codes
+        .iter()
+        .map(|n| {
+            fact(
+                &record_id(first + n),
+                "scan",
+                &floor.shift,
+                checked_scan(*n, &instant(*n, 0)),
+            )
+        })
+        .collect();
+    let answered = receipts(&admin.app, &floor.key, &scans).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    let records: Vec<Value> = events
+        .iter()
+        .zip(first + 100..)
+        .map(|((job, n, attempt, kind, second), id)| {
+            fact(
+                &record_id(id),
+                "unit_label",
+                &floor.shift,
+                job_event(*job, *n, *attempt, kind, &instant(100 + second, 0)),
+            )
+        })
+        .collect();
+    let answered = receipts(&admin.app, &floor.key, &records).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+}
+
+/// The card of a shift that prints counts its labels: attempts sent,
+/// attempts verified, jobs whose check was skipped, reprints (attempts after
+/// the first), and the jobs not resolved yet — those whose last event is not
+/// `verified`, `verification_skipped`, or `sent` when no check is required.
+/// The last event of a job is the latest by its `at`, then by attempt, then
+/// by its place in the domain's order (a check after the print), whatever
+/// order the records came in. A shift that prints nothing has no such
+/// totals; a planned shift that prints has zeros.
+#[tokio::test]
+async fn the_totals_of_a_shift_that_prints_count_its_labels() {
+    let (admin, setup, floor) = printing_floor("required").await;
+    assert_eq!(
+        totals(&admin, &floor.shift).await,
+        json!({ "sent": 0, "verified": 0, "skipped": 0, "unresolved": 0, "reprints": 0 })
+    );
+    send_events(
+        &admin,
+        &floor,
+        0,
+        &[
+            // 1: verified.
+            (1, 1, 1, "prepared", 1),
+            (1, 1, 1, "sending", 2),
+            (1, 1, 1, "sent", 3),
+            (1, 1, 1, "verified", 4),
+            // The same attempt's `sent` received twice counts once.
+            (1, 1, 1, "sent", 3),
+            // 2: the check skipped.
+            (2, 2, 1, "prepared", 1),
+            (2, 2, 1, "sending", 2),
+            (2, 2, 1, "sent", 3),
+            (2, 2, 1, "verification_skipped", 4),
+            // 3: the print's outcome unknown.
+            (3, 3, 1, "prepared", 1),
+            (3, 3, 1, "sending", 2),
+            (3, 3, 1, "delivery_unknown", 3),
+            // 4: rejected, printed again, sent and waiting for its check.
+            (4, 4, 1, "prepared", 1),
+            (4, 4, 1, "sending", 2),
+            (4, 4, 1, "sent", 3),
+            (4, 4, 1, "verification_rejected", 4),
+            (4, 4, 2, "prepared", 5),
+            (4, 4, 2, "sending", 6),
+            (4, 4, 2, "sent", 7),
+            // 5: prepared only.
+            (5, 5, 1, "prepared", 1),
+            // 6: verified and rejected at the same instant, the rejection
+            // received last: the check that passed is the last event.
+            (6, 6, 1, "prepared", 1),
+            (6, 6, 1, "sending", 2),
+            (6, 6, 1, "sent", 3),
+            (6, 6, 1, "verified", 4),
+            (6, 6, 1, "verification_rejected", 4),
+            // 7: its `sending` received after its check: by `at` the check
+            // is the last event.
+            (7, 7, 1, "prepared", 1),
+            (7, 7, 1, "sent", 3),
+            (7, 7, 1, "verified", 4),
+            (7, 7, 1, "sending", 2),
+        ],
+    )
+    .await;
+    assert_eq!(
+        totals(&admin, &floor.shift).await,
+        json!({ "sent": 6, "verified": 3, "skipped": 1, "unresolved": 3, "reprints": 1 })
+    );
+
+    // Without a required check a sent label is resolved.
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let body = printing_body(&admin, &setup, "none").await;
+    let unchecked = open(&admin, &colleague_key, &setup.other_line, body).await;
+    send_events(
+        &admin,
+        &unchecked,
+        1000,
+        &[
+            (11, 11, 1, "prepared", 1),
+            (11, 11, 1, "sending", 2),
+            (11, 11, 1, "sent", 3),
+            (12, 12, 1, "prepared", 1),
+            (12, 12, 1, "sending", 2),
+            (12, 12, 1, "delivery_unknown", 3),
+            (12, 12, 1, "verified", 4),
+            (13, 13, 1, "prepared", 1),
+            (13, 13, 1, "failed_before_send", 2),
+        ],
+    )
+    .await;
+    assert_eq!(
+        totals(&admin, &unchecked.shift).await,
+        json!({ "sent": 1, "verified": 1, "skipped": 0, "unresolved": 1, "reprints": 0 })
+    );
+
+    // A planned shift that prints: zeros; shifts that print nothing: none.
+    let planned = plan_shift(&admin, printing_body(&admin, &setup, "none").await).await;
+    assert_eq!(
+        planned["totals"]["unitLabels"],
+        json!({ "sent": 0, "verified": 0, "skipped": 0, "unresolved": 0, "reprints": 0 })
+    );
+    let mut validation = shift_body(&setup);
+    validation["mode"] = json!("validation");
+    for body in [validation, shift_body(&setup)] {
+        let plain = plan_shift(&admin, body).await;
+        assert!(plain["totals"].get("unitLabels").is_none(), "{plain}");
+    }
+}

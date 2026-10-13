@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
     OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftTotals, ShiftUpdate,
-    ValidationPrint,
+    UnitLabelTotals, ValidationPrint,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -60,7 +60,30 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
       AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL) AS closed_pallets, \
      (SELECT COUNT(*) FROM pallets p WHERE p.shift_id = shifts.id AND p.closed_at IS NULL \
       AND EXISTS (SELECT 1 FROM boxes b WHERE b.pallet_id = p.id \
-                  AND b.disassembled_at IS NULL)) AS open_pallets \
+                  AND b.disassembled_at IS NULL)) AS open_pallets, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'sent') AS labels_sent, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'verified') AS labels_verified, \
+     (SELECT COUNT(DISTINCT e.job_id) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'verification_skipped') AS labels_skipped, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'prepared' AND e.attempt_no > 1) \
+      AS labels_reprinted, \
+     (SELECT COUNT(*) FROM unit_label_events e WHERE e.shift_id = shifts.id \
+      AND NOT (e.event IN ('verified', 'verification_skipped') \
+               OR (e.event = 'sent' AND shifts.validation_print_verification = 'none')) \
+      AND NOT EXISTS (SELECT 1 FROM unit_label_events later \
+                      WHERE later.shift_id = e.shift_id AND later.job_id = e.job_id \
+                      AND (later.at, later.attempt_no, \
+                           CASE later.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
+                            WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, later.id) \
+                          > (e.at, e.attempt_no, \
+                           CASE e.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
+                            WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, e.id))) \
+      AS labels_unresolved \
      FROM shifts";
 
 #[derive(sqlx::FromRow)]
@@ -102,10 +125,28 @@ struct ShiftRow {
     device_ids: String,
     closed_pallets: i64,
     open_pallets: i64,
+    labels_sent: i64,
+    labels_verified: i64,
+    labels_skipped: i64,
+    labels_reprinted: i64,
+    labels_unresolved: i64,
 }
 
 fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
     let created_from = row.created_from.parse().map_err(ApiError::internal)?;
+    let count = |value: i64| u64::try_from(value).map_err(ApiError::internal);
+    // Only a shift that prints has label totals (plan РЕЖ, part B).
+    let unit_labels = if row.validation_print_mode == "duplicate_dm" {
+        Some(UnitLabelTotals {
+            sent: count(row.labels_sent)?,
+            verified: count(row.labels_verified)?,
+            skipped: count(row.labels_skipped)?,
+            unresolved: count(row.labels_unresolved)?,
+            reprints: count(row.labels_reprinted)?,
+        })
+    } else {
+        None
+    };
     Ok(OfficeShift {
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
@@ -147,6 +188,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
             device_ids: serde_json::from_str(&row.device_ids).map_err(ApiError::internal)?,
             closed_pallets: u32::try_from(row.closed_pallets).map_err(ApiError::internal)?,
             open_pallets: u32::try_from(row.open_pallets).map_err(ApiError::internal)?,
+            unit_labels,
         },
     })
 }
@@ -866,6 +908,36 @@ mod tests {
                 ["SEARCH o USING INDEX code_owners_shift_unboxed (shift_id=?)"],
                 "{filter}: {plan:#?}"
             );
+        }
+    }
+
+    /// A printing shift's label totals (plan РЕЖ, part B) read its events
+    /// through `unit_label_events_shift` of `0021`, each of the six reads
+    /// (the last event of a job included), for one shift and for the list
+    /// alike, and never scan the table.
+    #[tokio::test]
+    async fn the_label_totals_run_on_the_index_of_0021() {
+        for filter in [
+            "WHERE id = ?",
+            "WHERE status <> 'closed' OR production_date >= ?",
+        ] {
+            let plan = plan(filter).await;
+            let found: Vec<&String> = plan
+                .iter()
+                .filter(|line| {
+                    line.contains("unit_label_events")
+                        || line.contains(" e ")
+                        || line.contains(" later ")
+                })
+                .collect();
+            assert_eq!(found.len(), 6, "{filter}: {plan:#?}");
+            for line in &found {
+                assert!(
+                    line.starts_with("SEARCH")
+                        && line.contains("USING INDEX unit_label_events_shift"),
+                    "{filter}: {line}"
+                );
+            }
         }
     }
 }

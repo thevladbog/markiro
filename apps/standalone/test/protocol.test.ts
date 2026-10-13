@@ -3443,6 +3443,26 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
     expect(answer.error?.issues.map((issue) => issue.path)).toStrictEqual([["validationPrint"]]);
   });
 
+  it("reads the label totals of a shift that prints, and none of another", () => {
+    const office = officeShiftSchema.parse(fixture("office-shift-validation-print.json"));
+    expect(office.totals.unitLabels).toStrictEqual({
+      sent: 321,
+      verified: 0,
+      skipped: 0,
+      unresolved: 2,
+      reprints: 3,
+    });
+    expect(officeShiftSchema.parse(fixture("office-shift.json")).totals.unitLabels).toBeUndefined();
+    const raw = fixture("office-shift-validation-print.json") as Row & { totals: Row };
+    const totals = (unitLabels: unknown) => ({ ...raw, totals: { ...raw.totals, unitLabels } });
+    expect(officeShiftSchema.safeParse(totals({ sent: -1 })).success).toBe(false);
+    expect(
+      officeShiftSchema.safeParse(
+        totals({ sent: 1, verified: 0, skipped: 0, unresolved: 0.5, reprints: 0 }),
+      ).success,
+    ).toBe(false);
+  });
+
   it("reads a policy with a field a newer host adds (B1 review)", () => {
     const office = fixture("office-shift-validation-print.json") as Row;
     const newer = {

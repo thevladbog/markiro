@@ -7,8 +7,8 @@
 
 use markiro_proto::{
     DeviceShift, FactKind, FactRecord, LabelVerification, OfficeShift, ReprintReason, ShiftCreate,
-    ShiftMode, ShiftSnapshot, ShiftUpdate, UnitLabelEvent, UnitLabelFact, ValidationPrint,
-    PROTOCOL_VERSION,
+    ShiftMode, ShiftSnapshot, ShiftUpdate, UnitLabelEvent, UnitLabelFact, UnitLabelTotals,
+    ValidationPrint, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -78,9 +78,21 @@ fn the_office_sees_the_policy_of_a_shift() {
         shift.validation_print,
         Some(duplicate(LabelVerification::None))
     );
+    // Its card counts its labels (task B3).
+    assert_eq!(
+        shift.totals.unit_labels,
+        Some(UnitLabelTotals {
+            sent: 321,
+            verified: 0,
+            skipped: 0,
+            unresolved: 2,
+            reprints: 3
+        })
+    );
     for name in ["office-shift.json", "office-shift-validation.json"] {
         let shift: OfficeShift = round_trip(name);
         assert_eq!(shift.validation_print, None, "{name}");
+        assert_eq!(shift.totals.unit_labels, None, "{name}");
     }
 }
 

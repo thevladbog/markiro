@@ -732,7 +732,9 @@ const civilDateTextSchema = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
  * taken apart («Кодов в закрытых коробах», the cloud's `containedUnits`); the
  * boxes closed and not taken apart; the open boxes that hold a live code; the
  * host's time of the last record of the shift; its devices, first entry first.
- * A planned shift's are zeros, `null` and `[]`.
+ * A planned shift's are zeros, `null` and `[]`. A validation shift that prints
+ * a duplicate (plan РЕЖ part B) counts its unit labels (`unitLabels`); every
+ * other shift leaves the field out.
  */
 export const shiftTotalsSchema = z.object({
   acceptedUnits: z.number().int().nonnegative(),
@@ -743,6 +745,20 @@ export const shiftTotalsSchema = z.object({
   deviceIds: z.array(z.uuid()),
   closedPallets: z.number().int().nonnegative(),
   openPallets: z.number().int().nonnegative(),
+  /**
+   * `markiro_proto::UnitLabelTotals`: attempts sent, attempts verified, jobs whose
+   * check was skipped, jobs not resolved yet (their last event is not `verified`,
+   * `verification_skipped`, or `sent` without a required check), reprints.
+   */
+  unitLabels: z
+    .object({
+      sent: z.number().int().nonnegative(),
+      verified: z.number().int().nonnegative(),
+      skipped: z.number().int().nonnegative(),
+      unresolved: z.number().int().nonnegative(),
+      reprints: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
 

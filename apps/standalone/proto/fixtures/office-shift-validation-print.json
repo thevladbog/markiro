@@ -36,6 +36,7 @@
     "lastFactAt": "2026-10-08T09:41:07Z",
     "deviceIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
     "closedPallets": 0,
-    "openPallets": 0
+    "openPallets": 0,
+    "unitLabels": { "sent": 321, "verified": 0, "skipped": 0, "unresolved": 2, "reprints": 3 }
   }
 }

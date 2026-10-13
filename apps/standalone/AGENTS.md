@@ -1355,11 +1355,15 @@ adds the cross-field rules: a duplicate only with `mode: validation` (a plan
 without a mode is aggregation; an edit without one is the host's to check),
 and an entered shift's snapshot froze exactly the shift's policy (same
 `verification`, `template.id = templateId`, none when the shift prints none).
-Until task B3 the host keeps no policy: it takes `{ "mode": "none" }` and
-answers `duplicate_dm` `validation_failed` on `validationPrint`, and it answers
-a `unit_label` record exactly as a kind it does not know (see Facts). The
-station keeps entering with `STATION_SHIFT_ENTER` = `["validation-v1"]`; it
-names `validation-dm-duplicate-v1` only once it prints unit labels (B5/B6).
+The host keeps the policy since task B3 («Shifts»): a shift that prints is
+entered only by a station that names both `validation-v1` and
+`validation-dm-duplicate-v1` (`station_update` otherwise), and it reads
+`unit_label` records («Facts»). `ShiftTotals.unitLabels`
+(`markiro_proto::UnitLabelTotals`, `{ sent, verified, skipped, unresolved,
+reprints }`) is set only for a shift that prints. The station keeps entering
+with `STATION_SHIFT_ENTER` = `["validation-v1"]`, so it cannot enter a shift
+that prints until it names `validation-dm-duplicate-v1`, once it prints unit
+labels (B5/B6); it says why for `duplicate_template_not_fit`.
 The host does not look at the protocol of a station that enters a shift (it
 records it at pairing only), so a station of protocol 2 could enter a shift
 the office planned with pallets and produce boxes without them. The pilot
@@ -2902,7 +2906,27 @@ have, is `conflict` on `shift_status`, not `validation_failed`; then, for a
 planned shift, the line, templates and counterparty that change. A station's
 own shift (`DeviceShiftCreate`) is created as aggregation, planned until a
 station enters it; while it is planned the office may still edit it like any
-planned shift, its mode included. A shift with pallets (`palletsEnabled`, plan
+planned shift, its mode included. A validation shift may print a Data Matrix
+duplicate of each accepted code (plan РЕЖ part B, migration `0021`):
+`validationPrint` is `{ "mode": "none" }` or `{ "mode": "duplicate_dm",
+"verification": "none" | "required", "templateId" }`, stored in
+`shifts.validation_print_mode`, `_verification` and `_template_id`. A
+duplicate needs mode validation (`validation_failed` on `validationPrint`,
+after the mode's own rules; on an edit only for a planned shift, where a
+policy left out is the shift's, so a printing shift turned to aggregation must
+send `{ "mode": "none" }` in the same edit) and a template of the
+`product_duplicate` purpose that is enabled and covers the product's group
+(`shifts::check_duplicate_template`, `validation_failed` on
+`validationPrint.templateId`, after the box template; on an edit only when the
+template changes, a kept one stays like the box template). Left out or `null`,
+a plan has none and an edit keeps the shift's (no helper refuses `null`, as
+for the other optional fields). An edit writes the mode and the three policy
+columns in one `UPDATE`, which the triggers of `0021` check together; an
+active shift's other policy is `conflict` on `shift_status`, the same policy
+again no change. `shift.create` names `validationPrint` only when it prints,
+`shift.update` names it with its `{ from, to }` (`{ "mode": "none" }` for
+none). `OfficeShift` and `DeviceShift` carry the policy only when it prints
+(left out: none). A shift with pallets (`palletsEnabled`, plan
 ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
 product (`templates::fits` for the pallet purpose; `validation_failed` on
 `palletTemplateId` otherwise, a missing one included) and a pallet capacity of
@@ -2941,8 +2965,10 @@ keeps its pallets (`shift_status`). Only a planned shift is deleted
 (`DELETE …/{id}`, 204; an open or a closed one is `shift_status`); the delete
 takes a revision with no row left to
 stamp, and a delete repeated after a lost answer is `not_found`. A template a
-planned shift names, for its boxes or its pallets, is not deleted (`conflict`
-on `template_in_use`, with `details.shiftIds`), since the shift prints with it
+planned shift names, for its boxes, its pallets or its duplicates (plan РЕЖ
+part B), is not deleted (`conflict` on `template_in_use`, with
+`details.shiftIds`; `PLANNED_SHIFTS_NAMING` of `routes/templates.rs`, its plan
+pinned on `shifts_status_production_date`), since the shift prints with it
 once a station opens it;
 an open or closed shift has the layout in its snapshot. Disabling or narrowing
 such a template is not refused: the shift then does not open, and the office
@@ -2989,11 +3015,17 @@ gets the same snapshot back, so a station that lost its database recovers it;
 a change of the catalog, the template or the GLN never changes it. A pallet
 template disabled or narrowed since the plan keeps the shift planned
 (`conflict` on `pallet_template_not_fit`, checked after the box template). A
+validation shift that prints (plan РЕЖ part B) freezes its duplicate template
+the same way, with the verification, as `snapshot.validationPrint` (`{
+verification, template }`); one disabled or narrowed since keeps the shift
+planned (`conflict` on `duplicate_template_not_fit`, after the pallet
+template), and `shift.open` names `validationPrintTemplateId` and
+`validationPrintTemplateRev`. A
 closed shift is `shift_status` for every station, a shift of another line (or a
 station without one) `shift_line`, a shift another station opened
 `shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
 320 KB (a `CHECK` of `0009`, `shifts::MAX_SNAPSHOT_BYTES`): a box layout and a
-pallet layout that together exceed it keep the shift planned (`conflict` on
+pallet layout (or a duplicate layout) that together exceed it keep the shift planned (`conflict` on
 `snapshot_too_large`, checked at the entry after the templates, before a
 revision is taken). The host never checks a layout's content: the station
 does, with `labelTemplateSpecSchema`, when it enters. The opening writes
@@ -3246,12 +3278,16 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
   with both, held by `shifts_validation_print_insert`/`_update` (a template
   id without a foreign key, as the box template's; a planned shift's
   duplicate template is found by `shifts_planned_duplicate_template`). Its
-  label events are `unit_label_events` (part B, «Facts»).
+  label events are `unit_label_events` (part B, «Facts»). The office plans
+  and edits the policy of a planned shift only, a duplicate only in a
+  validation shift with a fitting `product_duplicate` template («Shifts»).
 - Entry needs capabilities: since protocol 4 a station names what it works in
   `ShiftEnter.supports`, and a validation shift requires `validation-v1`; a
   station that does not name it (protocol 3 sends no body) is refused with
   `conflict`, `details.constraint = "station_update"`, on every entry
-  («Protocol»).
+  («Protocol»); a shift that prints also requires
+  `validation-dm-duplicate-v1`, and its snapshot freezes the duplicate
+  template whole (`duplicate_template_not_fit`, `snapshot_too_large`).
 - The box rule by mode has two halves: the host's triggers
   `scans_ok_box_by_mode*` (`0020`) refuse an accepted scan without a box in a
   shift that is not a validation shift, and the host's code
@@ -3270,7 +3306,8 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
 - Its close counts codes: `actualQty` is the shift's codes, `closedBoxCount`
   is 0 (the host refuses any other), no open box can block it («Floor work»,
   «Facts»); the office's totals are «Принято кодов» from
-  `code_owners_shift_unboxed`.
+  `code_owners_shift_unboxed`, and for a shift that prints its labels
+  (`ShiftTotals.unitLabels`, «Facts»).
 - Its exports are flat only: the office offers `shift_txt_flat` and
   `shift_csv_flat`, the port refuses every box or pallet format
   («Shift exports»).
@@ -3278,7 +3315,7 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
   choosing the mode on the station's new-shift steps is part C (owner's
   decision), as are reprocessing codes of earlier shifts and modes on the
   handheld. The duplicate print under «Проверка» is part B (protocol 5; its
-  wire is in «Protocol» and «Facts»).
+  wire is in «Protocol» and «Facts»; the host's side since task B3).
 - Parity with the cloud is held by `test/scan-verdict-parity.test.ts` (every
   raw scan of the domain's KM fixtures and a line's scanner rows: the same
   verdict and duplicate key as `validateShiftScan`, in both modes; the one
@@ -3348,10 +3385,33 @@ receipt is kept for good. `unit_label` (protocol 5, plan РЕЖ part B,
 kinds), `reason` (a `ReprintReason`, on the `prepared` event of a reprint
 only), `errorCode` (exactly on `failed_before_send`, `delivery_unknown` and
 `verification_rejected`, from `UNIT_LABEL_ERROR_CODES`), `payloadDigest`,
-`bytesDigest`, `at`; never the full code. Until task B3 the host refuses it in
-`facts::apply` before anything is read, as an unknown kind: `invalid_record`
-without a field, the receipt kept without a kind or a shift
-(`host/tests/validation_shifts.rs`).
+`bytesDigest`, `at`; never the full code. The host (`facts/unit_label.rs`,
+task B3) takes it only in a validation shift that prints (`invalid_record` on
+`shift_mode` in an aggregation shift, by `facts::admits`; on
+`validationPrint` in a validation shift that prints nothing), and only for a
+code this station accepted in this shift (`subject_unknown`, a receipt code
+of protocol 5, otherwise; found through `scans_code_hash`, its plan pinned).
+Every rule a row of `unit_label_events` keeps is checked before the write, so
+a broken record is `invalid_record` on its field and never a database error
+(a 500 would be retried forever and block the station's queue): `jobId` a
+client UUID, `at` a device instant, and `UnitLabelFact::check` in proto (the
+hex digests, an attempt from 1, the reason only on a reprint's `prepared`,
+each error code exactly on its event from `UnitLabelEvent::error_codes`, so
+a code a newer station adds is refused). `proto/fixtures/unit-label-rules.json`
+holds `UnitLabelFact::check`, `unitLabelFactSchema` and the host's receipts to
+the same answers (`proto/tests/validation_print.rs`, `test/protocol.test.ts`,
+`host/tests/unit_labels.rs`). The host runs no state machine of its own: it
+keeps each event as sent, with the operator, no audit row and no revision.
+A printing shift's card counts them (`ShiftTotals.unitLabels`): attempts
+`sent` and `verified` (each attempt once), jobs whose check was `skipped`,
+`reprints` (attempts after the first) and `unresolved` jobs, whose last event
+is not `verified`, `verification_skipped`, or `sent` when the shift requires
+no check. A job's last event is its latest by `at`, then `attemptNo`, then its
+place in the domain's order of an attempt (`prepared`, `sending`, the print's
+outcome, a rejected check, a check that passed or was skipped), then the
+host's id — not the order the records arrived in (rowids do not survive
+`VACUUM INTO` reliably). Every read runs on `unit_label_events_shift`
+(`routes/office_shifts.rs`, its plan pinned).
 
 A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
 an `invalid` one keeps no code, only what it looked like (`rawKind`) and its

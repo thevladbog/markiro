@@ -1786,6 +1786,30 @@ pub struct ShiftTotals {
     pub device_ids: Vec<String>,
     pub closed_pallets: u32,
     pub open_pallets: u32,
+    /// The unit labels of a validation shift that prints a duplicate (plan
+    /// РЕЖ, part B); left out for every other shift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_labels: Option<UnitLabelTotals>,
+}
+
+/// What a shift's `unit_label` facts give its card (plan РЕЖ, part B; the
+/// cloud's `productLabelSummary`): the attempts sent and the attempts
+/// verified (each attempt once, whatever was received twice), the jobs whose
+/// check was skipped, the reprints (attempts after a job's first), and the
+/// jobs not resolved yet: those whose last event is not `verified`,
+/// `verification_skipped`, or `sent` when the shift requires no check. A
+/// job's last event is its latest by `at`, then by `attemptNo`, then by its
+/// place in the domain's order of an attempt (`prepared`, `sending`, the
+/// print's outcome, a rejected check, a check that passed or was skipped),
+/// then by the host's id: an order the record's arrival does not change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitLabelTotals {
+    pub sent: u64,
+    pub verified: u64,
+    pub skipped: u64,
+    pub unresolved: u64,
+    pub reprints: u64,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
