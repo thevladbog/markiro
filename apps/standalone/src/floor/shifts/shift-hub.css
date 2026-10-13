@@ -1,0 +1,545 @@
+/*
+ * The shift hub («Смены линии») and the new shift, ported from the cloud
+ * station (apps/station/src/station.css: .station-screen, .station-floor-footer,
+ * .shift-selection__*, .shift-card*, .new-shift__*; shift card redesign
+ * 2026-09-20, PR #615/#619). Every rule is scoped to `.station-screen` of
+ * these screens: the office's shift card and the shell's older floor rules
+ * share some class names, and none of them may leak in either direction.
+ * Colours and type come from @markiro/ui tokens only.
+ */
+
+/* ---- The screen: title row, content, fixed action row (StationScreen). ---- */
+
+.station-screen.shift-hub,
+.station-screen.new-shift {
+  display: grid;
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* A fixed, non-scrolling station screen: it takes the room the floor frame
+     gives it and never grows the page with its content (the frame's height is
+     only a minimum, so without this a long form pushed the footer off screen). */
+  contain: size;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__header,
+:is(.shift-hub, .new-shift) .station-screen__content,
+:is(.shift-hub, .new-shift) .station-screen__actions {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__header {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  justify-content: space-between;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__title {
+  display: grid;
+  flex-shrink: 0;
+  min-width: 0;
+  gap: var(--sp-1);
+}
+
+:is(.shift-hub, .new-shift) .station-screen__title h2 {
+  margin: 0;
+  font: var(--floor-title);
+  white-space: nowrap;
+}
+
+/* The operator: a quiet second voice under the title (the status bar names them too). */
+.shift-hub .shift-hub__operator {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: nowrap;
+}
+
+:is(.shift-hub, .new-shift) .station-screen__actions {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* ---- The fixed action row (FloorFooter), flush inside the screen. ---- */
+
+:is(.shift-hub, .new-shift) .station-floor-footer {
+  display: flex;
+  width: 100%;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* One line per label, as on the cloud station's footer. */
+:is(.shift-hub, .new-shift) .station-floor-footer .mk-btn {
+  white-space: nowrap;
+}
+
+.shift-hub .shift-hub__primary {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.shift-hub .shift-hub__hint {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shift-hub .shift-selection__secondary-actions {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  gap: var(--sp-3);
+}
+
+/* ---- The hub's header: message slot and the top-right action. ---- */
+
+.shift-hub .shift-selection__message {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  max-width: 620px;
+  min-height: 64px;
+  max-height: min(144px, 18vh);
+  overflow: auto;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.shift-hub .shift-selection__message p {
+  margin: 0;
+}
+
+.shift-hub .shift-selection__header-action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.shift-hub .shift-selection__header-action .mk-btn {
+  min-height: 64px;
+  white-space: nowrap;
+}
+
+/* ---- The hub's content: the page of cards and the pager under it. ---- */
+
+.shift-hub .shift-selection__content {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.shift-hub .shift-selection__slot,
+.shift-hub .shift-selection__grid {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shift-hub .shift-selection__grid {
+  display: grid;
+  height: 100%;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.shift-hub .shift-selection__state {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  gap: var(--sp-3);
+  align-content: center;
+  color: var(--fg-2);
+  font: var(--floor-lg);
+  place-items: center;
+  text-align: center;
+}
+
+.shift-hub .shift-selection__state p {
+  max-width: 46ch;
+  margin: 0;
+}
+
+.shift-hub .shift-selection__state--empty {
+  gap: var(--sp-2);
+}
+
+/* A quiet marker instead of a centred control a read could re-render. */
+.shift-hub .shift-selection__empty-mark {
+  width: 72px;
+  height: 4px;
+  margin-bottom: var(--sp-2);
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+/* ---- The shift card (redesign 2026-09-20). ---- */
+
+.shift-hub .shift-card {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+  /* The card's surface, border and shadow are `Card`'s own inline style, as on
+     the cloud station (its stylesheet gradient loses to that style there too). */
+}
+
+.shift-hub .shift-card .mk-card__body {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shift-hub .shift-card p {
+  margin: 0;
+}
+
+.shift-hub .shift-card__body {
+  display: grid;
+  height: 100%;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(160px, 38%) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * Rows: heading · product · date · mode · counterparty · notes (the free
+ * row) · the 72 px action. The cloud card's free row stands empty; the
+ * standalone says there what the action is waiting for.
+ */
+.shift-hub .shift-card__details {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2) 0;
+  overflow: hidden;
+  gap: var(--sp-2);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) 72px;
+}
+
+.shift-hub .shift-card__heading {
+  display: flex;
+  flex-wrap: nowrap;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* The number is the shift's address: quiet monospace text beside the status. */
+.shift-hub .shift-card__number {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  font: 500 13px/17px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card .mk-tag {
+  border-radius: 6px;
+}
+
+.shift-hub .shift-card .mk-chip {
+  border-radius: 999px;
+}
+
+.shift-hub .shift-card__status.mk-chip {
+  flex-shrink: 0;
+}
+
+/* The product's own gradient, its hue derived from the GTIN. */
+.shift-hub .shift-card__photo {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-3);
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
+  place-items: center;
+}
+
+.shift-hub .shift-card__photo[data-accent="true"] {
+  background: linear-gradient(
+    305deg,
+    hsl(var(--product-hue) 40% 20%),
+    hsl(var(--product-hue) 36% 11%) 55%,
+    hsl(var(--product-hue) 32% 6%)
+  );
+}
+
+.shift-hub .shift-card__photo-monogram {
+  color: rgb(250 250 248 / 70%);
+  font: 700 clamp(40px, 5vw, 72px) / 1 var(--font-ui);
+}
+
+.shift-hub .shift-card__product {
+  display: -webkit-box;
+  align-self: start;
+  overflow: hidden;
+  font: var(--floor-lg);
+  letter-spacing: -0.015em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.shift-hub .shift-card__product--only {
+  -webkit-line-clamp: 5;
+}
+
+/* Short kiosk viewports (1366×768, 1280×800): a tighter title by height. */
+@media (max-height: 820px) {
+  .shift-hub .shift-card__product {
+    font: 600 20px/24px var(--font-ui);
+    -webkit-line-clamp: 2;
+  }
+
+  .shift-hub .shift-card__product--only {
+    -webkit-line-clamp: 4;
+  }
+}
+
+/* Dates and plan are monospace facts, not prose. */
+.shift-hub .shift-card__dates,
+.shift-hub .shift-card__plan {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 400 14px/18px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-hub .shift-card__dates {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+}
+
+.shift-hub .shift-card__date-part {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__mode {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.shift-hub .shift-card__counterparty {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.shift-hub .shift-card__notes {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-1);
+  align-content: end;
+}
+
+.shift-hub .shift-card__hint {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.shift-hub .shift-card__action {
+  --control-floor: 72px;
+
+  align-self: end;
+  grid-row: -2 / -1;
+}
+
+/* ---- The new shift (NewShift). ---- */
+
+/* The footer's parts share the row equally, as the cloud's full-width buttons do. */
+.new-shift .station-floor-footer > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.new-shift .new-shift__panel {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+}
+
+/* The product step: the scan prompt and the name search, centred. */
+.new-shift .new-shift__panel--input {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.new-shift .new-shift__search {
+  display: grid;
+  width: min(680px, 100%);
+  min-width: 0;
+  min-height: 0;
+  margin-inline: auto;
+  overflow: auto;
+  gap: var(--sp-3);
+  align-content: center;
+}
+
+.new-shift .new-shift__prompt {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.new-shift .new-shift__results {
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__results p {
+  margin: 0;
+}
+
+/* The form step: the product card, then the choices, scrolling only if it must. */
+.new-shift .new-shift__panel--found {
+  width: min(820px, 100%);
+  margin-inline: auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.new-shift .new-shift__fields {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  gap: var(--sp-3);
+  align-content: start;
+  /* Every row at its content: a clipped part (the product card) never shrinks to nothing. */
+  grid-auto-rows: max-content;
+}
+
+.new-shift .new-shift__fields p {
+  margin: 0;
+}
+
+.new-shift .new-shift__product {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.new-shift .new-shift__product h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.new-shift .new-shift__code {
+  margin-top: var(--sp-2);
+  overflow: hidden;
+  font: var(--floor-lg);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-shift .new-shift__group {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.new-shift .new-shift__label {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.new-shift .new-shift__value {
+  font: var(--floor-body-strong);
+}
+
+.new-shift .new-shift__modes {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* The production date and its two steps in one row. */
+.new-shift .new-shift__date-row {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+}
+
+.new-shift .new-shift__counts {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.new-shift .new-shift__hint {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.new-shift .new-shift__message {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  overflow: hidden;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.new-shift .new-shift__message p {
+  margin: 0;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card } from "@markiro/ui";
+import { Alert, Button, Pager } from "@markiro/ui";
 
 import type { FloorSession } from "../../app/shell.js";
 import type { EnteredShift } from "../../host/protocol.js";
@@ -10,6 +10,7 @@ import type { Pairing } from "../../local/reference-sync.js";
 import { readRefusedCloses } from "../close/shift-close.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
+import { FloorFooter, FloorScreen } from "./FloorScreen.js";
 import { cardAction, ShiftCard } from "./ShiftCard.js";
 
 export interface ShiftListProps {
@@ -41,6 +42,9 @@ export interface ShiftListProps {
   /** The queue of what was not sent (plan ОЧ); none — no button. */
   onQueue?: () => void;
 }
+
+/** Two large cards stay legible on the 1280×800 line terminal, as on the cloud station. */
+const SHIFT_PAGE_SIZE = 2;
 
 type Copies =
   | { kind: "loading" }
@@ -86,6 +90,7 @@ export function ShiftList({
   const [attempt, setAttempt] = useState(0);
   const [entering, setEntering] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<EntryRefusal | null>(null);
+  const [requestedPage, setRequestedPage] = useState(1);
   const alive = useRef(true);
   const start = useRef<HTMLParagraphElement>(null);
   // The guard of one entry at a time: two presses in one turn both pass a
@@ -175,33 +180,48 @@ export function ShiftList({
       {t("floor.shifts.readHostFailed")}
     </Alert>
   ) : null;
+  const cards = copies.kind === "ready" ? copies.copies : [];
+  const pageCount = Math.max(1, Math.ceil(cards.length / SHIFT_PAGE_SIZE));
+  // The page is clamped where it is read: a list that got shorter shows its last page.
+  const page = Math.min(Math.max(1, requestedPage), pageCount);
+  const shown = cards.slice((page - 1) * SHIFT_PAGE_SIZE, page * SHIFT_PAGE_SIZE);
   const body = () => {
-    if (copies.kind === "loading") return <p>{t("floor.shifts.loading")}</p>;
+    if (copies.kind === "loading") {
+      return <p className="shift-selection__state">{t("floor.shifts.loading")}</p>;
+    }
     if (copies.kind === "failed") {
       return (
-        <Alert
-          tone="error"
-          action={
-            <Button size="floor" variant="secondary" onClick={() => setAttempt((v) => v + 1)}>
-              {t("floor.shifts.retry")}
-            </Button>
-          }
-        >
-          {t("floor.shifts.readFailed")}
-        </Alert>
+        <div className="shift-selection__state">
+          <Alert
+            tone="error"
+            action={
+              <Button size="floor" variant="secondary" onClick={() => setAttempt((v) => v + 1)}>
+                {t("floor.shifts.retry")}
+              </Button>
+            }
+          >
+            {t("floor.shifts.readFailed")}
+          </Alert>
+        </div>
       );
     }
     if (copies.copies.length === 0) {
-      return <p>{t(shiftReads.done === 0 ? "floor.shifts.notRead" : "floor.shifts.empty")}</p>;
+      // Static by design, as on the cloud station: a quiet mark, never a control.
+      return (
+        <div className="shift-selection__state shift-selection__state--empty">
+          <span className="shift-selection__empty-mark" aria-hidden="true" />
+          <p>{t(shiftReads.done === 0 ? "floor.shifts.notRead" : "floor.shifts.empty")}</p>
+        </div>
+      );
     }
     return (
-      <div className="shift-list__cards">
-        {copies.copies.map((copy) => (
+      <div className="shift-selection__grid">
+        {shown.map((copy) => (
           <ShiftCard
             key={copy.id}
             copy={copy}
             refusal={
-              copy.localState === "closing" && copies.refused.has(copy.id)
+              copies.refused.has(copy.id) && copy.localState === "closing"
                 ? { code: copies.refused.get(copy.id) ?? null }
                 : null
             }
@@ -215,43 +235,74 @@ export function ShiftList({
   };
 
   return (
-    <Card className="standalone-card shift-list" title={t("floor.shifts.title")} titleAs="h2">
-      <div className="standalone-form">
-        <p ref={start} tabIndex={-1} className="floor-sign-in__prompt">
+    <FloorScreen
+      className="shift-hub"
+      title={t("floor.shifts.title")}
+      subtitle={
+        <p ref={start} tabIndex={-1} className="shift-hub__operator">
           {t("floor.operator.signedIn", { name: operator.name, login: operator.login })}
         </p>
-        <div className="floor-sign-in__message floor-sign-in__message--stack" aria-live="polite">
-          {standing}
-          {linkState}
-          {busy && <p>{t("floor.shifts.entering")}</p>}
-        </div>
-        {body()}
-        <div className="standalone-form__actions">
-          <Button size="floor" disabled={busy || !online} onClick={onNew}>
-            {t("floor.shifts.new")}
-          </Button>
-          {onSetup !== undefined && (
-            <Button size="floor" variant="secondary" disabled={busy} onClick={onSetup}>
-              {t("floor.shifts.setup")}
-            </Button>
-          )}
+      }
+      header={
+        <>
+          <div className="shift-selection__message" aria-live="polite">
+            {standing}
+            {linkState}
+            {busy && <p>{t("floor.shifts.entering")}</p>}
+          </div>
           {onWarehouse !== undefined && (
-            <Button size="floor" variant="secondary" disabled={busy} onClick={onWarehouse}>
-              {t("floor.warehouse.open")}
-            </Button>
+            <div className="shift-selection__header-action">
+              <Button size="floor" variant="secondary" disabled={busy} onClick={onWarehouse}>
+                {t("floor.warehouse.open")}
+              </Button>
+            </div>
           )}
-          {onQueue !== undefined && (
-            <Button size="floor" variant="secondary" disabled={busy} onClick={onQueue}>
-              {t("floor.shifts.queue")}
+        </>
+      }
+      actions={
+        <FloorFooter ariaLabel={t("floor.shifts.actions")}>
+          <div className="shift-hub__primary">
+            <Button size="floor" disabled={busy || !online} onClick={onNew}>
+              {t("floor.shifts.new")}
             </Button>
-          )}
-          {/* Never held by an entry: one that never settles must not trap the station here. */}
-          <Button size="floor" variant="secondary" onClick={onSignOut}>
-            {t("floor.operator.signOut")}
-          </Button>
-        </div>
-        {!online && <p className="shift-card__hint">{t("floor.shifts.newNeedsLink")}</p>}
+            {!online && <p className="shift-hub__hint">{t("floor.shifts.newNeedsLink")}</p>}
+          </div>
+          <div className="shift-selection__secondary-actions">
+            {onSetup !== undefined && (
+              <Button size="floor" variant="secondary" disabled={busy} onClick={onSetup}>
+                {t("floor.shifts.setup")}
+              </Button>
+            )}
+            {onQueue !== undefined && (
+              <Button size="floor" variant="secondary" disabled={busy} onClick={onQueue}>
+                {t("floor.shifts.queue")}
+              </Button>
+            )}
+            {/* Never held by an entry: one that never settles must not trap the station here. */}
+            <Button size="floor" variant="secondary" onClick={onSignOut}>
+              {t("floor.operator.signOut")}
+            </Button>
+          </div>
+        </FloorFooter>
+      }
+    >
+      <div className="shift-selection__content">
+        <div className="shift-selection__slot">{body()}</div>
+        {pageCount > 1 ? (
+          <Pager
+            page={page}
+            pageCount={pageCount}
+            onPageChange={setRequestedPage}
+            ariaLabel={t("floor.shifts.pagination")}
+            previousLabel={t("floor.shifts.previousPage")}
+            nextLabel={t("floor.shifts.nextPage")}
+            pageLabel={(current, count) =>
+              t("floor.shifts.page", { page: current, pageCount: count })
+            }
+            className="shift-selection__pager"
+          />
+        ) : null}
       </div>
-    </Card>
+    </FloorScreen>
   );
 }

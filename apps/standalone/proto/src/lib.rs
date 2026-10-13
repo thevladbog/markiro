@@ -190,6 +190,7 @@ pub mod shift_close_reasons {
 
 pub mod backup;
 pub mod cloud_import;
+pub mod code_search;
 pub mod pairing;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
