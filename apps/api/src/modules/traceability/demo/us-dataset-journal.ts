@@ -221,6 +221,17 @@ export class UsDatasetJournalStore {
     this.unit(unitKey, stage);
     return this.stage(tx, checked, datasetId, unitKey, stage);
   }
+  async readStages(
+    raw: UsDatasetContext,
+    datasetId: string,
+    requests: readonly { unitKey: string; stage: UsDatasetStage }[],
+  ): Promise<(UsDatasetStageRow | null)[]> {
+    const value = context(raw);
+    return this.db.transaction(
+      (tx) => this.readStagesInTransaction(tx, value, datasetId, requests),
+      { isolationLevel: "repeatable read" },
+    );
+  }
   async readStageCompletions(
     raw: UsDatasetContext,
     datasetId: string,

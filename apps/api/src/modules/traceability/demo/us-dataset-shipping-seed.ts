@@ -84,10 +84,16 @@ export class UsDatasetShippingSeedStore {
       } catch (cause) {
         throw datasetShippingError("us_dataset_shipping_input_invalid", unitKey, cause);
       }
-      const references = await journal.readStage(context, header.id, "references", "references");
-      const receiving = await journal.readStage(context, header.id, unitKey, "receiving");
-      const transformation = await journal.readStage(context, header.id, unitKey, "transformation");
-      const cases = await journal.readStage(context, header.id, unitKey, "cases");
+      const [references, receiving, transformation, cases] = await journal.readStages(
+        context,
+        header.id,
+        [
+          { unitKey: "references", stage: "references" },
+          { unitKey, stage: "receiving" },
+          { unitKey, stage: "transformation" },
+          { unitKey, stage: "cases" },
+        ],
+      );
       if (
         !references?.receipt ||
         !receiving?.receipt ||

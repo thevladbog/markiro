@@ -37,11 +37,13 @@ const expectedFiles = [
   "test/us-dataset-plan-seed.e2e.test.ts",
   "test/us-request-create-transaction.e2e.test.ts",
   "test/us-case-demo-owned-application.e2e.test.ts",
+  "test/us-dataset-journal-reader.e2e.test.ts",
+  "test/us-dataset-shipping-prerequisites.e2e.test.ts",
 ];
 const expectedFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 const expectedCommand =
-  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts --maxWorkers=1";
+  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1";
 const expectedJob = load(`jobs:
   dataset_prepared_services:
     runs-on: ubuntu-latest
@@ -81,7 +83,7 @@ const expectedJob = load(`jobs:
       - name: Verify prepared Plan, dataset intent, Plan seed and Request creation transactions
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1
 `).jobs.dataset_prepared_services;
 
 const source = readFileSync(".github/workflows/us-development.yml", "utf8");
@@ -157,7 +159,7 @@ test("prepared services have an explicit native owner", () => {
   const owner = job.steps.at(-1);
   assert.equal(
     owner.run,
-    "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts --maxWorkers=1",
+    "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1",
   );
   assertOwnership(readWorkflows());
 });
