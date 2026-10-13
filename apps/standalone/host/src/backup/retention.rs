@@ -2,7 +2,7 @@
 //! of each of the 14 newest days and of each of the 12 newest months that
 //! have copies, days and months in UTC. One stream of copies serves all
 //! three, so a copy may be kept for more than one reason. A copy made before
-//! pending migrations (plan ОБН-1, `crate::upgrade`) stays besides for
+//! pending migrations (plan ОБН-1, `crate::upgrade`) is also kept for
 //! `upgrade::KEEP_DAYS` days.
 
 use std::collections::BTreeSet;
@@ -15,6 +15,17 @@ pub const MONTHLY: usize = 12;
 
 /// The names to keep among `copies` (`(file, created at)`, any order).
 pub fn keep(copies: &[(String, OffsetDateTime)]) -> BTreeSet<String> {
+    keep_anchored(copies, None)
+}
+
+/// [`keep`], counting the 14 days of a copy before an upgrade back from
+/// `anchor` — the time of the copy a run just made — rather than from the
+/// folder's newest copy: a copy dated years ahead by a clock once set forward
+/// would otherwise put every copy made at the real time past the floor.
+pub fn keep_anchored(
+    copies: &[(String, OffsetDateTime)],
+    anchor: Option<OffsetDateTime>,
+) -> BTreeSet<String> {
     let mut newest_first: Vec<&(String, OffsetDateTime)> = copies.iter().collect();
     // Newest first; the name breaks a tie, so the choice never depends on the
     // order a folder listed its files in.
@@ -38,9 +49,10 @@ pub fn keep(copies: &[(String, OffsetDateTime)]) -> BTreeSet<String> {
         }
     }
     // A copy before an upgrade stays while it is no more than
-    // `upgrade::KEEP_DAYS` days older than the folder's newest copy: the rule
-    // has no clock of its own, and the newest copy is the one a run just made.
-    if let Some(newest) = newest_first.first().map(|copy| copy.1) {
+    // `upgrade::KEEP_DAYS` days older than the copy a run just made (or,
+    // without one, the folder's newest copy): the rule has no clock of its
+    // own.
+    if let Some(newest) = anchor.or_else(|| newest_first.first().map(|copy| copy.1)) {
         let floor = newest - time::Duration::days(crate::upgrade::KEEP_DAYS);
         for (name, at) in &newest_first {
             if *at >= floor && crate::upgrade::is_pre_upgrade(name) {

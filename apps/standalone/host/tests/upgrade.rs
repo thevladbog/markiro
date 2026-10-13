@@ -155,6 +155,13 @@ fn a_copy_before_an_upgrade_is_known_by_its_name() {
     assert!(!upgrade::is_pre_upgrade(
         "other-20261013T090000Z-pre-upgrade-16-31.db"
     ));
+    // The time must be a copy's UTC time, followed by `-`.
+    assert!(!upgrade::is_pre_upgrade(
+        "markiro-host-20261013T090000Zxpre-upgrade-16-31.db"
+    ));
+    assert!(!upgrade::is_pre_upgrade(
+        "markiro-host-abcdefghijklmnop-pre-upgrade-16-31.db"
+    ));
 }
 
 /// A data folder whose `host.db` has every migration but `ADDED`, one line,

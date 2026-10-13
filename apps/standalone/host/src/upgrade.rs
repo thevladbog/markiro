@@ -55,18 +55,35 @@ impl Pending {
 }
 
 /// Whether `file` is the name of a copy made before pending migrations:
-/// `markiro-host-<UTC time, 16 characters>-pre-upgrade-…`.
+/// `markiro-host-<UTC time, 16 characters>-pre-upgrade-…`, the time as a
+/// copy's name writes it (`20261013T090000Z`).
 pub fn is_pre_upgrade(file: &str) -> bool {
-    file.strip_prefix(COPY_PREFIX)
-        .and_then(|rest| rest.get(17..))
-        .is_some_and(|tag| tag.starts_with(TAG_PREFIX))
+    let Some(rest) = file.strip_prefix(COPY_PREFIX) else {
+        return false;
+    };
+    let stamp = rest.as_bytes().get(..17).unwrap_or_default();
+    let is_stamp = stamp.len() == 17
+        && stamp.iter().enumerate().all(|(index, byte)| match index {
+            8 => *byte == b'T',
+            15 => *byte == b'Z',
+            16 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        });
+    is_stamp
+        && rest
+            .get(17..)
+            .is_some_and(|tag| tag.starts_with(TAG_PREFIX))
 }
 
 /// What this build's `migrator` would add to the database on `conn`, on top
 /// of at least one migration it has. `None` for a new file (no migrations
 /// table, or no row in it), for a database that is up to date, and for one
 /// with a failed migration or one this build does not know: sqlx refuses
-/// those as before, and a copy would protect nothing new.
+/// those as before, and a copy would protect nothing new. Checksums are not
+/// compared: an applied migration whose checksum differs from the build's
+/// still gets a copy when something is pending, and sqlx then refuses it
+/// (possibly after applying a lower migration that arrived late, which the
+/// copy protects).
 pub async fn pending(
     conn: &mut SqliteConnection,
     migrator: &Migrator,

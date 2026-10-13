@@ -128,8 +128,9 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
 /// last, and one it cannot remove is logged and skipped ([`remove_identity`]),
 /// never failing the call. `keep_also` (the copy a run just made) always stays:
 /// with the host's clock set back the copies made before are newer, and by
-/// the rule alone the fresh copy would be the first to go. Returns the
-/// copies that stay, newest first.
+/// the rule alone the fresh copy would be the first to go. Its time also
+/// anchors the 14 days of a copy before an upgrade (plan ОБН-1,
+/// [`retention::keep_anchored`]). Returns the copies that stay, newest first.
 pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manifest>> {
     let copies = list(dir)?;
     let dated: Vec<(String, time::OffsetDateTime)> = copies
@@ -140,7 +141,15 @@ pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manife
                 .map(|at| (copy.file.clone(), at))
         })
         .collect();
-    let mut kept = retention::keep(&dated);
+    // The copy just made anchors the days a copy before an upgrade is kept
+    // (plan ОБН-1).
+    let anchor = keep_also.and_then(|fresh| {
+        dated
+            .iter()
+            .find(|(file, _)| file == fresh)
+            .map(|(_, at)| *at)
+    });
+    let mut kept = retention::keep_anchored(&dated, anchor);
     kept.extend(keep_also.map(str::to_owned));
     let mut staying = Vec::new();
     for copy in copies {
