@@ -177,7 +177,7 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     expect(messageOf(NEW, "Шаблон этикетки короба")).not.toBe(VALIDATION_HINT);
   });
 
-  it("drops a refusal of the box capacity once «Проверка» hides it, and sends none of the refused value", async () => {
+  it("drops a refusal of the box capacity once «Проверка» hides it, so «Агрегация» chosen again shows none, and sends none of the refused value", async () => {
     const session = await openCreate();
     session.api.createShift.mockResolvedValue({ ...CREATED, mode: "validation" });
     set(NEW, "Товар", MILK.id);
@@ -188,12 +188,36 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
       expect(messageOf(NEW, "Вместимость короба, шт")).toBe("Укажите целое число от 1 до 100 000"),
     );
     expect(session.api.createShift).not.toHaveBeenCalled();
+    // The refusal does not wait behind the hidden field: back on «Агрегация», without a
+    // new submit, the capacity shows its value and no message.
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(mode(NEW, "Агрегация"));
+    expect(valueOf(NEW, "Вместимость короба, шт")).toBe("0");
+    expect(messageOf(NEW, "Вместимость короба, шт") ?? "").not.toContain("Укажите");
+    expect(field(NEW, "Вместимость короба, шт").getAttribute("aria-invalid")).not.toBe("true");
+    // And a validation shift is sent without the refused value.
     fireEvent.click(mode(NEW, "Проверка"));
     fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
     await screen.findByText("Смена OCT26-006 запланирована.");
     const [, sent] = session.api.createShift.mock.calls[0] ?? [];
     expect(sent).toMatchObject({ mode: "validation", palletsEnabled: false });
     expect(sent).not.toHaveProperty("boxCapacity");
+  });
+
+  it("does not ask for the A4 pallet sheets while «Проверка» is chosen, whatever the pallets switch holds", async () => {
+    const validation: OfficeShift = {
+      ...PLANNED,
+      mode: "validation",
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+    };
+    const session = shiftsSession([validation]);
+    const name = await openEdit(session, validation);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(session.api.listPalletSheets).not.toHaveBeenCalled();
+    // The control: «Агрегация» with the same pallets switch asks for them.
+    fireEvent.click(mode(name, "Агрегация"));
+    await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(1));
   });
 
   it("changes a planned shift's mode, sending the mode alone", async () => {
@@ -219,30 +243,36 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     expect(messageOf(name, "Шаблон этикетки короба")).toBe(VALIDATION_HINT);
   });
 
-  it("shows an active shift's mode with both choices off: an open shift's mode does not change (Р1)", async () => {
-    const session = shiftsSession();
-    for (const shown of ["aggregation", "validation"] as const) {
-      const view = render(
-        <QueryClientProvider client={createOfficeQueryClient()}>
-          <OfficeSessionProvider value={session}>
-            <ShiftDialog
-              shift={{ ...ACTIVE, mode: shown }}
-              onClose={() => undefined}
-              onSaved={() => undefined}
-              onReload={() => undefined}
-              onOutdated={() => undefined}
-            />
-          </OfficeSessionProvider>
-        </QueryClientProvider>,
-      );
-      const name = `Смена ${ACTIVE.number}`;
-      await screen.findByRole("dialog", { name });
-      const radios = within(modes(name)).getAllByRole("radio");
-      expect(radios.map((radio) => radio.hasAttribute("disabled"))).toEqual([true, true]);
-      expect(isChecked(mode(name, shown === "validation" ? "Проверка" : "Агрегация"))).toBe(true);
-      view.unmount();
-    }
-  });
+  it.each([
+    ["active", ACTIVE],
+    ["closed", { ...ACTIVE, status: "closed" as const }],
+  ])(
+    "shows the mode of a shift that is %s with both choices off: the mode does not change once planned (Р1)",
+    async (_status, base) => {
+      const session = shiftsSession();
+      for (const shown of ["aggregation", "validation"] as const) {
+        const view = render(
+          <QueryClientProvider client={createOfficeQueryClient()}>
+            <OfficeSessionProvider value={session}>
+              <ShiftDialog
+                shift={{ ...base, mode: shown }}
+                onClose={() => undefined}
+                onSaved={() => undefined}
+                onReload={() => undefined}
+                onOutdated={() => undefined}
+              />
+            </OfficeSessionProvider>
+          </QueryClientProvider>,
+        );
+        const name = `Смена ${ACTIVE.number}`;
+        await screen.findByRole("dialog", { name });
+        const radios = within(modes(name)).getAllByRole("radio");
+        expect(radios.map((radio) => radio.hasAttribute("disabled"))).toEqual([true, true]);
+        expect(isChecked(mode(name, shown === "validation" ? "Проверка" : "Агрегация"))).toBe(true);
+        view.unmount();
+      }
+    },
+  );
 
   it("is reached by Tab on the chosen mode and changed by the arrows", async () => {
     await openCreate();

@@ -28,9 +28,11 @@ const DOCUMENT = "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f";
 describe("a format's check (plan ЧЗ, the dialog's one pass)", () => {
   it("is the offer and the warnings of one snapshot, for every format the shift is offered", () => {
     const shift = warned();
-    const offers = formatOffers(shift, FORMED_AT);
-    expect(offeredFormats(shift)).toEqual(offers.map((offer) => offer.format));
-    const checks = offeredFormats(shift).map((format) => formatCheck(shift, format, FORMED_AT));
+    const offers = formatOffers(shift, FORMED_AT, "aggregation");
+    expect(offeredFormats(shift, "aggregation")).toEqual(offers.map((offer) => offer.format));
+    const checks = offeredFormats(shift, "aggregation").map((format) =>
+      formatCheck(shift, format, FORMED_AT),
+    );
     expect(checks.map(({ format, refusal }) => ({ format, refusal }))).toEqual(offers);
     for (const check of checks) {
       expect(check.warnings).toEqual(exportWarnings(shift, check.format, FORMED_AT));
@@ -51,7 +53,7 @@ describe("a format's check (plan ЧЗ, the dialog's one pass)", () => {
   it("offers a shift without pallets the six formats that need none", () => {
     const shift = rows();
     shift.shift.palletsEnabled = false;
-    expect(offeredFormats(shift).map((format) => format.id)).toEqual([
+    expect(offeredFormats(shift, "aggregation").map((format) => format.id)).toEqual([
       "shift_txt_flat",
       "shift_txt_boxes",
       "shift_txt_boxes_reversed",
@@ -110,10 +112,12 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
   it("is the counts, a check of each format and every pallet with its late boxes, one turn each", async () => {
     const shift = warned();
     const made = deps();
-    const plan = await planExport(shift, FORMED_AT, made);
+    const plan = await planExport(shift, FORMED_AT, made, "aggregation");
     expect(plan).toEqual({
       counts: exportCounts(shift),
-      checks: offeredFormats(shift).map((format) => formatCheck(shift, format, FORMED_AT)),
+      checks: offeredFormats(shift, "aggregation").map((format) =>
+        formatCheck(shift, format, FORMED_AT),
+      ),
       pallets: palletOffers(shift).map((pallet) => ({
         ...pallet,
         warnings: palletWarnings(shift, pallet.palletId),
@@ -136,7 +140,7 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
     const shift = rows();
     shift.shift.palletsEnabled = false;
     const made = deps();
-    const plan = await planExport(shift, FORMED_AT, made);
+    const plan = await planExport(shift, FORMED_AT, made, "aggregation");
     expect(plan?.checks).toHaveLength(6);
     expect(plan?.pallets).toEqual([]);
     expect(made.pause).toHaveBeenCalledTimes(8);
@@ -148,7 +152,7 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
       turns += 1;
       return turns <= 3;
     });
-    expect(await planExport(warned(), FORMED_AT, made)).toBeNull();
+    expect(await planExport(warned(), FORMED_AT, made, "aggregation")).toBeNull();
     // Three turns were wanted (counts and two formats), the fourth was not.
     expect(made.steps).toEqual([
       { done: 1, total: 13 },

@@ -37,7 +37,7 @@ function uncovered(): ShiftExportRows {
 
 describe("the formats the dialog offers (plan ЧЗ)", () => {
   it("are every format for a shift with pallets, the six without pallets for one without", () => {
-    expect(formatOffers(rows(), FORMED_AT).map((offer) => offer.format.id)).toEqual([
+    expect(formatOffers(rows(), FORMED_AT, "aggregation").map((offer) => offer.format.id)).toEqual([
       "shift_txt_flat",
       "shift_txt_boxes",
       "shift_txt_boxes_reversed",
@@ -51,20 +51,27 @@ describe("the formats the dialog offers (plan ЧЗ)", () => {
       "shift_xml_gismt_pallet_boxes",
     ]);
     const without = { ...rows(), shift: { ...rows().shift, palletsEnabled: false } };
-    expect(formatOffers(without, FORMED_AT).map((offer) => offer.format.id)).toEqual([
-      "shift_txt_flat",
-      "shift_txt_boxes",
-      "shift_txt_boxes_reversed",
-      "shift_csv_flat",
-      "shift_csv_boxes",
-      "shift_xml_gismt_aggregation",
-    ]);
+    expect(formatOffers(without, FORMED_AT, "aggregation").map((offer) => offer.format.id)).toEqual(
+      [
+        "shift_txt_flat",
+        "shift_txt_boxes",
+        "shift_txt_boxes_reversed",
+        "shift_csv_flat",
+        "shift_csv_boxes",
+        "shift_xml_gismt_aggregation",
+      ],
+    );
   });
 
   it("carry each format's refusal now: a code outside a closed box blocks every box format", () => {
-    expect(formatOffers(rows(), FORMED_AT).every((offer) => offer.refusal === null)).toBe(true);
     expect(
-      formatOffers(uncovered(), FORMED_AT).map((offer) => [offer.format.id, offer.refusal]),
+      formatOffers(rows(), FORMED_AT, "aggregation").every((offer) => offer.refusal === null),
+    ).toBe(true);
+    expect(
+      formatOffers(uncovered(), FORMED_AT, "aggregation").map((offer) => [
+        offer.format.id,
+        offer.refusal,
+      ]),
     ).toEqual([
       ["shift_txt_flat", null],
       ["shift_txt_boxes", "BOX_COVERAGE_INCOMPLETE"],
@@ -83,7 +90,7 @@ describe("the formats the dialog offers (plan ЧЗ)", () => {
   it("refuse the ЧЗ documents without an INN, and everything for a shift not closed", () => {
     const noInn = { ...rows(), organization: { name: "ООО «Атолл»", inn: null } };
     expect(
-      formatOffers(noInn, FORMED_AT)
+      formatOffers(noInn, FORMED_AT, "aggregation")
         .filter((offer) => offer.refusal !== null)
         .map((offer) => [offer.format.id, offer.refusal]),
     ).toEqual([
@@ -92,9 +99,9 @@ describe("the formats the dialog offers (plan ЧЗ)", () => {
       ["shift_xml_gismt_pallet_boxes", "ORG_INN_MISSING"],
     ]);
     const active = { ...rows(), shift: { ...rows().shift, status: "active" as const } };
-    expect(new Set(formatOffers(active, FORMED_AT).map((offer) => offer.refusal))).toEqual(
-      new Set(["SHIFT_NOT_CLOSED"]),
-    );
+    expect(
+      new Set(formatOffers(active, FORMED_AT, "aggregation").map((offer) => offer.refusal)),
+    ).toEqual(new Set(["SHIFT_NOT_CLOSED"]));
   });
 });
 

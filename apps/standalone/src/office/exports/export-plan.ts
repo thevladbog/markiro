@@ -56,7 +56,7 @@ export function yieldToUi(): Promise<void> {
 }
 
 /** The steps of a plan: the counts, each format the shift is offered, the pallets. */
-export function planSteps(rows: ShiftExportRows, mode: ShiftMode = "aggregation"): number {
+export function planSteps(rows: ShiftExportRows, mode: ShiftMode): number {
   return offeredFormats(rows, mode).length + 2;
 }
 
@@ -70,7 +70,7 @@ export async function planExport(
   rows: ShiftExportRows,
   formedAt: string,
   turns: PlanTurns,
-  mode: ShiftMode = "aggregation",
+  mode: ShiftMode,
 ): Promise<ExportPlan | null> {
   const formats = offeredFormats(rows, mode);
   const total = planSteps(rows, mode);

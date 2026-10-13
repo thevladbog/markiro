@@ -76,7 +76,7 @@ export type ExportWarning =
 export function formatOffers(
   rows: ShiftExportRows,
   formedAt: string,
-  mode: ShiftMode = "aggregation",
+  mode: ShiftMode,
 ): FormatOffer[] {
   return offeredFormats(rows, mode).map((format) => {
     const snapshot = shiftExportSnapshot(rows, format, formedAt);
@@ -87,7 +87,7 @@ export function formatOffers(
 /** The formats of `formatOffers`, without the work of checking them. */
 export function offeredFormats(
   rows: ShiftExportRows,
-  mode: ShiftMode = "aggregation",
+  mode: ShiftMode,
 ): ShiftExportFormatDescriptor[] {
   if (mode === "validation") {
     return SHIFT_EXPORT_FORMATS.filter((format) => format.boxMode === "flat");
