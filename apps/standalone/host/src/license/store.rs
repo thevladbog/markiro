@@ -133,10 +133,12 @@ fn decoded(row: LicenseRow) -> Decoded {
         .into_iter()
         .all(|ms| bounded_ms(ms).is_some());
     if !in_range {
-        tracing::warn!(
-            license_id = %row.license_id,
-            "a stored license file holds a time out of range; it is not used"
-        );
+        if first_warning(&row.license_id, "out of range") {
+            tracing::warn!(
+                license_id = %row.license_id,
+                "a stored license file holds a time out of range; it is not used"
+            );
+        }
         return Decoded::OutOfRange;
     }
     let terms: Result<(Quotas, Features), serde_json::Error> = serde_json::from_str(&row.quotas)
@@ -194,11 +196,13 @@ async fn signed(
                 && license.host_id == host_id
         });
     if license.is_some() {
-        tracing::warn!(
-            license_id = %key.license_id,
-            "a stored license file holds terms of the wrong shape; read from its signed text"
-        );
-    } else {
+        if first_warning(&key.license_id, "read from its text") {
+            tracing::warn!(
+                license_id = %key.license_id,
+                "a stored license file holds terms of the wrong shape; read from its signed text"
+            );
+        }
+    } else if first_warning(&key.license_id, "not used") {
         tracing::warn!(
             license_id = %key.license_id,
             "a stored license file holds terms of the wrong shape; it is not used"
@@ -207,16 +211,40 @@ async fn signed(
     Ok(license)
 }
 
-/// Put the trial's stored start back to `at` when it is after it (spec §3.4:
-/// the state counts such a start from now; written, it does not slide with
-/// the time). A start out of range ([`bounded_ms`]) reads as a trial that is
-/// over and stays. True when it wrote.
-pub async fn clamp_trial_start(conn: &mut SqliteConnection, at: i64) -> Result<bool, sqlx::Error> {
+/// Whether this process has not told `kind` of the row `license_id` yet
+/// (and from now on has): a row the host cannot use is read at every look
+/// (each minute, each device's `GET /v1/device`), and its warning would
+/// fill the log.
+fn first_warning(license_id: &str, kind: &'static str) -> bool {
+    static TOLD: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<(String, &'static str)>>,
+    > = std::sync::OnceLock::new();
+    TOLD.get_or_init(Default::default)
+        .lock()
+        .map(|mut told| told.insert((license_id.to_owned(), kind)))
+        .unwrap_or(true)
+}
+
+/// Put the trial's stored start back to `at`, the trusted time, when it is
+/// after it and the PC's own clock (`wall`) is behind it too: a clock set
+/// ahead at the wizard and then back (spec §3.4; the state counts such a
+/// start from now, and written, it does not slide with the time). A start
+/// the PC's clock has reached is an honest one, though the trusted time has
+/// not (a clock put right ahead while the host runs), and stays: putting it
+/// back would shorten the trial. A start out of range ([`bounded_ms`]) reads
+/// as a trial that is over and stays. True when it wrote.
+pub async fn clamp_trial_start(
+    conn: &mut SqliteConnection,
+    at: i64,
+    wall: i64,
+) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(
         "UPDATE license_clock SET trial_started_at = ?1 \
-         WHERE id = 1 AND trial_started_at > ?1 AND trial_started_at <= 9007199254740991",
+         WHERE id = 1 AND trial_started_at > ?1 AND trial_started_at > ?2 \
+         AND trial_started_at <= 9007199254740991",
     )
     .bind(at)
+    .bind(wall)
     .execute(conn)
     .await?;
     Ok(done.rows_affected() > 0)
@@ -246,6 +274,15 @@ pub async fn clock_row(conn: &mut SqliteConnection) -> Result<ClockRow, sqlx::Er
         last_state: row.last_state,
         last_state_at: row.last_state_at.and_then(bounded_ms),
     })
+}
+
+/// Whether the wizard has run (`site.initialized_at`).
+pub async fn initialized(conn: &mut SqliteConnection) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM site WHERE id = 1 AND initialized_at IS NOT NULL)",
+    )
+    .fetch_one(conn)
+    .await
 }
 
 /// The organization's INN as stored; `None` before the wizard or without one.
@@ -312,16 +349,24 @@ pub async fn persist_mark(conn: &mut SqliteConnection, mark: i64) -> Result<(), 
     Ok(())
 }
 
-/// The state a `license.state` row (or the first look) named, and when; the
-/// mark with it.
+/// The state a `license.state` row (or the first look) named, and when;
+/// the mark with it when `raise_mark` (not before the wizard: there is
+/// nothing to protect yet, and a PC's wrong clock must not become the
+/// floor of the time).
 pub async fn set_state(
     conn: &mut SqliteConnection,
     state: &str,
     at: i64,
+    raise_mark: bool,
 ) -> Result<(), sqlx::Error> {
+    let mark = if raise_mark {
+        RAISED_MARK
+    } else {
+        "max_seen_at"
+    };
     sqlx::query(&format!(
         "UPDATE license_clock SET last_state = ?2, last_state_at = ?1, \
-         max_seen_at = {RAISED_MARK} WHERE id = 1"
+         max_seen_at = {mark} WHERE id = 1"
     ))
     .bind(at)
     .bind(state)
@@ -360,4 +405,20 @@ pub async fn set_emergency(
         return Err(sqlx::Error::RowNotFound);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A row the host cannot use is told once a process, not at every look
+    /// (review of Task 12): each kind of warning, per file.
+    #[test]
+    fn a_broken_row_is_told_once_per_file_and_kind() {
+        assert!(first_warning("a3f0-once-1", "out of range"));
+        assert!(!first_warning("a3f0-once-1", "out of range"));
+        assert!(first_warning("a3f0-once-1", "not used"));
+        assert!(first_warning("a3f0-once-2", "out of range"));
+        assert!(!first_warning("a3f0-once-2", "out of range"));
+    }
 }

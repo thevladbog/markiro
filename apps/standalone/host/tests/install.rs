@@ -1001,7 +1001,10 @@ fn the_trial_key_lets_the_service_set_values_in_it_and_keeps_an_existing_one() {
         r"$path = 'HKLM:\SOFTWARE\Markiro\Standalone\Trial'",
         "if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }",
         "SecurityIdentifier('S-1-5-19')",
-        "RegistryAccessRule($sid, 'ReadKey, SetValue', 'None', 'None', 'Allow')",
+        "RegistryAccessRule($sid, 'ReadKey, SetValue, CreateSubKey', 'None', 'None', 'Allow')",
+        // A 32-bit PowerShell would make the key under `WOW6432Node`, where
+        // the service's `reg.exe /reg:64` never looks: it refuses instead.
+        "if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { throw",
         "Set-Acl -LiteralPath $path -AclObject $acl",
     ] {
         assert!(script.contains(part), "{part}\n{script}");

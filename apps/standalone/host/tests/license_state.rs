@@ -159,11 +159,9 @@ async fn a_since_that_moves_with_the_time_is_no_change() {
     }
     assert_eq!(host_revision(&app).await, rev);
     assert!(audit_trail(&app, actions::LICENSE_STATE).await.is_empty());
-    // The state and its time stay the first look's; only the mark moved.
-    assert_eq!(
-        clock(&app).await,
-        (first.0, first.1, Some(START_MS + 6 * 60 * 60_000), None)
-    );
+    // The state and its time stay the first look's; before the wizard no
+    // mark of the time is kept (review of Task 12).
+    assert_eq!(clock(&app).await, (first.0, first.1, None, None));
 }
 
 #[tokio::test]
@@ -377,6 +375,34 @@ async fn a_site_whose_wizard_ran_before_the_license_starts_its_trial_at_its_firs
     assert!(audit_trail(&admin.app, actions::LICENSE_STATE)
         .await
         .is_empty());
+}
+
+/// Only a PC's clock behind the stored start puts the start back (review of
+/// Task 12): a start the PC's clock has reached, though the trusted time has
+/// not (a clock put right ahead while the host runs), is an honest one and
+/// stays; set back behind it, the start is put back to the trusted time.
+#[tokio::test]
+async fn only_a_pcs_clock_behind_the_start_puts_it_back() {
+    let admin = admin().await;
+    let trial_start = || async {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT trial_started_at FROM license_clock WHERE id = 1",
+        )
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+    };
+    admin.app.clock.move_wall(time::Duration::days(2));
+    sqlx::query("UPDATE license_clock SET trial_started_at = ? WHERE id = 1")
+        .bind(START_MS + DAY_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    refresh(&admin.app).await;
+    assert_eq!(trial_start().await, Some(START_MS + DAY_MS));
+    admin.app.clock.move_wall(time::Duration::days(-2));
+    refresh(&admin.app).await;
+    assert_eq!(trial_start().await, Some(START_MS + 5 * 60_000));
 }
 
 /// A trial start ahead of the trusted time (a PC's clock set ahead at the

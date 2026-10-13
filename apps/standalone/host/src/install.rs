@@ -469,15 +469,20 @@ New-NetFirewallRule -Name '{FIREWALL_RULE}' -DisplayName 'Markiro Хост (TCP 
 
 /// The key of the trial's mark (plan ЛЦ-2, spec §3.4), made with the
 /// installer's administrator rights; LocalService (`*S-1-5-19`) may read it
-/// and set values in this key only (no inheritance to subkeys). An existing
+/// and set values in this key only (no inheritance to subkeys). The rights
+/// include `CreateSubKey`: `reg add` opens the key it writes to with
+/// `KEY_WRITE`, which asks for it. The key is made in the 64-bit view of the
+/// registry, where the service's `reg.exe /reg:64` reads it: a 32-bit
+/// PowerShell, which would make it under `WOW6432Node`, refuses. An existing
 /// key keeps its values, and an uninstall leaves it.
 pub fn trial_key_script() -> String {
     "$ErrorActionPreference = 'Stop'; \
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { throw 'a 32-bit PowerShell sees the 32-bit registry' }; \
 $path = 'HKLM:\\SOFTWARE\\Markiro\\Standalone\\Trial'; \
 if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }; \
 $acl = Get-Acl -LiteralPath $path; \
 $sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-19'); \
-$rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid, 'ReadKey, SetValue', 'None', 'None', 'Allow'); \
+$rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid, 'ReadKey, SetValue, CreateSubKey', 'None', 'None', 'Allow'); \
 $acl.SetAccessRule($rule); \
 Set-Acl -LiteralPath $path -AclObject $acl"
         .to_owned()
