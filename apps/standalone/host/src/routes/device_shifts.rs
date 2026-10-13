@@ -202,6 +202,16 @@ pub async fn create_device_shift(
     // A new shift the station could not open (plan ЛЦ-2, spec §3.3): a
     // retried create above still answers the shift it made.
     crate::license::gate::require_new_shifts(&state, &mut tx).await?;
+    // Pallets are a feature of the license (plan ЛЦ-2 Д8): a new shift with
+    // them asks; a planned one with them opens (`enter_shift`) unasked.
+    if create.pallets_enabled {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::Pallets,
+        )
+        .await?;
+    }
     let line_id: Option<String> = sqlx::query_scalar("SELECT line_id FROM devices WHERE id = ?")
         .bind(&device.id)
         .fetch_one(&mut *tx)

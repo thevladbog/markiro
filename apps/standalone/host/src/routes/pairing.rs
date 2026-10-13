@@ -213,9 +213,17 @@ pub async fn claim(
             return Err(ApiError::new(StatusCode::BAD_REQUEST, error_code, message));
         }
     };
-    // The license's seat (plan ЛЦ-2 Д9, spec §4.7), after the code is
-    // verified and before it is used up: a refused device keeps the code for
-    // its next try, and the refusal writes no row.
+    // The license's feature and seat (plan ЛЦ-2 Д8, Д9, spec §4.7), after
+    // the code is verified and before it is used up: a refused device keeps
+    // the code for its next try, and the refusal writes no row.
+    if request.kind == DeviceKind::Handheld {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::Handheld,
+        )
+        .await?;
+    }
     if let Some(quota) = crate::license::seats::seat_of(request.kind) {
         crate::license::seats::require_seat(&state, &mut tx, quota).await?;
     }

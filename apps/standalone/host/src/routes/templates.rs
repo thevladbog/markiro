@@ -174,6 +174,14 @@ pub async fn create_template(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
+    // A new template (the editor's import and copy too) is the label
+    // editor's, a feature of the license (plan ЛЦ-2 Д8).
+    crate::license::seats::require_feature(
+        &state,
+        &mut tx,
+        crate::license::seats::Feature::LabelEditor,
+    )
+    .await?;
     templates::check_groups(&mut tx, "chzProductGroupCodes", codes).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
@@ -255,6 +263,16 @@ pub async fn update_template(
         .spec
         .as_ref()
         .is_some_and(|spec| *spec != current.spec);
+    // A new name or layout is an edit of the label editor (plan ЛЦ-2 Д8);
+    // the flag, the categories and a delete are not, and printing never asks.
+    if spec_changed || name != current.name {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::LabelEditor,
+        )
+        .await?;
+    }
     if current.stock && (name != current.name || spec_changed) {
         return Err(ApiError::conflict(
             "stock_template",

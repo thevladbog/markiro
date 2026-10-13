@@ -8,7 +8,7 @@ use markiro_proto::DeviceKind;
 use serde_json::json;
 use sqlx::SqliteConnection;
 
-use super::state::Quotas;
+use super::state::{Features, Quotas};
 use crate::error::ApiError;
 use crate::server::AppState;
 
@@ -176,9 +176,122 @@ pub async fn require_added_seats(
     Err(seat_limit(quota, used.saturating_sub(added), limit))
 }
 
+/// A feature of the file (spec §4.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feature {
+    LabelEditor,
+    PublicApi,
+    Pallets,
+    ChzIntegration,
+    Inventory,
+    CommerceMl,
+    Handheld,
+}
+
+impl Feature {
+    pub const ALL: [Feature; 7] = [
+        Feature::LabelEditor,
+        Feature::PublicApi,
+        Feature::Pallets,
+        Feature::ChzIntegration,
+        Feature::Inventory,
+        Feature::CommerceMl,
+        Feature::Handheld,
+    ];
+
+    /// The file's and the cloud's name.
+    pub fn key(self) -> &'static str {
+        match self {
+            Feature::LabelEditor => "labelEditor",
+            Feature::PublicApi => "publicApi",
+            Feature::Pallets => "pallets",
+            Feature::ChzIntegration => "chzIntegration",
+            Feature::Inventory => "inventory",
+            Feature::CommerceMl => "commerceMl",
+            Feature::Handheld => "handheld",
+        }
+    }
+
+    pub fn enabled(self, features: &Features) -> bool {
+        match self {
+            Feature::LabelEditor => features.label_editor,
+            Feature::PublicApi => features.public_api,
+            Feature::Pallets => features.pallets,
+            Feature::ChzIntegration => features.chz_integration,
+            Feature::Inventory => features.inventory,
+            Feature::CommerceMl => features.commerce_ml,
+            Feature::Handheld => features.handheld,
+        }
+    }
+}
+
+/// The license includes `feature` (the trial has every one); else
+/// `conflict` on `feature_disabled` with its name. Only new actions ask
+/// (ЛО23, plan Д8): what runs never does. Called inside the writer's
+/// transaction, before any write: a refusal writes no row and takes no
+/// revision.
+pub async fn require_feature(
+    app: &AppState,
+    conn: &mut SqliteConnection,
+    feature: Feature,
+) -> Result<(), ApiError> {
+    let snapshot = app
+        .license
+        .snapshot(app, conn)
+        .await
+        .map_err(ApiError::internal)?;
+    if feature.enabled(&snapshot.evaluation.features) {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        constraints::FEATURE_DISABLED,
+        "the site's license does not include this feature",
+    )
+    .with_details(json!({
+        "constraint": constraints::FEATURE_DISABLED,
+        "feature": feature.key(),
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_feature_reads_its_own_flag_under_its_own_name() {
+        let keys: Vec<&str> = Feature::ALL.iter().map(|feature| feature.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                "labelEditor",
+                "publicApi",
+                "pallets",
+                "chzIntegration",
+                "inventory",
+                "commerceMl",
+                "handheld"
+            ]
+        );
+        assert!(Feature::ALL
+            .iter()
+            .all(|feature| feature.enabled(&Features::ALL)));
+        for (n, feature) in Feature::ALL.iter().enumerate() {
+            // Only the flag of `feature` is off.
+            let flags: Vec<bool> = (0..7).map(|i| i != n).collect();
+            let only = Features {
+                label_editor: flags[0],
+                public_api: flags[1],
+                pallets: flags[2],
+                chz_integration: flags[3],
+                inventory: flags[4],
+                commerce_ml: flags[5],
+                handheld: flags[6],
+            };
+            for other in Feature::ALL {
+                assert_eq!(other.enabled(&only), other != *feature, "{}", other.key());
+            }
+        }
+    }
 
     #[test]
     fn stations_and_handhelds_share_a_pool_and_an_office_pc_takes_no_seat() {
