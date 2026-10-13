@@ -1,4 +1,4 @@
-//! Employees (migration `0017`): the site's register of people, as the
+//! Employees (migration `0018`): the site's register of people, as the
 //! cloud's `employees`, and the optional link of an employee to one operator.
 //! Office data for administrators only, never in the station feed.
 

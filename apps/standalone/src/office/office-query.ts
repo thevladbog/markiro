@@ -21,7 +21,7 @@ export const officeKeys = {
   counterparties: ["office", "counterparties"],
   lines: ["office", "lines"],
   operators: ["office", "operators"],
-  /** The site's register of people and their links to operators (migration 0017). */
+  /** The site's register of people and their links to operators (host migration 0018). */
   employees: ["office", "employees"],
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],

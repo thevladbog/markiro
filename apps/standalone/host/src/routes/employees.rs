@@ -1,4 +1,4 @@
-//! Employees (migration `0017`), administrators only: `GET
+//! Employees (migration `0018`), administrators only: `GET
 //! /v1/office/employees`, `POST` and `PUT …/{id}` (the whole record with
 //! `expectedRev`). The site's register of people, as the cloud's
 //! `employees`; an employee may be linked to one operator and an operator to

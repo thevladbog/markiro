@@ -2046,7 +2046,7 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   оператором, как в вебе»; administrators only, `RequireRole`, right before
   «Операторы») is the site's register of people, as the cloud's
   `employees`: a name, an optional role and an archive flag (host migration
-  `0017`, `GET`/`POST`/`PUT /v1/office/employees`, audit `employee.create`
+  `0018`, `GET`/`POST`/`PUT /v1/office/employees`, audit `employee.create`
   and `employee.update`). In the cloud an operator is an employee granted
   station access (`operator_credentials` keyed by `employee_id`); here
   operators came first and keep their own record, so the cloud's one person

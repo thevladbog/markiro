@@ -6,8 +6,9 @@
 -- hold NULL): the link says which person an operator is, and the operator
 -- keeps its own personnel number, PIN and badges. An archived employee is
 -- linked to no operator, so archiving and unlinking are one change.
--- Numbered 0017: 0013 (plan ОЧ) and 0014 are allocated to other plans and
--- may land later (`tests/org_logo.rs`), 0015 and 0016 are СКЛ and А4.
+-- Numbered 0018: 0013 (plan ОЧ) and 0014 are allocated to other plans and
+-- may land later (`tests/org_logo.rs`), 0015 and 0016 are СКЛ and А4, 0017
+-- is the code search.
 CREATE TABLE employees (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 100),
