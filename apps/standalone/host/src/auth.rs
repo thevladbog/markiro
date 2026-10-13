@@ -8,7 +8,8 @@ use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use markiro_proto::{
-    codes, credentials, DeviceKind, OfficeRole, OfficeUser, OFFICE_SESSION_HEADER,
+    codes, credentials, DeviceKind, OfficeRole, OfficeUser, APP_VERSION_HEADER,
+    OFFICE_SESSION_HEADER, PROTOCOL_HEADER,
 };
 use sqlx::SqliteConnection;
 use time::OffsetDateTime;
@@ -40,7 +41,8 @@ impl FromRequestParts<AppState> for AuthDevice {
 
 /// A paired, non-revoked device that WRITES NOTHING when it is
 /// authenticated: the same key, revocation and kind checks as
-/// [`AuthDevice`], but `last_seen_at` is never touched. Only the code check
+/// [`AuthDevice`], but `last_seen_at` is never touched, nor the version it
+/// reports (plan ОБН-1). Only the code check
 /// (`GET /v1/device/codes/{codeHash}`, answered by a station within 300 ms)
 /// uses it, so that route never waits for a writer, even for the first
 /// request after an idle minute. Every other device route takes
@@ -71,16 +73,18 @@ async fn authenticate(
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|key| !key.is_empty())
         .ok_or_else(|| ApiError::unauthorized(credentials::DEVICE, "a device key is required"))?;
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, kind, last_seen_at FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
+    let row: Option<DeviceAuthRow> = sqlx::query_as(
+        "SELECT id, kind, last_seen_at, app_version, protocol, version_seen_at FROM devices \
+         WHERE key_hash = ? AND revoked_at IS NULL",
     )
     .bind(key_hash(key))
     .fetch_optional(&state.pool)
     .await
     .map_err(ApiError::internal)?;
-    let (id, kind, last_seen_at) = row.ok_or_else(|| {
-        ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
-    })?;
+    let (id, kind, last_seen_at, app_version, protocol, version_seen_at) =
+        row.ok_or_else(|| {
+            ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
+        })?;
     let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
     // Record activity at most once a minute per device to keep writes rare.
     // Even an `UPDATE` that matches no row takes SQLite's write lock, so it
@@ -92,6 +96,33 @@ async fn authenticate(
     // first.
     if touch {
         let now = state.now();
+        // The version the app names on every request (plan ОБН-1): written
+        // only when it, or the protocol, differs from what is stored, or
+        // nothing was reported since pairing, so a working device takes the
+        // write lock for it once per upgrade. No revision, no audit row: like
+        // `last_seen_at`, this is no office change.
+        if let Some((reported_version, reported_protocol)) = reported(parts) {
+            let reported_protocol = i64::from(reported_protocol);
+            if version_seen_at.is_none()
+                || app_version != reported_version
+                || protocol != reported_protocol
+            {
+                sqlx::query(
+                    "UPDATE devices SET app_version = ?, protocol = ?, version_seen_at = ? \
+                     WHERE id = ? AND revoked_at IS NULL AND (version_seen_at IS NULL \
+                     OR app_version IS NOT ? OR protocol IS NOT ?)",
+                )
+                .bind(&reported_version)
+                .bind(reported_protocol)
+                .bind(format_timestamp(now))
+                .bind(&id)
+                .bind(&reported_version)
+                .bind(reported_protocol)
+                .execute(&state.pool)
+                .await
+                .map_err(ApiError::internal)?;
+            }
+        }
         let due = format_timestamp(now - time::Duration::minutes(1));
         if last_seen_at.is_none_or(|seen| seen <= due) {
             sqlx::query(
@@ -106,6 +137,39 @@ async fn authenticate(
         }
     }
     Ok(AuthDevice { id, kind })
+}
+
+/// `id, kind, last_seen_at, app_version, protocol, version_seen_at` of a
+/// device found by its key.
+type DeviceAuthRow = (String, String, Option<String>, String, i64, Option<String>);
+
+/// The largest protocol read from the header outside `protocol_guard`.
+const MAX_REPORTED_PROTOCOL: u32 = 1000;
+
+/// The version and protocol a request reports (plan ОБН-1): the app's
+/// header as plain text of 1-50 characters (the pairing's rule for
+/// `appVersion`), with the protocol `protocol_guard` read, or, on a route
+/// outside the guard, the protocol header's whole number 1-1000. `None`
+/// when either is missing or malformed: nothing is recorded then.
+pub fn reported(parts: &Parts) -> Option<(String, u32)> {
+    let version = parts
+        .headers
+        .get(APP_VERSION_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            crate::validate::clean_text("appVersion", value, 50, "the app version").ok()
+        })?
+        .to_owned();
+    let protocol = match parts.extensions.get::<crate::server::ClientProtocol>() {
+        Some(protocol) => protocol.0,
+        None => parts
+            .headers
+            .get(PROTOCOL_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|protocol| (1..=MAX_REPORTED_PROTOCOL).contains(protocol))?,
+    };
+    Some((version, protocol))
 }
 
 impl AuthDevice {
@@ -402,4 +466,64 @@ pub async fn end_session(conn: &mut SqliteConnection, session_id: &str) -> Resul
         .execute(conn)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::Request;
+
+    use super::*;
+    use crate::server::ClientProtocol;
+
+    fn parts(version: Option<&str>, guard: Option<u32>, header: Option<&str>) -> Parts {
+        let mut builder = Request::builder().uri("/v1/device");
+        if let Some(version) = version {
+            builder = builder.header(markiro_proto::APP_VERSION_HEADER, version);
+        }
+        if let Some(protocol) = header {
+            builder = builder.header(markiro_proto::PROTOCOL_HEADER, protocol);
+        }
+        let (mut parts, ()) = builder.body(()).unwrap().into_parts();
+        if let Some(protocol) = guard {
+            parts.extensions.insert(ClientProtocol(protocol));
+        }
+        parts
+    }
+
+    /// A version is recorded only as plain text of 1-50 characters, with a
+    /// protocol: the guard's, or outside the guard the header's (plan ОБН-3's
+    /// routes), a whole number 1-1000.
+    #[test]
+    fn a_reported_version_is_plain_text_with_a_protocol() {
+        assert_eq!(
+            reported(&parts(Some(" 0.2.0 "), Some(3), None)),
+            Some(("0.2.0".to_owned(), 3))
+        );
+        assert_eq!(
+            reported(&parts(Some("0.2.0"), None, Some("1"))),
+            Some(("0.2.0".to_owned(), 1))
+        );
+        // The guard's protocol wins over the header's.
+        assert_eq!(
+            reported(&parts(Some("0.2.0"), Some(3), Some("2"))),
+            Some(("0.2.0".to_owned(), 3))
+        );
+        for (version, header) in [
+            (Some("0.2.0"), Some("0")),
+            (Some("0.2.0"), Some("1001")),
+            (Some("0.2.0"), Some("3x")),
+            (Some("0.2.0"), None),
+            (None, Some("3")),
+            (Some(""), Some("3")),
+            (Some("   "), Some("3")),
+        ] {
+            assert_eq!(
+                reported(&parts(version, None, header)),
+                None,
+                "{version:?} {header:?}"
+            );
+        }
+        let long = "9".repeat(51);
+        assert_eq!(reported(&parts(Some(&long), Some(3), None)), None);
+    }
 }

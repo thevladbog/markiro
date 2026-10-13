@@ -105,3 +105,44 @@ fn the_order_of_the_listing_never_changes_the_choice() {
     assert!(chosen.contains("tie-b"), "the newest of 9 October");
     assert!(!chosen.contains("tie-a"));
 }
+
+/// A copy made before pending migrations (plan ОБН-1) stays at least 14 days
+/// after it was made, counted back from the folder's newest copy, whatever
+/// the hourly, daily and monthly rule says; nothing else the rule keeps
+/// changes.
+#[test]
+fn a_copy_before_an_upgrade_stays_fourteen_days_whatever_the_rule_says() {
+    use markiro_host::backup::copy::copy_name;
+
+    let named = |created: &str, tag: &str| {
+        copy(
+            &copy_name(markiro_host::clock::parse_timestamp(created).unwrap(), tag),
+            created,
+        )
+    };
+    // One copy an hour from 1 to 20 October 2026; the newest is 20 October
+    // 23:00, so the floor is 6 October 23:00.
+    let mut copies = Vec::new();
+    for day in 1..=20 {
+        for hour in 0..24 {
+            copies.push(named(
+                &format!("2026-10-{day:02}T{hour:02}:00:00Z"),
+                &format!("{day:02}{hour:02}0000"),
+            ));
+        }
+    }
+    let by_rule = kept(&copies);
+    // 13 days 15 hours old, exactly 14 days old, 14 days 30 minutes old.
+    let young = named("2026-10-07T08:00:30Z", "pre-upgrade-16-31");
+    let boundary = named("2026-10-06T23:00:00Z", "pre-upgrade-12-16");
+    let old = named("2026-10-06T22:30:00Z", "pre-upgrade-11-12");
+    copies.extend([young.clone(), boundary.clone(), old.clone()]);
+    let with = kept(&copies);
+    assert!(with.contains(&young.0), "{with:?}");
+    assert!(with.contains(&boundary.0), "{with:?}");
+    assert!(!with.contains(&old.0), "{with:?}");
+    let mut expected = by_rule;
+    expected.extend([young.0, boundary.0]);
+    expected.sort();
+    assert_eq!(with, expected);
+}

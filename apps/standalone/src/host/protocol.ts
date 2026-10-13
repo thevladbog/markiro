@@ -178,6 +178,14 @@ export const deviceRecordSchema = z.object({
   name: z.string(),
   lineId: z.uuid().nullable(),
   appVersion: z.string(),
+  /**
+   * The protocol the device spoke when it last reported its version, or at
+   * pairing (plan ОБН-1). Optional: a host before ОБН-1 of the same protocol
+   * does not send it.
+   */
+  protocol: z.number().int().positive().optional(),
+  /** When the host first heard the device report its current version; `null` while it has not. */
+  versionSeenAt: z.iso.datetime().nullable().optional(),
   pairedAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime().nullable(),
   revokedAt: z.iso.datetime().nullable(),

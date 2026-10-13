@@ -21,6 +21,7 @@ import { LoadError, PageLoading } from "../page-state.js";
 import { useStoreRecord } from "../records.js";
 import { useThisDeviceId } from "../this-device.js";
 import { DeviceDialog } from "./DeviceDialog.js";
+import { deviceVersionText } from "./device-version.js";
 import { lineLabel } from "./line-label.js";
 import { codeLifetimeMs, PairingCodeDialog } from "./PairingCodeDialog.js";
 import { RevokeDeviceDialog } from "./RevokeDeviceDialog.js";
@@ -168,6 +169,16 @@ export function DevicesPage() {
       key: "line",
       title: t("office.devices.table.line"),
       render: (device) => lineLabel(lines.data ?? [], device.lineId, t),
+    },
+    {
+      // What the device reports on every request since plan ОБН-1.
+      key: "version",
+      title: t("office.devices.table.version"),
+      // Wraps at «(при подключении)» rather than push «Доступ» and the
+      // actions out of a 1280-pixel window.
+      wrap: true,
+      minWidth: 110,
+      render: (device) => deviceVersionText(device, t),
     },
     {
       key: "pairedAt",

@@ -2526,10 +2526,15 @@
         "name": "Имя",
         "kind": "Вид",
         "line": "Линия",
+        "version": "Версия",
         "pairedAt": "Подключено",
         "lastSeenAt": "Последний раз",
         "status": "Доступ",
         "actions": "Действия"
+      },
+      "version": {
+        "reported": "{{version}}, протокол {{protocol}}",
+        "paired": "{{version}} (при подключении)"
       },
       "kinds": {
         "station": "Станция",

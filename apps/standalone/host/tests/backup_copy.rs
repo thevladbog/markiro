@@ -1226,3 +1226,31 @@ fn a_stale_partial_identity_is_cleaned_with_the_other_leftovers() {
     assert!(other.exists(), "only names of copies are ever touched");
     assert!(dir.path().join(&kept.file).exists());
 }
+
+/// A copy before an upgrade (plan ОБН-1) keeps its 14 days counted from the
+/// copy the run just made, not from the folder's newest: a copy dated years
+/// ahead by a clock once set forward would otherwise put every real copy
+/// past the floor for good.
+#[tokio::test]
+async fn a_copy_before_an_upgrade_keeps_its_days_from_the_fresh_copy_despite_a_future_one() {
+    let folder = tempfile::tempdir().unwrap();
+    let dir = folder.path();
+    let future = fake_copy(dir, "2030-01-01T00:00:00Z", "00002030");
+    let before = fake_copy(dir, "2026-10-17T09:00:00Z", "pre-upgrade-16-31");
+    // Not the newest of its day, nor of the 24 newest copies.
+    fake_copy(dir, "2026-10-17T20:00:00Z", "00001720");
+    for hour in 0..24 {
+        fake_copy(
+            dir,
+            &format!("2026-10-19T{hour:02}:00:00Z"),
+            &format!("000019{hour:02}"),
+        );
+    }
+    let fresh = fake_copy(dir, "2026-10-20T09:00:00Z", "0000ffff");
+
+    let staying = rotate(dir, Some(&fresh.file)).unwrap();
+    let staying: Vec<&str> = staying.iter().map(|copy| copy.file.as_str()).collect();
+    assert!(staying.contains(&before.file.as_str()), "{staying:?}");
+    assert!(staying.contains(&future.file.as_str()), "{staying:?}");
+    assert!(dir.join(&before.file).exists());
+}

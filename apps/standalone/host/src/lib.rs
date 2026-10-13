@@ -29,6 +29,7 @@ pub mod service;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
+pub mod upgrade;
 pub mod validate;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -123,7 +124,11 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     // here). The next `markiro-host restore` finishes it first.
     restore::refuse_unfinished(paths)?;
     let config = HostConfig::load_or_create(paths, options.port_override)?;
-    let pool = db::open(&paths.database_file()).await?;
+    let clock: std::sync::Arc<dyn clock::Clock> = std::sync::Arc::new(clock::SystemClock);
+    // The copy before this build's pending migrations (plan ОБН-1): one that
+    // fails stops the start before any migration runs.
+    let pre_upgrade = upgrade::PreUpgrade::for_paths(paths, config.host_id.clone(), clock.now());
+    let pool = db::open_upgrading(&paths.database_file(), &pre_upgrade).await?;
     // Build the unknown-login verifier now, off the async threads, so the
     // first unknown login does not pay for building it.
     tokio::task::spawn_blocking(|| {
@@ -135,7 +140,6 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port));
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
-    let clock: std::sync::Arc<dyn clock::Clock> = std::sync::Arc::new(clock::SystemClock);
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
     let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())

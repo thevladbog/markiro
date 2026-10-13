@@ -178,7 +178,17 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
       kind: "station",
       lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
       revokedAt: null,
+      protocol: 3,
+      versionSeenAt: "2026-09-26T10:40:00Z",
     });
+    // A host before plan ОБН-1 (same protocol) sends neither field.
+    const legacy = deviceRecordSchema.parse(fixture("device-record-legacy.json"));
+    expect(legacy.protocol).toBeUndefined();
+    expect(legacy.versionSeenAt).toBeUndefined();
+    expect(
+      deviceRecordSchema.safeParse({ ...(fixture("device-record.json") as object), protocol: 0 })
+        .success,
+    ).toBe(false);
   });
 
   it("change feed", () => {
@@ -270,6 +280,7 @@ describe("feed records that grant access", () => {
 const RESPONSES = [
   ["device-info.json", deviceInfoSchema],
   ["device-record.json", deviceRecordSchema],
+  ["device-record-legacy.json", deviceRecordSchema],
   ["office-user.json", officeUserSchema],
   ["office-session.json", officeSessionSchema],
   ["bootstrap-response.json", bootstrapResponseSchema],

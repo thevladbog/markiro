@@ -24,6 +24,10 @@ pub const MIN_PROTOCOL_VERSION: u32 = 1;
 pub const PROTOCOL_HEADER: &str = "x-markiro-protocol";
 /// Request header carrying the office session token.
 pub const OFFICE_SESSION_HEADER: &str = "x-office-session";
+/// Request header carrying the app's own version on every request of the
+/// shell (plan ОБН-1): the host records it on the device
+/// (`devices.app_version`, spec §10.11.7). A host before it ignores it.
+pub const APP_VERSION_HEADER: &str = "x-markiro-app-version";
 /// `product` value the host reports in [`Hello`].
 pub const HOST_PRODUCT: &str = "markiro-host";
 /// Default TCP port of the host (IANA-unassigned range 45679-45823).
@@ -507,7 +511,14 @@ pub struct DeviceRecord {
     pub kind: DeviceKind,
     pub name: String,
     pub line_id: Option<String>,
+    /// The version the device last reported (`APP_VERSION_HEADER`), or the
+    /// one it named when it paired until it reports (plan ОБН-1).
     pub app_version: String,
+    /// The protocol it spoke when it last reported, or at pairing.
+    pub protocol: u32,
+    /// When the host first heard it report its current version and
+    /// protocol; `None` while it has reported nothing since it paired.
+    pub version_seen_at: Option<String>,
     pub paired_at: String,
     pub last_seen_at: Option<String>,
     pub revoked_at: Option<String>,
