@@ -3906,7 +3906,12 @@ prints the field empty. A pallet's A4 sheet takes it too, but the sheet's render
 (`pallet-sheet-render.ts`) takes only 19 digits: a frozen code of another form is left
 off the sheet with one diagnostic line (`EGAIS_NOT_ON_SHEET_LINE`) instead of failing
 every sheet of a shift whose code can no longer change; the thermal labels still print
-it, and the office warns when the code is typed. Samples — the sheet preview
+it, and the office warns when the code is typed. The station says so on screen too,
+never stopping the work (`sheetWithoutEgais`: a pallet job whose printer prints A4
+sheets and a frozen code not of 19 digits): the label panel of such a job carries a
+warning, and a sheet sent — by the line or by «Напечатать снова» — leaves a notice in
+the work screen's alerts until «Понятно» (`floor.print.egaisOffSheet`): the sheet went
+without the code, which must be corrected in the office's product card. Samples — the sheet preview
 (`sampleSheetContext`) and the A4 test print (`a4-test.ts`) — print no code.
 
 ## Floor exceptions and close

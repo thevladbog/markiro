@@ -12,13 +12,18 @@ import {
 
 import type { EnteredShift } from "../src/host/protocol.js";
 import { boxLabelData, palletLabelData, renderLabel } from "../src/floor/print/label-render.js";
-import { EGAIS_NOT_ON_SHEET_LINE, renderShiftSheet } from "../src/floor/print/shift-render.js";
+import {
+  EGAIS_NOT_ON_SHEET_LINE,
+  egaisLeftOffSheet,
+  renderShiftSheet,
+  sheetWithoutEgais,
+} from "../src/floor/print/shift-render.js";
+import { FIRST_SSCC, HP_A4, ZEBRA } from "./support/printing.js";
 import { sourceFields } from "../src/floor/warehouse/warehouse-work.js";
 import { renderSheetBytes } from "../src/labels/sheet-render.js";
 import { sheetLogoOf } from "../src/labels/logo.js";
 import { enteredShift, ENTERED } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
-import { FIRST_SSCC } from "./support/printing.js";
 import { BOX_SOURCE } from "./support/warehouse.js";
 
 const EGAIS = "0150320000001234567";
@@ -240,5 +245,19 @@ describe("the EGAIS code on the station's labels (plan ТОВ)", () => {
     expect(bytes.length).toBeGreaterThan(0);
     expect(texts).not.toContain("EG-0150320000001");
     expect(lines).toEqual([EGAIS_NOT_ON_SHEET_LINE]);
+  });
+
+  it("names the pallet sheets that go without the code: an A4 printer, a code not of 19 digits", async () => {
+    expect(egaisLeftOffSheet({ egaisCode: EGAIS })).toBe(false);
+    expect(egaisLeftOffSheet({ egaisCode: null })).toBe(false);
+    expect(egaisLeftOffSheet({})).toBe(false);
+    expect(egaisLeftOffSheet({ egaisCode: "EG-1" })).toBe(true);
+    const odd = await stored(frozen({ chzProductGroupCode: 15, egaisCode: "EG-1" }));
+    const fine = await stored(frozen({ chzProductGroupCode: 15, egaisCode: EGAIS }));
+    expect(sheetWithoutEgais({ purpose: "pallet", printer: HP_A4 }, odd)).toBe(true);
+    expect(sheetWithoutEgais({ purpose: "pallet", printer: ZEBRA }, odd)).toBe(false);
+    expect(sheetWithoutEgais({ purpose: "box", printer: HP_A4 }, odd)).toBe(false);
+    expect(sheetWithoutEgais({ purpose: "pallet", printer: null }, odd)).toBe(false);
+    expect(sheetWithoutEgais({ purpose: "pallet", printer: HP_A4 }, fine)).toBe(false);
   });
 });

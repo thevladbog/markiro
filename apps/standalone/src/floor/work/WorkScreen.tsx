@@ -91,7 +91,7 @@ import {
   type ResolveContext,
 } from "../print/print-resolution.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
-import { shiftLabelRender } from "../print/shift-render.js";
+import { sheetWithoutEgais, shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
@@ -722,6 +722,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const deciding = useRef(false);
   // A label on its way to the printer: the work waits for it, and says so.
   const [sending, setSending] = useState(false);
+  // A pallet's A4 sheet printed without the shift's EGAIS code (plan ТОВ): its SSCC,
+  // shown in a notice that stops nothing until the operator dismisses it.
+  const [egaisOffSheet, setEgaisOffSheet] = useState<string | null>(null);
   // The shift's close is being written; a second press meanwhile starts nothing.
   const [closing, setClosing] = useState(false);
   const closeRunning = useRef(false);
@@ -988,6 +991,10 @@ export function WorkScreen(props: WorkScreenProps) {
         continue;
       } finally {
         if (alive.current) setSending(false);
+      }
+      // The print's result: a sheet that went out without the EGAIS code says so.
+      if (alive.current && job.state === "sent" && sheetWithoutEgais(job, live.current.shift)) {
+        setEgaisOffSheet(job.sscc);
       }
       // The oldest that still waits is read again: one that stops the work is
       // that one, and the next waits behind it; one done with lets the next go.
@@ -1458,6 +1465,10 @@ export function WorkScreen(props: WorkScreenProps) {
             if (prints && alive.current) setSending(true);
             const job = await work(stopped.job);
             live.current.onRecorded();
+            // A sheet printed again without the EGAIS code says so too.
+            if (prints && alive.current && job.state === "sent") {
+              if (sheetWithoutEgais(job, live.current.shift)) setEgaisOffSheet(job.sscc);
+            }
             showLabel(job);
             // A label decided lets the next one that waits go (a box's, then its pallet's).
             if (stopRef.current === null) await settleLabel();
@@ -2349,6 +2360,19 @@ export function WorkScreen(props: WorkScreenProps) {
               {t("floor.work.continue")}
             </Button>,
           )}
+        {egaisOffSheet !== null &&
+          card(
+            "warn",
+            t("floor.print.egaisOffSheet.title"),
+            <p>{t("floor.print.egaisOffSheet.body")}</p>,
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => dismiss(() => setEgaisOffSheet(null))}
+            >
+              {t("floor.print.egaisOffSheet.dismiss")}
+            </Button>,
+          )}
         {waitingSerials && (
           <p className="work-overlay--note work-screen__waiting">
             {t("floor.work.waitingSerials")}
@@ -2449,6 +2473,7 @@ export function WorkScreen(props: WorkScreenProps) {
                 : {})}
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+              egaisOffSheet={sheetWithoutEgais(stop.job, shift)}
             />
           </div>
         )}
