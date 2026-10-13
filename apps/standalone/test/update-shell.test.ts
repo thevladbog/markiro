@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  UPDATE_SHELL_CODES,
   UpdateShellError,
   createTauriUpdateShell,
   type FoundPackage,
@@ -113,5 +116,20 @@ describe("the update commands of the shell", () => {
       expect(error).toBeInstanceOf(UpdateShellError);
       expect(error instanceof UpdateShellError ? error.code : null).toBe(code);
     }
+  });
+});
+
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+
+describe("the refusal codes", () => {
+  it("are the ones the shell's UpdateError gives, in its order (src-tauri/tests/fixtures/update-error-codes.json)", () => {
+    const fixture: unknown = JSON.parse(
+      readFileSync(
+        new URL("../src-tauri/tests/fixtures/update-error-codes.json", testModuleUrl),
+        "utf8",
+      ),
+    );
+    expect([...UPDATE_SHELL_CODES]).toEqual(fixture);
   });
 });

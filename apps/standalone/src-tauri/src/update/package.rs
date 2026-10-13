@@ -456,6 +456,8 @@ impl Drop for CriticalErrorsQuiet {
 /// again (it may have changed since the search), the installer beside it
 /// opened by [`open_installer`], its size and SHA-256 the manifest's.
 pub fn verify(manifest_path: &Path, keyset: &Keyset) -> Result<Checked, PackageError> {
+    // A drive pulled since the search shows no system window either.
+    let _quiet = CriticalErrorsQuiet::new();
     let manifest = read_manifest(manifest_path, keyset)?;
     let dir = manifest_path
         .parent()

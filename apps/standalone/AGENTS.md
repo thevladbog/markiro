@@ -2243,7 +2243,9 @@ credential); the same version and a silent host each need a confirmation the
 webview sends back, and every one of them must be sent. The launch is
 `ShellExecuteExW` with `runas`, the app's window as the prompt's owner (kiosk
 mode hides the taskbar a prompt without an owner would flash in) and
-`/P /UPDATE /R` behind `launch::Launcher` (no `/ROLE`: the hooks take it from
+`/P /UPDATE /R` behind `launch::Launcher` (a final path of 260 units or more
+keeps its `\\?\` prefix and may not start: the office then offers the manual
+install; no `/ROLE`: the hooks take it from
 the registry; without `/UPDATE` a passive install may uninstall first and the
 hooks would drop the role and `installation.json`). Before it the shell
 writes `update-pending.json` (`{ from, to, startedAtMs }`); a refused prompt
@@ -2259,7 +2261,8 @@ administrator searches, checks and installs. On the host's PC it asks the
 host for a copy first (`POST /v1/office/backups`, up to 10 minutes) and names
 the paired devices whose protocol the new `minProtocol` refuses; it names
 this PC's open shift. Then `POST /v1/office/updates/started` writes
-`app.update.start` (administrator, the role checked before the body, the
+`app.update.start` (administrator, the role checked before the fields' form,
+after the body's shape: a body the host does not read is a 400 for anyone; the
 session's device as the target, `{ from, to, installerSha256, source }`, no
 revision — what the office reported, like `shift.export`), and the shell
 starts the installer. A host that does not answer the report stops nothing

@@ -336,9 +336,10 @@ impl UpdateState {
             }
             Err(error) => {
                 self.restore_mark(earlier.as_ref());
+                // `{:?}` names Windows' error number for `Failed`, never a path.
                 eprintln!(
-                    "standalone: update_install: the installer did not start: {}",
-                    error.code()
+                    "standalone: update_install: the installer did not start: {:?}",
+                    error
                 );
                 Err(error.into())
             }
@@ -474,4 +475,38 @@ pub fn update_outcome_dismiss(state: tauri::State<'_, UpdateState>) -> Result<()
 #[tauri::command]
 pub async fn update_open_folder(state: tauri::State<'_, UpdateState>) -> Result<(), String> {
     state.open_folder().map_err(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UpdateError;
+
+    /// The codes the webview reads (`UPDATE_SHELL_CODES` in
+    /// `src/office/info/update-shell.ts`, which `test/update-shell.test.ts`
+    /// pins to the same fixture): a code of no known name would read there as
+    /// `unsupported`.
+    #[test]
+    fn every_update_error_has_the_code_the_webview_knows() {
+        let fixture: Vec<String> =
+            serde_json::from_str(include_str!("../../tests/fixtures/update-error-codes.json"))
+                .unwrap();
+        let codes: Vec<&str> = [
+            UpdateError::InvalidRequest,
+            UpdateError::DocumentsUnavailable,
+            UpdateError::Storage,
+            UpdateError::Unsupported,
+            UpdateError::ManifestMalformed,
+            UpdateError::ManifestUnknownKey,
+            UpdateError::ManifestSignature,
+            UpdateError::InstallerMissing,
+            UpdateError::InstallerMismatch,
+            UpdateError::UpdateRefused,
+            UpdateError::ConfirmationRequired,
+            UpdateError::UacCancelled,
+            UpdateError::LaunchFailed,
+        ]
+        .map(UpdateError::code)
+        .to_vec();
+        assert_eq!(codes, fixture);
+    }
 }

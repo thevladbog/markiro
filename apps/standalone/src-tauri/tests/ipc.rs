@@ -2268,10 +2268,23 @@ fn update_commands_answer_through_the_ipc_shapes() {
         ),
         Ok(Value::Null)
     );
-    assert_eq!(
-        *update.launcher.calls.lock().unwrap(),
-        vec![(installer, "/P /UPDATE /R".to_owned())]
-    );
+    {
+        let calls = update.launcher.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, "/P /UPDATE /R");
+        if cfg!(windows) {
+            // Started by the final path of the held handle: long names, any case
+            // (a runner's temporary folder may be named in 8.3 form).
+            let real = std::fs::canonicalize(&installer).unwrap();
+            assert_eq!(
+                calls[0].0.to_string_lossy().to_lowercase(),
+                markiro_standalone_lib::update::package::unverbatim(&real.to_string_lossy())
+                    .to_lowercase()
+            );
+        } else {
+            assert_eq!(calls[0].0, installer);
+        }
+    }
     assert_eq!(*update.exits.lock().unwrap(), vec![0]);
     assert_eq!(
         *update.launcher.marked.lock().unwrap(),
