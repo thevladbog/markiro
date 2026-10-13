@@ -633,7 +633,7 @@ describe("NationalCatalogClient", () => {
       join(__dirname, "../src/modules/national-catalog/national-catalog.client.ts"),
       "utf8",
     );
-    expect(source).toMatch(/import \{ isValidInn \} from "@markiro\/domain";/);
+    expect(source).toMatch(/import \{[^}]*\bisValidInn\b[^}]*\} from "@markiro\/domain";/);
     expect(source).not.toMatch(/function isValidInn\(/);
   });
 

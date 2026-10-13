@@ -47,11 +47,26 @@ const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$
 const version = z.string().regex(VERSION);
 const lowerHex = (length: number) => z.string().regex(new RegExp(`^[0-9a-f]{${length}}$`));
 
-/** No control character (U+0000-U+001F, U+007F): the text is shown as text. */
+/**
+ * No character that changes how the text around it shows: the C0 and C1
+ * controls with DEL (U+0000-U+001F, U+007F-U+009F), the line and paragraph
+ * separators (U+2028, U+2029) and the bidirectional embeddings, overrides and
+ * isolates (U+202A-U+202E, U+2066-U+2069). `is_plain_text` in
+ * `markiro_proto::trust` is the twin.
+ */
 function isPlainText(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0;
-    if (code <= 0x1f || code === 0x7f) return false;
+    if (
+      code <= 0x1f ||
+      (code >= 0x7f && code <= 0x9f) ||
+      code === 0x2028 ||
+      code === 0x2029 ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2066 && code <= 0x2069)
+    ) {
+      return false;
+    }
   }
   return true;
 }

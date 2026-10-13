@@ -178,9 +178,38 @@ pub fn parse_keysets(text: &str) -> Result<Keysets, String> {
     Ok(Keysets { license, update })
 }
 
+/// An origin as the cloud's `SAAS_ADMIN_ORIGIN` serializes it: `https://`, a
+/// lower-case host and an optional port, no path and no trailing `/`. A
+/// license's `issuer` is compared with it byte for byte.
+fn is_origin(text: &str) -> bool {
+    let Some(authority) = text.strip_prefix("https://") else {
+        return false;
+    };
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    !host.is_empty()
+        && !host.starts_with(['.', '-'])
+        && !host.ends_with(['.', '-'])
+        && host.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        })
+        && port.map_or(true, |port| {
+            (1..=5).contains(&port.len())
+                && port.bytes().all(|byte| byte.is_ascii_digit())
+                && !port.starts_with('0')
+                && port.parse::<u16>().is_ok()
+        })
+}
+
 fn keyset(file: KeysetFile, name: &str) -> Result<Keyset, String> {
-    if file.origin.as_deref() == Some("") {
-        return Err(format!("{name}: an empty origin"));
+    if file
+        .origin
+        .as_deref()
+        .is_some_and(|origin| !is_origin(origin))
+    {
+        return Err(format!("{name}: the origin is not https://host[:port]"));
     }
     let mut keys: Vec<TrustedKey> = Vec::with_capacity(file.keys.len());
     for entry in file.keys {
@@ -411,13 +440,24 @@ fn is_inn_shape(text: &str) -> bool {
     (text.len() == 10 || text.len() == 12) && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// Non-empty, at most `max` UTF-16 units, no control character.
+/// Non-empty, at most `max` UTF-16 units, and no character that changes how
+/// the text around it shows: C0 and C1 controls with DEL, the line and
+/// paragraph separators, the bidirectional embeddings, overrides and
+/// isolates (the domain's `isPlainText`).
 fn is_plain_text(text: &str, max: usize) -> bool {
     !text.is_empty()
         && utf16_len(text) <= max
-        && !text
-            .chars()
-            .any(|character| character <= '\u{1f}' || character == '\u{7f}')
+        && !text.chars().any(|character| {
+            matches!(
+                character,
+                '\u{0}'..='\u{1f}'
+                    | '\u{7f}'..='\u{9f}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+            )
+        })
 }
 
 /// `0` or a decimal without a leading zero, at most 19 digits.
@@ -791,6 +831,67 @@ mod tests {
         }
         assert!(production.license.keys.is_empty() || production.license.origin.is_some());
         assert_eq!(production.update.origin, None);
+    }
+
+    /// What of the test keysets a production keyset holds: the kids of keys
+    /// whose point is a test key's, and `"origin"` when the license issuer is
+    /// the test one.
+    fn test_material_in(production: &Keysets, test: &Keysets) -> Vec<String> {
+        let test_points: Vec<&Vec<u8>> = test
+            .license
+            .keys
+            .iter()
+            .chain(&test.update.keys)
+            .map(|key| &key.public_key)
+            .collect();
+        let mut found: Vec<String> = production
+            .license
+            .keys
+            .iter()
+            .chain(&production.update.keys)
+            .filter(|key| test_points.contains(&&key.public_key))
+            .map(|key| key.kid.clone())
+            .collect();
+        if production.license.origin.is_some() && production.license.origin == test.license.origin {
+            found.push("origin".to_owned());
+        }
+        found
+    }
+
+    /// A test key under a production-looking kid, or the test issuer, would
+    /// let anyone holding the committed test private key sign licenses and
+    /// update manifests a release trusts: the key material and the origin are
+    /// compared, not only the kid prefix.
+    #[test]
+    fn the_production_keysets_hold_no_test_key_material_and_not_the_test_issuer() {
+        let test = parse_keysets(TEST_KEYS).unwrap();
+        assert_eq!(
+            test_material_in(&production_keysets(), &test),
+            Vec::<String>::new()
+        );
+        // The check itself: the test license key renamed, and the test issuer.
+        let disguised = Keysets {
+            license: Keyset {
+                origin: test.license.origin.clone(),
+                keys: vec![TrustedKey {
+                    kid: "lic-2026-10".to_owned(),
+                    public_key: test.license.keys[0].public_key.clone(),
+                }],
+                retired_kids: Vec::new(),
+            },
+            update: Keyset {
+                origin: None,
+                keys: vec![TrustedKey {
+                    kid: "upd-2026-10".to_owned(),
+                    public_key: test.update.keys[0].public_key.clone(),
+                }],
+                retired_kids: Vec::new(),
+            },
+        };
+        assert_eq!(
+            test_material_in(&disguised, &test),
+            ["lic-2026-10", "upd-2026-10", "origin"]
+        );
     }
 
     #[test]

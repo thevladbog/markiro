@@ -4,6 +4,7 @@ import grants from "../../platform-contracts/fixtures/offline-grants-v1.json" wi
 import {
   decodeBase64UrlCanonical,
   encodeBase64Url,
+  parseJsonStrict,
   signCompactJws,
   verifyCompactJws,
   type TrustedKey,
@@ -124,6 +125,36 @@ describe("compact JWS ES256", () => {
         }),
       ).toEqual(refuse);
     }
+  });
+
+  it("signs only what it verifies: a valid kid, a JSON payload, no lone surrogate", async () => {
+    for (const kid of ["", "k".repeat(129)]) {
+      await expect(signCompactJws(pair.privateKey, { typ: TYP, kid }, {})).rejects.toThrow();
+    }
+    await expect(
+      signCompactJws(pair.privateKey, { typ: TYP, kid: "k1" }, undefined),
+    ).rejects.toThrow("The payload is not JSON");
+    await expect(
+      signCompactJws(pair.privateKey, { typ: TYP, kid: "k1" }, { name: "\ud800" }),
+    ).rejects.toThrow("lone surrogate");
+    await expect(
+      signCompactJws(pair.privateKey, { typ: TYP, kid: "k1" }, { name: "\ud83d\ude00" }),
+    ).resolves.toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+  });
+
+  it("reads JSON as serde_json does: no __proto__ key, no lone surrogate", () => {
+    expect(parseJsonStrict('{"a":[1,{"b":"c"}]}')).toEqual({ a: [1, { b: "c" }] });
+    for (const text of [
+      '{"__proto__":{}}',
+      '{"a":{"__proto__":1}}',
+      '[{"__proto__":null}]',
+      '{"a":"\\ud800"}',
+      '{"\\udc00":1}',
+      '"\\ud800x"',
+    ]) {
+      expect(() => parseJsonStrict(text), text).toThrow();
+    }
+    expect(parseJsonStrict('"\\ud83d\\ude00"')).toBe("\u{1f600}");
   });
 
   it("refuses a changed payload, a foreign signature and a short one", async () => {

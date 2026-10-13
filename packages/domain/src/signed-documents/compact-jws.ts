@@ -44,6 +44,30 @@ export function decodeUtf8Strict(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 }
 
+// A lone UTF-16 surrogate: JSON.parse takes `"\ud800"`, serde_json does not.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** `text` holds no lone surrogate (`String.prototype.isWellFormed`, ES2024). */
+export function isWellFormedText(text: string): boolean {
+  return !LONE_SURROGATE.test(text);
+}
+
+/**
+ * `JSON.parse` as `markiro_proto::trust` reads a document: a `__proto__` key
+ * (an own property Zod's `.strict()` does not see) and a lone surrogate in a
+ * key or a string throw, as serde_json refuses them. Throws on anything else
+ * `JSON.parse` throws on.
+ */
+export function parseJsonStrict(text: string): unknown {
+  return JSON.parse(text, function strict(key: string, value: unknown) {
+    if (key === "__proto__" || !isWellFormedText(key)) throw new Error("Refused JSON key");
+    if (typeof value === "string" && !isWellFormedText(value)) {
+      throw new Error("Refused JSON string");
+    }
+    return value;
+  });
+}
+
 interface Segments {
   kid: string;
   payload: Uint8Array<ArrayBuffer>;
@@ -57,7 +81,7 @@ function segments(compact: string, typ: string): Segments | null {
     const [encodedHeader, encodedPayload, encodedSignature] = parts;
     if (parts.length !== 3 || !encodedHeader || !encodedPayload || !encodedSignature) return null;
     const header = protectedHeaderSchema.parse(
-      JSON.parse(decodeUtf8Strict(decodeBase64UrlCanonical(encodedHeader))),
+      parseJsonStrict(decodeUtf8Strict(decodeBase64UrlCanonical(encodedHeader))),
     );
     if (header.typ !== typ) return null;
     return {
@@ -133,10 +157,22 @@ export async function signCompactJws(
   payload: unknown,
 ): Promise<string> {
   const encoder = new TextEncoder();
-  const encodedHeader = encodeBase64Url(
-    encoder.encode(JSON.stringify({ typ: header.typ, alg: "ES256", kid: header.kid })),
+  const headerText = JSON.stringify(
+    protectedHeaderSchema.parse({ typ: header.typ, alg: "ES256", kid: header.kid }),
   );
-  const encodedPayload = encodeBase64Url(encoder.encode(JSON.stringify(payload)));
+  // JSON.stringify gives undefined for undefined or a function, and escapes
+  // a lone surrogate (`\ud800`) that parseJsonStrict and serde_json refuse:
+  // sign only what the verifiers will read.
+  const payloadText: unknown = JSON.stringify(payload);
+  if (typeof payloadText !== "string") throw new Error("The payload is not JSON");
+  try {
+    parseJsonStrict(headerText);
+    parseJsonStrict(payloadText);
+  } catch {
+    throw new Error("The header or payload holds a lone surrogate or a __proto__ key");
+  }
+  const encodedHeader = encodeBase64Url(encoder.encode(headerText));
+  const encodedPayload = encodeBase64Url(encoder.encode(payloadText));
   const signature = new Uint8Array(
     await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
