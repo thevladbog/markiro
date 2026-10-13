@@ -703,7 +703,7 @@ whatever its revision (fail-closed).
   it brought. The asks go through a gate in `App` (`SIGN_IN_SYNC_GAP_MS`,
   2 s: the first at once, asks inside the wait fold into one more sync at its
   end), so a burst of stray scans does not hammer the host.
-- The name search (plan 1f2; «Найти себя по имени»,
+- The name search (plan 1f2; «Найти по имени»,
   `src/floor/operator-search.ts`) only fills in a personnel number: the PIN
   is then checked by `signInWithPin` like a typed one, under the same
   lockouts, and «Назад» on the PIN goes back to the search. It reads
@@ -793,7 +793,10 @@ header's right column on every step; the readout and keypad are centred
 together (no gap under the readout); below 900 px of height the keys are the
 cloud's compact 80 px, and below 760 px they are 64 px with the readout beside
 the keypad, so a 1024×600 panel shows the keypad whole; the number step offers
-the name search and the name search the number, as the cloud's steps do. The
+the name search and the name search the number, as the cloud's steps do. The step texts are the
+cloud's (owner decision 2026-10-13: «Ввести табельный номер», «Найти по
+имени», «Сброс», «Отсканируйте бейдж для входа», «Введите …»); the PIN
+prompts keep the personnel number, which the cloud's «Введите PIN» drops. The
 chip (`src/floor/scanner-indicator.ts`) says what the floor honestly knows:
 «ready» for the keyboard wedge (it cannot be seen) and for connected COM
 scanners, a warning for a part of them or a shell that cannot be asked, an
