@@ -6,12 +6,15 @@ import { Alert } from "@markiro/ui";
 
 import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FactsFailure, SyncState } from "../app/shell.js";
+import type { HardwareApi } from "../hardware/hardware.js";
 import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import "./floor-status-bar.css";
 import { readStrandedRecords } from "./queue/outbox-recovery.js";
+import { useScannerIndicator, type ScannerIndicator } from "./scanner-indicator.js";
 import {
   readBlockDrops,
   readDeliveryStuck,
@@ -65,6 +68,48 @@ export interface FloorStatusBarProps {
   factsFailure: FactsFailure | null;
   /** The clock the waits are measured on; this computer's by default. */
   now?: () => Date;
+  /**
+   * The shell's COM scanners (`HardwareApi.watchScanners`), for the scanner
+   * pill; without it the keyboard wedge alone is assumed.
+   */
+  watchScanners?: HardwareApi["watchScanners"];
+}
+
+const SCANNER_TONE: Readonly<Record<ScannerIndicator, PillTone>> = {
+  keyboard: "neutral",
+  connected: "ok",
+  partial: "warn",
+  disconnected: "warn",
+  unknown: "neutral",
+};
+
+type PillTone = "ok" | "warn" | "neutral";
+
+/**
+ * One identity value, after the cloud's `IdentityValue`: the label stays for
+ * assistive tech but is not painted, the value is.
+ */
+function IdentityValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="station-status-item">
+      <dt className="station-visually-hidden">{label}</dt>
+      <dd title={value}>{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * One telemetry pill, after the cloud's `StatusPill`: a tone dot, the label,
+ * the value right after it (its next element, as the tests read it).
+ */
+function StatusPill({ label, value, tone }: { label: string; value: string; tone: PillTone }) {
+  return (
+    <div className="station-status-item station-status-pill" data-tone={tone}>
+      <span aria-hidden="true" className="station-status-pill__dot" />
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
 }
 
 /**
@@ -157,8 +202,10 @@ export function FloorStatusBar({
   outboxVersion,
   factsFailure,
   now = systemClock,
+  watchScanners,
 }: FloorStatusBarProps) {
   const { t } = useTranslation();
+  const scanner = useScannerIndicator(watchScanners);
   const [place, setPlace] = useState<FloorPlace>({ organization: null, line: null });
   const [shift, setShift] = useState<{ id: string; number: string } | null>(null);
   const { hostId, deviceId } = pairing;
@@ -321,79 +368,37 @@ export function FloorStatusBar({
     };
   }, [local, hostId, deviceId, lineId, sync.synced]);
 
+  const operatorValue =
+    operator === null
+      ? t("floor.status.nobody")
+      : t("floor.status.operatorValue", { name: operator.name, login: operator.login });
   return (
-    <section className="floor-status" aria-label={t("floor.status.label")}>
-      <dl className="floor-status__identity">
-        {deviceName !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.device")}</dt>
-            <dd>{deviceName}</dd>
-          </div>
-        )}
-        {place.organization !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.organization")}</dt>
-            <dd>{place.organization}</dd>
-          </div>
-        )}
-        {place.line !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.line")}</dt>
-            <dd>{place.line}</dd>
-          </div>
-        )}
-        <div className="floor-status__item">
-          <dt>{t("floor.status.operator")}</dt>
-          <dd>
-            {operator === null
-              ? t("floor.status.nobody")
-              : t("floor.status.operatorValue", { name: operator.name, login: operator.login })}
-          </dd>
+    <section className="station-status-bar floor-status" aria-label={t("floor.status.label")}>
+      {/*
+        The cloud station's identity deck (`apps/station/src/ui/StatusBar.tsx`):
+        where on the strong first row (the device, the line), who and for whom
+        on the quieter second (the operator, the shift, the organization).
+      */}
+      <dl className="station-status-identity">
+        <div className="station-status-identity__row station-status-identity__row--primary">
+          {deviceName !== null && (
+            <IdentityValue label={t("floor.status.device")} value={deviceName} />
+          )}
+          {place.line !== null && (
+            <IdentityValue label={t("floor.status.line")} value={place.line} />
+          )}
         </div>
-        {shiftNumber !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.shift")}</dt>
-            <dd>{shiftNumber}</dd>
-          </div>
-        )}
-        {shiftStock !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.serials")}</dt>
-            <dd>{formatQuantity(shiftStock.boxes.left)}</dd>
-          </div>
-        )}
-        {shiftStock !== null && shiftStock.pallets !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.palletSerials")}</dt>
-            <dd>{formatQuantity(shiftStock.pallets.left)}</dd>
-          </div>
-        )}
-        {outbox !== null && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.unsent")}</dt>
-            <dd>{formatQuantity(outbox.unsent)}</dd>
-          </div>
-        )}
-        {outbox !== null && outbox.rejected > 0 && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.rejected")}</dt>
-            <dd>{formatQuantity(outbox.rejected)}</dd>
-          </div>
-        )}
-        {outbox !== null && outbox.conflicts > 0 && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.conflicts")}</dt>
-            <dd>{formatQuantity(outbox.conflicts)}</dd>
-          </div>
-        )}
-        {stranded > 0 && (
-          <div className="floor-status__item">
-            <dt>{t("floor.status.stranded")}</dt>
-            <dd>{formatQuantity(stranded)}</dd>
-          </div>
-        )}
+        <div className="station-status-identity__row station-status-identity__row--secondary">
+          <IdentityValue label={t("floor.status.operator")} value={operatorValue} />
+          {shiftNumber !== null && (
+            <IdentityValue label={t("floor.status.shift")} value={shiftNumber} />
+          )}
+          {place.organization !== null && (
+            <IdentityValue label={t("floor.status.organization")} value={place.organization} />
+          )}
+        </div>
       </dl>
-      <div className="floor-status__health">
+      <div className="station-status-pills">
         {/*
           While the refusal waits the link is torn down, but a refusal that came
           from a call leaves the last status `online`: say it stopped (a stopped
@@ -403,62 +408,113 @@ export function FloorStatusBar({
           status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
           sync={sync}
         />
-        {/*
-          Its own polite region, there before the warnings so that they are
-          heard; the warnings are not alerts as well (`role="presentation"`
-          drops the component's own role), or each would be read twice.
-        */}
-        <div className="floor-status__alerts" aria-live="polite">
-          {refusalHeld && (
-            <Alert tone="error" role="presentation">
-              {t(otherHostHeld ? "floor.status.otherHostHeld" : "floor.status.refusalHeld")}
-            </Alert>
+        <dl className="station-status-pills__list">
+          {shiftStock !== null && (
+            <StatusPill
+              label={t("floor.status.serials")}
+              value={formatQuantity(shiftStock.boxes.left)}
+              tone={shiftStock.boxes.level === "ok" ? "ok" : "warn"}
+            />
           )}
-          {deviceNotSaved && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.deviceNotSaved")}
-            </Alert>
+          {shiftStock !== null && shiftStock.pallets !== null && (
+            <StatusPill
+              label={t("floor.status.palletSerials")}
+              value={formatQuantity(shiftStock.pallets.left)}
+              tone={shiftStock.pallets.level === "ok" ? "ok" : "warn"}
+            />
           )}
-          {!refusalHeld && factsFailure === "host" && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.factsHost")}
-            </Alert>
+          {outbox !== null && (
+            <StatusPill
+              label={t("floor.status.unsent")}
+              value={formatQuantity(outbox.unsent)}
+              tone={failing ? "warn" : "ok"}
+            />
           )}
-          {!refusalHeld && factsFailure === "held" && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.restoreHeld")}
-            </Alert>
+          {outbox !== null && outbox.rejected > 0 && (
+            <StatusPill
+              label={t("floor.status.rejected")}
+              value={formatQuantity(outbox.rejected)}
+              tone="warn"
+            />
           )}
-          {!refusalHeld && restore !== null && restore.due && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.restoreDue")}
-            </Alert>
+          {outbox !== null && outbox.conflicts > 0 && (
+            <StatusPill
+              label={t("floor.status.conflicts")}
+              value={formatQuantity(outbox.conflicts)}
+              tone="warn"
+            />
           )}
-          {restore !== null && restore.refused > 0 && (
-            <Alert tone="error" role="presentation">
-              {t("floor.status.restoreRefused", { n: restore.refused })}
-            </Alert>
+          {stranded > 0 && (
+            <StatusPill
+              label={t("floor.status.stranded")}
+              value={formatQuantity(stranded)}
+              tone="warn"
+            />
           )}
-          {!refusalHeld && factsFailure === "local" && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.factsLocal")}
-            </Alert>
-          )}
-          {!refusalHeld && !stuckIsRestore && stuck !== null && (
-            <Alert tone="warn" role="presentation">
-              {stuckText(t, stuck)}
-            </Alert>
-          )}
-          {shiftStock !== null && stockAlert(t, "box", shiftStock.boxes)}
-          {shiftStock !== null &&
-            shiftStock.pallets !== null &&
-            stockAlert(t, "pallet", shiftStock.pallets)}
-          {drops > 0 && (
-            <Alert tone="error" role="presentation">
-              {t("floor.status.blockDrops", { n: formatQuantity(drops) })}
-            </Alert>
-          )}
-        </div>
+          <StatusPill
+            label={t("floor.status.scanner")}
+            value={t(`floor.status.scannerValue.${scanner}`)}
+            tone={SCANNER_TONE[scanner]}
+          />
+        </dl>
+      </div>
+      {/*
+        Its own polite region, there before the warnings so that they are
+        heard; the warnings are not alerts as well (`role="presentation"`
+        drops the component's own role), or each would be read twice. A row
+        of its own under the bar, the full width, empty and flat until a
+        warning comes.
+      */}
+      <div className="station-status-alerts floor-status__alerts" aria-live="polite">
+        {refusalHeld && (
+          <Alert tone="error" role="presentation">
+            {t(otherHostHeld ? "floor.status.otherHostHeld" : "floor.status.refusalHeld")}
+          </Alert>
+        )}
+        {deviceNotSaved && (
+          <Alert tone="warn" role="presentation">
+            {t("floor.status.deviceNotSaved")}
+          </Alert>
+        )}
+        {!refusalHeld && factsFailure === "host" && (
+          <Alert tone="warn" role="presentation">
+            {t("floor.status.factsHost")}
+          </Alert>
+        )}
+        {!refusalHeld && factsFailure === "held" && (
+          <Alert tone="warn" role="presentation">
+            {t("floor.status.restoreHeld")}
+          </Alert>
+        )}
+        {!refusalHeld && restore !== null && restore.due && (
+          <Alert tone="warn" role="presentation">
+            {t("floor.status.restoreDue")}
+          </Alert>
+        )}
+        {restore !== null && restore.refused > 0 && (
+          <Alert tone="error" role="presentation">
+            {t("floor.status.restoreRefused", { n: restore.refused })}
+          </Alert>
+        )}
+        {!refusalHeld && factsFailure === "local" && (
+          <Alert tone="warn" role="presentation">
+            {t("floor.status.factsLocal")}
+          </Alert>
+        )}
+        {!refusalHeld && !stuckIsRestore && stuck !== null && (
+          <Alert tone="warn" role="presentation">
+            {stuckText(t, stuck)}
+          </Alert>
+        )}
+        {shiftStock !== null && stockAlert(t, "box", shiftStock.boxes)}
+        {shiftStock !== null &&
+          shiftStock.pallets !== null &&
+          stockAlert(t, "pallet", shiftStock.pallets)}
+        {drops > 0 && (
+          <Alert tone="error" role="presentation">
+            {t("floor.status.blockDrops", { n: formatQuantity(drops) })}
+          </Alert>
+        )}
       </div>
     </section>
   );

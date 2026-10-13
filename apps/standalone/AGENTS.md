@@ -781,6 +781,30 @@ bar lay out on a real screen and touch panel, are unverified (the styles were
 not looked at in a browser). Kiosk mode and the floor's status bar are under
 "App shell".
 
+The screen's presentation is forked from the cloud station's approved sign-in
+(`apps/station/src/pages/OperatorLogin.tsx`, `ui/BadgeScanIllustration.tsx`,
+`ui/StationBrand.tsx` and their rules in `station.css`), owner decision of
+2026-10-13: «Вход оператора» with the brand, the step's prompt, the badge cue,
+the readout and keypad or the name search, and one row of equal actions in the
+cloud's order. Its CSS lives beside it (`src/floor/sign-in/operator-sign-in.css`,
+cloud class names); the logo is drawn inline, so the screen holds no `<img>`.
+The differences are the standalone's own: «Офис» and the scanner chip share the
+header's right column on every step; the readout and keypad are centred
+together (no gap under the readout); below 900 px of height the keys are the
+cloud's compact 80 px, and below 760 px they are 64 px with the readout beside
+the keypad, so a 1024×600 panel shows the keypad whole; the number step offers
+the name search and the name search the number, as the cloud's steps do. The
+chip (`src/floor/scanner-indicator.ts`) says what the floor honestly knows:
+«ready» for the keyboard wedge (it cannot be seen) and for connected COM
+scanners, a warning for a part of them or a shell that cannot be asked, an
+error for COM scanners off the link, and «Вход приостановлен» while the last
+attempt was answered by the station's lockout (an operator's PIN lockout
+leaves the badge working and does not count). The watch is the shell's
+`watchScanners`, passed by `App`; a watch that throws or answers with no stop
+never takes the screen down. Verified in a browser (Chromium, a harness with a
+fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
+real panel or a real scanner.
+
 ## Catalog and label templates
 
 The ЧЗ product groups are the cloud's static lookup: host migration `0008`
@@ -1681,7 +1705,15 @@ is still named, since the station works on it until the office moves it; read
 again after every sync, and a failed read leaves the names out), the operator
 signed in or «Никто не вошёл», and `HostStatusLine`, which the floor screens
 no longer show themselves. It holds nothing to press, so the 64 px rule has
-nothing to apply to. Since plan 2a5 it also names the device
+nothing to apply to. Its presentation is forked from the cloud station's
+one-row header (`apps/station/src/ui/StatusBar.tsx`, `.station-status-*` in
+`src/floor/floor-status-bar.css`): the device and the line strong on the first
+row, the operator, the shift and the organization quieter on the second (the
+labels stay for assistive tech, unpainted), then the link to the host and the
+pills (serials, unsent, refused, conflicts, records of an older pairing, and
+the scanner, «Клавиатурный» without COM scanners), and the warnings in a
+full-width row under it, flat while empty. The same file makes the floor fill
+the window edge to edge, as the cloud's `.station-root`. Since plan 2a5 it also names the device
 (`DeviceStatus.deviceName`, left out for an older pairing file), the number of
 the shift the operator works in (read from the copies, by
 `ShellState.floorWork`) and, in a polite region of its own that is on the

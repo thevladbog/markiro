@@ -826,6 +826,7 @@ export function App({
             factsFailure={state.factsFailure}
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
+            watchScanners={hardwareApi.watchScanners}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -840,6 +841,7 @@ export function App({
               onSignedIn={operatorSignedIn}
               onSync={signInSync.request}
               onOffice={() => dispatch({ type: "office_requested" })}
+              watchScanners={hardwareApi.watchScanners}
             />
           ) : (
             <FloorApp

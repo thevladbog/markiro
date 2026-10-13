@@ -1502,6 +1502,40 @@ fn opening_an_office_form_answers_through_the_ipc_shapes() {
     );
 }
 
+/// `open_external_link` takes `link` (`src/office/info/about-api.ts`) and
+/// opens only the product's site or a plain `mailto:` address; a refusal is
+/// the bare `invalid_request`, and off Windows an allowed link is
+/// `unsupported` (this test starts nothing on Windows: it never sends one).
+#[test]
+fn opening_an_external_link_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app_saving_into(OfficeFilesState::at(dir.path().to_path_buf()));
+    for link in [
+        "http://markiro.app",
+        "https://evil.example",
+        "file:///C:/Windows/System32/calc.exe",
+        "calc.exe",
+        "mailto:a@markiro.app?body=x",
+        "",
+    ] {
+        assert_eq!(
+            invoke(&webview, "open_external_link", json!({ "link": link })),
+            Err(json!("invalid_request")),
+            "{link:?}"
+        );
+    }
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_external_link",
+                json!({ "link": "mailto:hello@markiro.app" }),
+            ),
+            Err(json!("unsupported"))
+        );
+    }
+}
+
 /// `set_system_awake` takes `awake` (`src/hardware/hardware.ts`) and answers
 /// `null`, asked twice or not; letting go never fails. Off Windows it holds
 /// nothing. On Windows this test asks for a real power request, which a CI

@@ -11,6 +11,7 @@ import { plannedQtyRule, shiftBoxCapacityRule, toCount } from "../../lib/rules.j
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import type { ScanSource } from "../scan-source.js";
+import { FloorFooter, FloorScreen } from "./FloorScreen.js";
 import {
   createdCopy,
   createStationShift,
@@ -389,7 +390,8 @@ export function NewShift({
   };
 
   const productStep = () => {
-    if (choices.kind === "loading") return <p>{t("floor.newShift.loading")}</p>;
+    if (choices.kind === "loading")
+      return <p className="new-shift__prompt">{t("floor.newShift.loading")}</p>;
     if (choices.kind === "failed") {
       return (
         <Alert
@@ -418,7 +420,7 @@ export function NewShift({
             .slice(0, RESULTS);
     return (
       <>
-        <p className="floor-sign-in__prompt">{t("floor.newShift.productPrompt")}</p>
+        <p className="new-shift__prompt">{t("floor.newShift.productPrompt")}</p>
         <Input
           size="floor"
           label={t("floor.newShift.searchLabel")}
@@ -431,7 +433,7 @@ export function NewShift({
           onBlur={() => source.setManualTextEntryActive(false)}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
-        <div className="floor-sign-in__results" aria-live="polite">
+        <div className="new-shift__results" aria-live="polite">
           {letters(needle) >= MIN_QUERY_LETTERS && found.length === 0 ? (
             <p>{t("floor.newShift.searchEmpty")}</p>
           ) : (
@@ -464,34 +466,43 @@ export function NewShift({
     const frozen = busy !== null || form.created !== null;
     return (
       <>
-        <p className="shift-card__product">
-          {t("floor.newShift.product", { name: form.product.name, gtin: form.product.gtin14 })}
-        </p>
+        <Card className="new-shift__product" padding="var(--sp-3)">
+          <h3>{form.product.name}</h3>
+          <div className="new-shift__code">{form.product.gtin14}</div>
+        </Card>
         {fitting.length === 0 ? (
           <Alert tone="error">{t("floor.newShift.noTemplate")}</Alert>
         ) : form.templateFixed && chosen !== null ? (
-          <p>{t("floor.newShift.templateChosen", { name: chosen.name })}</p>
+          <p className="new-shift__value">
+            {t("floor.newShift.templateChosen", { name: chosen.name })}
+          </p>
         ) : (
-          <div className="new-shift__choice" role="group" aria-label={t("floor.newShift.template")}>
-            {chosen === null && <p>{t("floor.newShift.templateChoose")}</p>}
-            {fitting.map((template) => (
-              <Button
-                key={template.id}
-                size="floor"
-                variant={template.id === form.templateId ? "primary" : "secondary"}
-                aria-pressed={template.id === form.templateId}
-                disabled={frozen}
-                onClick={() => update({ templateId: template.id })}
-              >
-                {template.name}
-              </Button>
-            ))}
+          <div className="new-shift__group" role="group" aria-label={t("floor.newShift.template")}>
+            {chosen === null && (
+              <p className="new-shift__label">{t("floor.newShift.templateChoose")}</p>
+            )}
+            <div className="new-shift__modes">
+              {fitting.map((template) => (
+                <Button
+                  key={template.id}
+                  size="floor"
+                  fullWidth
+                  variant={template.id === form.templateId ? "primary" : "secondary"}
+                  aria-pressed={template.id === form.templateId}
+                  disabled={frozen}
+                  onClick={() => update({ templateId: template.id })}
+                >
+                  {template.name}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
         {palletCapacity !== null && (
-          <div className="new-shift__choice" role="group" aria-label={t("floor.newShift.pallets")}>
+          <div className="new-shift__modes" role="group" aria-label={t("floor.newShift.pallets")}>
             <Button
               size="floor"
+              fullWidth
               variant={form.pallets ? "secondary" : "primary"}
               aria-pressed={!form.pallets}
               disabled={frozen}
@@ -501,6 +512,7 @@ export function NewShift({
             </Button>
             <Button
               size="floor"
+              fullWidth
               variant={form.pallets ? "primary" : "secondary"}
               aria-pressed={form.pallets}
               disabled={frozen}
@@ -512,48 +524,55 @@ export function NewShift({
         )}
         {form.pallets && palletCapacity !== null && (
           <>
-            <p>
+            <p className="new-shift__hint">
               {t("floor.newShift.palletCapacity", { quantity: formatQuantity(palletCapacity) })}
             </p>
             {form.palletTemplateFixed && palletChosen !== null ? (
-              <p>{t("floor.newShift.palletTemplateChosen", { name: palletChosen.name })}</p>
+              <p className="new-shift__value">
+                {t("floor.newShift.palletTemplateChosen", { name: palletChosen.name })}
+              </p>
             ) : (
               <div
-                className="new-shift__choice"
+                className="new-shift__group"
                 role="group"
                 aria-label={t("floor.newShift.palletTemplate")}
               >
-                {palletChosen === null && <p>{t("floor.newShift.palletTemplateChoose")}</p>}
-                {palletFitting.map((template) => (
-                  <Button
-                    key={template.id}
-                    size="floor"
-                    variant={template.id === form.palletTemplateId ? "primary" : "secondary"}
-                    aria-pressed={template.id === form.palletTemplateId}
-                    disabled={frozen}
-                    onClick={() => update({ palletTemplateId: template.id })}
-                  >
-                    {template.name}
-                  </Button>
-                ))}
+                {palletChosen === null && (
+                  <p className="new-shift__label">{t("floor.newShift.palletTemplateChoose")}</p>
+                )}
+                <div className="new-shift__modes">
+                  {palletFitting.map((template) => (
+                    <Button
+                      key={template.id}
+                      size="floor"
+                      fullWidth
+                      variant={template.id === form.palletTemplateId ? "primary" : "secondary"}
+                      aria-pressed={template.id === form.palletTemplateId}
+                      disabled={frozen}
+                      onClick={() => update({ palletTemplateId: template.id })}
+                    >
+                      {template.name}
+                    </Button>
+                  ))}
+                </div>
               </div>
             )}
           </>
         )}
         <div
-          className="new-shift__date"
+          className="new-shift__group"
           role="group"
           aria-label={t("floor.newShift.productionDate")}
         >
-          <p className="floor-sign-in__prompt">
-            {t("floor.newShift.productionDateValue", {
-              date: formatCivilDate(form.productionDate),
-            })}
-          </p>
-          {!zoneKnown && <p className="shift-card__hint">{t("floor.newShift.pcDate")}</p>}
-          <div className="standalone-form__actions">
+          <div className="new-shift__date-row">
+            <p className="new-shift__value">
+              {t("floor.newShift.productionDateValue", {
+                date: formatCivilDate(form.productionDate),
+              })}
+            </p>
             <Button
               size="floor"
+              fullWidth
               variant="secondary"
               disabled={frozen}
               onClick={() => update({ productionDate: addCivilDays(form.productionDate, -1) })}
@@ -562,6 +581,7 @@ export function NewShift({
             </Button>
             <Button
               size="floor"
+              fullWidth
               variant="secondary"
               disabled={frozen}
               onClick={() => update({ productionDate: addCivilDays(form.productionDate, 1) })}
@@ -569,79 +589,123 @@ export function NewShift({
               {t("floor.newShift.dayAfter")}
             </Button>
           </div>
+          {!zoneKnown && <p className="new-shift__hint">{t("floor.newShift.pcDate")}</p>}
         </div>
-        <Input
-          size="floor"
-          label={t("floor.newShift.plannedQty")}
-          hint={t("floor.newShift.optional")}
-          inputMode="numeric"
-          value={form.plannedQty}
-          disabled={frozen}
-          {...(errors.plannedQty === undefined ? {} : { error: errors.plannedQty })}
-          onChange={(event) => update({ plannedQty: event.currentTarget.value })}
-        />
-        <Input
-          size="floor"
-          label={t("floor.newShift.boxCapacity")}
-          inputMode="numeric"
-          value={form.boxCapacity}
-          disabled={frozen}
-          {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
-          onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
-        />
-        <div className="standalone-form__actions">
-          <Button
+        <div className="new-shift__counts">
+          <Input
             size="floor"
-            loading={busy !== null}
-            disabled={
-              !online || form.templateId === null || palletsOf(form, from).kind === "unavailable"
-            }
-            onClick={() => void submit(form)}
-          >
-            {form.created === null
-              ? t("floor.newShift.create")
-              : t("floor.newShift.openCreated", { number: form.created.shift.number })}
-          </Button>
-          <Button
+            label={t("floor.newShift.plannedQty")}
+            hint={t("floor.newShift.optional")}
+            inputMode="numeric"
+            value={form.plannedQty}
+            disabled={frozen}
+            {...(errors.plannedQty === undefined ? {} : { error: errors.plannedQty })}
+            onChange={(event) => update({ plannedQty: event.currentTarget.value })}
+          />
+          <Input
             size="floor"
-            variant="secondary"
-            disabled={busy !== null}
-            onClick={() => {
-              setProblem(null);
-              setStep({ kind: "product" });
-            }}
-          >
-            {t("floor.newShift.otherProduct")}
-          </Button>
+            label={t("floor.newShift.boxCapacity")}
+            inputMode="numeric"
+            value={form.boxCapacity}
+            disabled={frozen}
+            {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
+            onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
+          />
         </div>
         {!online && form.created === null && (
-          <p className="shift-card__hint">{t("floor.newShift.needsLink")}</p>
+          <p className="new-shift__hint">{t("floor.newShift.needsLink")}</p>
         )}
       </>
     );
   };
 
+  const formShown = step.kind === "form" && ready !== null ? step.form : null;
+  // The problem and the request in progress, said together in one polite
+  // region that is there before either. Not an alert as well
+  // (`role="presentation"` drops the component's own role): inside this
+  // region it would be read twice.
+  const messageSlot = (
+    <div className="new-shift__message" aria-live="polite">
+      {problem !== null && (
+        <Alert tone="error" role="presentation">
+          {problemText(problem)}
+        </Alert>
+      )}
+      {busy !== null && <p>{t(`floor.newShift.${busy}`)}</p>}
+    </div>
+  );
+  // Never held by a request: one that never settles must not trap the station here.
+  const back = (
+    <Button size="floor" fullWidth variant="secondary" onClick={onBack}>
+      {t("floor.newShift.back")}
+    </Button>
+  );
+
   return (
-    <Card className="standalone-card shift-list" title={t("floor.newShift.title")} titleAs="h2">
-      <div className="standalone-form">
-        <div className="floor-sign-in__message" aria-live="polite">
-          {/* Not an alert as well (`role="presentation"` drops the component's
-              own role): inside this polite region it would be read twice. */}
-          {problem !== null && (
-            <Alert tone="error" role="presentation">
-              {problemText(problem)}
-            </Alert>
+    <FloorScreen
+      className="new-shift"
+      title={t("floor.newShift.title")}
+      actions={
+        <FloorFooter ariaLabel={t("floor.newShift.actions")}>
+          {formShown !== null && ready !== null ? (
+            <>
+              <Button
+                size="floor"
+                fullWidth
+                loading={busy !== null}
+                disabled={
+                  !online ||
+                  formShown.templateId === null ||
+                  palletsOf(formShown, ready).kind === "unavailable"
+                }
+                onClick={() => void submit(formShown)}
+              >
+                {formShown.created === null
+                  ? t("floor.newShift.create")
+                  : t("floor.newShift.openCreated", { number: formShown.created.shift.number })}
+              </Button>
+              <Button
+                size="floor"
+                fullWidth
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={() => {
+                  setProblem(null);
+                  setStep({ kind: "product" });
+                }}
+              >
+                {t("floor.newShift.otherProduct")}
+              </Button>
+              {back}
+            </>
+          ) : (
+            <>
+              {/* The cloud's first half holds «Открыть» for a typed GTIN; here a
+                  product is chosen by a scan or from the results, so it stays empty. */}
+              <span className="new-shift__spacer" aria-hidden="true" />
+              {back}
+            </>
           )}
-          {busy !== null && <p>{t(`floor.newShift.${busy}`)}</p>}
-        </div>
-        {step.kind === "form" && ready !== null ? formStep(step.form, ready) : productStep()}
-        <div className="standalone-form__actions">
-          {/* Never held by a request: one that never settles must not trap the station here. */}
-          <Button size="floor" variant="secondary" onClick={onBack}>
-            {t("floor.newShift.back")}
-          </Button>
-        </div>
-      </div>
-    </Card>
+        </FloorFooter>
+      }
+    >
+      {formShown !== null && ready !== null ? (
+        <section className="new-shift__panel new-shift__panel--found">
+          {/* Keyed apart from the search: a scroller reused across the steps
+              kept the search's scroll and opened the form part-way down. */}
+          <div key="fields" className="new-shift__fields">
+            {formStep(formShown, ready)}
+          </div>
+          {messageSlot}
+        </section>
+      ) : (
+        <section className="new-shift__panel new-shift__panel--input">
+          <div key="search" className="new-shift__search">
+            {productStep()}
+          </div>
+          {messageSlot}
+        </section>
+      )}
+    </FloorScreen>
   );
 }

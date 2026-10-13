@@ -246,6 +246,21 @@
   color: var(--fg-2);
 }
 
+/* A page's table of contents: plain links to its sections' anchors in a row. */
+.office-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.office-toc a {
+  color: var(--fg-1);
+  text-decoration: underline;
+}
+
 /* A product's name, and its print name on a quieter second line when it differs. */
 .product-name {
   display: grid;
