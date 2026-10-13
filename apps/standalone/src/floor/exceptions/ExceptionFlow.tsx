@@ -259,6 +259,13 @@ export interface ExceptionFlowProps {
   onTextEntry: (active: boolean) => void;
   /** Back to the work: never held, whatever the screen shows. */
   onBack: () => void;
+  /**
+   * Opened from the open box's own button (the cloud's box instrument): «Снять
+   * последний код» runs at once, as its card does; «Очистить короб» opens on
+   * its confirmation. The same actions, words and confirmations as from the
+   * cards; «Назад» from the confirmation goes to the cards, as there.
+   */
+  start?: "undo" | "clear";
   /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
   clock?: () => number;
 }
@@ -302,10 +309,17 @@ export function ExceptionFlow({
   registerScan,
   onTextEntry,
   onBack,
+  start,
   clock = realClock,
 }: ExceptionFlowProps) {
   const { t } = useTranslation();
-  const [stage, setStage] = useState<Stage>({ kind: "actions" });
+  const [stage, setStage] = useState<Stage>(
+    start === "clear"
+      ? { kind: "confirm_clear" }
+      : start === "undo"
+        ? { kind: "applying", pallet: false }
+        : { kind: "actions" },
+  );
   const alive = useRef(true);
   useLayoutEffect(() => {
     alive.current = true;
@@ -434,6 +448,19 @@ export function ExceptionFlow({
       },
     );
   };
+
+  // «Снять последний код» pressed under the box: the action runs once, on entry.
+  // The undo the latest render would run, read by the entry's effect.
+  const startUndo = useRef<() => void>(() => undefined);
+  useLayoutEffect(() => {
+    startUndo.current = () => run(onUndo);
+  });
+  const started = useRef(false);
+  useEffect(() => {
+    if (start !== "undo" || started.current) return;
+    started.current = true;
+    startUndo.current();
+  }, [start]);
 
   const apply = (box: Subject, reasoned: Reasoned) => {
     // A pallet's action the floor does not give is a pallet that is not there: nothing is done.

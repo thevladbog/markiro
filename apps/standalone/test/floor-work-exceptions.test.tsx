@@ -89,6 +89,72 @@ describe("the list of closed boxes by the last digits of their SSCC", () => {
   });
 });
 
+describe("the open box's own «Снять последний код» and «Очистить короб» (the cloud's box instrument)", () => {
+  const box = () => within(screen.getByRole("region", { name: "Открытый короб" }));
+
+  it("offers both under the box only while it holds codes and nothing stops the work", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await scanAll(work, []);
+    expect(box().getByRole("button", { name: "Снять последний код" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(box().getByRole("button", { name: "Очистить короб" })).toHaveProperty("disabled", true);
+    await work.scan(km("A1"));
+    const undo = box().getByRole("button", { name: "Снять последний код" });
+    expect(undo).toHaveProperty("disabled", false);
+    expect(undo.style.height).toBe("var(--control-floor)");
+    expect(box().getByRole("button", { name: "Очистить короб" })).toHaveProperty("disabled", false);
+    work.rerender({ leaving: true });
+    expect(box().getByRole("button", { name: "Снять последний код" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("takes the last code out by the exception's own way and words, and the focus comes back to it", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await scanAll(work, ["A1", "A2", "A3"]);
+    await work.press("Снять последний код");
+    expect(await screen.findByText("Последний код снят из короба.")).toBeTruthy();
+    expect(exceptionKinds(at)).toEqual([{ kind: "undo", reason_code: null, reason_text: null }]);
+    expect(work.props.onRecorded).toHaveBeenCalled();
+    await work.press("Вернуться к работе");
+    expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
+    expect(openBoxLine()).toBe("2 из 12");
+    expect(document.activeElement).toBe(box().getByRole("button", { name: "Снять последний код" }));
+  });
+
+  it("clears the box only after the exception's own confirmation, the quantity named", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await scanAll(work, ["A1", "A2"]);
+    await work.press("Очистить короб");
+    expect(screen.getByRole("group", { name: "Очистить короб?" })).toBeTruthy();
+    expect(screen.getByText(/уйдут все коды \(2 шт\.\)/)).toBeTruthy();
+    expect(exceptionKinds(at)).toEqual([]);
+    await work.press("Очистить короб");
+    expect(await screen.findByText("Короб очищен.")).toBeTruthy();
+    expect(exceptionKinds(at)).toEqual([{ kind: "clear", reason_code: null, reason_text: null }]);
+    await work.press("Вернуться к работе");
+    expect(openBoxLine()).toBe("Короб откроется с первым кодом");
+  });
+
+  it("goes back from the confirmation with nothing cleared", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await scanAll(work, ["A1"]);
+    await work.press("Очистить короб");
+    await work.press("Назад");
+    await work.press("Назад");
+    expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
+    expect(exceptionKinds(at)).toEqual([]);
+    expect(openBoxLine()).toBe("1 из 12");
+  });
+});
+
 describe("the exceptions of the work screen", () => {
   it("takes the last code out of the open box, and the work goes on", async () => {
     const at = await printStation();
