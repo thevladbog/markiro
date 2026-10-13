@@ -18,15 +18,24 @@ use aws_lc_rs::signature::{ParsedPublicKey, UnparsedPublicKey, ECDSA_P256_SHA256
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// `typ` of a license file's header.
 pub const LICENSE_TYP: &str = "markiro-standalone-license+jws";
 /// `typ` of an update manifest's header.
 pub const UPDATE_TYP: &str = "markiro-standalone-update+jws";
+/// A license file above this many bytes is refused unread (spec §4.3).
+pub const MAX_LICENSE_BYTES: usize = 16 * 1024;
+/// An update manifest above this many bytes is refused unread (spec §10.11.2).
+pub const MAX_UPDATE_MANIFEST_BYTES: usize = 64 * 1024;
+/// `format` of the host's activation request (spec §6.3).
+pub const ACTIVATION_REQUEST_FORMAT: &str = "markiro-activation-request-v1";
 /// The longest `kid`, in UTF-16 code units as the domain's Zod counts.
 const MAX_KID_UNITS: usize = 128;
+/// `Number.MAX_SAFE_INTEGER`: the domain reads every count and instant as a
+/// JavaScript number, so a larger one is malformed on both sides.
+const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 const PRODUCTION_KEYS: &str = include_str!("../fixtures/trust-keys.json");
 #[cfg(any(test, feature = "test-keys"))]
@@ -351,6 +360,418 @@ pub fn license_keyset() -> Keyset {
 /// The release keyset this build trusts.
 pub fn update_keyset() -> Keyset {
     built_in().update.clone()
+}
+
+/// Reads an `Option` field that must be present, `null` or a value: serde
+/// alone would read a missing `Option` as `None`, where the domain's Zod
+/// refuses it.
+fn required<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(deserializer)
+}
+
+fn utf16_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// A lower-case canonical UUID of versions 1-8 and the RFC variant.
+fn is_uuid(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(byte),
+        })
+        && (b'1'..=b'8').contains(&bytes[14])
+        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
+}
+
+/// An identifier the counterparty chooses (the license's `tenantId` and
+/// `siteId`, owner decision 2026-10-13): 1-64 ASCII letters, digits and `.`,
+/// `_`, `:`, `-`, compared byte for byte (never lower-cased or trimmed). The
+/// domain's `STANDALONE_OPAQUE_ID_PATTERN` is the twin.
+pub fn is_opaque_id(text: &str) -> bool {
+    (1..=64).contains(&text.len())
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
+}
+
+fn is_lower_hex(text: &str, length: usize) -> bool {
+    text.len() == length
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Ten or twelve ASCII digits: the shape; the check digits are the host's
+/// (`markiro_host::inn`), since a wrong one is a mismatch, not a bad file.
+fn is_inn_shape(text: &str) -> bool {
+    (text.len() == 10 || text.len() == 12) && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Non-empty, at most `max` UTF-16 units, no control character.
+fn is_plain_text(text: &str, max: usize) -> bool {
+    !text.is_empty()
+        && utf16_len(text) <= max
+        && !text
+            .chars()
+            .any(|character| character <= '\u{1f}' || character == '\u{7f}')
+}
+
+/// `0` or a decimal without a leading zero, at most 19 digits.
+fn is_decimal_revision(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 19
+        && bytes.iter().all(u8::is_ascii_digit)
+        && (bytes.len() == 1 || bytes[0] != b'0')
+}
+
+/// `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, the shape the domain's Zod checks.
+fn is_utc_instant(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let shape = b"dddd-dd-ddTdd:dd:dd";
+    if bytes.len() < shape.len() + 1 || bytes.last() != Some(&b'Z') {
+        return false;
+    }
+    let fixed = shape.iter().zip(bytes).all(|(expected, byte)| {
+        if *expected == b'd' {
+            byte.is_ascii_digit()
+        } else {
+            expected == byte
+        }
+    });
+    let fraction = &bytes[shape.len()..bytes.len() - 1];
+    fixed
+        && (fraction.is_empty()
+            || (fraction[0] == b'.'
+                && (2..=10).contains(&fraction.len())
+                && fraction[1..].iter().all(u8::is_ascii_digit)))
+}
+
+/// `X.Y.Z`, each part `0` or up to nine digits without a leading zero.
+fn version_parts(text: &str) -> Option<[u32; 3]> {
+    let mut parts = text.split('.');
+    let mut out = [0u32; 3];
+    for slot in &mut out {
+        let part = parts.next()?;
+        if part.is_empty()
+            || part.len() > 9
+            || !part.bytes().all(|byte| byte.is_ascii_digit())
+            || (part.len() > 1 && part.starts_with('0'))
+        {
+            return None;
+        }
+        *slot = part.parse().ok()?;
+    }
+    parts.next().is_none().then_some(out)
+}
+
+/// A license file's payload (spec §4.2), the domain's
+/// `standaloneLicensePayloadV1Schema`: read strictly, an unknown field is
+/// malformed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LicensePayloadV1 {
+    pub version: u8,
+    pub license_id: String,
+    pub sequence: u64,
+    pub issuer: String,
+    pub tenant_id: String,
+    pub site_id: String,
+    pub host_id: String,
+    pub customer: LicenseCustomer,
+    pub plan: LicensePlan,
+    pub plan_version_id: String,
+    pub entitlement_revision: String,
+    pub issued_at: u64,
+    pub valid_from: u64,
+    pub valid_until: u64,
+    pub grace_days: u8,
+    pub quotas: LicenseQuotas,
+    pub features: LicenseFeatures,
+    #[serde(deserialize_with = "required")]
+    pub replaces: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LicenseCustomer {
+    pub name: String,
+    pub inn: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LicensePlan {
+    Demo,
+    Subscription,
+}
+
+/// The cloud's quotas; `None` is no limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LicenseQuotas {
+    #[serde(deserialize_with = "required")]
+    pub lines: Option<u64>,
+    #[serde(deserialize_with = "required")]
+    pub stations: Option<u64>,
+    #[serde(deserialize_with = "required")]
+    pub kiosks: Option<u64>,
+    #[serde(deserialize_with = "required")]
+    pub cabinet_users: Option<u64>,
+}
+
+/// The cloud's features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LicenseFeatures {
+    pub label_editor: bool,
+    pub public_api: bool,
+    pub pallets: bool,
+    pub chz_integration: bool,
+    pub inventory: bool,
+    pub commerce_ml: bool,
+    pub handheld: bool,
+}
+
+impl LicensePayloadV1 {
+    /// The payload of `bytes`, if it is one (shape and rules).
+    pub fn from_json(bytes: &[u8]) -> Result<Self, TrustError> {
+        let payload: Self = read_object(bytes, &["", "/customer", "/quotas", "/features"], &[])?;
+        if payload.is_valid() {
+            Ok(payload)
+        } else {
+            Err(TrustError::Malformed)
+        }
+    }
+
+    /// The rules serde does not check (the domain's refinements).
+    pub fn is_valid(&self) -> bool {
+        let quotas = [
+            self.quotas.lines,
+            self.quotas.stations,
+            self.quotas.kiosks,
+            self.quotas.cabinet_users,
+        ];
+        self.version == 1
+            && is_uuid(&self.license_id)
+            && (1..=MAX_SAFE_INTEGER).contains(&self.sequence)
+            && !self.issuer.is_empty()
+            && utf16_len(&self.issuer) <= 256
+            && is_opaque_id(&self.tenant_id)
+            && is_opaque_id(&self.site_id)
+            && is_uuid(&self.host_id)
+            && is_plain_text(&self.customer.name, 300)
+            && is_inn_shape(&self.customer.inn)
+            && is_uuid(&self.plan_version_id)
+            && is_decimal_revision(&self.entitlement_revision)
+            && [self.issued_at, self.valid_from, self.valid_until]
+                .iter()
+                .all(|instant| *instant <= MAX_SAFE_INTEGER)
+            && self.valid_from < self.valid_until
+            && self.grace_days <= 60
+            && quotas
+                .iter()
+                .flatten()
+                .all(|limit| *limit <= MAX_SAFE_INTEGER)
+            && self.replaces.as_deref().map_or(true, is_uuid)
+    }
+}
+
+/// The signed update manifest (spec §10.2), the domain's
+/// `standaloneUpdateManifestV1Schema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UpdateManifestV1 {
+    pub v: u8,
+    pub product: String,
+    pub version: String,
+    pub channel: UpdateChannel,
+    pub released_at: String,
+    pub source_sha: String,
+    pub installer: UpdateInstaller,
+    pub protocol: u32,
+    pub min_protocol: u32,
+    pub min_upgrade_from: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    Beta,
+    Stable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UpdateInstaller {
+    pub name: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
+impl UpdateManifestV1 {
+    /// The manifest of `bytes`, if it is one (shape and rules).
+    pub fn from_json(bytes: &[u8]) -> Result<Self, TrustError> {
+        let manifest: Self = read_object(bytes, &["", "/installer"], &[])?;
+        if manifest.is_valid() {
+            Ok(manifest)
+        } else {
+            Err(TrustError::Malformed)
+        }
+    }
+
+    /// The rules serde does not check (the domain's refinements).
+    pub fn is_valid(&self) -> bool {
+        let (Some(version), Some(oldest)) = (
+            version_parts(&self.version),
+            version_parts(&self.min_upgrade_from),
+        ) else {
+            return false;
+        };
+        self.v == 1
+            && self.product == "markiro-standalone"
+            && oldest <= version
+            && is_utc_instant(&self.released_at)
+            && is_lower_hex(&self.source_sha, 40)
+            && self.installer.name
+                == format!(
+                    "markiro-standalone-{}-windows-x86_64-setup.exe",
+                    self.version
+                )
+            && is_lower_hex(&self.installer.sha256, 64)
+            && (1..=MAX_SAFE_INTEGER).contains(&self.installer.size_bytes)
+            && self.min_protocol >= 1
+            && self.min_protocol <= self.protocol
+            && self.notes.len() <= 30
+            && self.notes.iter().all(|note| is_plain_text(note, 200))
+    }
+}
+
+/// The host's activation request (spec §6.3), the domain's
+/// `standaloneActivationRequestSchema`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ActivationRequest {
+    pub format: String,
+    pub host_id: String,
+    pub host_fingerprint: String,
+    pub host_version: String,
+    pub organization: ActivationOrganization,
+    #[serde(deserialize_with = "required")]
+    pub trial: Option<ActivationTrial>,
+    #[serde(deserialize_with = "required")]
+    pub current_license: Option<ActivationLicense>,
+    pub usage: ActivationUsage,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivationOrganization {
+    pub name: String,
+    /// Empty while the organization has none.
+    pub inn: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ActivationTrial {
+    pub started_at: String,
+    pub inn: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ActivationLicense {
+    pub license_id: String,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ActivationUsage {
+    pub stations: u64,
+    pub cabinet_users: u64,
+    pub lines: u64,
+}
+
+impl ActivationRequest {
+    /// The request of `bytes`, if it is one (shape and rules).
+    pub fn from_json(bytes: &[u8]) -> Result<Self, TrustError> {
+        let request: Self = read_object(
+            bytes,
+            &["", "/organization", "/usage"],
+            &["/trial", "/currentLicense"],
+        )?;
+        if request.is_valid() {
+            Ok(request)
+        } else {
+            Err(TrustError::Malformed)
+        }
+    }
+
+    /// The rules serde does not check; the host checks what it builds.
+    pub fn is_valid(&self) -> bool {
+        let inn_or_none = |inn: &str| inn.is_empty() || is_inn_shape(inn);
+        self.format == ACTIVATION_REQUEST_FORMAT
+            && is_uuid(&self.host_id)
+            && is_lower_hex(&self.host_fingerprint, 64)
+            && version_parts(&self.host_version).is_some()
+            && is_plain_text(&self.organization.name, 300)
+            && inn_or_none(&self.organization.inn)
+            && self.trial.as_ref().map_or(true, |trial| {
+                is_utc_instant(&trial.started_at) && inn_or_none(&trial.inn)
+            })
+            && self.current_license.as_ref().map_or(true, |license| {
+                is_uuid(&license.license_id) && (1..=MAX_SAFE_INTEGER).contains(&license.sequence)
+            })
+            && [
+                self.usage.stations,
+                self.usage.cabinet_users,
+                self.usage.lines,
+            ]
+            .iter()
+            .all(|count| *count <= MAX_SAFE_INTEGER)
+            && is_utc_instant(&self.created_at)
+    }
+}
+
+/// Steps 1-4 of the host's check (spec §4.3): size, form, `kid`, signature,
+/// the payload strictly and its issuer against the keyset's origin. The
+/// binding (`hostId`, INN, `sequence`) is the host's.
+pub fn verify_license(
+    compact: &str,
+    keyset: &Keyset,
+) -> Result<(LicensePayloadV1, String), TrustError> {
+    if compact.len() > MAX_LICENSE_BYTES {
+        return Err(TrustError::Malformed);
+    }
+    let verified = verify_compact(compact, LICENSE_TYP, keyset)?;
+    let license = LicensePayloadV1::from_json(&verified.payload)?;
+    if keyset.origin.as_deref() != Some(license.issuer.as_str()) {
+        return Err(TrustError::Malformed);
+    }
+    Ok((license, verified.kid))
+}
+
+/// The same for an update manifest, against the release keyset.
+pub fn verify_update_manifest(
+    compact: &str,
+    keyset: &Keyset,
+) -> Result<(UpdateManifestV1, String), TrustError> {
+    if compact.len() > MAX_UPDATE_MANIFEST_BYTES {
+        return Err(TrustError::Malformed);
+    }
+    let verified = verify_compact(compact, UPDATE_TYP, keyset)?;
+    Ok((
+        UpdateManifestV1::from_json(&verified.payload)?,
+        verified.kid,
+    ))
 }
 
 #[cfg(test)]
