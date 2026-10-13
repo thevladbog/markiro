@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { HostError } from "../src/host/client.js";
 import { officeConflictPageSchema, type OfficeConflictPage } from "../src/host/review.js";
 import { renderOffice, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
+import { chooseText, optionTexts, selectTrigger, shownIn, waitForList } from "./support/select.js";
 import { ACTIVE, expectFocusedNotice, shiftsSession } from "./support/shifts.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -201,42 +202,32 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
         "Смена, чей скан проиграл. Конфликты, где эта смена выиграла код, сюда не попадают.",
       ),
     ).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "all" } });
+    chooseText("Состояние", "Все");
     await waitFor(() => expect(lastQuery(value)).toEqual({ page: 1 }));
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "unreviewed" } });
+    chooseText("Состояние", "Не разобранные");
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 1 }));
-    await waitFor(() =>
-      expect(
-        within(screen.getByLabelText("Смена")).getByRole("option", { name: ACTIVE.number }),
-      ).toBeTruthy(),
-    );
-    fireEvent.change(screen.getByLabelText("Смена"), { target: { value: ACTIVE.id } });
+    await waitForList(() => expect(optionTexts("Смена")).toContain(ACTIVE.number));
+    chooseText("Смена", ACTIVE.number);
     await waitFor(() =>
       expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: false, page: 1 }),
     );
     // A filter on page 2 goes back to the first page.
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "reviewed" } });
+    chooseText("Состояние", "Разобранные");
     await waitFor(() =>
       expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: true, page: 1 }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 1 }));
     expect(screen.queryByRole("button", { name: "Сбросить" })).toBeNull();
-    const shift = screen.getByLabelText("Смена");
-    const state = screen.getByLabelText("Состояние");
-    expect(shift instanceof HTMLSelectElement && shift.value).toBe("");
-    expect(state instanceof HTMLSelectElement && state.value).toBe("unreviewed");
+    expect(shownIn("Смена")).toBe("Все смены");
+    expect(shownIn("Состояние")).toBe("Не разобранные");
   });
 
   it("names a shift a link brought that the list does not hold", async () => {
     const value = session();
     renderOffice(value, { initialPath: "/conflicts?shift=9e8d7c6b-5a49-4f3e-8d2c-1b0a9f8e7d6c" });
     await screen.findByRole("heading", { name: "Конфликты", level: 1 });
-    await waitFor(() =>
-      expect(
-        within(screen.getByLabelText("Смена")).getByRole("option", { name: "Смена из ссылки" }),
-      ).toBeTruthy(),
-    );
+    await waitFor(() => expect(shownIn("Смена")).toBe("Смена из ссылки"));
     expect(lastQuery(value)).toEqual({
       shiftId: "9e8d7c6b-5a49-4f3e-8d2c-1b0a9f8e7d6c",
       reviewed: false,
@@ -251,9 +242,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     );
     renderOffice(value, { initialPath: `/conflicts?shift=${ACTIVE.id}` });
     await screen.findByRole("heading", { name: "Конфликты", level: 1 });
-    const shift = screen.getByLabelText("Смена");
-    await waitFor(() => expect(shift instanceof HTMLSelectElement && shift.value).toBe(ACTIVE.id));
-    expect(within(shift).getByRole("option", { name: "Смена из ссылки" })).toBeTruthy();
+    await waitFor(() => expect(shownIn("Смена")).toBe("Смена из ссылки"));
   });
 
   it("pages through the conflicts", async () => {
@@ -271,7 +260,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     const value = session(EMPTY);
     await openConflicts(value);
     expect(screen.getByText("Конфликтов нет")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "reviewed" } });
+    chooseText("Состояние", "Разобранные");
     expect(await screen.findByText("Нет конфликтов с таким отбором")).toBeTruthy();
   });
 
@@ -294,7 +283,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
       name: "Отметить разобранным конфликт кода S000008",
     });
     // Everything between the filters and the button can take the focus in order.
-    const state = screen.getByLabelText("Состояние");
+    const state = selectTrigger("Состояние");
     expect(state.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.getAttribute("tabindex")).not.toBe("-1");
     expect(button.hasAttribute("disabled")).toBe(false);

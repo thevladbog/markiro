@@ -23,6 +23,7 @@ import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
+import { searchableSelect } from "../select-search.js";
 import { ssccText } from "../shifts/shift-card.js";
 import {
   conflictQuery,
@@ -250,7 +251,7 @@ export function ConflictsPage() {
           : {})}
       >
         <Select
-          native
+          {...searchableSelect(t)}
           label={t("office.conflicts.filters.shift")}
           hint={t("office.conflicts.filters.shiftHint")}
           options={shiftOptions}
@@ -258,7 +259,6 @@ export function ConflictsPage() {
           onValueChange={(value) => setFilter({ shift: value })}
         />
         <Select
-          native
           label={t("office.conflicts.filters.reviewed")}
           options={REVIEWED_FILTERS.map((value) => ({
             value,
