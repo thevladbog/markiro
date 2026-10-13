@@ -426,6 +426,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::backups::resume_facts),
         )
         .route(
+            "/v1/office/updates/started",
+            post(crate::routes::app_updates::record_started),
+        )
+        .route(
             "/v1/office/import",
             post(crate::routes::cloud_import::import).layer(axum::extract::DefaultBodyLimit::max(
                 crate::routes::cloud_import::MAX_BODY_BYTES,

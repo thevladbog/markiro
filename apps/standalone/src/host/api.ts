@@ -133,6 +133,7 @@ import {
   type TemplateDefaults,
   type TemplateDefaultsUpdate,
   type TemplateUpdate,
+  type UpdateStarted,
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
@@ -335,6 +336,11 @@ export interface HostApi {
   updateBackupSettings: (token: string, update: BackupSettingsUpdate) => Promise<BackupState>;
   /** End the hold of the stations' facts a restore set; without a hold it changes nothing. */
   resumeFacts: (token: string) => Promise<BackupState>;
+  /**
+   * Plan ОБН-2: the office starts an installer on this PC; the host writes one
+   * `app.update.start` row with this session's device. Administrators only.
+   */
+  recordUpdateStarted: (token: string, record: UpdateStarted) => Promise<void>;
 }
 
 /** How long the scan pipeline waits for the host's code check (stage 2a spec, decision 16). */
@@ -788,5 +794,12 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: backupStateSchema,
       }),
+    recordUpdateStarted: async (token, record) => {
+      await client.request("POST", "/v1/office/updates/started", {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
   };
 }

@@ -17,6 +17,10 @@ pub mod actions {
     /// (plan ОБН-1); `failed` when the copy or the migrations failed. The
     /// host is the actor, the copy its target.
     pub const HOST_UPGRADE: &str = "host.upgrade";
+    /// The office started an installer on its PC (plan ОБН-2): the session's
+    /// device is the target, and the row records what the office reported,
+    /// as `shift.export` does.
+    pub const APP_UPDATE_START: &str = "app.update.start";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";

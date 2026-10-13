@@ -99,10 +99,12 @@ Backups (plan РК) write `backup.create` (the host or the office user who asked
 `failed` when a folder did not get the copy), `backup.settings.update`,
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
 (the station). The copy before an upgrade (plan ОБН-1) writes `host.upgrade`
-(the host; see «Backups and restore»).
+(the host; see «Backups and restore»). The office's start of an update
+(plan ОБН-2) writes `app.update.start` (see «Updates from a file»).
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
-SHA-256 of a copy's file in `backup.create` and `host.restore` is a checksum to
-compare with the manifest, not a credential hash), and
+SHA-256 of a copy's file in `backup.create` and `host.restore`, and of an
+installer in `app.update.start`, is a checksum to compare with a manifest, not
+a credential hash), and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
 refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
@@ -110,12 +112,14 @@ refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
 writer since plan 1b1: the `denied` rows are refused sign-ins, password
 changes and pairing claims. `office_user.password` covers
 both an administrator's reset and a user's own change (`actor_id ==
-target_id`). `shift.export` (plan ЧЗ) is the one row that records no change:
-the office saved an export's files and then wrote it (`POST
-/v1/office/shifts/{id}/exports`), every office role, no revision, the
-shift as its target and the record's fields as its details. The host cannot
-check those counts against the files, which it never sees: the row says what
-the office session reported it wrote, and it is no evidence of the bytes.
+target_id`). `shift.export` (plan ЧЗ) and `app.update.start` (plan ОБН-2)
+are the two rows that record no change. `shift.export`: the office saved an
+export's files and then wrote it (`POST /v1/office/shifts/{id}/exports`),
+every office role, no revision, the shift as its target and the record's
+fields as its details. The host cannot check those counts against the files,
+which it never sees: the row says what the office session reported it wrote,
+and it is no evidence of the bytes. `app.update.start` says the same of an
+installer the office started (see «Updates from a file»).
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -161,8 +165,11 @@ that name that is sound and older than the database (an earlier open of this
 version whose first migration committed before a later one failed) stays as
 it is: it holds the state before all of them, which the previous app can
 open. A copy of that name left by an upgrade that finished (two builds can
-share a version: `CARGO_PKG_VERSION` is not yet tied to the release version,
-plan ОБН-3) is replaced. A new file, a failed or an unknown migration take no
+share a version: a rebuild of the same release, or a development build) is
+replaced. Since plan ОБН-2 `CARGO_PKG_VERSION` is the release version: the
+contract `tools/standalone-release/test/versions.test.mjs` keeps
+`tauri.conf.json`, the three crates, `package.json` and `Cargo.lock` at one
+version. A new file, a failed or an unknown migration take no
 copy (sqlx decides as before). A copy that fails runs no migration: the open
 fails as `OpenFailure::Other` (the file stays, the app starts without its
 local database), except damage the copy met in the database, which stays
@@ -2191,6 +2198,85 @@ installer and `markiro-host restore` of the copy before the upgrade
 the NSIS template refuses, with and without `/S`, has not been seen on
 Windows. A copy before the migrations that fails is one more cause of
 `install`'s exit code 4.
+
+## Updates from a file
+
+Plan ОБН-2 (spec `2026-10-13-standalone-license-and-updates-design.md`, §10,
+§22) updates a PC from a package: the installer `prepare.mjs` names and its
+signed manifest `markiro-standalone-<version>.update.jws` (compact JWS ES256,
+`typ` `markiro-standalone-update+jws`), side by side. CI writes the unsigned
+draft (`markiro-standalone-<version>.update-draft.json`: version, commit,
+installer, the protocol range of `proto/src/lib.rs`); the owner adds the
+channel, the date, `minUpgradeFrom` and the notes and signs it offline with
+`tools/standalone-release/sign-update.mjs`: the passphrase from a terminal
+only, the key (one encrypted PKCS#8 block) and the result outside any Git
+work tree, the installer hashed again against its evidence, and only with a
+key the build lists under that kid in `proto/fixtures/trust-keys.json`, not
+retired (a package signed by another key would be refused on every site).
+Authenticode first, then `prepare.mjs`, then the signing. No key reaches CI;
+`test/offline.test.mjs` pins the network crates of the lock and refuses an
+updater or HTTP plugin. The shell compares a package with
+`app.package_info().version` (`tauri.conf.json`), which `versions.test.mjs`
+keeps equal to every crate's version.
+
+The shell (`src-tauri/src/update/`) looks for `*.update.jws` in
+`Документы\Markiro\Обновления` (`office_files::UPDATES_ROOT`, not one of the
+roots the office writes) and in the root and `Markiro\` folder of removable
+drives from `C:` on, no deeper, at most 32 packages, with Windows' «no disk»
+window off for the search (an empty card reader is skipped), and verifies
+each manifest with `markiro_proto::trust::verify_update_manifest` at once,
+read through one handle that follows no link and no further than 64 KiB.
+`update_verify` and `update_install` take only a path the last `update_scan`
+found. The installer beside a manifest must be named for its version and is
+read through a handle that shares reading only and opens no link
+(`package::open_installer`); it is started by the final path of that handle
+(`GetFinalPathNameByHandleW`), so a junction above it retargeted after the
+hash cannot send the start elsewhere, and the handle is kept from the hash
+until the app's process ends (`UpdateState::leaving`), while the installer
+reopens itself to read its data. `rules::decide` refuses an older version
+always (the passive installer would not: `allowDowngrades` stops only `/S`
+and the dialog, so this is the only protection on this path), a version
+below `minUpgradeFrom`, and, on a PC whose role is not `host`, a protocol
+above the host's `hello` (`host_probe::host_versions`, read whatever the
+protocol, without pinning the certificate: a number to compare, not a
+credential); the same version and a silent host each need a confirmation the
+webview sends back, and every one of them must be sent. The launch is
+`ShellExecuteExW` with `runas`, the app's window as the prompt's owner (kiosk
+mode hides the taskbar a prompt without an owner would flash in) and
+`/P /UPDATE /R` behind `launch::Launcher` (a final path of 260 units or more
+keeps its `\\?\` prefix and may not start: the office then offers the manual
+install; no `/ROLE`: the hooks take it from
+the registry; without `/UPDATE` a passive install may uninstall first and the
+hooks would drop the role and `installation.json`). Before it the shell
+writes `update-pending.json` (`{ from, to, startedAtMs }`); a refused prompt
+puts back the mark an earlier attempt left; after a start
+`lockdown::release_for_exit` lets the close guard go and the app exits. The
+next start reads the mark: «обновлено» (the mark goes), «не завершилось» (it
+stays until «Скрыть»), and nothing for a reinstall of the same version, whose
+version cannot tell whether it finished.
+
+The office (`src/office/info/UpdateSection.tsx`, after «Лицензия» in
+`ABOUT_SECTIONS`) shows the version and the outcome to both roles; only an
+administrator searches, checks and installs. On the host's PC it asks the
+host for a copy first (`POST /v1/office/backups`, up to 10 minutes) and names
+the paired devices whose protocol the new `minProtocol` refuses; it names
+this PC's open shift. Then `POST /v1/office/updates/started` writes
+`app.update.start` (administrator, the role checked before the fields' form,
+after the body's shape: a body the host does not read is a 400 for anyone; the
+session's device as the target, `{ from, to, installerSha256, source }`, no
+revision — what the office reported, like `shift.export`), and the shell
+starts the installer. A host that does not answer the report stops nothing
+only when the person confirmed an update without the host. Nothing is
+installed while this PC's role is unknown (the host's PC would skip its
+copy), the confirmation keeps the report and the role its warnings were
+computed for, and an update whose section is left stops before its report
+and its launch (`update-flow.ts`, `cancelled`). The installer's
+hook asks no network question on an update (`$UpdateMode = 1`). Nothing here
+runs on Windows in the macOS tests: the administrator prompt, the handle's
+sharing on NTFS, a process started from a held file and the final path
+(Windows-only unit tests in `update/package.rs`), removable drives and the
+passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
+are checked by the Windows job and by hand.
 
 ## Office pages
 

@@ -263,3 +263,20 @@ test("blocks balance in each macro (makensis is not available where these tests 
     }
   }
 });
+
+test("an update the app starts asks nothing: the network question belongs to the first installation", () => {
+  // `/P /UPDATE` (plan ОБН-2) is passive, not silent: a question would wait
+  // for a click while the app that started the update has already left.
+  const postinstall = macro("NSIS_HOOK_POSTINSTALL");
+  const question = postinstall.slice(
+    postinstall.indexOf('${If} $0 == "3"'),
+    postinstall.indexOf("markiro_keep_profile:"),
+  );
+  assert.match(
+    question,
+    /\$\{IfNot\} \$\{Silent\}\n\s+\$\{AndIf\} \$UpdateMode <> 1\n\s+MessageBox MB_YESNO/,
+  );
+  // The check itself still runs and is logged on every installation.
+  assert.match(postinstall, /"\$INSTDIR\\markiro-host\.exe" network-check'\n\s+Pop \$0/);
+  assert.match(question, /DetailPrint "Сеть отнесена к общедоступным/);
+});
