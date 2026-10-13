@@ -98,5 +98,19 @@ describe("standalone license signing configuration (plan ЛЦ-0)", () => {
     expect(standaloneLicenseReusesGrantKey({ ...grantEnv, ...licenseEnv(shared) })).toBe(true);
     expect(standaloneLicenseReusesGrantKey({ ...grantEnv, ...licenseEnv() })).toBe(false);
     expect(standaloneLicenseReusesGrantKey(licenseEnv())).toBe(false);
+    // The shared key is the license keyset's second, not active, entry.
+    const active = pair();
+    const license = licenseEnv(active);
+    const keyset = JSON.parse(license.STANDALONE_LICENSE_KEYSET_JSON) as {
+      keys: { kid: string; jwk: unknown }[];
+    };
+    keyset.keys.push({ kid: "lic-old", jwk: shared.jwk });
+    expect(
+      standaloneLicenseReusesGrantKey({
+        ...grantEnv,
+        ...license,
+        STANDALONE_LICENSE_KEYSET_JSON: JSON.stringify(keyset),
+      }),
+    ).toBe(true);
   });
 });

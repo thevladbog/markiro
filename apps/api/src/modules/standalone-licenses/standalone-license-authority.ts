@@ -52,7 +52,9 @@ export async function requireStandaloneLicenseActor(
     )
   )
     throw new ForbiddenException();
-  const [tenant] = await tx
+  // The cabinet access decides the issuance path; a write holds it FOR SHARE so
+  // a cabinet grant cannot commit between the decision and the signed file.
+  const tenantQuery = tx
     .select({
       id: schema.organization.id,
       name: schema.organization.name,
@@ -60,6 +62,7 @@ export async function requireStandaloneLicenseActor(
     })
     .from(schema.organization)
     .where(eq(schema.organization.id, tenantId));
+  const [tenant] = await (write ? tenantQuery.for("share") : tenantQuery);
   if (!tenant) throw new NotFoundException();
   return { user, tenant };
 }

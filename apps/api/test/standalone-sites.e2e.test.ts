@@ -294,7 +294,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
       requestId: randomUUID(),
       name: "Офлайн-цех",
       request,
-      acknowledgedWarnings: ["org_inn_missing"],
+      acknowledgedWarnings: [],
     });
 
     expect(await sites.list(admin, tenantId)).toEqual({
@@ -308,6 +308,128 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
       .from(schema.organization)
       .where(eq(schema.organization.id, tenantId));
     expect(tenant).toEqual({ cabinetAccess: "none" });
+  });
+
+  it("replays a request id only for the administrator and host that made it", async () => {
+    const admin = await platformActor(db);
+    const other = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    await setTenantInns(db, tenantId, { org: "7707083893" });
+    const first = activationRequest({ inn: "7707083893" });
+    const create = {
+      intent: "create" as const,
+      requestId: randomUUID(),
+      name: "Цех",
+      request: first,
+      acknowledgedWarnings: [],
+    };
+    const site = await sites.register(admin, tenantId, create);
+    const rebind = {
+      intent: "rebind" as const,
+      requestId: randomUUID(),
+      siteId: site.id,
+      request: activationRequest({ inn: "7707083893" }),
+      acknowledgedWarnings: [],
+    };
+    const rebound = await sites.register(admin, tenantId, rebind);
+
+    for (const replay of [
+      sites.register(other, tenantId, create),
+      sites.register(admin, tenantId, {
+        ...create,
+        request: activationRequest({ inn: "7707083893" }),
+      }),
+      sites.register(other, tenantId, rebind),
+      sites.register(admin, tenantId, {
+        ...rebind,
+        request: activationRequest({ inn: "7707083893" }),
+      }),
+      sites.register(admin, tenantId, { ...rebind, requestId: create.requestId, request: first }),
+    ]) {
+      expect(await refusal(replay)).toEqual({ code: "standalone_site_request_conflict" });
+    }
+    // The create still replays after the site moved to its new host.
+    expect(await sites.register(admin, tenantId, create)).toEqual(rebound);
+    expect(await siteRows(tenantId)).toHaveLength(1);
+    expect((await auditRows(db, tenantId)).map((row) => row.action)).toEqual([
+      "standalone_site.registered",
+      "standalone_site.host_rebound",
+    ]);
+  });
+
+  it("writes one site for one request confirmed twice at once, and one site for one host raced by two tenants", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    await setTenantInns(db, tenantId, { org: "7707083893" });
+    const body = {
+      intent: "create" as const,
+      requestId: randomUUID(),
+      name: "Цех",
+      request: activationRequest({ inn: "7707083893" }),
+      acknowledgedWarnings: [],
+    };
+    const [a, b] = await Promise.all([
+      sites.register(admin, tenantId, body),
+      sites.register(admin, tenantId, body),
+    ]);
+    expect(b).toEqual(a);
+    expect(await siteRows(tenantId)).toHaveLength(1);
+    expect(await auditRows(db, tenantId)).toHaveLength(1);
+
+    const tenantA = await createOrganization(db);
+    const tenantB = await createOrganization(db);
+    await setTenantInns(db, tenantA, { org: "7707083893" });
+    await setTenantInns(db, tenantB, { org: "7707083893" });
+    const request = activationRequest({ inn: "7707083893" });
+    const results = await Promise.allSettled(
+      [tenantA, tenantB].map((tenant) =>
+        sites.register(admin, tenant, {
+          intent: "create",
+          requestId: randomUUID(),
+          name: "Гонка",
+          request,
+          acknowledgedWarnings: [],
+        }),
+      ),
+    );
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : [],
+    );
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0] instanceof ConflictException ? rejected[0].getResponse() : null).toEqual({
+      code: "standalone_site_host_taken",
+    });
+    expect([...(await siteRows(tenantA)), ...(await siteRows(tenantB))]).toHaveLength(1);
+  });
+
+  it("denies a suspended administrator and one whose two-factor flag is off", async () => {
+    const tenantId = await createOrganization(db);
+    await setTenantInns(db, tenantId, { org: "7707083893" });
+    const request = activationRequest({ inn: "7707083893" });
+    const suspended = await platformActor(db);
+    await db
+      .update(schema.platformUsers)
+      .set({ status: "suspended" })
+      .where(eq(schema.platformUsers.id, suspended.userId));
+    const noFactor = await platformActor(db);
+    await db
+      .update(schema.platformUsers)
+      .set({ twoFactorEnabled: false })
+      .where(eq(schema.platformUsers.id, noFactor.userId));
+    for (const actor of [suspended, noFactor]) {
+      await expect(sites.list(actor, tenantId)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        sites.register(actor, tenantId, {
+          intent: "create",
+          requestId: randomUUID(),
+          name: "Цех",
+          request,
+          acknowledgedWarnings: [],
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(await siteRows(tenantId)).toEqual([]);
   });
 
   it("denies support, accountant and an administrator without a verified factor, writing nothing", async () => {

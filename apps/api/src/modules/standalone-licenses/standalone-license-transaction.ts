@@ -15,7 +15,8 @@ export function postgresFailure(error: unknown): {
   let cursor: unknown = error;
   for (let depth = 0; depth < 5 && cursor !== null && typeof cursor === "object"; depth++) {
     const code = "code" in cursor && typeof cursor.code === "string" ? cursor.code : null;
-    if (code !== null && /^[0-9A-Z]{5}$/u.test(code)) {
+    // A SQLSTATE, not a Node errno such as EPIPE (no SQLSTATE class starts with E).
+    if (code !== null && /^[0-9A-Z]{5}$/u.test(code) && !/^E[A-Z]{4}$/u.test(code)) {
       const constraint =
         "constraint" in cursor && typeof cursor.constraint === "string" ? cursor.constraint : null;
       return { code, constraint };

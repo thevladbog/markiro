@@ -52,9 +52,36 @@ describe("siteRegistrationWarnings (spec §4.9)", () => {
         requestInn: INVALID,
         trialInn: null,
         orgInn: INVALID,
-        billingInn: MAIN,
+        billingInn: null,
       }),
     ).toEqual(["org_inn_missing", "request_inn_invalid"]);
+  });
+
+  it("does not ask about the organization profile when billing holds a valid INN (a tenant without a cabinet)", () => {
+    expect(
+      siteRegistrationWarnings({
+        requestInn: MAIN,
+        trialInn: null,
+        orgInn: null,
+        billingInn: MAIN,
+      }),
+    ).toEqual([]);
+    expect(
+      siteRegistrationWarnings({
+        requestInn: INVALID,
+        trialInn: null,
+        orgInn: INVALID,
+        billingInn: MAIN,
+      }),
+    ).toEqual(["request_inn_invalid"]);
+  });
+
+  it("warns about an invalid trial INN even when the request INN is missing or invalid", () => {
+    for (const requestInn of ["", INVALID]) {
+      expect(
+        siteRegistrationWarnings({ requestInn, trialInn: INVALID, orgInn: MAIN, billingInn: null }),
+      ).toContain("trial_inn_differs");
+    }
   });
 });
 

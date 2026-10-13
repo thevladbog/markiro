@@ -120,7 +120,7 @@ export const standaloneLicenseIssuances = pgTable(
     ),
     check(
       "standalone_license_issuances_interval_check",
-      sql`isfinite(${t.issuedAt}) and isfinite(${t.validFrom}) and isfinite(${t.validUntil}) and ${t.validUntil} > ${t.validFrom} and ${t.validUntil} <= ${t.validFrom} + interval '366 days'`,
+      sql`isfinite(${t.issuedAt}) and isfinite(${t.validFrom}) and isfinite(${t.validUntil}) and ${t.issuedAt} = ${t.validFrom} and ${t.validUntil} > ${t.validFrom} and ${t.validUntil} - ${t.validFrom} <= interval '365 days'`,
     ),
     check(
       "standalone_license_issuances_payload_check",

@@ -89,7 +89,11 @@ export async function licenseValidity(input: {
     if (rightsReduce(previous, rights))
       return { validUntil: next, reason: "entitlement_reduction", boundaryAt: next };
     previous = rights;
-    next = snapshot.nextChangeAt === null ? null : new Date(snapshot.nextChangeAt);
+    const after = snapshot.nextChangeAt === null ? null : new Date(snapshot.nextChangeAt);
+    // A boundary that does not move forward is a timeline it cannot trust: cut there.
+    if (after !== null && after <= next)
+      return { validUntil: next, reason: "entitlement_reduction", boundaryAt: next };
+    next = after;
   }
   return limit;
 }

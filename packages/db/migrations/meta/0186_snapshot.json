@@ -1,5 +1,5 @@
 {
-  "id": "4f362db6-cfb7-4002-8a39-89d6561a5746",
+  "id": "cfdca453-c5e1-4a2b-86e3-7ed0935b8326",
   "prevId": "64e5cb1b-4b12-4e29-a032-e7f3da265e74",
   "version": "7",
   "dialect": "postgresql",
@@ -38496,7 +38496,7 @@
         },
         "standalone_license_issuances_interval_check": {
           "name": "standalone_license_issuances_interval_check",
-          "value": "isfinite(\"standalone_license_issuances\".\"issued_at\") and isfinite(\"standalone_license_issuances\".\"valid_from\") and isfinite(\"standalone_license_issuances\".\"valid_until\") and \"standalone_license_issuances\".\"valid_until\" > \"standalone_license_issuances\".\"valid_from\" and \"standalone_license_issuances\".\"valid_until\" <= \"standalone_license_issuances\".\"valid_from\" + interval '366 days'"
+          "value": "isfinite(\"standalone_license_issuances\".\"issued_at\") and isfinite(\"standalone_license_issuances\".\"valid_from\") and isfinite(\"standalone_license_issuances\".\"valid_until\") and \"standalone_license_issuances\".\"issued_at\" = \"standalone_license_issuances\".\"valid_from\" and \"standalone_license_issuances\".\"valid_until\" > \"standalone_license_issuances\".\"valid_from\" and \"standalone_license_issuances\".\"valid_until\" - \"standalone_license_issuances\".\"valid_from\" <= interval '365 days'"
         },
         "standalone_license_issuances_payload_check": {
           "name": "standalone_license_issuances_payload_check",

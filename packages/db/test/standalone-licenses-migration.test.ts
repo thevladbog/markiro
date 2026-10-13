@@ -45,11 +45,12 @@ describe.skipIf(!databaseUrl)("standalone license tables on a fresh database (pl
       source?: string;
       reason?: string;
       days?: number;
+      issuedSkewSeconds?: number;
     } = {},
   ) {
     return pool.query(
       `INSERT INTO standalone_license_issuances (id, tenant_id, site_id, sequence, request_id, host_id, plan, plan_version_id, entitlement_revision, payload, compact, sha256, kid, grace_days, issued_at, valid_from, valid_until, valid_until_reason, source, issued_by_platform_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 7, '{"version":1}', 'h.p.s', $9, 'lic-1', $10, now(), now(), now() + make_interval(days => $13), $11, $12, 'lc0-admin')`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 7, '{"version":1}', 'h.p.s', $9, 'lic-1', $10, now() - make_interval(secs => $14), now(), now() + make_interval(days => $13), $11, $12, 'lc0-admin')`,
       [
         randomUUID(),
         overrides.tenant ?? "lc0-a",
@@ -64,6 +65,7 @@ describe.skipIf(!databaseUrl)("standalone license tables on a fresh database (pl
         overrides.reason ?? "subscription_end",
         overrides.source ?? "subscription",
         overrides.days ?? 30,
+        overrides.issuedSkewSeconds ?? 0,
       ],
     );
   }
@@ -139,8 +141,12 @@ describe.skipIf(!databaseUrl)("standalone license tables on a fresh database (pl
       });
     }
     await expect(
-      issuance({ sequence: 15, source: "offline", reason: "offline_term", days: 400 }),
+      issuance({ sequence: 15, source: "offline", reason: "offline_term", days: 366 }),
     ).rejects.toMatchObject({
+      code: "23514",
+      constraint: "standalone_license_issuances_interval_check",
+    });
+    await expect(issuance({ sequence: 16, issuedSkewSeconds: 1 })).rejects.toMatchObject({
       code: "23514",
       constraint: "standalone_license_issuances_interval_check",
     });

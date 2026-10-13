@@ -33,6 +33,8 @@ import { siteView, type StandaloneSiteRow } from "./standalone-license-views";
 import { normalizedInn, sameWarnings, siteRegistrationWarnings } from "./standalone-inn-check";
 
 const MAX_HOST_HISTORY = 100;
+/** The list contract caps sites at 500 (`standaloneSiteListSchema`). */
+const MAX_LISTED_SITES = 500;
 const conflict = (code: string) => new ConflictException({ code });
 
 @Injectable()
@@ -57,10 +59,12 @@ export class StandaloneSitesService {
           .select()
           .from(schema.standaloneSites)
           .where(eq(schema.standaloneSites.tenantId, tenantId))
-          .orderBy(asc(schema.standaloneSites.createdAt), asc(schema.standaloneSites.id));
+          .orderBy(asc(schema.standaloneSites.createdAt), asc(schema.standaloneSites.id))
+          .limit(MAX_LISTED_SITES);
+        // Only each site's latest file: DISTINCT ON keeps the journal out of memory.
         const issuances = sites.length
           ? await tx
-              .select()
+              .selectDistinctOn([schema.standaloneLicenseIssuances.siteId])
               .from(schema.standaloneLicenseIssuances)
               .where(
                 and(
@@ -71,7 +75,10 @@ export class StandaloneSitesService {
                   ),
                 ),
               )
-              .orderBy(desc(schema.standaloneLicenseIssuances.sequence))
+              .orderBy(
+                asc(schema.standaloneLicenseIssuances.siteId),
+                desc(schema.standaloneLicenseIssuances.sequence),
+              )
           : [];
         const now = this.now();
         return standaloneSiteListSchema.parse({
@@ -163,14 +170,19 @@ export class StandaloneSitesService {
             ),
           );
         if (replay) {
-          if (replay.hostId !== request.hostId || replay.createdByPlatformUserId !== user.id)
+          // The host this request bound is the history's first entry; the site may have moved since.
+          const bound = standaloneSiteHostHistorySchema.parse(replay.hostHistory)[0];
+          if (bound?.hostId !== request.hostId || replay.createdByPlatformUserId !== user.id)
             throw conflict("standalone_site_request_conflict");
           return this.view(tx, replay, now);
         }
       } else {
         site = await findSite(tx, tenantId, body.siteId, true);
         const history = standaloneSiteHostHistorySchema.parse(site.hostHistory);
-        const replay = history.find((entry) => entry.requestId === body.requestId);
+        // The first entry is the create: its request id never replays as a rebind.
+        if (history[0]?.requestId === body.requestId)
+          throw conflict("standalone_site_request_conflict");
+        const replay = history.slice(1).find((entry) => entry.requestId === body.requestId);
         if (replay) {
           if (replay.hostId !== request.hostId || replay.boundByPlatformUserId !== user.id)
             throw conflict("standalone_site_request_conflict");

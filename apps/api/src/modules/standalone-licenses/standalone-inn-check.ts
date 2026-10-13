@@ -29,11 +29,13 @@ export function siteRegistrationWarnings(input: {
   else if (request === null) warnings.add("request_inn_invalid");
   const org = normalizedInn(input.orgInn);
   const billing = normalizedInn(input.billingInn);
-  if (org === null) warnings.add("org_inn_missing");
+  // A tenant without a cabinet has no organization profile; a valid billing INN stands in (plan Д3).
+  if (org === null && billing === null) warnings.add("org_inn_missing");
   if (request !== null && org !== null && request !== org) warnings.add("request_inn_differs_org");
   if (request !== null && billing !== null && request !== billing)
     warnings.add("request_inn_differs_billing");
-  if (rawInn(input.trialInn) !== null && normalizedInn(input.trialInn) !== request)
+  const trial = normalizedInn(input.trialInn);
+  if (rawInn(input.trialInn) !== null && (trial === null || trial !== request))
     warnings.add("trial_inn_differs");
   return [...warnings].sort();
 }

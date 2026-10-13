@@ -182,6 +182,16 @@ describe("licenseValidity (spec §6.2, plan Д5)", () => {
     expect(snapshotAt).not.toHaveBeenCalled();
   });
 
+  it("cuts at a boundary whose next change does not move forward instead of looping on it", async () => {
+    const endsAt = new Date(AT.getTime() + 90 * DAY);
+    const stuck = new Date(AT.getTime() + 5 * DAY);
+    const snapshotAt = vi.fn(async () => snapshot({ asOf: stuck, endsAt, nextChangeAt: stuck }));
+    await expect(
+      licenseValidity({ at: AT, first: snapshot({ endsAt, nextChangeAt: stuck }), snapshotAt }),
+    ).resolves.toEqual({ validUntil: stuck, reason: "entitlement_reduction", boundaryAt: stuck });
+    expect(snapshotAt).toHaveBeenCalledTimes(1);
+  });
+
   it("cuts conservatively at the boundary where it runs out of steps", async () => {
     const step = (n: number) => new Date(AT.getTime() + n * DAY);
     const snapshotAt = vi.fn(async (when: Date) =>
