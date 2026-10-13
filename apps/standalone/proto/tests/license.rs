@@ -106,6 +106,45 @@ fn a_device_reads_the_license_with_its_record_and_an_older_host_sends_none() {
 }
 
 #[test]
+fn a_quota_holds_any_limit_a_signed_file_may_carry() {
+    // `trust::LicenseQuotas` and the cloud allow limits up to 2^53 − 1.
+    const MAX_SAFE: u64 = 9_007_199_254_740_991;
+    let mut value = fixture("office-license.json");
+    value["quotas"]["stations"]["limit"] = Value::from(MAX_SAFE);
+    value["quotas"]["lines"]["used"] = Value::from(u64::from(u32::MAX) + 1);
+    let license: OfficeLicense = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(license.quotas.stations.limit, Some(MAX_SAFE));
+    assert_eq!(license.quotas.lines.used, u64::from(u32::MAX) + 1);
+    assert_eq!(serde_json::to_value(&license).unwrap(), value);
+    let mut preview = fixture("office-license-preview.json");
+    preview["after"]["quotas"]["kiosks"]["limit"] = Value::from(MAX_SAFE);
+    let preview: LicensePreview = serde_json::from_value(preview).unwrap();
+    assert_eq!(preview.after.quotas.kiosks.limit, Some(MAX_SAFE));
+}
+
+#[test]
+fn a_malformed_license_line_never_blocks_the_device_record() {
+    let malformed = [
+        serde_json::json!({ "state": "grace", "since": null, "phaseEndsAt": null, "emergencyUntil": null }),
+        serde_json::json!({ "since": "2027-10-20T09:00:00Z" }),
+        serde_json::json!({ "state": 7, "since": "2027-10-20T09:00:00Z", "phaseEndsAt": null, "emergencyUntil": null }),
+        serde_json::json!("grace"),
+        serde_json::json!(42),
+        serde_json::json!([]),
+        Value::Null,
+    ];
+    // The same record as `device-license.json`, without its license line.
+    let record: DeviceInfo = round_trip("device-info.json");
+    for license in malformed {
+        let mut device = fixture("device-license.json");
+        device["license"] = license.clone();
+        let info: DeviceInfo = serde_json::from_value(device)
+            .unwrap_or_else(|error| panic!("{license}: the record failed: {error}"));
+        assert_eq!(info, record, "{license}");
+    }
+}
+
+#[test]
 fn the_load_request_is_strict() {
     let request: LicenseLoadRequest = round_trip("license-load-request.json");
     assert!(request.file.starts_with("eyJ"));

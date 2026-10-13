@@ -205,7 +205,11 @@ export const LICENSE_FEATURE_KEYS = [
   "commerceMl",
   "handheld",
 ] as const;
-/** The most a license file may hold (`verify::MAX_FILE_BYTES`). */
+/**
+ * The most a license file may hold (`verify::MAX_FILE_BYTES`). Zod's `.max()`
+ * counts UTF-16 units, not bytes: the host's 16 KiB byte limit is the one that
+ * decides (a `.mklic` file is ASCII, where the two agree).
+ */
 export const MAX_LICENSE_FILE_BYTES = 16 * 1024;
 
 const quotaUseSchema = z.object({
@@ -313,14 +317,18 @@ export const licenseLoadRequestSchema = z
   .strict();
 export type LicenseLoadRequest = z.infer<typeof licenseLoadRequestSchema>;
 
-/** `GET /v1/device`; `license` since plan ЛЦ-2. */
+/**
+ * `GET /v1/device`; `license` since plan ЛЦ-2. A license line of the wrong
+ * shape reads as none (as `DeviceInfo.license` in proto): it never blocks the
+ * device's own record.
+ */
 export const deviceInfoSchema = z.object({
   id: z.uuid(),
   kind: deviceKindSchema,
   name: z.string(),
   lineId: z.uuid().nullable(),
   pairedAt: z.iso.datetime(),
-  license: deviceLicenseSchema.optional(),
+  license: deviceLicenseSchema.optional().catch(undefined),
 });
 export type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 

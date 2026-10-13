@@ -801,6 +801,8 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: officeLicenseSchema,
       }),
+    // Parsed with the domain's strict schema on purpose: the office must not
+    // save a request the cloud would refuse.
     getActivationRequest: (token) =>
       client.request("GET", "/v1/office/license/activation-request", {
         officeToken: token,

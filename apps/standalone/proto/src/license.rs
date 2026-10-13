@@ -111,12 +111,14 @@ pub const FEATURE_KEYS: [&str; 7] = [
 ];
 
 /// A quota: the file's limit (`None`: no limit), what the site uses, and
-/// whether it uses more than the file allows.
+/// whether it uses more than the file allows. `u64`, as
+/// `trust::LicenseQuotas`: the cloud allows limits up to 2^53 − 1, and a
+/// valid signed file must never read as malformed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaUse {
-    pub limit: Option<u32>,
-    pub used: u32,
+    pub limit: Option<u64>,
+    pub used: u64,
     pub over: bool,
 }
 
@@ -271,6 +273,19 @@ pub struct DeviceLicense {
     pub phase_ends_at: Option<String>,
     /// New shifts open until then although the state says otherwise (§3.5).
     pub emergency_until: Option<String>,
+}
+
+/// `DeviceInfo.license`: a line of the wrong shape (a `null` time, a missing
+/// field, a type of a newer host) reads as no line, so the device keeps its
+/// record and the shell's `device_refresh` goes on.
+pub(crate) fn device_license_or_none<'de, D>(
+    deserializer: D,
+) -> Result<Option<DeviceLicense>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 /// `POST /v1/office/license/preview` and `PUT /v1/office/license`: the text

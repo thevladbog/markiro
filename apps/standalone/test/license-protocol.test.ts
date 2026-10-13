@@ -38,6 +38,16 @@ describe("license shapes (proto/fixtures, plan ЛЦ-2)", () => {
     expect(officeLicenseSchema.safeParse(extended("office-license.json")).success).toBe(true);
     const future = { ...extended("office-license.json"), state: "some_future_state" };
     expect(officeLicenseSchema.parse(future).state).toBe("some_future_state");
+    // A signed file may carry any limit up to 2^53 − 1 (`QuotaUse` is u64).
+    const office = fixture("office-license.json") as { quotas: Record<string, object> };
+    const large = {
+      ...office,
+      quotas: {
+        ...office.quotas,
+        stations: { limit: Number.MAX_SAFE_INTEGER, used: 2 ** 32, over: false },
+      },
+    };
+    expect(officeLicenseSchema.parse(large).quotas.stations.limit).toBe(Number.MAX_SAFE_INTEGER);
   });
 
   it("read the preview's two columns and its warnings", () => {
@@ -61,6 +71,26 @@ describe("license shapes (proto/fixtures, plan ЛЦ-2)", () => {
       deviceLicenseSchema.safeParse({ state: "grace", since: "yesterday", phaseEndsAt: null })
         .success,
     ).toBe(false);
+  });
+
+  it("read a device's record whatever its license line holds", () => {
+    const record = deviceInfoSchema.parse(fixture("device-info.json"));
+    const malformed: unknown[] = [
+      { state: "grace", since: null, phaseEndsAt: null, emergencyUntil: null },
+      { since: "2027-10-20T09:00:00Z" },
+      { state: 7, since: "2027-10-20T09:00:00Z", phaseEndsAt: null, emergencyUntil: null },
+      "grace",
+      42,
+      [],
+      null,
+    ];
+    for (const license of malformed) {
+      const device = { ...(fixture("device-license.json") as Record<string, unknown>), license };
+      const parsed = deviceInfoSchema.safeParse(device);
+      expect(parsed.success, JSON.stringify(license)).toBe(true);
+      expect(parsed.data?.license, JSON.stringify(license)).toBeUndefined();
+      expect(parsed.data, JSON.stringify(license)).toEqual(record);
+    }
   });
 
   it("send the file strictly through its one builder", () => {
