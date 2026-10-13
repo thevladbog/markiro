@@ -926,6 +926,13 @@ export function installTenantApi({
           selections: [],
           currentShadow: { awaitingSelection: false, affectedDeviceIds: [], enforced: false },
         });
+      if (url.endsWith(`/api/platform/tenants/${TENANT_ID}/standalone-sites`) && method === "GET")
+        return jsonResponse(200, {
+          tenantId: TENANT_ID,
+          signingConfigured: true,
+          issuanceSource: "subscription",
+          sites: [],
+        });
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return listStatus === 200

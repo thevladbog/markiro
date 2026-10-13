@@ -1,13 +1,16 @@
 import { useTranslation } from "react-i18next";
 
 import { DeviceLicensingPanel } from "./DeviceLicensingPanel.js";
+import { StandaloneSitesPanel } from "./StandaloneSitesPanel.js";
 
 export function TenantEquipmentPanel({
   tenantId,
   canWrite,
+  canManageStandalone,
 }: {
   tenantId: string;
   canWrite: boolean;
+  canManageStandalone: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -19,6 +22,7 @@ export function TenantEquipmentPanel({
         <span>{t("tenants.detail.equipment.description")}</span>
       </header>
       <DeviceLicensingPanel tenantId={tenantId} canWrite={canWrite} />
+      {canManageStandalone ? <StandaloneSitesPanel tenantId={tenantId} /> : null}
     </section>
   );
 }
