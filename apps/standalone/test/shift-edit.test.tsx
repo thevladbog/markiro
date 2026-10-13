@@ -33,6 +33,7 @@ import {
   optionTextsOn,
   shownOn,
   valueOn,
+  waitForList,
 } from "./support/select.js";
 
 const TOKEN = "office-session-token";
@@ -215,7 +216,7 @@ describe("office shifts: changing a shift", () => {
     setField(name, "Линия", LINE_2.id);
     session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
     fireEvent.click(save(name));
-    await waitFor(() => expect(options(name, "Линия")).toContain("Линия 2 (в архиве)"));
+    await waitForList(() => expect(options(name, "Линия")).toContain("Линия 2 (в архиве)"));
     expect(shownOn(field(name, "Линия"))).toBe("Линия 2 (в архиве)");
     expect(valueOf(name, "Линия")).toBe(LINE_2.id);
     // Back to the shift's own line, and a counterparty the host then refuses.
@@ -224,7 +225,7 @@ describe("office shifts: changing a shift", () => {
     setField(name, "Контрагент", NORTH.id);
     session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
     fireEvent.click(save(name));
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options(name, "Контрагент")).toContain("ООО «Северный берег» (в архиве)"),
     );
     expect(shownOn(field(name, "Контрагент"))).toBe("ООО «Северный берег» (в архиве)");
@@ -1054,7 +1055,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("shows the sheet the shift holds, offers «main» to it too, and sends nothing for it unchanged", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options(name, "Лист А4")).toEqual([
         "По умолчанию для товара (Палета А4 · вертикальная)",
         "Палета А4 · вертикальная",
@@ -1078,7 +1079,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends the other sheet that was chosen, with nothing else", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
@@ -1093,7 +1094,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const off = { ...SHEETS, sheets: [PORTRAIT, { ...LANDSCAPE, enabled: false }, TWO_A5] };
     const session = sessionWith(WITH_SHEET, off);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options(name, "Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
     );
     expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
@@ -1105,7 +1106,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const gone = { ...SHEETS, sheets: [PORTRAIT, TWO_A5] };
     const session = sessionWith(WITH_SHEET, gone);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options(name, "Лист А4")).toContain(`Лист ${LANDSCAPE.id.slice(0, 8)}`),
     );
     expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
@@ -1114,7 +1115,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("offers «main» to a shift with pallets that has no sheet, and a chosen sheet goes alone", async () => {
     const session = sessionWith(WITH_PALLETS);
     const name = await openEdit(session, WITH_PALLETS);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options(name, "Лист А4")[0]).toBe(
         "По умолчанию для товара (Палета А4 · вертикальная)",
       ),
@@ -1135,7 +1136,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const session = sessionWith(PLANNED);
     const name = await openEdit(session, PLANNED);
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
@@ -1153,7 +1154,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const session = sessionWith(PLANNED);
     const name = await openEdit(session, PLANNED);
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     expect(valueOf(name, "Лист А4")).toBe("");
     fireEvent.click(save(name));
     await waitFor(() =>
@@ -1169,7 +1170,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends a shift that holds a sheet back to «main» as `null`, with nothing else", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", "");
     expect(valueOf(name, "Лист А4")).toBe("");
     fireEvent.click(save(name));
@@ -1184,7 +1185,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
   it("sends no sheet when the pallets are turned off", async () => {
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
     expect(within(dialog(name)).queryByLabelText("Лист А4")).toBeNull();
     fireEvent.click(save(name));
@@ -1202,7 +1203,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
       api("validation_failed", { field: "palletSheetTemplateId" }),
     );
     const name = await openEdit(session, WITH_SHEET);
-    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
