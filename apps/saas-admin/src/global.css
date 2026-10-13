@@ -2485,6 +2485,12 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+/* The standalone sites card is a grid item of the equipment workspace: without
+   min-width 0 its table's min-content width widens the whole tab on a phone. */
+.standalone-sites-panel {
+  min-width: 0;
+}
+
 .equipment-registry {
   min-width: 0;
   border: 1px solid var(--mk-border-operational-strong);

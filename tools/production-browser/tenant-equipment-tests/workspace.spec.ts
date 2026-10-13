@@ -39,6 +39,18 @@ for (const viewport of [
       ).toBeVisible();
       await expect(page.getByText("Линия розлива 1")).toBeVisible();
       await expect(page.getByText(ru ? "3 устройства" : "3 devices")).toBeVisible();
+      await expect(
+        page.getByRole("heading", {
+          level: 3,
+          name: ru
+            ? "Автоном: площадки и офлайн-лицензии"
+            : "Standalone: sites and offline licenses",
+        }),
+      ).toBeVisible();
+      await expect(page.getByRole("cell", { name: "Цех розлива", exact: true })).toBeVisible();
+      await expect(
+        page.getByText(ru ? "Пора продлить" : "Renew soon", { exact: true }),
+      ).toBeVisible();
       await noPageOverflow(page);
       await shot(page, info, `tenant-equipment-${locale}-${viewport.width}`);
       expect(fixture.unhandled).toEqual([]);
