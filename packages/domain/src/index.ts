@@ -520,3 +520,4 @@ export {
 
 export { isValidInn, normalizeInn } from "./inn.js";
 export * from "./signed-documents/compact-jws.js";
+export * from "./standalone-license/index.js";

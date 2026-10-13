@@ -1,0 +1,966 @@
+{
+  "license": {
+    "base": {
+      "version": 1,
+      "licenseId": "7a1e5c2b-3d4f-4a6b-8c9d-0e1f2a3b4c5d",
+      "sequence": 1,
+      "issuer": "https://license.test.invalid",
+      "tenantId": "Zq4bL0x9cabinetTenant01",
+      "siteId": "2c3d4e5f-6071-4829-8b3c-4d5e6f7a8b9c",
+      "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "customer": {
+        "name": "ООО «Тестовая площадка»",
+        "inn": "7707083893"
+      },
+      "plan": "subscription",
+      "planVersionId": "4e5f6071-8293-4a4b-9c5d-6e7f8091a2b3",
+      "entitlementRevision": "12",
+      "issuedAt": 1792454400000,
+      "validFrom": 1792454400000,
+      "validUntil": 1823990400000,
+      "graceDays": 14,
+      "quotas": {
+        "lines": 2,
+        "stations": 5,
+        "kiosks": 0,
+        "cabinetUsers": 3
+      },
+      "features": {
+        "labelEditor": true,
+        "publicApi": false,
+        "pallets": true,
+        "chzIntegration": true,
+        "inventory": false,
+        "commerceMl": false,
+        "handheld": true
+      },
+      "replaces": null
+    },
+    "cases": [
+      {
+        "name": "the base",
+        "valid": true
+      },
+      {
+        "name": "a demo without grace",
+        "valid": true,
+        "set": {
+          "plan": "demo",
+          "graceDays": 0
+        }
+      },
+      {
+        "name": "no limit on lines",
+        "valid": true,
+        "set": {
+          "quotas.lines": null
+        }
+      },
+      {
+        "name": "a 12-digit INN",
+        "valid": true,
+        "set": {
+          "customer.inn": "500100732259"
+        }
+      },
+      {
+        "name": "an INN with a wrong check digit keeps its shape: the host compares it",
+        "valid": true,
+        "set": {
+          "customer.inn": "7707083894"
+        }
+      },
+      {
+        "name": "sixty days of grace",
+        "valid": true,
+        "set": {
+          "graceDays": 60
+        }
+      },
+      {
+        "name": "the first revision",
+        "valid": true,
+        "set": {
+          "entitlementRevision": "0"
+        }
+      },
+      {
+        "name": "replaces an earlier file",
+        "valid": true,
+        "set": {
+          "replaces": "6c7d8e9f-0a1b-4c2d-9e3f-5061728394a5"
+        }
+      },
+      {
+        "name": "an unknown field",
+        "valid": false,
+        "set": {
+          "note": "x"
+        }
+      },
+      {
+        "name": "an unknown customer field",
+        "valid": false,
+        "set": {
+          "customer.kpp": "770701001"
+        }
+      },
+      {
+        "name": "an unknown feature",
+        "valid": false,
+        "set": {
+          "features.kiosk": true
+        }
+      },
+      {
+        "name": "an unknown quota",
+        "valid": false,
+        "set": {
+          "quotas.handhelds": 1
+        }
+      },
+      {
+        "name": "no replaces",
+        "valid": false,
+        "remove": ["replaces"]
+      },
+      {
+        "name": "no kiosks quota",
+        "valid": false,
+        "remove": ["quotas.kiosks"]
+      },
+      {
+        "name": "no handheld feature",
+        "valid": false,
+        "remove": ["features.handheld"]
+      },
+      {
+        "name": "version 2",
+        "valid": false,
+        "set": {
+          "version": 2
+        }
+      },
+      {
+        "name": "sequence 0",
+        "valid": false,
+        "set": {
+          "sequence": 0
+        }
+      },
+      {
+        "name": "a sequence above 2^53 - 1",
+        "valid": false,
+        "set": {
+          "sequence": 9007199254740992
+        }
+      },
+      {
+        "name": "a negative quota",
+        "valid": false,
+        "set": {
+          "quotas.stations": -1
+        }
+      },
+      {
+        "name": "a fractional quota",
+        "valid": false,
+        "set": {
+          "quotas.stations": 1.5
+        }
+      },
+      {
+        "name": "a quota as text",
+        "valid": false,
+        "set": {
+          "quotas.stations": "5"
+        }
+      },
+      {
+        "name": "61 days of grace",
+        "valid": false,
+        "set": {
+          "graceDays": 61
+        }
+      },
+      {
+        "name": "the plan trial",
+        "valid": false,
+        "set": {
+          "plan": "trial"
+        }
+      },
+      {
+        "name": "an upper-case host id",
+        "valid": false,
+        "set": {
+          "hostId": "3F1C2D4E-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
+        }
+      },
+      {
+        "name": "a license id that is no UUID",
+        "valid": false,
+        "set": {
+          "licenseId": "license-1"
+        }
+      },
+      {
+        "name": "a nil host id",
+        "valid": false,
+        "set": {
+          "hostId": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      {
+        "name": "a tenant id that is a UUID",
+        "valid": true,
+        "set": {
+          "tenantId": "1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7a8b"
+        }
+      },
+      {
+        "name": "a nil UUID as tenant id: the counterparty chooses it",
+        "valid": true,
+        "set": {
+          "tenantId": "00000000-0000-0000-0000-000000000000"
+        }
+      },
+      {
+        "name": "a tenant id of one character",
+        "valid": true,
+        "set": {
+          "tenantId": "7"
+        }
+      },
+      {
+        "name": "a tenant id of 64 characters",
+        "valid": true,
+        "set": {
+          "tenantId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "a tenant id with every allowed punctuation",
+        "valid": true,
+        "set": {
+          "tenantId": "acme.site_01:main-2"
+        }
+      },
+      {
+        "name": "an upper-case tenant id",
+        "valid": true,
+        "set": {
+          "tenantId": "ACME-1"
+        }
+      },
+      {
+        "name": "a site id that is no UUID",
+        "valid": true,
+        "set": {
+          "siteId": "site:moscow-1"
+        }
+      },
+      {
+        "name": "an empty tenant id",
+        "valid": false,
+        "set": {
+          "tenantId": ""
+        }
+      },
+      {
+        "name": "a tenant id of 65 characters",
+        "valid": false,
+        "set": {
+          "tenantId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "a tenant id with a space",
+        "valid": false,
+        "set": {
+          "tenantId": "a b"
+        }
+      },
+      {
+        "name": "a tenant id with a leading space",
+        "valid": false,
+        "set": {
+          "tenantId": " acme"
+        }
+      },
+      {
+        "name": "a tenant id with a NUL",
+        "valid": false,
+        "set": {
+          "tenantId": "a\u0000b"
+        }
+      },
+      {
+        "name": "a tenant id with a tab",
+        "valid": false,
+        "set": {
+          "tenantId": "a\tb"
+        }
+      },
+      {
+        "name": "a tenant id with a trailing line feed",
+        "valid": false,
+        "set": {
+          "tenantId": "acme\n"
+        }
+      },
+      {
+        "name": "a tenant id with a slash",
+        "valid": false,
+        "set": {
+          "tenantId": "tenant/1"
+        }
+      },
+      {
+        "name": "a tenant id with a backslash",
+        "valid": false,
+        "set": {
+          "tenantId": "tenant\\1"
+        }
+      },
+      {
+        "name": "a tenant id with a Cyrillic look-alike",
+        "valid": false,
+        "set": {
+          "tenantId": "tеnant"
+        }
+      },
+      {
+        "name": "a tenant id with a full-width letter",
+        "valid": false,
+        "set": {
+          "tenantId": "ａcme"
+        }
+      },
+      {
+        "name": "a tenant id with a zero-width space",
+        "valid": false,
+        "set": {
+          "tenantId": "acme​"
+        }
+      },
+      {
+        "name": "a tenant id with a non-breaking space",
+        "valid": false,
+        "set": {
+          "tenantId": "acme "
+        }
+      },
+      {
+        "name": "a tenant id as a number",
+        "valid": false,
+        "set": {
+          "tenantId": 12345
+        }
+      },
+      {
+        "name": "a tenant id of null",
+        "valid": false,
+        "set": {
+          "tenantId": null
+        }
+      },
+      {
+        "name": "an empty site id",
+        "valid": false,
+        "set": {
+          "siteId": ""
+        }
+      },
+      {
+        "name": "a site id of 65 characters",
+        "valid": false,
+        "set": {
+          "siteId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "name": "a site id with a slash",
+        "valid": false,
+        "set": {
+          "siteId": "site/1"
+        }
+      },
+      {
+        "name": "a site id with a Cyrillic look-alike",
+        "valid": false,
+        "set": {
+          "siteId": "sіte"
+        }
+      },
+      {
+        "name": "no tenant id",
+        "valid": false,
+        "remove": ["tenantId"]
+      },
+      {
+        "name": "validUntil equal to validFrom",
+        "valid": false,
+        "set": {
+          "validUntil": 1792454400000
+        }
+      },
+      {
+        "name": "a revision with a leading zero",
+        "valid": false,
+        "set": {
+          "entitlementRevision": "012"
+        }
+      },
+      {
+        "name": "a revision that is no number",
+        "valid": false,
+        "set": {
+          "entitlementRevision": "r12"
+        }
+      },
+      {
+        "name": "a nine-digit INN",
+        "valid": false,
+        "set": {
+          "customer.inn": "770708389"
+        }
+      },
+      {
+        "name": "an INN with a space",
+        "valid": false,
+        "set": {
+          "customer.inn": "7707 083893"
+        }
+      },
+      {
+        "name": "an empty customer name",
+        "valid": false,
+        "set": {
+          "customer.name": ""
+        }
+      },
+      {
+        "name": "a customer name with a line break",
+        "valid": false,
+        "set": {
+          "customer.name": "ООО\nТест"
+        }
+      },
+      {
+        "name": "a negative issuedAt",
+        "valid": false,
+        "set": {
+          "issuedAt": -1
+        }
+      },
+      {
+        "name": "a fractional issuedAt",
+        "valid": false,
+        "set": {
+          "issuedAt": 1792454400000.5
+        }
+      },
+      {
+        "name": "an empty issuer",
+        "valid": false,
+        "set": {
+          "issuer": ""
+        }
+      },
+      {
+        "name": "a feature as text",
+        "valid": false,
+        "set": {
+          "features.pallets": "true"
+        }
+      },
+      {
+        "name": "the customer as an array",
+        "valid": false,
+        "set": {
+          "customer": ["ООО «Тестовая площадка»", "7707083893"]
+        }
+      },
+      {
+        "name": "the quotas as an array",
+        "valid": false,
+        "set": {
+          "quotas": [2, 5, 0, 3]
+        }
+      },
+      {
+        "name": "the features as an array",
+        "valid": false,
+        "set": {
+          "features": [true, false, true, true, false, false, true]
+        }
+      }
+    ]
+  },
+  "manifest": {
+    "base": {
+      "v": 1,
+      "product": "markiro-standalone",
+      "version": "0.3.0",
+      "channel": "stable",
+      "releasedAt": "2026-11-02T10:00:00Z",
+      "sourceSha": "0123456789abcdef0123456789abcdef01234567",
+      "installer": {
+        "name": "markiro-standalone-0.3.0-windows-x86_64-setup.exe",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sizeBytes": 61234567
+      },
+      "protocol": 4,
+      "minProtocol": 2,
+      "minUpgradeFrom": "0.2.0",
+      "notes": ["Лицензия площадки и страница «Информация»", "Обновление из файла"]
+    },
+    "cases": [
+      {
+        "name": "the base",
+        "valid": true
+      },
+      {
+        "name": "a beta",
+        "valid": true,
+        "set": {
+          "channel": "beta"
+        }
+      },
+      {
+        "name": "no notes",
+        "valid": true,
+        "set": {
+          "notes": []
+        }
+      },
+      {
+        "name": "thirty notes",
+        "valid": true,
+        "set": {
+          "notes": [
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n"
+          ]
+        }
+      },
+      {
+        "name": "fractional seconds",
+        "valid": true,
+        "set": {
+          "releasedAt": "2026-11-02T10:00:00.123Z"
+        }
+      },
+      {
+        "name": "an upgrade from the same version",
+        "valid": true,
+        "set": {
+          "minUpgradeFrom": "0.3.0"
+        }
+      },
+      {
+        "name": "minProtocol equal to protocol",
+        "valid": true,
+        "set": {
+          "minProtocol": 4
+        }
+      },
+      {
+        "name": "a note of 200 characters",
+        "valid": true,
+        "set": {
+          "notes": [
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ]
+        }
+      },
+      {
+        "name": "an unknown field",
+        "valid": false,
+        "set": {
+          "signature": "x"
+        }
+      },
+      {
+        "name": "an unknown installer field",
+        "valid": false,
+        "set": {
+          "installer.url": "https://example.invalid/setup.exe"
+        }
+      },
+      {
+        "name": "v 2",
+        "valid": false,
+        "set": {
+          "v": 2
+        }
+      },
+      {
+        "name": "another product",
+        "valid": false,
+        "set": {
+          "product": "markiro-station"
+        }
+      },
+      {
+        "name": "a version of two parts",
+        "valid": false,
+        "set": {
+          "version": "0.3"
+        }
+      },
+      {
+        "name": "a version with a leading zero",
+        "valid": false,
+        "set": {
+          "version": "01.3.0"
+        }
+      },
+      {
+        "name": "a pre-release version",
+        "valid": false,
+        "set": {
+          "version": "0.3.0-beta.1"
+        }
+      },
+      {
+        "name": "the installer of another version",
+        "valid": false,
+        "set": {
+          "installer.name": "markiro-standalone-0.2.9-windows-x86_64-setup.exe"
+        }
+      },
+      {
+        "name": "an installer name with a path",
+        "valid": false,
+        "set": {
+          "installer.name": "..\\markiro-standalone-0.3.0-windows-x86_64-setup.exe"
+        }
+      },
+      {
+        "name": "an upper-case installer hash",
+        "valid": false,
+        "set": {
+          "installer.sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+        }
+      },
+      {
+        "name": "a short source commit",
+        "valid": false,
+        "set": {
+          "sourceSha": "0123456"
+        }
+      },
+      {
+        "name": "an empty installer",
+        "valid": false,
+        "set": {
+          "installer.sizeBytes": 0
+        }
+      },
+      {
+        "name": "minProtocol above protocol",
+        "valid": false,
+        "set": {
+          "minProtocol": 5
+        }
+      },
+      {
+        "name": "minProtocol 0",
+        "valid": false,
+        "set": {
+          "minProtocol": 0
+        }
+      },
+      {
+        "name": "an upgrade only from a newer version",
+        "valid": false,
+        "set": {
+          "minUpgradeFrom": "0.4.0"
+        }
+      },
+      {
+        "name": "an upgrade only from 0.10.0, newer by number though not by text",
+        "valid": false,
+        "set": {
+          "minUpgradeFrom": "0.10.0"
+        }
+      },
+      {
+        "name": "thirty-one notes",
+        "valid": false,
+        "set": {
+          "notes": [
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n",
+            "n"
+          ]
+        }
+      },
+      {
+        "name": "a note of 201 characters",
+        "valid": false,
+        "set": {
+          "notes": [
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ]
+        }
+      },
+      {
+        "name": "a note with a line break",
+        "valid": false,
+        "set": {
+          "notes": ["Первая\nвторая"]
+        }
+      },
+      {
+        "name": "an empty note",
+        "valid": false,
+        "set": {
+          "notes": [""]
+        }
+      },
+      {
+        "name": "the channel nightly",
+        "valid": false,
+        "set": {
+          "channel": "nightly"
+        }
+      },
+      {
+        "name": "a date without a time",
+        "valid": false,
+        "set": {
+          "releasedAt": "2026-11-02"
+        }
+      },
+      {
+        "name": "a time with an offset",
+        "valid": false,
+        "set": {
+          "releasedAt": "2026-11-02T13:00:00+03:00"
+        }
+      },
+      {
+        "name": "no notes field",
+        "valid": false,
+        "remove": ["notes"]
+      },
+      {
+        "name": "the installer as an array",
+        "valid": false,
+        "set": {
+          "installer": [
+            "markiro-standalone-0.3.0-windows-x86_64-setup.exe",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            61234567
+          ]
+        }
+      }
+    ]
+  },
+  "activation": {
+    "base": {
+      "format": "markiro-activation-request-v1",
+      "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+      "hostFingerprint": "9b2c4d6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c",
+      "hostVersion": "0.3.0",
+      "organization": {
+        "name": "ООО «Тестовая площадка»",
+        "inn": "7707083893"
+      },
+      "trial": {
+        "startedAt": "2026-10-20T09:00:00Z",
+        "inn": "7707083893"
+      },
+      "currentLicense": {
+        "licenseId": "7a1e5c2b-3d4f-4a6b-8c9d-0e1f2a3b4c5d",
+        "sequence": 1
+      },
+      "usage": {
+        "stations": 4,
+        "cabinetUsers": 2,
+        "lines": 2
+      },
+      "createdAt": "2026-10-21T09:00:00Z"
+    },
+    "cases": [
+      {
+        "name": "the base",
+        "valid": true
+      },
+      {
+        "name": "no trial",
+        "valid": true,
+        "set": {
+          "trial": null
+        }
+      },
+      {
+        "name": "no license yet",
+        "valid": true,
+        "set": {
+          "currentLicense": null
+        }
+      },
+      {
+        "name": "no INN in the organization yet",
+        "valid": true,
+        "set": {
+          "organization.inn": ""
+        }
+      },
+      {
+        "name": "an unknown field",
+        "valid": false,
+        "set": {
+          "note": "x"
+        }
+      },
+      {
+        "name": "another format",
+        "valid": false,
+        "set": {
+          "format": "markiro-activation-request-v2"
+        }
+      },
+      {
+        "name": "a three-digit INN",
+        "valid": false,
+        "set": {
+          "organization.inn": "123"
+        }
+      },
+      {
+        "name": "no lines in the usage",
+        "valid": false,
+        "remove": ["usage.lines"]
+      },
+      {
+        "name": "a negative usage",
+        "valid": false,
+        "set": {
+          "usage.stations": -1
+        }
+      },
+      {
+        "name": "an upper-case fingerprint",
+        "valid": false,
+        "set": {
+          "hostFingerprint": "9B2C4D6E8F0A1B3C5D7E9F1A2B4C6D8E0F1A3B5C7D9E1F2A4B6C8D0E2F4A6B8C"
+        }
+      },
+      {
+        "name": "a host version of two parts",
+        "valid": false,
+        "set": {
+          "hostVersion": "0.3"
+        }
+      },
+      {
+        "name": "a license of sequence 0",
+        "valid": false,
+        "set": {
+          "currentLicense.sequence": 0
+        }
+      },
+      {
+        "name": "no trial field",
+        "valid": false,
+        "remove": ["trial"]
+      },
+      {
+        "name": "a creation time without a zone",
+        "valid": false,
+        "set": {
+          "createdAt": "2026-10-21T09:00:00"
+        }
+      },
+      {
+        "name": "an unknown usage key",
+        "valid": false,
+        "set": {
+          "usage.kiosks": 0
+        }
+      },
+      {
+        "name": "the organization as an array",
+        "valid": false,
+        "set": {
+          "organization": ["ООО «Тестовая площадка»", "7707083893"]
+        }
+      },
+      {
+        "name": "the trial as an array",
+        "valid": false,
+        "set": {
+          "trial": ["2026-10-20T09:00:00Z", "7707083893"]
+        }
+      },
+      {
+        "name": "the usage as an array",
+        "valid": false,
+        "set": {
+          "usage": [4, 2, 2]
+        }
+      }
+    ]
+  }
+}
