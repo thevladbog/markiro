@@ -406,6 +406,24 @@ without that file. That is a hazard of developing on unmerged branches
 (use a fresh database), not a field procedure; the runbook names it for
 developers only.
 
+Migration `0014_floor_validation.sql` (plan РЕЖ, part A) rebuilds
+`floor_codes` and `floor_scans` so that a code and an accepted scan of a
+validation shift name no box: `floor_codes.box_id` may be NULL, and the scan's
+CHECK `(verdict = 'ok') = (box_id IS NOT NULL)` becomes `box_id IS NULL OR
+verdict = 'ok'` (a box still only on an accepted scan). The rule "an
+aggregation shift's accepted scan is in a box" is the station's code, not a
+CHECK. The rebuild is the usual one (`*_rebuilt`, copy, `DROP`, `RENAME`, so
+SQLite records the table's name quoted) and re-creates `floor_codes_box`,
+`floor_codes_shift` and `floor_scans_shift` with their own text; nothing
+refers to the two tables (no foreign key, trigger or view) and both stay
+`DeviceData`. `test/floor-schema.test.ts` (Node's SQLite) and
+`migration_0014_lets_a_code_and_an_accepted_scan_have_no_box`
+(`tests/local_db.rs`, the shell's `Migrator`) apply it over a database of
+`0013`: every row stays, `sqlite_master` changes only by the two intended
+texts, and the plans of the reads that search these indexes stay, the work
+screen's count of a shift's codes (`SHIFT_CODES_SQL`, its box-less codes
+included) on `floor_codes_shift`.
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a

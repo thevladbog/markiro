@@ -44,6 +44,14 @@ export interface WorkTotals {
   lastSscc: string | null;
 }
 
+/**
+ * The codes this station holds in a shift: the work screen's accepted count, of a validation
+ * shift too, whose codes have no box (plan РЕЖ, migration `0014`). Searches `floor_codes_shift`;
+ * pinned with this exact text in `test/floor-schema.test.ts` and `src-tauri/tests/local_db.rs`.
+ */
+export const SHIFT_CODES_SQL =
+  "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
 const countRow = z.object({ n: z.number().int().nonnegative() });
 const ssccRow = z.object({ sscc: z.string() });
 
@@ -55,11 +63,7 @@ export async function readWorkTotals(
   const scope = [pairing.hostId, pairing.deviceId, shiftId];
   const [openBox, accepted, closed, last] = await Promise.all([
     readOpenBox(local, pairing, shiftId),
-    local.query(
-      "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
-      scope,
-      countRow,
-    ),
+    local.query(SHIFT_CODES_SQL, scope, countRow),
     local.query(
       "SELECT count(*) AS n FROM floor_boxes WHERE host_id = ? AND device_id = ? " +
         "AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL",

@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -52,6 +53,7 @@ import {
 } from "../src/floor/queue/outbox-recovery.js";
 import { BLOCKS_WITH_ROOM_SQL, NEWEST_BLOCK_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
+import { SHIFT_CODES_SQL } from "../src/floor/work/work-reads.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
@@ -315,9 +317,11 @@ describe("the station's own production tables (migration 0006)", () => {
     await refused(executor, scan("scan-gtin-ok", { ...invalid, verdict: "ok", box_id: "box-1" }));
   });
 
+  // An accepted scan of a validation shift has no box (plan РЕЖ, migration `0014`): the rule
+  // "an aggregation shift's accepted scan is in a box" is the station's code, not a CHECK.
   it("name a box for an accepted scan only, and a source for a duplicate only", async () => {
     const { executor } = openLocalDb();
-    await refused(executor, scan("ok-without-box", { box_id: null }));
+    await accepted(executor, scan("ok-without-box", { box_id: null }));
     await refused(
       executor,
       scan("duplicate-in-box", { verdict: "duplicate", duplicate_source: "local" }),
@@ -599,7 +603,8 @@ const COLUMNS: Record<string, string[]> = {
     "device_id TEXT NOT NULL PK2",
     "code_hash TEXT NOT NULL PK3",
     "shift_id TEXT NOT NULL",
-    "box_id TEXT NOT NULL",
+    // NULL for a code of a validation shift (plan РЕЖ, migration `0014`).
+    "box_id TEXT",
     "scan_id TEXT NOT NULL",
     "scanned_at TEXT NOT NULL",
   ],
@@ -839,6 +844,10 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(
       plan("SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?"),
     ).toContain("floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)");
+    // The same count as the work screen runs it, a validation shift's box-less codes included.
+    expect(plan(SHIFT_CODES_SQL)).toContain(
+      "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
+    );
     expect(
       plan(
         "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
@@ -1249,8 +1258,9 @@ describe("the shape of the production tables (migration 0006)", () => {
       NEWEST_PALLET_JOB_GUARD_SQL,
       BLOCK_DROPS_COUNT_SQL,
       NEWEST_BLOCK_SQL,
+      SHIFT_CODES_SQL,
     ];
-    expect(new Set(statements).size).toBe(30);
+    expect(new Set(statements).size).toBe(31);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, every table's delete by shift as a literal (each
@@ -2011,5 +2021,228 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     for (const [sql] of STATEMENTS.filter(([sql]) => !sql.startsWith(columns))) {
       expect(source, sql).toContain(`"${sql}"`);
     }
+  });
+});
+
+// Migration `0014` (plan РЕЖ, part A): a code and an accepted scan of a validation shift have no
+// box. SQLite drops neither a NOT NULL nor a CHECK without rebuilding the table, so the migration
+// rebuilds `floor_codes` and `floor_scans`; the same is pinned on the shell's SQLite
+// (`migration_0014_lets_a_code_and_an_accepted_scan_have_no_box`, `tests/local_db.rs`).
+describe("migration 0014 over a database of 0013 (plan РЕЖ)", () => {
+  const MIGRATIONS = new URL("../src-tauri/migrations/", testModuleUrl);
+  /** The migrations whose file name sorts within `[from, to]` (a prefix of four digits). */
+  const migrate = (db: DatabaseSync, from: string, to: string): void => {
+    const files = readdirSync(MIGRATIONS)
+      .filter((name) => name.endsWith(".sql") && name >= from && name <= `${to}_zzz`)
+      .sort();
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
+  };
+  const master = (db: DatabaseSync, tables: "rebuilt" | "others"): unknown[] =>
+    db
+      .prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master " +
+          `WHERE tbl_name ${tables === "rebuilt" ? "IN" : "NOT IN"} ('floor_codes', 'floor_scans') ` +
+          "ORDER BY type, name",
+      )
+      .all()
+      .map((row) => ({ ...row }));
+  // The reads and writes of the two tables that search their indexes (each pinned above).
+  const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+  const STATEMENTS = [
+    BOX_CODES_SQL,
+    LAST_CODE_SQL,
+    NEWEST_CODE_SCAN_SQL,
+    BOX_STATE_SQL,
+    CLOSE_SUMMARY_SQL,
+    SHIFT_CODES_SQL,
+    "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? AND code_hash = ?",
+    "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ?",
+    "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+    purgeTableSql("floor_codes"),
+    purgeTableSql("floor_scans"),
+    ...receiptStatements(pairing, "[]", "x").map((statement) => statement.sql),
+  ];
+  const plans = (db: DatabaseSync): Record<string, string> =>
+    Object.fromEntries(
+      STATEMENTS.map((sql) => [
+        sql,
+        db
+          .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+          .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+          .map((step) => String(step["detail"]))
+          .join("\n"),
+      ]),
+    );
+  const insert = (db: DatabaseSync, table: string, row: Record<string, string | number | null>) =>
+    db
+      .prepare(
+        `INSERT INTO ${table} (${Object.keys(row).join(", ")}) ` +
+          `VALUES (${Object.keys(row)
+            .map(() => "?")
+            .join(", ")})`,
+      )
+      .run(...Object.values(row));
+  const km = (hash: string) => ({
+    raw_kind: "km",
+    raw_length: 31,
+    code_hash: hash,
+    gtin14: "04600682000013",
+    serial: "abc",
+    canonical: "0104600682000013215abc",
+  });
+  const scanRow = (id: string, row: Record<string, string | number | null>) => ({
+    id,
+    host_id: HOST_ID,
+    device_id: DEVICE_ID,
+    shift_id: "shift-1",
+    scanned_at: AT,
+    ...row,
+  });
+  const codeRow = (hash: string, box: string | null) => ({
+    host_id: HOST_ID,
+    device_id: DEVICE_ID,
+    code_hash: hash,
+    shift_id: "shift-1",
+    box_id: box,
+    scan_id: `scan-${hash}`,
+    scanned_at: AT,
+  });
+
+  function upgraded() {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "0001", "0013");
+    insert(db, "floor_codes", codeRow("hash-1", "box-1"));
+    insert(db, "floor_codes", codeRow("hash-2", "box-2"));
+    insert(
+      db,
+      "floor_scans",
+      scanRow("scan-ok", { box_id: "box-1", verdict: "ok", ...km("hash-1") }),
+    );
+    insert(
+      db,
+      "floor_scans",
+      scanRow("scan-duplicate", {
+        verdict: "duplicate",
+        duplicate_source: "host",
+        operator_id: "op-1",
+        conflict: 1,
+        ...km("hash-3"),
+      }),
+    );
+    insert(db, "floor_scans", scanRow("scan-wrong", { verdict: "wrong_gtin", ...km("hash-4") }));
+    insert(
+      db,
+      "floor_scans",
+      scanRow("scan-invalid", { verdict: "invalid", raw_kind: "unknown", raw_length: 7 }),
+    );
+    const before = {
+      rebuilt: master(db, "rebuilt"),
+      others: master(db, "others"),
+      plans: plans(db),
+      codes: db.prepare("SELECT * FROM floor_codes ORDER BY code_hash").all(),
+      scans: db.prepare("SELECT * FROM floor_scans ORDER BY id").all(),
+    };
+    migrate(db, "0014", "0014");
+    return { db, before };
+  }
+
+  it("keeps every row and column of both tables as it was", () => {
+    const { db, before } = upgraded();
+    expect(before.codes).toHaveLength(2);
+    expect(before.scans).toHaveLength(4);
+    expect(db.prepare("SELECT * FROM floor_codes ORDER BY code_hash").all()).toEqual(before.codes);
+    expect(db.prepare("SELECT * FROM floor_scans ORDER BY id").all()).toEqual(before.scans);
+  });
+
+  it("changes only the box's NOT NULL and the accepted scan's CHECK, and keeps every index and plan", () => {
+    const { db, before } = upgraded();
+    // The rebuilt table is renamed into place, which SQLite records with the name quoted.
+    const intended = (row: unknown): unknown => {
+      const entry = z
+        .object({
+          type: z.string(),
+          name: z.string(),
+          tbl_name: z.string(),
+          sql: z.string().nullable(),
+        })
+        .parse(row);
+      if (entry.type !== "table" || entry.sql === null) return entry;
+      const changes: Record<string, [string, string]> = {
+        floor_codes: ["box_id TEXT NOT NULL,", "box_id TEXT,"],
+        floor_scans: [
+          "CHECK ((verdict = 'ok') = (box_id IS NOT NULL)),",
+          "CHECK (box_id IS NULL OR verdict = 'ok'),",
+        ],
+      };
+      const [from, to] = changes[entry.name] ?? ["", ""];
+      expect(entry.sql.split(from)).toHaveLength(2);
+      return {
+        ...entry,
+        sql: entry.sql
+          .replace(`CREATE TABLE ${entry.name} (`, `CREATE TABLE "${entry.name}" (`)
+          .replace(from, to),
+      };
+    };
+    expect(master(db, "rebuilt")).toEqual(before.rebuilt.map(intended));
+    // Exactly the two tables and their three indexes; no trigger, nothing else touched.
+    expect(
+      master(db, "rebuilt").map((row) => z.object({ name: z.string() }).parse(row).name),
+    ).toEqual([
+      "floor_codes_box",
+      "floor_codes_shift",
+      "floor_scans_shift",
+      "sqlite_autoindex_floor_codes_1",
+      "sqlite_autoindex_floor_scans_1",
+      "floor_codes",
+      "floor_scans",
+    ]);
+    expect(master(db, "others")).toEqual(before.others);
+    expect(plans(db)).toEqual(before.plans);
+    expect(plans(db)[SHIFT_CODES_SQL]).toContain(
+      "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
+    );
+  });
+
+  it("takes a code and an accepted scan without a box, and still no box on any other verdict", async () => {
+    // Over the upgraded database...
+    const { db } = upgraded();
+    const ok = (statement: () => unknown) => expect(statement).not.toThrow();
+    const no = (statement: () => unknown) => expect(statement).toThrow(/constraint failed/);
+    ok(() => insert(db, "floor_codes", codeRow("validated", null)));
+    ok(() => insert(db, "floor_codes", codeRow("boxed", "box-1")));
+    no(() => insert(db, "floor_codes", { ...codeRow("validated", null), scan_id: "again" }));
+    ok(() => insert(db, "floor_scans", scanRow("ok-without-box", { verdict: "ok", ...km("h5") })));
+    ok(() =>
+      insert(
+        db,
+        "floor_scans",
+        scanRow("ok-in-box", { box_id: "box-1", verdict: "ok", ...km("h6") }),
+      ),
+    );
+    const boxed = { box_id: "box-1", ...km("h7") };
+    no(() =>
+      insert(
+        db,
+        "floor_scans",
+        scanRow("duplicate-in-box", { verdict: "duplicate", duplicate_source: "local", ...boxed }),
+      ),
+    );
+    no(() =>
+      insert(db, "floor_scans", scanRow("wrong-in-box", { verdict: "wrong_gtin", ...boxed })),
+    );
+    // A validation shift's count reads its box-less codes with the boxed ones.
+    expect({ ...db.prepare(SHIFT_CODES_SQL).get(HOST_ID, DEVICE_ID, "shift-1") }).toEqual({ n: 4 });
+
+    // ...and over a new one, through the executor the station writes with.
+    const { executor } = openLocalDb();
+    await accepted(executor, code("validated", { box_id: null, scan_id: "scan-validated" }));
+    await refused(executor, code("validated", { box_id: null, scan_id: "again" }));
+    await accepted(executor, scan("ok-without-box", { box_id: null }));
+    await refused(
+      executor,
+      scan("duplicate-in-box", { verdict: "duplicate", duplicate_source: "local" }),
+    );
+    await refused(executor, scan("wrong-in-box", { verdict: "wrong_gtin" }));
   });
 });

@@ -844,6 +844,325 @@ async fn a_lower_migration_that_arrives_after_a_higher_one_is_applied() {
     );
 }
 
+/// `sqlite_master`'s rows of `tables` (`IN`) or of every other table (`NOT IN`), in order.
+async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Value> {
+    sqlx::query(&format!(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE tbl_name {tables} \
+         ('floor_codes', 'floor_scans') ORDER BY type, name"
+    ))
+    .fetch_all(raw)
+    .await
+    .unwrap()
+    .iter()
+    .map(|row| {
+        json!({
+            "type": row.get::<String, _>("type"),
+            "name": row.get::<String, _>("name"),
+            "tbl_name": row.get::<String, _>("tbl_name"),
+            "sql": row.get::<Option<String>, _>("sql"),
+        })
+    })
+    .collect()
+}
+
+/// The plan of each statement of `0014`'s list, as the shell's SQLite gives it.
+async fn plans_of(raw: &mut sqlx::SqliteConnection, statements: &[&str]) -> Vec<Vec<String>> {
+    let mut plans = Vec::new();
+    for sql in statements {
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..sql.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        plans.push(
+            explain
+                .fetch_all(&mut *raw)
+                .await
+                .unwrap()
+                .iter()
+                .map(|row| row.get::<String, _>("detail"))
+                .collect(),
+        );
+    }
+    plans
+}
+
+/// Migration `0014` (plan РЕЖ, part A) over a station's database of the migrations before it,
+/// on the shell's own SQLite: `floor_codes` and `floor_scans` are rebuilt so that a code and an
+/// accepted scan of a validation shift have no box. Every row and column stays; the table texts
+/// change only by the box's NOT NULL, the accepted scan's CHECK and the quoted name of a renamed
+/// table; every index, every other table and the plans of the reads that search these tables
+/// stay as they were; a box-less code and accepted scan are taken, and any other verdict still
+/// names no box. `test/floor-schema.test.ts` pins the same on Node's SQLite.
+#[tokio::test]
+async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 14)
+        .cloned()
+        .collect();
+    assert!(before.iter().any(|migration| migration.version == 13));
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 14));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    let km = "'km', 31, '04600682000013', 'abc', '0104600682000013215abc'";
+    for sql in [
+        "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+         scanned_at) VALUES ('host', 'device', 'hash-1', 'shift-1', 'box-1', 'scan-ok', \
+         '2026-10-09T08:00:00.000Z')"
+            .to_owned(),
+        "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+         scanned_at) VALUES ('host', 'device', 'hash-2', 'shift-1', 'box-2', 'scan-2', \
+         '2026-10-09T08:00:01.000Z')"
+            .to_owned(),
+        format!(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+             raw_kind, raw_length, gtin14, serial, canonical, code_hash, scanned_at) VALUES \
+             ('scan-ok', 'host', 'device', 'shift-1', 'box-1', 'ok', {km}, 'hash-1', \
+             '2026-10-09T08:00:00.000Z')"
+        ),
+        format!(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, verdict, \
+             duplicate_source, raw_kind, raw_length, gtin14, serial, canonical, code_hash, \
+             scanned_at, operator_id, conflict) VALUES ('scan-duplicate', 'host', 'device', \
+             'shift-1', 'duplicate', 'host', {km}, 'hash-3', '2026-10-09T08:00:02.000Z', 'op-1', 1)"
+        ),
+        "INSERT INTO floor_scans (id, host_id, device_id, shift_id, verdict, raw_kind, \
+         raw_length, scanned_at) VALUES ('scan-invalid', 'host', 'device', 'shift-1', \
+         'invalid', 'unknown', 7, '2026-10-09T08:00:03.000Z')"
+            .to_owned(),
+    ] {
+        sqlx::query(&sql).execute(&mut raw).await.unwrap();
+    }
+    // The reads and writes that search the two tables' indexes (each pinned in
+    // `the_floors_repeating_reads_search_an_index`).
+    let statements = [
+        SHIFT_CODES,
+        CLOSE_SUMMARY,
+        "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
+         AND box_id = ? ORDER BY code_hash",
+        "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? \
+         AND code_hash = ?",
+        "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ?",
+        "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+        "DELETE FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+        "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+        // A box's other scans by its shift, as the receipt's statement searches them (its own
+        // text is pinned twice above and `test/floor-schema.test.ts` counts the copies).
+        "SELECT 1 FROM floor_scans c WHERE c.host_id = ? AND c.device_id = ? AND c.shift_id = ? \
+         AND c.box_id = ? AND c.conflict = 1",
+    ];
+    let rebuilt = master_rows(&mut raw, "IN").await;
+    let others = master_rows(&mut raw, "NOT IN").await;
+    let plans = plans_of(&mut raw, &statements).await;
+    let read_rows = |table: &str| format!("SELECT * FROM {table} ORDER BY 1, 2, 3");
+    let mut rows = Vec::new();
+    for table in ["floor_codes", "floor_scans"] {
+        rows.push(
+            sqlx::query(&read_rows(table))
+                .fetch_all(&mut raw)
+                .await
+                .unwrap()
+                .len(),
+        );
+    }
+    assert_eq!(rows, [2, 3]);
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let codes = db
+        .query("SELECT * FROM floor_codes ORDER BY code_hash", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(codes.into_iter().map(Value::Object).collect()),
+        json!([
+            {
+                "host_id": "host", "device_id": "device", "code_hash": "hash-1",
+                "shift_id": "shift-1", "box_id": "box-1", "scan_id": "scan-ok",
+                "scanned_at": "2026-10-09T08:00:00.000Z"
+            },
+            {
+                "host_id": "host", "device_id": "device", "code_hash": "hash-2",
+                "shift_id": "shift-1", "box_id": "box-2", "scan_id": "scan-2",
+                "scanned_at": "2026-10-09T08:00:01.000Z"
+            }
+        ])
+    );
+    let scans = db
+        .query("SELECT * FROM floor_scans ORDER BY id", vec![])
+        .await
+        .unwrap();
+    let km_columns = |hash: &str| {
+        json!({
+            "raw_kind": "km", "raw_length": 31, "gtin14": "04600682000013", "serial": "abc",
+            "canonical": "0104600682000013215abc", "code_hash": hash
+        })
+    };
+    let merge = |base: Value, more: Value| {
+        let mut base = base;
+        for (key, value) in more.as_object().unwrap() {
+            base[key] = value.clone();
+        }
+        base
+    };
+    assert_eq!(
+        Value::Array(scans.into_iter().map(Value::Object).collect()),
+        json!([
+            merge(
+                json!({
+                    "id": "scan-duplicate", "host_id": "host", "device_id": "device",
+                    "shift_id": "shift-1", "box_id": null, "verdict": "duplicate",
+                    "duplicate_source": "host", "scanned_at": "2026-10-09T08:00:02.000Z",
+                    "operator_id": "op-1", "conflict": 1
+                }),
+                km_columns("hash-3")
+            ),
+            {
+                "id": "scan-invalid", "host_id": "host", "device_id": "device",
+                "shift_id": "shift-1", "box_id": null, "verdict": "invalid",
+                "duplicate_source": null, "raw_kind": "unknown", "raw_length": 7,
+                "code_hash": null, "gtin14": null, "serial": null, "canonical": null,
+                "scanned_at": "2026-10-09T08:00:03.000Z", "operator_id": null, "conflict": 0
+            },
+            merge(
+                json!({
+                    "id": "scan-ok", "host_id": "host", "device_id": "device",
+                    "shift_id": "shift-1", "box_id": "box-1", "verdict": "ok",
+                    "duplicate_source": null, "scanned_at": "2026-10-09T08:00:00.000Z",
+                    "operator_id": null, "conflict": 0
+                }),
+                km_columns("hash-1")
+            )
+        ])
+    );
+
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    // Only the intended changes of the two tables' texts; the renamed table's name is quoted.
+    let intended: Vec<Value> = rebuilt
+        .iter()
+        .map(|row| {
+            let mut row = row.clone();
+            if row["type"] == "table" {
+                let name = row["name"].as_str().unwrap().to_owned();
+                let (from, to) = match name.as_str() {
+                    "floor_codes" => ("box_id TEXT NOT NULL,", "box_id TEXT,"),
+                    "floor_scans" => (
+                        "CHECK ((verdict = 'ok') = (box_id IS NOT NULL)),",
+                        "CHECK (box_id IS NULL OR verdict = 'ok'),",
+                    ),
+                    other => panic!("unexpected table {other}"),
+                };
+                let sql = row["sql"].as_str().unwrap();
+                assert_eq!(sql.matches(from).count(), 1, "{name}: {sql}");
+                row["sql"] = json!(sql
+                    .replace(
+                        &format!("CREATE TABLE {name} ("),
+                        &format!("CREATE TABLE \"{name}\" (")
+                    )
+                    .replace(from, to));
+            }
+            row
+        })
+        .collect();
+    assert_eq!(master_rows(&mut raw, "IN").await, intended);
+    assert_eq!(
+        intended
+            .iter()
+            .map(|row| row["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "floor_codes_box",
+            "floor_codes_shift",
+            "floor_scans_shift",
+            "sqlite_autoindex_floor_codes_1",
+            "sqlite_autoindex_floor_scans_1",
+            "floor_codes",
+            "floor_scans"
+        ],
+        "the two tables and their indexes, no trigger"
+    );
+    assert_eq!(master_rows(&mut raw, "NOT IN").await, others);
+    let after = plans_of(&mut raw, &statements).await;
+    assert_eq!(after, plans, "the plans stay");
+    assert!(after[0]
+        .iter()
+        .any(|step| step.contains("floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)")));
+    raw.close().await.unwrap();
+
+    // A code and an accepted scan of a validation shift have no box; any other verdict still
+    // names none, and a code is still held once per pairing.
+    let code = |hash: &str, box_id: Value| {
+        expecting(
+            "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+             scanned_at) VALUES ('host', 'device', ?, 'shift-1', ?, ?, '2026-10-09T08:01:00.000Z')",
+            json!([hash, box_id, format!("scan-{hash}")]),
+            1,
+        )
+    };
+    db.transaction(vec![code("validated", Value::Null)])
+        .await
+        .unwrap();
+    assert!(db
+        .transaction(vec![code("validated", Value::Null)])
+        .await
+        .is_err());
+    let scan = |id: &str, verdict: &str, source: Value, box_id: Value| {
+        expecting(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+             duplicate_source, raw_kind, raw_length, gtin14, serial, canonical, code_hash, \
+             scanned_at) VALUES (?, 'host', 'device', 'shift-1', ?, ?, ?, 'km', 31, \
+             '04600682000013', 'abc', '0104600682000013215abc', ?, '2026-10-09T08:01:00.000Z')",
+            json!([id, box_id, verdict, source, format!("hash-{id}")]),
+            1,
+        )
+    };
+    db.transaction(vec![scan("ok-without-box", "ok", Value::Null, Value::Null)])
+        .await
+        .unwrap();
+    db.transaction(vec![scan("ok-in-box", "ok", Value::Null, json!("box-1"))])
+        .await
+        .unwrap();
+    for (id, verdict, source) in [
+        ("duplicate-in-box", "duplicate", json!("local")),
+        ("wrong-in-box", "wrong_gtin", Value::Null),
+    ] {
+        assert_eq!(
+            db.transaction(vec![scan(id, verdict, source, json!("box-1"))])
+                .await,
+            Err(LocalDbError::StatementFailed),
+            "{id}"
+        );
+    }
+    // The work screen's count reads the box-less code with the boxed ones.
+    let count = db
+        .query(
+            SHIFT_CODES,
+            vec![json!("host"), json!("device"), json!("shift-1")],
+        )
+        .await
+        .unwrap();
+    assert_eq!(count[0]["n"], json!(3));
+}
+
 #[tokio::test]
 async fn a_batch_commits_together_and_values_come_back_typed() {
     let (_dir, db) = open().await;
@@ -1948,6 +2267,11 @@ const OPEN_JOB_READ: &str =
      shift_id = ? AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = \
      'sent' AND verify = 1)) ORDER BY created_at, purpose, id LIMIT 1";
 
+/// The work screen's count of a shift's codes (`SHIFT_CODES_SQL`, `src/floor/work/work-reads.ts`),
+/// of a validation shift too, whose codes have no box (plan РЕЖ, migration `0014`).
+const SHIFT_CODES: &str =
+    "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
@@ -1962,7 +2286,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 100] = [
+    let reads: [(&str, &str); 101] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -2072,6 +2396,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         ),
         (
             "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            SHIFT_CODES,
             "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         (
