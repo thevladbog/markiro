@@ -315,6 +315,53 @@ async fn an_accepted_file_is_kept_with_one_row_and_a_revision() {
     );
 }
 
+/// A load that committed answers with the file even when the read after the
+/// commit fails (review of Task 8): the answer is built from what the load
+/// already knew, never a 500 that would make the office load it again.
+#[tokio::test]
+async fn a_committed_load_answers_when_the_read_after_it_fails() {
+    let admin = admin().await;
+    // The load's own transaction removes the clock's row: the commit holds,
+    // and every read of the license after it fails.
+    sqlx::query(
+        "CREATE TRIGGER lose_the_clock AFTER INSERT ON licenses \
+         BEGIN DELETE FROM license_clock; END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    // Issued three days after the PC's clock: the answer is of the time
+    // after the floor the file raises (its issue less a day).
+    let good = file(&admin.app.state.host_id, |terms| {
+        terms["issuedAt"] = json!(START_MS + 3 * DAY_MS);
+        terms["quotas"]["stations"] = json!(3);
+    });
+    let body = load_ok(&admin, &good).await;
+    assert_eq!(
+        (
+            body["state"].clone(),
+            body["license"]["sequence"].clone(),
+            body["opensNewShifts"].clone(),
+            body["quotas"]["stations"].clone(),
+            body["effectiveAt"].clone()
+        ),
+        (
+            json!("active"),
+            json!(1),
+            json!(true),
+            json!({ "limit": 3, "used": 1, "over": false }),
+            json!(text(START_MS + 2 * DAY_MS))
+        ),
+        "{body}"
+    );
+    assert!(body.get("warnings").is_none(), "{body}");
+    assert_eq!(stored(&admin).await, 1);
+    assert_eq!(
+        audit_trail(&admin.app, actions::LICENSE_LOAD).await.len(),
+        1
+    );
+}
+
 #[tokio::test]
 async fn a_newer_file_replaces_by_sequence_and_an_older_or_equal_one_is_refused() {
     let admin = admin().await;

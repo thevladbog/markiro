@@ -471,6 +471,79 @@ async fn a_mark_out_of_range_is_no_mark() {
         (license.effective_at, license.state),
         (text(START_MS), "trial".to_owned())
     );
+    // The next look repairs the column (review of Task 8): a mark above the
+    // bound would otherwise win every `max` and never move again.
+    let mark = || async {
+        sqlx::query_scalar::<_, Option<i64>>("SELECT max_seen_at FROM license_clock WHERE id = 1")
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap()
+    };
+    started.license.refresh(&started).await.unwrap();
+    assert_eq!(mark().await, Some(START_MS));
+    // And so does a change of state, which writes the mark with it.
+    sqlx::query("UPDATE license_clock SET max_seen_at = ?, last_state = 'active' WHERE id = 1")
+        .bind(PAST_SAFE_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    started.license.refresh(&started).await.unwrap();
+    assert_eq!(mark().await, Some(START_MS));
+}
+
+/// A stored file whose quotas or features have the wrong shape is skipped
+/// like a time out of range (review of Task 8): the file before it stays in
+/// force, and every read of the license still answers.
+#[tokio::test]
+async fn a_stored_file_whose_terms_have_the_wrong_shape_is_not_used() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    seed(&admin.app, &terms(&host)).await;
+    let mut quotas = terms(&host);
+    quotas["licenseId"] = json!(license_id(2));
+    quotas["sequence"] = json!(2);
+    quotas["quotas"] =
+        json!({ "lines": -1, "stations": null, "kiosks": null, "cabinetUsers": null });
+    seed(&admin.app, &quotas).await;
+    let mut features = terms(&host);
+    features["licenseId"] = json!(license_id(3));
+    features["sequence"] = json!(3);
+    features["features"] = json!("broken");
+    seed(&admin.app, &features).await;
+    let (status, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        (body["state"].clone(), body["license"]["sequence"].clone()),
+        (json!("active"), json!(1))
+    );
+}
+
+/// A trial start in range but after the time the host trusts cannot make a
+/// longer trial (review of Task 8): the trial counts from the earlier.
+#[tokio::test]
+async fn a_trial_start_after_now_counts_from_now() {
+    let admin = admin().await;
+    sqlx::query("UPDATE license_clock SET trial_started_at = ? WHERE id = 1")
+        .bind(START_MS + 10 * DAY_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(
+        (
+            body["state"].clone(),
+            body["trial"]["startedAt"].clone(),
+            body["trial"]["endsAt"].clone(),
+            body["daysLeft"].clone()
+        ),
+        (
+            json!("trial"),
+            json!(text(START_MS)),
+            json!(text(START_MS + 14 * DAY_MS)),
+            json!(14)
+        ),
+        "{body}"
+    );
 }
 
 #[tokio::test]

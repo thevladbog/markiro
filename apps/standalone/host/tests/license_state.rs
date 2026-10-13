@@ -12,15 +12,15 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use markiro_host::audit::actions;
 use markiro_host::license::trial_mark::NoMark;
-use markiro_host::license::LicenseService;
+use markiro_host::license::{spawn_ticker_every, LicenseService};
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_trail, cloud_import_request, empty, host_revision, json as json_request, login,
     request, with_device, Admin, AuditRow, TestApp, IMPORT_ID,
 };
 use support::license::{
-    expired_file, file, license_id, load_ok, office_license, refresh, seed, set_org_inn, terms,
-    text, DAY_MS, INN, OTHER_INN, START_MS,
+    expire, expired_file, file, license_id, load_ok, office_license, refresh, seed, set_org_inn,
+    terms, text, DAY_MS, INN, OTHER_INN, START_MS,
 };
 
 const OTHER_HOST: &str = "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f";
@@ -197,20 +197,149 @@ async fn a_device_reads_the_license_with_its_record_and_not_with_its_line() {
     assert!(moved.get("license").is_none(), "{moved}");
 }
 
-/// A license the host cannot read (a stored row it cannot decode) never
-/// costs a device its record: it is read without the license line.
+/// A stored row the host cannot decode is not used (review of Task 8): the
+/// device reads its record with the license of the files before it.
 #[tokio::test]
-async fn a_device_reads_its_record_when_the_license_cannot_be_read() {
+async fn a_device_reads_the_license_without_a_row_it_cannot_decode() {
     let admin = admin().await;
     let mut payload = terms(&admin.app.state.host_id);
     payload["quotas"] = json!("broken");
     seed(&admin.app, &payload).await;
     let record = device_record(&admin).await;
     assert_eq!(
+        (record["kind"].clone(), record["license"]["state"].clone()),
+        (json!("station"), json!("trial")),
+        "{record}"
+    );
+}
+
+/// A license the host cannot read at all (its clock row is gone) never
+/// costs a device its record: it is read without the license line.
+#[tokio::test]
+async fn a_device_reads_its_record_when_the_license_cannot_be_read() {
+    let admin = admin().await;
+    sqlx::query("DELETE FROM license_clock")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let record = device_record(&admin).await;
+    assert_eq!(
         (record["kind"].clone(), record.get("license")),
         (json!("station"), None),
         "{record}"
     );
+}
+
+/// The minute's look (review of Task 8): a phase that ends by time is
+/// written without a request, and the look ends when the host stops. The
+/// real `start` wires it (`no_secrets_in_logs`, plan Task 14); here it runs
+/// every 10 ms, because the host's tokio has no paused time (`test-util`).
+#[tokio::test]
+async fn the_minute_look_writes_a_change_of_time_and_stops_with_the_host() {
+    let admin = admin().await;
+    admin.app.clock.advance(time::Duration::days(15));
+    let ticker = spawn_ticker_every(
+        admin.app.state.clone(),
+        admin.app.state.stopping.subscribe(),
+        std::time::Duration::from_millis(10),
+    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while audit_trail(&admin.app, actions::LICENSE_STATE)
+        .await
+        .is_empty()
+    {
+        assert!(tokio::time::Instant::now() < deadline, "no look in 10 s");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(!ticker.is_finished());
+    admin.app.state.stopping.send_replace(true);
+    tokio::time::timeout(std::time::Duration::from_secs(10), ticker)
+        .await
+        .expect("the look stops with the host")
+        .unwrap();
+    assert_eq!(
+        audit_trail(&admin.app, actions::LICENSE_STATE).await,
+        [state_row(
+            None,
+            "trial",
+            "trial_expired",
+            START_MS + 15 * DAY_MS
+        )]
+    );
+}
+
+/// The look that only clears a wrong host's sighting, while the state's
+/// word stays the same, still writes it (review of Task 8).
+#[tokio::test]
+async fn a_sighting_that_ends_while_the_state_stays_is_cleared() {
+    let admin = admin().await;
+    seed(&admin.app, &terms(OTHER_HOST)).await;
+    refresh(&admin.app).await;
+    admin.app.clock.advance(time::Duration::days(31));
+    refresh(&admin.app).await;
+    assert_eq!(
+        clock(&admin.app).await,
+        (
+            Some("restricted".to_owned()),
+            Some(START_MS + 31 * DAY_MS),
+            Some(START_MS + 31 * DAY_MS),
+            Some(START_MS)
+        )
+    );
+    // An own file, ended before the clock's start: still `restricted`, and
+    // no file of another host is in force any more.
+    let mut own = terms(&admin.app.state.host_id);
+    own["licenseId"] = json!(license_id(2));
+    own["sequence"] = json!(2);
+    expire(&mut own);
+    seed(&admin.app, &own).await;
+    let rev = host_revision(&admin.app).await;
+    refresh(&admin.app).await;
+    assert_eq!(
+        clock(&admin.app).await,
+        (
+            Some("restricted".to_owned()),
+            Some(START_MS + 31 * DAY_MS),
+            Some(START_MS + 31 * DAY_MS),
+            None
+        )
+    );
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert_eq!(
+        audit_trail(&admin.app, actions::LICENSE_STATE).await.len(),
+        2
+    );
+}
+
+/// A change under a clock set back or far ahead says so in its row
+/// (review of Task 8).
+#[tokio::test]
+async fn a_change_under_a_clock_set_back_names_the_days_behind() {
+    let admin = admin().await;
+    let app = &admin.app;
+    app.clock.advance(time::Duration::days(-2));
+    seed(app, &terms(&app.state.host_id)).await;
+    refresh(app).await;
+    let mut row = state_row(Some(&license_id(1)), "trial", "active", START_MS);
+    row.6["clockBehindDays"] = json!(2);
+    assert_eq!(audit_trail(app, actions::LICENSE_STATE).await, [row]);
+}
+
+#[tokio::test]
+async fn a_change_under_a_clock_far_ahead_says_it_is_ahead() {
+    let admin = admin().await;
+    let app = &admin.app;
+    app.clock.move_wall(time::Duration::days(500));
+    seed(app, &terms(&app.state.host_id)).await;
+    refresh(app).await;
+    let mut row = state_row(
+        Some(&license_id(1)),
+        "trial",
+        "active",
+        START_MS + 5 * 60_000,
+    );
+    row.6["clockAhead"] = json!(true);
+    assert_eq!(audit_trail(app, actions::LICENSE_STATE).await, [row]);
 }
 
 #[tokio::test]

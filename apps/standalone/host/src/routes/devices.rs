@@ -54,7 +54,11 @@ pub async fn device_info(
         Ok(snapshot) => info.license = Some(crate::license::routes::device_license(&snapshot)),
         Err(error) => tracing::warn!(%error, "the license was not read for a device"),
     }
-    tx.rollback().await.map_err(ApiError::internal)?;
+    // A read: the record is whole, and a rollback that fails (the reader's
+    // connection lost after a failed read) is the pool's, not the device's.
+    if let Err(error) = tx.rollback().await {
+        tracing::warn!(%error, "a device's read did not roll back");
+    }
     Ok(Json(info))
 }
 

@@ -36,10 +36,20 @@ pub const TICK: std::time::Duration = std::time::Duration::from_secs(60);
 /// in progress finishes first: it is one short write.
 pub fn spawn_ticker(
     app: AppState,
+    stopping: tokio::sync::watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    spawn_ticker_every(app, stopping, TICK)
+}
+
+/// [`spawn_ticker`] every `period` (tests look more often than a minute:
+/// the host's tokio has no paused time).
+pub fn spawn_ticker_every(
+    app: AppState,
     mut stopping: tokio::sync::watch::Receiver<bool>,
+    period: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(TICK);
+        let mut interval = tokio::time::interval(period);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // The first tick is at once: the start looked already.
         interval.tick().await;
@@ -147,11 +157,28 @@ impl LicenseService {
             });
             clock.observe(wall, mono)
         };
+        Ok(self.evaluate_known(app, reading, licenses, clock_row, org_inn))
+    }
+
+    /// The state of data already read (`snapshot`'s, or a write's that just
+    /// committed) at `reading`, without the database.
+    pub fn evaluate_known(
+        &self,
+        app: &AppState,
+        reading: clock::Reading,
+        licenses: Vec<StoredLicense>,
+        clock_row: store::ClockRow,
+        org_inn: Option<String>,
+    ) -> Snapshot {
         let registry = *self.registry_started_at.lock().expect("registry mark lock");
+        // A start after the time the host trusts (a PC's clock set ahead at
+        // the wizard, then back) would make a longer trial: it counts from
+        // now at the latest.
         let trial_started_at = match (clock_row.trial_started_at, registry) {
             (Some(stored), Some(marked)) => Some(stored.min(marked)),
             (stored, marked) => stored.or(marked),
-        };
+        }
+        .map(|started_at| started_at.min(reading.effective));
         let inn_mismatch_since = clock_row
             .last_state
             .as_deref()
@@ -170,13 +197,13 @@ impl LicenseService {
                 .as_deref()
                 .zip(clock_row.emergency_until),
         });
-        Ok(Snapshot {
+        Snapshot {
             evaluation,
             reading,
             licenses,
             clock_row,
             org_inn,
-        })
+        }
     }
 
     /// Write what changed since the last look (spec §8.2): a new state with

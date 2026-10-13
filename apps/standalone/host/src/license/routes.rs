@@ -552,7 +552,34 @@ pub async fn load_license(
         "a license file was loaded"
     );
     app.license.refresh_after_write(&app).await;
-    let mut answer = app.license.office_license_now(&app).await?;
+    // The file is kept: a read after the commit that fails must not answer
+    // 500 (the office would load it again). The answer is then built from
+    // what the load knew, the new file with the files before it, at the
+    // time after its floor; the reason is logged.
+    let mut answer = match app.license.office_license_now(&app).await {
+        Ok(answer) => answer,
+        Err(_) => {
+            tracing::warn!(
+                license_id = %license.license_id,
+                "the license was not read after its load; answered from the load"
+            );
+            let mut licenses = snapshot.licenses.clone();
+            licenses.push(license.clone());
+            licenses.sort_by_key(|license| license.sequence);
+            let reading = clock::Reading {
+                effective: time_after_load(&snapshot, license),
+                ..snapshot.reading
+            };
+            let known = app.license.evaluate_known(
+                &app,
+                reading,
+                licenses,
+                snapshot.clock_row.clone(),
+                snapshot.org_inn.clone(),
+            );
+            office_license(&app, &known, &usage)
+        }
+    };
     answer.warnings = warnings;
     Ok(Json(answer))
 }

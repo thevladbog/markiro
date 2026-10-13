@@ -5,7 +5,7 @@
 use sqlx::SqliteConnection;
 
 use super::bounded_ms;
-use super::state::StoredLicense;
+use super::state::{Features, Quotas, StoredLicense};
 
 /// `license_clock`, times in ms UTC.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -50,15 +50,12 @@ struct ClockRecord {
     last_state_at: Option<i64>,
 }
 
-fn decode(error: serde_json::Error) -> sqlx::Error {
-    sqlx::Error::Decode(Box::new(error))
-}
-
 /// Every stored file, by `sequence`. A row with a time out of range
-/// ([`bounded_ms`]) is not used: the host never wrote one, so it is not a
-/// file the office loaded; the service log names only its id. Skipping it
-/// keeps the license (and every device, which reads it with its record)
-/// working on the files before it.
+/// ([`bounded_ms`]) or terms of the wrong shape (`quotas`, `features` that
+/// do not read as the file's) is not used: the host never wrote one, so it
+/// is not a file the office loaded; the service log names only its id.
+/// Skipping it keeps the license (and every device, which reads it with its
+/// record) working on the files before it.
 pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>, sqlx::Error> {
     let rows: Vec<LicenseRow> = sqlx::query_as(
         "SELECT license_id, sequence, kid, host_id, issued_at, valid_from, valid_until, \
@@ -67,38 +64,47 @@ pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>,
     )
     .fetch_all(conn)
     .await?;
-    rows.into_iter()
-        .filter(|row| {
-            let usable = [row.issued_at, row.valid_from, row.valid_until]
-                .into_iter()
-                .all(|ms| bounded_ms(ms).is_some());
-            if !usable {
-                tracing::warn!(
-                    license_id = %row.license_id,
-                    "a stored license file holds a time out of range; it is not used"
-                );
-            }
-            usable
-        })
-        .map(|row| {
-            Ok(StoredLicense {
-                quotas: serde_json::from_str(&row.quotas).map_err(decode)?,
-                features: serde_json::from_str(&row.features).map_err(decode)?,
-                license_id: row.license_id,
-                sequence: row.sequence,
-                kid: row.kid,
-                host_id: row.host_id,
-                issued_at: row.issued_at,
-                valid_from: row.valid_from,
-                valid_until: row.valid_until,
-                grace_days: row.grace_days,
-                plan: row.plan,
-                plan_version_id: row.plan_version_id,
-                customer_name: row.customer_name,
-                customer_inn: row.customer_inn,
-            })
-        })
-        .collect()
+    Ok(rows.into_iter().filter_map(usable).collect())
+}
+
+/// `row` as a file, or none (logged by its id) when the host could not have
+/// written it.
+fn usable(row: LicenseRow) -> Option<StoredLicense> {
+    let in_range = [row.issued_at, row.valid_from, row.valid_until]
+        .into_iter()
+        .all(|ms| bounded_ms(ms).is_some());
+    if !in_range {
+        tracing::warn!(
+            license_id = %row.license_id,
+            "a stored license file holds a time out of range; it is not used"
+        );
+        return None;
+    }
+    let terms: Result<(Quotas, Features), serde_json::Error> = serde_json::from_str(&row.quotas)
+        .and_then(|quotas| Ok((quotas, serde_json::from_str(&row.features)?)));
+    let Ok((quotas, features)) = terms else {
+        tracing::warn!(
+            license_id = %row.license_id,
+            "a stored license file holds terms of the wrong shape; it is not used"
+        );
+        return None;
+    };
+    Some(StoredLicense {
+        quotas,
+        features,
+        license_id: row.license_id,
+        sequence: row.sequence,
+        kid: row.kid,
+        host_id: row.host_id,
+        issued_at: row.issued_at,
+        valid_from: row.valid_from,
+        valid_until: row.valid_until,
+        grace_days: row.grace_days,
+        plan: row.plan,
+        plan_version_id: row.plan_version_id,
+        customer_name: row.customer_name,
+        customer_inn: row.customer_inn,
+    })
 }
 
 /// The one row of `license_clock` (migration `0030` seeds it). A time out
@@ -174,11 +180,17 @@ pub async fn insert(
     Ok(())
 }
 
+/// The stored mark raised to `?1`: never lowered, but a mark out of range
+/// ([`bounded_ms`]), which the host never wrote, is replaced, or it would
+/// win every `max` and never move again.
+const RAISED_MARK: &str = "CASE WHEN max_seen_at BETWEEN 0 AND 9007199254740991 \
+     THEN max(max_seen_at, ?1) ELSE ?1 END";
+
 /// Raise the stored mark to `mark` (never lower it).
 pub async fn persist_mark(conn: &mut SqliteConnection, mark: i64) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE license_clock SET max_seen_at = max(coalesce(max_seen_at, ?1), ?1) WHERE id = 1",
-    )
+    sqlx::query(&format!(
+        "UPDATE license_clock SET max_seen_at = {RAISED_MARK} WHERE id = 1"
+    ))
     .bind(mark)
     .execute(conn)
     .await?;
@@ -192,12 +204,12 @@ pub async fn set_state(
     state: &str,
     at: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE license_clock SET last_state = ?1, last_state_at = ?2, \
-         max_seen_at = max(coalesce(max_seen_at, ?2), ?2) WHERE id = 1",
-    )
-    .bind(state)
+    sqlx::query(&format!(
+        "UPDATE license_clock SET last_state = ?2, last_state_at = ?1, \
+         max_seen_at = {RAISED_MARK} WHERE id = 1"
+    ))
     .bind(at)
+    .bind(state)
     .execute(conn)
     .await?;
     Ok(())
