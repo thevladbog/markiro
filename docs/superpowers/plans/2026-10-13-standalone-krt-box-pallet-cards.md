@@ -81,6 +81,10 @@ Vitest 4 (jsdom).
   - тексты — `apps/admin/src/i18n/ru.json` (`pages.codeSearch.boxCard.*`, `palletCard.*`,
     `pages.pallets.*`, `pages.boxes.*`).
 - Поток «Поиск кодов»: `/tmp/claude/wt/fb-codesearch`, ветка `claude/fb-codesearch`.
+- Планы `docs/superpowers/plans/2026-10-13-standalone-dzg-disaggregation.md` (таблицы `0024`,
+  провод `proto/src/disaggregation.rs`, `HostApi`, права, запрос объединения для читателей) и
+  `…-dzg-o-disaggregation-office.md` (маршрут `disaggregation/:id`) — для задач 8–9; источник
+  имён — ДЗГ.
 - `apps/standalone/AGENTS.md`: «Office pages», «Shifts», «Facts», «Floor pallets», «Shift exports»,
   «Shift card and printed forms», «Verification».
 
@@ -237,14 +241,28 @@ Vitest 4 (jsdom).
     смену и показывается над таблицей.
 - **Р10 — документы ДЗГ — поле с первого дня.** `OfficeBoxCard.documents` и
   `OfficePalletCard.documents` объявлены в задаче 1 с `#[serde(default)]` и до задачи 8 всегда
-  `[]`. Раздел «Документы дезагрегации» офис показывает, только когда список не пуст. Карточка
-  полностью работает до слияния ДЗГ. Задача 8 добавляет только запрос и тесты.
-- **Р11 — «Расформировать» по образцу облака** (`PalletCard.tsx`, `startDisassembly`): создать
-  черновик документа ДЗГ и перейти к нему с `?sscc=<18 цифр>`, страница документа ДЗГ-О подставляет
-  SSCC. Кнопка видна, если выполнены все условия:
-  - у роли есть возможность ДЗГ-О;
+  `[]`. Поля — имена ДЗГ (`DisaggregationDocument`: `docNo`, `appliedAt`, `reasonName`,
+  `appliedByName`). Раздел «Документы дезагрегации» офис показывает, только когда список не пуст.
+  Карточка полностью работает до слияния ДЗГ; задача 8 добавляет только запросы и тесты.
+  Проведение ДЗГ не пишет `box_exceptions`/`pallet_exceptions` (Р1 ДЗГ): действие офиса — сама
+  строка проведённого документа. Карточка читает обе стороны в одном снимке и показывает их
+  двумя разделами — это и есть правило ДЗГ «читатели объединяют исключения станции и строки
+  проведённых документов».
+- **Р11 — «Расформировать» создаёт черновик со строкой и открывает документ.** Облако создаёт
+  пустой черновик и передаёт SSCC страницы в `?sscc=` (`PalletCard.tsx`, `startDisassembly`).
+  Страница документа ДЗГ-О `?sscc=` не читает, а ДЗГ позволяет создать черновик без причины:
+  `DisaggregationCreate { reasonId?, comment? }`, причина обязательна только у проведённого
+  (`CHECK (status <> 'applied' OR reason_id IS NOT NULL)`). Поэтому кнопка делает два вызова
+  ДЗГ:
+  - `createDisaggregation(token, { reasonId: null, comment: null })`;
+  - `addDisaggregationLines(token, id, { lines: [{ input: sscc, sscc }], import: false })`.
+
+  Затем она переходит на `/disaggregation/:id`. Там строка уже проверена хостом, а причину
+  выбирает пользователь. Страница ДЗГ-О не меняется. Кнопка видна, если выполнены все условия:
+  - у роли есть `useCan("planShifts")` — это администратор и технолог, как
+    `auth::disaggregates` ДЗГ (Р10 ДЗГ) и кнопка «Создать документ» ДЗГ-О;
   - короб или паллета закрыты, не расформированы и с SSCC;
-  - смена закрыта (ПР-1).
+  - смена закрыта (ПР-1; иначе строка получила бы `shift_open`).
 
   При активной смене вместо кнопки — тихая строка «Расформировать можно после закрытия смены».
 
@@ -260,7 +278,7 @@ Vitest 4 (jsdom).
   `proto/src/lib.rs:16-19` подъёма не требует. Резерв КРТ не заведён.
 - **Р15 — чтение без аудита, все офисные роли.** Как поиск кодов и списки смены. Ключ устройства
   без сессии, чужая сессия, выдуманная сессия — `401`, и тело отказа не несёт данных короба (тест).
-  Запрет роли есть только у «Расформировать» (задача 9, по возможности ДЗГ-О).
+  Запрета роли в КРТ нет: «Расформировать» доступна обеим ролям, как документы ДЗГ (Р11).
 - **Р16 — предохранитель `scans_ok_box` в `0025`.** План РЕЖ (`0020_validation_scans.sql`)
   перестраивает `scans` и пересоздаёт индексы поиска кодов под старым именем: в его таблице
   указан `box_items_box`, а пересоздаются только `scans_ok_gtin` и `scans_ok_scanned`. Поток
@@ -286,6 +304,14 @@ Vitest 4 (jsdom).
   РЕЖ). КРТ не читает `code_owners`; состав короба идёт по `scans.box_id = ?`, поэтому скан без
   короба в него не попадает. Смены проверки в выборе вкладки «Короба» не показываются.
 - Офлайн цеха не затронут: станция и её очередь не меняются.
+- **Ссылки других планов на карточки КРТ.** После слияния КРТ:
+  - КНФ `conflict-list.ts::loserBoxLink` ведёт на `/codes/box/${scan.boxId}`, когда `boxId`
+    есть. Без короба (смена проверки) — на карточку смены `/shifts/${scan.shiftId}`, как сегодня.
+    Временную ссылку КНФ `/shifts/{shiftId}?box={sscc}` (Р7 КНФ) это заменяет. Правку делает тот
+    план, что вливается вторым; если КНФ уже влит — задача 6 КРТ (одна строка и её тест в
+    `test/conflict-list.test.ts`).
+  - Строки документа ДЗГ-О ссылаются на `/codes/box/:id` и `/codes/pallet/:id`
+    (`DisaggregationLine.boxId`/`palletId`).
 
 **Миграции и протокол (распределение 2026-10-13)**
 
@@ -356,7 +382,8 @@ Vitest 4 (jsdom).
   - `apps/standalone/host/tests/{office_cards,office_pallets}.rs`;
   - `apps/standalone/src/host/pack-cards.ts`;
   - `apps/standalone/src/office/codes/{CodesSection,RegistryTabs,BoxesTab,PalletsTab,BoxCardPage,PalletCardPage,PackLinks}.tsx`,
-    `apps/standalone/src/office/codes/pallet-query.ts`;
+    `apps/standalone/src/office/codes/pallet-query.ts`, `apps/standalone/src/office/codes/disassemble.ts`
+    (задача 9);
   - `apps/standalone/test/{pack-cards-protocol,pallet-query}.test.ts`,
     `apps/standalone/test/{registry-tabs,boxes-tab,pallets-tab,box-card-page,pallet-card-page}.test.tsx`.
 - **Изменить:**
@@ -459,14 +486,18 @@ pub struct OfficeBoxException {
 }
 
 /// An applied disaggregation document that took the box or the pallet apart
-/// (plan ДЗГ). Empty until plan ДЗГ's tables exist (plan КРТ, task 8).
+/// (plan ДЗГ), named as `disaggregation::DisaggregationDocument` names it.
+/// Empty until plan ДЗГ's tables exist (plan КРТ, task 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficePackDocument {
     pub id: String,
-    pub number: String,
+    /// `DSG-YY-NNNN`.
+    pub doc_no: String,
+    /// The host's instant of the apply.
     pub applied_at: String,
-    pub reason: Option<String>,
+    pub reason_name: Option<String>,
+    pub applied_by_name: Option<String>,
 }
 
 /// `GET /v1/office/boxes/{id}`.
@@ -655,9 +686,10 @@ export const officeBoxExceptionSchema = z.object({
 });
 export const officePackDocumentSchema = z.object({
   id: z.string(),
-  number: z.string(),
+  docNo: z.string(),
   appliedAt: instant,
-  reason: z.string().nullable(),
+  reasonName: z.string().nullable(),
+  appliedByName: z.string().nullable(),
 });
 /** What a box, a pallet and a row of the list share. */
 const pack = {
@@ -2353,96 +2385,173 @@ export interface ExportDialogProps {
 ## Задача 8 (зависит от ДЗГ; можно отрезать): документы дезагрегации в карточках
 
 **Зависимость.** План ДЗГ (`docs/superpowers/plans/2026-10-13-standalone-dzg-disaggregation.md`,
-хост `0024`) влит в `claude/integration`. На момент написания КРТ этого плана ещё нет. Ниже —
-предположения по спецификации §5.1: таблицы `disaggregation_documents` и
-`disaggregation_document_lines`, проведение пишет `boxes.disassembled_at`,
-`box_items.removed_at`, `pallets.disassembled_at`.
+хост `0024_disaggregation.sql`) влит в `claude/integration`. Имена ниже — из этого плана
+(задачи 1, 2, 9 ДЗГ):
+
+- `disaggregation_documents`: `id`, `doc_no` (`DSG-YY-NNNN`), `status`
+  (`draft | applied | cancelled`), `reason_id`, `applied_at`, `applied_by → office_users`.
+- `disaggregation_document_lines`: `document_id`, `box_id`, `pallet_id`, `status`
+  (`ok | not_found | not_closed | shift_open | already_disassembled | duplicate`).
+  `box_id`/`pallet_id` — то, что строка назвала при последней проверке. Он задан и у строки
+  `already_disassembled`, поэтому фильтр `l.status = 'ok'` обязателен: проведённый документ
+  состоит только из строк `ok` (Р15 ДЗГ).
+- `disaggregation_reasons.name`.
+- Индексы `disaggregation_lines_box (box_id) WHERE box_id IS NOT NULL` и
+  `disaggregation_lines_pallet (pallet_id) WHERE pallet_id IS NOT NULL`.
+- Проведение короба пишет `box_items.removed_at`, `boxes.disassembled_at` — время хоста в форме
+  устройства (`facts::rules::device_text`, Р4 ДЗГ) — и строку `code_releases`. Проведение
+  паллеты пишет только `pallets.disassembled_at`, короба не трогает (Р5 ДЗГ).
+  `box_exceptions`/`pallet_exceptions` проведение не пишет.
 
 **Files:** Modify `host/src/routes/office_cards.rs`, `host/tests/office_cards.rs`,
-`src/office/codes/{BoxCardPage,PalletCardPage}.tsx`, тесты страниц.
+`src/office/codes/{BoxCardPage,PalletCardPage}.tsx`, `src/i18n/ru.json`, тесты страниц.
 
-- [ ] **Шаг 0: сверка имён.** Прочитать влитую миграцию ДЗГ (`ls host/migrations | grep -i disaggregation`)
-      и её маршруты. Выписать в «Отклонения» фактические имена: таблиц, столбцов строки (ссылка на
-      короб и паллету — `box_id`/`pallet_id` или SSCC), статуса проведения, номера документа,
-      времени проведения, причины, индексов по коробу и паллете. Если индекса строки по коробу
-      или по паллете нет, ДЗГ его не создал — запросы ниже не идут по индексу. Тогда — индекс
-      в новой миграции КРТ (следующий свободный номер после `0025`, без касания `scans`) и
-      запись в «Отклонения».
-- [ ] **Шаг 1: красные тесты.** Стенд: закрыть смену станции (`close_from_office`), провести
-      маршрутами ДЗГ документ на SSCC короба 1 и документ на SSCC паллеты 2. Проверки:
-  - карточка короба 1 — `documents == [{ id, number: "DSG-26-0001", appliedAt, reason }]`,
-    все строки состава `removed` с `leftAt` = время проведения, `disassembledAt` задан,
-    исключений станции не прибавилось;
-  - карточка паллеты 2 — свой документ;
-  - черновик и отменённый документ в `documents` не попадают;
-  - запросы документов идут по индексу (расширить `QUERIES`).
-- [ ] **Шаг 2: реализация.** Тела `box_documents`/`pallet_documents` — запрос вида (имена из
-      шага 0):
+- [ ] **Шаг 0: сверка с влитым ДЗГ.** Сравнить влитую миграцию
+      (`ls host/migrations | grep -i disaggregation`) и `proto/src/disaggregation.rs` с именами
+      выше. Расхождение — в «Отклонения», запросы — по фактическим именам. Проверить, что ДЗГ добавил в `AGENTS.md`
+      запрос объединения для читателей истории короба (задача 9 ДЗГ). Условия запросов ниже
+      повторяют его ветку `office`.
+- [ ] **Шаг 1: красные тесты** (`host/tests/office_cards.rs`, стенд `Yard`).
+  - Закрыть смену станции (`close_from_office`).
+  - Провести маршрутами ДЗГ два документа: на SSCC короба 1 (`sscc(1500)`) и на SSCC паллеты 2
+    (`pallet_sscc(240)`). Последовательность:
+    - `POST /v1/office/disaggregation` с `{}`;
+    - `PUT …/{id}` с причиной `d15a0000-0000-4000-8000-000000000002` («Неверное количество») и
+      `expectedRev`;
+    - `POST …/{id}/lines` с `{ "lines": [{ "input": …, "sscc": … }] }`;
+    - `POST …/{id}/apply` с `expectedRev`.
+  - Третий документ на короб 12 оставить черновиком, четвёртый отменить.
 
-  ```sql
-  SELECT d.id, d.number, d.applied_at, r.name AS reason
-  FROM disaggregation_document_lines l
-  JOIN disaggregation_documents d ON d.id = l.document_id
-  LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id
-  WHERE l.box_id = ?1 AND d.status = 'applied'
-  ORDER BY d.applied_at, d.id
+  Проверки:
+  - карточка короба 1 — `documents == [{ id, docNo: "DSG-26-0001", appliedAt, reasonName:
+"Неверное количество", appliedByName: <имя администратора мастера> }]`; живые строки состава
+    `removed` с `leftAt == disassembledAt`; `exceptions` те же, что до проведения (одна
+    `undo`);
+  - карточка паллеты 2 — свой документ, `disassembledAt` задан, `members` прежние (короба
+    паллеты не тронуты, Р5 ДЗГ);
+  - карточка короба 12 — `documents == []`: черновик и отменённый не попадают;
+  - строка `already_disassembled` другого черновика на тот же короб 1 в `documents` короба 1 не
+    попадает;
+  - запросы документов идут по `disaggregation_lines_box` / `disaggregation_lines_pallet`
+    (`QUERIES` получает `box documents`, `pallet documents`).
+
+  Номер года в `docNo` берётся из часов `TestApp` (год создания по UTC, Р9 ДЗГ). Имя
+  администратора — из `support::app::bootstrap_body`.
+
+- [ ] **Шаг 2: реализация.** Тела `box_documents` / `pallet_documents`:
+
+  ```rust
+  /// Plan ДЗГ's applied documents that took the box apart: its applied
+  /// document's `ok` line names the box (the office branch of the readers'
+  /// union, plan ДЗГ task 9). A draft's or a cancelled document's lines and a
+  /// line that found the box already taken apart are not.
+  pub const BOX_DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.applied_at, \
+       r.name AS reason_name, u.name AS applied_by_name \
+       FROM disaggregation_document_lines l \
+       JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied' \
+       LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
+       LEFT JOIN office_users u ON u.id = d.applied_by \
+       WHERE l.box_id = ?1 AND l.status = 'ok' ORDER BY d.applied_at, d.id LIMIT ?2";
+  /// The same of a pallet (`l.pallet_id`).
+  pub const PALLET_DOCUMENTS_SQL: &str = /* BOX_DOCUMENTS_SQL with `l.pallet_id = ?1` */;
   ```
 
-  Офис: раздел «Документы дезагрегации» — список «{{number}} · проведён {{at}} · {{reason}}»;
-  номер — ссылка на страницу документа ДЗГ-О (`/disaggregation/:id`, сверить с ДЗГ-О). Вид
-  документа — только из `documents`, без догадок по исключениям.
+  Имя столбца имени офисного пользователя (`office_users.name`) сверить с
+  `host/migrations/0003_office_auth.sql`.
+
+  Офис: раздел «Документы дезагрегации» (`h2`), список «{{docNo}} · проведён {{at}} ·
+  {{reason}} · {{who}}». `docNo` — ссылка `Link` на `/disaggregation/:id` (маршрут ДЗГ-О
+  `disaggregation/:id`). В составе короба строки, снятые документом, получают тихую подпись
+  «по документу {{docNo}}», если `leftAt` равен `disassembledAt` и документ есть. Вид документа
+  берётся только из `documents`, без догадок по исключениям. Тексты:
+  - `office.packs.documents.item` — «{{docNo}} · проведён {{at}} · {{reason}} · {{who}}»;
+  - `office.packs.documents.byDocument` — «по документу {{docNo}}»;
+  - `office.packs.documents.open` — «Открыть документ {{docNo}}» (подпись ссылки, как у ДЗГ-О
+    «Открыть документ DSG-26-0007»).
 
 - [ ] **Шаг 3: зелёные тесты, fmt, typecheck, коммит**
       `feat(standalone): applied disaggregation documents on the box and pallet cards`. В
-      `AGENTS.md` (раздел КРТ) — абзац о документах.
+      `AGENTS.md` (раздел КРТ) — абзац о документах со ссылкой на запрос объединения ДЗГ.
 
-## Задача 9 (последняя; зависит от ДЗГ-О; можно отрезать): «Расформировать» в карточках паллеты и короба
+## Задача 9 (последняя; зависит от ДЗГ и ДЗГ-О; можно отрезать): «Расформировать» в карточках паллеты и короба
 
-**Зависимость.** План ДЗГ-О
-(`docs/superpowers/plans/2026-10-13-standalone-dzg-o-disaggregation-office.md`) влит: есть
-страница документа, `HostApi`-метод создания черновика и возможность офиса для дезагрегации.
-Предположения (сверить в шаге 0):
+**Зависимость.** ДЗГ влит: методы `HostApi` из `src/host/api.ts` (задача 1 ДЗГ) — источник
+имён:
 
-- `HostApi.createDisaggregation(token, create)` → документ с `id`;
-- страница `/disaggregation/:id`;
-- возможность `useCan("disaggregate")` в `src/office/access.ts`.
+```ts
+createDisaggregation: (token: string, create: DisaggregationCreate) =>
+  Promise<DisaggregationDetail>;
+addDisaggregationLines: (token: string, id: string, add: DisaggregationLinesAdd) =>
+  Promise<DisaggregationDetail>;
+// DisaggregationCreate = { reasonId: string | null; comment: string | null } (both optional on the host)
+// DisaggregationLinesAdd = { lines: { input: string; sscc: string | null }[]; import: boolean }
+// DisaggregationDetail = { document: DisaggregationDocument; lines: DisaggregationLine[] }
+```
+
+ДЗГ-О влит: маршрут `disaggregation/:id` (`DisaggregationDocumentPage`), право кнопки
+«Создать документ» — `useCan("planShifts")`.
+
+ДЗГ-О на 2026-10-13 называет методы иначе: `createDisaggregationDocument`,
+`addDisaggregationLines(…, { ssccs, source })`. Его согласуют с ДЗГ. КРТ пишет по именам ДЗГ
+и в шаге 0 сверяет влитый `api.ts`.
 
 **Files:** Modify `src/office/codes/{BoxCardPage,PalletCardPage}.tsx`, `src/i18n/ru.json`,
-`test/{box-card-page,pallet-card-page}.test.tsx`; при необходимости (шаг 0) — страница документа
-ДЗГ-О (подстановка `?sscc=`).
+`test/{box-card-page,pallet-card-page}.test.tsx`. Страница ДЗГ-О не меняется.
 
-- [ ] **Шаг 0: сверка с ДЗГ-О.** Выписать в «Отклонения» фактические имена:
-  - метод создания черновика и его тело (нужна ли причина при создании);
-  - путь страницы документа;
-  - возможность офиса;
-  - читает ли страница `?sscc=` и подставляет ли его в поле строк.
-
-  Если не читает — добавить чтение `?sscc=` в страницу документа ДЗГ-О в этой же задаче:
-  одна строка в поле ввода SSCC при первом открытии черновика; тест на это — в тестах страницы
-  ДЗГ-О. Если черновик нельзя создать без причины, кнопка ведёт на страницу «новый документ»
-  ДЗГ-О с `?sscc=` вместо создания черновика (вопрос КРТ-1, по умолчанию — как в облаке).
-
+- [ ] **Шаг 0: сверка.** В влитом `src/host/api.ts` и `src/host/disaggregation.ts`: имена
+      методов, форма `DisaggregationCreate` и `DisaggregationLinesAdd`, путь страницы документа в
+      `routes.tsx`, право кнопки ДЗГ-О. Расхождение — в «Отклонения», код — по фактическим
+      именам. Если хост всё же требует причину при создании (`validation_failed` на `reasonId`),
+      кнопка ведёт на `/disaggregation` без записи, а SSCC показывается в `Alert` для вставки.
+      Это запасной путь, вопрос КРТ-1.
 - [ ] **Шаг 1: красные тесты.**
-  - Паллета закрыта, с SSCC, не расформирована, смена закрыта, роль с возможностью → кнопка
-    «Расформировать». Нажатие вызывает `createDisaggregation` один раз (повторное нажатие во
-    время запроса ничего не шлёт: `loading`) и переходит на `/disaggregation/<id>?sscc=146006820000000402`.
+  - Паллета закрыта, с SSCC, не расформирована, смена закрыта, администратор → кнопка
+    «Расформировать». Нажатие:
+    - вызывает `createDisaggregation(token, { reasonId: null, comment: null })` один раз
+      (повторное нажатие во время запроса ничего не шлёт: `loading`);
+    - затем `addDisaggregationLines(token, DOC_ID, { lines: [{ input: "146006820000000402",
+sscc: "146006820000000402" }], import: false })`;
+    - затем открывает страницу документа ДЗГ-О (`getDisaggregation` вызван с `DOC_ID`).
+  - Технолог видит и нажимает кнопку так же (Р10 ДЗГ: отказа роли нет).
   - Смена активна → кнопки нет, есть строка «Расформировать можно после закрытия смены» (ПР-1).
   - Паллета расформирована, открыта или без SSCC → кнопки нет.
-  - Роль без возможности (технолог, если ДЗГ-О дал её только администратору) → кнопки нет.
-  - Ошибка хоста → `Alert` «Не удалось создать документ дезагрегации: …» с текстом
-    `errorMessageKey`, фокус на нём; карточка остаётся.
+  - Ошибка создания → `Alert` «Не удалось создать документ дезагрегации: …»
+    (`errorMessageKey`), фокус на нём, карточка остаётся, `addDisaggregationLines` не вызван.
+  - Черновик создан, а строка не добавилась → `Alert` «Документ {{docNo}} создан, но SSCC не
+    добавлен: …» со ссылкой «Открыть документ {{docNo}}». Черновик не удаляется, у ДЗГ нет
+    удаления: его можно отменить на странице документа.
   - То же для карточки короба: короб закрыт, не расформирован, с SSCC, смена закрыта.
-- [ ] **Шаг 2: реализация.** `useOfficeMutation((api, token, _: void) => api.createDisaggregation(token, …))`;
-      по успеху — `navigate(`/disaggregation/${doc.id}?${new URLSearchParams({ sscc })}`)`.
-      Тексты:
+- [ ] **Шаг 2: реализация.**
+
+  ```ts
+  const disassemble = useOfficeMutation(async (api, token, sscc: string) => {
+    const created = await api.createDisaggregation(token, { reasonId: null, comment: null });
+    try {
+      await api.addDisaggregationLines(token, created.document.id, {
+        lines: [{ input: sscc, sscc }],
+        import: false,
+      });
+    } catch (error) {
+      throw new DraftWithoutLine(created.document, error);
+    }
+    return created.document;
+  });
+  // onSuccess: navigate(`/disaggregation/${document.id}`)
+  ```
+
+  `DraftWithoutLine` — маленький класс ошибки в `src/office/codes/disassemble.ts` с полями
+  `document` и `cause`; `Alert` различает два случая через `instanceof`. Тексты:
   - `office.packs.disassemble` — «Расформировать» (облако `palletCard.disassembleAction`);
   - `office.packs.disassembleAfterClose` — «Расформировать можно после закрытия смены»;
   - `office.packs.disassembleFailed` — «Не удалось создать документ дезагрегации: {{reason}}»
     (облако `palletCard.disassembleError`, «разагрегации» → «дезагрегации», как в остальном
-    автономе).
+    автономе);
+  - `office.packs.disassembleLineFailed` — «Документ {{docNo}} создан, но SSCC не добавлен:
+    {{reason}}».
+
 - [ ] **Шаг 3: зелёные тесты (дважды), typecheck, lint, prettier, `AGENTS.md` (раздел КРТ — абзац
       о кнопке), полный прогон, коммит**
-      `feat(standalone): «Расформировать» on the pallet and box cards opens a disaggregation draft with the SSCC`.
+      `feat(standalone): «Расформировать» on the pallet and box cards makes a disaggregation draft with the SSCC`.
 
 ## Итоговая проверка плана
 
@@ -2488,18 +2597,21 @@ export interface ExportDialogProps {
    - Файл принимается ЛК ЧЗ, как файл из карточки смены (внешняя проверка).
 7. Карточка смены: SSCC короба и паллеты — ссылки в карточки.
 8. Технолог видит все три вкладки и обе карточки.
-9. После ДЗГ-О (задача 9): «Расформировать» у закрытой паллеты закрытой смены открывает
-   черновик документа с подставленным SSCC. У паллеты активной смены кнопки нет, есть строка
-   «после закрытия смены».
+9. После ДЗГ-О (задача 9): «Расформировать» у закрытой паллеты закрытой смены открывает новый
+   черновик документа. В нём уже есть строка этой паллеты со статусом «ok»; после выбора причины
+   документ проводится. У паллеты активной смены кнопки нет, есть строка «после закрытия смены».
+   После проведения карточки короба и паллеты показывают документ в «Документах дезагрегации»
+   (задача 8).
 10. Время реестра на реальной базе площадки (год работы): первая страница и «Показать ещё»
     открываются без заметной задержки (меньше секунды). Если дольше — сообщить: записать в
     «Отклонения» замер и план запроса.
 
 ## Открытые вопросы
 
-- **КРТ-1.** «Расформировать» сразу создаёт черновик документа (как облако) или открывает форму
-  нового документа без записи? **По умолчанию — как облако**: черновик и переход с `?sscc=`.
-  Если ДЗГ требует причину при создании — форма нового документа (задача 9, шаг 0).
+- **КРТ-1 (решён по ДЗГ).** ДЗГ создаёт черновик без причины (причина обязательна только при
+  проведении), поэтому «Расформировать» создаёт черновик, сразу добавляет строку с SSCC и
+  открывает документ (Р11). Запасной путь (переход к списку и SSCC в подсказке) остаётся только
+  на случай, если влитый ДЗГ разойдётся со своим планом.
 - **КРТ-2.** Показывать ли в составе короба полный код с криптохвостом, как облако? **По
   умолчанию — нет** (Р2): полный текст есть в карточке кода, на одну ссылку дальше.
 - **КРТ-3.** Нужен ли в реестре паллет фильтр по смене и столбец «Вид»? **По умолчанию — нет**:
@@ -2524,9 +2636,11 @@ export interface ExportDialogProps {
   `routes/mod.rs`, `proto/src/lib.rs`, `src/host/api.ts`, `test/support/office.tsx`,
   `ShiftCardPage.tsx` (КНФ добавляет разделы), `ExportDialog.tsx` (КНФ трогает
   `export-checks.ts`, может и диалог). Конфликты текста, не логики.
-- **КНФ и ИСТ ссылаются на карточки КРТ.** КНФ — «переход к коробу проигравшего» на
-  `/codes/box/:id`; ИСТ — перенесённые короба должны открываться. Если ИСТ кладёт историю в свои
-  таблицы, карточки их не увидят: это вопрос ИСТ, не КРТ.
+- **КНФ и ИСТ ссылаются на карточки КРТ.** КНФ: `loserBoxLink` после слияния КРТ меняется на
+  `/codes/box/:id` (Global Constraints). ИСТ: перенесённые короба должны открываться. Если ИСТ
+  кладёт историю в свои таблицы, карточки их не увидят — это вопрос ИСТ, не КРТ.
+- **Имена ДЗГ-О расходятся с ДЗГ** (`createDisaggregationDocument`, `{ ssccs, source }`). КРТ
+  пишет по ДЗГ; если ДЗГ-О не согласуют до слияния, задача 9 шагом 0 возьмёт фактические имена.
 - **`ExportDialog` в режиме паллеты читает источник всей смены** (до 200 000 кодов) и проверяет
   все форматы ради одной паллеты. Это медленно на большой смене, но не неверно. Отдельный
   маршрут XML одной паллеты — вне плана.
@@ -2535,9 +2649,9 @@ export interface ExportDialogProps {
 
 - Ни одна команда не запускалась: план — документ. Имена потока «Поиск кодов» прочитаны в его
   рабочем дереве на 2026-10-13 (коммиты `7ff64eab6`, `9796384c6`) и могут измениться до слияния.
-- Планы ДЗГ и ДЗГ-О на момент написания не существовали. Имена таблиц, маршрутов, метода
-  создания черновика и возможности офиса в задачах 8–9 — предположения по спецификации §5.1;
-  каждая задача начинается со сверки.
+- Задачи 8–9 сверены с планами ДЗГ и ДЗГ-О на 2026-10-13, не с кодом: оба ещё не исполнены.
+  ДЗГ-О может измениться при согласовании с ДЗГ. Каждая задача начинается со сверки с влитым
+  кодом.
 - Использует ли планировщик SQLite индекс по выражению для сравнения строк — не проверено.
 - Номера серий SSCC второй станции в стенде и форма факта `pallet_exception` в стенде —
   предположения, проверяются первым прогоном.
