@@ -22,17 +22,22 @@ const TABLES: [(&str, &str); 4] = [
     ("code_conflicts", "id"),
 ];
 
-/// Every migration before `0020`.
-fn through_0019() -> Migrator {
+/// Every migration up to `last`.
+fn through(last: i64) -> Migrator {
     Migrator {
         migrations: MIGRATOR
             .iter()
-            .filter(|migration| migration.version < 20)
+            .filter(|migration| migration.version <= last)
             .cloned()
             .collect::<Vec<_>>()
             .into(),
         ..Migrator::DEFAULT
     }
+}
+
+/// Every migration before `0020`.
+fn through_0019() -> Migrator {
+    through(19)
 }
 
 /// One connection, so a `PRAGMA` a test sets holds for its next statement.
@@ -318,7 +323,9 @@ async fn the_rebuild_keeps_every_row_and_every_object_but_the_rule_it_moves() {
     );
     let schema_before = schema(&pool).await;
 
-    MIGRATOR.run(&pool).await.unwrap();
+    // `0020` alone: the schema diff below is this migration's (`0021` has
+    // its own, `tests/migration_validation_print.rs`).
+    through(20).run(&pool).await.unwrap();
 
     assert!(applied(&pool).await.contains(&20));
     // Every row as it was, its rowid with it.

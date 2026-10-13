@@ -3236,6 +3236,17 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
   station opens the shift (an active shift's other mode is `conflict` on
   `shift_status`, «Shifts»). A validation shift has no pallets and no A4
   sheet; its box template and capacity stay, unprinted.
+- The database holds the freeze too (`0021`, trigger `shifts_mode_frozen`):
+  a shift's mode and print policy change only while it is planned and has
+  no scan, so `0020`'s box rule never meets a shift whose mode moved after
+  it took scans; a write of the same value (the office's edit writes every
+  field) is no change. The print policy (part B,
+  `shifts.validation_print_*`) is the cloud's pair: `none` with no
+  verification and no template, or `duplicate_dm` in a validation shift
+  with both, held by `shifts_validation_print_insert`/`_update` (a template
+  id without a foreign key, as the box template's; a planned shift's
+  duplicate template is found by `shifts_planned_duplicate_template`). Its
+  label events are `unit_label_events` (part B, «Facts»).
 - Entry needs capabilities: since protocol 4 a station names what it works in
   `ShiftEnter.supports`, and a validation shift requires `validation-v1`; a
   station that does not name it (protocol 3 sends no body) is refused with
