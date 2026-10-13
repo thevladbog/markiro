@@ -435,3 +435,38 @@ async fn a_migration_that_fails_keeps_its_copy_and_the_next_start_uses_it_again(
     );
     pool.close().await;
 }
+
+/// `crate::start` over a database of the previous build whose copy cannot be
+/// written (the folder of copies is closed to the host) does not start and
+/// runs no migration (spec §10.6: `install` then answers 4). It fails before
+/// binding any socket.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_host_whose_copy_fails_does_not_start_and_runs_no_migration() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let paths = old_host(dir.path()).await;
+    let (from, _) = versions();
+    let backups = paths.backups_dir();
+    std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let started = markiro_host::start(
+        &paths,
+        markiro_host::StartOptions {
+            port_override: None,
+            bind: Some("127.0.0.1:0".parse().unwrap()),
+        },
+    )
+    .await;
+    std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let error = match started {
+        Ok(_) => panic!("the host started over a database it could not copy"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("no migration ran"), "{error}");
+    assert!(error.contains("access_denied"), "{error}");
+    let versions = applied(&paths).await;
+    assert_eq!(versions.last(), Some(&from));
+    assert!(!versions.contains(&ADDED), "{versions:?}");
+    assert!(names(&backups).is_empty(), "nothing of the copy stays");
+}
