@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { renderShiftTaskFormHtml, type ShiftTaskFormData } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -139,4 +140,90 @@ describe("printed forms parity with the cloud (plan О-Ф)", () => {
       ).toBe(expected?.sha256);
     },
   );
+});
+
+// The cloud loader's input of a task case (`ShiftsService.taskFormData`), as
+// `apps/api/test/standalone-forms-parity.test.ts` reads it.
+const cloudTaskSchema = z.object({
+  shiftId: z.string(),
+  shiftNumber: z.string(),
+  status: z.enum(["planned", "active"]),
+  mode: z.enum(["validation", "aggregation"]),
+  organizationName: z.string(),
+  productId: z.string(),
+  productName: z.string(),
+  productPrintName: z.string().nullable(),
+  gtin14: z.string(),
+  imageChecksum: z.string().nullable(),
+  lineName: z.string().nullable(),
+  plannedDate: z.string().nullable(),
+  productionDate: z.string().nullable(),
+  plannedQty: z.number().int().nullable(),
+  boxCapacity: z.number().int().nullable(),
+  palletsEnabled: z.boolean(),
+  palletBoxCapacity: z.number().int().nullable(),
+  counterpartyName: z.string().nullable(),
+  ssccIssuerName: z.string().nullable(),
+  validationPrintMode: z.enum(["none", "duplicate_dm"]),
+  validationPrintVerification: z.enum(["none", "required"]),
+  allowPreviouslyAcceptedCodes: z.boolean(),
+  generatedAt: z.iso.datetime(),
+});
+const cloudTasks = z
+  .object({
+    cases: z.array(
+      z.union([
+        z.object({ name: z.string(), form: z.literal("task"), cloud: cloudTaskSchema }),
+        z.object({ name: z.string(), form: z.enum(["box", "pallet", "placard", "placards"]) }),
+      ]),
+    ),
+  })
+  .parse(read("cases.json"))
+  .cases.flatMap((each) => ("cloud" in each ? [[each.name, each.cloud] as const] : []));
+
+describe("«Бланк смены» of a validation shift, the office's and the cloud's (plan РЕЖ, A9)", () => {
+  // The golden has aggregation shifts only, and the cloud's fixtures are not this plan's to
+  // change; so each task case is turned into a validation shift on both sides — the host's
+  // shift as the host keeps one (no pallets; the box capacity it took stays, unprinted), the
+  // cloud's as its loader reads one (no box capacity, no pallets, no duplicate print) — and the
+  // office must draw exactly what the cloud's renderer draws.
+  it("has task cases to turn", () => {
+    expect(cloudTasks.length).toBeGreaterThan(0);
+  });
+
+  it.each(cloudTasks)("%s as a validation shift", (name, cloud) => {
+    const parityCase = cases.find((each) => each.name === name);
+    if (parityCase?.form !== "task") throw new Error(`${name} is a task case`);
+    const host = {
+      ...parityCase.host,
+      shift: {
+        ...parityCase.host.shift,
+        mode: "validation" as const,
+        palletsEnabled: false,
+        palletBoxCapacity: null,
+        palletTemplateId: null,
+      },
+    };
+    const cloudData: ShiftTaskFormData = {
+      ...cloud,
+      mode: "validation",
+      boxCapacity: null,
+      palletsEnabled: false,
+      palletBoxCapacity: null,
+      validationPrintMode: "none",
+      validationPrintVerification: "none",
+      allowPreviouslyAcceptedCodes: false,
+      generatedAt: new Date(cloud.generatedAt),
+    };
+    const drawn = renderForm({
+      kind: "task",
+      inputs: host,
+      generatedAt: new Date(parityCase.generatedAt),
+    });
+    const expected = renderShiftTaskFormHtml(cloudData);
+    expect(expected).toContain(`<p class="subtitle">Проверка · `);
+    expect(expected).toContain("Без печати");
+    expect(drawn?.kind).toBe("task");
+    expect(drawn?.html).toBe(expected);
+  });
 });
