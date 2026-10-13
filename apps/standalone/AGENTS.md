@@ -3936,6 +3936,28 @@ plan; the summary and the closed panel name no box (`boxless`). Entering a
 validation shift names `validation-v1` (`STATION_SHIFT_ENTER`); a host that
 refuses it as `station_update` is said on the list, which stays.
 
+A validation shift that prints the Data Matrix duplicate (plan РЕЖ part B, task
+B5; its snapshot's `validationPrint`) goes through the same `processScan`, with
+two differences (`src/floor/unit-labels/unit-label-work.ts`). Before the scan is
+read at all, `checkUnitAcceptance` refuses it while the station's one unresolved
+unit label waits (`canAcceptNext`: `verify` — a required check after `sent`, or
+an unknown outcome a scan of the label settles; `wait` — prepared, sending or
+failed before its send; `another_shift` — the station's unresolved job is
+another shift's) or no duplicate printer is assigned: nothing is journalled, as
+the cloud's station takes no scan while it cannot accept. An accepted unit is
+taken by `acceptWithLabel`: refused before any write when its code has no
+crypto tail (`parseDuplicateKm`, `incomplete_km`) or its label does not render
+(`render_failed`), then ONE transaction of its `floor_codes` place, its
+`floor_scans` row, its `scan` record, the job `prepared` and the job's
+`unit_label` `prepared` record after the `scan` record, so the host knows the
+unit before its label (`subject_unknown`). Every refusal rejects with
+`UnitLabelRefusedError` (`code`, and the job in the way); the outcome of an
+accepted unit carries its job (`label`). The work screen's handling of these
+(the label panel, the check of a printed label, history) is task B6, which also
+names `validation-dm-duplicate-v1` on entry: until then the host lets this
+station into no printing shift. The parity of every station step with the
+domain's machine is `test/unit-label-work.test.ts`.
+
 ## Floor printing
 
 Stage 2a, plan 2a7 (`src/floor/print`, `src/floor/setup`, `src/hardware/awake.ts`).
@@ -4189,6 +4211,43 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
 - `FloorApp` reads the saved sound level once when it opens (a read slower than a
   whole setup visit could overwrite a newer level); a spooler queue whose port is a
   COM port is not known to the app.
+
+Unit labels (plan РЕЖ part B, task B5; `src/floor/unit-labels/`, migration
+`0015`, «Local database»). The label of an accepted unit is the snapshot's
+duplicate layout (`validationPrint.template`, checked on entry by
+`labelTemplateSpecSchema` and the domain's `assertDuplicateTemplate`; a layout
+that fails keeps the operator out as `layout`/unreadable) with the cloud's
+`duplicateLabelFields` (`unitLabelFields`: the box label's fields of one unit —
+`qty` 1, no SSCC — the full canonical code in `km.code`, the shift's number and
+production date, the acceptance moment as the label's instant, the operator's
+name), rendered by `unitLabelRender` (the shift labels' logo rule, the code as
+the GS1 raster, `kmDataMatrix: "raster"`; a driver page for a printer through
+the Windows driver) for the printer assigned to `duplicate` at the acceptance;
+`test/unit-label-render.test.ts` holds its bytes to the domain's ZPL and TSPL at
+203 and 300 dpi and to the domain's driver page. The job keeps those bytes and
+their print identity for good. Each step is one transaction of the guarded
+`MOVE_JOB_SQL` and its `unit_label` record (`StaleUnitLabelError` when the job
+moved meanwhile, nothing written): `sendUnitLabel` sends a prepared attempt only —
+the duplicate printer assigned now must have the job's way of printing,
+language (RAW) and resolution, else `failed_before_send` (`printer_unconfigured`
+without a printer, `printer_changed` otherwise) and nothing leaves; `sending` is
+written before the bytes go, then `sent` on the shell's `{ sent: true }` and
+`delivery_unknown` `transport_failed` on any other answer, a timeout or `busy`
+(the domain has no failure after `sending`, and the cloud records a failed send
+so); `verifyUnitLabel` compares the scanned label with the job's code
+(`compareDuplicateKm`, full content and crypto tail) when a required check is
+open after `sent` or the outcome is unknown: `verified`, or
+`verification_rejected` (`mismatch`/`invalid`) written as a guarded no-op step,
+so a check of an attempt that moved on is journalled neither way;
+`skipVerification` only after `sent` of a pending required check, with the
+operator; `reprintUnitLabel` a new attempt with the operator's reason and the
+same bytes and date, not while the attempt is prepared or sending nor beside
+another unresolved job; `recoverUnitLabels` at start makes a job left in
+`sending` whose bytes no send of this run holds `delivery_unknown` `interrupted`
+(the record may name no operator) and sends nothing. Nothing sends a label by
+itself: only a prepared attempt is sent, by the operator's screen. A `prepared`
+record of a reprint and a skip name their operator (`factRecordSchema`). No full
+code reaches a record or a log line.
 
 ## Floor exceptions and close
 

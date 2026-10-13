@@ -5,7 +5,11 @@ import type { CodeCheck, CodeOwner, ScanFact, ScanRawKind } from "../../host/pro
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, scanRecord, scannedCode, type RecordHead } from "../facts.js";
+import type { ShiftRenderDeps } from "../print/shift-render.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
+import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
+import type { UnitLabelJob } from "../unit-labels/unit-label-store.js";
+import { acceptWithLabel, checkUnitAcceptance } from "../unit-labels/unit-label-work.js";
 import { readOpenBox, SHIFT_CODES_SQL } from "./work-reads.js";
 
 /**
@@ -54,6 +58,17 @@ export interface ScanContext {
   onHostError: (error: unknown) => void;
   now: () => Date;
   newId: () => string;
+  /**
+   * What a unit's label needs in a validation shift that prints the Data
+   * Matrix duplicate (plan РЕЖ part B): the name it prints as the operator,
+   * and the render replaced (tests). Left out, the label prints no operator
+   * and the app's render draws it.
+   */
+  unitLabel?: {
+    operatorName: string | null;
+    render?: RenderUnitLabel;
+    labelDeps?: ShiftRenderDeps;
+  };
 }
 
 /**
@@ -65,7 +80,13 @@ export interface ScanContext {
  */
 export type ScanOutcome = { scannedAt: string } & (
   | { kind: "accepted"; boxId: string; itemCount: number }
-  | { kind: "accepted"; boxId: null; acceptedCount: number }
+  | {
+      kind: "accepted";
+      boxId: null;
+      acceptedCount: number;
+      /** The unit's label job, `prepared`, in a shift that prints the duplicate (plan РЕЖ part B). */
+      label?: UnitLabelJob;
+    }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
   | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
   | { kind: "wrong_gtin"; gtin14: string }
@@ -154,9 +175,19 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
  * keeps its length and kind, never its text (decision 15: it may be a
  * badge). A failed write rejects: the scan is not taken, and the screen says
  * so.
+ *
+ * A validation shift that prints the Data Matrix duplicate (plan РЕЖ part B)
+ * takes no scan at all while the station's unit label waits for the operator
+ * or no duplicate printer is assigned, and accepts a unit with its label
+ * (`acceptWithLabel`): its place, journal row and `scan` record, the job and
+ * its `prepared` record in one transaction. Those refusals and the unit's own
+ * (a code without its crypto tail, a label that does not render) reject with
+ * `UnitLabelRefusedError`, nothing written.
  */
 export async function processScan(context: ScanContext, raw: string): Promise<ScanOutcome> {
   const { local, pairing, shift } = context;
+  const printing = shift.copy.mode === "validation" && shift.snapshot.validationPrint !== null;
+  if (printing) await checkUnitAcceptance(context);
   const scannedAt = context.now().toISOString();
   const head: RecordHead = {
     id: context.newId(),
@@ -229,8 +260,38 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       [pairing.hostId, pairing.deviceId, shift.copy.id],
       countRow,
     );
+    const acceptedCount = (held?.n ?? 0) + 1;
+    if (printing) {
+      const data: ScanFact = { ...refused, verdict: "ok", duplicateSource: null, boxId: null };
+      const label = await acceptWithLabel(
+        {
+          local,
+          pairing,
+          shift,
+          operatorId: context.operatorId,
+          operatorName: context.unitLabel?.operatorName ?? null,
+          now: context.now,
+          newId: context.newId,
+          ...(context.unitLabel?.render === undefined ? {} : { render: context.unitLabel.render }),
+          ...(context.unitLabel?.labelDeps === undefined
+            ? {}
+            : { labelDeps: context.unitLabel.labelDeps }),
+        },
+        {
+          scanId: head.id,
+          code,
+          scannedAt,
+          statements: [
+            claim(null),
+            scanRow(context, head.id, data),
+            outboxStatement(scanRecord(head, data), pairing, scannedAt),
+          ],
+        },
+      );
+      return { kind: "accepted", boxId: null, acceptedCount, scannedAt, label };
+    }
     await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId: null }, [claim(null)]);
-    return { kind: "accepted", boxId: null, acceptedCount: (held?.n ?? 0) + 1, scannedAt };
+    return { kind: "accepted", boxId: null, acceptedCount, scannedAt };
   }
   const box = await readOpenBox(local, pairing, shift.copy.id);
   const boxId = box?.id ?? context.newId();
