@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
-import { Script } from "node:vm";
 import { load } from "js-yaml";
-import ts from "typescript";
 import { checkWorkflows } from "../check-isolation.mjs";
 import {
   hasExactTraceReadinessOwner,
@@ -22,7 +20,14 @@ import {
   withoutParallelSegmentsBytes,
 } from "./support/parallel-segments.mjs";
 
-const source = readFileSync(".github/workflows/us-development.yml", "utf8");
+import {
+  withoutPreparedServicesOwner,
+  withoutPreparedServicesOwnerBytes,
+} from "./support/prepared-services-owner.mjs";
+import { assertNativeFixtureGate } from "./support/native-fixture-gate.mjs";
+
+const fullSource = readFileSync(".github/workflows/us-development.yml", "utf8");
+const source = withoutPreparedServicesOwnerBytes(fullSource);
 const workflow = load(source);
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const hash = (value) => digest(JSON.stringify(value));
@@ -63,17 +68,31 @@ function assertOwnership(all) {
   }
   assert.deepEqual(job, traceReadinessJob, "complete unconditional failure-propagating native job");
   assert.deepEqual(
-    Object.keys(w.jobs),
+    Object.keys(withoutPreparedServicesOwner(w).jobs),
     ["isolation", traceReadinessJobId],
     "only one additive job",
   );
   assert.equal(
-    hash(withoutTraceReadinessOwner(w)),
+    hash(withoutTraceReadinessOwner(withoutPreparedServicesOwner(w))),
     predecessorHash,
     "complete 82-step predecessor workflow is unchanged",
   );
   assert.deepEqual(checkWorkflows(all, "codex/us-mvp"), [], "operational release locks preserved");
 }
+
+test("Trace global selectors remain visible inside a malformed prepared addition", () => {
+  const all = readWorkflows();
+  const w = all["us-development.yml"];
+  const file = "test/us-dataset-trace-readiness.e2e.test.ts";
+  w.jobs.dataset_prepared_services.steps.push({ run: `corepack pnpm exec vitest run ${file}` });
+  assert.deepEqual(withoutPreparedServicesOwner(w), w);
+  assert.throws(
+    () => assertOwnership(all),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      error.message.includes(`${file} has exactly one explicit native selection`),
+  );
+});
 
 test("terminal Shipping projection requires the exact four-suite owner and missing-suite denial", () => {
   const expectedCommand =
@@ -100,7 +119,7 @@ test("terminal Shipping projection requires the exact four-suite owner and missi
   assert.equal(hasExactTraceReadinessOwner(changed), false);
   assert.deepEqual(withoutTraceReadinessOwner(changed), changed);
   const missingBytes = source.replace(` ${projection}`, "");
-  assert.deepEqual(load(missingBytes), changed);
+  assert.deepEqual(load(missingBytes), withoutPreparedServicesOwner(changed));
   assert.equal(withoutTraceReadinessOwnerBytes(missingBytes), missingBytes);
 });
 
@@ -156,52 +175,9 @@ test("exact additive removal restores original 82-step bytes and AST without cha
 });
 
 test("native gates skip aggregate collection without the dedicated isolated fixture", () => {
-  const descendants = (node, predicate) => {
-    const found = [];
-    const visit = (child) => {
-      if (predicate(child)) found.push(child);
-      ts.forEachChild(child, visit);
-    };
-    visit(node);
-    return found;
-  };
   for (const file of traceReadinessFiles) {
     const path = `apps/api/${file}`;
-    const native = ts.createSourceFile(
-      path,
-      readFileSync(path, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const gates = descendants(
-      native,
-      (node) => ts.isCallExpression(node) && node.expression.getText(native) === "describe.skipIf",
-    );
-    assert.equal(gates.length, 1, `${file} has one native fixture gate`);
-    const predicate = gates[0].arguments[0];
-    assert.ok(
-      ts.isPrefixUnaryExpression(predicate) &&
-        predicate.operator === ts.SyntaxKind.ExclamationToken,
-    );
-    const operand = predicate.operand.getText(native);
-    if (operand === "base") {
-      const bindings = descendants(
-        native,
-        (node) => ts.isVariableDeclaration(node) && node.name.getText(native) === "base",
-      );
-      assert.equal(bindings.length, 1);
-      assert.equal(bindings[0].initializer.getText(native), "process.env.US_TEST_DATABASE_URL");
-      assert.ok(bindings[0].parent.flags & ts.NodeFlags.Const);
-      assert.equal(bindings[0].parent.parent.parent, native);
-    } else assert.equal(operand, "process.env.US_TEST_DATABASE_URL");
-    const shouldSkip = new Script(
-      `((base, process) => (${predicate.getText(native)}))`,
-    ).runInNewContext();
-    assert.equal(shouldSkip(undefined, { env: {} }), true);
-    assert.equal(
-      shouldSkip(traceReadinessFixture, { env: { US_TEST_DATABASE_URL: traceReadinessFixture } }),
-      false,
-    );
+    assertNativeFixtureGate(readFileSync(path, "utf8"), file, traceReadinessFixture);
   }
   assert.equal(
     JSON.parse(readFileSync("apps/api/package.json", "utf8")).scripts.test,

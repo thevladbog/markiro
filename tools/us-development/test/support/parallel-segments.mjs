@@ -1,6 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
 import {
+  withoutPreparedServicesOwner,
+  withoutPreparedServicesOwnerBytes,
+} from "./prepared-services-owner.mjs";
+import {
   withoutTraceReadinessOwner,
   withoutTraceReadinessOwnerBytes,
 } from "./trace-readiness-owner.mjs";
@@ -57,7 +61,7 @@ export function hasExactParallelSegments(workflow) {
 // complete partition; missing segments, misplaced guards or extra steps stay visible.
 export function withoutParallelSegments(workflow) {
   if (!hasExactParallelSegments(workflow)) return structuredClone(workflow);
-  const result = withoutTraceReadinessOwner(workflow);
+  const result = withoutTraceReadinessOwner(withoutPreparedServicesOwner(workflow));
   delete result.jobs.isolation.strategy;
   for (const step of result.jobs.isolation.steps) delete step.if;
   return result;
@@ -65,7 +69,7 @@ export function withoutParallelSegments(workflow) {
 
 export function withoutParallelSegmentsBytes(source) {
   if (!hasExactParallelSegments(load(source))) return source;
-  source = withoutTraceReadinessOwnerBytes(source);
+  source = withoutTraceReadinessOwnerBytes(withoutPreparedServicesOwnerBytes(source));
   const block =
     "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, office, requests, browser, persistence]\n";
   if (source.split(block).length !== 2) return source;
