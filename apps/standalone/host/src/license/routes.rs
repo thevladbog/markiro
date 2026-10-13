@@ -161,10 +161,9 @@ pub async fn activation_request(
         .await
         .map_err(ApiError::internal)?;
     tx.rollback().await.map_err(ApiError::internal)?;
-    let newest = snapshot
-        .licenses
-        .iter()
-        .max_by_key(|license| license.sequence);
+    // The highest stored row, used or not: the issuer must not give a
+    // number under a file the host keeps.
+    let newest = snapshot.newest.as_ref();
     let request = ActivationRequest {
         format: ACTIVATION_REQUEST_FORMAT.to_owned(),
         host_id: app.host_id.clone(),
@@ -306,19 +305,24 @@ fn changes(before: &LicenseTerms, after: &LicenseTerms) -> Vec<String> {
     changes
 }
 
+/// The floor of the time once `license` is stored: the latest issue of every
+/// stored row (used or not) and the new file less a day (§7).
+fn floor_after_load(snapshot: &Snapshot, license: &StoredLicense) -> Option<i64> {
+    clock::issue_floor(
+        snapshot
+            .issued_at
+            .iter()
+            .copied()
+            .chain([license.issued_at]),
+    )
+}
+
 /// The effective time the host keeps once `license` is stored: the latest
 /// issue of every stored file and the new one less a day raises it (§7). The
 /// warnings speak of this time, so they never call a file «not yet valid» or
 /// «expired» when it is not by the time the host uses after the load.
 fn time_after_load(snapshot: &Snapshot, license: &StoredLicense) -> i64 {
-    let floor = clock::issue_floor(
-        snapshot
-            .licenses
-            .iter()
-            .chain([license])
-            .map(|license| license.issued_at),
-    );
-    floor.map_or(snapshot.reading.effective, |floor| {
+    floor_after_load(snapshot, license).map_or(snapshot.reading.effective, |floor| {
         snapshot.reading.effective.max(floor)
     })
 }
@@ -391,6 +395,7 @@ pub async fn preview_license(
                 &app.host_id,
                 snapshot.org_inn.as_deref(),
                 &snapshot.licenses,
+                snapshot.newest.as_ref().map(|newest| newest.sequence),
             )
             .map(|_| verified)
         })
@@ -427,6 +432,7 @@ pub async fn load_license(
             &app.host_id,
             snapshot.org_inn.as_deref(),
             &snapshot.licenses,
+            snapshot.newest.as_ref().map(|newest| newest.sequence),
         )
         .map(|admission| (verified, admission))
     });
@@ -470,11 +476,13 @@ pub async fn load_license(
     }
     let license = &verified.license;
     // The file the new one replaces by number: the highest stored
-    // `sequence`, not necessarily the file in force (the preview's «before»).
+    // `sequence` (its row used or not), not necessarily the file in force
+    // (the preview's «before»); its terms when the host can read them.
+    let previous_sequence = snapshot.newest.as_ref().map(|newest| newest.sequence);
     let previous = snapshot
         .licenses
         .iter()
-        .max_by_key(|license| license.sequence);
+        .find(|license| Some(license.sequence) == previous_sequence);
     store::insert(
         &mut tx,
         license,
@@ -488,7 +496,7 @@ pub async fn load_license(
     let mut details = json!({
         "licenseId": license.license_id,
         "sequence": license.sequence,
-        "previousSequence": previous.map(|previous| previous.sequence),
+        "previousSequence": previous_sequence,
         "kid": license.kid,
         "warnings": warnings,
     });
@@ -537,13 +545,7 @@ pub async fn load_license(
         .map_err(ApiError::internal)?;
     // Every stored file, the new one with them, proves the time is not
     // before its issue less a day (§7).
-    if let Some(floor) = clock::issue_floor(
-        snapshot
-            .licenses
-            .iter()
-            .chain([license])
-            .map(|license| license.issued_at),
-    ) {
+    if let Some(floor) = floor_after_load(&snapshot, license) {
         app.license.raise_floor(&app, floor);
     }
     tracing::info!(
@@ -563,9 +565,14 @@ pub async fn load_license(
                 license_id = %license.license_id,
                 "the license was not read after its load; answered from the load"
             );
-            let mut licenses = snapshot.licenses.clone();
-            licenses.push(license.clone());
-            licenses.sort_by_key(|license| license.sequence);
+            let mut files = snapshot.files();
+            files.usable.push(license.clone());
+            files.usable.sort_by_key(|license| license.sequence);
+            files.newest = Some(store::FileKey {
+                license_id: license.license_id.clone(),
+                sequence: license.sequence,
+            });
+            files.issued_at.push(license.issued_at);
             let reading = clock::Reading {
                 effective: time_after_load(&snapshot, license),
                 ..snapshot.reading
@@ -573,7 +580,7 @@ pub async fn load_license(
             let known = app.license.evaluate_known(
                 &app,
                 reading,
-                licenses,
+                files,
                 snapshot.clock_row.clone(),
                 snapshot.org_inn.clone(),
             );
@@ -665,7 +672,7 @@ pub async fn enable_emergency(
             let known = app.license.evaluate_known(
                 &app,
                 snapshot.reading,
-                snapshot.licenses.clone(),
+                snapshot.files(),
                 clock_row,
                 snapshot.org_inn.clone(),
             );

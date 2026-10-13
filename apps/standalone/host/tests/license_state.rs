@@ -379,6 +379,47 @@ async fn a_site_whose_wizard_ran_before_the_license_starts_its_trial_at_its_firs
         .is_empty());
 }
 
+/// A trial start ahead of the trusted time (a PC's clock set ahead at the
+/// wizard, then back) is put back to that time once and for all (review of
+/// Task 10): days later the trial has counted them, it did not slide.
+#[tokio::test]
+async fn a_trial_start_ahead_of_the_time_is_put_back_and_stays() {
+    let admin = admin().await;
+    let trial_start = || async {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT trial_started_at FROM license_clock WHERE id = 1",
+        )
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+    };
+    sqlx::query("UPDATE license_clock SET trial_started_at = ? WHERE id = 1")
+        .bind(START_MS + 10 * DAY_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    refresh(&admin.app).await;
+    assert_eq!(trial_start().await, Some(START_MS));
+    admin.app.clock.advance(time::Duration::days(5));
+    refresh(&admin.app).await;
+    assert_eq!(trial_start().await, Some(START_MS));
+    let license = license_now(&admin.app).await;
+    assert_eq!(
+        (license["state"].clone(), license["daysLeft"].clone()),
+        (json!("trial"), json!(9))
+    );
+    // A start out of range reads as a trial that is over: never put back
+    // to now, which would start a new trial.
+    sqlx::query("UPDATE license_clock SET trial_started_at = ? WHERE id = 1")
+        .bind(9_007_199_254_740_992_i64)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    refresh(&admin.app).await;
+    assert_eq!(trial_start().await, Some(9_007_199_254_740_992));
+    assert_eq!(license_now(&admin.app).await["state"], "trial_expired");
+}
+
 /// A site before its wizard has no trial to start: the wizard starts it.
 #[tokio::test]
 async fn a_start_before_the_wizard_starts_no_trial() {

@@ -341,7 +341,9 @@ async fn an_import_that_would_add_lines_beyond_the_file_is_refused() {
                     )
                     .await
             ),
-            (StatusCode::CONFLICT, seat_limit("lines", 2, 3)),
+            // What the import would make the site use: 4 of 3, as `over`
+            // reads it (spec §4.7), not the 2 before it.
+            (StatusCode::CONFLICT, seat_limit("lines", 4, 3)),
             "dry run: {dry_run}"
         );
     }
@@ -363,4 +365,34 @@ async fn an_import_that_would_add_lines_beyond_the_file_is_refused() {
         .await;
     assert_eq!(status, StatusCode::OK, "{summary}");
     assert_eq!(summary["linesCreated"], 2);
+}
+
+/// An import that adds no line takes no seat (review of Task 10): a site
+/// already over its line quota still takes a file whose lines all exist.
+#[tokio::test]
+async fn an_import_that_adds_no_line_passes_a_site_over_its_line_quota() {
+    let admin = admin().await;
+    // The export's lines the wizard has not made («Линия 1» it has).
+    for name in ["Упаковка", "линия 1 (2)"] {
+        let (status, body) = admin
+            .call("POST", "/v1/office/lines", Some(json!({ "name": name })))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    load_ok(&admin, &quota(&admin.app.state.host_id, "lines", 1)).await;
+    let (status, summary) = admin
+        .call(
+            "POST",
+            "/v1/office/import",
+            Some(cloud_import_request(IMPORT_ID, false)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        (
+            summary["linesCreated"].clone(),
+            summary["linesPresent"].clone()
+        ),
+        (json!(0), json!(3))
+    );
 }

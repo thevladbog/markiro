@@ -2,10 +2,12 @@
 //! row of the license clock. Plain reads and writes; the decisions are
 //! `state.rs`'s and `mod.rs`'s.
 
+use markiro_proto::trust::Keyset;
 use sqlx::SqliteConnection;
 
 use super::bounded_ms;
 use super::state::{Features, Quotas, StoredLicense};
+use super::verify;
 
 /// `license_clock`, times in ms UTC.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -50,26 +52,83 @@ struct ClockRecord {
     last_state_at: Option<i64>,
 }
 
+/// A stored file's id and number, read from its row whether or not the
+/// rest of the row decodes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileKey {
+    pub license_id: String,
+    pub sequence: i64,
+}
+
+/// What the host reads of its stored files.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Files {
+    /// Every file the host can use, by `sequence`.
+    pub usable: Vec<StoredLicense>,
+    /// The row of the highest `sequence`, used or not: no older file comes
+    /// in under a row the host cannot read (spec §4.3 step 7), and the
+    /// activation request names it.
+    pub newest: Option<FileKey>,
+    /// The issue of every row whose issue is in range ([`bounded_ms`]), used
+    /// or not: the floor of the time (§7) is never weakened by a row that
+    /// does not decode.
+    pub issued_at: Vec<i64>,
+}
+
 /// Every stored file, by `sequence`. A row with a time out of range
-/// ([`bounded_ms`]) or terms of the wrong shape (`quotas`, `features` that
-/// do not read as the file's) is not used: the host never wrote one, so it
-/// is not a file the office loaded; the service log names only its id.
-/// Skipping it keeps the license (and every device, which reads it with its
+/// ([`bounded_ms`]) is not used: the host never wrote one, so it is not a
+/// file the office loaded. A row whose terms (`quotas`, `features`) do not
+/// read as the file's is read again from its signed text (`compact`, with
+/// every key of `keyset`, retired ones too: the file was trusted when it was
+/// loaded) when that verifies and names the row's host, number and id; else
+/// it is not used either. The service log names only the row's id. Skipping
+/// a row keeps the license (and every device, which reads it with its
 /// record) working on the files before it.
-pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>, sqlx::Error> {
+pub async fn files(conn: &mut SqliteConnection, keyset: &Keyset) -> Result<Files, sqlx::Error> {
     let rows: Vec<LicenseRow> = sqlx::query_as(
         "SELECT license_id, sequence, kid, host_id, issued_at, valid_from, valid_until, \
          grace_days, plan, plan_version_id, customer_name, customer_inn, quotas, features \
          FROM licenses ORDER BY sequence",
     )
-    .fetch_all(conn)
+    .fetch_all(&mut *conn)
     .await?;
-    Ok(rows.into_iter().filter_map(usable).collect())
+    let newest = rows.last().map(|row| FileKey {
+        license_id: row.license_id.clone(),
+        sequence: row.sequence,
+    });
+    let issued_at = rows
+        .iter()
+        .filter_map(|row| bounded_ms(row.issued_at))
+        .collect();
+    let mut usable = Vec::with_capacity(rows.len());
+    for row in rows {
+        match decoded(row) {
+            Decoded::Usable(license) => usable.push(license),
+            Decoded::OutOfRange => {}
+            Decoded::BrokenTerms(key, host_id) => {
+                if let Some(license) = signed(&mut *conn, keyset, &key, &host_id).await? {
+                    usable.push(license);
+                }
+            }
+        }
+    }
+    Ok(Files {
+        usable,
+        newest,
+        issued_at,
+    })
 }
 
-/// `row` as a file, or none (logged by its id) when the host could not have
-/// written it.
-fn usable(row: LicenseRow) -> Option<StoredLicense> {
+enum Decoded {
+    Usable(StoredLicense),
+    OutOfRange,
+    /// The row's id and number, and its host.
+    BrokenTerms(FileKey, String),
+}
+
+/// `row` as a file; out of range (logged by its id) when the host could not
+/// have written it; broken terms to read again from the signed text.
+fn decoded(row: LicenseRow) -> Decoded {
     let in_range = [row.issued_at, row.valid_from, row.valid_until]
         .into_iter()
         .all(|ms| bounded_ms(ms).is_some());
@@ -78,18 +137,20 @@ fn usable(row: LicenseRow) -> Option<StoredLicense> {
             license_id = %row.license_id,
             "a stored license file holds a time out of range; it is not used"
         );
-        return None;
+        return Decoded::OutOfRange;
     }
     let terms: Result<(Quotas, Features), serde_json::Error> = serde_json::from_str(&row.quotas)
         .and_then(|quotas| Ok((quotas, serde_json::from_str(&row.features)?)));
     let Ok((quotas, features)) = terms else {
-        tracing::warn!(
-            license_id = %row.license_id,
-            "a stored license file holds terms of the wrong shape; it is not used"
+        return Decoded::BrokenTerms(
+            FileKey {
+                license_id: row.license_id,
+                sequence: row.sequence,
+            },
+            row.host_id,
         );
-        return None;
     };
-    Some(StoredLicense {
+    Decoded::Usable(StoredLicense {
         quotas,
         features,
         license_id: row.license_id,
@@ -105,6 +166,60 @@ fn usable(row: LicenseRow) -> Option<StoredLicense> {
         customer_name: row.customer_name,
         customer_inn: row.customer_inn,
     })
+}
+
+/// The file of a row whose terms do not decode, read from its signed text:
+/// only when it verifies with every key of `keyset` (retired ones too) and
+/// names the row's host, number and id. Else none, logged by the id.
+async fn signed(
+    conn: &mut SqliteConnection,
+    keyset: &Keyset,
+    key: &FileKey,
+    host_id: &str,
+) -> Result<Option<StoredLicense>, sqlx::Error> {
+    let compact: String = sqlx::query_scalar("SELECT compact FROM licenses WHERE license_id = ?")
+        .bind(&key.license_id)
+        .fetch_one(conn)
+        .await?;
+    let every_key = Keyset {
+        retired_kids: Vec::new(),
+        ..keyset.clone()
+    };
+    let license = verify::read(&compact, &every_key)
+        .ok()
+        .map(|verified| verified.license)
+        .filter(|license| {
+            license.license_id == key.license_id
+                && license.sequence == key.sequence
+                && license.host_id == host_id
+        });
+    if license.is_some() {
+        tracing::warn!(
+            license_id = %key.license_id,
+            "a stored license file holds terms of the wrong shape; read from its signed text"
+        );
+    } else {
+        tracing::warn!(
+            license_id = %key.license_id,
+            "a stored license file holds terms of the wrong shape; it is not used"
+        );
+    }
+    Ok(license)
+}
+
+/// Put the trial's stored start back to `at` when it is after it (spec §3.4:
+/// the state counts such a start from now; written, it does not slide with
+/// the time). A start out of range ([`bounded_ms`]) reads as a trial that is
+/// over and stays. True when it wrote.
+pub async fn clamp_trial_start(conn: &mut SqliteConnection, at: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE license_clock SET trial_started_at = ?1 \
+         WHERE id = 1 AND trial_started_at > ?1 AND trial_started_at <= 9007199254740991",
+    )
+    .bind(at)
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() > 0)
 }
 
 /// The one row of `license_clock` (migration `0030` seeds it). A time out

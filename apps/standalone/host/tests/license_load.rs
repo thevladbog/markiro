@@ -800,6 +800,181 @@ async fn at_a_start_the_floor_is_the_latest_issue_of_every_stored_file() {
     );
 }
 
+/// The office's activation request, which names the newest stored file.
+async fn current_license(admin: &Admin) -> Value {
+    let (status, body) = admin
+        .call("GET", "/v1/office/license/activation-request", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["currentLicense"].clone()
+}
+
+/// A stored row whose terms do not decode is read again from its signed text
+/// (review of Task 10): the file stays in force, its own again, even after
+/// its key was retired; a signed text of another file is not its own.
+#[tokio::test]
+async fn a_row_with_broken_terms_is_read_again_from_its_signed_text() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    load_ok(&admin, &file(&host, |_| {})).await;
+    let second = file(&host, |terms| {
+        terms["licenseId"] = json!(license_id(2));
+        terms["sequence"] = json!(2);
+        terms["quotas"]["lines"] = json!(5);
+    });
+    load_ok(&admin, &second).await;
+    sqlx::query("UPDATE licenses SET quotas = '\"broken\"' WHERE sequence = 2")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(
+        (
+            body["license"]["sequence"].clone(),
+            body["quotas"]["lines"]["limit"].clone()
+        ),
+        (json!(2), json!(5)),
+        "{body}"
+    );
+    // The same file again is the same: nothing written.
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(load(&admin, &second).await.0, StatusCode::OK);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(
+        current_license(&admin).await,
+        json!({ "licenseId": license_id(2), "sequence": 2 })
+    );
+    // A build that retired the file's key still reads what it once loaded.
+    let mut retired = markiro_proto::trust::license_keyset();
+    retired.retired_kids.push(TEST_KID.to_owned());
+    let started = admin
+        .app
+        .state
+        .clone()
+        .with_license(Arc::new(LicenseService::new(retired, Arc::new(NoMark))));
+    let license = started
+        .license
+        .office_license_now(&started)
+        .await
+        .expect("the license now");
+    assert_eq!(
+        (
+            license.license.map(|file| file.sequence),
+            license.quotas.lines.limit
+        ),
+        (Some(2), Some(5))
+    );
+    // A signed text that names another host, number or id is not this
+    // row's: the file before it is in force.
+    let other_host = "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f";
+    for (signed_host, id, sequence) in [
+        (other_host, 2, 2),
+        (host.as_str(), 2, 9),
+        (host.as_str(), 7, 2),
+    ] {
+        let other = file(signed_host, |terms| {
+            terms["licenseId"] = json!(license_id(id));
+            terms["sequence"] = json!(sequence);
+        });
+        sqlx::query("UPDATE licenses SET compact = ? WHERE sequence = 2")
+            .bind(&other)
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+        let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+        assert_eq!(
+            (
+                body["license"]["sequence"].clone(),
+                body["license"]["licenseId"].clone()
+            ),
+            (json!(1), json!(license_id(1))),
+            "{signed_host} {id} {sequence}: {body}"
+        );
+    }
+}
+
+/// A stored row that cannot be read at all (its terms and its signed text
+/// broken) is not in force, yet it still is the newest file: an older one
+/// stays refused, the activation request names it, and its issue is a floor
+/// of the time at a start (review of Task 10).
+#[tokio::test]
+async fn a_row_that_cannot_be_read_is_still_the_newest_and_a_floor() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    load_ok(&admin, &file(&host, |_| {})).await;
+    let mut broken = terms(&host);
+    broken["licenseId"] = json!(license_id(5));
+    broken["sequence"] = json!(5);
+    broken["issuedAt"] = json!(START_MS + 10 * DAY_MS);
+    broken["quotas"] = json!("broken");
+    seed(&admin.app, &broken).await;
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(body["license"]["sequence"], json!(1), "{body}");
+    let between = file(&host, |terms| {
+        terms["licenseId"] = json!(license_id(3));
+        terms["sequence"] = json!(3);
+    });
+    let rows = audit_rows(&admin.app).await;
+    let (status, body) = load(&admin, &between).await;
+    assert_eq!(
+        (status, body["error"]["details"].clone()),
+        (
+            StatusCode::BAD_REQUEST,
+            json!({ "field": "file", "reason": "license_older", "newestSequence": 5 })
+        )
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows + 1);
+    let (status, body) = preview(&admin, &between).await;
+    assert_eq!(
+        (status, body["error"]["details"]["reason"].clone()),
+        (StatusCode::BAD_REQUEST, json!("license_older"))
+    );
+    assert_eq!(
+        current_license(&admin).await,
+        json!({ "licenseId": license_id(5), "sequence": 5 })
+    );
+    // A fresh service on the same data (a start of the host) puts the
+    // time on the row's issue less a day.
+    let started = admin
+        .app
+        .state
+        .clone()
+        .with_license(Arc::new(LicenseService::new(
+            markiro_proto::trust::license_keyset(),
+            Arc::new(NoMark),
+        )));
+    let license = started
+        .license
+        .office_license_now(&started)
+        .await
+        .expect("the license now");
+    assert_eq!(license.effective_at, text(START_MS + 9 * DAY_MS));
+    // A newer file replaces the row by number; its terms are unknown.
+    load_ok(
+        &admin,
+        &file(&host, |terms| {
+            terms["licenseId"] = json!(license_id(6));
+            terms["sequence"] = json!(6);
+        }),
+    )
+    .await;
+    let loaded = audit_trail(&admin.app, actions::LICENSE_LOAD).await;
+    let details = &loaded.last().expect("the load's row").6;
+    assert_eq!(
+        (
+            details["previousSequence"].clone(),
+            details["changed"].clone(),
+            details["quotas"]["from"].clone()
+        ),
+        (
+            json!(5),
+            json!(["quotas", "features", "validUntil", "plan"]),
+            Value::Null
+        ),
+        "{details}"
+    );
+}
+
 #[tokio::test]
 async fn only_an_administrators_session_previews_or_loads() {
     let admin = admin().await;
@@ -997,7 +1172,10 @@ async fn the_files_plan_lc1_signs_are_read_as_the_cloud_will_send_them() {
     // The rows keep the whole of both files, field by field.
     let mut conn = admin.app.state.pool.acquire().await.unwrap();
     assert_eq!(
-        store::licenses(&mut conn).await.unwrap(),
+        store::files(&mut conn, &markiro_proto::trust::license_keyset())
+            .await
+            .unwrap()
+            .usable,
         vec![kept_of(&payload), kept_of(&payload_of(&upgrade))]
     );
     drop(conn);

@@ -94,8 +94,14 @@ pub fn ms_text(ms: i64) -> String {
 pub struct Snapshot {
     pub evaluation: Evaluation,
     pub reading: clock::Reading,
-    /// Every stored file, by `sequence`.
+    /// Every stored file the host can use, by `sequence`.
     pub licenses: Vec<StoredLicense>,
+    /// The stored row of the highest `sequence`, used or not
+    /// ([`store::Files::newest`]).
+    pub newest: Option<store::FileKey>,
+    /// The issue of every stored row in range, used or not
+    /// ([`store::Files::issued_at`]).
+    pub issued_at: Vec<i64>,
     pub clock_row: store::ClockRow,
     pub org_inn: Option<String>,
 }
@@ -109,6 +115,17 @@ pub struct LicenseService {
     clock: Mutex<Option<clock::LicenseClock>>,
     /// The registry's start of the trial, read once at a start.
     registry_started_at: Mutex<Option<i64>>,
+}
+
+impl Snapshot {
+    /// The stored files as read ([`store::Files`]).
+    pub fn files(&self) -> store::Files {
+        store::Files {
+            usable: self.licenses.clone(),
+            newest: self.newest.clone(),
+            issued_at: self.issued_at.clone(),
+        }
+    }
 }
 
 impl LicenseService {
@@ -142,7 +159,7 @@ impl LicenseService {
         app: &AppState,
         conn: &mut SqliteConnection,
     ) -> Result<Snapshot, sqlx::Error> {
-        let licenses = store::licenses(&mut *conn).await?;
+        let files = store::files(&mut *conn, &self.keyset).await?;
         let clock_row = store::clock_row(&mut *conn).await?;
         let org_inn = store::org_inn(&mut *conn).await?;
         let wall = to_ms(app.now());
@@ -152,12 +169,12 @@ impl LicenseService {
             let clock = guard.get_or_insert_with(|| {
                 // Loaded files prove the time is not before the latest issue
                 // of any stored file less a day (§7).
-                let floor = clock::issue_floor(licenses.iter().map(|license| license.issued_at));
+                let floor = clock::issue_floor(files.issued_at.iter().copied());
                 clock::LicenseClock::at_start(clock_row.max_seen_at, wall, mono, floor)
             });
             clock.observe(wall, mono)
         };
-        Ok(self.evaluate_known(app, reading, licenses, clock_row, org_inn))
+        Ok(self.evaluate_known(app, reading, files, clock_row, org_inn))
     }
 
     /// The state of data already read (`snapshot`'s, or a write's that just
@@ -166,10 +183,15 @@ impl LicenseService {
         &self,
         app: &AppState,
         reading: clock::Reading,
-        licenses: Vec<StoredLicense>,
+        files: store::Files,
         clock_row: store::ClockRow,
         org_inn: Option<String>,
     ) -> Snapshot {
+        let store::Files {
+            usable: licenses,
+            newest,
+            issued_at,
+        } = files;
         let registry = *self.registry_started_at.lock().expect("registry mark lock");
         // A start after the time the host trusts (a PC's clock set ahead at
         // the wizard, then back) would make a longer trial: it counts from
@@ -201,6 +223,8 @@ impl LicenseService {
             evaluation,
             reading,
             licenses,
+            newest,
+            issued_at,
             clock_row,
             org_inn,
         }
@@ -221,7 +245,9 @@ impl LicenseService {
         let evaluation = &snapshot.evaluation;
         let phase = evaluation.phase.as_str();
         let row = &snapshot.clock_row;
-        let mut wrote = false;
+        // A stored start after the trusted time is counted from it (above);
+        // written, it no longer slides with the time.
+        let mut wrote = store::clamp_trial_start(&mut tx, now).await?;
         if evaluation.wrong_host_since != row.wrong_host_since {
             store::set_wrong_host_since(&mut tx, evaluation.wrong_host_since).await?;
             wrote = true;

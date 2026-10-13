@@ -143,12 +143,15 @@ fn stored_of(payload: &LicensePayloadV1, kid: String) -> Option<StoredLicense> {
 /// Steps 5–7: this host's file, the organization's INN (normalized and
 /// checked by its check digit, §4.9; the GLN and the prefixes are not part
 /// of it), newer than every stored file. The same file again is no refusal:
-/// nothing changes.
+/// nothing changes. `stored` are the files the host can use; `newest` is the
+/// highest stored `sequence` of any row, one the host cannot read included,
+/// so such a row never lets an older file in.
 pub fn admit(
     verified: &Verified,
     host_id: &str,
     org_inn: Option<&str>,
     stored: &[StoredLicense],
+    newest: Option<i64>,
 ) -> Result<Admission, Refusal> {
     let license = &verified.license;
     let license_id = license.license_id.clone();
@@ -178,7 +181,7 @@ pub fn admit(
     {
         return Ok(Admission::Same);
     }
-    match stored.iter().map(|known| known.sequence).max() {
+    match newest {
         Some(newest) if license.sequence <= newest => Err(Refusal::Older { license_id, newest }),
         _ => Ok(Admission::New),
     }

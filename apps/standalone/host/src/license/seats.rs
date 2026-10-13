@@ -151,7 +151,9 @@ pub async fn require_seat(
 /// `added` seats of `quota` were just written in this writer's transaction
 /// (the cloud's import, which adds lines in bulk): refused as by
 /// [`require_seat`] when they take the site beyond the file, so the caller
-/// rolls the whole write back. `used` names what the site used before them.
+/// rolls the whole write back. `used` names what the write would make the
+/// site use (4 of 3), the same over-limit reading as `over` (spec §4.7). An
+/// addition of none passes even a site already over the limit.
 pub async fn require_added_seats(
     app: &AppState,
     conn: &mut SqliteConnection,
@@ -173,7 +175,7 @@ pub async fn require_added_seats(
     if used <= limit {
         return Ok(());
     }
-    Err(seat_limit(quota, used.saturating_sub(added), limit))
+    Err(seat_limit(quota, used, limit))
 }
 
 /// A feature of the file (spec §4.7).
