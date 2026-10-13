@@ -346,6 +346,12 @@ pub fn run() {
             // config directory: the device identity must stay on this
             // computer and never follow a Windows user profile elsewhere.
             let dir = app.path().app_local_data_dir()?;
+            // The window opens ordinary: 1280x800 at most, inside its monitor's
+            // work area, centred, never maximized. Kiosk mode (stations) and
+            // the office's window mode are the webview's decision, later.
+            if let Some(window) = app.get_webview_window(lockdown::MAIN_WINDOW) {
+                lockdown::settle_ordinary_window(&window);
+            }
             let link = manage_state(app.handle(), &dir, installation::read_beside_executable());
             let status = app.state::<ConnectionState>().inner().clone();
             tauri::async_runtime::spawn(connection::supervise(

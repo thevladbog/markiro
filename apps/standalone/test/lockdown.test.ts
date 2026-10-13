@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createLockdownLifecycle, type LockdownCommand } from "../src/app/lockdown.js";
+import {
+  createLockdownLifecycle,
+  shouldOpenOfficeWindowed,
+  type LockdownCommand,
+} from "../src/app/lockdown.js";
 
 /** An `invoke` whose every call waits until the test resolves it. */
 function heldInvoke() {
@@ -156,5 +160,28 @@ describe("the kiosk-mode lifecycle", () => {
     unsubscribe();
     await lifecycle.enter();
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe("shouldOpenOfficeWindowed", () => {
+  it("opens an administrator's office in an ordinary window on a PC that locks", () => {
+    expect(shouldOpenOfficeWindowed({ enabled: true, officePc: false, officeAdmin: true })).toBe(
+      true,
+    );
+  });
+
+  it("leaves the technologist locked, as only an administrator leaves kiosk mode", () => {
+    expect(shouldOpenOfficeWindowed({ enabled: true, officePc: false, officeAdmin: false })).toBe(
+      false,
+    );
+  });
+
+  it("sends nothing where the window is never locked: an office PC and a development build", () => {
+    expect(shouldOpenOfficeWindowed({ enabled: true, officePc: true, officeAdmin: true })).toBe(
+      false,
+    );
+    expect(shouldOpenOfficeWindowed({ enabled: false, officePc: false, officeAdmin: true })).toBe(
+      false,
+    );
   });
 });
