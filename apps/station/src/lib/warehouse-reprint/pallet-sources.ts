@@ -6,6 +6,8 @@ import {
 } from "./pallet-resolutions.js";
 import { z } from "zod";
 import {
+  palletDataFromLegacySource,
+  palletDataSchema,
   makePalletLabelSource,
   palletCompositionDigest,
   labelTemplateSpecSchema,
@@ -106,12 +108,12 @@ export async function retainProductionPalletSource(
   sscc: string,
   rendering: PalletLabelSourceV1["rendering"],
   originalAttempt: PalletLabelSourceV1["originalAttempt"],
+  canonical = false,
 ) {
   const [existing] = await exec.all(
     `SELECT 1 FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? LIMIT 1`,
     [owner, sscc],
   );
-  if (existing) return;
   const membership = await palletMembership(exec, sscc);
   if (!membership?.pallet.closed_at) throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
   if (rendering.kind === "thermal") {
@@ -120,34 +122,44 @@ export async function retainProductionPalletSource(
     ]);
     if (!closure) return; // Legacy thermal labels without a frozen context are not invented.
   }
-  await savePalletLabelSource(
-    exec,
-    owner,
-    makePalletLabelSource({
-      version: 1,
-      sscc,
-      shiftId: membership.pallet.shift_id,
-      closedAt: new Date(membership.pallet.closed_at).toISOString(),
-      boxCount: membership.pallet.box_count,
-      itemCount: membership.pallet.item_count,
-      boxSsccs: membership.boxes,
-      compositionDigest: membership.compositionDigest,
-      rendering,
-      originalAttempt,
-    }),
-  );
+  const source = makePalletLabelSource({
+    version: 1,
+    sscc,
+    shiftId: membership.pallet.shift_id,
+    closedAt: new Date(membership.pallet.closed_at).toISOString(),
+    boxCount: membership.pallet.box_count,
+    itemCount: membership.pallet.item_count,
+    boxSsccs: membership.boxes,
+    compositionDigest: membership.compositionDigest,
+    rendering,
+    originalAttempt,
+  });
+  if (existing) return source;
+  if (canonical) {
+    const data = palletDataFromLegacySource(source);
+    await exec.run(
+      `INSERT INTO warehouse_pallet_sources(owner,sscc,revision,value_json) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=?) ON CONFLICT DO NOTHING`,
+      [owner, data.sscc, data.revision, JSON.stringify(data), owner, data.sscc],
+    );
+  } else await savePalletLabelSource(exec, owner, source);
+  return source;
 }
 export async function retainPalletClosureSource(
   exec: SqlExecutor,
   owner: string,
   sscc: string,
   paper?: "thermal" | "a4",
+  canonical = false,
 ) {
   const [saved] = await exec.all<{ value_json: string }>(
     `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
     [owner, sscc],
   );
-  if (saved) return palletLabelSourceSchema.parse(JSON.parse(saved.value_json));
+  if (saved) {
+    const parsed = palletLabelSourceSchema.safeParse(JSON.parse(saved.value_json));
+    if (parsed.success) return parsed.data;
+    palletDataSchema.parse(JSON.parse(saved.value_json));
+  }
   const [closure] = await exec.all<{ context_json: string }>(
     "SELECT context_json FROM warehouse_pallet_closures WHERE sscc=?",
     [sscc],
@@ -218,7 +230,15 @@ export async function retainPalletClosureSource(
         )
           throw new Error("WAREHOUSE_OWNER_CHANGED");
       }
-      await retainProductionPalletSource(exec, owner, sscc, rendering, null);
+      const created = await retainProductionPalletSource(
+        exec,
+        owner,
+        sscc,
+        rendering,
+        null,
+        canonical,
+      );
+      if (canonical || saved) return created ?? null;
       const [row] = await exec.all<{ value_json: string }>(
         `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
         [owner, sscc],

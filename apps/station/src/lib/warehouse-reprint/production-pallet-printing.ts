@@ -62,6 +62,7 @@ export async function attemptProductionPalletPrint(
       input.owner,
       input.sscc,
       "thermal",
+      true,
     ).catch(() => null);
     const retained = captured?.rendering.kind === "thermal" ? captured.rendering : null;
     const fields = retained?.fields ?? warehouseSourceSchema.shape.fields.parse(input.fields),
@@ -103,6 +104,7 @@ export async function attemptProductionPalletPrint(
           bytesDigest: productLabelBytesDigest(bytes),
           geometryFingerprint: null,
         },
+        true,
       );
     } catch {
       // Auxiliary warehouse eligibility must not stop ordinary line output.

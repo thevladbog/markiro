@@ -1,6 +1,9 @@
 import { recoverLegacyProductionPalletDeliveries } from "./production-delivery.js";
 import { z } from "zod";
 import {
+  UNIFIED_REPRINT_PROTOCOL,
+  palletDataSchema,
+  palletDataReceiptSchema,
   PALLET_REPRINT_PROTOCOL,
   PALLET_PRODUCTION_DELIVERY_PROTOCOL,
   palletProductionDeliverySchema,
@@ -38,38 +41,55 @@ export async function syncWarehousePallets(
   );
   if (!sources.length && !events.length) return 0;
   let supportsProductionDelivery: boolean;
+  let supportsData: boolean;
   try {
     const caps = z
       .strictObject({ protocols: z.array(z.string()) })
       .parse(await client.get("/station/warehouse-reprint/source-capabilities"));
     if (!caps.protocols.includes(PALLET_REPRINT_PROTOCOL)) return 0;
     supportsProductionDelivery = caps.protocols.includes(PALLET_PRODUCTION_DELIVERY_PROTOCOL);
+    supportsData = caps.protocols.includes(UNIFIED_REPRINT_PROTOCOL);
   } catch (error) {
     if (error instanceof StationApiError && error.status === 404) return 0;
     throw error;
   }
   if (!isCurrent()) return 0;
   let acknowledged = 0;
-  if (sources[0]?.production_delivery_json && !supportsProductionDelivery) {
+  const dataOnly = sources[0]
+    ? z.object({ version: z.number() }).parse(JSON.parse(sources[0].value_json)).version === 3
+    : false;
+  const supportedSource =
+    (!dataOnly || supportsData) &&
+    (!sources[0]?.production_delivery_json ||
+      supportsProductionDelivery ||
+      (dataOnly && supportsData));
+  if (sources.length && !supportedSource) {
     await exec.run(
       "UPDATE warehouse_pallet_sources SET last_tried_at=? WHERE owner=? AND sscc=? AND receive_status<>'conflict'",
-      [new Date().toISOString(), sources[0].owner, sources[0].sscc],
+      [new Date().toISOString(), sources[0]?.owner, sources[0]?.sscc],
     );
   }
-  if (sources.length && (!sources[0]?.production_delivery_json || supportsProductionDelivery)) {
-    const entries = sources.map((row) => palletLabelSourceSchema.parse(JSON.parse(row.value_json)));
-    const receipt = palletSourcesReceiptSchema.parse(
-      await client.post("/station/warehouse-reprint/pallet-sources", {
-        protocol: PALLET_REPRINT_PROTOCOL,
-        entries,
-        ...(sources[0]?.production_delivery_json
-          ? {
-              productionDelivery: palletProductionDeliverySchema.parse(
-                JSON.parse(sources[0].production_delivery_json),
-              ),
-            }
-          : {}),
-      }),
+  if (sources.length && supportedSource) {
+    const entries = sources.map((row) =>
+      (dataOnly ? palletDataSchema : palletLabelSourceSchema).parse(JSON.parse(row.value_json)),
+    );
+    const receipt = (dataOnly ? palletDataReceiptSchema : palletSourcesReceiptSchema).parse(
+      await client.post(
+        dataOnly
+          ? "/station/warehouse-reprint/pallet-data-v3"
+          : "/station/warehouse-reprint/pallet-sources",
+        {
+          protocol: dataOnly ? UNIFIED_REPRINT_PROTOCOL : PALLET_REPRINT_PROTOCOL,
+          entries,
+          ...(sources[0]?.production_delivery_json
+            ? {
+                productionDelivery: palletProductionDeliverySchema.parse(
+                  JSON.parse(sources[0].production_delivery_json),
+                ),
+              }
+            : {}),
+        },
+      ),
     );
     if (
       receipt.results.length !== entries.length ||

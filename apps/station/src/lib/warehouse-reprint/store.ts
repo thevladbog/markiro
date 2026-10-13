@@ -127,10 +127,10 @@ export async function resumeWarehouseSession(exec: SqlExecutor, owner: string) {
     sent_count: number;
     closed: number;
   }>(
-    `SELECT owner,session_json,sent_count,
+    `SELECT owner,session_json,sent_count + (SELECT COUNT(*) FROM warehouse_pallet_session_sends p WHERE p.owner=s.owner AND p.session_id=s.session_id) AS sent_count,
      EXISTS(SELECT 1 FROM warehouse_reprint_session_closures c WHERE c.owner=s.owner AND c.session_id=s.session_id) AS closed
      FROM warehouse_reprint_sessions s WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
-     ORDER BY EXISTS(SELECT 1 FROM warehouse_reprint_jobs j WHERE j.owner=s.owner AND j.session_id=s.session_id AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send')) DESC,rowid DESC LIMIT 1`,
+     ORDER BY (EXISTS(SELECT 1 FROM warehouse_reprint_jobs j WHERE j.owner=s.owner AND j.session_id=s.session_id AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send')) OR EXISTS(SELECT 1 FROM warehouse_pallet_jobs j WHERE j.owner=s.owner AND j.session_id=s.session_id AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send'))) DESC,rowid DESC LIMIT 1`,
     [owner],
   );
   // Unresolved work has priority; otherwise the latest closure ends earlier paused history.
@@ -148,7 +148,11 @@ export async function readWarehouseTemplatePreference(exec: SqlExecutor, owner: 
   if (!row) return null;
   const session = warehouseSessionSchema.parse(json(row.session_json));
   if (session.owner !== row.owner) throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
-  return { unitTemplate: session.unitTemplate, boxTemplate: session.boxTemplate };
+  return {
+    unitTemplate: session.unitTemplate,
+    boxTemplate: session.boxTemplate,
+    palletTemplate: session.palletTemplate ?? null,
+  };
 }
 /** One autocommit statement; the DB guard checks every retained credential owner. */
 export async function finishWarehouseSession(

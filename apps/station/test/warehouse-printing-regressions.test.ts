@@ -139,8 +139,8 @@ it.each([false, true])(
                 "SELECT value_json FROM warehouse_pallet_sources",
               )
             )[0]?.value_json ?? "null",
-          ).rendering.kind,
-        ).toBe("thermal");
+          ),
+        ).toMatchObject({ version: 3, sscc });
     } finally {
       db.close();
     }
@@ -910,6 +910,25 @@ it("preserves quarantine protection across a later denial for another shift", as
       { key: `sync_recovery_denied_shift:${shiftId}` },
       { key: "sync_recovery_denied_shift:other-shift" },
     ]);
+  } finally {
+    db.close();
+  }
+});
+
+it("reconstructs closure rendering from saved context when data-only V3 already exists", async () => {
+  const { db, exec } = await setup();
+  try {
+    await seedPallet(exec, false);
+    const { retainPalletClosureSource } =
+      await import("../src/lib/warehouse-reprint/pallet-sources.js");
+    const first = await retainPalletClosureSource(exec, owner, sscc, "thermal", true);
+    expect(first?.version).toBe(1);
+    const before = await exec.all("SELECT revision,value_json FROM warehouse_pallet_sources");
+    const again = await retainPalletClosureSource(exec, owner, sscc, "thermal", true);
+    expect(again?.revision).toBe(first?.revision);
+    expect(await exec.all("SELECT revision,value_json FROM warehouse_pallet_sources")).toEqual(
+      before,
+    );
   } finally {
     db.close();
   }

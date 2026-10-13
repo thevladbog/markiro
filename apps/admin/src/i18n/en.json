@@ -2368,7 +2368,7 @@
           "fieldKind": "Field",
           "brandingError": "Could not load the organization name or logo. The layout is retained; retry the preview when access is restored."
         },
-        "presetHint": "Creating a standard layout adds a new template. Existing templates and shift snapshots stay unchanged; select the new layout in settings."
+        "presetHint": "Updated standard layouts include logo spacing, a right-aligned PALLET title and a footer. If your template was edited, select an updated standard in settings or create a new one. Saved print jobs remain unchanged."
       }
     },
     "lines": {

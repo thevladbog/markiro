@@ -65,6 +65,10 @@ function isStationRequest(req: Request): boolean {
         path === "/station/warehouse-reprint/pallet-lookup" ||
         path === "/station/warehouse-reprint/pallet-events" ||
         path === "/station/warehouse-reprint/pallet-lookup-v2" ||
+        path === "/station/warehouse-reprint/lookup-v3" ||
+        path === "/station/warehouse-reprint/pallet-data-v3" ||
+        path === "/station/warehouse-reprint/pallet-renderings-v3" ||
+        path === "/station/warehouse-reprint/pallet-events-v3" ||
         path === "/station/warehouse-reprint/pallet-renderings-v2" ||
         path === "/station/warehouse-reprint/pallet-events-v2" ||
         path === "/station/warehouse-reprint/pallet-production-resolutions" ||

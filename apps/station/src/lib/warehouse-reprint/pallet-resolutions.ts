@@ -1,4 +1,6 @@
+import { z } from "zod";
 import {
+  palletDataSchema,
   palletLabelSourceSchema,
   palletProductionDeliverySchema,
   palletDeliveryDiagnosticSchema,
@@ -37,7 +39,9 @@ export async function localPalletDiagnostic(exec: SqlExecutor, owner: string, ss
     [owner, sscc],
   );
   if (!row?.production_delivery_json) return null;
-  const source = palletLabelSourceSchema.parse(JSON.parse(row.value_json)),
+  const source = z
+      .union([palletDataSchema, palletLabelSourceSchema])
+      .parse(JSON.parse(row.value_json)),
     receipt = palletProductionDeliverySchema.parse(JSON.parse(row.production_delivery_json)),
     recovery = await readDeviceRecovery(exec);
   const [mirror] = await exec.all<{ terminal_id: string | null }>(
@@ -45,7 +49,8 @@ export async function localPalletDiagnostic(exec: SqlExecutor, owner: string, ss
     [sscc],
   );
   const scope =
-    source.originalAttempt?.scope ?? JSON.stringify([source.shiftId, mirror?.terminal_id]);
+    (source.version === 1 ? source.originalAttempt?.scope : null) ??
+    JSON.stringify([source.shiftId, mirror?.terminal_id]);
   const [driver] = await exec.all<{ state: string }>(
     "SELECT state FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? AND attempt_id=? AND resolved_at IS NULL",
     [scope, sscc, receipt.attemptId],
@@ -123,7 +128,9 @@ export async function resolveOriginalPalletDelivery(input: {
     [owner, d.sscc],
   );
   if (!sourceRow) throw new Error("WAREHOUSE_PALLET_SOURCE_CHANGED");
-  const source = palletLabelSourceSchema.parse(JSON.parse(sourceRow.value_json));
+  const source = z
+    .union([palletDataSchema, palletLabelSourceSchema])
+    .parse(JSON.parse(sourceRow.value_json));
   if (
     membership.compositionDigest !== source.compositionDigest ||
     membership.pallet.shift_id !== source.shiftId ||

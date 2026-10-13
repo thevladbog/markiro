@@ -1,8 +1,11 @@
+import { thermalChoice } from "../../../packages/domain/test/support/pallet-reprint.js";
 import { StrictMode } from "react";
 import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import {
+  PALLET_REPRINT_V2_PROTOCOL,
+  UNIFIED_REPRINT_PROTOCOL,
   WAREHOUSE_REPRINT_PROTOCOL,
   warehouseBoxTemplate,
   productLabelValueDigest,
@@ -47,6 +50,10 @@ export function warehouseTestCatalog() {
 }
 function warehouseCatalogGet(path: string, catalog = warehouseTestCatalog()) {
   const url = new URL(path, "https://station.test");
+  if (url.pathname.endsWith("source-capabilities"))
+    return { protocols: [PALLET_REPRINT_V2_PROTOCOL, UNIFIED_REPRINT_PROTOCOL] };
+  if (url.pathname.endsWith("pallet-templates-v2"))
+    return { protocol: PALLET_REPRINT_V2_PROTOCOL, templates: [thermalChoice()] };
   if (url.pathname === "/shifts/box-label-templates")
     return { items: [], defaultBoxLabelTemplateId: null, defaultSource: null };
   const ids = url.searchParams.get("ids")?.split(",");
@@ -63,11 +70,12 @@ it("selects independent templates and sends legacy and ordinary scans only once"
   let listener: (raw: string) => void = () => {};
   const client = {
     get: vi.fn(async (path: string) => warehouseCatalogGet(path)),
-    post: vi.fn().mockResolvedValue({
+    post: vi.fn(async (path: string) => ({
       status: "found",
+      ...(path.endsWith("lookup-v3") ? { kind: "box" } : {}),
       source: warehouseBoxSource(),
       repair: "legacy_tspl_fnc1_literal",
-    }),
+    })),
   } as unknown as StationClient;
   const print = vi.fn().mockResolvedValue(undefined);
   const onExit = vi.fn();
@@ -116,10 +124,12 @@ it("selects independent templates and sends legacy and ordinary scans only once"
         name: new RegExp(i.template.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
       }),
     );
+    await user.click(screen.getByRole("button", { name: "Палеты · SSCC" }));
+    await user.click(screen.getByRole("radio", { name: new RegExp(thermalChoice().name) }));
     await user.click(screen.getByRole("button", { name: "Применить шаблоны" }));
     await user.click(screen.getByRole("button", { name: "Начать перепечатку" }));
     await waitFor(() =>
-      expect(screen.getByText("Отсканируйте код единицы или короба")).toBeTruthy(),
+      expect(screen.getByText("Отсканируйте код продукции, короба или палеты")).toBeTruthy(),
     );
     act(() => listener(`!100${i.source.identity}`));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
@@ -171,13 +181,17 @@ it("prints a manually entered SSCC once, pauses scanner intake and rejects inval
     status: "paused",
     unitTemplate: catalog.templates[1] ?? null,
     boxTemplate: i.template,
+    palletTemplate: thermalChoice(),
   });
   let scanning = false;
   const client = {
     get: vi.fn(async (path: string) => warehouseCatalogGet(path, catalog)),
-    post: vi
-      .fn()
-      .mockResolvedValue({ status: "found", source: warehouseBoxSource(), repair: null }),
+    post: vi.fn(async (path: string) => ({
+      status: "found",
+      ...(path.endsWith("lookup-v3") ? { kind: "box" } : {}),
+      source: warehouseBoxSource(),
+      repair: null,
+    })),
   } as unknown as StationClient;
   const print = vi.fn().mockResolvedValue(undefined);
   const view = render(
@@ -295,6 +309,7 @@ it("acknowledges the visible quarantine warning durably without accepting or del
     status: "active",
     unitTemplate: null,
     boxTemplate: i.template,
+    palletTemplate: thermalChoice(),
   });
   await prepareWarehouseJob(exec, { ...i, owner });
   await exec.run(

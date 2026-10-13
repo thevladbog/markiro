@@ -18,7 +18,11 @@ import {
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { assertWarehouseDevice, assertWarehouseHistoricalOperator } from "./access";
-import { WarehousePalletService, palletLookupIdentities } from "./pallet.service";
+import {
+  WarehousePalletService,
+  tryStoredPalletData,
+  palletLookupIdentities,
+} from "./pallet.service";
 @Injectable()
 export class WarehousePalletRenderingsService {
   constructor(
@@ -117,7 +121,9 @@ export class WarehousePalletRenderingsService {
         productionSequence: latest?.sequence ?? null,
         sourceRevision: source?.revision ?? null,
         originDeviceId: source?.sourceDeviceId ?? null,
-        shiftId: source ? palletLabelSourceSchema.parse(source.value).shiftId : null,
+        shiftId: source
+          ? (tryStoredPalletData(source.value, source.revision)?.shiftId ?? null)
+          : null,
       },
     });
   }

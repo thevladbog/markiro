@@ -2,6 +2,12 @@ import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
+  UNIFIED_REPRINT_PROTOCOL,
+  palletDataSchema,
+  palletDataFromLegacySource,
+  palletRenderingV3Schema,
+  assertPalletRenderingV3MatchesData,
+  type PalletDataV3,
   PALLET_REPRINT_PROTOCOL,
   PALLET_REPRINT_V2_PROTOCOL,
   palletReprintEventV2Schema,
@@ -24,6 +30,32 @@ import {
   assertWarehouseOperator,
   assertWarehouseHistoricalOperator,
 } from "./access";
+export function storedPalletData(value: unknown, expectedRevision?: string): PalletDataV3 {
+  const parsed = palletDataSchema.safeParse(value);
+  if (parsed.success) {
+    if (expectedRevision !== undefined && expectedRevision !== parsed.data.revision)
+      throw new Error("WAREHOUSE_SOURCE_CORRUPT");
+    return parsed.data;
+  }
+  const legacy = palletLabelSourceSchema.parse(value);
+  if (expectedRevision !== undefined && expectedRevision !== legacy.revision)
+    throw new Error("WAREHOUSE_SOURCE_CORRUPT");
+  return palletDataFromLegacySource(legacy);
+}
+/** Corrupt persisted JSON is a per-record conflict, not a failed sync batch. */
+export function tryStoredPalletData(
+  value: unknown,
+  expectedRevision?: string,
+): PalletDataV3 | null {
+  try {
+    return storedPalletData(value, expectedRevision);
+  } catch {
+    return null;
+  }
+}
+function sourceBranding(source: PalletLabelSourceV1 | PalletDataV3): string | null {
+  return source.version === 1 ? source.rendering.brandingJson : source.brandingJson;
+}
 type Reader = Pick<Db, "select">;
 export async function palletMembership(db: Reader, tenantId: string, sscc: string) {
   const [pallet] = await db
@@ -106,7 +138,7 @@ export async function palletMembership(db: Reader, tenantId: string, sscc: strin
 }
 export function samePalletComposition(
   m: NonNullable<Awaited<ReturnType<typeof palletMembership>>>,
-  source: PalletLabelSourceV1,
+  source: Pick<PalletLabelSourceV1, "compositionDigest" | "boxCount" | "itemCount" | "boxSsccs">,
 ) {
   return (
     m.compositionDigest === source.compositionDigest &&
@@ -192,7 +224,7 @@ export class WarehousePalletService {
   async receive(
     tenantId: string,
     deviceId: string,
-    entries: PalletLabelSourceV1[],
+    entries: Array<PalletLabelSourceV1 | PalletDataV3>,
     productionDelivery?: z.infer<typeof palletProductionDeliverySchema>,
   ) {
     return this.db.transaction(async (tx) => {
@@ -203,7 +235,7 @@ export class WarehousePalletService {
       const results: Array<{ revision: string; status: "accepted" | "retryable" | "conflict" }> =
         [];
       const receiveDelivery = async (
-        source: PalletLabelSourceV1,
+        source: PalletLabelSourceV1 | PalletDataV3,
       ): Promise<"accepted" | "conflict"> => {
         if (!productionDelivery) return "accepted";
         const deliveryScope = and(
@@ -341,8 +373,8 @@ export class WarehousePalletService {
           m.pallet.closedAt?.toISOString() !== source.closedAt ||
           m.pallet.disassembledAt ||
           !samePalletComposition(m, source) ||
-          (source.rendering.brandingJson !== null &&
-            validatePalletBranding(source.rendering.brandingJson).tenantId !== tenantId)
+          (sourceBranding(source) !== null &&
+            validatePalletBranding(sourceBranding(source) ?? "").tenantId !== tenantId)
         ) {
           results.push({ revision: source.revision, status: "conflict" });
           continue;
@@ -366,7 +398,7 @@ export class WarehousePalletService {
             deviceId,
             sscc: source.sscc,
             sourceRevision: source.revision,
-            format: source.rendering.kind,
+            format: source.version === 1 ? source.rendering.kind : "data",
           },
         });
         results.push({ revision: source.revision, status: await receiveDelivery(source) });
@@ -405,6 +437,9 @@ export class WarehousePalletService {
             ? ("snapshot_missing" as const)
             : ("delivery_unresolved" as const),
       };
+    const parsedSource = palletLabelSourceSchema.safeParse(saved.value);
+    if (!parsedSource.success)
+      return { status: "unavailable" as const, code: "snapshot_missing" as const };
     const [latestDelivery] = await this.db
       .select()
       .from(schema.palletProductionDeliveries)
@@ -447,7 +482,7 @@ export class WarehousePalletService {
     );
     if (delivery?.state !== "sent" && !resolved && !explicitlyResolved)
       return { status: "unavailable" as const, code: "delivery_unresolved" as const };
-    const source = palletLabelSourceSchema.parse(saved.value);
+    const source = parsedSource.data;
     if (
       source.sscc !== sscc ||
       source.shiftId !== m.pallet.shiftId ||
@@ -464,7 +499,9 @@ export class WarehousePalletService {
       z.infer<typeof palletReprintEventSchema> | z.infer<typeof palletReprintEventV2Schema>
     >,
     protocol:
-      typeof PALLET_REPRINT_PROTOCOL | typeof PALLET_REPRINT_V2_PROTOCOL = PALLET_REPRINT_PROTOCOL,
+      | typeof PALLET_REPRINT_PROTOCOL
+      | typeof PALLET_REPRINT_V2_PROTOCOL
+      | typeof UNIFIED_REPRINT_PROTOCOL = PALLET_REPRINT_PROTOCOL,
   ) {
     return this.db.transaction(async (tx) => {
       await assertWarehouseDevice(tx, tenantId, deviceId);
@@ -540,13 +577,17 @@ export class WarehousePalletService {
           results.push({ eventId: event.eventId, status: "retryable" });
           continue;
         }
-        if (source.revision !== event.sourceRevision) {
+        const sourceRevision =
+          protocol === UNIFIED_REPRINT_PROTOCOL
+            ? tryStoredPalletData(source.value, source.revision)?.revision
+            : source.revision;
+        if (sourceRevision !== event.sourceRevision) {
           await reject();
           continue;
         }
         if (
           previous.some(
-            (row) => "renderingRevision" in row.value !== (protocol === PALLET_REPRINT_V2_PROTOCOL),
+            (row) => "renderingRevision" in row.value !== (protocol !== PALLET_REPRINT_PROTOCOL),
           )
         ) {
           await reject();
@@ -554,11 +595,14 @@ export class WarehousePalletService {
         }
         const accepted = previous.filter((row) => row.status === "accepted");
         const history = accepted.map((row) =>
-          protocol === PALLET_REPRINT_V2_PROTOCOL
+          protocol !== PALLET_REPRINT_PROTOCOL
             ? palletReprintEventV2Schema.parse(row.value)
             : palletReprintEventSchema.parse(row.value),
         );
-        const frozen = palletLabelSourceSchema.parse(source.value);
+        const frozen =
+          protocol === UNIFIED_REPRINT_PROTOCOL
+            ? storedPalletData(source.value, source.revision)
+            : palletLabelSourceSchema.parse(source.value);
         const [savedRendering] = await tx
           .select()
           .from(schema.palletReprintRenderings)
@@ -569,8 +613,14 @@ export class WarehousePalletService {
               eq(schema.palletReprintRenderings.jobId, event.jobId),
             ),
           );
-        let renderingKind = frozen.rendering.kind;
-        if (protocol === PALLET_REPRINT_V2_PROTOCOL) {
+        let renderingKind: "a4" | "thermal" =
+          frozen.version === 1 ? frozen.rendering.kind : "thermal";
+        let templateAudit: {
+          templateId: string | null;
+          templateName: string;
+          templateKind: "a4" | "thermal";
+        } | null = null;
+        if (protocol !== PALLET_REPRINT_PROTOCOL) {
           if (!savedRendering) {
             results.push({ eventId: event.eventId, status: "retryable" });
             continue;
@@ -582,13 +632,41 @@ export class WarehousePalletService {
             await reject();
             continue;
           }
-          const rendering = palletRenderingV2Schema.parse(savedRendering.value);
-          if (rendering.sscc !== frozen.sscc || rendering.sourceRevision !== frozen.revision) {
-            await reject();
-            continue;
+          if (protocol === UNIFIED_REPRINT_PROTOCOL) {
+            const rendering = palletRenderingV3Schema.parse(savedRendering.value);
+            if (
+              rendering.sscc !== frozen.sscc ||
+              rendering.sourceRevision !== frozen.revision ||
+              frozen.version !== 3
+            ) {
+              await reject();
+              continue;
+            }
+            assertPalletRenderingV3MatchesData(frozen, rendering);
+            renderingKind = rendering.choice.kind;
+            templateAudit = {
+              templateId: rendering.choice.id,
+              templateName: rendering.choice.name,
+              templateKind: renderingKind,
+            };
+          } else {
+            const rendering = palletRenderingV2Schema.parse(savedRendering.value);
+            if (
+              rendering.sscc !== frozen.sscc ||
+              rendering.sourceRevision !== frozen.revision ||
+              frozen.version !== 1
+            ) {
+              await reject();
+              continue;
+            }
+            assertPalletRenderingMatchesSource(frozen, rendering);
+            renderingKind = rendering.rendering.kind;
+            templateAudit = {
+              templateId: rendering.templateId,
+              templateName: rendering.templateName,
+              templateKind: renderingKind,
+            };
           }
-          assertPalletRenderingMatchesSource(frozen, rendering);
-          renderingKind = rendering.rendering.kind;
         } else if (savedRendering || "renderingRevision" in event) {
           await reject();
           continue;
@@ -669,13 +747,7 @@ export class WarehousePalletService {
           after: {
             deviceId,
             ...event,
-            ...(savedRendering
-              ? {
-                  templateId: palletRenderingV2Schema.parse(savedRendering.value).templateId,
-                  templateName: palletRenderingV2Schema.parse(savedRendering.value).templateName,
-                  templateKind: renderingKind,
-                }
-              : {}),
+            ...(templateAudit ?? {}),
           },
         });
         results.push({ eventId: event.eventId, status: "accepted" });

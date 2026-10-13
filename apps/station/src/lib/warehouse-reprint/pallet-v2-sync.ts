@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  UNIFIED_REPRINT_PROTOCOL,
+  palletRenderingV3Schema,
+  palletRenderingsV3ReceiptSchema,
+  palletEventsV3ReceiptSchema,
   PALLET_REPRINT_V2_PROTOCOL,
   PALLET_PRODUCTION_RESOLUTION_PROTOCOL,
   palletRenderingV2Schema,
@@ -30,13 +34,15 @@ export async function syncWarehousePalletV2(
   client: Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>,
   owner: string,
   current: () => boolean,
+  version: 2 | 3 = 2,
 ) {
+  const protocol = version === 3 ? UNIFIED_REPRINT_PROTOCOL : PALLET_REPRINT_V2_PROTOCOL;
   if (!current() || !client.get) return 0;
   const [pending] = await exec.all(
-    `SELECT 1 FROM warehouse_pallet_renderings WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' UNION SELECT 1 FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND json_extract(value_json,'$.renderingRevision') IS NOT NULL LIMIT 1`,
+    `SELECT 1 FROM warehouse_pallet_renderings WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND json_extract(value_json,'$.version')=${version} UNION SELECT 1 FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending' AND json_extract(value_json,'$.renderingRevision') IS NOT NULL AND EXISTS(SELECT 1 FROM warehouse_pallet_jobs j WHERE j.owner=warehouse_pallet_events.owner AND j.job_id=json_extract(warehouse_pallet_events.value_json,'$.jobId') AND j.protocol='${protocol}') LIMIT 1`,
     [owner, owner],
   );
-  if (!pending || !(await supports(client, PALLET_REPRINT_V2_PROTOCOL)) || !current()) return 0;
+  if (!pending || !(await supports(client, protocol)) || !current()) return 0;
   let ack = 0;
   const rows = await exec.all<{
     owner: string;
@@ -44,15 +50,19 @@ export async function syncWarehousePalletV2(
     value_json: string;
     event_json: string;
   }>(
-    `SELECT r.owner,r.job_id,r.value_json,j.event_json FROM warehouse_pallet_renderings r JOIN warehouse_pallet_jobs j ON j.owner=r.owner AND j.job_id=r.job_id WHERE r.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND r.receive_status='pending' ORDER BY r.last_tried_at,r.rowid LIMIT 1`,
+    `SELECT r.owner,r.job_id,r.value_json,j.event_json FROM warehouse_pallet_renderings r JOIN warehouse_pallet_jobs j ON j.owner=r.owner AND j.job_id=r.job_id WHERE r.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND r.receive_status='pending' AND j.protocol='${protocol}' ORDER BY r.last_tried_at,r.rowid LIMIT 1`,
     [owner],
   );
   for (const row of rows) {
-    const rendering = palletRenderingV2Schema.parse(JSON.parse(row.value_json)),
+    const rendering = (version === 3 ? palletRenderingV3Schema : palletRenderingV2Schema).parse(
+        JSON.parse(row.value_json),
+      ),
       event = palletReprintEventV2Schema.parse(JSON.parse(row.event_json));
-    const receipt = palletRenderingsV2ReceiptSchema.parse(
-      await client.post("/station/warehouse-reprint/pallet-renderings-v2", {
-        protocol: PALLET_REPRINT_V2_PROTOCOL,
+    const receipt = (
+      version === 3 ? palletRenderingsV3ReceiptSchema : palletRenderingsV2ReceiptSchema
+    ).parse(
+      await client.post(`/station/warehouse-reprint/pallet-renderings-v${version}`, {
+        protocol,
         entries: [{ jobId: row.job_id, operatorId: event.operatorId, rendering }],
       }),
     );
@@ -76,14 +86,14 @@ export async function syncWarehousePalletV2(
     if (result.status !== "retryable") ack++;
   }
   const events = await exec.all<{ owner: string; event_id: string; value_json: string }>(
-    `SELECT e.owner,e.event_id,e.value_json FROM warehouse_pallet_events e JOIN warehouse_pallet_renderings r ON r.owner=e.owner AND r.job_id=json_extract(e.value_json,'$.jobId') WHERE e.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND e.receive_status='pending' AND r.receive_status='accepted' AND json_extract(e.value_json,'$.renderingRevision') IS NOT NULL ORDER BY e.last_tried_at,e.rowid LIMIT 100`,
+    `SELECT e.owner,e.event_id,e.value_json FROM warehouse_pallet_events e JOIN warehouse_pallet_renderings r ON r.owner=e.owner AND r.job_id=json_extract(e.value_json,'$.jobId') WHERE e.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND e.receive_status='pending' AND r.receive_status='accepted' AND json_extract(r.value_json,'$.version')=${version} AND json_extract(e.value_json,'$.renderingRevision') IS NOT NULL ORDER BY e.last_tried_at,e.rowid LIMIT 100`,
     [owner],
   );
   if (!events.length || !current()) return ack;
   const entries = events.map((r) => palletReprintEventV2Schema.parse(JSON.parse(r.value_json))),
-    receipt = palletEventsV2ReceiptSchema.parse(
-      await client.post("/station/warehouse-reprint/pallet-events-v2", {
-        protocol: PALLET_REPRINT_V2_PROTOCOL,
+    receipt = (version === 3 ? palletEventsV3ReceiptSchema : palletEventsV2ReceiptSchema).parse(
+      await client.post(`/station/warehouse-reprint/pallet-events-v${version}`, {
+        protocol,
         entries,
       }),
     );
@@ -109,6 +119,14 @@ export async function syncWarehousePalletV2(
     if (result.status !== "retryable") ack++;
   }
   return ack;
+}
+export async function syncWarehousePalletV3(
+  exec: SqlExecutor,
+  client: Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>,
+  owner: string,
+  current: () => boolean,
+) {
+  return syncWarehousePalletV2(exec, client, owner, current, 3);
 }
 export async function syncPalletProductionResolutions(
   exec: SqlExecutor,

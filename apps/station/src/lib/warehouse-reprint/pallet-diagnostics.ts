@@ -1,4 +1,8 @@
+import { z } from "zod";
 import {
+  UNIFIED_REPRINT_PROTOCOL,
+  palletDataSchema,
+  palletDataReceiptSchema,
   PALLET_REPRINT_PROTOCOL,
   palletLabelSourceSchema,
   palletProductionDeliverySchema,
@@ -29,15 +33,24 @@ export async function syncWarehousePalletEvidence(
     [owner, sscc],
   );
   if (!row) return false;
-  const source = palletLabelSourceSchema.parse(JSON.parse(row.value_json));
+  const source = z
+    .union([palletDataSchema, palletLabelSourceSchema])
+    .parse(JSON.parse(row.value_json));
   const evidence = palletProductionDeliverySchema.parse(JSON.parse(row.production_delivery_json));
   if (evidence.state !== "sent" || evidence.sourceRevision !== source.revision) return false;
-  const receipt = palletSourcesReceiptSchema.parse(
-    await client.post("/station/warehouse-reprint/pallet-sources", {
-      protocol: PALLET_REPRINT_PROTOCOL,
-      entries: [source],
-      productionDelivery: evidence,
-    }),
+  const receipt = (
+    source.version === 3 ? palletDataReceiptSchema : palletSourcesReceiptSchema
+  ).parse(
+    await client.post(
+      source.version === 3
+        ? "/station/warehouse-reprint/pallet-data-v3"
+        : "/station/warehouse-reprint/pallet-sources",
+      {
+        protocol: source.version === 3 ? UNIFIED_REPRINT_PROTOCOL : PALLET_REPRINT_PROTOCOL,
+        entries: [source],
+        productionDelivery: evidence,
+      },
+    ),
   );
   if (receipt.results.length !== 1 || receipt.results[0]?.revision !== source.revision)
     throw new Error("WAREHOUSE_PALLET_RECEIPT_MISMATCH");

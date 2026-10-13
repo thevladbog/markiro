@@ -135,6 +135,19 @@ describe("complete A4 sheet rendering", () => {
     );
     expect(printed).toContain(expiry);
   });
+  it("prints the explicit historical expiry instead of recalculating from current shelf life", async () => {
+    const spec = makeSheetSpec();
+    spec.body.push({ id: "expiry", kind: "field", field: "expiryDate", fontSizePt: 14 });
+    const { printed, rasterize } = textRecorder();
+    await domain.renderPalletSheet(
+      spec,
+      { ...context, expiryDate: "2026-11-15" },
+      domain.nominalSheetGeometry(spec),
+      rasterize,
+    );
+    expect(printed).toContain("15.11.2026");
+    expect(printed).not.toContain("09.10.2027");
+  });
   it("renders complete EGAIS leading zeroes when present and omits the empty row", async () => {
     const spec = makeSheetSpec();
     spec.body.push({

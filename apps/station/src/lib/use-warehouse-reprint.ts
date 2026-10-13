@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { createWarehouseWork, type WarehouseWorkOptions } from "./warehouse-reprint/work.js";
+import { createUnifiedWarehouseWork, type WarehouseWorkOptions } from "./warehouse-reprint/work.js";
 import type { FloorWorkBarrier } from "./credential-recovery.js";
 export function useWarehouseReprint(
   options: WarehouseWorkOptions,
@@ -10,7 +10,7 @@ export function useWarehouseReprint(
   const { exec, generation, deviceId, operatorId } = options;
   const work = useMemo(
     () =>
-      createWarehouseWork({
+      createUnifiedWarehouseWork({
         exec,
         client: {
           get: (path, requestOptions) => latest.current.client.get(path, requestOptions),

@@ -228,3 +228,33 @@ it("hides the previous owner's logo while another credential loads its own previ
   finish(logo);
   await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
 });
+
+it("keeps the resolved preview when a catalog refresh returns an equivalent template object", async () => {
+  const spec: LabelTemplateSpec = {
+    language: "tspl",
+    dpi: 203,
+    widthMm: 58,
+    heightMm: 40,
+    elements: [
+      {
+        id: "cache-title",
+        kind: "text",
+        text: "UNCHANGED CATALOG PREVIEW",
+        xMm: 2,
+        yMm: 2,
+        fontSizePt: 10,
+      },
+    ],
+  };
+  const first = template(spec),
+    view = render(<LabelPreview template={first} />);
+  await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
+  const calls = vi.mocked(rasterizeText).mock.calls.length;
+  view.rerender(
+    <LabelPreview
+      template={template({ ...spec, elements: spec.elements.map((e) => ({ ...e })) })}
+    />,
+  );
+  await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
+  expect(vi.mocked(rasterizeText).mock.calls).toHaveLength(calls);
+});

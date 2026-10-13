@@ -123,6 +123,16 @@ serialized per physical endpoint, including test labels. Local destination metad
 retires with the existing print-job retention rules and never enters server event digests.
 See [device printer routing](superpowers/specs/2026-09-13-device-printer-routing-design.md).
 
+Warehouse reprinting uses one session with product, box and pallet templates selected
+before scanning. A unit scan prints the unit, a box SSCC prints the box, and a pallet
+SSCC prints the closed production pallet; scans do not expand to a parent pallet.
+The assigned pallet printer's A4 flag selects sheet templates or thermal templates.
+Pallet V3 sources retain historical fields and civil dates independently of the
+original template. Each new attempt freezes the selected template and bytes; the
+existing V1/V2 journals remain recoverable. A genuine unknown send requires an
+explicit resolution, while absence of a legacy receipt alone does not block a new
+print. Deploy V3 API capability before the Station client.
+
 Station additionally supports `windows_driver` profiles for installed Windows queues.
 The default and every legacy profile remain RAW ZPL/TSPL. Driver mode freezes a
 validated `mono-raster-v1` page at 203 or 300 DPI and prints it through GDI at 1:1
