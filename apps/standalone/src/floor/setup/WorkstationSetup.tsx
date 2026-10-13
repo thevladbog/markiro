@@ -17,6 +17,7 @@ import type {
   ScannerSnapshot,
   UsbPrinter,
 } from "../../hardware/hardware.js";
+import { checkScan, type ScanCheck } from "../../app/scan-check.js";
 import { paintMonoRaster } from "../../labels/sheet-render.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
@@ -76,6 +77,13 @@ export interface WorkstationSetupProps {
   /** The settings were stored: the floor reads them again. */
   onSaved: (settings: WorkstationSettings) => void;
   onBack: () => void;
+  /**
+   * `scanners` — the scanner settings a station opens before its pairing
+   * (owner feedback, first Windows test): the COM scanners and a check of what
+   * a scan read, under «Настройки сканера»; printers, sound and the label
+   * check stay as stored. `all` (the default) — the whole workstation setup.
+   */
+  scope?: "all" | "scanners";
 }
 
 /**
@@ -131,8 +139,12 @@ export function WorkstationSetup({
   playTone = (level) => playSignalTone("ok", undefined, level),
   onSaved,
   onBack,
+  scope = "all",
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
+  const scannersOnly = scope === "scanners";
+  // What the last scan read, for the scanner check (scanners only).
+  const [scanCheck, setScanCheck] = useState<ScanCheck | null>(null);
   const [stored, setStored] = useState<WorkstationSettings | null>(null);
   const [draft, setDraft] = useState<WorkstationSettings | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -212,9 +224,11 @@ export function WorkstationSetup({
   const sectionHeading = useRef<HTMLHeadingElement>(null);
   const loaded = draft !== null && stored !== null;
   const editing = editor !== null;
+  const scannersHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (loaded) sectionHeading.current?.focus();
-  }, [loaded, editing]);
+    if (!loaded) return;
+    (scannersOnly ? scannersHeading : sectionHeading).current?.focus();
+  }, [loaded, editing, scannersOnly]);
 
   // The test print as the scanner's listener reads it: kept as it is set, so
   // a scan right after the label went is checked against it, never missed.
@@ -231,6 +245,8 @@ export function WorkstationSetup({
   useEffect(
     () =>
       source.start((raw) => {
+        // The scanner check says what any scan read, never its text.
+        if (scannersOnly) setScanCheck(checkScan(raw));
         const now = testRef.current;
         // The check stays open after a wrong scan, until the right code comes.
         if (now?.kind !== "sent" && now?.kind !== "mismatch") return;
@@ -243,7 +259,7 @@ export function WorkstationSetup({
             : { kind: "mismatch", name: now.name, code: now.code, sheet: now.sheet },
         );
       }),
-    [source, setTest],
+    [source, setTest, scannersOnly],
   );
 
   // The keys typed into a text field are the field's, not a scan: the scan
@@ -318,8 +334,6 @@ export function WorkstationSetup({
     );
   };
 
-  const scannersHeading = useRef<HTMLHeadingElement>(null);
-
   const change = (next: WorkstationSettings) => {
     setDraft(next);
     setStatus(null);
@@ -327,7 +341,11 @@ export function WorkstationSetup({
 
   if (readFailed || draft === null || stored === null) {
     return (
-      <Card className="standalone-card" title={t("floor.setup.title")} titleAs="h2">
+      <Card
+        className="standalone-card"
+        title={t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+        titleAs="h2"
+      >
         <div className="standalone-form">
           <div aria-live="polite">
             {readFailed ? (
@@ -795,6 +813,25 @@ export function WorkstationSetup({
     );
   };
 
+  const scanCheckTone = (check: ScanCheck) =>
+    check.kind === "unreadable" ? "warn" : check.kind === "pairing" ? "ok" : "info";
+  const scanCheckText = (check: ScanCheck): string => {
+    if (check.kind === "unreadable") return t("floor.setup.scannerScope.unreadable");
+    const parts =
+      check.kind === "pairing"
+        ? [
+            check.addresses.length === 0
+              ? t("floor.setup.scannerScope.pairingNoAddress")
+              : t("floor.setup.scannerScope.pairing", { addresses: check.addresses.join(", ") }),
+          ]
+        : [
+            t("floor.setup.scannerScope.other", { length: check.length }),
+            ...(check.groupSeparator ? [t("floor.setup.scannerScope.groupSeparator")] : []),
+          ];
+    if (check.russianLayout) parts.push(t("floor.setup.scannerScope.russianLayout"));
+    return parts.join(" ");
+  };
+
   const silent = soundLevel(draft.sound) === 0;
   const setVolume = (volume: number) => {
     change({ ...draft, sound: { ...draft.sound, volume: Math.min(100, Math.max(0, volume)) } });
@@ -809,14 +846,18 @@ export function WorkstationSetup({
   ];
 
   return (
-    <Card className="standalone-card workstation-setup" title={t("floor.setup.title")} titleAs="h2">
+    <Card
+      className="standalone-card workstation-setup"
+      title={t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+      titleAs="h2"
+    >
       <div className="standalone-form">
-        {editor === null && (
+        {editor === null && !scannersOnly && (
           <h3 ref={sectionHeading} tabIndex={-1}>
             {t("floor.setup.printers.title")}
           </h3>
         )}
-        {editor !== null ? (
+        {scannersOnly ? null : editor !== null ? (
           editorForm(editor)
         ) : (
           <>
@@ -988,6 +1029,23 @@ export function WorkstationSetup({
             </div>
             <p>{t("floor.setup.scanners.keyboard")}</p>
 
+            {scannersOnly && (
+              <>
+                <h3>{t("floor.setup.scannerScope.checkTitle")}</h3>
+                <p>{t("floor.setup.scannerScope.checkBody")}</p>
+                <div className="workstation-setup__live" aria-live="polite">
+                  {scanCheck !== null && (
+                    <Alert tone={scanCheckTone(scanCheck)} role="presentation">
+                      {scanCheckText(scanCheck)}
+                    </Alert>
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        )}
+        {editor === null && !scannersOnly && (
+          <>
             <h3>{t("floor.setup.sound.title")}</h3>
             <p aria-live="polite">
               {silent

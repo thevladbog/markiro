@@ -10,10 +10,68 @@
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
+use tauri::{AppHandle, LogicalSize, Manager, Runtime, State, WebviewWindow, Window, WindowEvent};
 
 /// The label of the app's only window (`tauri.conf.json` names none, so it is `main`).
 pub const MAIN_WINDOW: &str = "main";
+
+/// The size of an ordinary (not kiosk) window, in logical pixels: what the
+/// office is for, a mouse-and-keyboard app that opens as a normal, resizable
+/// window and never fills the screen by itself (`tauri.conf.json` has the same
+/// numbers for the window's first appearance).
+pub const ORDINARY_SIZE: (f64, f64) = (1280.0, 800.0);
+
+/// The least an ordinary window shrinks to, in logical pixels.
+pub const ORDINARY_MIN: (f64, f64) = (960.0, 600.0);
+
+/// What the title bar and the window frame take beyond the page, so that an
+/// ordinary window fits a work area with its frame (logical pixels).
+const FRAME_ALLOWANCE: f64 = 48.0;
+
+/// The size an ordinary window gets on a monitor whose work area (the screen
+/// without the taskbar) is `work_area` logical pixels: `ORDINARY_SIZE`, kept
+/// inside the work area with room for the frame, and never below
+/// `ORDINARY_MIN` (a window that small is the user's to resize). `None` — the
+/// monitor is unknown — gives `ORDINARY_SIZE`.
+pub fn ordinary_window_size(work_area: Option<(f64, f64)>) -> (f64, f64) {
+    let Some((width, height)) = work_area else {
+        return ORDINARY_SIZE;
+    };
+    (
+        ORDINARY_SIZE.0.min(width).max(ORDINARY_MIN.0.min(width)),
+        ORDINARY_SIZE
+            .1
+            .min(height - FRAME_ALLOWANCE)
+            .max(ORDINARY_MIN.1.min(height - FRAME_ALLOWANCE)),
+    )
+}
+
+/// The work area of the monitor the window is on, in logical pixels.
+fn work_area_of<R: Runtime>(window: &WebviewWindow<R>) -> Option<(f64, f64)> {
+    let monitor = window.current_monitor().ok().flatten()?;
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 {
+        return None;
+    }
+    let size = monitor.work_area().size;
+    Some((
+        f64::from(size.width) / scale,
+        f64::from(size.height) / scale,
+    ))
+}
+
+/// Gives the window the shape of an ordinary one: not maximized, not
+/// fullscreen, `ordinary_window_size` for its monitor, centred. Every step is
+/// tried whatever the others did; `true` when all held.
+pub fn settle_ordinary_window<R: Runtime>(window: &WebviewWindow<R>) -> bool {
+    let (width, height) = ordinary_window_size(work_area_of(window));
+    let results = [
+        window.unmaximize(),
+        window.set_size(LogicalSize::new(width, height)),
+        window.center(),
+    ];
+    results.iter().all(Result::is_ok)
+}
 
 /// Whether the main window is in kiosk mode; off when the app starts.
 #[derive(Debug, Default)]
@@ -41,6 +99,9 @@ pub enum LockdownError {
     NoWindow,
     /// The window refused a property (or, on Windows, covering its monitor).
     WindowFailed,
+    /// Kiosk mode may not lock this PC (`window_policy::kiosk_permitted`: a
+    /// host or office PC, `"kiosk": false`, a `--windowed` launch).
+    NotPermitted,
 }
 
 impl LockdownError {
@@ -48,6 +109,7 @@ impl LockdownError {
         match self {
             Self::NoWindow => "no_window",
             Self::WindowFailed => "window_failed",
+            Self::NotPermitted => "kiosk_off",
         }
     }
 }
@@ -108,6 +170,8 @@ fn cover_current_monitor<R: Runtime>(_window: &WebviewWindow<R>) -> Result<(), L
 
 /// Every property back to an ordinary window, each tried whatever the others
 /// did (a `?` chain would leave the window half-locked); `true` when all held.
+/// The size comes back too: kiosk mode covered the whole monitor, and leaving
+/// fullscreen alone would keep that size, a window that only looks maximized.
 fn restore_window<R: Runtime>(window: &WebviewWindow<R>) -> bool {
     let results = [
         window.set_fullscreen(false),
@@ -115,7 +179,9 @@ fn restore_window<R: Runtime>(window: &WebviewWindow<R>) -> bool {
         window.set_skip_taskbar(false),
         window.set_decorations(true),
     ];
-    results.iter().all(Result::is_ok)
+    let held = results.iter().all(Result::is_ok);
+    // After the decorations: the size is the page's, the frame is added.
+    settle_ordinary_window(window) && held
 }
 
 fn main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, LockdownError> {
@@ -127,7 +193,15 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, Lockd
 /// fullscreen over its monitor. The flag is set only once every property
 /// held; a failure rolls every property back and leaves the flag off, so a
 /// window that is not fully locked can still be closed.
+/// A PC kiosk mode may not lock (`window_policy`) is refused before anything
+/// changes, whatever the webview asked: the host's PC is never locked.
 pub fn lock<R: Runtime>(app: &AppHandle<R>, state: &LockdownState) -> Result<(), LockdownError> {
+    let permitted = app
+        .try_state::<crate::window_policy::KioskPolicyState>()
+        .is_none_or(|policy| policy.permitted());
+    if !permitted {
+        return Err(LockdownError::NotPermitted);
+    }
     let window = main_window(app)?;
     let applied = window
         .set_decorations(false)
@@ -213,8 +287,36 @@ mod tests {
     }
 
     #[test]
+    fn an_ordinary_window_is_1280_by_800_on_a_big_enough_screen() {
+        assert_eq!(ordinary_window_size(None), (1280.0, 800.0));
+        assert_eq!(
+            ordinary_window_size(Some((1920.0, 1040.0))),
+            (1280.0, 800.0)
+        );
+        assert_eq!(
+            ordinary_window_size(Some((2560.0, 1400.0))),
+            (1280.0, 800.0)
+        );
+    }
+
+    #[test]
+    fn an_ordinary_window_fits_a_small_screen_with_room_for_its_frame() {
+        // 1366x768 with the taskbar: 728 logical pixels of work area.
+        assert_eq!(ordinary_window_size(Some((1366.0, 728.0))), (1280.0, 680.0));
+        assert_eq!(ordinary_window_size(Some((1024.0, 728.0))), (1024.0, 680.0));
+    }
+
+    #[test]
+    fn an_ordinary_window_follows_a_screen_smaller_than_its_minimum() {
+        assert_eq!(ordinary_window_size(Some((1000.0, 700.0))), (1000.0, 652.0));
+        // Below the minimum the screen wins: the window must stay reachable.
+        assert_eq!(ordinary_window_size(Some((800.0, 500.0))), (800.0, 452.0));
+    }
+
+    #[test]
     fn refusals_are_bare_codes() {
         assert_eq!(LockdownError::NoWindow.code(), "no_window");
         assert_eq!(LockdownError::WindowFailed.code(), "window_failed");
+        assert_eq!(LockdownError::NotPermitted.code(), "kiosk_off");
     }
 }

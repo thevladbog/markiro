@@ -1,6 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 
-import { createLockdownLifecycle, type LockdownCommand } from "../src/app/lockdown.js";
+import {
+  createLockdownLifecycle,
+  kioskDue,
+  rolePermitsKiosk,
+  type LockdownCommand,
+  type OfficeSessionKind,
+} from "../src/app/lockdown.js";
 
 /** An `invoke` whose every call waits until the test resolves it. */
 function heldInvoke() {
@@ -156,5 +164,53 @@ describe("the kiosk-mode lifecycle", () => {
     unsubscribe();
     await lifecycle.enter();
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+interface PolicyRow {
+  role: "host" | "station" | "office" | null;
+  kioskSetting: boolean;
+  windowedLaunch: boolean;
+  configured: boolean;
+  office: OfficeSessionKind;
+  permitted: boolean;
+  kiosk: boolean;
+}
+
+// Bind the module URL before use: the jsdom environment rewrites a literal
+// `new URL(..., import.meta.url)` (see test/protocol.test.ts).
+const moduleUrl = import.meta.url;
+/** The table the shell's tests read too (`src-tauri/src/window_policy.rs`). */
+const POLICY = (
+  JSON.parse(
+    readFileSync(new URL("../src-tauri/tests/fixtures/window-policy.json", moduleUrl), "utf8"),
+  ) as { rows: PolicyRow[] }
+).rows;
+
+describe("the window-mode table (owner decision 2026-10-13)", () => {
+  it("decides each row as the shell's table does", () => {
+    expect(POLICY.length).toBeGreaterThanOrEqual(24);
+    for (const row of POLICY) {
+      expect(
+        kioskDue({ permitted: row.permitted, configured: row.configured, office: row.office }),
+        JSON.stringify(row),
+      ).toBe(row.kiosk);
+    }
+  });
+
+  it("lets the role alone permit kiosk mode as the shell does", () => {
+    for (const row of POLICY.filter(
+      (candidate) => candidate.kioskSetting && !candidate.windowedLaunch,
+    )) {
+      expect(rolePermitsKiosk(row.role), JSON.stringify(row)).toBe(row.permitted);
+    }
+  });
+
+  it("never locks a host or office PC, and opens an administrator's office on a station", () => {
+    expect(rolePermitsKiosk("host")).toBe(false);
+    expect(rolePermitsKiosk("office")).toBe(false);
+    expect(kioskDue({ permitted: true, configured: true, office: "administrator" })).toBe(false);
+    expect(kioskDue({ permitted: true, configured: true, office: "other" })).toBe(true);
+    expect(kioskDue({ permitted: true, configured: false, office: "none" })).toBe(false);
   });
 });

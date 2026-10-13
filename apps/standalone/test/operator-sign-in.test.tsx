@@ -70,9 +70,10 @@ interface Options {
   sync?: SyncState;
   notice?: FloorNotice | null;
   source?: ScanSource;
+  watchScanners?: OperatorSignInProps["watchScanners"];
 }
 
-function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) {
+function renderSignIn({ local, sync = SYNCED, notice = null, source, watchScanners }: Options) {
   const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
   const onSync = vi.fn<() => void>();
   const onOffice = vi.fn<() => void>();
@@ -89,6 +90,7 @@ function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) 
         onSignedIn={onSignedIn}
         onSync={onSync}
         onOffice={onOffice}
+        {...(watchScanners === undefined ? {} : { watchScanners })}
       />
     </ThemeProvider>,
   );
@@ -106,7 +108,7 @@ function press(...keys: string[]) {
 }
 
 async function enterLogin(login: string) {
-  fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
   press(...login);
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
 }
@@ -115,7 +117,7 @@ describe("the floor's sign-in screen", () => {
   it("signs an operator in with a personnel number and a PIN on the keypad", async () => {
     const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
     await enterLogin("0042");
-    expect(screen.getByText("Табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Табельный номер 0042. Введите PIN")).toBeTruthy();
     press("4", "8", "2", "1");
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("••••");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -130,13 +132,13 @@ describe("the floor's sign-in screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
     expect(await screen.findByText("Неверный табельный номер или PIN.")).toBeTruthy();
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
-    expect(screen.getByText("Табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Табельный номер 0042. Введите PIN")).toBeTruthy();
     expect(onSignedIn).not.toHaveBeenCalled();
   });
 
   it("offers «Далее» for 3–12 digits and «Войти» for 4–6", async () => {
     renderSignIn({ local: await synced([SITE, OPERATOR]) });
-    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     const next = () => screen.getByRole("button", { name: "Далее" }) as HTMLButtonElement;
     press("4", "2");
     expect(next().disabled).toBe(true);
@@ -149,12 +151,12 @@ describe("the floor's sign-in screen", () => {
     press("1");
     expect(submit().disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    expect(screen.getByText("Наберите табельный номер.")).toBeTruthy();
+    expect(screen.getByText("Введите табельный номер")).toBeTruthy();
   });
 
   it("signs an operator in with a badge scan, once, whatever arrives during the check", async () => {
     const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     act(() => {
       scan("MRK-000742");
       scan("MRK-000742");
@@ -168,7 +170,7 @@ describe("the floor's sign-in screen", () => {
 
   it("explains a refused scan in words of its own, and asks for a sync only after an unknown badge", async () => {
     const { onSync } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     act(() => scan("MRK-000743"));
     expect(await screen.findByText(/^Бейдж не найден\./)).toBeTruthy();
     expect(onSync).toHaveBeenCalledTimes(1);
@@ -190,7 +192,7 @@ describe("the floor's sign-in screen", () => {
       },
     ]);
     renderSignIn({ local });
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     act(() => scan("MRK-000742"));
     expect(
       await screen.findByText(
@@ -203,7 +205,7 @@ describe("the floor's sign-in screen", () => {
     const { executor } = openLocalDb();
     const { onOffice } = renderSignIn({ local: executor, sync: { ...SYNCED, synced: 0 } });
     expect(await screen.findByText(/^Справочники ещё не загружены с хоста\./)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Войти по табельному номеру" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ввести табельный номер" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     expect(onOffice).toHaveBeenCalledTimes(1);
   });
@@ -251,7 +253,7 @@ describe("the floor's sign-in screen", () => {
     ).toBeTruthy();
     failing = false;
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    expect(await screen.findByRole("button", { name: "Войти по табельному номеру" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Ввести табельный номер" })).toBeTruthy();
   });
 
   it("says why the last operator was signed out until somebody tries to sign in", async () => {
@@ -268,7 +270,7 @@ describe("the floor's sign-in screen", () => {
     const IDLE = "Оператор вышел по бездействию. Войдите снова.";
     expect(await screen.findByText(IDLE)).toBeTruthy();
     // Moving between the steps without trying to sign in keeps it.
-    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     expect(screen.getByText(IDLE)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(screen.getByText(IDLE)).toBeTruthy();
@@ -282,7 +284,7 @@ describe("the floor's sign-in screen", () => {
       gate.release();
     }
     expect(await screen.findByText(/^Бейдж не найден\./)).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     expect(screen.queryByText(/^Бейдж не найден\./)).toBeNull();
     expect(screen.queryByText(IDLE)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
@@ -372,7 +374,7 @@ const OTHER_HOST = "9b8a7c6d-5e4f-4321-8a9b-0c1d2e3f4a5b";
 const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
 const LINE = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const OTHER_LINE = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
-const BADGE_PROMPT = "Приложите бейдж к сканеру или войдите по табельному номеру.";
+const BADGE_PROMPT = "Отсканируйте бейдж для входа";
 const FAILED_TEXT = "Не удалось проверить вход на этом компьютере. Попробуйте ещё раз.";
 
 function operatorItem(id: string, rev: number, login: string, name: string): ChangeItem {
@@ -553,7 +555,7 @@ describe("a check that is still running when the screen changes", () => {
       expect(await screen.findByText("Проверяем…")).toBeTruthy();
       const office = screen.getByRole("button", { name: "Офис" }) as HTMLButtonElement;
       const login = screen.getByRole("button", {
-        name: "Войти по табельному номеру",
+        name: "Ввести табельный номер",
       }) as HTMLButtonElement;
       // A check that never settles must not trap the station on this screen.
       expect(office.disabled).toBe(false);
@@ -723,7 +725,7 @@ describe("what the screen holds back", () => {
     await enterLogin("0042");
     press("1", "2");
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    expect(screen.getByText("Наберите табельный номер.")).toBeTruthy();
+    expect(screen.getByText("Введите табельный номер")).toBeTruthy();
     press("0", "0", "4", "2");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
@@ -906,7 +908,7 @@ describe("the screen's answers", () => {
   it("says there are no operators and keeps the way into the office", async () => {
     const { onOffice } = renderSignIn({ local: await synced([SITE]) });
     expect(await screen.findByText(/^В справочнике нет операторов\./)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Войти по табельному номеру" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ввести табельный номер" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     expect(onOffice).toHaveBeenCalledTimes(1);
   });
@@ -915,7 +917,7 @@ describe("the screen's answers", () => {
 describe("the keypad's limits and the scanner on every step", () => {
   it("takes at most 12 digits of a number and 6 of a PIN", async () => {
     renderSignIn({ local: await synced([SITE, OPERATOR]) });
-    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     press(..."1234567890");
     expect((screen.getByRole("button", { name: "1" }) as HTMLButtonElement).disabled).toBe(false);
     press("1", "2");
@@ -938,7 +940,7 @@ describe("the keypad's limits and the scanner on every step", () => {
     press("1", "1");
     act(() => scan("MRK-000743"));
     expect(await screen.findByText(/^Бейдж не найден\./)).toBeTruthy();
-    expect(screen.getByText("Табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Табельный номер 0042. Введите PIN")).toBeTruthy();
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
     act(() => scan("MRK-000742"));
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
@@ -948,7 +950,7 @@ describe("the keypad's limits and the scanner on every step", () => {
     const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
     await screen.findByText(BADGE_PROMPT);
     for (const key of "abc") fireEvent.keyDown(window, { key });
-    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
     act(() => scan("MRK-000742"));
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
@@ -1022,7 +1024,7 @@ describe("the rest of the screen", () => {
     try {
       fireEvent.click(screen.getByRole("button", { name: "Войти" }));
       expect(await screen.findByText("Проверяем…")).toBeTruthy();
-      for (const name of ["1", "Стереть", "Очистить", "Назад"]) {
+      for (const name of ["1", "Стереть", "Сброс", "Назад"]) {
         expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
       }
       expect((screen.getByRole("button", { name: "Офис" }) as HTMLButtonElement).disabled).toBe(
@@ -1048,7 +1050,7 @@ describe("the rest of the screen", () => {
 
   it("goes back from the number to the badge prompt", async () => {
     renderSignIn({ local: await synced([SITE, OPERATOR]) });
-    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(screen.getByText(BADGE_PROMPT)).toBeTruthy();
   });
@@ -1104,7 +1106,7 @@ describe("finding oneself by name", () => {
   const BORIS_ITEM = operatorItem(BORIS, 6, "0077", "Борис Петров");
 
   async function openSearch() {
-    fireEvent.click(await screen.findByRole("button", { name: "Найти себя по имени" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Найти по имени" }));
     return screen.getByLabelText("Имя оператора") as HTMLInputElement;
   }
 
@@ -1115,10 +1117,10 @@ describe("finding oneself by name", () => {
   it("finds an operator by name and signs them in with their PIN", async () => {
     const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
     const field = await openSearch();
-    expect(screen.getByText("Наберите первые буквы имени или фамилии.")).toBeTruthy();
+    expect(screen.getByText("Введите первые 2–3 буквы имени")).toBeTruthy();
     typeName(field, "кузн");
     fireEvent.click(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" }));
-    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Введите PIN")).toBeTruthy();
     press("4", "8", "2", "1");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
@@ -1127,14 +1129,12 @@ describe("finding oneself by name", () => {
   it("waits for two letters and says when nobody matches", async () => {
     renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
     const field = await openSearch();
-    expect(await screen.findByText("Наберите хотя бы две буквы.")).toBeTruthy();
+    expect(await screen.findByText("Введите минимум две буквы")).toBeTruthy();
     typeName(field, "а");
-    expect(screen.getByText("Наберите хотя бы две буквы.")).toBeTruthy();
+    expect(screen.getByText("Введите минимум две буквы")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /— 0042$/ })).toBeNull();
     typeName(field, "яя");
-    expect(
-      screen.getByText("Никого не нашли. Проверьте имя или войдите по табельному номеру."),
-    ).toBeTruthy();
+    expect(screen.getByText("Операторы не найдены")).toBeTruthy();
   });
 
   it("goes back from the PIN to the search as it was, and from the search to the badge", async () => {
@@ -1149,7 +1149,7 @@ describe("finding oneself by name", () => {
     expect(screen.getByText(BADGE_PROMPT)).toBeTruthy();
     // The keypad's way afterwards names nobody.
     await enterLogin("0077");
-    expect(screen.getByText("Табельный номер 0077. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Табельный номер 0077. Введите PIN")).toBeTruthy();
   });
 
   it("does not take a name typed into the field for a badge scan", async () => {
@@ -1189,7 +1189,7 @@ describe("finding oneself by name", () => {
     typeName(field, "кузн");
     // A click on a result does not blur the field in jsdom: only the step change can.
     fireEvent.click(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" }));
-    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Введите PIN")).toBeTruthy();
     act(() => scan("MRK-000742"));
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
@@ -1257,7 +1257,7 @@ describe("finding oneself by name", () => {
       const view = await swappable();
       const field = await openSearch();
       // The first reading of the copies has landed once the hint replaces «Читаем…».
-      await screen.findByText("Наберите хотя бы две буквы.");
+      await screen.findByText("Введите минимум две буквы");
       act(() => field.focus());
       view.swap(next);
       view.rerender(view.element({ ...SYNCED, synced: 2 }));
@@ -1275,7 +1275,7 @@ describe("finding oneself by name", () => {
     it("hears a badge there without the field ever having the keys (the control)", async () => {
       const view = await swappable();
       await openSearch();
-      await screen.findByText("Наберите хотя бы две буквы.");
+      await screen.findByText("Введите минимум две буквы");
       view.swap(failingCopies());
       view.rerender(view.element({ ...SYNCED, synced: 2 }));
       expect(await screen.findByText(READ_FAILED)).toBeTruthy();
@@ -1293,7 +1293,7 @@ describe("finding oneself by name", () => {
     typeName(await openSearch(), "кузн");
     expect(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти по имени" }));
     typeName(screen.getByLabelText("Имя оператора"), "кузн");
     // The list read before is gone at once; the new reading lands afterwards.
     expect(screen.getByText("Читаем справочник операторов…")).toBeTruthy();
@@ -1332,7 +1332,7 @@ describe("the size of the screen's controls", () => {
     renderSignIn({ local: await synced([SITE, OPERATOR]) });
     await screen.findByText(BADGE_PROMPT);
     allFloorSized();
-    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти по имени" }));
     fireEvent.change(screen.getByLabelText("Имя оператора"), { target: { value: "ан" } });
     await screen.findByRole("button", { name: "Анна Кузнецова — 0042" });
     allFloorSized();
@@ -1348,5 +1348,143 @@ describe("the size of the screen's controls", () => {
     renderSignIn({ local });
     await screen.findByText("Не удалось прочитать справочник операторов на этом компьютере.");
     allFloorSized();
+  });
+});
+
+describe("the welcome screen's layout, the same on every step", () => {
+  /** «Офис» and, off the badge step, «Назад»: present, floor-sized, and «Офис» in one place. */
+  function officeInHeader() {
+    const office = screen.getByRole("button", { name: "Офис" });
+    expect(office.className).toContain("mk-btn--floor");
+    expect(office.closest(".operator-login__header")).not.toBeNull();
+    return office;
+  }
+
+  function backInActions() {
+    const back = screen.getByRole("button", { name: "Назад" });
+    expect(back.className).toContain("mk-btn--floor");
+    expect(back.closest(".operator-login__actions")).not.toBeNull();
+  }
+
+  it("keeps «Офис» in the header and «Назад» in the action row on every step", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(screen.getByRole("heading", { name: "Вход оператора" })).toBeTruthy();
+    officeInHeader();
+    expect(screen.queryByRole("button", { name: "Назад" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
+    officeInHeader();
+    backInActions();
+    press("0", "0", "4", "2");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    officeInHeader();
+    backInActions();
+
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти по имени" }));
+    officeInHeader();
+    backInActions();
+    // The name field is labelled.
+    expect(screen.getByLabelText("Имя оператора").tagName).toBe("INPUT");
+  });
+
+  it("offers the name search from the number step and the number from the name search, as the cloud station does", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    fireEvent.click(await screen.findByRole("button", { name: "Ввести табельный номер" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти по имени" }));
+    expect(screen.getByText("Введите первые 2–3 буквы имени")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
+    expect(screen.getByText("Введите табельный номер")).toBeTruthy();
+    expect(screen.getByLabelText("Набранный табельный номер").textContent).toBe("");
+  });
+
+  it("shows the badge cue on the badge step only", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(screen.getByText("Поднесите бейдж к сканеру")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
+    expect(screen.queryByText("Поднесите бейдж к сканеру")).toBeNull();
+  });
+});
+
+describe("the scanner's state on the welcome screen", () => {
+  function snapshotOf(...statuses: Array<"connected" | "disconnected">) {
+    return {
+      revision: 1,
+      scanners: statuses.map((status, index) => ({
+        port: `COM${index + 3}`,
+        baud: 9600,
+        status,
+      })),
+    };
+  }
+
+  function watching(...statuses: Array<"connected" | "disconnected">) {
+    return (onSnapshot: (next: ReturnType<typeof snapshotOf>) => void) => {
+      onSnapshot(snapshotOf(...statuses));
+      return Promise.resolve(() => undefined);
+    };
+  }
+
+  function chip() {
+    return screen.getByTestId("scanner-state");
+  }
+
+  it("says the scanner is ready with only the keyboard wedge", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().textContent).toContain("Сканер штрихкодов готов");
+    expect(chip().getAttribute("data-tone")).toBe("ok");
+  });
+
+  it("follows the COM scanners the shell reports", async () => {
+    const local = await synced([SITE, OPERATOR]);
+    const view = renderSignIn({ local, watchScanners: watching("connected") });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().textContent).toContain("Сканер штрихкодов готов");
+    view.unmount();
+
+    renderSignIn({ local, watchScanners: watching("disconnected") });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().getAttribute("data-tone")).toBe("error"));
+    expect(chip().textContent).toContain("Сканер не на связи");
+  });
+
+  it("warns when only a part of the scanners answers, and when the shell cannot say", async () => {
+    const local = await synced([SITE, OPERATOR]);
+    const view = renderSignIn({ local, watchScanners: watching("connected", "disconnected") });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().textContent).toContain("Часть сканеров недоступна"));
+    expect(chip().getAttribute("data-tone")).toBe("warn");
+    view.unmount();
+
+    renderSignIn({ local, watchScanners: () => Promise.reject(new Error("no shell")) });
+    await screen.findByText(BADGE_PROMPT);
+    await waitFor(() => expect(chip().textContent).toContain("Состояние сканера неизвестно"));
+  });
+
+  it("says the sign-in is paused while the station is locked out, and still takes the scan's answer", async () => {
+    const local = await synced([SITE, OPERATOR, BADGE]);
+    await local.transaction([
+      {
+        sql:
+          "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) " +
+          "VALUES ('station', 10, ?, ?)",
+        values: [NOW - 1_000, NOW - 1_000],
+      },
+    ]);
+    renderSignIn({ local });
+    await screen.findByText(BADGE_PROMPT);
+    expect(chip().getAttribute("data-tone")).toBe("ok");
+    act(() => scan("MRK-000742"));
+    expect(
+      await screen.findByText(
+        "Слишком много неудачных попыток. Вход на этой станции приостановлен на 1 мин.",
+      ),
+    ).toBeTruthy();
+    expect(chip().textContent).toContain("Вход приостановлен");
+    expect(chip().getAttribute("data-tone")).toBe("error");
   });
 });

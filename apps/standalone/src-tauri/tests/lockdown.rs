@@ -12,6 +12,7 @@ use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::local_db::LocalDbState;
 use markiro_standalone_lib::lockdown::{self, LockdownState, MAIN_WINDOW};
+use markiro_standalone_lib::window_policy::{self, KioskPolicyState};
 use serde_json::{json, Value};
 use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
@@ -22,12 +23,21 @@ use tauri::{App, Manager, RunEvent, WebviewWindow, WindowEvent};
 /// The app's command list on the mock runtime, with one
 /// window labelled `label`. The `App` must outlive the window.
 fn mock_app(label: &str) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
+    mock_app_with(label, KioskPolicyState::default())
+}
+
+/// `mock_app` with what the installation and the launch permit of kiosk mode.
+fn mock_app_with(
+    label: &str,
+    policy: KioskPolicyState,
+) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
     let dir = tempfile::tempdir().unwrap();
     let app = mock_builder()
         .manage(DeviceState::load(dir.path().to_path_buf()))
         .manage(LocalDbState::unavailable())
         .manage(ConnectionState::default())
         .manage(LockdownState::default())
+        .manage(policy)
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -82,6 +92,21 @@ fn the_kiosk_commands_turn_the_flag_on_and_off() {
     assert!(!locked(&app));
 }
 
+/// Leaving kiosk mode (the office's «Оконный режим», and every office
+/// session of an administrator) answers `Ok` with the size step included: the
+/// mock window has no monitor and does not keep a size, so what the step sets
+/// is pinned by `lockdown::ordinary_window_size`'s unit tests, and what the
+/// real window does by the manual check on Windows.
+#[cfg(not(windows))]
+#[test]
+fn leaving_kiosk_mode_restores_an_ordinary_window() {
+    let (_app, webview) = mock_app(MAIN_WINDOW);
+    assert_eq!(invoke(&webview, "enter_lockdown"), Ok(Value::Null));
+    assert_eq!(invoke(&webview, "exit_lockdown"), Ok(Value::Null));
+    assert!(!webview.is_maximized().unwrap());
+    assert!(!webview.is_fullscreen().unwrap());
+}
+
 /// `SetWindowPos` refuses the mock window's handle (or Windows finds no
 /// monitor for it): the enter is refused and rolled back, the flag stays off.
 /// Should a Windows version accept it, the flag must be on instead.
@@ -98,6 +123,49 @@ fn on_windows_a_refused_enter_leaves_the_flag_off() {
     }
     assert_eq!(invoke(&webview, "exit_lockdown"), Ok(Value::Null));
     assert!(!locked(&app));
+}
+
+/// Owner decision 2026-10-13: a PC kiosk mode may not lock (a host or office
+/// PC, `"kiosk": false`, a `--windowed` launch) refuses the enter before any
+/// window property changes, whatever the webview asks; leaving still works.
+#[test]
+fn a_pc_kiosk_mode_may_not_lock_refuses_the_enter() {
+    let (app, webview) = mock_app_with(MAIN_WINDOW, KioskPolicyState::new(false, false));
+    assert_eq!(invoke(&webview, "kiosk_permitted_now"), Ok(json!(false)));
+    assert_eq!(invoke(&webview, "enter_lockdown"), Err(json!("kiosk_off")));
+    assert!(!locked(&app));
+    assert!(!webview.is_fullscreen().unwrap());
+    assert!(!webview.is_always_on_top().unwrap());
+    assert_eq!(invoke(&webview, "exit_lockdown"), Ok(Value::Null));
+
+    let (app, webview) = mock_app_with(MAIN_WINDOW, KioskPolicyState::new(true, true));
+    assert_eq!(invoke(&webview, "kiosk_permitted_now"), Ok(json!(false)));
+    assert_eq!(invoke(&webview, "enter_lockdown"), Err(json!("kiosk_off")));
+    assert!(!locked(&app));
+}
+
+/// A second launch with `--windowed` (the single-instance callback) unlocks
+/// the running window and forbids kiosk mode from then on; one without it
+/// changes nothing.
+#[cfg(not(windows))]
+#[test]
+fn a_second_launch_with_windowed_unlocks_the_running_window() {
+    let (app, webview) = mock_app(MAIN_WINDOW);
+    assert_eq!(invoke(&webview, "kiosk_permitted_now"), Ok(json!(true)));
+    assert_eq!(invoke(&webview, "enter_lockdown"), Ok(Value::Null));
+    assert!(locked(&app));
+
+    window_policy::on_second_launch(app.handle(), &["markiro-standalone.exe".to_owned()]);
+    assert!(locked(&app));
+
+    window_policy::on_second_launch(
+        app.handle(),
+        &["markiro-standalone.exe".to_owned(), "--windowed".to_owned()],
+    );
+    assert!(!locked(&app));
+    assert!(!webview.is_fullscreen().unwrap());
+    assert_eq!(invoke(&webview, "kiosk_permitted_now"), Ok(json!(false)));
+    assert_eq!(invoke(&webview, "enter_lockdown"), Err(json!("kiosk_off")));
 }
 
 #[test]

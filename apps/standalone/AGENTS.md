@@ -703,7 +703,7 @@ whatever its revision (fail-closed).
   it brought. The asks go through a gate in `App` (`SIGN_IN_SYNC_GAP_MS`,
   2 s: the first at once, asks inside the wait fold into one more sync at its
   end), so a burst of stray scans does not hammer the host.
-- The name search (plan 1f2; «Найти себя по имени»,
+- The name search (plan 1f2; «Найти по имени»,
   `src/floor/operator-search.ts`) only fills in a personnel number: the PIN
   is then checked by `signInWithPin` like a typed one, under the same
   lockouts, and «Назад» on the PIN goes back to the search. It reads
@@ -780,6 +780,33 @@ physical wedge scanner in WebView2, and how the search step and the status
 bar lay out on a real screen and touch panel, are unverified (the styles were
 not looked at in a browser). Kiosk mode and the floor's status bar are under
 "App shell".
+
+The screen's presentation is forked from the cloud station's approved sign-in
+(`apps/station/src/pages/OperatorLogin.tsx`, `ui/BadgeScanIllustration.tsx`,
+`ui/StationBrand.tsx` and their rules in `station.css`), owner decision of
+2026-10-13: «Вход оператора» with the brand, the step's prompt, the badge cue,
+the readout and keypad or the name search, and one row of equal actions in the
+cloud's order. Its CSS lives beside it (`src/floor/sign-in/operator-sign-in.css`,
+cloud class names); the logo is drawn inline, so the screen holds no `<img>`.
+The differences are the standalone's own: «Офис» and the scanner chip share the
+header's right column on every step; the readout and keypad are centred
+together (no gap under the readout); below 900 px of height the keys are the
+cloud's compact 80 px, and below 760 px they are 64 px with the readout beside
+the keypad, so a 1024×600 panel shows the keypad whole; the number step offers
+the name search and the name search the number, as the cloud's steps do. The step texts are the
+cloud's (owner decision 2026-10-13: «Ввести табельный номер», «Найти по
+имени», «Сброс», «Отсканируйте бейдж для входа», «Введите …»); the PIN
+prompts keep the personnel number, which the cloud's «Введите PIN» drops. The
+chip (`src/floor/scanner-indicator.ts`) says what the floor honestly knows:
+«ready» for the keyboard wedge (it cannot be seen) and for connected COM
+scanners, a warning for a part of them or a shell that cannot be asked, an
+error for COM scanners off the link, and «Вход приостановлен» while the last
+attempt was answered by the station's lockout (an operator's PIN lockout
+leaves the badge working and does not count). The watch is the shell's
+`watchScanners`, passed by `App`; a watch that throws or answers with no stop
+never takes the screen down. Verified in a browser (Chromium, a harness with a
+fake local database) at 1280×800, 1920×1080 and 1024×600; not on WebView2, a
+real panel or a real scanner.
 
 ## Catalog and label templates
 
@@ -1681,7 +1708,15 @@ is still named, since the station works on it until the office moves it; read
 again after every sync, and a failed read leaves the names out), the operator
 signed in or «Никто не вошёл», and `HostStatusLine`, which the floor screens
 no longer show themselves. It holds nothing to press, so the 64 px rule has
-nothing to apply to. Since plan 2a5 it also names the device
+nothing to apply to. Its presentation is forked from the cloud station's
+one-row header (`apps/station/src/ui/StatusBar.tsx`, `.station-status-*` in
+`src/floor/floor-status-bar.css`): the device and the line strong on the first
+row, the operator, the shift and the organization quieter on the second (the
+labels stay for assistive tech, unpainted), then the link to the host and the
+pills (serials, unsent, refused, conflicts, records of an older pairing, and
+the scanner, «Клавиатурный» without COM scanners), and the warnings in a
+full-width row under it, flat while empty. The same file makes the floor fill
+the window edge to edge, as the cloud's `.station-root`. Since plan 2a5 it also names the device
 (`DeviceStatus.deviceName`, left out for an older pairing file), the number of
 the shift the operator works in (read from the copies, by
 `ShellState.floorWork`) and, in a polite region of its own that is on the
@@ -1721,29 +1756,84 @@ synchronous in the shell, so the window itself is hung then, and a timeout
 that let the next command overlap could leave the window locked while the
 webview believes it is not.
 
-`App` enters kiosk mode (on every PC but an office PC, below) whenever no
-office session is open: at start, when the office closes («Выйти в цех») and
-when the session ends (below: when a call to the host finds it expired). That covers every screen that is not the
-office, the first-run wizard and the repair screens (pairing, host not found,
-pairing failed) included: on a fresh install, or while the host service is
-down, nothing inside the app leads out of the locked window until setup is
-finished and an administrator signs in.
+Which PCs lock, and when (owner decision 2026-10-13, after the first Windows
+test left a station PC that could neither close the app nor leave the locked
+window; it replaced «every PC but an office PC locks whenever no office session
+is open» and the host PC's locked first-run wizard):
 
-Kiosk mode locks every PC except an office PC (plan УСТ; owner question П11,
-answered as recommended until the owner says otherwise). An office PC is one
-the installer gave the role «только офис» (`installation.json`, see
-«Installer and service»), or one paired as a device of kind `office`: `App`
-asks the shell for the role first (`install_role`) and enters kiosk mode only
-once the answer came and says it is not an office PC; an answer the shell
-cannot give counts as a station, so the floor stays locked. The role wins over
-the pairing: a PC the installer made a host or a station stays locked even if
-its disk holds an office pairing, and an office-role PC never shows the floor,
-the line choice or the operator sign-in even if its disk holds a station
-pairing. The host's own PC is the site's station (pilot spec §3) and stays
-locked. A technologist on a station cannot leave the locked window (only an
-administrator can).
+| Role (`installation.json`)                                      | Station configured | Office session           | Window                                                                 |
+| --------------------------------------------------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------- |
+| `office`                                                        | any                | any                      | ordinary, never locked                                                 |
+| `host`                                                          | any                | any                      | ordinary, never locked (the wizard, the floor and the office included) |
+| `station` or none readable                                      | no                 | any                      | ordinary                                                               |
+| `station` or none readable                                      | yes                | none or a technologist's | kiosk mode                                                             |
+| `station` or none readable                                      | yes                | an administrator's       | ordinary                                                               |
+| any, with `"kiosk": false` in the file or a `--windowed` launch | any                | any                      | ordinary                                                               |
 
-An office session opens with the window still locked; the way out is «Оконный
+«Configured» is a station paired as a station with a line
+(`DeviceStatus.kind === "station"` and `lineId` set): pairing alone leaves the
+line to choose, a line is stored only from the host's answer (the line choice
+or a read of the device), so it also proves one exchange with the host after
+the pairing. Until then — first start, «Служба хоста не отвечает», «Подключение
+к хосту в сети», its «Настройки сканера», the line choice — the window has a
+frame, a close button and a taskbar button, so whoever sets the PC up can close
+the app and reach Windows. A station locks as soon as it is configured and at
+every later start (the device is read before anything is decided, so nothing
+flickers). Once configured, a line the office clears later keeps the window
+locked for that pairing (`configuredDevice` in `App`): the floor does not leave
+kiosk mode by having its line taken away; a new pairing (another device id)
+starts unconfigured again. A forget (the device-rejected, other-host and
+config-error screens' «Сбросить подключение», below) makes the station
+unpaired and so ordinary: those screens appear only when the host refused the
+device or the config is unreadable, which nobody produces from the floor (an
+owner question all the same).
+
+The shell owns what it alone knows (`src-tauri/src/window_policy.rs`): the
+role, the file's `"kiosk": false` and the `--windowed` launch, as
+`kiosk_permitted`, answered by `kiosk_permitted_now` and enforced in
+`lockdown::lock`, which refuses with the bare code `kiosk_off` before any
+window property changes (a host PC is never locked, even by a webview that
+asks). The rest is the webview's state: `kioskDue` in `src/app/lockdown.ts`
+(with `rolePermitsKiosk`, so a shell that cannot answer still never locks a
+host or office PC), mirrored by `window_policy::kiosk_due`;
+`src-tauri/tests/fixtures/window-policy.json` is the table both sides' tests
+read. `App` decides once the role, the shell's answer and the device are known
+and sends `enter` or `exit` whenever the decision changes (`exit` sends nothing
+for a window that was never locked). An answer `kiosk_permitted_now` cannot
+give reads as permitted (the floor's safe side; the role and the configuration
+still decide). An office PC is one the installer gave the role «только офис»,
+or one paired as a device of kind `office` where the shell gave no role; an
+office-role PC never shows the floor, the line choice or the operator sign-in
+even if its disk holds a station pairing.
+
+Recovery for an installer who is stuck (both are documented in
+`docs/runbooks/standalone-install.md`): `"kiosk": false` added by hand to
+`installation.json` (beside the executable under `Program Files`, writable by
+administrators only; `installation::InstallationFile`, an optional key, any
+other unknown key still refuses the file; the installer rewrites the file, so a
+reinstall or an update brings kiosk mode back); and the launch flag
+`--windowed` (also `/windowed`, any case). A fresh launch with it never locks;
+a second launch while the app runs (`markiro-standalone.exe --windowed` from
+Win+R or a console) goes to the single-instance callback
+(`window_policy::on_second_launch`), which forbids kiosk mode for the running
+app, unlocks the window and sends `standalone://kiosk-permitted` (`false`) so
+the webview follows. Every second launch, with the flag or not, also shows,
+unminimizes and focuses the window: a locked window has no taskbar button and
+is not in Alt+Tab, and starting the app again used to do nothing. Neither is
+an authority check: anyone who can run a command on the PC already has
+Windows; kiosk mode keeps an operator with a touch screen and a scanner on the
+app, it is not a security boundary against a keyboard and Ctrl+Alt+Del.
+
+The office is a mouse-and-keyboard app (owner feedback of the first beta), so
+on a configured station an administrator's office session opens in an
+ordinary, resizable window by itself (the table's «an administrator's» row);
+leaving kiosk mode restores an ordinary window of 1280x800 at most, inside the
+monitor's work area and centred (`lockdown::settle_ordinary_window` — the
+monitor-sized window kiosk mode left must not stay), and the app also starts
+that way (`tauri.conf.json`: centred, not maximized, minimum 960x600). A
+technologist's session stays in the locked window; a role taken away during an
+administrator's session locks the window then (the table follows the role the
+header shows). When the automatic exit failed, the manual way is «Оконный
 режим» (`src/office/WindowModeButton.tsx`, in the office header), shown only
 to an administrator while the window is locked and never in a build that does
 not lock it. It asks first (`FormDialog`), reads the user from the host again
@@ -1754,24 +1844,38 @@ goes with the button once the refreshed role lands: the header shows the
 technologist role, and the message is on screen for one round trip only.
 After a successful exit the focus moves to the office page (the button that
 held it is gone; `OfficeShell` hands `WindowModeButton` a callback that
-focuses its `main`). Leaving the office locks the window again; a role taken
-away after the window opened does not lock it before the session ends. The
+focuses its `main`). Leaving the office locks the window again. The
 window mode lasts until a call to the host finds the office session expired
 (a page's request, or the header's re-read of the user after a change-feed
 revision): the webview has no client idle timer, and the host drops the
 session after 30 idle minutes without telling it. An administrator who walks
 away from an open office therefore leaves the window framed and closable, with
 the office on screen, for anyone on the floor (an open owner question: a
-client-side office idle lock on a station PC). Non-administrator office
-users (technologists) work in the locked window too, so the template import's
-file chooser and the ZPL/TSPL `<a download>` saves open under a borderless
-topmost window; their behaviour there is unchecked. There is no local
-maintenance code (one more secret on the PC; an owner question). Without the
-host nobody signs in to the office, so the app cannot leave kiosk mode then:
-Windows' own Ctrl+Alt+Del stays, and Tauri catches neither it nor Alt+Tab or
-the Windows key (the window stays on top, so Task Manager may open underneath
-it). A failed enter is logged by the command's name and tried again at the
-next office close or restart; nothing on screen says so.
+client-side office idle lock on a station PC). Technologists work in the
+locked window, so the template import's file chooser and the ZPL/TSPL
+`<a download>` saves open under a borderless topmost window; their behaviour
+there is unchecked. There is no local maintenance code (one more secret on the
+PC; an owner question): on a configured station without the host nobody signs
+in to the office, so the ways out are the two recoveries above and Windows' own
+Ctrl+Alt+Del (Tauri catches neither it nor Alt+Tab or the Windows key; the
+window stays on top, so Task Manager may open underneath it). A failed enter is
+logged by the command's name and tried again at the next change of the
+decision or restart; nothing on screen says so.
+
+The pairing screen of a station (owner feedback, first Windows test) offers
+«Настройки сканера»: `WorkstationSetup` with `scope="scanners"` — the COM
+scanners of «Рабочее место» (port, speed, connection, the same storage and the
+same `configure_scanners`; printers, sound and the label check are kept as
+stored and not shown) plus «Проверка сканера», which says what a scan read
+(`src/app/scan-check.ts`: the office's pairing code with its addresses, a
+garbled frame — U+FFFD, most often a COM port at the wrong speed — or a length,
+a group separator and the Russian layout, never the scan's text). A
+keyboard-wedge scanner needs no settings: the pairing payload is read under the
+Russian layout and Caps Lock (`parsePairingPayload`). The pairing screen also
+hears the shell's COM scanners (`comScans`, `createComScanSource`; only on the
+scan form and while nothing is being sent): before, a COM scanner's frame went
+nowhere there, since only the focused field took a scan. Its controls are the
+floor's 64 px.
 
 The trust boundary of the exit is the webview's: the administrator check lives
 in `App` and `WindowModeButton`, and `exit_lockdown` itself has no guard in
@@ -4435,8 +4539,11 @@ the host and the held restore; it reads the state with its own polling loop
 (1 s while a copy runs, slower when idle, paused while the window is hidden)
 and writes times in the organization's zone. «Обзор» repeats the warnings (a
 held restore, a failed copy, no copy, a newest copy older than 26 hours by the
-host's clock, no second folder, a host clock behind the newest copy, a copy
-running for more than 30 minutes). The page lists per station whether it
+host's clock, a host clock behind the newest copy, a copy
+running for more than 30 minutes). No second folder is not among them: a fresh
+install has none, so «Резервные копии» says so as a calm hint beside the
+folder's form (`secondNotSetHint`), and only a second folder that is set and
+refused the last copy (`secondFailed`) is an error. The page lists per station whether it
 sent its blocks back (`reconciled`, plan РК-С); the host sets the flag on the
 last part of a station's blocks (`more` absent), which is empty for a station
 that never got a block.
@@ -4922,10 +5029,28 @@ either; a file log is stage 5.
   (`on_windows_a_refused_enter_leaves_the_flag_off`) also runs.
 - Kiosk mode by hand, on Windows 10 and 11 with a build from that job. None
   of it has been run; check at least:
-  - the window locks at start, again after «Выйти в цех» and after the office
-    session ends; it also locks on the first-run wizard and the repair
-    screens, where nothing in the app leads out (a fresh install; the host
-    service stopped);
+  - the window-mode table (owner decision 2026-10-13, «App shell»): a host
+    PC and an office PC never lock (the host's first-run wizard, the floor,
+    the office, «Выйти в цех»); a fresh station is an ordinary window with a
+    frame, a close button and a taskbar button on «Служба хоста не отвечает»,
+    the pairing, «Настройки сканера» and the line choice, and closes; it
+    locks as soon as its line is set (chosen there or by the office) and at
+    every later start; a configured station locks again after «Выйти в цех»
+    and after the office session ends; a line cleared by the office keeps it
+    locked until a restart;
+  - the recovery: `"kiosk": false` added to `installation.json` by an
+    administrator keeps a configured station ordinary after a restart, and a
+    reinstall brings kiosk mode back; `markiro-standalone.exe --windowed`
+    from a console or Win+R while the station is locked unlocks the running
+    window at once and brings it to the front, and a fresh launch with it does
+    not lock; check also that Win+R and a console are reachable at all with
+    the topmost window on screen (Ctrl+Alt+Del → Task Manager → «Запустить
+    новую задачу» may open underneath it);
+  - «Настройки сканера» before pairing: a COM scanner added there connects,
+    the scanner check names the pairing code, a wrong speed shows the garbled
+    warning, and the office's code scanned by that COM scanner on the pairing
+    screen pairs; a keyboard-wedge scanner under the RU and EN layouts and with
+    Caps Lock pairs without any settings;
   - Alt+F4, closing from the taskbar and the frame keep the window open
     (this is the only test that `run` installs the close guard);
   - the window stays above every other window and covers its whole monitor,
@@ -4938,13 +5063,11 @@ either; a file log is stage 5.
     locks again; an administrator demoted on the host while the dialog is
     open sees the button go and the technologist role in the header;
   - Ctrl+Alt+Del: Task Manager may open underneath the topmost window, so
-    «Выйти из системы» may be the only way out; try it on the setup screens;
+    «Выйти из системы» may be the only way out on a configured station;
   - Win+D, or a minimize any other way, with the window locked: a window
-    without a taskbar button is not in Alt+Tab either, and starting the app
-    again does nothing (the single-instance callback in `run` is empty, as in
-    the cloud station), so check what finds the window again (Win+D once
-    more, Task Manager «Переключиться»); the fix is a callback that shows,
-    unminimizes and focuses `main`, which the mock runtime cannot test;
+    without a taskbar button is not in Alt+Tab either; starting the app again
+    must now bring it back (`window_policy::on_second_launch` shows,
+    unminimizes and focuses `main`, which the mock runtime cannot show);
   - Windows restart, shutdown and sign-out with the window locked, as for a
     Windows Update on a factory PC: whether tao raises a close request then,
     whether `refuse_close_while_locked` refuses it and Windows shows «this app

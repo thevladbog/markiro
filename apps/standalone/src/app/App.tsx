@@ -12,6 +12,7 @@ import {
 } from "../floor/scan-source.js";
 import { createPrintRuntime } from "../floor/print/print-runtime.js";
 import { applySavedScanners } from "../floor/setup/workstation-settings.js";
+import { WorkstationSetup } from "../floor/setup/WorkstationSetup.js";
 import type { FloorOperator } from "../floor/sign-in.js";
 import { createSystemAwake } from "../hardware/awake.js";
 import {
@@ -51,7 +52,13 @@ import type { WindowMode } from "../office/window-mode.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
-import { createLockdownLifecycle, type LockdownLifecycle } from "./lockdown.js";
+import { createTauriKioskPolicy, type KioskPolicyApi } from "./kiosk-policy.js";
+import {
+  createLockdownLifecycle,
+  kioskDue,
+  rolePermitsKiosk,
+  type LockdownLifecycle,
+} from "./lockdown.js";
 import { NetworkPairing } from "./NetworkPairing.js";
 import {
   ConfigErrorScreen,
@@ -144,6 +151,14 @@ export interface AppProps {
   signInSyncGapMs?: number;
   /** Kiosk mode of the window: the shell's commands outside development by default. */
   lockdown?: LockdownLifecycle;
+  /** What the shell permits of kiosk mode on this PC; the shell's by default. */
+  kioskPolicy?: KioskPolicyApi;
+  /**
+   * Where the pairing screen hears a scanner that is not a keyboard: the
+   * shell's COM scanners by default. A keyboard-wedge scanner types into the
+   * screen's own field, so the keyboard is not a source here.
+   */
+  pairingScanSource?: ScanSource;
 }
 
 export function App({
@@ -159,6 +174,8 @@ export function App({
   idleTimeoutMs,
   signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
   lockdown,
+  kioskPolicy,
+  pairingScanSource,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -198,6 +215,37 @@ export function App({
     [lockdown],
   );
   const kioskSnapshot = useSyncExternalStore(kiosk.subscribe, kiosk.getSnapshot);
+  const kioskShell = useMemo(() => kioskPolicy ?? createTauriKioskPolicy(), [kioskPolicy]);
+  // What the shell permits of kiosk mode (the role, `"kiosk": false`, a
+  // `--windowed` launch); `null` until it answers. A second launch with
+  // `--windowed` turns it off for the running app.
+  const [shellPermitted, setShellPermitted] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    void kioskShell.permitted().then((permitted) => {
+      if (!cancelled) setShellPermitted((now) => (now === false ? false : permitted));
+    });
+    void kioskShell
+      .onTurnedOff(() => {
+        if (!cancelled) setShellPermitted(false);
+      })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [kioskShell]);
+  const comScans = useMemo(
+    () => pairingScanSource ?? createComScanSource(hardwareApi.onScan),
+    [pairingScanSource, hardwareApi],
+  );
+  // The scanner settings opened from the pairing screen (owner feedback, first
+  // Windows test): the same settings as the floor's «Рабочее место», scanners only.
+  const [scannerSetup, setScannerSetup] = useState(false);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   // The installer's role, `"unknown"` until the shell answers (plan УСТ). It
   // comes from the shell alone: nothing the page can write sets it.
@@ -550,6 +598,8 @@ export function App({
   );
 
   const session = view.kind === "office" ? view.session : null;
+  // The scanner settings belong to the pairing screen: leaving it closes them.
+  if (scannerSetup && view.kind !== "network_pairing") setScannerSetup(false);
 
   // An office PC (the installer's role «только офис») has no floor and is
   // never locked (plan УСТ, owner question П11). The role is the shell's; a
@@ -557,22 +607,54 @@ export function App({
   // so a station or host PC with a stale office pairing stays locked.
   const officePc =
     role === "office" || (role !== "host" && role !== "station" && pairedStatus?.kind === "office");
-  // Kiosk mode whenever no office session is open: at start, when the office
-  // closes and when its session ends — once the role is known, and never on
-  // an office PC. Only an open session's administrator turns it off
-  // («Оконный режим»), and only until that session ends.
-  const officeOpen = session !== null;
-  const roleKnown = role !== "unknown";
+  const officeAdmin = session?.user.role === "admin";
+  // A station is configured once it is paired as a station with a line (owner
+  // decision 2026-10-13): pairing alone leaves the line to choose, which a
+  // person does at this window or in the office, and a line is only ever
+  // stored from the host's answer. Until then the window is an ordinary one,
+  // with a frame and a close button. Once configured, a line the office
+  // clears later keeps the window locked for this pairing: the floor cannot
+  // leave kiosk mode by having its line taken away. A new pairing (another
+  // device id) starts unconfigured again.
+  const pairedStationId = pairedStatus?.kind === "station" ? pairedStatus.deviceId : null;
+  const [configuredDevice, setConfiguredDevice] = useState<string | null>(null);
+  if (
+    pairedStationId !== null &&
+    pairedStatus?.lineId != null &&
+    configuredDevice !== pairedStationId
+  ) {
+    setConfiguredDevice(pairedStationId);
+  }
+  const configured =
+    pairedStationId !== null &&
+    (pairedStatus?.lineId != null || configuredDevice === pairedStationId);
+  // The window mode (owner decision 2026-10-13, `kioskDue`): a host PC and an
+  // office PC never lock; a station locks once configured, at once and at every
+  // later start, except while an administrator's office session is open (the
+  // office is a mouse-and-keyboard app; a technologist's session stays
+  // locked); the shell may forbid kiosk mode on this PC (`"kiosk": false` in
+  // `installation.json`, a `--windowed` launch). Decided once the role, the
+  // shell's answer and the device are known; until then nothing is sent.
+  const decided = role !== "unknown" && shellPermitted !== null && state.device.kind === "ready";
+  const due =
+    decided &&
+    !officePc &&
+    kioskDue({
+      permitted: shellPermitted && rolePermitsKiosk(role),
+      configured,
+      office: session === null ? "none" : officeAdmin ? "administrator" : "other",
+    });
   useEffect(() => {
-    if (!officeOpen && roleKnown && !officePc) void kiosk.enter();
-  }, [kiosk, officeOpen, roleKnown, officePc]);
+    if (!decided) return;
+    // `exit` sends nothing for a window that was never locked.
+    void (due ? kiosk.enter() : kiosk.exit());
+  }, [kiosk, decided, due]);
   const leaveKiosk = useCallback(async (): Promise<boolean> => {
     await kiosk.exit();
     const { mode, error } = kiosk.getSnapshot();
     if (error !== null) kiosk.clearError();
     return mode === "windowed";
   }, [kiosk]);
-  const officeAdmin = session?.user.role === "admin";
   const windowMode = useMemo<WindowMode | null>(
     () => (kiosk.enabled && officeAdmin ? { mode: kioskSnapshot.mode, leave: leaveKiosk } : null),
     [kiosk.enabled, officeAdmin, kioskSnapshot.mode, leaveKiosk],
@@ -662,11 +744,24 @@ export function App({
       )}
       {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
       {view.kind === "pairing" && <WaitScreen messageKey="shell.pairing.title" />}
-      {view.kind === "network_pairing" && (
+      {view.kind === "network_pairing" && scannerSetup && (
+        <WorkstationSetup
+          scope="scanners"
+          local={localDb}
+          hardware={hardwareApi}
+          printing={printing}
+          source={scanner}
+          onSaved={() => undefined}
+          onBack={() => setScannerSetup(false)}
+        />
+      )}
+      {view.kind === "network_pairing" && !scannerSetup && (
         <NetworkPairing
           probe={hostProbe}
           onClaim={claim}
           onBack={() => dispatch({ type: "network_pairing_cancelled" })}
+          comScans={comScans}
+          onScannerSetup={() => setScannerSetup(true)}
         />
       )}
       {view.kind === "pair_failed" && (
@@ -731,6 +826,7 @@ export function App({
             factsFailure={state.factsFailure}
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
+            watchScanners={hardwareApi.watchScanners}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -745,6 +841,7 @@ export function App({
               onSignedIn={operatorSignedIn}
               onSync={signInSync.request}
               onOffice={() => dispatch({ type: "office_requested" })}
+              watchScanners={hardwareApi.watchScanners}
             />
           ) : (
             <FloorApp
