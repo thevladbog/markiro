@@ -146,6 +146,9 @@ pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
 /// What a restore holds (plan РК): a station's facts, its code checks and
 /// its warehouse reprints, whose answers depend on the shifts, blocks and
 /// codes a copy may lack.
+/// The reads of a station's conflicts (plan КНФ) are not held on purpose: a
+/// copy is an older state, so they can only tell of fewer reviews and
+/// displacements, never wrong ones.
 fn held_by_a_restore(path: &str) -> bool {
     path == "/v1/device/facts"
         || path.starts_with("/v1/device/codes/")

@@ -42,11 +42,12 @@ impl FromRequestParts<AppState> for AuthDevice {
 /// A paired, non-revoked device that WRITES NOTHING when it is
 /// authenticated: the same key, revocation and kind checks as
 /// [`AuthDevice`], but `last_seen_at` is never touched, nor the version it
-/// reports (plan ОБН-1). Only the code check
+/// reports (plan ОБН-1). The code check
 /// (`GET /v1/device/codes/{codeHash}`, answered by a station within 300 ms)
 /// uses it, so that route never waits for a writer, even for the first
-/// request after an idle minute. Every other device route takes
-/// [`AuthDevice`].
+/// request after an idle minute, and so do the reads of a station's
+/// conflicts (`routes/device_conflicts.rs`, plan КНФ). Every other device
+/// route takes [`AuthDevice`].
 #[derive(Debug, Clone)]
 pub struct AskingDevice(pub AuthDevice);
 

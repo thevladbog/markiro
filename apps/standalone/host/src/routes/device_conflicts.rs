@@ -27,13 +27,16 @@ pub const STATUS_SQL: &str = "SELECT l.record_id, c.reviewed_at FROM scans l \
      WHERE l.device_id = ?1 AND l.record_id IN (SELECT value FROM json_each(?2)) \
      AND c.reviewed_at IS NOT NULL ORDER BY l.record_id";
 
+/// The conflicts after the cursor drive the read (`code_conflicts_detected`,
+/// migration 0022), in their order: `CROSS JOIN` keeps the planner from
+/// starting at the device's scans, whose journal only grows. One batch
+/// detects many at one instant, so the id breaks the tie.
 pub const DISPLACEMENTS_SQL: &str = "SELECT c.id, l.record_id, l.shift_id, c.code_hash, l.box_id, \
      c.detected_at, c.reviewed_at, w.shift_id AS w_shift_id, ws.number_month_key, \
      ws.number_seq, ws.created_from, w.device_id AS w_device_id, w.scanned_at AS w_scanned_at \
-     FROM code_conflicts c JOIN scans l ON l.id = c.loser_scan_id \
+     FROM code_conflicts c CROSS JOIN scans l ON l.id = c.loser_scan_id \
      JOIN scans w ON w.id = c.winner_scan_id JOIN shifts ws ON ws.id = w.shift_id \
-     WHERE c.kind = 'displaced' AND l.device_id = ?1 \
-     AND (c.detected_at > ?2 OR (c.detected_at = ?2 AND c.id > ?3)) \
+     WHERE c.kind = 'displaced' AND l.device_id = ?1 AND (c.detected_at, c.id) > (?2, ?3) \
      ORDER BY c.detected_at, c.id LIMIT ?4";
 
 pub async fn conflict_status(
@@ -98,8 +101,15 @@ pub async fn list_displacements(
     let (after_at, after_id) = match (query.after_at, query.after_id) {
         (None, None) => (String::new(), String::new()),
         (Some(at), Some(id)) => {
-            crate::clock::parse_timestamp(&at)
-                .map_err(|_| ApiError::validation("afterAt", "a host timestamp"))?;
+            // Compared as text with `detected_at`: only the host's own spelling of an
+            // instant orders right (`…03.000Z` sorts before `…03Z`).
+            let canonical = crate::clock::parse_timestamp(&at)
+                .ok()
+                .map(crate::clock::format_timestamp)
+                .filter(|written| *written == at);
+            if canonical.is_none() {
+                return Err(ApiError::validation("afterAt", "a host timestamp"));
+            }
             validate::client_uuid("afterId", &id)?;
             (at, id)
         }

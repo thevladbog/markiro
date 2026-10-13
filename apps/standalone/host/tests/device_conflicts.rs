@@ -60,7 +60,18 @@ async fn a_station_learns_which_of_its_conflicts_the_office_reviewed() {
             ))
             .await;
         assert_eq!(code, StatusCode::BAD_REQUEST, "{answer}");
+        assert_eq!(answer["error"]["code"], "validation_failed", "{answer}");
     }
+    // 200 ids are the most one request names, and they pass.
+    let most: Vec<String> = (1..=200).map(record_id).collect();
+    let (code, answer) = status(s.b.key.clone(), most).await;
+    assert_eq!(
+        (code, answer),
+        (
+            StatusCode::OK,
+            json!({ "reviewed": [{ "recordId": record_id(12), "reviewedAt": reviewed_at }] })
+        )
+    );
 }
 
 #[tokio::test]
@@ -99,9 +110,34 @@ async fn a_displaced_station_learns_of_its_displacements_after_its_cursor() {
     )
     .await;
     assert_eq!(after["items"], json!([]));
-    // One end of the cursor without the other.
-    let (code, _) = list(s.a.key.clone(), format!("?afterAt={}", s.detected_at)).await;
-    assert_eq!(code, StatusCode::BAD_REQUEST);
+    // One end of the cursor without the other, or either end malformed: an instant the host
+    // never writes (its text would not order with `detected_at`), an id that is no UUID.
+    let upper = conflict.to_uppercase();
+    let millis = s.detected_at.replace('Z', ".000Z");
+    for query in [
+        format!("?afterAt={}", s.detected_at),
+        format!("?afterId={conflict}"),
+        format!("?afterAt=yesterday&afterId={conflict}"),
+        format!("?afterAt={millis}&afterId={conflict}"),
+        format!("?afterAt={}&afterId=x", s.detected_at),
+        format!("?afterAt={}&afterId={upper}", s.detected_at),
+    ] {
+        let (code, body) = list(s.a.key.clone(), query.clone()).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{query}: {body}");
+    }
+    // The office reviews the displacement: A hears it as reviewed when it reads it.
+    let (status, _) = s
+        .admin
+        .call(
+            "POST",
+            &format!("/v1/office/conflicts/{conflict}/review"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let reviewed_at = s.admin.app.state.timestamp();
+    let (_, again) = list(s.a.key.clone(), String::new()).await;
+    assert_eq!(again["items"][0]["reviewedAt"], reviewed_at);
     // An office session alone (no device key) is refused like any device route.
     let (code, _) = s
         .admin
@@ -122,7 +158,7 @@ async fn displacements_come_a_page_at_a_time_after_the_cursor() {
     .fetch_one(&s.admin.app.state.pool)
     .await
     .unwrap();
-    // 120 more displacements of A's scan, detected after the scene's.
+    // 120 more displacements of A's scan, detected together after the scene's.
     for n in 0..120 {
         sqlx::query(
             "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, kind, \
@@ -132,7 +168,8 @@ async fn displacements_come_a_page_at_a_time_after_the_cursor() {
         .bind(format!("{:064x}", 7))
         .bind(&winner)
         .bind(&loser)
-        .bind(format!("2099-01-01T00:{:02}:{:02}Z", n / 60, n % 60))
+        // One batch detects many at one instant: the id orders them.
+        .bind("2099-01-01T00:00:00Z")
         .execute(&s.admin.app.state.pool)
         .await
         .unwrap();
@@ -208,6 +245,19 @@ async fn the_devices_reads_search_by_index() {
                 steps
                     .iter()
                     .any(|step| step.contains("code_conflicts_loser")),
+                "{steps:?}"
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| step.contains("scans_record (device_id=? AND record_id=?)")),
+                "{steps:?}"
+            );
+        } else {
+            // The conflicts after the cursor, in their order: never the device's scans first.
+            assert!(steps[0].contains("code_conflicts_detected"), "{steps:?}");
+            assert!(
+                !steps.iter().any(|step| step.contains("TEMP B-TREE")),
                 "{steps:?}"
             );
         }
