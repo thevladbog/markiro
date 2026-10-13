@@ -414,10 +414,14 @@ Before this build's pending migrations (plan ОБН-1) `LocalDb::open` copies th
 database: `VACUUM INTO standalone-station.pre-<app version>.db.partial`,
 `integrity_check` on it read-only, flushed, renamed over a copy of that name,
 and every older `standalone-station.pre-*.db` goes with its side files, so one
-stays. A copy of that name that is sound and older than the database (an
-earlier open of this version whose first migration committed before a later
-one failed) stays as it is: it holds the state before all of them, which the
-previous app can open. A new file, a failed or an unknown migration take no
+stays. Between the copy and the end of the migrations the database carries
+`PRAGMA user_version` «OBN1» (`UPGRADE_UNFINISHED`); while it does, a copy of
+that name that is sound and older than the database (an earlier open of this
+version whose first migration committed before a later one failed) stays as
+it is: it holds the state before all of them, which the previous app can
+open. A copy of that name left by an upgrade that finished (two builds can
+share a version: `CARGO_PKG_VERSION` is not yet tied to the release version,
+plan ОБН-3) is replaced. A new file, a failed or an unknown migration take no
 copy (sqlx decides as before). A copy that fails runs no migration: the open
 fails as `OpenFailure::Other` (the file stays, the app starts without its
 local database), except damage the copy met in the database, which stays
@@ -5033,6 +5037,10 @@ writing `host.restore`: a change there must keep it. The manifest says
 older office's `backupTriggerSchema` refuse an unknown trigger, and the
 rollback needs the older `restore` to read this copy; the name is the mark
 (`upgrade::is_pre_upgrade`, the copy's UTC time and `-pre-upgrade-`).
+A copy made of a database already half migrated (the failed row could not be
+written, or the power went) is named with a larger `from`: the rollback takes
+the copy with the smallest `from` for the upgrade's `to`, the only one the
+older `restore` accepts (runbook «Откат хоста к прежней версии»).
 `retention::keep_anchored` keeps such a copy while it is no more than 14 days
 older than the copy the run just made (`rotate`'s `keep_also`; the folder's
 newest without one), whatever the other rules say, so a copy dated ahead by a

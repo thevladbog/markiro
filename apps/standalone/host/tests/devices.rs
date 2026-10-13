@@ -518,7 +518,7 @@ async fn an_unknown_device_is_not_found_once_the_body_is_valid() {
 }
 
 /// The office reads a device's protocol and when its version was last
-/// reported (plan ОБН-1): a device paired now spoke protocol 3 at pairing
+/// reported (plan ОБН-1): a device paired now spoke this build's protocol at pairing
 /// and has reported nothing since.
 #[tokio::test]
 async fn the_office_reads_a_devices_protocol_and_when_its_version_was_seen() {

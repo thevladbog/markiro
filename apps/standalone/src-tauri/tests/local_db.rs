@@ -3902,6 +3902,19 @@ async fn a_partial_upgrade_keeps_the_copy_made_before_all_its_migrations() {
     let db = LocalDb::open_versioned(dir.path(), "9.9.9").await.unwrap();
     drop(db);
     assert_eq!(newest_applied(&dir.path().join(FILE_NAME)).await, newest);
+    // The upgrade finished: a later build of the same version copies anew.
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    let mark: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    assert_eq!(mark, 0);
     assert_eq!(newest_applied(&copy).await, oldest);
     assert_eq!(pre_upgrade_copies(dir.path()), [pre_upgrade_file("9.9.9")]);
 }
@@ -4042,4 +4055,43 @@ async fn an_older_copy_goes_with_its_side_files() {
     let db = LocalDb::open_versioned(dir.path(), "9.9.9").await.unwrap();
     drop(db);
     assert_eq!(pre_upgrade_copies(dir.path()), [pre_upgrade_file("9.9.9")]);
+}
+
+/// A copy of the same name left by an earlier upgrade that finished (two
+/// builds both called by one version, months apart) is no copy of this
+/// database: a fresh one replaces it. Only an open that did not finish its
+/// migrations keeps its copy.
+#[tokio::test]
+async fn a_finished_earlier_upgrades_copy_of_the_same_version_is_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let (previous, _) = shell_versions();
+    let oldest = two_builds_back_database(dir.path()).await;
+    let copy = dir.path().join(pre_upgrade_file("9.9.9"));
+    std::fs::copy(dir.path().join(FILE_NAME), &copy).unwrap();
+    // The earlier build of "9.9.9" brought `previous` and finished.
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            MIGRATOR
+                .iter()
+                .filter(|migration| migration.version <= previous)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+    assert_eq!(newest_applied(&copy).await, oldest);
+
+    let db = LocalDb::open_versioned(dir.path(), "9.9.9").await.unwrap();
+    drop(db);
+
+    assert_eq!(newest_applied(&copy).await, previous);
 }

@@ -337,6 +337,19 @@ impl LocalDb {
             writer.close().await;
             return Err(error.into());
         }
+        // The migrations finished: the copy before them is no longer the one
+        // to keep (plan ОБН-1). One that does not clear is cleared by the
+        // next open; until then a later upgrade of the same version would
+        // keep an older copy, so it is noted.
+        if let Err(error) = finish_upgrade(&writer).await {
+            eprintln!(
+                "standalone: the local database's unfinished-upgrade mark did not clear: {}",
+                error
+                    .as_database_error()
+                    .and_then(|database| database.code())
+                    .unwrap_or_default()
+            );
+        }
         let readers = SqlitePoolOptions::new()
             .max_connections(2)
             .connect_with(
@@ -789,10 +802,12 @@ async fn has_pending_migrations(pool: &SqlitePool) -> Result<bool, sqlx::Error> 
 /// `VACUUM INTO <copy>.partial`, `integrity_check` on it read-only, flushed,
 /// renamed to `standalone-station.pre-<version>.db` (over one of that name),
 /// then every older such copy goes, with its side files. A copy of that name
-/// that is sound and older than the database stays as it is: an earlier
-/// open of this version copied the database, and one of its migrations
-/// committed before a later one failed, so it holds the state before all of
-/// them (plan ОБН-1). A failure leaves the database as it was and no partial
+/// stays as it is only while the database carries [`UPGRADE_UNFINISHED`]
+/// and the copy is sound and older than the database: an earlier open of
+/// this version copied the database and did not finish its migrations (one
+/// committed before a later one failed), so the copy holds the state before
+/// all of them (plan ОБН-1). A copy left by an earlier upgrade that finished
+/// (two builds can share one version) is replaced. A failure leaves the database as it was and no partial
 /// file behind. Errors are I/O ([`OpenFailure::Other`]) except the damage the
 /// copy met in the database itself, which stays SQLite's
 /// ([`OpenFailure::Corrupt`], so a forget may set the file aside).
@@ -808,7 +823,10 @@ async fn copy_before_migrations(
         sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations WHERE success = 1")
             .fetch_one(pool)
             .await?;
-    if !older_sound_copy(&target, live).await {
+    // Only an open that did not finish its migrations keeps its copy: the
+    // name carries the app's version, and two builds can share one.
+    let keep = upgrade_unfinished(pool).await? && older_sound_copy(&target, live).await;
+    if !keep {
         match std::fs::remove_file(&partial) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -828,6 +846,11 @@ async fn copy_before_migrations(
             return Err(sqlx::Error::Io(error));
         }
     }
+    // The copy is in place: until the migrations finish, a later open of
+    // this version keeps it rather than copy a half-migrated database.
+    sqlx::query(&format!("PRAGMA user_version = {UPGRADE_UNFINISHED}"))
+        .execute(pool)
+        .await?;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let Some(other) = entry.file_name().to_str().map(str::to_owned) else {
@@ -850,6 +873,28 @@ async fn copy_before_migrations(
                 );
             }
         }
+    }
+    Ok(())
+}
+
+/// `PRAGMA user_version` of the database while an upgrade's copy is made and
+/// its migrations have not finished (plan ОБН-1): «OBN1». Nothing else uses
+/// `user_version`.
+const UPGRADE_UNFINISHED: i64 = 0x4f42_4e31;
+
+/// Whether the database carries [`UPGRADE_UNFINISHED`]: an earlier open
+/// copied it and did not finish its migrations.
+async fn upgrade_unfinished(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    let mark: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(pool)
+        .await?;
+    Ok(mark == UPGRADE_UNFINISHED)
+}
+
+/// Clears [`UPGRADE_UNFINISHED`] once the migrations ran.
+async fn finish_upgrade(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    if upgrade_unfinished(pool).await? {
+        sqlx::query("PRAGMA user_version = 0").execute(pool).await?;
     }
     Ok(())
 }
