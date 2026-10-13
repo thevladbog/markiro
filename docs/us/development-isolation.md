@@ -2694,3 +2694,32 @@ consumer suites passed 191/191 with zero skips; API typecheck, full lint, build,
 formatting and diff checks passed. Exact owned test children were normally
 disposed and verified absent; unknown children were preserved. This is only the
 service boundary, not an approved dataset Plan, complete demo or hosted proof.
+
+#### Exact CI outcome and owned Plan stage (2026-10-13)
+
+GitHub run38349158875 at cedecca8d completed with all six original isolation
+jobs successful. The dedicated Trace/Readiness job passed25 cases and failed the
+unchanged full262 test at900000ms. Its60000ms tracked-work drain hooks also timed
+out; full-seed child disposal/absence was not logged before runner exit. This
+observed CI timeout is separate from the earlier unexplained local SIGTERM. Full
+runtime acceptance is RED; no checks/budgets were relaxed and no unchanged retry
+is presented as a fix. A measured terminal native projection correction is next.
+
+The independently task-reviewed guarded preparation operation now atomically
+captures service-created draft, success audit and pending intent. The Plan stage
+uses real owned references, separately versioned English synthetic content and
+native approval with original identity/key and actual timestamp. It verifies
+current publication, actor/request/evidence binding and retained actual PDF bytes
+before its final receipt. Pending draft and effective-but-receipt-missing recovery
+are distinct; verify/completed replay write neither business rows nor provider
+objects. Journal JSON retains public artifact facts and the full native descriptor
+digest, not the private object key; equal bytes at another identity conflict.
+
+Preparation native regressions passed114/114; final Plan/journal/reference gates
+passed387/387 across16 files, zero skips, including41 new Plan cases. API types,
+full lint/build and formatting/diff passed. Exact owned dataset children drained,
+were normally disposed and verified absent; unrelated databases were preserved.
+Final most-capable source review approved the complete two-task increment with
+no actionable findings. No full dataset assembly,
+prepared demo Requests, visitor access, browser/hosted provider, deployment or
+release acceptance is implied; datasetComplete remains false.

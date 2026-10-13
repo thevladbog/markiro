@@ -2699,3 +2699,31 @@ checks, zero skips. API types, full lint, build, formatting and diff checks pass
 Owned test work drained and exact children were disposed normally and absent;
 unowned databases were not modified. Approval, immutable PDF, final dataset Plan
 receipt, Requests, visitor and hosted acceptance remain subsequent gates.
+
+### Exact CI outcome and service-owned Plan checkpoint (2026-10-13)
+
+Run38349158875 at cedecca8d has six successful original isolation jobs; the
+dedicated Trace/Readiness job is failed,25 passed/1 failed. Full262 acceptance
+exceeded its unchanged900000ms and tracked-work drain hooks exceeded60000ms.
+No full-seed disposal/absence was logged before remote runner exit. This timeout
+does not explain the older unknown local SIGTERM. Preserve all checks/budgets;
+remove measured duplicate native dependency reads before another full gate.
+
+Task-level independent review approved guarded prepareStageIntent and the owned
+Plan adapter. Preparation creates draft/audit/pending identity in one guarded
+transaction; replay returns the original identity without invoking creation.
+The adapter invokes native approval/default PDF with actual time and original
+key, distinguishes draft from already-published recovery, checks persisted
+key/request hashes and independent original actor/trusted seed, verifies private
+bytes outside locks and rechecks current publication before its exact receipt.
+It keeps raw objectKey outside journal JSON while binding the complete native
+descriptor digest. Current reference/configuration drift, unowned versions,
+supersession and provider/byte replacement are rejected rather than repaired.
+
+Native preparation114/114 and final Plan/journal/reference387/387 across16 files
+passed with zero skips; the latter includes41 new Plan cases. API typecheck/full
+lint/build, formatting/diff and exact owned dataset child normal disposal/absence
+passed. Final most-capable source review approved without actionable findings.
+Runtime integration is blocked on
+the red full Trace gate; Requests/packages, visitor/CLI/full browser and hosted
+acceptance remain pending. This checkpoint is not complete-demo or release proof.
