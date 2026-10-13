@@ -37,6 +37,12 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::with_host_id(&uuid::Uuid::new_v4().to_string()).await
+    }
+
+    /// A host whose `hostId` is `host_id`: the license fixtures of plan
+    /// ЛЦ-1 are issued to one.
+    pub async fn with_host_id(host_id: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = markiro_host::db::open(&dir.path().join("host.db"))
             .await
@@ -44,7 +50,7 @@ impl TestApp {
         let clock = Arc::new(ManualClock::new(
             time::OffsetDateTime::from_unix_timestamp(START).unwrap(),
         ));
-        let state = AppState::new(pool, uuid::Uuid::new_v4().to_string(), clock.clone())
+        let state = AppState::new(pool, host_id.to_owned(), clock.clone())
             .with_endpoint(test_fingerprint(), 45710)
             .with_addresses(|| TEST_ADDRESSES.to_vec());
         Self {
@@ -208,7 +214,15 @@ pub struct Admin {
 /// A new host: a paired station runs the wizard, and the administrator's
 /// session stays open on it.
 pub async fn admin() -> Admin {
-    let app = TestApp::new().await;
+    admin_of(TestApp::new().await).await
+}
+
+/// `admin()` on a host whose `hostId` is `host_id`.
+pub async fn admin_on(host_id: &str) -> Admin {
+    admin_of(TestApp::with_host_id(host_id).await).await
+}
+
+async fn admin_of(app: TestApp) -> Admin {
     let (_, key) = pair_device(&app, "station").await;
     let token = bootstrap(&app, &key).await;
     let (status, me) = app

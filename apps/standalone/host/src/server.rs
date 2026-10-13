@@ -59,6 +59,9 @@ pub struct AppState {
     /// The copies of the database (plan РК); `None` answers the office's
     /// backup routes `not_found`. `crate::start` always sets it.
     pub backups: Option<Arc<crate::backup::Backups>>,
+    /// The site's license (plan ЛЦ-2): its files, its state, the time it
+    /// trusts and its gates.
+    pub license: Arc<crate::license::LicenseService>,
 }
 
 impl AppState {
@@ -86,6 +89,10 @@ impl AppState {
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
+            license: Arc::new(crate::license::LicenseService::new(
+                markiro_proto::trust::license_keyset(),
+                Arc::new(crate::license::trial_mark::NoMark),
+            )),
             clock,
         }
     }
@@ -124,6 +131,13 @@ impl AppState {
     /// The copies of the database the office's backup routes read.
     pub fn with_backups(mut self, backups: Arc<crate::backup::Backups>) -> Self {
         self.backups = Some(backups);
+        self
+    }
+
+    /// Replace the license service (`crate::start` gives it the registry's
+    /// mark; tests a mark of their own).
+    pub fn with_license(mut self, license: Arc<crate::license::LicenseService>) -> Self {
+        self.license = license;
         self
     }
 }
@@ -443,6 +457,14 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::pairing::create_code),
         )
         .route("/v1/pairing/claim", post(crate::routes::pairing::claim))
+        .route(
+            "/v1/office/license",
+            get(crate::license::routes::get_license),
+        )
+        .route(
+            "/v1/office/license/activation-request",
+            get(crate::license::routes::activation_request),
+        )
 }
 
 /// The protocol version the client sent, set by [`protocol_guard`] for every
