@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
     shift_supports, DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftEnter,
-    ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus,
+    ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus, ValidationPrint,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -35,7 +35,9 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      CASE WHEN s.snapshot IS NULL THEN c.name \
          ELSE json_extract(s.snapshot, '$.counterpartyName') END AS counterparty_name, \
      s.production_date, s.planned_qty, s.box_capacity, s.box_template_id, \
-     s.pallet_box_capacity, s.pallet_template_id, s.owner_device_id, s.opened_at, s.closed_at \
+     s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
+     s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
+     s.opened_at, s.closed_at \
      FROM shifts s JOIN products p ON p.id = s.product_id \
      LEFT JOIN counterparties c ON c.id = s.counterparty_id";
 
@@ -59,6 +61,9 @@ struct ShiftRow {
     box_template_id: String,
     pallet_box_capacity: Option<u32>,
     pallet_template_id: Option<String>,
+    validation_print_mode: String,
+    validation_print_verification: Option<String>,
+    validation_print_template_id: Option<String>,
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
@@ -84,8 +89,12 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         box_template_id: row.box_template_id,
         pallet_box_capacity: row.pallet_box_capacity,
         pallet_template_id: row.pallet_template_id,
-        // The host keeps no policy before task B3 (part B of plan РЕЖ).
-        validation_print: None,
+        // Left out when it is `none` (plan РЕЖ, part B).
+        validation_print: shifts::stored_print(
+            &row.validation_print_mode,
+            row.validation_print_verification.as_deref(),
+            row.validation_print_template_id.as_deref(),
+        )?,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -237,6 +246,7 @@ pub async fn create_device_shift(
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
             pallets,
+            validation_print: &ValidationPrint::None {},
         },
         &at,
         rev,
@@ -281,13 +291,22 @@ pub fn station_update() -> ApiError {
 }
 
 /// What a station must name to enter a shift of `mode`: nothing for
-/// aggregation, [`shift_supports::VALIDATION`] for validation.
-fn require_supports(mode: ShiftMode, enter: &ShiftEnter) -> Result<(), ApiError> {
-    let needed = match mode {
-        ShiftMode::Aggregation => return Ok(()),
-        ShiftMode::Validation => shift_supports::VALIDATION,
+/// aggregation, [`shift_supports::VALIDATION`] for validation, and with it
+/// [`shift_supports::VALIDATION_DM_DUPLICATE`] when the shift prints a
+/// duplicate (`prints`, part B).
+fn require_supports(mode: ShiftMode, prints: bool, enter: &ShiftEnter) -> Result<(), ApiError> {
+    let needed: &[&str] = match (mode, prints) {
+        (ShiftMode::Aggregation, _) => &[],
+        (ShiftMode::Validation, false) => &[shift_supports::VALIDATION],
+        (ShiftMode::Validation, true) => &[
+            shift_supports::VALIDATION,
+            shift_supports::VALIDATION_DM_DUPLICATE,
+        ],
     };
-    if enter.supports.iter().any(|name| name == needed) {
+    if needed
+        .iter()
+        .all(|needed| enter.supports.iter().any(|name| name == needed))
+    {
         Ok(())
     } else {
         Err(station_update())
@@ -305,6 +324,9 @@ struct EntryRow {
     box_template_id: String,
     pallet_template_id: Option<String>,
     pallet_sheet_template_id: Option<String>,
+    validation_print_mode: String,
+    validation_print_verification: Option<String>,
+    validation_print_template_id: Option<String>,
     counterparty_id: Option<String>,
     snapshot: Option<String>,
     number_month_key: String,
@@ -327,7 +349,11 @@ struct EntryRow {
 /// nothing. A validation shift needs `validation-v1`, on its opening and on
 /// every entry again (a station rolled back to an older build must not work
 /// it as an aggregation one): otherwise `station_update`, after the shift's
-/// own refusals above and before anything is frozen or written.
+/// own refusals above and before anything is frozen or written. A
+/// validation shift that prints a duplicate (part B) also needs
+/// `validation-dm-duplicate-v1`, and its snapshot freezes the duplicate
+/// template whole (`shifts::snapshot`: `duplicate_template_not_fit` when it
+/// no longer fits, after the pallet template; the bound counts its layout).
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -342,8 +368,9 @@ pub async fn enter_shift(
     device.require_station_in(&mut tx, STATION_ONLY).await?;
     let shift: Option<EntryRow> = sqlx::query_as(
         "SELECT status, mode, line_id, owner_device_id, product_id, box_template_id, \
-         pallet_template_id, pallet_sheet_template_id, counterparty_id, snapshot, \
-         number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+         pallet_template_id, pallet_sheet_template_id, validation_print_mode, \
+         validation_print_verification, validation_print_template_id, counterparty_id, \
+         snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -369,7 +396,23 @@ pub async fn enter_shift(
     {
         return Err(shifts::busy());
     }
-    require_supports(shift.mode.parse().map_err(ApiError::internal)?, &enter)?;
+    let validation_print = shifts::stored_print(
+        &shift.validation_print_mode,
+        shift.validation_print_verification.as_deref(),
+        shift.validation_print_template_id.as_deref(),
+    )?;
+    let duplicate = match &validation_print {
+        Some(ValidationPrint::DuplicateDm {
+            verification,
+            template_id,
+        }) => Some((*verification, template_id.as_str())),
+        Some(ValidationPrint::None {}) | None => None,
+    };
+    require_supports(
+        shift.mode.parse().map_err(ApiError::internal)?,
+        duplicate.is_some(),
+        &enter,
+    )?;
     let snapshot = match shift.snapshot {
         // The station that opened the shift enters it again.
         Some(text) => {
@@ -400,6 +443,7 @@ pub async fn enter_shift(
                 shift.pallet_template_id.as_deref(),
                 shift.counterparty_id.as_deref(),
                 shift.pallet_sheet_template_id.as_deref(),
+                duplicate,
             )
             .await?
         }
@@ -443,6 +487,10 @@ pub async fn enter_shift(
     if let Some(sheet) = &snapshot.pallet_sheet {
         details["palletSheetTemplateId"] = json!(sheet.id);
         details["palletSheetRevision"] = json!(sheet.revision);
+    }
+    if let Some(print) = &snapshot.validation_print {
+        details["validationPrintTemplateId"] = json!(print.template.id);
+        details["validationPrintTemplateRev"] = json!(print.template.rev);
     }
     audit::record(
         &mut tx,

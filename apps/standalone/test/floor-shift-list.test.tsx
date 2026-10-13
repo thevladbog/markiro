@@ -216,6 +216,11 @@ describe("the shifts of the station's line", () => {
       "pallet_template_not_fit",
       "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
     ],
+    // The template of a validation shift's duplicate (plan РЕЖ, part B).
+    [
+      "duplicate_template_not_fit",
+      "Шаблон дубликата Data Matrix выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
     // A mode this build does not name in its entry (plan РЕЖ, Р5).
     [
       "station_update",

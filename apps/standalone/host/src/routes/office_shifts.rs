@@ -34,7 +34,8 @@ use crate::validate;
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
-     pallet_sheet_template_id, owner_device_id, \
+     pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
+     validation_print_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
      close_reason_text, late_data_at, created_at, rev, \
      CASE mode WHEN 'validation' \
@@ -81,6 +82,9 @@ struct ShiftRow {
     pallet_box_capacity: Option<u32>,
     pallet_template_id: Option<String>,
     pallet_sheet_template_id: Option<String>,
+    validation_print_mode: String,
+    validation_print_verification: Option<String>,
+    validation_print_template_id: Option<String>,
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
@@ -119,9 +123,12 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         pallet_box_capacity: row.pallet_box_capacity,
         pallet_template_id: row.pallet_template_id,
         pallet_sheet_template_id: row.pallet_sheet_template_id,
-        // The host keeps no policy before task B3 (part B of plan РЕЖ): every
-        // shift's is `none`, left out.
-        validation_print: None,
+        // Left out when it is `none` (plan РЕЖ, part B).
+        validation_print: shifts::stored_print(
+            &row.validation_print_mode,
+            row.validation_print_verification.as_deref(),
+            row.validation_print_template_id.as_deref(),
+        )?,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -248,23 +255,19 @@ pub fn check_mode_rules(mode: ShiftMode, pallets_enabled: bool) -> Result<(), Ap
     Ok(())
 }
 
-/// The print policy (protocol 5, part B of plan РЕЖ) before the host keeps
-/// it (task B3): `{ "mode": "none" }`, every shift's, is taken and changes
-/// nothing; `duplicate_dm` is `validation_failed` on `validationPrint`, so no
-/// shift is planned as printing a duplicate this host would not print.
-pub fn check_validation_print(policy: Option<&ValidationPrint>) -> Result<(), ApiError> {
-    match policy {
-        None | Some(ValidationPrint::None {}) => Ok(()),
-        Some(ValidationPrint::DuplicateDm { .. }) => Err(ApiError::validation(
-            "validationPrint",
-            "this host does not print a duplicate yet",
-        )),
-    }
+/// A shift's print policy as an answer leaves it out: `none` for `None`.
+fn policy_of(policy: Option<&ValidationPrint>) -> ValidationPrint {
+    policy.cloned().unwrap_or(ValidationPrint::None {})
 }
 
 /// `POST /v1/office/shifts`: a planned shift of an active product on an
 /// active line, with a box template that fits the product, and with pallets
-/// a pallet template that fits it too (`shifts::pallet_request`).
+/// a pallet template that fits it too (`shifts::pallet_request`). A
+/// validation shift may print a duplicate (`validationPrint`, plan РЕЖ part
+/// B): `validation_failed` on `validationPrint` for another mode (after the
+/// mode's own rules), on `validationPrint.templateId` unless the template
+/// fits the product (`shifts::check_duplicate_template`, after the box
+/// template). Left out or `null`, the policy is `none`.
 pub async fn create_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -272,7 +275,8 @@ pub async fn create_shift(
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
     check_mode_rules(create.mode, create.pallets_enabled)?;
-    check_validation_print(create.validation_print.as_ref())?;
+    let validation_print = policy_of(create.validation_print.as_ref());
+    shifts::check_print_mode(create.mode, &validation_print)?;
     let pallet_request = shifts::pallet_request(
         create.pallets_enabled,
         create.pallet_box_capacity,
@@ -294,6 +298,9 @@ pub async fn create_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
+        shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
+    }
     let pallets = shifts::pallets(
         &mut tx,
         pallet_request,
@@ -318,6 +325,7 @@ pub async fn create_shift(
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
             pallets,
+            validation_print: &validation_print,
         },
         &at,
         rev,
@@ -341,6 +349,10 @@ pub async fn create_shift(
     // without a mode is an aggregation shift's.
     if created.mode != ShiftMode::Aggregation {
         details["mode"] = json!(created.mode);
+    }
+    // And the policy only by a shift that prints a duplicate.
+    if let Some(policy) = &created.validation_print {
+        details["validationPrint"] = json!(policy);
     }
     audit::record(
         &mut tx,
@@ -383,6 +395,15 @@ pub async fn create_shift(
 /// fields' own shape (`shifts::pallet_request`, e.g. pallets turned on with
 /// no template: `palletTemplateId`) is checked before the status, for any
 /// shift, as it was before the mode existed.
+///
+/// The print policy (part B) is a fixed field too: left out (or `null`) it is
+/// kept, so a printing shift turned to aggregation must send
+/// `validationPrint: { "mode": "none" }` in the same edit, else
+/// `validation_failed` on `validationPrint` (`shifts::check_print_mode`, after
+/// the mode's rules, only for a planned shift); a changed template is checked
+/// as at planning (`validationPrint.templateId`), a kept one is not. The mode
+/// and the three policy columns are written in one `UPDATE`, which the
+/// triggers of `0021` check together.
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -390,7 +411,6 @@ pub async fn update_shift(
     ApiJson(update): ApiJson<ShiftUpdate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_validation_print(update.validation_print.as_ref())?;
     validate::count(
         "palletBoxCapacity",
         update.pallet_box_capacity,
@@ -443,8 +463,14 @@ pub async fn update_shift(
     // change is refused on its status below, not on the rules of a mode it
     // cannot take (and one that sends none already keeps them).
     let mode = update.mode.unwrap_or(current.mode);
+    let current_print = policy_of(current.validation_print.as_ref());
+    let validation_print = update
+        .validation_print
+        .clone()
+        .unwrap_or_else(|| current_print.clone());
     if current.status == ShiftStatus::Planned {
         check_mode_rules(mode, pallets_enabled)?;
+        shifts::check_print_mode(mode, &validation_print)?;
     }
     let pallet_request = if pallets_enabled {
         shifts::pallet_request(
@@ -505,7 +531,8 @@ pub async fn update_shift(
         || pallets_enabled != current.pallets_enabled
         || pallet_box_capacity != current.pallet_box_capacity
         || pallet_template_id != current.pallet_template_id
-        || pallet_sheet_template_id != current.pallet_sheet_template_id;
+        || pallet_sheet_template_id != current.pallet_sheet_template_id
+        || validation_print != current_print;
     match current.status {
         ShiftStatus::Planned => {
             // A changed pallet template is checked; pallets just turned on
@@ -528,6 +555,17 @@ pub async fn update_shift(
                         sheet_id,
                     )
                     .await?;
+                }
+            }
+            // A duplicate template that changes is checked; a kept one stays.
+            if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
+                let kept = matches!(
+                    &current_print,
+                    ValidationPrint::DuplicateDm { template_id: current, .. } if current == template_id
+                );
+                if !kept {
+                    let product = shifts::shift_product(&mut tx, &current.product_id).await?;
+                    shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
                 }
             }
             if line_id != current.line_id {
@@ -590,17 +628,25 @@ pub async fn update_shift(
             json!(current.pallet_sheet_template_id),
             json!(pallet_sheet_template_id),
         ),
+        (
+            "validationPrint",
+            json!(current_print),
+            json!(validation_print),
+        ),
     ]) else {
         // Nothing actually changed: report the shift as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
         return Ok(Json(current));
     };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    let (print_mode, print_verification, print_template_id) =
+        shifts::print_columns(&validation_print);
     sqlx::query(
         "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
          box_capacity = ?, planned_qty = ?, counterparty_id = ?, mode = ?, pallets_enabled = ?, \
-         pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, rev = ? \
-         WHERE id = ?",
+         pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, \
+         validation_print_mode = ?, validation_print_verification = ?, \
+         validation_print_template_id = ?, rev = ? WHERE id = ?",
     )
     .bind(&line_id)
     .bind(&production_date)
@@ -613,6 +659,9 @@ pub async fn update_shift(
     .bind(pallet_box_capacity)
     .bind(&pallet_template_id)
     .bind(&pallet_sheet_template_id)
+    .bind(print_mode)
+    .bind(print_verification)
+    .bind(print_template_id)
     .bind(rev)
     .bind(&id)
     .execute(&mut *tx)

@@ -17,7 +17,8 @@ import { checkShiftSnapshot } from "./shift-snapshot.js";
  * not one this station entered before (`no_link`); the host refused it
  * (`busy`: another station opened it, `closed`, `other_line`, `not_found`:
  * deleted, `product_inactive`, `template_not_fit`, `pallet_template_not_fit`:
- * the pallet template, plan ПЛ-Х; `station_update`: the shift's mode needs
+ * the pallet template, plan ПЛ-Х; `duplicate_template_not_fit`: the template
+ * of a validation shift's duplicate, plan РЕЖ part B; `station_update`: the shift's mode needs
  * what this build does not name in its entry, plan РЕЖ); its layout is one this
  * build does not read (`unreadable`); this computer could not keep it
  * (`local`); or anything else (`failed`).
@@ -31,6 +32,7 @@ export type EntryRefusal =
   | "product_inactive"
   | "template_not_fit"
   | "pallet_template_not_fit"
+  | "duplicate_template_not_fit"
   | "station_update"
   | "unreadable"
   | "local"
@@ -60,6 +62,7 @@ const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
   product_inactive: "product_inactive",
   template_not_fit: "template_not_fit",
   pallet_template_not_fit: "pallet_template_not_fit",
+  duplicate_template_not_fit: "duplicate_template_not_fit",
   station_update: "station_update",
 };
 

@@ -8,7 +8,8 @@
 //! (`stock_template`): it may be disabled or narrowed, and copied by a
 //! `POST`. A template is never disabled, narrowed out of a category it is
 //! the default of, or deleted while it is a default (`template_is_default`),
-//! nor deleted while a planned shift names it (`template_in_use`).
+//! nor deleted while a planned shift names it (`template_in_use`: its box,
+//! pallet or duplicate template, plan РЕЖ part B).
 //! Deleting a template clears the products' preferences that name it, each
 //! product at the delete's revision, and leaves a tombstone.
 
@@ -333,6 +334,14 @@ pub async fn update_template(
     Ok(Json(updated))
 }
 
+/// The planned shifts that name a template (`?1`) as their box, pallet or
+/// duplicate template (plan РЕЖ, part B): SQLite answers it from the planned
+/// shifts by `shifts_status_production_date`, never a scan of `shifts` (a
+/// unit test pins the plan).
+const PLANNED_SHIFTS_NAMING: &str = "SELECT id FROM shifts WHERE (box_template_id = ?1 \
+     OR pallet_template_id = ?1 OR validation_print_template_id = ?1) \
+     AND status = 'planned' ORDER BY id";
+
 /// `DELETE /v1/office/templates/{id}` → 204. A template deleted already (its
 /// tombstone stands) answers 204 again, so a delete repeated after a lost
 /// answer does not fail; one that never existed is `not_found`.
@@ -368,17 +377,14 @@ pub async fn delete_template(
     if usage.organization || !usage.categories.is_empty() {
         return Err(templates::is_default(usage.organization, usage.categories));
     }
-    // A planned shift prints its boxes or its pallets with this template once
-    // a station opens it; an open or closed shift has the layout in its
-    // snapshot.
-    let planned: Vec<String> = sqlx::query_scalar(
-        "SELECT id FROM shifts WHERE (box_template_id = ?1 OR pallet_template_id = ?1) \
-         AND status = 'planned' ORDER BY id",
-    )
-    .bind(&id)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(ApiError::internal)?;
+    // A planned shift prints its boxes, its pallets or its duplicates with
+    // this template once a station opens it; an open or closed shift has the
+    // layout in its snapshot.
+    let planned: Vec<String> = sqlx::query_scalar(PLANNED_SHIFTS_NAMING)
+        .bind(&id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
     if !planned.is_empty() {
         return Err(ApiError::conflict(
             "template_in_use",
@@ -435,4 +441,37 @@ pub async fn delete_template(
         .await
         .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::Row;
+
+    use super::PLANNED_SHIFTS_NAMING;
+
+    /// `template_in_use` reads the planned shifts by their status
+    /// (`shifts_status_production_date`) whatever template slot names the
+    /// template: no scan of `shifts`.
+    #[tokio::test]
+    async fn the_planned_shifts_naming_a_template_are_read_by_their_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&dir.path().join("plan.db")).await.unwrap();
+        let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {PLANNED_SHIFTS_NAMING}"))
+            .bind("00000000-0000-4000-8000-000000000000")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().all(|step| !step.starts_with("SCAN")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("shifts_status_production_date")),
+            "{plan:?}"
+        );
+    }
 }

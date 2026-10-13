@@ -7,9 +7,9 @@
 //! `test/shift-numbers.test.ts` read every one.
 
 use markiro_proto::{
-    ProductStatus, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftSnapshotLogo,
+    LabelVerification, ProductStatus, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftSnapshotLogo,
     ShiftSnapshotOrganization, ShiftSnapshotProduct, ShiftSnapshotSheet, ShiftSnapshotTemplate,
-    ShiftStatus, TemplatePurpose,
+    ShiftStatus, SnapshotValidationPrint, TemplatePurpose, ValidationPrint,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -183,6 +183,81 @@ pub async fn check_pallet_template(
     .await
 }
 
+/// The field of a print policy's template, as a refusal names it.
+pub const PRINT_TEMPLATE_FIELD: &str = "validationPrint.templateId";
+
+/// The rule of a shift's print policy on its own (plan РЕЖ, part B; the
+/// cloud's `assertValidationPrintCompatible`): a duplicate is printed only by
+/// a validation shift, else `validation_failed` on `validationPrint`.
+pub fn check_print_mode(mode: ShiftMode, policy: &ValidationPrint) -> Result<(), ApiError> {
+    match policy {
+        ValidationPrint::DuplicateDm { .. } if mode != ShiftMode::Validation => {
+            Err(ApiError::validation(
+                "validationPrint",
+                "only a validation shift prints a duplicate",
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `validation_failed` on `validationPrint.templateId` unless `id` names a
+/// duplicate template that fits a product of `group` (`templates::fits`:
+/// enabled, of the `product_duplicate` purpose, covering the group), as the
+/// cloud's `PRODUCT_LABEL_TEMPLATE_NOT_ELIGIBLE`.
+pub async fn check_duplicate_template(
+    conn: &mut SqliteConnection,
+    id: &str,
+    group: u32,
+) -> Result<(), ApiError> {
+    templates::check_slot(
+        conn,
+        PRINT_TEMPLATE_FIELD,
+        id,
+        TemplatePurpose::ProductDuplicate,
+        Some(group),
+    )
+    .await
+}
+
+/// The three policy columns of `shifts` (`0021`) of a policy: its mode, its
+/// verification and its template, both `NULL` without a duplicate.
+pub fn print_columns(
+    policy: &ValidationPrint,
+) -> (&'static str, Option<&'static str>, Option<&str>) {
+    match policy {
+        ValidationPrint::None {} => ("none", None, None),
+        ValidationPrint::DuplicateDm {
+            verification,
+            template_id,
+        } => (
+            "duplicate_dm",
+            Some(verification.as_str()),
+            Some(template_id),
+        ),
+    }
+}
+
+/// The policy the three columns hold: `None` for a shift that prints
+/// nothing, so an answer leaves the field out (`none`, every shift's before
+/// part B), `Some` with its verification and template for a duplicate.
+pub fn stored_print(
+    mode: &str,
+    verification: Option<&str>,
+    template_id: Option<&str>,
+) -> Result<Option<ValidationPrint>, ApiError> {
+    match (mode, verification, template_id) {
+        ("none", None, None) => Ok(None),
+        ("duplicate_dm", Some(verification), Some(template_id)) => {
+            Ok(Some(ValidationPrint::DuplicateDm {
+                verification: verification.parse().map_err(ApiError::internal)?,
+                template_id: template_id.to_owned(),
+            }))
+        }
+        _ => Err(ApiError::internal("a shift's print policy breaks its rule")),
+    }
+}
+
 /// A shift's pallets: how many boxes a pallet holds and the pallet label
 /// template. A shift without pallets has none of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +380,9 @@ pub struct NewShift<'a> {
     pub box_capacity: u32,
     pub box_template_id: &'a str,
     pub pallets: Option<Pallets>,
+    /// The print policy (plan РЕЖ, part B), checked: a station's own shift
+    /// prints nothing.
+    pub validation_print: &'a ValidationPrint,
 }
 
 /// Insert a planned shift at `rev` and return its id. The number is the
@@ -325,6 +403,7 @@ pub async fn insert(
     .await
     .map_err(ApiError::internal)?;
     let id = uuid::Uuid::new_v4().to_string();
+    let (print_mode, print_verification, print_template_id) = print_columns(shift.validation_print);
     let created_by_kind = match shift.origin {
         ShiftOrigin::Office => "office_user",
         ShiftOrigin::Station => "device",
@@ -333,8 +412,10 @@ pub async fn insert(
         "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
          created_by, create_request_id, status, mode, pallets_enabled, product_id, line_id, \
          counterparty_id, production_date, planned_qty, box_capacity, box_template_id, \
-         pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, created_at, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, \
+         validation_print_mode, validation_print_verification, validation_print_template_id, \
+         created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
@@ -366,6 +447,9 @@ pub async fn insert(
             .as_ref()
             .and_then(|pallets| pallets.sheet_id.as_deref()),
     )
+    .bind(print_mode)
+    .bind(print_verification)
+    .bind(print_template_id)
     .bind(at)
     .bind(rev)
     .execute(&mut *conn)
@@ -408,16 +492,27 @@ pub fn pallet_template_not_fit() -> ApiError {
     )
 }
 
+/// `conflict` on `duplicate_template_not_fit` (plan РЕЖ, part B): the
+/// planned shift's duplicate template is disabled now, or no longer covers
+/// the product's group.
+pub fn duplicate_template_not_fit() -> ApiError {
+    ApiError::conflict(
+        "duplicate_template_not_fit",
+        "the shift's duplicate template no longer fits its product",
+    )
+}
+
 /// The most bytes of snapshot text a shift keeps: the `CHECK` of `shifts` in
 /// migration `0009` (`length(CAST(snapshot AS BLOB)) <= 327680`). Each layout
 /// may be up to `validate::MAX_SPEC_BYTES` (256 KB), so a box layout and a
-/// pallet layout together can exceed it; the entry answers
+/// pallet layout (or a validation shift's duplicate layout, plan РЕЖ part B)
+/// together can exceed it; the entry answers
 /// [`snapshot_too_large`] instead of failing the `CHECK` (a unit test ties
 /// the two numbers).
 pub const MAX_SNAPSHOT_BYTES: usize = 327_680;
 
-/// `conflict` on `snapshot_too_large`: the shift's box and pallet layouts
-/// together are more than a shift's snapshot keeps. The office can point the
+/// `conflict` on `snapshot_too_large`: the shift's box, pallet and duplicate
+/// layouts together are more than a shift's snapshot keeps. The office can point the
 /// planned shift at smaller templates.
 pub fn snapshot_too_large() -> ApiError {
     ApiError::conflict(
@@ -468,7 +563,11 @@ async fn frozen_template(
 /// with the whole layout, with pallets its pallet template the same way
 /// (`pallet_template_not_fit`), the issuer prefix of the organization's
 /// current GLN, the counterparty's name, and (plan А4) the A4 sheet the shift
-/// names and the organization's name, INN and print logo.
+/// names and the organization's name, INN and print logo. A validation shift
+/// that prints a duplicate (plan РЕЖ, part B; `duplicate`: its verification
+/// and template) freezes that template whole the same way, still enabled and
+/// covering the product's group (`duplicate_template_not_fit`, after the
+/// pallet template), with the verification beside it.
 ///
 /// The sheet is frozen as it is now, enabled or not (turning a sheet off only
 /// stops new shifts from choosing it). A sheet that is not there (the API
@@ -481,6 +580,7 @@ pub async fn snapshot(
     pallet_template_id: Option<&str>,
     counterparty_id: Option<&str>,
     pallet_sheet_id: Option<&str>,
+    duplicate: Option<(LabelVerification, &str)>,
 ) -> Result<ShiftSnapshot, ApiError> {
     type ProductRow = (
         String,
@@ -515,9 +615,23 @@ pub async fn snapshot(
             _ => return Err(pallet_template_not_fit()),
         }
     }
+    if let Some((_, duplicate_template_id)) = duplicate {
+        match templates::scope(conn, duplicate_template_id).await? {
+            Some(scope)
+                if templates::fits(&scope, TemplatePurpose::ProductDuplicate, Some(group)) => {}
+            _ => return Err(duplicate_template_not_fit()),
+        }
+    }
     let box_template = frozen_template(&mut *conn, template_id).await?;
     let pallet_template = match pallet_template_id {
         Some(id) => Some(frozen_template(&mut *conn, id).await?),
+        None => None,
+    };
+    let validation_print = match duplicate {
+        Some((verification, id)) => Some(SnapshotValidationPrint {
+            verification,
+            template: frozen_template(&mut *conn, id).await?,
+        }),
         None => None,
     };
     let gln: Option<String> = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
@@ -587,8 +701,7 @@ pub async fn snapshot(
             inn: org_inn,
             logo,
         }),
-        // No duplicate print before task B3 (part B of plan РЕЖ).
-        validation_print: None,
+        validation_print,
     })
 }
 
