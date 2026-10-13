@@ -578,19 +578,19 @@ foreign_key_check` пуст.
       let mut body = milk(); // group 8
       body["egaisCode"] = json!("0150320000001234567");
       let (status, error) = admin.call("POST", "/v1/office/products", Some(body)).await;
-      assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+      assert_eq!(status, StatusCode::BAD_REQUEST);
       assert_eq!(error["error"]["details"]["field"], "egaisCode");
   }
 
   #[tokio::test]
-  async fn changing_the_group_away_from_15_with_the_code_kept_is_refused() { /* PUT group 8 + code → 422 egaisCode */ }
+  async fn changing_the_group_away_from_15_with_the_code_kept_is_refused() { /* PUT group 8 + code → 400 egaisCode */ }
 
   #[tokio::test]
-  async fn an_egais_code_of_65_characters_or_with_a_control_character_is_refused() { /* 422 */ }
+  async fn an_egais_code_of_65_characters_or_with_a_control_character_is_refused() { /* 400 validation_failed */ }
 
   #[tokio::test]
   async fn the_default_counterparty_must_be_in_use() {
-      // an unknown id → 422 defaultCounterpartyId; an archived counterparty → 422;
+      // an unknown id → 400 defaultCounterpartyId; an archived counterparty → 400;
       // an active one → saved; archiving it later keeps the product's pointer
   }
 
@@ -611,8 +611,8 @@ foreign_key_check` пуст.
   }
   ```
 
-  Код статуса и путь к полю ошибки сверить с существующими тестами `validation_failed` в этом файле
-  (например, тестом GTIN). Форму `details` у `update_details` — с соседним тестом аудита
+  Ошибка поля у хоста — `400 validation_failed` с `details.field` (`host/src/error.rs:88`); путь к полю
+  сверить с существующими тестами `validation_failed` в этом файле (например, тестом GTIN). Форму `details` у `update_details` — с соседним тестом аудита
   обновления. `milk_record` получает три новых поля со значением `null`.
 
 - [ ] **Шаг 3: красные тесты фото** (`host/tests/product_photos.rs`):
@@ -620,8 +620,8 @@ foreign_key_check` пуст.
   - `PUT` фикстуры `product-photo-put.json` — ответ с `checksum` = SHA-256 байт, `GET` отдаёт то
     же; `photoChecksum` в `GET /v1/office/products` совпадает;
   - `PUT` технологом проходит; устройство без сессии — `401`;
-  - PNG (`iVBORw0KGgo=`) — `422`, поле `dataBase64`; 300 001 байт — `422`; ширина 641 — `422`
-    `width`; кривой base64 — `422`; неизвестный товар — `404`;
+  - PNG (`iVBORw0KGgo=`) — `400` `validation_failed`, поле `dataBase64`; 300 001 байт — `400` `validation_failed`; ширина 641 — `400` `validation_failed`
+    `width`; кривой base64 — `400` `validation_failed`; неизвестный товар — `404`;
   - ревизия хоста (`host_revision`) после `PUT` не меняется;
   - аудит `product.photo.set` с `details == {"width":2,"height":1,"bytes":13}` и без base64
     (тест ищет подстроку `"/9j/` в `details` и не находит);
@@ -1139,10 +1139,10 @@ imageSrc?: string;
 WHERE id = ?`);
   - файл формата 1 (фикстура с `formatVersion: 1` и без новых полей, собранная в тесте из
     `cloud-export-file.json` удалением полей) принимается, поля `NULL`;
-  - формат 3 — `422` `formatVersion`;
-  - код ЕГАИС у товара группы 8 в файле — `422` на `payload.products.N.egaisCode` (правило
+  - формат 3 — `400` `validation_failed` `formatVersion`;
+  - код ЕГАИС у товара группы 8 в файле — `400` `validation_failed` на `payload.products.N.egaisCode` (правило
     хоста то же, что в маршруте);
-  - контрагент по умолчанию, которого нет среди `payload.counterparties`, — `422` на
+  - контрагент по умолчанию, которого нет среди `payload.counterparties`, — `400` `validation_failed` на
     `payload.products.N.defaultCounterpartyId`.
 - [ ] **Шаг 4: реализация хоста.**
   - `CloudProduct` получает `#[serde(default)] pub egais_code: Option<String>` и
