@@ -12,9 +12,10 @@ use axum::http::StatusCode;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use markiro_host::audit::actions;
+use markiro_host::license::state::{Features, Quotas, StoredLicense};
 use markiro_host::license::trial_mark::NoMark;
 use markiro_host::license::verify::{self, Refusal};
-use markiro_host::license::LicenseService;
+use markiro_host::license::{store, LicenseService};
 use serde_json::{json, Value};
 use support::app::{
     admin, admin_on, audit_rows, audit_trail, empty, host_revision, json as json_body, request,
@@ -45,6 +46,52 @@ fn denied(admin: &Admin, license_id: Option<&str>, details: Value) -> AuditRow {
         "denied".to_owned(),
         details,
     )
+}
+
+/// The whole file the host must keep for `payload`, read field by field
+/// from the payload's own names: a field the host swapped with another one
+/// of the same type shows here.
+fn kept_of(payload: &Value) -> StoredLicense {
+    let int = |value: &Value| value.as_i64().expect("an integer");
+    let string = |value: &Value| value.as_str().expect("a string").to_owned();
+    let quota = |key: &str| {
+        let limit = &payload["quotas"][key];
+        if limit.is_null() {
+            None
+        } else {
+            Some(limit.as_u64().expect("a quota"))
+        }
+    };
+    let feature = |key: &str| payload["features"][key].as_bool().expect("a feature");
+    StoredLicense {
+        license_id: string(&payload["licenseId"]),
+        sequence: int(&payload["sequence"]),
+        kid: TEST_KID.to_owned(),
+        host_id: string(&payload["hostId"]),
+        issued_at: int(&payload["issuedAt"]),
+        valid_from: int(&payload["validFrom"]),
+        valid_until: int(&payload["validUntil"]),
+        grace_days: int(&payload["graceDays"]),
+        plan: string(&payload["plan"]),
+        plan_version_id: string(&payload["planVersionId"]),
+        customer_name: string(&payload["customer"]["name"]),
+        customer_inn: string(&payload["customer"]["inn"]),
+        quotas: Quotas {
+            lines: quota("lines"),
+            stations: quota("stations"),
+            kiosks: quota("kiosks"),
+            cabinet_users: quota("cabinetUsers"),
+        },
+        features: Features {
+            label_editor: feature("labelEditor"),
+            public_api: feature("publicApi"),
+            pallets: feature("pallets"),
+            chz_integration: feature("chzIntegration"),
+            inventory: feature("inventory"),
+            commerce_ml: feature("commerceMl"),
+            handheld: feature("handheld"),
+        },
+    }
 }
 
 async fn stored(admin: &Admin) -> i64 {
@@ -478,6 +525,15 @@ async fn the_preview_of_an_upgrade_compares_with_the_file_in_force() {
             json!(["not_yet_valid"])
         )
     );
+    assert_eq!(
+        [
+            body["after"]["quotas"]["lines"]["limit"].clone(),
+            body["after"]["quotas"]["stations"]["limit"].clone(),
+            body["after"]["quotas"]["kiosks"]["limit"].clone(),
+            body["after"]["quotas"]["cabinetUsers"]["limit"].clone(),
+        ],
+        [json!(5), json!(3), json!(1), json!(4)]
+    );
     assert_eq!(stored(&admin).await, 1);
 }
 
@@ -562,6 +618,104 @@ async fn a_file_issued_ahead_of_the_pcs_clock_moves_the_time_to_its_issue_less_a
     )
     .await;
     assert_eq!(body["effectiveAt"], json!(text(START_MS + 9 * DAY_MS)));
+}
+
+/// The warnings speak of the time the host keeps after the load: the
+/// latest issue of every stored file and the new one less a day. A file in
+/// force at that time is not «not yet valid», and one over by then is
+/// «expired», whatever the PC's clock said before.
+#[tokio::test]
+async fn the_warnings_are_of_the_time_after_the_floor_the_file_raises() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    // Issued ten days ahead of the PC, in force from day five: by the floor
+    // (day nine) it is in force.
+    let in_force = file(&host, |terms| {
+        terms["issuedAt"] = json!(START_MS + 10 * DAY_MS);
+        terms["validFrom"] = json!(START_MS + 5 * DAY_MS);
+    });
+    // In force now, over on day three: by the floor it is over.
+    let over = file(&host, |terms| {
+        terms["issuedAt"] = json!(START_MS + 10 * DAY_MS);
+        terms["validFrom"] = json!(START_MS - 30 * DAY_MS);
+        terms["validUntil"] = json!(START_MS + 3 * DAY_MS);
+        terms["graceDays"] = json!(0);
+    });
+    let (status, body) = preview(&admin, &in_force).await;
+    assert_eq!(
+        (status, body["warnings"].clone()),
+        (StatusCode::OK, json!([]))
+    );
+    let (status, body) = preview(&admin, &over).await;
+    assert_eq!(
+        (status, body["warnings"].clone()),
+        (StatusCode::OK, json!(["expired"]))
+    );
+    let body = load_ok(&admin, &in_force).await;
+    // No warning: the office answer leaves an empty list out.
+    assert_eq!(
+        (body["state"].clone(), body["warnings"].clone()),
+        (json!("active"), Value::Null)
+    );
+    assert_eq!(last_load_row(&admin).await.6["warnings"], json!([]));
+
+    // A stored file the clock has not met yet counts too: issued on day ten,
+    // put in by hand, it holds the floor at day nine for the next file.
+    let seeded = admin_on(FIXTURE_HOST_ID).await;
+    let mut first = terms(FIXTURE_HOST_ID);
+    first["issuedAt"] = json!(START_MS + 10 * DAY_MS);
+    seed(&seeded.app, &first).await;
+    let (status, body) = preview(
+        &seeded,
+        &file(FIXTURE_HOST_ID, |terms| {
+            terms["licenseId"] = json!(license_id(2));
+            terms["sequence"] = json!(2);
+            terms["validFrom"] = json!(START_MS + 5 * DAY_MS);
+        }),
+    )
+    .await;
+    assert_eq!(
+        (status, body["warnings"].clone()),
+        (StatusCode::OK, json!([]))
+    );
+}
+
+/// A body past the route's limit is refused before the handler: no row, and
+/// nothing of the rate limit spent.
+#[tokio::test]
+async fn a_body_past_the_routes_limit_is_refused_before_anything() {
+    let admin = admin().await;
+    let rows = audit_rows(&admin.app).await;
+    let big = "a".repeat(40 * 1024);
+    for _ in 0..6 {
+        for (method, path) in [
+            ("PUT", "/v1/office/license"),
+            ("POST", "/v1/office/license/preview"),
+        ] {
+            let (status, body) = admin.call(method, path, Some(json!({ "file": big }))).await;
+            assert_eq!(
+                (
+                    status,
+                    body["error"]["code"].clone(),
+                    body["error"]["details"].clone()
+                ),
+                (
+                    StatusCode::BAD_REQUEST,
+                    json!("validation_failed"),
+                    Value::Null
+                ),
+                "{method} {path}: {body}"
+            );
+        }
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    // Twelve refusals, and the limit of ten is untouched.
+    assert_eq!(
+        preview(&admin, &file(&admin.app.state.host_id, |_| {}))
+            .await
+            .0,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]
@@ -737,6 +891,17 @@ async fn the_files_plan_lc1_signs_are_read_as_the_cloud_will_send_them() {
         ),
         (json!(FIXTURE_HOST_ID), json!(INN))
     );
+    // Distinct quotas and mixed features, so a swapped field cannot pass.
+    assert_eq!(
+        (payload["quotas"].clone(), payload["features"].clone()),
+        (
+            json!({ "lines": 2, "stations": 5, "kiosks": 0, "cabinetUsers": 3 }),
+            json!({
+                "labelEditor": true, "publicApi": false, "pallets": true, "chzIntegration": true,
+                "inventory": false, "commerceMl": false, "handheld": true
+            })
+        )
+    );
     for (name, reason) in [
         ("license-tampered.jws", "license_signature"),
         ("license-unknown-kid.jws", "license_unknown_key"),
@@ -782,6 +947,13 @@ async fn the_files_plan_lc1_signs_are_read_as_the_cloud_will_send_them() {
             json!(["not_yet_valid"])
         )
     );
+    // The rows keep the whole of both files, field by field.
+    let mut conn = admin.app.state.pool.acquire().await.unwrap();
+    assert_eq!(
+        store::licenses(&mut conn).await.unwrap(),
+        vec![kept_of(&payload), kept_of(&payload_of(&upgrade))]
+    );
+    drop(conn);
     let (status, body) = load(&admin, &fixture_file("license-older.jws")).await;
     assert_eq!(
         (status, body["error"]["details"].clone()),
@@ -817,25 +989,8 @@ fn the_host_reads_every_license_fixture_as_the_domain_does() {
             "ok" => {
                 let verified = read.unwrap_or_else(|refusal| panic!("{name}: {refusal:?}"));
                 let payload = payload_of(&fixture_file(name));
-                assert_eq!(
-                    (
-                        json!(verified.license.license_id),
-                        json!(verified.license.sequence),
-                        json!(verified.license.host_id),
-                        json!(verified.license.customer_inn),
-                        json!(verified.license.valid_until),
-                        json!(verified.license.kid)
-                    ),
-                    (
-                        payload["licenseId"].clone(),
-                        payload["sequence"].clone(),
-                        payload["hostId"].clone(),
-                        payload["customer"]["inn"].clone(),
-                        payload["validUntil"].clone(),
-                        json!(TEST_KID)
-                    ),
-                    "{name}"
-                );
+                // The whole file: every quota, every feature and every term.
+                assert_eq!(verified.license, kept_of(&payload), "{name}");
             }
             result => {
                 let expected = match result {

@@ -169,6 +169,9 @@ pub fn admit(
             org_inn: org.to_owned(),
         });
     }
+    // «The same file» is decided by `licenseId` alone: the issuer gives
+    // every file its own id (a new `sequence` is a new id), and this host,
+    // INN and signature were checked above.
     if stored
         .iter()
         .any(|known| known.license_id == license.license_id)
@@ -181,7 +184,8 @@ pub fn admit(
     }
 }
 
-/// What an accepted file warns of, at the effective time `now`.
+/// What an accepted file warns of, at the effective time `now`: the time
+/// the host keeps after the load (`routes::time_after_load`).
 pub fn warnings_for(license: &StoredLicense, now: i64, usage: &Usage) -> Vec<String> {
     let mut found = Vec::new();
     if license.valid_until <= now {

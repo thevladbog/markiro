@@ -305,13 +305,34 @@ fn changes(before: &LicenseTerms, after: &LicenseTerms) -> Vec<String> {
     changes
 }
 
+/// The effective time the host keeps once `license` is stored: the latest
+/// issue of every stored file and the new one less a day raises it (§7). The
+/// warnings speak of this time, so they never call a file «not yet valid» or
+/// «expired» when it is not by the time the host uses after the load.
+fn time_after_load(snapshot: &Snapshot, license: &StoredLicense) -> i64 {
+    let floor = clock::issue_floor(
+        snapshot
+            .licenses
+            .iter()
+            .chain([license])
+            .map(|license| license.issued_at),
+    );
+    floor.map_or(snapshot.reading.effective, |floor| {
+        snapshot.reading.effective.max(floor)
+    })
+}
+
 /// «было → станет» of `license` against what is in force (spec §4.8).
+/// «before» is the file in force now (or the trial), which need not be the
+/// stored file of the highest `sequence`: a newer file may wait for its
+/// start. The `license.load` row's `previousSequence` is the highest stored
+/// one, the file the new one replaces by number.
 pub fn preview_of(snapshot: &Snapshot, usage: &Usage, license: &StoredLicense) -> LicensePreview {
     let before = terms_now(&snapshot.evaluation, usage);
     let after = terms_of_file(license, usage);
     LicensePreview {
         changes: changes(&before, &after),
-        warnings: verify::warnings_for(license, snapshot.reading.effective, usage),
+        warnings: verify::warnings_for(license, time_after_load(snapshot, license), usage),
         before,
         after,
     }
@@ -435,7 +456,11 @@ pub async fn load_license(
         }
     };
     let usage = seats::usage(&mut tx).await.map_err(ApiError::internal)?;
-    let warnings = verify::warnings_for(&verified.license, snapshot.reading.effective, &usage);
+    let warnings = verify::warnings_for(
+        &verified.license,
+        time_after_load(&snapshot, &verified.license),
+        &usage,
+    );
     if admission == Admission::Same {
         tx.rollback().await.map_err(ApiError::internal)?;
         let mut answer = office_license(&app, &snapshot, &usage);
@@ -443,6 +468,8 @@ pub async fn load_license(
         return Ok(Json(answer));
     }
     let license = &verified.license;
+    // The file the new one replaces by number: the highest stored
+    // `sequence`, not necessarily the file in force (the preview's «before»).
     let previous = snapshot
         .licenses
         .iter()
