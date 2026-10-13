@@ -16,7 +16,10 @@
   DataMatrix каждого кода. Рендерер облака переезжает в `packages/domain` побайтово;
 - для проведённого документа офис формирует XML «Расформирование упаковки» (решение ПР-2). Генератор
   берётся из инвентаризации домена, файл сохраняется в «Документы\Markiro\Выгрузки», хост пишет
-  строку аудита.
+  строку аудита;
+- на странице «Конфликты» КНФ у строки есть действие «Расформировать короб» для короба
+  проигравшего: оно создаёт черновик с этим SSCC и открывает документ — тем же механизмом, что
+  кнопка «Расформировать» карточек КРТ (задача 8, после слияния КНФ, можно отрезать).
 
 **Architecture:**
 
@@ -44,7 +47,10 @@
 - **Офис:** раздел `src/office/disaggregation/*`:
   - страницы и разбор вставки и файла в webview по правилам облака;
   - акт рисуется через `render-form.ts` (новый вид формы `act`) и печатается через `print-form.ts`;
-  - XML собирается доменом и сохраняется через `save_office_files`, затем пишется аудит.
+  - XML собирается доменом и сохраняется через `save_office_files`, затем пишется аудит;
+  - действие КНФ зовёт помощник КРТ `src/office/codes/disassemble.ts`
+    (`createDisaggregation` → `addDisaggregationLines` → страница документа; `DraftWithoutLine`,
+    если черновик создан, а SSCC не добавлен).
 
 **Tech Stack:** Rust (axum, sqlx 0.8.6, serde) — `host`, `proto`; React 19.2, TypeScript 6 strict
 (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), zod 4, i18next, `@tanstack/react-query`,
@@ -58,9 +64,14 @@ NestJS 11 (только импорт в `apps/api`).
 
 - `docs/superpowers/specs/2026-10-13-standalone-office-parity-design.md` — §5.1 (ДЗГ), строки
   П-19 и П-20, решения ПР-1, ПР-2, ПР-3, §8.1 (ДЗГ-О после ДЗГ).
-- План ДЗГ: `docs/superpowers/plans/2026-10-13-standalone-dzg-disaggregation.md`. Когда писался
-  этот план, файла ещё не было, поэтому его интерфейсы здесь — допущения (Р1). Задача 0 их
-  сверяет.
+- План ДЗГ: `docs/superpowers/plans/2026-10-13-standalone-dzg-disaggregation.md` — таблицы `0024`,
+  `proto/src/disaggregation.rs`, `src/host/disaggregation.ts`, методы `HostApi`, правила строк и
+  проведения (его Р4, Р10, Р12–Р16). Имена этого плана сверены с ним (раздел «Что даёт ДЗГ»).
+- План КНФ: `docs/superpowers/plans/2026-10-13-standalone-knf-conflicts.md` — страница «Конфликты»,
+  `OfficeConflictScan`; его Р7 передал сюда «создать документ дезагрегации из конфликта».
+- План КРТ: `docs/superpowers/plans/2026-10-13-standalone-krt-box-pallet-cards.md`, задача 9 —
+  кнопка «Расформировать»: `createDisaggregation`, затем `addDisaggregationLines`, затем
+  `/disaggregation/:id`; помощник `src/office/codes/disassemble.ts`; право — `useCan("planShifts")`.
 - `docs/superpowers/plans/2026-09-26-standalone-00-print-forms-to-domain.md` — образец переноса
   формы в домен со слепками.
 - Облако, образец:
@@ -139,8 +150,62 @@ timeZone)` → `["Выгрузки", <номер>, <дата_время>_<фор
   - Тестовая поддержка — `test/support/office.tsx` (`fakeHostApi`, `fakeOfficeSession`,
     `renderOffice`, `TECHNOLOGIST`, `ORG_PROFILE`) и `test/support/office-files.ts`
     (`fakeOfficeFiles`).
-- **Дезагрегации в автономе нет** (спецификация §5.1): ни таблиц, ни маршрутов, ни страниц. Всё,
-  что ниже названо «из ДЗГ», появляется планом ДЗГ.
+- **Дезагрегации в базе нет** (спецификация §5.1): ни таблиц, ни маршрутов, ни страниц. Её хост и
+  провод даёт план ДЗГ (ниже).
+
+## Что даёт ДЗГ (по плану `2026-10-13-standalone-dzg-disaggregation.md`; сверить после слияния)
+
+- **Таблицы `0024_disaggregation.sql`:**
+  - `disaggregation_documents(id, seq, doc_no, status, reason_id, comment, source, created_by,
+created_at, applied_at, applied_by, cancelled_at, cancelled_by, updated_at, rev)`; `created_by`
+    — `NOT NULL`, проведённый документ всегда с причиной;
+  - `disaggregation_document_lines(id, document_id, position, sscc_input, sscc, box_id, pallet_id,
+status, product_id, code_count, validated_at, created_at)`, `UNIQUE (document_id, position)`;
+    индексы `disaggregation_lines_document_sscc`, `_sscc`, `_box`, `_pallet`. Строка `duplicate` и
+    `not_found` без цели; у повтора `sscc = NULL`, поэтому на акт и в XML он не попадает;
+  - `disaggregation_reasons(id, name, sort_order, archived, created_at, rev)` — пять причин по
+    умолчанию с id `d15a0000-0000-4000-8000-00000000000N` («Повреждена упаковка» — `…0003`);
+  - `code_releases` — лента станциям (этому плану не нужна).
+- **Проведение (его Р4):** живые единицы короба получают `removed_at`, `boxes.disassembled_at` —
+  тот же текст, момент хоста в форме устройства (24 символа, `YYYY-MM-DDTHH:MM:SS.sssZ`,
+  `facts::rules::device_text`). Правило кодов акта «`removed_at = disassembled_at`» (как
+  `office_reports::BOX_ITEMS_SQL`) находит снятые документом единицы по равенству текста. Паллета —
+  только `pallets.disassembled_at`, её короба не трогаются, `boxes.pallet_id` остаётся.
+- **Провод:** типы — `proto/src/disaggregation.rs` (`markiro_proto::disaggregation::*`): статусы
+  `DisaggregationStatus` (с `FromStr`), `DisaggregationLineStatus` (`ok`, `not_found`, `not_closed`,
+  `shift_open`, `already_disassembled`, `duplicate`), `DisaggregationSource`,
+  `DisaggregationDocument`, `DisaggregationLine` (с `shiftId`, `shiftNumber`),
+  `DisaggregationDetail { document, lines }`, `DisaggregationCreate { reasonId, comment }`,
+  `DisaggregationUpdate { reasonId, comment, expectedRev }` (вся шапка),
+  `DisaggregationLinesAdd { lines: [{ input, sscc }], import }`, `DisaggregationTransition
+{ expectedRev }`, `DisaggregationReason`, `DisaggregationReasonCreate { name, sortOrder }`,
+  `DisaggregationReasonUpdate { name, sortOrder, archived, expectedRev }`; пределы
+  `MAX_LINES_PER_REQUEST = 500`, `MAX_LINES_PER_DOCUMENT = 10 000`, вход до 64 символов.
+  Zod — `src/host/disaggregation.ts` (`disaggregationStatusSchema`, `…LineStatusSchema`,
+  `disaggregationDetailSchema`, `DisaggregationFilter`, `disaggregationQuery`,
+  `DISAGGREGATION_MAX_LINES_PER_REQUEST`, `DISAGGREGATION_CONSTRAINTS`); тесты провода —
+  `proto/tests/disaggregation.rs`, `test/disaggregation-protocol.test.ts`.
+- **`HostApi`:** `listDisaggregations(token, filter?)`, `getDisaggregation`, `createDisaggregation`,
+  `updateDisaggregation`, `addDisaggregationLines`, `deleteDisaggregationLine`,
+  `applyDisaggregation`, `cancelDisaggregation` (все записи отвечают `DisaggregationDetail`),
+  `listDisaggregationReasons`, `createDisaggregationReason`, `updateDisaggregationReason`.
+- **Маршруты:** `GET|POST /v1/office/disaggregation` (создание — `200`), `GET|PUT …/{id}`,
+  `POST …/{id}/lines`, `DELETE …/{id}/lines/{lineId}`, `POST …/{id}/apply`, `POST …/{id}/cancel`,
+  `GET|POST /v1/office/disaggregation-reasons`, `PUT …/{id}`. Список: фильтры `status`,
+  `reasonId`, `from`, `to` (моменты хоста `YYYY-MM-DDTHH:MM:SSZ`, не даты — его Р16), `q`
+  (подстрока номера), новые первыми, не больше 1 000.
+- **Ошибки:** `validation_failed` — `400` с `details.field` (не 422); `conflict` — `409` с
+  `details.constraint`: `document_not_draft`, `reason_required`, `no_lines`, `invalid_lines`
+  (+ `details.invalidLines`; свежие статусы сохранены, карточку надо перечитать); чужая правка —
+  `stale_revision`.
+- **Права (его Р10):** документы и справочник причин — администратор и технолог
+  (`auth::disaggregates`, `require_disaggregation[_in]`); без офисной сессии — `401`. Отказа роли
+  в волне 1 нет.
+- **Аудит:** `disaggregation.create`, `.update`, `.lines.add`, `.lines.delete`, `.apply`,
+  `.cancel`, `disaggregation_reason.create/.update`; цель — `disaggregation_document` /
+  `disaggregation_reason`.
+- **SSCC читает вебвью (его Р12):** строка на проводе — `{ input, sscc }`, где `sscc` — результат
+  `parseScannedSscc` домена (18 цифр) или `null`.
 
 ## Решения владельца
 
@@ -155,23 +220,9 @@ timeZone)` → `["Выгрузки", <номер>, <дата_время>_<фор
 
 ## Допущения
 
-- **Р1 — интерфейсы ДЗГ (предположение, сверяет задача 0).** План пишется параллельно с ДЗГ, и
-  ниже — то, что ДЗГ должен дать по спецификации §5.1. Все имена этого плана опираются на этот
-  список. Если в ДЗГ имена другие, исполнитель заменяет их по всему плану и записывает замену в
-  «Отклонения», а смысл задач не меняется.
-
-  - **Миграция хоста:** `0024_disaggregation.sql`: `disaggregation_reasons(id, name, sort_order, archived, rev)`, `disaggregation_doc_counters`, `disaggregation_documents(id, doc_no, status, reason_id, comment, source, created_by, created_at, applied_by, applied_at, cancelled_by, cancelled_at, rev)`, `disaggregation_document_lines(id, document_id, position, sscc_input, sscc, box_id, pallet_id, status, product_id, code_count, validated_at)`; индекс строк по `document_id`
-  - **Номер документа:** `DSG-YY-NNNN`, как `formatDocNo` облака
-  - **SSCC строки:** `sscc` — голые 18 цифр или `NULL`, если ввод не разобран
-  - **Статусы:** документ: `draft`, `applied`, `cancelled`; строка: `ok`, `not_found`, `not_closed`, `shift_open`, `already_disassembled`, `duplicate` (без облачного `written_off`: выбытия нет)
-  - **Проведение:** одна транзакция под замком фактов. Для короба `boxes.disassembled_at` и `box_items.removed_at` получают **одно и то же** время (так делает факт станции, `AGENTS.md`, «Shift card and printed forms»); у паллеты `pallets.disassembled_at`
-  - **Маршруты:** `GET/POST /v1/office/disaggregation`, `GET/PUT /v1/office/disaggregation/{id}`, `POST …/{id}/lines`, `DELETE …/{id}/lines/{lineId}`, `POST …/{id}/apply`, `POST …/{id}/cancel`, `GET/POST /v1/office/disaggregation-reasons`, `PUT …/{id}`
-  - **Права:** документы — `require_shift_planning` (admin, technologist); причины — `require_admin` (справочник, как контрагенты и линии); чтение — все офисные роли
-  - **Proto:** `DisaggregationStatus` (с `FromStr`, как `ShiftStatus`), `DisaggregationLineStatus`, `DisaggregationDocument` (`id, docNo, status, reasonId, reasonName, comment, source, lineCount, codeCount, createdByName, createdAt, appliedAt, cancelledAt, rev`), `DisaggregationDocumentDetail` (то же + `lines`), `DisaggregationLine` (`id, ssccInput, sscc, boxId, palletId, status, productName, codeCount`), `DisaggregationReason` (`id, name, sortOrder, archived, rev`), запросы `DisaggregationDocumentCreate {reasonId, comment}`, `DisaggregationDocumentUpdate {reasonId, comment, expectedRev}`, `DisaggregationLinesAdd {ssccs, source}` (до 10 000), `DisaggregationApply {expectedRev}`, `DisaggregationCancel {expectedRev}`, `DisaggregationReasonCreate/Update`
-  - **Zod и `HostApi`:** схемы `disaggregation*Schema` в `src/host/protocol.ts`; методы `listDisaggregationDocuments`, `getDisaggregationDocument`, `createDisaggregationDocument`, `updateDisaggregationDocument`, `addDisaggregationLines`, `deleteDisaggregationLine`, `applyDisaggregationDocument`, `cancelDisaggregationDocument`, `listDisaggregationReasons`, `createDisaggregationReason`, `updateDisaggregationReason`
-  - **Аудит:** действия `disaggregation.create`, `.update`, `.apply`, `.cancel`, `disaggregation_reason.*`; `target_type` — `"disaggregation"`
-  - **Отказ проведения:** `conflict` с `details.constraint = "lines_not_ready"`, если строка перестала быть `ok`; `stale_revision` при чужой правке
-
+- **Р1 — сверка с ДЗГ по плану, а не по коду.** Имена раздела «Что даёт ДЗГ» взяты из плана ДЗГ.
+  Задача 0 сверяет их с влитым кодом; расхождение исполнитель заменяет по всему плану и пишет в
+  «Отклонения», смысл задач не меняется.
 - **Р2 — акт переезжает в домен без правок, слепки пишет API до переноса.** Как этап 0: сначала
   тест в `apps/api/test` пишет HTML облачного `report.ts` в
   `packages/domain/test/fixtures/print-forms/disaggregation-act-*.html`. Каталог уже исключён из
@@ -207,6 +258,8 @@ timeZone = "UTC")`, как `renderBoxReportHtml`. Облако параметр 
   - Коды читаются **по сменам документа**: один проход по `scans_shift` на смену, а не на
     короб. Поэтому 100 коробов одной смены — один проход по её сканам, а не сто.
   - Читать могут все офисные роли, как остальные данные форм.
+  - На акт идут строки с `sscc IS NOT NULL` по `position`. Повтор (`duplicate`) хранит
+    `sscc = NULL` и на акт не попадает, как в облаке; поэтому короб встречается на акте один раз.
 - **Р7 — XML: все SSCC проведённого документа, правило ИНН — генератора.**
   - В файл идут SSCC всех строк проведённого документа: и короба, и паллеты. Расформирование
     паллеты в ЧЗ — тоже `<packing>` с её кодом упаковки (вопрос ДЗГО-4).
@@ -226,10 +279,12 @@ timeZone = "UTC")`, как `renderBoxReportHtml`. Облако параметр 
     (`formatId: "disaggregation_xml_gismt"`, `formatVersion: 1`, `packingCount`), как в выгрузках
     смены. Если запись не прошла, офис говорит об этом, предлагает «Записать снова», а файл
     остаётся.
-  - Хост проверяет, что документ проведён (`conflict` `document_status`) и что `packingCount`
-    равен числу разных SSCC документа (`validation_failed`). Строки проведённого документа не
-    меняются, поэтому расхождение — ошибка офиса, а не гонка.
-  - Аудит: `disaggregation.export`, цель `disaggregation`, детали — три поля записи. Ревизии нет.
+  - Хост проверяет права (`require_disaggregation_in`, как записи ДЗГ), что документ проведён
+    (`409 conflict`, `document_not_applied`) и что `packingCount` равен числу разных SSCC документа
+    (`400 validation_failed`). Строки проведённого документа не меняются, поэтому расхождение —
+    ошибка офиса, а не гонка.
+  - Аудит: `disaggregation.export`, цель `disaggregation_document`, детали — три поля записи.
+    Ревизии нет.
 - **Р9 — разбор ввода в webview, правила облака.**
   - Вставка: правило страницы облака — разделители `/[\s;,]+/` (`DocumentDetail.tsx`,
     `splitSsccInput`).
@@ -241,27 +296,42 @@ timeZone = "UTC")`, как `renderBoxReportHtml`. Облако параметр 
   - Текст читается `File.text()` (UTF-8, BOM снимается). Облако BOM не снимает
     (`buffer.toString("utf8")`), и первый токен файла из Excel получает невидимый символ U+FEFF и статус
     `not_found`. Здесь это сознательно исправлено, и тест это фиксирует.
-  - Токены уходят одним запросом `addDisaggregationLines` с `source: "import"`.
-- **Р10 — права в офисе.**
-  - Документы (создать, править, строки, провести, отменить), печать акта и XML —
-    `planShifts` (admin и technologist), как в ДЗГ.
-  - Справочник причин правит только администратор (`editReference`). Технолог видит его только
-    для чтения с текстом `office.common.readOnly`.
-  - Маршруты этого плана (`report-data`, `exports`) открыты всем офисным ролям, как данные форм и
-    запись выгрузки смены: и печать, и XML доступны обеим ролям.
-  - Отказ проверяется так: устройство без офисной сессии получает `401`, технолог на странице
-    причин не видит кнопок записи. Если ДЗГ дал технологу правку причин, офис следует хосту:
-    `editCatalog` вместо `editReference`, запись в «Отклонения».
-- **Р11 — список фильтруется в webview.** Документов на площадке — десятки в месяц. Хост отдаёт
-  весь список (`listDisaggregationDocuments`), страница фильтрует и делит на страницы по 50, как
-  «Смены» (`findShifts`, `OfficePager`):
-  - период — по гражданской дате создания в часовом поясе организации (`civilToday(zone, new
-Date(createdAt))`);
-  - номер — подстрока без учёта регистра.
-
-  Если ДЗГ отдаёт список с фильтрами хоста, страница всё равно фильтрует у себя: параметры
-  запроса не нужны.
-
+  - Каждый токен (вставки и файла) превращается в строку провода `{ input: token, sscc:
+parseScannedSscc(token) }` — правило ДЗГ (его Р12): SSCC читает домен, хост проверяет только
+    форму. `parseScannedSscc` снимает `(00)`, `]C1` и ведущие `00` у 20 цифр.
+  - Хост берёт за запрос до 500 строк (`DISAGGREGATION_MAX_LINES_PER_REQUEST`), документ — до
+    10 000. Поэтому вставка и файл уходят частями по 500, по порядку, `import: true` у файла. После
+    сбоя части страница говорит, сколько строк добавлено (`importPartial`), и показывает документ
+    как он есть: уже добавленные строки остаются черновыми строками, их можно удалить. Предел
+    документа хост проверяет сам (`400` на `lines`), офис показывает его текстом
+    `documentFull`.
+- **Р10 — права в офисе — как у хоста ДЗГ.** ДЗГ дал документы и справочник причин обеим ролям
+  (его Р10, `auth::disaggregates`). В офисе это тот же набор ролей, что у `planShifts`
+  (`src/office/access.ts`), и его же ждёт кнопка КРТ. Поэтому отдельная возможность не
+  заводится: всё действие дезагрегации — `useCan("planShifts")`.
+  - По ней — создание и правка документа, строки, проведение, отмена, причины, печать акта и XML.
+  - `GET …/report-data` открыт всем офисным ролям, как данные форм; запись XML —
+    `require_disaggregation_in`.
+  - Отказа роли в волне 1 нет (обе роли могут всё). Тесты проверяют, что технолог делает то же,
+    что администратор, и что без офисной сессии хост отвечает `401`. Если план РОЛ (волна 3)
+    разведёт роли, у дезагрегации появится своя возможность, зеркало `auth::disaggregates`.
+- **Р11 — фильтры списка — на хосте, период переводит офис.** Хост отдаёт не больше 1 000
+  новейших документов и сам фильтрует по `status`, `reasonId`, `q`, `from`, `to`. Даты «С» и «По»
+  офис переводит в моменты хоста в часовом поясе организации: `from` — начало дня «С», `to` —
+  последняя секунда дня «По» (`dayStartInstant` в `document-list.ts`). Номер ищется с задержкой
+  300 мс, как в облаке. Страница делит ответ на страницы по 50 (`OfficePager`).
+- **Р13 — один механизм «создать черновик с SSCC» для КРТ и КНФ.** Как облачный
+  `startDisassembly`: `createDisaggregation(token, { reasonId: null, comment: null })`, затем
+  `addDisaggregationLines(token, id, { lines: [{ input: sscc, sscc }], import: false })`, затем
+  страница `/disaggregation/{id}`. Страница документа адресных параметров не читает. Помощник —
+  `src/office/codes/disassemble.ts` КРТ; задача 8 его переиспользует, а если КРТ ещё не влит,
+  создаёт файл с тем же именем и той же формой.
+- **Р14 — «Расформировать короб» из конфликта (задача 8, после КНФ, можно отрезать).** На странице
+  «Конфликты» КНФ у строки — действие для короба проигравшего, если короб закрыт (`boxSscc` есть),
+  его смена закрыта и короб не расформирован. Двух последних признаков в `OfficeConflictScan`
+  КНФ нет, поэтому ответ получает поля `shiftClosed` и `boxDisassembled` (ответ терпит новые поля,
+  версия протокола не растёт). Условия кнопки — подсказка: проверку строки всё равно делает хост
+  (`shift_open`, `already_disassembled`).
 - **Р12 — без миграции и без версии протокола.** Хосту нужны только чтение и строка аудита. Номер
   миграции за ДЗГ-О не закреплён (распределение: «ДЗГ-О — нет»).
 
@@ -277,7 +347,7 @@ Date(createdAt))`);
   - приём файла в ЛК ЧЗ проверяет владелец.
 - Аудит: точные исполнитель, действие, цель, результат и разобранные детали. Отказ хоста
   (`validation_failed`, `conflict`, `not_found`) строку не пишет (`AGENTS.md`, «Audit»).
-- Права: Р10. Отказ проверяется тестами (технолог — только чтение причин, без сессии — `401`).
+- Права: Р10. Тесты: технолог делает всё, что администратор; без офисной сессии — `401`.
 - Офлайн: ничего не ходит в сеть. Акт — встроенный SVG и системный Arial, XML пишется на диск
   через шелл.
 
@@ -304,7 +374,8 @@ Date(createdAt))`);
   проверка `EXPLAIN QUERY PLAN` в задаче 4 ловит его возможное переименование.
 - **Порядок:** план исполняется после слияния ДЗГ в `claude/integration`. Без ДЗГ задача 0
   останавливает исполнение и сообщает контроллеру. Задачи 1 и 2 (только домен) от ДЗГ не зависят
-  и могут идти раньше.
+  и могут идти раньше. Задача 8 ждёт слияния КНФ; без него она откладывается или отрезается, и
+  остальной план от неё не зависит.
 
 **Код и процесс**
 
@@ -317,8 +388,8 @@ Date(createdAt))`);
 - Офис:
   - только `@markiro/ui`; мышь и клавиатура; видимый фокус; подписи у полей;
   - строки — только в `src/i18n/ru.json` (английского файла в `apps/standalone` нет);
-  - формы на проводе — фикстуры `proto/fixtures`, их читают и Rust (`proto/tests/fixtures.rs`), и
-    Vitest (`test/protocol.test.ts`).
+  - формы на проводе — фикстуры `proto/fixtures`, их читают и Rust (`proto/tests/disaggregation.rs`
+    ДЗГ), и Vitest (`test/disaggregation-protocol.test.ts` ДЗГ).
 - Rust: `cargo fmt` чистый, без предупреждений. `Cargo.toml`, `Cargo.lock`, `package.json`,
   `pnpm-lock.yaml` не меняются; `pnpm install/add` не запускать.
 - Новые миграции — только новыми файлами (здесь их нет). Никогда `git stash`. Коммиты с явными
@@ -346,7 +417,7 @@ Date(createdAt))`);
   недостающий слепок, а падает.
 - Интеграционные тесты хоста на `TestApp` сокет не открывают. Песочница нужна только тестам с
   loopback.
-- React-тесты страниц и диалогов (задачи 5–7) прогоняются дважды:
+- React-тесты страниц и диалогов (задачи 5–8) прогоняются дважды:
   - один раз с `--reporter=verbose`, без `stderr |`;
   - второй раз под стендом с задержкой `setImmediate` на 3 мс: временные
     `test/delayed-immediate.setup.ts` и `vitest.delay.config.ts`, как в плане СКЛ. После прогона
@@ -376,47 +447,34 @@ Date(createdAt))`);
     `packages/domain/src/inventory/index.ts`;
   - `apps/api/src/modules/disaggregation/{disaggregation.controller.ts,disaggregation.service.ts}`,
     `apps/api/src/pickup/slip.ts` (комментарий);
-  - `apps/standalone/proto/src/lib.rs`, `proto/tests/fixtures.rs`;
+  - `apps/standalone/proto/src/disaggregation.rs`, `proto/tests/disaggregation.rs` (модули ДЗГ);
   - `apps/standalone/host/src/{audit.rs,server.rs}`, `host/src/routes/mod.rs`;
-  - `apps/standalone/src/host/{protocol.ts,api.ts}`;
+  - `apps/standalone/src/host/{disaggregation.ts,api.ts}`;
   - `apps/standalone/src/office/{nav.ts,routes.tsx,office-query.ts}`;
+  - задача 8 (КНФ): `proto/src/review.rs` или где КНФ держит `OfficeConflictScan`,
+    `host/src/routes/office_conflicts.rs`, `proto/fixtures/office-conflict-page.json`,
+    `src/host/review.ts`, `src/office/conflicts/ConflictsPage.tsx`, `host/tests/office_conflicts.rs`,
+    `test/conflicts-page.test.tsx`, `src/office/codes/disassemble.ts` (КРТ; создать, если КРТ не
+    влит), `src/i18n/ru.json`;
   - `apps/standalone/src/office/forms/{render-form.ts,print-form.ts,PrintFormDialog.tsx}`;
   - `apps/standalone/src/i18n/ru.json`;
-  - тесты `apps/standalone/test/{protocol,api,prepare-form,print-form,operators-page,shifts-page}.test.ts(x)`
+  - тесты `apps/standalone/test/{disaggregation-protocol,api,prepare-form,print-form,operators-page,shifts-page}.test.ts(x)`
     и `test/support/office.tsx`;
   - `apps/standalone/AGENTS.md`, `docs/superpowers/specs/2026-10-13-standalone-office-parity-design.md`
     (отметка в §5.1).
 
 ---
 
-## Задача 0: сверка с планом ДЗГ (без кода)
+## Задача 0: проверка по влитому ДЗГ (без кода)
 
-**Files:** только чтение; итог пишется в раздел «Отклонения при исполнении» этого файла.
-
-- [ ] **Шаг 1: ДЗГ влит.** `git -C <wt> log --oneline claude/integration -- apps/standalone/host/migrations`
-      показывает миграцию дезагрегации, а
-      `rtk proxy grep -n "disaggregation" <wt>/apps/standalone/host/src/server.rs` — её маршруты.
-      Если их нет, остановиться и сообщить контроллеру. Задачи 1 и 2 можно исполнить и до ДЗГ.
-- [ ] **Шаг 2: сверить имена с планом ДЗГ.** Пройти список Р1 пункт за пунктом по
-      `docs/superpowers/plans/2026-10-13-standalone-dzg-disaggregation.md` и по коду:
-  - `rtk proxy grep -n "CREATE TABLE\|CREATE INDEX\|CREATE UNIQUE" <wt>/apps/standalone/host/migrations/0024_*.sql` —
-    таблицы, столбцы и индекс строк по документу;
-  - `rtk proxy grep -n "pub struct Disaggregation\|pub enum Disaggregation" <wt>/apps/standalone/proto/src/lib.rs` —
-    типы и поля, `FromStr` у статуса;
-  - `rtk proxy grep -n "Disaggregation" <wt>/apps/standalone/src/host/api.ts <wt>/apps/standalone/src/host/protocol.ts` —
-    методы и схемы;
-  - `rtk proxy grep -n "DISAGGREGATION" <wt>/apps/standalone/host/src/audit.rs` — действия и
-    `target_type`;
-  - `require_*` в маршрутах документов и причин — права (Р10);
-  - время проведения: в транзакции проведения ДЗГ `boxes.disassembled_at` и
-    `box_items.removed_at` получают одно значение. Если нет, то правило кодов
-    акта (`removed_at = disassembled_at`) не находит снятых документом кодов. Тогда это дефект
-    ДЗГ: сообщить контроллеру, а не обходить его здесь;
-  - есть ли у `DisaggregationLinesAdd` поле `source` и какой у него предел. Если предел меньше
-    10 000, импорт шлёт файл частями по пределу, по порядку, и после частичного сбоя говорит,
-    сколько строк добавлено (запись в «Отклонения»).
-- [ ] **Шаг 3:** записать в «Отклонения» таблицу «ожидалось → в ДЗГ» для каждого расхождения и
-      заменить имена по всему плану перед задачей 3. Коммита нет.
+- [ ] **Шаг 1:** ДЗГ влит: `git -C <wt> log --oneline claude/integration -- apps/standalone/proto/src/disaggregation.rs`
+      не пуст. Если пуст — остановиться и сообщить контроллеру (задачи 1 и 2 можно делать и до
+      ДЗГ).
+- [ ] **Шаг 2:** сверить с кодом раздел «Что даёт ДЗГ»: имена столбцов `0024`, типы
+      `proto/src/disaggregation.rs`, методы `src/host/api.ts`, `require_disaggregation_in`, действия
+      `audit.rs`, константы `conflict`, включает ли `to` списка свою секунду (`<=` или `<`), и
+      что проведение пишет `removed_at` и `disassembled_at` одним текстом (`device_text`).
+      Расхождения — в «Отклонения» и заменой по плану. Коммита нет.
 
 ## Задача 1: «Акт дезагрегации» в `@markiro/domain` — слепки, перенос, часовой пояс и примечание
 
@@ -497,7 +555,7 @@ export function renderDisaggregationReportHtml(
     lines: [
       {
         n: 1,
-        sscc: "00146007034967000017",
+        sscc: "00046007034967000017",
         productName: "Вода «Атолл» 0,5 л",
         codeCount: 2,
         codes: [km(1), km(2)],
@@ -510,8 +568,8 @@ export function renderDisaggregationReportHtml(
         codeCount: 24,
         codes: [],
         boxes: [
-          { sscc: "00146007034967000024", codeCount: 12 },
-          { sscc: "00146007034967000031", codeCount: 12 },
+          { sscc: "00046007034967000024", codeCount: 12 },
+          { sscc: "00046007034967000031", codeCount: 12 },
         ],
       },
     ],
@@ -535,7 +593,7 @@ export function renderDisaggregationReportHtml(
     lines: [
       {
         n: 1,
-        sscc: "00146007034967000017",
+        sscc: "00046007034967000017",
         productName: null,
         codeCount: 1,
         codes: [{ gtin14: GTIN, serial: "BROKEN", rawKm: "not-a-valid-km" }],
@@ -543,7 +601,7 @@ export function renderDisaggregationReportHtml(
       },
       {
         n: 2,
-        sscc: "00146007034967000048",
+        sscc: "00046007034967000048",
         productName: "Вода «Атолл» 0,5 л",
         codeCount: 0,
         codes: [],
@@ -796,20 +854,20 @@ DisaggregationReportCode, DisaggregationReportData } from "@markiro/domain";`.
       const text = decoder.decode(
         renderGismtDisaggregationXml({
           organizationInn: "781234567890",
-          ssccs: ["146007034967100014", "146007034967000017", "146007034967100014"],
+          ssccs: ["146007034967100014", "046007034967000017", "146007034967100014"],
         }).bytes,
       );
       expect(text.match(/<packing>/g)).toHaveLength(2);
-      expect(text.indexOf("146007034967000017")).toBeLessThan(text.indexOf("146007034967100014"));
+      expect(text.indexOf("046007034967000017")).toBeLessThan(text.indexOf("146007034967100014"));
       expect(text).toContain("<trade_participant_inn>781234567890</trade_participant_inn>");
     });
 
     it.each([
       [
-        { organizationInn: "0000000000", ssccs: ["146007034967000017"] },
+        { organizationInn: "0000000000", ssccs: ["046007034967000017"] },
         "INVALID_ORGANIZATION_INN",
       ],
-      [{ organizationInn: "7701234567", ssccs: ["00146007034967000017"] }, "INVALID_SSCC"],
+      [{ organizationInn: "7701234567", ssccs: ["00046007034967000017"] }, "INVALID_SSCC"],
       [{ organizationInn: "7701234567", ssccs: [] }, "EMPTY_SOURCE"],
     ] as const)("refuses %j with %s", (input, code) => {
       expect(() => renderGismtDisaggregationXml(input)).toThrow(new GismtDisaggregationError(code));
@@ -938,13 +996,14 @@ DisaggregationReportCode, DisaggregationReportData } from "@markiro/domain";`.
 
 ## Задача 3: протокол — данные акта, вариант, запись XML; Zod и `HostApi`
 
-**Files:** Modify `apps/standalone/proto/src/lib.rs`, `apps/standalone/proto/tests/fixtures.rs`,
-`apps/standalone/src/host/protocol.ts`, `apps/standalone/src/host/api.ts`,
-`apps/standalone/test/protocol.test.ts`, `apps/standalone/test/api.test.ts`,
-`apps/standalone/test/support/office.tsx`; Create фикстуры
+**Files:** Modify модули ДЗГ `apps/standalone/proto/src/disaggregation.rs`,
+`apps/standalone/proto/tests/disaggregation.rs`, `apps/standalone/src/host/disaggregation.ts`,
+`apps/standalone/test/disaggregation-protocol.test.ts`, а также `apps/standalone/src/host/api.ts`,
+`apps/standalone/test/api.test.ts`, `apps/standalone/test/support/office.tsx`; Create фикстуры
 `proto/fixtures/{disaggregation-report-rows-boxes,disaggregation-report-rows-full,disaggregation-export-record}.json`.
 
-**Interfaces (Rust, `proto/src/lib.rs`, после типов ДЗГ):**
+**Interfaces (Rust, `proto/src/disaggregation.rs`, после типов ДЗГ; `ExportOrganization` и
+`BoxReportItem` — `use crate::{BoxReportItem, ExportOrganization};`):**
 
 ```rust
 /// What `GET /v1/office/disaggregation/{id}/report-data` reads (plan ДЗГ-О):
@@ -1025,10 +1084,10 @@ pub struct DisaggregationExportRecord {
 }
 ```
 
-Имя `DisaggregationReportLine` может столкнуться с типом ДЗГ. Если у ДЗГ уже есть такое имя
-(задача 0), здесь берётся `DisaggregationReportLineRows`.
+Имя `DisaggregationReportLine` с типами ДЗГ (`DisaggregationLine`) не сталкивается.
 
-**Interfaces (TS, `src/host/protocol.ts`):**
+**Interfaces (TS, `src/host/disaggregation.ts`, рядом со схемами ДЗГ; `ssccSchema` ДЗГ уже есть в
+модуле):**
 
 ```ts
 const bareSsccSchema = z.string().regex(/^\d{18}$/u);
@@ -1040,7 +1099,7 @@ export type DisaggregationReportVariant = z.infer<typeof disaggregationReportVar
 export const disaggregationReportRowsSchema = z.object({
   id: z.uuid(),
   docNo: z.string().min(1),
-  status: disaggregationStatusSchema, // plan ДЗГ
+  status: disaggregationStatusSchema,
   createdAt: z.iso.datetime(),
   appliedAt: z.iso.datetime().nullable(),
   createdByName: z.string().nullable(),
@@ -1095,8 +1154,9 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
 
 - [ ] **Шаг 1: фикстуры.**
 
-  `disaggregation-report-rows-full.json` — те же факты, что `ACT_FULL` задачи 1. SSCC без `00`,
-  время хоста — целые секунды без миллисекунд (`clock::format_timestamp`):
+  `disaggregation-report-rows-full.json` — те же факты, что `ACT_FULL` задачи 1. SSCC без `00`
+  (короб — расширение 0, паллета — 1, как на хосте), время — как его пишет ДЗГ (схема принимает
+  и целые секунды, и миллисекунды):
 
   ```json
   {
@@ -1114,7 +1174,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
     "lines": [
       {
         "id": "7d1e2f3a-4b5c-4d6e-8f70-0000000000a1",
-        "sscc": "146007034967000017",
+        "sscc": "046007034967000017",
         "boxId": "b0000000-0000-4000-8000-000000000001",
         "palletId": null,
         "productName": "Вода «Атолл» 0,5 л",
@@ -1142,8 +1202,8 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
         "codeCount": 24,
         "items": [],
         "boxes": [
-          { "sscc": "146007034967000024", "units": 12 },
-          { "sscc": "146007034967000031", "units": 12 }
+          { "sscc": "046007034967000024", "units": 12 },
+          { "sscc": "046007034967000031", "units": 12 }
         ]
       }
     ]
@@ -1156,7 +1216,8 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
 
 - [ ] **Шаг 2: красные тесты.**
 
-  Rust (`proto/tests/fixtures.rs`):
+  Rust (`proto/tests/disaggregation.rs`; помощники `fixture`/`round_trip` — те, что завёл ДЗГ, или
+  копия из `proto/tests/fixtures.rs:26-56`):
 
   ```rust
   #[test]
@@ -1190,7 +1251,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   }
   ```
 
-  Vitest (`test/protocol.test.ts`):
+  Vitest (`test/disaggregation-protocol.test.ts`, помощник `fixture` — как в этом файле ДЗГ):
 
   ```ts
   describe("disaggregation act and file (plan ДЗГ-О)", () => {
@@ -1200,8 +1261,8 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
       );
       expect(full.lines.map((line) => line.items.length)).toEqual([2, 0]);
       expect(full.lines[1]?.boxes).toEqual([
-        { sscc: "146007034967000024", units: 12 },
-        { sscc: "146007034967000031", units: 12 },
+        { sscc: "046007034967000024", units: 12 },
+        { sscc: "046007034967000031", units: 12 },
       ]);
       expect(
         disaggregationReportRowsSchema.parse(fixture("disaggregation-report-rows-boxes.json"))
@@ -1244,10 +1305,10 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
 
   Прогон (должен упасть):
   - `cargo --offline --locked --manifest-path <wt>/apps/standalone/Cargo.toml test -p markiro-proto`;
-  - `pnpm … --filter @markiro/standalone exec vitest run test/protocol.test.ts test/api.test.ts`.
+  - `pnpm … --filter @markiro/standalone exec vitest run test/disaggregation-protocol.test.ts test/api.test.ts`.
 
-- [ ] **Шаг 3: реализация** по интерфейсам выше; типы импортируются в `fixtures.rs` в общий
-      `use markiro_proto::{…}`.
+- [ ] **Шаг 3: реализация** по интерфейсам выше; тест импортирует типы из
+      `markiro_proto::disaggregation::{…}`.
 - [ ] **Шаг 4: зелёные тесты, `cargo fmt --check`, typecheck, prettier, коммит**
       `feat(standalone): the wire of the disaggregation act's data and of its ЧЗ file's record`.
 
@@ -1267,9 +1328,9 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
 - [ ] **Шаг 1: красные тесты** (`host/tests/office_disaggregation_reports.rs`). Подготовка
       смены — как в `host/tests/office_reports.rs` (`admin`, `shift_setup`, `open_floor`,
       `open_pallet_floor`, `issue_block`, `issue_pallet_block`, `fact`, `ok_scan`, `box_closed`,
-      `pallet_closed`, `shift_closed`, `receipts`). Документ создаётся маршрутами ДЗГ (тела —
-      по задаче 0). Если ДЗГ добавил помощники в `support/app.rs` (например,
-      `disaggregation_document`), взять их.
+      `pallet_closed`, `shift_closed`, `receipts`). Документ создаётся маршрутами ДЗГ: создание
+      отвечает `200` с `DisaggregationDetail`, строки — `{ lines: [{ input, sscc }], import }`,
+      проведение — `{ expectedRev }`. Если ДЗГ вынес такие помощники в `support/app.rs` — взять их.
 
   ```rust
   mod support;
@@ -1314,26 +1375,29 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
       floor
   }
 
-  /// A document with `ssccs` (as typed) and the first reason of the
-  /// dictionary; applied when `apply`. Returns its id.
-  async fn document(admin: &Admin, ssccs: &[String], apply: bool) -> String {
-      let (_, reasons) = admin.call("GET", "/v1/office/disaggregation-reasons", None).await;
-      let reason = reasons[0]["id"].clone();
+  /// «Повреждена упаковка», a default reason of `0024` (plan ДЗГ).
+  const REASON: &str = "d15a0000-0000-4000-8000-000000000003";
+
+  /// A document of `lines` (`(input, sscc)`, as the office sends them after
+  /// `parseScannedSscc`); applied when `apply`. Returns its id.
+  async fn document(admin: &Admin, lines: &[(&str, Option<&str>)], apply: bool) -> String {
       let (status, created) = admin
           .call("POST", "/v1/office/disaggregation",
-              Some(json!({ "reasonId": reason, "comment": "Короба намокли" })))
+              Some(json!({ "reasonId": REASON, "comment": "Короба намокли" })))
           .await;
-      assert_eq!(status, StatusCode::CREATED, "{created}"); // or OK — as ДЗГ answers (task 0)
-      let id = created["id"].as_str().unwrap().to_owned();
+      assert_eq!(status, StatusCode::OK, "{created}");
+      let id = created["document"]["id"].as_str().unwrap().to_owned();
       let path = format!("/v1/office/disaggregation/{id}");
-      let (status, body) = admin
-          .call("POST", &format!("{path}/lines"), Some(json!({ "ssccs": ssccs, "source": "manual" })))
+      let lines: Vec<Value> =
+          lines.iter().map(|(input, sscc)| json!({ "input": input, "sscc": sscc })).collect();
+      let (status, detail) = admin
+          .call("POST", &format!("{path}/lines"), Some(json!({ "lines": lines, "import": false })))
           .await;
-      assert!(status.is_success(), "{body}");
+      assert_eq!(status, StatusCode::OK, "{detail}");
       if apply {
-          let (_, current) = admin.call("GET", &path, None).await;
+          let rev = detail["document"]["rev"].clone();
           let (status, body) = admin
-              .call("POST", &format!("{path}/apply"), Some(json!({ "expectedRev": current["rev"] })))
+              .call("POST", &format!("{path}/apply"), Some(json!({ "expectedRev": rev })))
               .await;
           assert_eq!(status, StatusCode::OK, "{body}");
       }
@@ -1356,16 +1420,16 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   async fn the_boxes_act_names_the_document_and_its_lines_without_contents() {
       let admin = admin().await;
       closed_shift(&admin).await;
-      let id = document(&admin, &[sscc(1500), sscc(1501), "мусор".to_owned()], true).await;
+      let (a, b) = (sscc(1500), sscc(1501));
+      let id = document(&admin, &[(&a, Some(&a)), (&b, Some(&b))], true).await;
       let (status, rows) = report(&admin, &id, "").await;
       assert_eq!(status, StatusCode::OK, "{rows}");
       assert_eq!(rows["variant"], "boxes");
       assert_eq!(rows["status"], "applied");
-      assert!(rows["docNo"].as_str().unwrap().starts_with("DSG-"));
+      assert_eq!(rows["docNo"], "DSG-26-0001");
       assert_eq!(rows["organization"]["inn"], admin_org_inn(&admin).await);
-      assert_eq!(rows["reasonName"], first_reason_name(&admin).await);
+      assert_eq!(rows["reasonName"], "Повреждена упаковка");
       assert_eq!(rows["comment"], "Короба намокли");
-      // A line whose input is not an SSCC is not on the act.
       let lines = rows["lines"].as_array().unwrap();
       assert_eq!(
           lines.iter().map(|l| l["sscc"].clone()).collect::<Vec<_>>(),
@@ -1377,10 +1441,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   }
   ```
 
-  Если ДЗГ не принимает документ с неразобранной строкой к проведению, тест создаёт для строки
-  «мусор» отдельный черновик, а проведённый документ строит без неё. Имена `admin_org_inn` и
-  `first_reason_name` — маленькие помощники в файле: читают `GET /v1/office/org` и
-  `GET /v1/office/disaggregation-reasons`.
+  `admin_org_inn` — маленький помощник файла: читает `GET /v1/office/org`.
 
   Остальные тесты файла (тело каждого — по тому же образцу):
   - `the_full_act_prints_the_codes_the_document_took_out_by_gtin_and_serial` — после проведения
@@ -1388,6 +1449,9 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
     документом, а правило `removed_at = disassembled_at` их находит. У короба 1501 —
     `[printed(4)]`.
   - `a_draft_full_act_prints_the_live_codes` — тот же короб в черновике: те же коды (живые).
+  - `a_draft_act_leaves_out_lines_without_an_sscc` — черновик со строками `(sscc(1500))`,
+    повтором `(sscc(1500))` и `("MRK-000742", None)`: на акте одна строка. Повтор хранит
+    `sscc = NULL` (ДЗГ), вход без SSCC — тоже.
   - `a_pallet_line_lists_its_boxes_not_taken_apart_closed_first` — смена с паллетами
     (`open_pallet_floor`, `issue_pallet_block`, `pallet_closed` по образцу
     `host/tests/pallet_facts.rs`). На паллете три короба, один разобран станцией до документа.
@@ -1397,18 +1461,16 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
     коды обоих на месте. Это проверка обхода по сменам.
   - `an_unknown_document_is_not_found_and_a_bad_variant_is_a_validation_error`:
     - `404` у неизвестного id;
-    - `?variant=all` и `?variant=full&x=1` — `422 validation_failed`.
-
-    Статус ошибки сверить с соседним тестом `ApiQuery` (`office_shifts`).
+    - `?variant=all` и `?variant=full&x=1` — `400 validation_failed`.
 
   - `every_office_role_reads_and_a_device_without_a_session_does_not` — технолог (`admin.technologist()`)
     получает `200`. Запрос с ключом устройства без сессии — `401` с
     `error.details.credential == "session"`, как в `office_reports.rs:186-196`.
   - `every_query_of_the_act_searches_by_an_index` — `EXPLAIN QUERY PLAN` для `DOCUMENT_SQL`,
     `LINES_SQL`, `LINE_SHIFTS_SQL`, `SHIFT_ITEMS_SQL` (с двумя параметрами), `PALLET_BOXES_SQL`:
-    ни одного шага `SCAN`, хотя бы один `SEARCH`. `SHIFT_ITEMS_SQL` ищет по `scans_shift`. Имена
-    индексов строк документа — из ДЗГ (задача 0); если индекса строк по документу нет, это
-    дефект ДЗГ (сообщить), а не повод для миграции здесь.
+    ни одного шага `SCAN`, хотя бы один `SEARCH`. `SHIFT_ITEMS_SQL` ищет по `scans_shift`, строки
+    документа — по автоиндексу `UNIQUE (document_id, position)` из `0024` (его имя тест ДЗГ
+    `the_lookups_use_their_indexes` уже читает из `sqlite_master`).
   - `the_act_reads_one_snapshot` — по образцу теста снимка в `office_reports.rs` (найти
     `rtk proxy grep -n "after_query\|read_box_rows" apps/standalone/host/tests/office_reports.rs`).
     Внутри `after_query("lines")` второе соединение меняет комментарий документа через
@@ -1432,7 +1494,8 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   async fn the_file_of_an_applied_document_writes_one_audit_row_and_no_revision() {
       let admin = admin().await;
       closed_shift(&admin).await;
-      let id = document(&admin, &[sscc(1500), sscc(1501)], true).await;
+      let (a, b) = (sscc(1500), sscc(1501));
+      let id = document(&admin, &[(&a, Some(&a)), (&b, Some(&b))], true).await;
       let revision = support::app::host_revision(&admin.app).await;
       let (status, body) = record(&admin, &admin.token, &id, record_of(2)).await;
       assert_eq!((status, &body), (StatusCode::NO_CONTENT, &Value::Null));
@@ -1446,8 +1509,10 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
       assert_eq!(
           support::app::audit_trail(&admin.app, "disaggregation.export").await,
           vec![
-              admin.row("disaggregation.export", "disaggregation", &id, details.clone()),
-              support::app::audit_row(&technologist_id, "disaggregation.export", "disaggregation", &id, details),
+              admin.row("disaggregation.export", "disaggregation_document", &id, details.clone()),
+              support::app::audit_row(
+                  &technologist_id, "disaggregation.export", "disaggregation_document", &id, details,
+              ),
           ]
       );
   }
@@ -1456,13 +1521,14 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   async fn what_the_host_refuses_writes_no_row() {
       let admin = admin().await;
       closed_shift(&admin).await;
-      let draft = document(&admin, &[sscc(1500)], false).await;
-      let applied = document(&admin, &[sscc(1501)], true).await;
+      let (a, b) = (sscc(1500), sscc(1501));
+      let draft = document(&admin, &[(&a, Some(&a))], false).await;
+      let applied = document(&admin, &[(&b, Some(&b))], true).await;
       for (id, body, status) in [
           (draft.as_str(), record_of(1), StatusCode::CONFLICT),
-          (applied.as_str(), record_of(2), StatusCode::UNPROCESSABLE_ENTITY),
-          (applied.as_str(), json!({ "formatId": "shift_xml_gismt_aggregation", "formatVersion": 1, "packingCount": 1 }), StatusCode::UNPROCESSABLE_ENTITY),
-          (applied.as_str(), json!({ "formatId": "disaggregation_xml_gismt", "formatVersion": 2, "packingCount": 1 }), StatusCode::UNPROCESSABLE_ENTITY),
+          (applied.as_str(), record_of(2), StatusCode::BAD_REQUEST),
+          (applied.as_str(), json!({ "formatId": "shift_xml_gismt_aggregation", "formatVersion": 1, "packingCount": 1 }), StatusCode::BAD_REQUEST),
+          (applied.as_str(), json!({ "formatId": "disaggregation_xml_gismt", "formatVersion": 2, "packingCount": 1 }), StatusCode::BAD_REQUEST),
           ("7d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6", record_of(1), StatusCode::NOT_FOUND),
       ] {
           let (answered, body) = record(&admin, &admin.token, id, body).await;
@@ -1473,9 +1539,8 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   ```
 
   Плюс `a_file_record_needs_a_session` (`401`, как выше) и `a_cancelled_document_has_no_file`
-  (`409`, `error.details.constraint == "document_status"`). Отменённый черновик делается
-  маршрутом отмены ДЗГ. Числовые статусы `validation_failed` и `conflict` сверить с
-  `host/tests/office_exports.rs`.
+  (`409`, `error.details.constraint == "document_not_applied"`). Отменённый черновик делается
+  `POST …/{id}/cancel` с `{ "expectedRev": … }`.
 
   Прогон `cargo … test -p markiro-host --test office_disaggregation_reports` — красный.
 
@@ -1497,12 +1562,12 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   use axum::extract::State;
   use axum::http::StatusCode;
   use axum::Json;
-  use markiro_proto::{
-      BoxReportItem, DisaggregationExportRecord, DisaggregationReportBox,
-      DisaggregationReportLine, DisaggregationReportRows, DisaggregationReportVariant,
-      DisaggregationStatus, ExportOrganization, DISAGGREGATION_XML_FORMAT_ID,
-      DISAGGREGATION_XML_FORMAT_VERSION,
+  use markiro_proto::disaggregation::{
+      DisaggregationExportRecord, DisaggregationReportBox, DisaggregationReportLine,
+      DisaggregationReportRows, DisaggregationReportVariant, DisaggregationStatus,
+      DISAGGREGATION_XML_FORMAT_ID, DISAGGREGATION_XML_FORMAT_VERSION,
   };
+  use markiro_proto::{BoxReportItem, ExportOrganization};
   use serde::Deserialize;
   use serde_json::json;
   use sqlx::{SqliteConnection, SqlitePool};
@@ -1519,7 +1584,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   pub const DOCUMENT_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.created_at, d.applied_at, \
        d.comment, cu.name AS created_by_name, au.name AS applied_by_name, r.name AS reason_name \
        FROM disaggregation_documents d \
-       LEFT JOIN office_users cu ON cu.id = d.created_by \
+       JOIN office_users cu ON cu.id = d.created_by \
        LEFT JOIN office_users au ON au.id = d.applied_by \
        LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
        WHERE d.id = ?";
@@ -1692,10 +1757,9 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
           .into_iter()
           .map(|line| {
               Ok(DisaggregationReportLine {
-                  // `get().cloned()`, not `remove`: a draft's duplicate line names the
-                  // same box twice, and the cloud prints its codes under both lines.
-                  items: line.box_id.as_ref().and_then(|b| items.get(b).cloned()).unwrap_or_default(),
-                  boxes: line.pallet_id.as_ref().and_then(|p| boxes.get(p).cloned()).unwrap_or_default(),
+                  // A box is on the act once: a repeat keeps `sscc = NULL` (plan ДЗГ, Р12).
+                  items: line.box_id.as_ref().and_then(|b| items.remove(b)).unwrap_or_default(),
+                  boxes: line.pallet_id.as_ref().and_then(|p| boxes.remove(p)).unwrap_or_default(),
                   code_count: u32::try_from(line.code_count).map_err(ApiError::internal)?,
                   id: line.id,
                   sscc: line.sscc,
@@ -1722,17 +1786,16 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
   }
   ```
 
-  В проведённом документе короб встречается один раз: дубль ДЗГ к проведению не пускает. Но в
-  черновике строка `duplicate` может назвать тот же короб второй раз, и облако печатает его коды у
-  обеих строк (`codesByBoxId.get`). Отсюда `get().cloned()` и тест
-  `a_duplicate_line_of_a_draft_prints_the_box_twice` (если ДЗГ даёт строке `duplicate` `boxId`).
+  `remove` безопасен: SSCC в документе уникален (`disaggregation_lines_document_sscc`), а повтор
+  хранит `sscc = NULL` и цели не имеет (CHECK `0024`), поэтому короб и паллета названы одной
+  строкой акта.
 
   Запись:
 
   ```rust
   /// `POST /v1/office/disaggregation/{id}/exports`: one `disaggregation.export`
   /// row with what the file named, `204`. Only an applied document has a file
-  /// (`conflict` on `document_status`); `packingCount` must be its distinct
+  /// (`conflict` on `document_not_applied`); `packingCount` must be its distinct
   /// SSCCs — an applied document's lines never change, so another count is
   /// the office's mistake, not a race.
   pub async fn record_export(
@@ -1749,9 +1812,10 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
               "not a file the office forms for a disaggregation document",
           ));
       }
+      context.require_disaggregation()?;
       let at = state.timestamp();
       let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-      context.require_session_in(&mut tx).await?;
+      context.require_disaggregation_in(&mut tx).await?;
       let status: Option<String> =
           sqlx::query_scalar("SELECT status FROM disaggregation_documents WHERE id = ?")
               .bind(&id)
@@ -1764,7 +1828,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
           .map_err(ApiError::internal)?;
       if status != DisaggregationStatus::Applied {
           return Err(ApiError::conflict(
-              "document_status",
+              "document_not_applied",
               "only an applied document has a ЧЗ file",
           ));
       }
@@ -1785,7 +1849,7 @@ recordDisaggregationExport: (token: string, id: string, record: DisaggregationEx
           Entry {
               actor: context.actor(),
               action: actions::DISAGGREGATION_EXPORT,
-              target_type: Some("disaggregation"),
+              target_type: Some("disaggregation_document"),
               target_id: Some(&id),
               outcome: Outcome::Ok,
               details: json!({
@@ -1848,22 +1912,24 @@ export type ImportParse = { ok: true; tokens: string[] } | { ok: false; refusal:
 export function parseSsccImport(text: string): ImportParse;
 /** Reads a picked file (UTF-8, the BOM dropped) and parses it; a file over 1 MiB is not read. */
 export function readSsccImport(file: Pick<File, "size" | "text">): Promise<ImportParse>;
+/** The wire's lines of tokens: the input as typed and the SSCC the domain reads (plan ДЗГ, Р12). */
+export function lineInputs(tokens: readonly string[]): DisaggregationLineInput[];
+/** The host's parts: at most `DISAGGREGATION_MAX_LINES_PER_REQUEST` (500) lines a request. */
+export function inParts<T>(lines: readonly T[]): T[][];
 
 // document-list.ts
-export type DocumentStatusFilter = "all" | DisaggregationStatus;
-export interface DocumentFilter {
-  status: DocumentStatusFilter;
+export interface DocumentFilterState {
+  status: "all" | DisaggregationStatus;
   reasonId: string; // "" = every reason
   docNo: string;
   from: string; // civil date or ""
   to: string;
 }
 export const DOCUMENT_PAGE_SIZE = 50;
-export function findDocuments(
-  documents: readonly DisaggregationDocument[],
-  filter: DocumentFilter,
-  timeZone: string,
-): DisaggregationDocument[];
+/** The host's instant (`YYYY-MM-DDTHH:MM:SSZ`) at which civil `date` begins in `timeZone`. */
+export function dayStartInstant(date: string, timeZone: string): string;
+/** The host's list filter (plan ДЗГ, Р16) from the page's: days become instants in `timeZone`. */
+export function documentFilter(state: DocumentFilterState, timeZone: string): DisaggregationFilter;
 
 // disaggregation-text.ts
 export const DOCUMENT_STATUS_PHASE: Record<DisaggregationStatus, TagPhase>;
@@ -1875,8 +1941,18 @@ export function lineSsccLabel(line: Pick<DisaggregationLine, "sscc" | "ssccInput
 `officeKeys` (в `office-query.ts`):
 
 ```ts
-/** Every list of disaggregation documents (plan ДЗГ-О): a write reads it again. */
+/** Every list of disaggregation documents (plan ДЗГ-О): a write reads them all again. */
 disaggregation: ["office", "disaggregation"],
+/** One filtered list (`listDisaggregations(token, filter)`). */
+disaggregationList: (filter: DisaggregationFilter) => [
+  "office",
+  "disaggregation",
+  filter.status ?? null,
+  filter.reasonId ?? null,
+  filter.q ?? null,
+  filter.from ?? null,
+  filter.to ?? null,
+],
 /** One document with its lines, read afresh at every opening. */
 disaggregationDocument: (id: string) => ["office", "disaggregation-document", id],
 disaggregationReasons: ["office", "disaggregation-reasons"],
@@ -1932,9 +2008,9 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
 
   describe("pasted SSCCs (the cloud page's splitSsccInput)", () => {
     it("splits on any whitespace, semicolons and commas", () => {
-      expect(parsePastedSsccs(" (00)146007034967000017 \t146007034967000024;\n,x ")).toEqual([
-        "(00)146007034967000017",
-        "146007034967000024",
+      expect(parsePastedSsccs(" (00)046007034967000017 \t046007034967000024;\n,x ")).toEqual([
+        "(00)046007034967000017",
+        "046007034967000024",
         "x",
       ]);
     });
@@ -1942,10 +2018,10 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
 
   describe("reading a picked file", () => {
     it("drops the BOM Excel writes, unlike the cloud", async () => {
-      const file = { size: 22, text: async () => "\uFEFF146007034967000017;\n" };
-      expect(await readSsccImport(file)).toEqual({ ok: true, tokens: ["146007034967000017"] });
-      const real = new File(["\uFEFF146007034967000017\n"], "list.csv");
-      expect(await readSsccImport(real)).toEqual({ ok: true, tokens: ["146007034967000017"] });
+      const file = { size: 22, text: async () => "\uFEFF046007034967000017;\n" };
+      expect(await readSsccImport(file)).toEqual({ ok: true, tokens: ["046007034967000017"] });
+      const real = new File(["\uFEFF046007034967000017\n"], "list.csv");
+      expect(await readSsccImport(real)).toEqual({ ok: true, tokens: ["046007034967000017"] });
     });
 
     it("does not read a file over 1 MiB", async () => {
@@ -1964,13 +2040,20 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
   тестом не доказывается. Поэтому хелпер снимает его и сам (`text.replace(/^\uFEFF/u, "")`), а
   тест проверяет оба пути: поддельный файл с BOM в тексте и настоящий `File`.
 
+  В тот же файл:
+  - `lineInputs(["(00)046007034967000017", "MRK-000742"])` → `[{ input: "(00)046007034967000017",
+sscc: "046007034967000017" }, { input: "MRK-000742", sscc: null }]` (через `parseScannedSscc`);
+  - `inParts` 1 001 строки → части по 500, 500 и 1, порядок сохранён.
+
   `test/document-list.test.ts`:
-  - фильтр по статусу и по причине;
-  - номер — подстрока без учёта регистра (`"dsg-26-00"` находит `DSG-26-0007`);
-  - период: документ, созданный в `2026-10-12T21:30:00Z`, при зоне `Europe/Moscow` попадает в
-    `from = to = "2026-10-13"`, а при зоне `UTC` — в `"2026-10-12"`;
-  - пустые `from`/`to` не фильтруют;
-  - порядок хоста сохраняется.
+  - `dayStartInstant("2026-10-13", "Europe/Moscow")` → `"2026-10-12T21:00:00Z"`, в `UTC` —
+    `"2026-10-13T00:00:00Z"`; день перехода на летнее время (`"2026-03-29"`, `Europe/Berlin`) →
+    `"2026-03-28T23:00:00Z"`;
+  - `documentFilter({ status: "applied", reasonId: R, docNo: " 0007 ", from: "2026-10-13", to:
+"2026-10-13" }, "Europe/Moscow")` → `{ status: "applied", reasonId: R, q: "0007", from:
+"2026-10-12T21:00:00Z", to: "2026-10-13T20:59:59Z" }`;
+  - `"all"`, пустые строки и пустой номер в фильтр не попадают (`{}` у пустого состояния), чтобы
+    `disaggregationQuery` ДЗГ не писал пустых параметров.
 
   Прогон `pnpm … exec vitest run test/sscc-input.test.ts test/document-list.test.ts` — красный.
 
@@ -2002,10 +2085,83 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
   }
   ```
 
-  `document-list.ts`: `findDocuments` фильтрует по `status`, `reasonId`,
-  `docNo.trim().toLocaleLowerCase("ru")` и периоду. Гражданская дата создания —
-  `civilToday(timeZone, new Date(document.createdAt))` из `src/lib/civil-date.ts`. Сравнение
-  строк `YYYY-MM-DD` лексикографическое.
+  ```ts
+  // sscc-input.ts (continued)
+  export function lineInputs(tokens: readonly string[]): DisaggregationLineInput[] {
+    return tokens.map((input) => ({ input, sscc: parseScannedSscc(input) }));
+  }
+
+  export function inParts<T>(lines: readonly T[]): T[][] {
+    const parts: T[][] = [];
+    for (let at = 0; at < lines.length; at += DISAGGREGATION_MAX_LINES_PER_REQUEST) {
+      parts.push(lines.slice(at, at + DISAGGREGATION_MAX_LINES_PER_REQUEST));
+    }
+    return parts;
+  }
+
+  // document-list.ts
+  const CIVIL = /^(\d{4})-(\d{2})-(\d{2})$/u;
+
+  /** Milliseconds the zone is ahead of UTC at `at` (its wall clock read back as UTC). */
+  function zoneOffset(at: number, timeZone: string): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    }).formatToParts(new Date(at));
+    const field = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((part) => part.type === type)?.value ?? "0");
+    const wall = Date.UTC(
+      field("year"),
+      field("month") - 1,
+      field("day"),
+      field("hour"),
+      field("minute"),
+      field("second"),
+    );
+    return wall - at;
+  }
+
+  function hostInstant(at: number): string {
+    return new Date(at).toISOString().replace(/\.\d{3}Z$/u, "Z");
+  }
+
+  function dayStart(date: string, timeZone: string, plusDays: number): number {
+    const match = CIVIL.exec(date);
+    if (match === null) throw new RangeError(`not a civil date: ${date}`);
+    const midnight = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + plusDays);
+    // Twice: the zone's offset at midnight may differ from the one at UTC midnight (a DST day).
+    const first = midnight - zoneOffset(midnight, timeZone);
+    return midnight - zoneOffset(first, timeZone);
+  }
+
+  export function dayStartInstant(date: string, timeZone: string): string {
+    return hostInstant(dayStart(date, timeZone, 0));
+  }
+
+  export function documentFilter(
+    state: DocumentFilterState,
+    timeZone: string,
+  ): DisaggregationFilter {
+    const q = state.docNo.trim();
+    return {
+      ...(state.status === "all" ? {} : { status: state.status }),
+      ...(state.reasonId === "" ? {} : { reasonId: state.reasonId }),
+      ...(q === "" ? {} : { q }),
+      ...(state.from === "" ? {} : { from: dayStartInstant(state.from, timeZone) }),
+      // The last second of the day «По»: the host compares instants of whole seconds.
+      ...(state.to === "" ? {} : { to: hostInstant(dayStart(state.to, timeZone, 1) - 1000) }),
+    };
+  }
+  ```
+
+  Включает ли хост `to` (`<=`), сверено в задаче 0; если хост сравнивает `<`, `to` — начало
+  следующего дня. Период с «С» позже «По» страница не отправляет (текст `filters.reversed`).
 
   `disaggregation-text.ts` — фазы облака (`DocumentDetail.tsx`, `DOCUMENT_STATUS_TO_PHASE`,
   `LINE_STATUS_TO_PHASE`):
@@ -2097,6 +2253,8 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
       "importHint": "SSCC через перевод строки, «;» или «,», не больше 10 000 и не больше 1 МБ.",
       "importAction": "Импорт из файла",
       "importAdded": "Из файла добавлено строк: {{count}}.",
+      "importPartial": "Добавлено {{added}} из {{total}} SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз.",
+      "documentFull": "В документе не может быть больше 10 000 строк.",
       "importRefused": {
         "file_too_large": "Файл больше 1 МБ: разделите его на части.",
         "file_empty": "В файле нет ни одного SSCC.",
@@ -2124,6 +2282,9 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
       "applyConfirm": "Будет расформировано строк: {{lines}}, кодов: {{codes}}. Коды коробов станут свободными, станции получат это при следующей связи с сервером.",
       "applyConfirmAction": "Провести",
       "applyBlocked": "Часть строк изменила статус и не готова к проведению. Проверьте таблицу ниже.",
+      "applyNoReason": "Выберите причину: без неё документ не проводится.",
+      "applyNoLines": "В документе нет строк.",
+      "notDraft": "Документ уже проведён или отменён в другом окне. Показано его текущее состояние.",
       "applied": "Документ проведён.",
       "cancel": "Отменить документ",
       "cancelConfirmTitle": "Отменить документ?",
@@ -2162,9 +2323,8 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
   }
   ```
 
-  Тексты акта, его диалога и XML добавляют задачи 6 и 7. Если ДЗГ удаляет причину вместо
-  архива, флажок «В архиве» заменяется действием «Удалить» с `ConfirmDialog`, тексты облака
-  (`archiveConfirmTitle`, `archiveConfirmBody`).
+  Тексты акта, его диалога и XML добавляют задачи 6 и 7. Причина не удаляется, а уходит в архив
+  (ДЗГ: `archived` в `DisaggregationReasonUpdate`).
 
 - [ ] **Шаг 4: красные тесты страниц** (`test/disaggregation-*.test.tsx`; сессия —
       `fakeOfficeSession`, хост — моки `fakeHostApi`, данные — фабрики в начале файла по типам
@@ -2177,48 +2337,57 @@ disaggregationReport: (id: string, variant: "boxes" | "full") => [
   - список показывает номер (ссылка с именем `Открыть документ DSG-26-0007`), дату создания в
     часовом поясе организации (`ORG_PROFILE.timeZone`), статус-чип, причину, число строк и кодов,
     автора;
-  - фильтры статуса, причины, номера и периода сужают список. «Сбросить фильтры» возвращает
-    его. Обратный период показывает текст `filters.reversed` и список не меняет;
+  - фильтры уходят хосту: смена статуса вызывает `listDisaggregations(token, { status:
+"applied" })`, период «13.10.2026–13.10.2026» — `{ from: "2026-10-12T21:00:00Z", to:
+"2026-10-13T20:59:59Z" }` (зона `ORG_PROFILE`), номер — `{ q }` после паузы 300 мс (фейковые
+    таймеры). «Сбросить фильтры» вызывает список без фильтра. Обратный период показывает текст
+    `filters.reversed` и хост не спрашивает;
   - 51 документ — две страницы (`OfficePager`);
-  - «Создать документ» вызывает `createDisaggregationDocument(token, { reasonId: null, comment:
-null })` и открывает `/disaggregation/<id>`;
+  - «Создать документ» вызывает `createDisaggregation(token, { reasonId: null, comment: null })` и
+    открывает `/disaggregation/<detail.document.id>`;
   - технологу кнопка тоже доступна (Р10);
   - сбой списка — `LoadError` с «Повторить».
 
   `disaggregation-document.test.tsx`:
-  - черновик: выбор причины вызывает `updateDisaggregationDocument` с `expectedRev`.
+  - черновик: выбор причины вызывает `updateDisaggregation(token, id, { reasonId, comment,
+expectedRev })` — вся шапка, как требует ДЗГ.
     Комментарий сохраняется при уходе фокуса и только если изменён. Ответ `stale_revision`
     показывает `StaleAlert`, «Загрузить заново» перечитывает документ;
-  - вставка «(00)146007034967000017 146007034967000024» → `addDisaggregationLines(token, id, {
-ssccs: ["(00)146007034967000017", "146007034967000024"], source: "manual" })`, поле
-    очищается;
-  - импорт: `FileDropZone` получает `new File(["146007034967000017;146007034967000024\n"],
-"list.csv")` → `addDisaggregationLines(…, { ssccs: […2], source: "import" })` и текст
+  - вставка «(00)046007034967000017 046007034967000024» → `addDisaggregationLines(token, id, {
+lines: [{ input: "(00)046007034967000017", sscc: "046007034967000017" }, { input:
+"046007034967000024", sscc: "046007034967000024" }], import: false })`, поле очищается;
+  - импорт: `FileDropZone` получает `new File(["046007034967000017;046007034967000024\n"],
+"list.csv")` → `addDisaggregationLines(…, { lines: […2], import: true })` и текст
     `importAdded` с числом 2;
+  - файл на 1 200 SSCC уходит тремя запросами (500, 500, 200) по порядку; сбой второго — текст
+    `importPartial` («добавлено 500 из 1 200»), третий не шлётся, документ перечитывается;
+  - ответ `400` на `lines` при полном документе — текст `documentFull`;
   - файл на 10 001 SSCC — текст `too_many_lines`, хост не вызывается;
   - `.xlsx` — `onRejected` → `extension`;
   - строки — таблица с подписью `linesCaption`: SSCC как `(00)…`, уровень, товар, коды, чип
-    статуса. «Удалить строку (00)146007034967000017» вызывает `deleteDisaggregationLine`;
+    статуса. «Удалить строку (00)046007034967000017» вызывает `deleteDisaggregationLine`;
   - «Провести» недоступна (`disabled`) без причины или со строкой не `ok`, рядом подсказка
     `applyHint`. С готовыми строками — `ConfirmDialog` с числом строк и кодов. Подтверждение
-    вызывает `applyDisaggregationDocument(token, id, { expectedRev })`, страница перечитывает
+    вызывает `applyDisaggregation(token, id, { expectedRev })`, страница перечитывает
     документ и показывает `applied`. Esc закрывает диалог без вызова;
-  - ответ `conflict` (`lines_not_ready`) показывает `applyBlocked` и перечитывает документ;
+  - ответ `409 conflict` с `invalid_lines` (фикстура ДЗГ `error-disaggregation-invalid-lines.json`)
+    показывает `applyBlocked` и перечитывает документ; `reason_required` и `no_lines` — свои
+    тексты (`applyNoReason`, `applyNoLines`), хотя кнопка в этих случаях и так недоступна;
   - «Отменить документ» → `ConfirmDialog` (`tone="destructive"`) →
-    `cancelDisaggregationDocument`;
+    `cancelDisaggregation(token, id, { expectedRev })`;
   - проведённый и отменённый документы — только чтение: нет полей, панели добавления, удаления
     строк, «Провести» и «Отменить». Есть «Акт дезагрегации»; «Файл для Честного знака» — только
     у проведённого. Кнопки диалогов проверяют задачи 6 и 7;
   - неизвестный документ (`not_found`) — `LoadError` и ссылка «← Дезагрегация».
 
   `disaggregation-reasons.test.tsx`:
-  - администратор добавляет причину (название 1–120 символов после обрезки, порядок — целое
-    число), правит её и переводит в архив. Каждое действие вызывает метод ДЗГ с `expectedRev`
-    (кроме создания);
+  - администратор добавляет причину (`createDisaggregationReason(token, { name, sortOrder })`,
+    название 1–120 символов после обрезки, порядок — целое число), правит её и переводит в архив
+    (`updateDisaggregationReason(token, id, { name, sortOrder, archived, expectedRev })` — вся
+    причина, как требует ДЗГ);
   - пустое название — ошибка поля `nameRequired`; «1.5» в порядке — `sortOrderInvalid`, хост не
     вызывается;
-  - технолог видит таблицу и текст `office.common.readOnly`, кнопок «Добавить причину» и
-    «Изменить» нет (Р10);
+  - технолог делает то же самое (Р10: ДЗГ дал справочник обеим ролям);
   - причины в архиве — в конце списка с `ArchiveStatus` (`src/office/records.tsx`);
   - ссылка «← Дезагрегация» и ссылка «Причины дезагрегации» со страницы списка ведут друг к
     другу.
@@ -2260,7 +2429,9 @@ ssccs: ["(00)146007034967000017", "146007034967000024"], source: "manual" })`, �
     `OfficePager`.
 
   Данные:
-  - `useOfficeQuery(officeKeys.disaggregation, (api, token) => api.listDisaggregationDocuments(token))`;
+  - `const filter = documentFilter(state, zone)` (номер — после паузы 300 мс);
+    `useOfficeQuery(officeKeys.disaggregationList(filter), (api, token) => api.listDisaggregations(token, filter))`;
+    при обратном периоде запрос не идёт (`enabled: false`);
   - причины — `officeKeys.disaggregationReasons`;
   - организация — `officeKeys.org`, зона — `formTimeZone(org.data)` из `forms/render-form.ts`.
 
@@ -2279,8 +2450,9 @@ timeZone })`, как `ShiftCardPage.tsx:147`.
     const [notice, setNotice] = useState<string | null>(null);
     const [dialog, setDialog] = useState<"act" | "xml" | "apply" | "cancel" | null>(null);
     const doc = useOfficeQuery(officeKeys.disaggregationDocument(id), (api, token) =>
-      api.getDisaggregationDocument(token, id),
+      api.getDisaggregation(token, id),
     );
+    // doc.data is `DisaggregationDetail`: `doc.data.document` (header, rev) and `doc.data.lines`.
     const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
     /** After a write: the document and every list are read again. */
     const readAgain = () => {
@@ -2293,26 +2465,32 @@ timeZone })`, как `ShiftCardPage.tsx:147`.
     //   (applied only), <StatusChip phase={DOCUMENT_STATUS_PHASE[status]} …/></RowActions>} />
     // draft && canWrite ? <DocumentHeaderForm …/> : <DocumentHeaderView …/>  (DefinitionGrid)
     // draft && canWrite ? <AddLinesCard …/> : null
-    // <Card title=linesTitle><Table columns rows=doc.lines empty=linesEmpty scrollLabel=linesCaption/></Card>
+    // <Card title=linesTitle><Table columns rows=lines empty=linesEmpty scrollLabel=linesCaption/></Card>
+    //   columns: SSCC (lineSsccLabel), level, shift (shiftNumber → Link /shifts/{shiftId}), product,
+    //   codes, status chip, delete (draft && canWrite)
     // draft && canWrite ? <DraftActions …/> : null  (ConfirmDialog ×2)
     // dialog === "act" ? <DisaggregationActDialog …/> (task 6); dialog === "xml" ? <DisaggregationXmlDialog …/> (task 7)
   }
   ```
 
   Правила:
-  - **`canApply`**: `lines.length > 0 && lines.every((l) => l.status === "ok") && reasonId !== null`.
+  - **`canApply`**: `lines.length > 0 && lines.every((l) => l.status === "ok") && document.reasonId !== null`.
     Кнопка `disabled`, рядом подсказка с `aria-describedby`.
   - **Импорт**:
     - `FileDropZone accept=".txt,.csv" compact label=importLabel hint=importHint
 busy={importing} onFile onRejected`;
-    - `onFile` → `readSsccImport(file)` → при `ok` вызов `addDisaggregationLines(…, { source:
-"import" })`;
+    - `onFile` → `readSsccImport(file)` → при `ok` `inParts(lineInputs(tokens))` и по части
+      `addDisaggregationLines(token, id, { lines: part, import: true })`, по порядку, с
+      остановкой на первом сбое (`importPartial`); вставка — так же с `import: false`;
     - отказ → `Alert tone="warn"` с текстом `importRefused.<code>`; сбой чтения → `unreadable`.
   - **Ошибки записи**:
     - `writeFailure`/`alertFailure` из `form-errors.ts` и `WriteFailureAlert` с
       `onReload={readAgain}`;
-    - `conflict` с `details.constraint === "lines_not_ready"` (`HostError`) → `applyBlocked` и
-      `readAgain`.
+    - `HostError` с `code === "conflict"` и `details.constraint === "invalid_lines"` →
+      `applyBlocked` и `readAgain`; `reason_required` / `no_lines` → `applyNoReason` /
+      `applyNoLines`; `document_not_draft` (документ провели или отменили в другом окне) →
+      `readAgain` и текст `notDraft`;
+    - `400` на `lines` при добавлении → `documentFull`.
   - **Фокус**: после записи фокус переходит на уведомление (`notice` с `tabIndex={-1}`, как
     `ShiftsPage.tsx`), чтобы клавиатура не терялась, когда кнопка исчезает (провели, отменили).
   - **Уровень строки**: `boxId` — «Короб», `palletId` — «Паллета», иначе «—».
@@ -2320,7 +2498,7 @@ busy={importing} onFile onRejected`;
   `DisaggregationReasonsPage.tsx` — по образцу `LinesPage.tsx` (таблица, `FormDialog` с `Input`
   «Название», `Input type="number"` «Порядок», `Checkbox` «В архиве» в правке,
   `activeFirstByName`-подобная сортировка: не в архиве первыми, по `sortOrder`, затем по имени).
-  Права — `useCan("editReference")` (Р10).
+  Права — `useCan("planShifts")` (Р10).
 
 - [ ] **Шаг 6: зелёные тесты** (два прогона: обычный и под стендом задержки `setImmediate`, см.
       «Заметки»), typecheck, lint, prettier. Коммит
@@ -2376,7 +2554,7 @@ export interface DisaggregationActDialogProps {
   import { renderDisaggregationReportHtml } from "@markiro/domain";
   import { describe, expect, it } from "vitest";
 
-  import { disaggregationReportRowsSchema } from "../src/host/protocol.js";
+  import { disaggregationReportRowsSchema } from "../src/host/disaggregation.js";
   import { actData } from "../src/office/disaggregation/act-data.js";
   import { renderForm } from "../src/office/forms/render-form.js";
 
@@ -2433,7 +2611,7 @@ export interface DisaggregationActDialogProps {
   // act-data.ts
   import type { DisaggregationReportData } from "@markiro/domain";
 
-  import type { DisaggregationReportRows } from "../../host/protocol.js";
+  import type { DisaggregationReportRows } from "../../host/disaggregation.js";
   import { machineSscc } from "../forms/form-data.js";
 
   /**
@@ -2593,7 +2771,7 @@ api.getDisaggregationReportRows(token, documentId, variant))`;
   import { renderGismtDisaggregationXml } from "@markiro/domain";
   import { describe, expect, it } from "vitest";
 
-  import { disaggregationReportRowsSchema } from "../src/host/protocol.js";
+  import { disaggregationReportRowsSchema } from "../src/host/disaggregation.js";
   import {
     disaggregationXmlFileName,
     disaggregationXmlFolder,
@@ -2618,7 +2796,7 @@ api.getDisaggregationReportRows(token, documentId, variant))`;
       if (!result.ok) return;
       const expected = renderGismtDisaggregationXml({
         organizationInn: "7701234567",
-        ssccs: ["146007034967000017", "146007034967100014"],
+        ssccs: ["046007034967000017", "146007034967100014"],
       });
       expect(result.file.bytes).toEqual(expected.bytes);
       expect(result.file.packingCount).toBe(2);
@@ -2682,7 +2860,7 @@ api.getDisaggregationReportRows(token, documentId, variant))`;
   import {
     DISAGGREGATION_XML_FORMAT_ID,
     type DisaggregationReportRows,
-  } from "../../host/protocol.js";
+  } from "../../host/disaggregation.js";
   import { exportFolder } from "../exports/export-checks.js";
 
   /**
@@ -2805,7 +2983,127 @@ formatId: "disaggregation_xml_gismt", formatVersion: 1, packingCount: 2 })`, т�
 - [ ] **Шаг 5: зелёные тесты** (два прогона диалога), typecheck, lint, prettier. Коммит
       `feat(standalone): office ЧЗ file «Расформирование упаковки» for an applied disaggregation document`.
 
-## Задача 8: документация и итоговый гейт
+## Задача 8 (зависит от слияния КНФ; можно отрезать): «Расформировать короб» на странице «Конфликты»
+
+**Зависимость.** План КНФ влит: `proto/src/review.rs` (`OfficeConflictScan`),
+`host/src/routes/office_conflicts.rs` (`FROM`, `COLUMNS`, `ConflictRow`, `conflict`),
+`src/host/review.ts` (`officeConflictScanSchema`), `src/office/conflicts/ConflictsPage.tsx`
+(`ScanCell`), фикстура `office-conflict-page.json`. Без КНФ задача откладывается; отрезанная, она
+ничего в остальном плане не ломает. Его Р7 передал это действие сюда.
+
+**Files:** Modify `proto/src/review.rs`, `proto/tests/review.rs`,
+`proto/fixtures/office-conflict-page.json`, `host/src/routes/office_conflicts.rs`,
+`host/tests/office_conflicts.rs`, `src/host/review.ts`, `src/office/conflicts/ConflictsPage.tsx`,
+`test/conflicts-page.test.tsx`, `src/i18n/ru.json`; Create или переиспользовать
+`src/office/codes/disassemble.ts` (КРТ, задача 9).
+
+**Interfaces:**
+
+```rust
+// proto/src/review.rs, OfficeConflictScan: after box_sscc
+/// The scan's shift is closed (owner decision ПР-1: only a closed shift's box
+/// is taken apart; plan ДЗГ-О's «Расформировать короб»).
+pub shift_closed: bool,
+/// The scan's box was taken apart (by a station or a document); `false`
+/// without a box.
+pub box_disassembled: bool,
+```
+
+```ts
+// src/host/review.ts, officeConflictScanSchema: add
+shiftClosed: z.boolean(),
+boxDisassembled: z.boolean(),
+
+// src/office/codes/disassemble.ts (КРТ's; the same name and shape when created here)
+/** A draft was made but the SSCC did not go in: the office names the draft to open. */
+export class DraftWithoutLine extends Error {
+  constructor(readonly document: DisaggregationDocument, readonly cause: unknown);
+}
+/** Plan КРТ's «Расформировать»: an empty draft, then its one line; the draft's header. */
+export async function startDisassembly(
+  api: HostApi,
+  token: string,
+  sscc: string,
+): Promise<DisaggregationDocument>;
+```
+
+- [ ] **Шаг 0: сверка.** КНФ влит (`git -C <wt> log --oneline claude/integration --
+apps/standalone/src/office/conflicts`). Влит ли КРТ: есть ли
+      `src/office/codes/disassemble.ts`. Если файл есть и мутация КРТ живёт в карточках, вынести
+      её тело в `startDisassembly` в этом файле (карточки КРТ зовут его; их тесты не меняются).
+      Если файла нет — создать его с той же формой; КРТ при слиянии переиспользует. Запись — в
+      «Отклонения».
+- [ ] **Шаг 1: красные тесты.**
+  - Rust (`host/tests/office_conflicts.rs`, подготовка — помощники файла КНФ): у конфликта с
+    проигравшим в закрытом коробе закрытой смены `loser.shiftClosed == true`,
+    `loser.boxDisassembled == false`; после расформирования короба станцией (`box_exception`
+    `disassemble`) — `boxDisassembled == true`; у скана без короба (смена проверки) — `false`.
+    `round_trip` обновлённой фикстуры в `proto/tests/review.rs`.
+  - Vitest (`test/conflicts-page.test.tsx`, сессия и `listConflicts` — как в файле КНФ):
+    - проигравший в закрытом коробе закрытой смены, короб цел → в строке кнопка «Расформировать
+      короб» с именем `Расформировать короб (00)046006820000015001`;
+    - нажатие вызывает `createDisaggregation(token, { reasonId: null, comment: null })` один раз
+      (повтор во время запроса ничего не шлёт), затем `addDisaggregationLines(token, DOC_ID, {
+lines: [{ input: "046006820000015001", sscc: "046006820000015001" }], import: false })`, затем
+      открывает страницу документа (`getDisaggregation` вызван с `DOC_ID`);
+    - смена открыта, короб открыт (`boxSscc: null`), короба нет, короб расформирован — кнопки
+      нет; у открытой смены — тихая строка «Расформировать можно после закрытия смены»;
+    - технолог видит кнопку (`planShifts`, Р10);
+    - ошибка создания → `Alert` `disassembleFailed`, фокус на нём, строки не шлются; черновик
+      создан, строка не добавилась (`DraftWithoutLine`) → `Alert` `disassembleLineFailed` со
+      ссылкой «Открыть документ DSG-26-0001».
+
+  Прогон: `cargo … test -p markiro-host --test office_conflicts`, `-p markiro-proto --test review`;
+  `pnpm … exec vitest run test/conflicts-page.test.tsx` — красный.
+
+- [ ] **Шаг 2: реализация.**
+  - `office_conflicts.rs`: в `COLUMNS` для обеих сторон —
+    `ls.status = 'closed' AS l_shift_closed, lb.disassembled_at IS NOT NULL AS l_box_disassembled`
+    (и `ws`/`wb` для победителя; `lb` — `LEFT JOIN`, без короба выражение даёт `0`);
+    `ConflictRow` — `l_shift_closed: bool`, `l_box_disassembled: bool` (и `w_…`); `conflict()`
+    переносит их. Индексы не нужны: столбцы читаются из уже соединённых строк.
+  - фикстура: в каждом `loser`/`winner` — `"shiftClosed"` и `"boxDisassembled"`.
+  - `disassemble.ts`:
+
+  ```ts
+  export async function startDisassembly(
+    api: HostApi,
+    token: string,
+    sscc: string,
+  ): Promise<DisaggregationDocument> {
+    const created = await api.createDisaggregation(token, { reasonId: null, comment: null });
+    try {
+      await api.addDisaggregationLines(token, created.document.id, {
+        lines: [{ input: sscc, sscc }],
+        import: false,
+      });
+    } catch (error) {
+      throw new DraftWithoutLine(created.document, error);
+    }
+    return created.document;
+  }
+  ```
+
+  - `ConflictsPage.tsx`: в ячейке проигравшего (`ScanCell` получает необязательный `action`) —
+    `Button variant="secondary" size="compact"` при `canDisassemble && scan.boxSscc !== null &&
+scan.shiftClosed && !scan.boxDisassembled`, где `canDisassemble = useCan("planShifts")`;
+    `useOfficeMutation((api, token, sscc: string) => startDisassembly(api, token, sscc))`, по
+    успеху — `navigate(`/disaggregation/${document.id}`)`. Уведомление об ошибке — над таблицей,
+    с фокусом (`expectFocusedNotice`-подобно КНФ).
+  - Тексты (`office.conflicts.*`):
+    - `disassemble` — «Расформировать короб»;
+    - `disassembleNamed` — «Расформировать короб {{sscc}}»;
+    - `disassembleAfterClose` — «Расформировать можно после закрытия смены»;
+    - `disassembleFailed` — «Не удалось создать документ дезагрегации: {{reason}}»;
+    - `disassembleLineFailed` — «Документ {{docNo}} создан, но SSCC не добавлен: {{reason}}»;
+    - `openDocument` — «Открыть документ {{docNo}}».
+
+    Если КРТ уже завёл те же слова в `office.packs.*`, взять его ключи.
+
+- [ ] **Шаг 3: зелёные тесты** (React — дважды), `cargo fmt --check`, typecheck, lint, prettier.
+      Коммит `feat(standalone): «Расформировать короб» on the conflicts page opens a disaggregation draft with the loser's box`.
+
+## Задача 9: документация и итоговый гейт
 
 **Files:** Modify `apps/standalone/AGENTS.md`,
 `docs/superpowers/specs/2026-10-13-standalone-office-parity-design.md`.
@@ -2822,6 +3120,7 @@ formatId: "disaggregation_xml_gismt", formatVersion: 1, packingCount: 2 })`, т�
     - зона и примечание акта (Р3, Р4) с эталонной цепочкой: слепки облака → фикстуры хоста →
       `test/disaggregation-act.test.ts`;
     - XML (Р7, Р8): генератор домена, правило ИНН, папка, запись;
+    - вход из конфликта (задача 8) и общий `startDisassembly` с КРТ;
     - что не проверено (WebView2, печать, приём файла в ЛК ЧЗ).
   - «Shift card and printed forms» — абзац о том, что `render-form.ts` рисует и акт, и где лежит
     `paint`.
@@ -2875,11 +3174,14 @@ formatId: "disaggregation_xml_gismt", formatVersion: 1, packingCount: 2 })`, т�
 5. **ИНН ИП (12 цифр):** если есть такой клиент, файл с 12-значным ИНН принят ЛК (вопрос
    ДЗГО-1).
 6. **Импорт файла:** `.csv` из Excel (UTF-8 с BOM, разделитель `;`) и `.txt` из 1С. Все SSCC
-   добавлены, первый не получил статус «не найден».
+   добавлены, первый не получил статус «не найден». Файл на 2 000 SSCC уходит частями и
+   добавляется целиком за разумное время (записать).
 7. **Клавиатура:** список, документ, причины, оба диалога проходятся Tab, Enter и Esc, фокус
    видим, после проведения фокус на сообщении.
-8. **Технолог:** создаёт и проводит документ, печатает акт, формирует XML; причины видит только
-   для чтения.
+8. **Технолог:** создаёт и проводит документ, печатает акт, формирует XML, правит причины.
+9. **Из конфликта (если задача 8 сделана):** на странице «Конфликты» «Расформировать короб» у
+   закрытого короба закрытой смены открывает черновик с этим SSCC; документ проводится, акт
+   печатается.
 
 ## Открытые вопросы
 
@@ -2899,21 +3201,27 @@ formatId: "disaggregation_xml_gismt", formatVersion: 1, packingCount: 2 })`, т�
 
 ## Риски
 
-- **Интерфейсы ДЗГ отличаются от Р1.** Мера — задача 0 до кода, замена имён и запись в
+- **Код ДЗГ разошёлся с его планом.** Мера — задача 0 до кода, замена имён и запись в
   «Отклонения». Смысл задач не зависит от имён.
-- **Время снятия кодов.** Если ДЗГ ставит `box_items.removed_at` не равным
-  `boxes.disassembled_at`, полный акт проведённого документа печатает короба без кодов. Мера —
-  тест задачи 4 (`the_full_act_prints_the_codes_the_document_took_out…`) и проверка в задаче 0.
+- **Импорт частями не атомарен.** Хост берёт 500 строк за запрос; сбой посреди файла оставляет
+  часть строк в черновике. Мера — текст `importPartial` с числом добавленных и перечитанный
+  документ; строки черновика удаляются, а дубли при повторе получают `duplicate`.
+- **Время снятия кодов.** План ДЗГ (его Р4) пишет один текст `device_text` в
+  `box_items.removed_at` и `boxes.disassembled_at`. Если код разойдётся с планом, полный акт
+  проведённого документа напечатает короба без кодов. Мера — тест задачи 4
+  (`the_full_act_prints_the_codes_the_document_took_out…`).
 - **Правки облака.** Перенос и аддитивные поля касаются `apps/api`. Мера — слепки до переноса,
   проверка с `CI=true`, `typecheck`/`build` API.
 - **Пересборка `scans` в РЕЖ.** Запрос кодов идёт по `scans_shift`. Мера — `EXPLAIN QUERY PLAN`
   в задаче 4: если РЕЖ переименует индекс, тест покажет `SCAN`.
 - **Общие файлы с другими потоками:** `ru.json`, `office/nav.ts`, `office/routes.tsx`,
-  `office-query.ts`, `server.rs`, `audit.rs`, `proto/src/lib.rs`, `proto/tests/fixtures.rs`,
-  `src/host/{protocol,api}.ts`, `test/support/office.tsx`, `test/protocol.test.ts` — с ДЗГ, КНФ,
-  ТОВ, КРТ, ИСТ; `packages/domain/src/index.ts` — с ТОВ (`shift-task-form.ts` рядом). Это
-  конфликты текста, а не логики. Слияние — после ДЗГ, перед КРТ (её кнопка «Расформировать»
-  открывает страницу документа этого плана).
+  `office-query.ts`, `server.rs`, `audit.rs`, модули ДЗГ `proto/src/disaggregation.rs`,
+  `src/host/disaggregation.ts` и их тесты, `src/host/api.ts`, `test/support/office.tsx` — с ДЗГ,
+  КНФ, ТОВ, КРТ, ИСТ; задача 8 — файлы КНФ (`review.rs`, `office_conflicts.rs`,
+  `ConflictsPage.tsx`) и помощник КРТ `src/office/codes/disassemble.ts`;
+  `packages/domain/src/index.ts` — с ТОВ. Это конфликты текста, а не логики. Слияние — после
+  ДЗГ, перед КРТ (её кнопка «Расформировать» открывает страницу документа этого плана); если
+  КРТ влит раньше, задача 8 переиспользует его помощник.
 - **Большой полный акт.** Домен рисует синхронно, документ на тысячи коробов с DataMatrix
   замораживает окно на секунды, как «Состав короба». Мера — этапы в живой области и проверка
   владельца 3. Настоящее решение — рендер в worker, отдельной задачей.
@@ -2925,7 +3233,8 @@ formatId: "disaggregation_xml_gismt", formatVersion: 1, packingCount: 2 })`, т�
 - Чтение DataMatrix акта сканером.
 - Приём XML в ЛК ЧЗ — внешняя проверка владельца.
 - E2e облака без `DATABASE_URL`.
-- Интерфейсы ДЗГ на момент написания плана (Р1) — сверяются задачей 0.
+- Имена ДЗГ взяты из его плана, не из кода (Р1) — сверяются задачей 0; включает ли фильтр `to`
+  свою секунду — тоже там.
 
 ## Отклонения при исполнении
 
