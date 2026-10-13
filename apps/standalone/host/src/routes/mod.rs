@@ -1,5 +1,6 @@
 //! Route handlers, one module per area; `server::router` wires them.
 
+pub mod app_updates;
 pub mod backups;
 pub mod bootstrap;
 pub mod changes;
