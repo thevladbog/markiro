@@ -1,5 +1,5 @@
 //! A4 sheets chosen by default on a par with the pallet labels (beta
-//! feedback, migration `0017`): the organization's and each category's
+//! feedback, migration `0019`): the organization's and each category's
 //! default sheet in the templates' defaults document, a product's preferred
 //! sheet, and the order a shift takes them in. A sheet and a thermal label
 //! never take each other's place: each slot reads its own table.

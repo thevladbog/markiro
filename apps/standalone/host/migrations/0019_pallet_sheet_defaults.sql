@@ -1,7 +1,8 @@
 -- A4 sheets chosen by default on a par with the pallet labels (beta
 -- feedback): a product's preferred sheet and each category's default sheet,
--- beside the organization's (`0016`). Numbered 0017 after `0016`; `0013` and
--- `0014` belong to other plans, and sqlx applies a missing lower number late.
+-- beside the organization's (`0016`). Numbered 0019: `0013` and `0014` belong
+-- to other plans, `0017` to the code search and `0018` to the people's
+-- changes of the same beta wave; sqlx applies a missing lower number late.
 --
 -- A shift with pallets that names no sheet takes the product's sheet while
 -- it is enabled, else its category's, else the organization's
