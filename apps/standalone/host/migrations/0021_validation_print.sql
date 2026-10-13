@@ -11,8 +11,10 @@
 -- The policy. `validation_print_template_id` has no foreign key, as
 -- `box_template_id` (`0009`): once the shift is open the layout lives in its
 -- snapshot, so a closed shift never holds its template back, and a template
--- a planned shift names is never deleted nor switched off
--- (`template_in_use`).
+-- a planned shift names is never deleted (`template_in_use` guards the
+-- delete only; switching a template off is guarded by `template_is_default`
+-- alone, and the entry then refuses a switched-off one with
+-- `duplicate_template_not_fit`).
 ALTER TABLE shifts ADD COLUMN validation_print_mode TEXT NOT NULL DEFAULT 'none'
   CHECK (validation_print_mode IN ('none', 'duplicate_dm'));
 ALTER TABLE shifts ADD COLUMN validation_print_verification TEXT
@@ -20,38 +22,45 @@ ALTER TABLE shifts ADD COLUMN validation_print_verification TEXT
     OR validation_print_verification IN ('none', 'required'));
 ALTER TABLE shifts ADD COLUMN validation_print_template_id TEXT;
 
--- The cloud's `shifts_validation_print_policy_check`: no policy names a
--- verification or a template; a duplicate is printed only in a validation
--- shift and names both. `0009` takes no CHECK across columns without a
--- rebuild, so two triggers hold the rule (as in `0012`); with the column
--- CHECK keeping the print mode to its two words, their three conditions are
--- the cloud's CHECK, and a word of neither is left to that column CHECK.
+-- The rule of the wire's pair (`mode` and `validationPrint`): no policy
+-- names a verification or a template; a duplicate is printed only in a
+-- validation shift and names both. This is not the cloud's columns: the
+-- cloud stores its verification `'none'` NOT NULL even without a policy,
+-- the host keeps NULL there for no policy (deliberately, so a row says
+-- whether a policy exists). `0009` takes no CHECK across columns without a
+-- rebuild, so two triggers hold the rule (as in `0012`); a word of neither
+-- list is left to the column CHECK. The triggers compare with `IS`, not
+-- `=`: under `OR REPLACE` a NULL print mode reaches the trigger as NULL and
+-- only then becomes the default `none`, and a `=` comparison with NULL would
+-- skip the rule and store `none` beside a verification or a template.
 -- Every shift written before (and every write that names no policy) has
 -- none.
 CREATE TRIGGER shifts_validation_print_insert BEFORE INSERT ON shifts
-WHEN (NEW.validation_print_mode = 'duplicate_dm') <> (NEW.validation_print_verification IS NOT NULL)
-  OR (NEW.validation_print_mode = 'duplicate_dm') <> (NEW.validation_print_template_id IS NOT NULL)
-  OR (NEW.validation_print_mode = 'duplicate_dm' AND NEW.mode <> 'validation')
+WHEN (NEW.validation_print_mode IS 'duplicate_dm') <> (NEW.validation_print_verification IS NOT NULL)
+  OR (NEW.validation_print_mode IS 'duplicate_dm') <> (NEW.validation_print_template_id IS NOT NULL)
+  OR (NEW.validation_print_mode IS 'duplicate_dm' AND NEW.mode IS NOT 'validation')
 BEGIN
   SELECT RAISE(ABORT, 'shift validation print: duplicate_dm only in a validation shift, with its verification and template');
 END;
 CREATE TRIGGER shifts_validation_print_update
 BEFORE UPDATE OF mode, validation_print_mode, validation_print_verification,
   validation_print_template_id ON shifts
-WHEN (NEW.validation_print_mode = 'duplicate_dm') <> (NEW.validation_print_verification IS NOT NULL)
-  OR (NEW.validation_print_mode = 'duplicate_dm') <> (NEW.validation_print_template_id IS NOT NULL)
-  OR (NEW.validation_print_mode = 'duplicate_dm' AND NEW.mode <> 'validation')
+WHEN (NEW.validation_print_mode IS 'duplicate_dm') <> (NEW.validation_print_verification IS NOT NULL)
+  OR (NEW.validation_print_mode IS 'duplicate_dm') <> (NEW.validation_print_template_id IS NOT NULL)
+  OR (NEW.validation_print_mode IS 'duplicate_dm' AND NEW.mode IS NOT 'validation')
 BEGIN
   SELECT RAISE(ABORT, 'shift validation print: duplicate_dm only in a validation shift, with its verification and template');
 END;
 
--- A shift's mode and policy change only while it is planned and has no
--- scan (the owner's rule: the mode does not change once the shift is open).
--- An open or closed shift has them in its snapshot, and `0020`'s box rule
--- (`scans_ok_box_by_mode`) reads the mode of the shift whose scans it
--- already took. The host refuses such an edit first (`conflict` on
--- `shift_status`); the office's edit writes every field, so a write of the
--- same value is no change. `scans_shift` finds a shift's scans.
+-- A shift's mode and policy change only while it is planned, stays planned
+-- in the same statement, and has no scan (the owner's rule: the mode does
+-- not change once the shift is open). An open or closed shift has them in
+-- its snapshot, and `0020`'s box rule (`scans_ok_box_by_mode`) reads the
+-- mode of the shift whose scans it already took; the statement that opens a
+-- shift (`device_shifts`) names none of them. The host refuses such an edit
+-- first (`conflict` on `shift_status`); the office's edit writes every
+-- field, so a write of the same value is no change. `scans_shift` finds a
+-- shift's scans.
 CREATE TRIGGER shifts_mode_frozen
 BEFORE UPDATE OF mode, validation_print_mode, validation_print_verification,
   validation_print_template_id ON shifts
@@ -59,7 +68,8 @@ WHEN (NEW.mode IS NOT OLD.mode
     OR NEW.validation_print_mode IS NOT OLD.validation_print_mode
     OR NEW.validation_print_verification IS NOT OLD.validation_print_verification
     OR NEW.validation_print_template_id IS NOT OLD.validation_print_template_id)
-  AND (OLD.status <> 'planned' OR EXISTS (SELECT 1 FROM scans WHERE shift_id = OLD.id))
+  AND (OLD.status <> 'planned' OR NEW.status IS NOT 'planned'
+    OR EXISTS (SELECT 1 FROM scans WHERE shift_id = OLD.id))
 BEGIN
   SELECT RAISE(ABORT, 'shift mode and print policy: frozen once open or scanned');
 END;

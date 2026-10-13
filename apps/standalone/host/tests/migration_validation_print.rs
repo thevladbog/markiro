@@ -684,6 +684,164 @@ async fn an_open_or_scanned_shift_keeps_its_mode_and_policy() {
     checks_clean(&pool).await;
 }
 
+/// A missing print mode cannot skip the rule: with `OR REPLACE` SQLite puts
+/// the column's default (`none`) in place of a NULL after the triggers ran,
+/// so a trigger that compared with `=` saw NULL, skipped, and the row kept a
+/// verification or a template without a policy.
+#[tokio::test]
+async fn a_missing_print_mode_does_not_slip_past_the_rule() {
+    let (_dir, pool) = migrated().await;
+    for (seq, policy) in (10..).zip([
+        ("NULL", "'required'", "NULL"),
+        ("NULL", "'none'", "NULL"),
+        ("NULL", "NULL", "'template-d'"),
+        ("NULL", "'required'", "'template-d'"),
+    ]) {
+        let (print_mode, verification, template) = policy;
+        refused(
+            run(
+                &pool,
+                &format!(
+                    "INSERT OR REPLACE INTO shifts (id, number_month_key, number_seq, \
+                     created_from, created_by_kind, created_by, status, mode, product_id, \
+                     line_id, production_date, box_capacity, box_template_id, \
+                     validation_print_mode, validation_print_verification, \
+                     validation_print_template_id, created_at, rev) \
+                     VALUES ('shift-x', 'NOV26', {seq}, 'office', 'office_user', 'user-1', \
+                     'planned', 'validation', 'product-1', 'line-1', '2026-11-02', 12, \
+                     'template-1', {print_mode}, {verification}, {template}, \
+                     '2026-11-01T17:00:00Z', 1)"
+                ),
+            )
+            .await,
+            POLICY,
+            &format!("insert or replace {policy:?}"),
+        );
+    }
+    planned(
+        &pool,
+        "shift-d",
+        20,
+        "validation",
+        ("'duplicate_dm'", "'required'", "'template-d'"),
+    )
+    .await
+    .unwrap();
+    refused(
+        run(
+            &pool,
+            "UPDATE OR REPLACE shifts SET validation_print_mode = NULL WHERE id = 'shift-d'",
+        )
+        .await,
+        POLICY,
+        "update or replace to a missing print mode",
+    );
+    // Without a policy, a missing print mode is none, as it always was.
+    run(
+        &pool,
+        "INSERT OR REPLACE INTO shifts (id, number_month_key, number_seq, created_from, \
+         created_by_kind, created_by, status, mode, product_id, line_id, production_date, \
+         box_capacity, box_template_id, validation_print_mode, \
+         validation_print_verification, validation_print_template_id, created_at, rev) \
+         VALUES ('shift-n', 'NOV26', 30, 'office', 'office_user', 'user-1', 'planned', \
+         'validation', 'product-1', 'line-1', '2026-11-02', 12, 'template-1', NULL, NULL, \
+         NULL, '2026-11-01T17:00:00Z', 1)",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        policy_of(&pool, "shift-n").await,
+        ("validation".to_owned(), "none".to_owned(), None, None)
+    );
+    assert_eq!(
+        policy_of(&pool, "shift-d").await,
+        (
+            "validation".to_owned(),
+            "duplicate_dm".to_owned(),
+            Some("required".to_owned()),
+            Some("template-d".to_owned())
+        )
+    );
+    checks_clean(&pool).await;
+}
+
+/// The statement that opens a shift cannot change its mode or policy on the
+/// way: a planned shift is judged by what it becomes as well. The host's
+/// entry (`device_shifts`) names none of them, and is taken; a planned
+/// shift with a scan keeps its policy as it keeps its mode.
+#[tokio::test]
+async fn the_opening_statement_and_a_scanned_planned_shift_keep_the_policy() {
+    let (_dir, pool) = migrated().await;
+    planned(
+        &pool,
+        "shift-d",
+        10,
+        "validation",
+        ("'duplicate_dm'", "'none'", "'template-d'"),
+    )
+    .await
+    .unwrap();
+    for statement in [
+        "UPDATE shifts SET status = 'active', owner_device_id = 'device-1', snapshot = '{}', \
+         opened_at = '2026-11-02T08:00:00Z', validation_print_verification = 'required' \
+         WHERE id = 'shift-d'",
+        "UPDATE shifts SET status = 'active', owner_device_id = 'device-1', snapshot = '{}', \
+         opened_at = '2026-11-02T08:00:00Z', mode = 'aggregation', \
+         validation_print_mode = 'none', validation_print_verification = NULL, \
+         validation_print_template_id = NULL WHERE id = 'shift-d'",
+        "UPDATE shifts SET status = 'active', owner_device_id = 'device-1', snapshot = '{}', \
+         opened_at = '2026-11-02T08:00:00Z', mode = 'validation' WHERE id = 'shift-pa'",
+    ] {
+        refused(run(&pool, statement).await, FROZEN, statement);
+    }
+    // A planned shift with a policy and a scan: its policy, not only its mode.
+    planned(
+        &pool,
+        "shift-s",
+        11,
+        "validation",
+        ("'duplicate_dm'", "'none'", "'template-d'"),
+    )
+    .await
+    .unwrap();
+    run(
+        &pool,
+        "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, raw_kind, raw_length, \
+         scanned_at, received_at) VALUES ('scan-9', 'record-9', 'device-1', 'shift-s', \
+         'invalid', 'unknown', 5, '2026-11-02T12:00:00.000Z', '2026-11-02T12:00:01Z')",
+    )
+    .await
+    .unwrap();
+    for statement in [
+        "UPDATE shifts SET validation_print_verification = 'required' WHERE id = 'shift-s'",
+        "UPDATE shifts SET validation_print_template_id = 'template-e' WHERE id = 'shift-s'",
+        "UPDATE shifts SET validation_print_mode = 'none', validation_print_verification = NULL, \
+         validation_print_template_id = NULL WHERE id = 'shift-s'",
+    ] {
+        refused(run(&pool, statement).await, FROZEN, statement);
+    }
+    // The entry's own statement, as `device_shifts` writes it.
+    run(
+        &pool,
+        "UPDATE shifts SET status = 'active', snapshot = '{}', \
+         opened_at = '2026-11-02T08:00:00Z', owner_device_id = 'device-1', rev = 2 \
+         WHERE id = 'shift-d'",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        policy_of(&pool, "shift-d").await,
+        (
+            "validation".to_owned(),
+            "duplicate_dm".to_owned(),
+            Some("none".to_owned()),
+            Some("template-d".to_owned())
+        )
+    );
+    assert_eq!(policy_of(&pool, "shift-pa").await.0, "aggregation");
+    checks_clean(&pool).await;
+}
+
 /// One event of a label job, every value a SQL literal; the defaults make a
 /// valid `sent` of attempt 1.
 struct Event<'a> {
@@ -1016,6 +1174,37 @@ async fn an_event_row_holds_the_rules_of_the_fact() {
             Event {
                 event: "'verification_rejected'",
                 error_code: "'printer_changed'",
+                ..SENT
+            },
+        ),
+        (
+            "failed with an unknown code",
+            Event {
+                event: "'failed_before_send'",
+                error_code: "'paper_out'",
+                ..SENT
+            },
+        ),
+        (
+            "unknown with an unknown code",
+            Event {
+                event: "'delivery_unknown'",
+                error_code: "'paper_out'",
+                ..SENT
+            },
+        ),
+        (
+            "rejected with an unknown code",
+            Event {
+                event: "'verification_rejected'",
+                error_code: "'paper_out'",
+                ..SENT
+            },
+        ),
+        (
+            "unknown code on sent",
+            Event {
+                error_code: "'paper_out'",
                 ..SENT
             },
         ),

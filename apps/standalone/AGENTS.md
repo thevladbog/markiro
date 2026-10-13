@@ -3269,11 +3269,16 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
   `shift_status`, «Shifts»). A validation shift has no pallets and no A4
   sheet; its box template and capacity stay, unprinted.
 - The database holds the freeze too (`0021`, trigger `shifts_mode_frozen`):
-  a shift's mode and print policy change only while it is planned and has
-  no scan, so `0020`'s box rule never meets a shift whose mode moved after
-  it took scans; a write of the same value (the office's edit writes every
-  field) is no change. The print policy (part B,
-  `shifts.validation_print_*`) is the cloud's pair: `none` with no
+  a shift's mode and print policy change only while it is planned, stays
+  planned in that statement (the statement that opens a shift cannot move
+  them; the entry names none) and has no scan, so `0020`'s box rule never
+  meets a shift whose mode moved after it took scans; a write of the same
+  value (the office's edit writes every field) is no change. The policy
+  triggers compare with `IS`, so a NULL print mode under `OR REPLACE`
+  cannot skip them. The print policy (part B,
+  `shifts.validation_print_*`) is the wire's pair (`mode` and
+  `validationPrint`, not the cloud's columns, which keep the verification
+  `none` without a policy where the host keeps NULL): `none` with no
   verification and no template, or `duplicate_dm` in a validation shift
   with both, held by `shifts_validation_print_insert`/`_update` (a template
   id without a foreign key, as the box template's; a planned shift's
