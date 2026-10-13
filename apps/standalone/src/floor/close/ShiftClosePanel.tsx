@@ -8,6 +8,7 @@ import { Alert, Button } from "@markiro/ui";
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import type { CloseBlocker, CloseSummary } from "./shift-close.js";
+import "./shift-close.css";
 
 /**
  * Why the summary is shown again: the shift changed meanwhile, no reason was
@@ -208,8 +209,8 @@ export function ShiftClosePanel({
     if (summary === null) {
       return (
         <>
-          <p>{t("floor.close.loading")}</p>
-          <div className="standalone-form__actions">{back}</div>
+          <p className="shift-close__loading">{t("floor.close.loading")}</p>
+          <div className="shift-close__actions">{back}</div>
         </>
       );
     }
@@ -225,7 +226,7 @@ export function ShiftClosePanel({
           <Alert tone="warn" role="presentation" title={t("floor.close.blockedTitle")}>
             <p>{blockerText(blocker, waitingSscc, t)}</p>
           </Alert>
-          <div className="standalone-form__actions">
+          <div className="shift-close__actions">
             {back}
             {blocker.kind === "label" && (
               <Button size="floor" {...press(onLabel)}>
@@ -240,7 +241,7 @@ export function ShiftClosePanel({
     const chosen = summary.reasonRequired ? reason : null;
     return (
       <>
-        <dl className="work-screen__facts">
+        <dl className="shift-close__facts">
           <div>
             <dt>{t("floor.close.product")}</dt>
             <dd>{productName}</dd>
@@ -273,7 +274,16 @@ export function ShiftClosePanel({
           </div>
         </dl>
         {summary.plannedQty !== null && (
-          <p>
+          <p
+            className="shift-close__result"
+            data-tone={
+              summary.actualQty === summary.plannedQty
+                ? "ok"
+                : summary.actualQty < summary.plannedQty
+                  ? "warn"
+                  : "info"
+            }
+          >
             {summary.actualQty === summary.plannedQty
               ? t("floor.close.result.met")
               : summary.actualQty < summary.plannedQty
@@ -286,26 +296,35 @@ export function ShiftClosePanel({
           </p>
         )}
         {summary.reasonRequired && (
-          <div role="group" aria-label={t("floor.close.reasonTitle")}>
-            <p>{t("floor.close.reasonTitle")}</p>
-            <div className="work-screen__close-reasons">
+          <div
+            className="shift-close__reasons"
+            role="group"
+            aria-label={t("floor.close.reasonTitle")}
+          >
+            <p className="shift-close__reasons-title">{t("floor.close.reasonTitle")}</p>
+            {/* The cloud's floor choices: every reason a visible 64 px target, two to a row. */}
+            <div className="floor-choice-group">
               {SHIFT_CLOSE_REASON_CODES.map((code) => (
                 <Button
                   key={code}
                   size="floor"
-                  variant={reason === code ? "primary" : "secondary"}
+                  variant="secondary"
+                  className="floor-choice"
+                  data-checked={reason === code ? "true" : undefined}
                   aria-pressed={reason === code}
                   {...press(() => setReason(code))}
                 >
                   {/* The chosen reason is marked by a sign too, not by its colour alone. */}
-                  {reason === code && <span aria-hidden="true">✓ </span>}
-                  {t(`floor.close.reasons.${code}`)}
+                  <span aria-hidden="true" className="floor-choice__mark">
+                    {reason === code ? "✓" : ""}
+                  </span>
+                  <span className="floor-choice__label">{t(`floor.close.reasons.${code}`)}</span>
                 </Button>
               ))}
             </div>
           </div>
         )}
-        <p>{t("floor.close.irreversible")}</p>
+        <p className="shift-close__note">{t("floor.close.irreversible")}</p>
         {palletAsked && (
           <Alert
             tone="warn"
@@ -318,7 +337,7 @@ export function ShiftClosePanel({
             <p>{t("floor.close.palletIrreversible")}</p>
           </Alert>
         )}
-        <div className="standalone-form__actions">
+        <div className="shift-close__actions">
           {back}
           <Button
             size="floor"
@@ -333,7 +352,7 @@ export function ShiftClosePanel({
   };
   return (
     <section
-      className="work-screen__close"
+      className="shift-close"
       aria-label={t("floor.close.title", { number })}
       tabIndex={-1}
       ref={viewRef}
@@ -390,8 +409,8 @@ export function ShiftClosedPanel({
   const { viewRef, settled } = useViewGuard<HTMLDivElement>("closed", clock);
   const title = t("floor.close.done.title", { number });
   return (
-    <div role="group" aria-label={title} tabIndex={-1} ref={viewRef} className="work-screen__close">
-      <Alert tone="ok" role="presentation" title={title}>
+    <div role="group" aria-label={title} tabIndex={-1} ref={viewRef} className="shift-close">
+      <Alert tone="ok" role="presentation" className="shift-close__done" title={title}>
         <p>{t("floor.close.done.body")}</p>
         <p>
           {t("floor.close.done.numbers", {
@@ -401,7 +420,7 @@ export function ShiftClosedPanel({
         </p>
         {linkHeld && <p>{t("floor.close.done.held")}</p>}
       </Alert>
-      <div className="standalone-form__actions">
+      <div className="shift-close__actions">
         <Button
           size="floor"
           aria-disabled={leaving ? true : undefined}

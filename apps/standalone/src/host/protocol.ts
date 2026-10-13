@@ -472,6 +472,23 @@ export const counterpartyRecordSchema = z.object({
 });
 export type CounterpartyRecord = z.infer<typeof counterpartyRecordSchema>;
 
+/**
+ * `GET /v1/office/employees` (administrators): a person of the site, as the
+ * cloud's employees. Office data, never in the station feed and never a
+ * credential. `operatorId` names the one operator the employee is, `null` for
+ * none; the operator keeps its own personnel number, PIN and badges. An
+ * archived employee is linked to no operator.
+ */
+export const employeeRecordSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  role: z.string().nullable(),
+  operatorId: z.uuid().nullable(),
+  archived: z.boolean(),
+  rev: z.number().int(),
+});
+export type EmployeeRecord = z.infer<typeof employeeRecordSchema>;
+
 /** `GET /v1/office/lines`: a production line as the office sees it, archived ones included. */
 export const officeLineSchema = z.object({
   id: z.uuid(),
@@ -1232,6 +1249,27 @@ export const counterpartyUpdateSchema = z
   })
   .strict();
 export type CounterpartyUpdate = z.infer<typeof counterpartyUpdateSchema>;
+
+/** `POST /v1/office/employees`; the office always sends `role` and `operatorId`, `null` for none. */
+export const employeeCreateSchema = z
+  .object({ name: z.string(), role: z.string().nullable(), operatorId: z.uuid().nullable() })
+  .strict();
+export type EmployeeCreate = z.infer<typeof employeeCreateSchema>;
+
+/**
+ * `PUT /v1/office/employees/{id}`: the whole record; `operatorId: null`
+ * unlinks, and `archived: true` needs `operatorId: null`.
+ */
+export const employeeUpdateSchema = z
+  .object({
+    name: z.string(),
+    role: z.string().nullable(),
+    operatorId: z.uuid().nullable(),
+    archived: z.boolean(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type EmployeeUpdate = z.infer<typeof employeeUpdateSchema>;
 
 /** `POST /v1/office/lines`. */
 export const lineCreateSchema = z.object({ name: z.string() }).strict();

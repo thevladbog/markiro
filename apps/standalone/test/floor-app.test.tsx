@@ -618,7 +618,11 @@ describe("the work screen of plan 2a5", () => {
     render(floorOf(local, handlers));
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
-    expect(screen.getByText("Молоко 3,2% 0,9 л · GTIN 04600682000013")).toBeTruthy();
+    // The shift band of the cloud's design: the product as its heading, the band named by both.
+    expect(
+      screen.getByRole("region", { name: "Молоко 3,2% 0,9 л · GTIN 04600682000013" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
     expect(screen.getByText("Отсканируйте код маркировки.")).toBeTruthy();
   });
 });
@@ -692,7 +696,9 @@ describe("the work screen's product", () => {
     const handlers = handlersOf({ enter: async () => renamed });
     render(floorOf(await floorCopies(), handlers));
     await enterPlanned();
-    expect(await screen.findByText("Молоко из снимка · GTIN 04600682000013")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Молоко из снимка · GTIN 04600682000013" }),
+    ).toBeTruthy();
     expect(screen.queryByText(/Молоко 3,2% 0,9 л/)).toBeNull();
   });
 });

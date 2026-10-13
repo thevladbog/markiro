@@ -726,6 +726,7 @@ describe("«Перенос из облака»", () => {
       ["category_template_defaults", "умолчания шаблонов категорий"],
       ["products", "товары"],
       ["label_templates", "шаблоны"],
+      ["employees", "сотрудники"],
       ["operators", "операторы"],
       ["counterparties", "контрагенты"],
       ["something_new", "записи"],
