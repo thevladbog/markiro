@@ -810,6 +810,9 @@ describe("request builders produce their fixtures exactly", () => {
     expect(deviceShiftCreate({ ...plain, pallets })).toStrictEqual(
       fixture("device-shift-create-pallets.json"),
     );
+    // The station names no A4 sheet: the host gives a station's shift the sheet
+    // by the product, its category, the organization, as an office plan's.
+    expect(deviceShiftCreate({ ...plain, pallets })).not.toHaveProperty("palletSheetTemplateId");
     // Without pallets, none of their fields: the host's rule for a shift without them.
     const body = deviceShiftCreate(plain);
     for (const field of ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"]) {
