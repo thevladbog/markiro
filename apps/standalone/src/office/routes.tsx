@@ -2,6 +2,7 @@ import { Navigate, type RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
 import { CodeSearchPage } from "./codes/CodeSearchPage.js";
+import { ConflictsPage } from "./conflicts/ConflictsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
 import { EmployeesPage } from "./employees/EmployeesPage.js";
@@ -41,6 +42,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
+      { path: "conflicts", element: <ConflictsPage /> },
       { path: "codes", element: <CodeSearchPage /> },
       {
         path: "employees",

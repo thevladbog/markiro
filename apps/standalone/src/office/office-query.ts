@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 
 import type { HostApi } from "../host/api.js";
+import type { ConflictQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
 
 /** Query keys of office data, one per host resource. */
@@ -40,6 +41,16 @@ export const officeKeys = {
     "shifts",
     period?.from ?? null,
     period?.to ?? null,
+  ],
+  /** Every list of conflicts, whatever its filter: a review reads them all again (plan КНФ). */
+  conflicts: ["office", "conflicts"],
+  /** One page of conflicts as `GET /v1/office/conflicts` narrows it. */
+  conflictList: (query: ConflictQuery) => [
+    "office",
+    "conflicts",
+    query.shiftId ?? null,
+    query.reviewed ?? null,
+    query.page ?? 1,
   ],
   /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],
