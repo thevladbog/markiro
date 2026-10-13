@@ -1,0 +1,57 @@
+[
+  {
+    "file": "license-subscription.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-demo.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-upgrade.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-older.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-other-host.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-other-inn.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-tampered.jws",
+    "as": "license",
+    "result": "bad_signature"
+  },
+  {
+    "file": "license-unknown-kid.jws",
+    "as": "license",
+    "result": "unknown_key"
+  },
+  {
+    "file": "update-manifest.jws",
+    "as": "update",
+    "result": "ok"
+  },
+  {
+    "file": "update-manifest.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-subscription.jws",
+    "as": "update",
+    "result": "malformed"
+  }
+]

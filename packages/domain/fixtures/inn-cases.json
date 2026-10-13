@@ -1,0 +1,110 @@
+[
+  {
+    "input": "7707083893",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "7707654321",
+    "normalized": "7707654321"
+  },
+  {
+    "input": "1234567894",
+    "normalized": "1234567894"
+  },
+  {
+    "input": "500100732259",
+    "normalized": "500100732259"
+  },
+  {
+    "input": "526317984689",
+    "normalized": "526317984689"
+  },
+  {
+    "input": "0000000000",
+    "normalized": "0000000000"
+  },
+  {
+    "input": " 7707083893 ",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\t7707083893\r\n",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\u000b7707083893\f",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\u00a07707083893\u00a0",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\ufeff7707083893",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\u20287707083893\u3000",
+    "normalized": "7707083893"
+  },
+  {
+    "input": "\u2009500100732259\u202f",
+    "normalized": "500100732259"
+  },
+  {
+    "input": "\u00857707083893",
+    "normalized": null
+  },
+  {
+    "input": "\u200b7707083893",
+    "normalized": null
+  },
+  {
+    "input": "7707083894",
+    "normalized": null
+  },
+  {
+    "input": "500100732250",
+    "normalized": null
+  },
+  {
+    "input": "500100732209",
+    "normalized": null
+  },
+  {
+    "input": "770708389",
+    "normalized": null
+  },
+  {
+    "input": "77070838931",
+    "normalized": null
+  },
+  {
+    "input": "7707 083893",
+    "normalized": null
+  },
+  {
+    "input": "77070838A3",
+    "normalized": null
+  },
+  {
+    "input": "\uff17\uff17\uff10\uff17\uff10\uff18\uff13\uff18\uff19\uff13",
+    "normalized": null
+  },
+  {
+    "input": "-707083893",
+    "normalized": null
+  },
+  {
+    "input": "+7707083893",
+    "normalized": null
+  },
+  {
+    "input": "",
+    "normalized": null
+  },
+  {
+    "input": "   ",
+    "normalized": null
+  }
+]

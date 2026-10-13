@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { isValidInn } from "@markiro/domain";
 import { createHash } from "node:crypto";
 
 import {
@@ -518,20 +519,6 @@ function validateTnved(value: string | undefined): void {
 function withQuery(path: string, query: URLSearchParams): string {
   const serialized = query.toString();
   return serialized.length > 0 ? `${path}?${serialized}` : path;
-}
-
-function isValidInn(value: string): boolean {
-  if (!/^\d{10}(?:\d{2})?$/.test(value)) return false;
-  const digits = [...value].map(Number);
-  const checksum = (weights: number[]): number =>
-    (weights.reduce((sum, weight, index) => sum + weight * (digits[index] ?? 0), 0) % 11) % 10;
-  if (digits.length === 10) {
-    return checksum([2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[9];
-  }
-  return (
-    checksum([7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[10] &&
-    checksum([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[11]
-  );
 }
 
 function parseCategories(payload: unknown): NationalCatalogCategoriesResponse | null {

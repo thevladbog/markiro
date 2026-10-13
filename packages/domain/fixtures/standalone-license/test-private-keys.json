@@ -1,0 +1,23 @@
+{
+  "warning": "TEST ONLY. Private test keys of the standalone license and update fixtures, published on purpose. Never trust them in a release or sign anything real with them.",
+  "license": {
+    "kid": "test-lic-1",
+    "privateJwk": {
+      "kty": "EC",
+      "x": "DegembtUtJiGhBJmWFImAgZ4N-w612fxdKJTpPec3Ro",
+      "y": "pztBeL8Wd1k8Leh4msckUegyTrkrcnLIYw_n-M9wNbQ",
+      "crv": "P-256",
+      "d": "mX1vWDWDOgaaGdDy1mDwnbTo0xCMKltJ4HWzxIDpixo"
+    }
+  },
+  "update": {
+    "kid": "test-upd-1",
+    "privateJwk": {
+      "kty": "EC",
+      "x": "SXA7w8qFyF1esFAomcQwRMlCB0z-M-M7SQ0LUToA4zY",
+      "y": "g3rzgJyH3yD20oJZ96ON-P3qYlSM8iXAQuBCE-Hp9Cc",
+      "crv": "P-256",
+      "d": "9LkAkIq1YZ6mtOFFnXyQyESwPXg1lKk_mZtXKQwPHYM"
+    }
+  }
+}

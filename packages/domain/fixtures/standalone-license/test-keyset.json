@@ -1,0 +1,31 @@
+{
+  "license": {
+    "origin": "https://license.test.invalid",
+    "keys": [
+      {
+        "kid": "test-lic-1",
+        "jwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "DegembtUtJiGhBJmWFImAgZ4N-w612fxdKJTpPec3Ro",
+          "y": "pztBeL8Wd1k8Leh4msckUegyTrkrcnLIYw_n-M9wNbQ"
+        }
+      }
+    ],
+    "retiredKids": []
+  },
+  "update": {
+    "keys": [
+      {
+        "kid": "test-upd-1",
+        "jwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "SXA7w8qFyF1esFAomcQwRMlCB0z-M-M7SQ0LUToA4zY",
+          "y": "g3rzgJyH3yD20oJZ96ON-P3qYlSM8iXAQuBCE-Hp9Cc"
+        }
+      }
+    ],
+    "retiredKids": []
+  }
+}
