@@ -1070,6 +1070,8 @@ describe("the level the setup's own sound controls give the tones", () => {
     await settle();
     await enterPlanned();
     fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    // The sound is the setup's own tab (the cloud station's layout).
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Тише" }));
     fireEvent.click(screen.getByRole("button", { name: "Тише" }));
     await act(async () => {
@@ -1080,6 +1082,7 @@ describe("the level the setup's own sound controls give the tones", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.6]);
     fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -1097,6 +1100,7 @@ describe("the level the setup's own sound controls give the tones", () => {
     await settle();
     await enterPlanned();
     fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад без сохранения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Input, Select } from "@markiro/ui";
+import { Alert, Button, Input, Select, StatusChip, type TagPhase } from "@markiro/ui";
 
 import type {
   HardwareApi,
@@ -33,6 +33,7 @@ import {
   settleDraft,
   type PrinterDraft,
 } from "./printer-draft.js";
+import { SetupTabs, type SetupTabId } from "./SetupTabs.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "./test-label.js";
 import {
   canonicalPort,
@@ -51,6 +52,8 @@ import {
   type PrintPurpose,
   type WorkstationSettings,
 } from "./workstation-settings.js";
+import "../floor-fit.css";
+import "./workstation-setup.css";
 
 /** The steps of the tones' level: 0, 10, … 100. */
 const VOLUME_STEP = 10;
@@ -76,6 +79,11 @@ export interface WorkstationSetupProps {
   /** The settings were stored: the floor reads them again. */
   onSaved: (settings: WorkstationSettings) => void;
   onBack: () => void;
+  /**
+   * The tab the setup opens on (the cloud station's `initialTab`); «Принтеры» by default, as the
+   * floor opens the setup mostly for a printer.
+   */
+  initialTab?: SetupTabId;
 }
 
 /**
@@ -108,6 +116,15 @@ function listed(snapshot: ScannerSnapshot, config: ScannerConfig) {
 /** A button that waits for an answer: still on the keyboard, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 
+/** A toggle read as the cloud's touch checkbox: its box first, then its words (the button's style is inline). */
+const TOGGLE_STYLE: CSSProperties = { justifyContent: "flex-start", padding: "0 16px" };
+/** The label check's toggle sits in its own bordered row, as the cloud's checkbox does. */
+const ROW_TOGGLE_STYLE: CSSProperties = {
+  ...TOGGLE_STYLE,
+  border: "1px solid transparent",
+  background: "transparent",
+};
+
 /**
  * The workstation setup (stage 2a spec §5.7.8): the printers of this
  * computer — where each is, its language and resolution — which one prints
@@ -131,8 +148,10 @@ export function WorkstationSetup({
   playTone = (level) => playSignalTone("ok", undefined, level),
   onSaved,
   onBack,
+  initialTab = "printer",
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<SetupTabId>(initialTab);
   const [stored, setStored] = useState<WorkstationSettings | null>(null);
   const [draft, setDraft] = useState<WorkstationSettings | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -255,7 +274,8 @@ export function WorkstationSetup({
     onFocus: () => source.setManualTextEntryActive(true),
     onBlur: () => source.setManualTextEntryActive(false),
   };
-  useLayoutEffect(() => () => source.setManualTextEntryActive(false), [source, editing]);
+  // Another tab takes its fields away with the focus on one, too.
+  useLayoutEffect(() => () => source.setManualTextEntryActive(false), [source, editing, activeTab]);
 
   // The test sheet on the screen, shrunk to a sixth: drawn once its raster is there (nothing to undo).
   useEffect(() => {
@@ -327,24 +347,25 @@ export function WorkstationSetup({
 
   if (readFailed || draft === null || stored === null) {
     return (
-      <Card className="standalone-card" title={t("floor.setup.title")} titleAs="h2">
-        <div className="standalone-form">
-          <div aria-live="polite">
-            {readFailed ? (
-              <Alert tone="error" role="presentation">
-                {t("floor.setup.readFailed")}
-              </Alert>
-            ) : (
-              <p>{t("floor.setup.loading")}</p>
-            )}
-          </div>
-          <div className="standalone-form__actions">
-            <Button size="floor" variant="secondary" onClick={onBack}>
-              {t("floor.setup.back")}
-            </Button>
-          </div>
+      <main className="workstation-setup floor-fit" aria-labelledby="workstation-setup-title">
+        <header className="workstation-setup__header">
+          <h1 id="workstation-setup-title">{t("floor.setup.title")}</h1>
+        </header>
+        <div className="workstation-setup__loading" aria-live="polite">
+          {readFailed ? (
+            <Alert tone="error" role="presentation">
+              {t("floor.setup.readFailed")}
+            </Alert>
+          ) : (
+            <p className="workstation-setup__result">{t("floor.setup.loading")}</p>
+          )}
         </div>
-      </Card>
+        <footer className="workstation-setup__footer">
+          <Button size="floor" variant="secondary" onClick={onBack}>
+            {t("floor.setup.back")}
+          </Button>
+        </footer>
+      </main>
     );
   }
 
@@ -581,167 +602,192 @@ export function WorkstationSetup({
         : []),
       ...(usbPrinters ?? []).map((printer) => ({ value: printer.name, label: printer.name })),
     ];
+    const driver = form.kind === "usb" && form.mode === "windows_driver";
     return (
-      <div className="standalone-form workstation-setup__editor">
-        <h3 ref={sectionHeading} tabIndex={-1}>
-          {form.id === null
-            ? t("floor.setup.printers.editor.titleNew")
-            : t("floor.setup.printers.editor.titleEdit", { name: form.name })}
-        </h3>
-        <Input
-          {...manualEntry}
-          size="floor"
-          label={t("floor.setup.printers.editor.name")}
-          value={form.name}
-          onChange={(event) => set({ name: event.target.value })}
-        />
-        <Select
-          native
-          size="floor"
-          label={t("floor.setup.printers.editor.kind")}
-          value={form.kind}
-          options={(["tcp", "serial", "usb"] as const).map((kind) => ({
-            value: kind,
-            label: t(`floor.setup.printers.editor.kinds.${kind}`),
-          }))}
-          onValueChange={(kind) => {
-            set({ kind });
-            if (kind === "usb" && usbPrinters === null) refreshUsb();
-          }}
-        />
-        {form.kind === "tcp" && (
-          <>
+      <div className="setup-split setup-split--editor">
+        <section
+          className="setup-card setup-card--printer-config"
+          aria-labelledby="printer-editor-title"
+        >
+          <h2
+            id="printer-editor-title"
+            className="setup-card__title"
+            ref={sectionHeading}
+            tabIndex={-1}
+          >
+            {form.id === null
+              ? t("floor.setup.printers.editor.titleNew")
+              : t("floor.setup.printers.editor.titleEdit", { name: form.name })}
+          </h2>
+          <div className="setup-printer-identity">
             <Input
               {...manualEntry}
               size="floor"
-              label={t("floor.setup.printers.editor.host")}
-              value={form.host}
-              onChange={(event) => set({ host: event.target.value })}
+              label={t("floor.setup.printers.editor.name")}
+              value={form.name}
+              onChange={(event) => set({ name: event.target.value })}
             />
-            <Input
-              {...manualEntry}
-              size="floor"
-              inputMode="numeric"
-              label={t("floor.setup.printers.editor.port")}
-              value={form.tcpPort}
-              onChange={(event) => set({ tcpPort: event.target.value })}
-            />
-          </>
-        )}
-        {form.kind === "serial" && (
-          <>
-            <Input
-              {...manualEntry}
-              size="floor"
-              label={t("floor.setup.printers.editor.serialPort")}
-              value={form.serialPort}
-              onChange={(event) => set({ serialPort: event.target.value })}
-            />
-            <Input
-              {...manualEntry}
-              size="floor"
-              inputMode="numeric"
-              label={t("floor.setup.printers.editor.baud")}
-              value={form.baud}
-              onChange={(event) => set({ baud: event.target.value })}
-            />
-          </>
-        )}
-        {form.kind === "usb" && (
-          <>
             <Select
               native
               size="floor"
-              label={t("floor.setup.printers.editor.usbPrinter")}
-              value={form.usbPrinter}
-              options={usbOptions}
-              {...(usbFailed ? { error: t("floor.setup.printers.editor.usbFailed") } : {})}
-              {...(usbAsking
-                ? { hint: t("floor.setup.printers.editor.usbAsking") }
-                : usbPrinters !== null && usbPrinters.length === 0 && !usbFailed
-                  ? { hint: t("floor.setup.printers.editor.usbNone") }
-                  : {})}
-              onValueChange={(usbPrinter) => set({ usbPrinter })}
+              label={t("floor.setup.printers.editor.dpi")}
+              value={form.dpi}
+              disabled={form.paper === "a4"}
+              options={[
+                { value: "203", label: "203 dpi" },
+                { value: "300", label: "300 dpi" },
+              ]}
+              onValueChange={(dpi) => set({ dpi })}
             />
-            <Button size="floor" variant="secondary" onClick={refreshUsb}>
-              {t("floor.setup.printers.editor.usbRefresh")}
-            </Button>
-          </>
-        )}
-        {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
+          </div>
           <Select
             native
             size="floor"
-            label={t("floor.setup.printers.editor.mode")}
-            value={form.mode}
-            options={(["raw", "windows_driver"] as const).map((mode) => ({
-              value: mode,
-              label: t(`floor.setup.printers.editor.modes.${mode}`),
+            label={t("floor.setup.printers.editor.kind")}
+            value={form.kind}
+            options={(["tcp", "serial", "usb"] as const).map((kind) => ({
+              value: kind,
+              label: t(`floor.setup.printers.editor.kinds.${kind}`),
             }))}
-            onValueChange={(mode) => set({ mode })}
-          />
-        )}
-        {form.kind === "usb" && form.mode === "windows_driver" && (
-          <Select
-            native
-            size="floor"
-            label={t("floor.setup.printers.editor.paper")}
-            value={form.paper}
-            options={(["label", "a4"] as const).map((paper) => ({
-              value: paper,
-              label: t(
-                paper === "a4"
-                  ? "floor.setup.printers.editor.paperA4"
-                  : "floor.setup.printers.editor.paperLabel",
-              ),
-            }))}
-            hint={t("floor.setup.printers.editor.paperHint")}
-            onValueChange={(paper) => set({ paper })}
-          />
-        )}
-        {form.kind === "usb" && form.mode === "windows_driver" ? (
-          <p>{t("floor.setup.printers.editor.driverHint")}</p>
-        ) : (
-          <Select
-            native
-            size="floor"
-            label={t("floor.setup.printers.editor.language")}
-            value={form.language}
-            options={[
-              { value: "zpl", label: "ZPL (Zebra)" },
-              { value: "tspl", label: "TSPL (TSC)" },
-            ]}
-            onValueChange={(language) => set({ language })}
-          />
-        )}
-        <Select
-          native
-          size="floor"
-          label={t("floor.setup.printers.editor.dpi")}
-          value={form.dpi}
-          disabled={form.paper === "a4"}
-          options={[
-            { value: "203", label: "203 dpi" },
-            { value: "300", label: "300 dpi" },
-          ]}
-          onValueChange={(dpi) => set({ dpi })}
-        />
-        {editorError !== null && <Alert tone="error">{editorError}</Alert>}
-        <div className="standalone-form__actions">
-          <Button size="floor" onClick={applyEditor}>
-            {t("floor.setup.printers.editor.apply")}
-          </Button>
-          <Button
-            size="floor"
-            variant="secondary"
-            onClick={() => {
-              setEditor(null);
-              setEditorError(null);
+            onValueChange={(kind) => {
+              set({ kind });
+              if (kind === "usb" && usbPrinters === null) refreshUsb();
             }}
-          >
-            {t("floor.setup.printers.editor.cancel")}
-          </Button>
-        </div>
+          />
+          <div className="setup-printer-connection">
+            {form.kind === "tcp" && (
+              <>
+                <Input
+                  {...manualEntry}
+                  size="floor"
+                  label={t("floor.setup.printers.editor.host")}
+                  value={form.host}
+                  onChange={(event) => set({ host: event.target.value })}
+                />
+                <Input
+                  {...manualEntry}
+                  size="floor"
+                  mono
+                  inputMode="numeric"
+                  label={t("floor.setup.printers.editor.port")}
+                  value={form.tcpPort}
+                  onChange={(event) => set({ tcpPort: event.target.value })}
+                />
+              </>
+            )}
+            {form.kind === "serial" && (
+              <>
+                <Input
+                  {...manualEntry}
+                  size="floor"
+                  label={t("floor.setup.printers.editor.serialPort")}
+                  value={form.serialPort}
+                  onChange={(event) => set({ serialPort: event.target.value })}
+                />
+                <Input
+                  {...manualEntry}
+                  size="floor"
+                  mono
+                  inputMode="numeric"
+                  label={t("floor.setup.printers.editor.baud")}
+                  value={form.baud}
+                  onChange={(event) => set({ baud: event.target.value })}
+                />
+              </>
+            )}
+            {form.kind === "usb" && (
+              <>
+                <Select
+                  native
+                  size="floor"
+                  label={t("floor.setup.printers.editor.usbPrinter")}
+                  value={form.usbPrinter}
+                  options={usbOptions}
+                  {...(usbFailed ? { error: t("floor.setup.printers.editor.usbFailed") } : {})}
+                  {...(usbAsking
+                    ? { hint: t("floor.setup.printers.editor.usbAsking") }
+                    : usbPrinters !== null && usbPrinters.length === 0 && !usbFailed
+                      ? { hint: t("floor.setup.printers.editor.usbNone") }
+                      : {})}
+                  onValueChange={(usbPrinter) => set({ usbPrinter })}
+                />
+                <Button size="floor" variant="secondary" onClick={refreshUsb}>
+                  {t("floor.setup.printers.editor.usbRefresh")}
+                </Button>
+              </>
+            )}
+          </div>
+        </section>
+        <section
+          className="setup-card setup-card--printer-output"
+          aria-labelledby="printer-output-title"
+        >
+          <h2 id="printer-output-title" className="setup-card__title">
+            {t("floor.setup.printers.editor.output")}
+          </h2>
+          {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
+            <Select
+              native
+              size="floor"
+              label={t("floor.setup.printers.editor.mode")}
+              value={form.mode}
+              options={(["raw", "windows_driver"] as const).map((mode) => ({
+                value: mode,
+                label: t(`floor.setup.printers.editor.modes.${mode}`),
+              }))}
+              onValueChange={(mode) => set({ mode })}
+            />
+          )}
+          {driver && (
+            <Select
+              native
+              size="floor"
+              label={t("floor.setup.printers.editor.paper")}
+              value={form.paper}
+              options={(["label", "a4"] as const).map((paper) => ({
+                value: paper,
+                label: t(
+                  paper === "a4"
+                    ? "floor.setup.printers.editor.paperA4"
+                    : "floor.setup.printers.editor.paperLabel",
+                ),
+              }))}
+              hint={t("floor.setup.printers.editor.paperHint")}
+              onValueChange={(paper) => set({ paper })}
+            />
+          )}
+          {driver ? (
+            <p className="setup-card__hint">{t("floor.setup.printers.editor.driverHint")}</p>
+          ) : (
+            <Select
+              native
+              size="floor"
+              label={t("floor.setup.printers.editor.language")}
+              value={form.language}
+              options={[
+                { value: "zpl", label: "ZPL (Zebra)" },
+                { value: "tspl", label: "TSPL (TSC)" },
+              ]}
+              onValueChange={(language) => set({ language })}
+            />
+          )}
+          {editorError !== null && <Alert tone="error">{editorError}</Alert>}
+          <div className="setup-card__actions">
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => {
+                setEditor(null);
+                setEditorError(null);
+              }}
+            >
+              {t("floor.setup.printers.editor.cancel")}
+            </Button>
+            <Button size="floor" onClick={applyEditor}>
+              {t("floor.setup.printers.editor.apply")}
+            </Button>
+          </div>
+        </section>
       </div>
     );
   };
@@ -771,28 +817,30 @@ export function WorkstationSetup({
     }
   };
 
-  const connection = (configured: ScannerConfig): string => {
+  /** A scanner's connection as the shell reports it: its words, and the phase of its tag. */
+  const connection = (configured: ScannerConfig): { text: string; phase: TagPhase } => {
     const saved = stored.scanners.some(
       (candidate) => candidate.port === configured.port && candidate.baud === configured.baud,
     );
-    if (!saved) return t("floor.setup.scanners.notApplied");
-    if (watchFailed) return t("floor.setup.scanners.watchFailed");
-    if (snapshot === null) return t("floor.setup.scanners.checking");
+    if (!saved) return { text: t("floor.setup.scanners.notApplied"), phase: "planned" };
+    if (watchFailed) return { text: t("floor.setup.scanners.watchFailed"), phase: "attention" };
+    if (snapshot === null) return { text: t("floor.setup.scanners.checking"), phase: "running" };
     const known = snapshot.scanners.find(
       (candidate) => candidate.port === configured.port && candidate.baud === configured.baud,
     );
     if (known === undefined) {
-      return t(
-        unapplied || unopened
-          ? "floor.setup.scanners.notOpenedRetry"
-          : "floor.setup.scanners.notOpened",
-      );
+      return {
+        text: t(
+          unapplied || unopened
+            ? "floor.setup.scanners.notOpenedRetry"
+            : "floor.setup.scanners.notOpened",
+        ),
+        phase: "attention",
+      };
     }
-    return t(
-      known.status === "connected"
-        ? "floor.setup.scanners.connected"
-        : "floor.setup.scanners.disconnected",
-    );
+    return known.status === "connected"
+      ? { text: t("floor.setup.scanners.connected"), phase: "active" }
+      : { text: t("floor.setup.scanners.disconnected"), phase: "failed" };
   };
 
   const silent = soundLevel(draft.sound) === 0;
@@ -808,280 +856,386 @@ export function WorkstationSetup({
       .map((printer) => ({ value: printer.id, label: printer.name })),
   ];
 
-  return (
-    <Card className="standalone-card workstation-setup" title={t("floor.setup.title")} titleAs="h2">
-      <div className="standalone-form">
-        {editor === null && (
-          <h3 ref={sectionHeading} tabIndex={-1}>
-            {t("floor.setup.printers.title")}
-          </h3>
-        )}
-        {editor !== null ? (
-          editorForm(editor)
-        ) : (
-          <>
-            {draft.printers.length === 0 ? (
-              <p>{t("floor.setup.printers.empty")}</p>
-            ) : (
-              <ul className="workstation-setup__list">
-                {draft.printers.map((printer) => (
-                  <li key={printer.id}>
-                    <strong>{printer.name}</strong>
-                    <span>{summary(printer)}</span>
-                    <div className="standalone-form__actions">
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        aria-label={t("floor.setup.printers.editFor", { name: printer.name })}
-                        onClick={() => setEditor(draftOf(printer))}
-                      >
-                        {t("floor.setup.printers.edit")}
-                      </Button>
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        aria-label={t("floor.setup.printers.testFor", { name: printer.name })}
-                        {...(test?.kind === "sending"
-                          ? { "aria-disabled": true, style: WAITING_STYLE }
-                          : {})}
-                        onClick={() => void testPrint(printer)}
-                      >
-                        {t("floor.setup.printers.test")}
-                      </Button>
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        aria-label={t("floor.setup.printers.removeFor", { name: printer.name })}
-                        onClick={() => remove(printer.id)}
-                      >
-                        {t("floor.setup.printers.remove")}
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {a4Preview !== null && (
-              <canvas
-                ref={a4Canvas}
-                role="img"
-                aria-label={t("floor.setup.printers.a4Test.preview")}
-                className="sheet-preview"
-              />
-            )}
-            {/* A region that is always there, so a reader hears what comes into it; its alert is no alert of its own. */}
-            <div className="workstation-setup__live" aria-live="polite">
-              {test !== null && (
-                <Alert tone={testText(test).tone} role="presentation">
-                  {testText(test).text}
-                </Alert>
-              )}
+  const printersPanel =
+    editor !== null ? (
+      editorForm(editor)
+    ) : (
+      <div className="setup-printer-routing">
+        <section className="setup-printer-list" aria-labelledby="setup-printers-title">
+          <div className="setup-printer-list__header">
+            <div className="setup-printer-list__heading">
+              <h2
+                id="setup-printers-title"
+                className="setup-card__title"
+                ref={sectionHeading}
+                tabIndex={-1}
+              >
+                {t("floor.setup.printers.title")}
+              </h2>
+              <span className="setup-printer-list__count" aria-hidden="true">
+                {draft.printers.length}
+              </span>
             </div>
             <Button size="floor" variant="secondary" onClick={() => setEditor(NEW_PRINTER)}>
               {t("floor.setup.printers.add")}
             </Button>
-            <h3>{t("floor.setup.printers.purposes.title")}</h3>
-            {PRINT_PURPOSES.map((purpose) => (
-              <Select
-                key={purpose}
-                native
-                size="floor"
-                label={t(`floor.setup.printers.purposes.${purpose}`)}
-                value={draft.assignments[purpose] ?? ""}
-                options={purposeOptions(purpose)}
-                {...(purpose === "box" ? {} : { hint: t("floor.setup.printers.purposes.later") })}
-                onValueChange={(id) => assign(purpose, id)}
-              />
-            ))}
-          </>
-        )}
-        {editor === null && (
-          <>
-            <h3 ref={scannersHeading} tabIndex={-1}>
-              {t("floor.setup.scanners.title")}
-            </h3>
-            {draft.scanners.length === 0 ? (
-              <p>{t("floor.setup.scanners.empty")}</p>
+          </div>
+          <div className="setup-printer-list__scroll">
+            {draft.printers.length === 0 ? (
+              <p className="setup-printer-list__empty">{t("floor.setup.printers.empty")}</p>
             ) : (
-              <ul className="workstation-setup__list">
-                {draft.scanners.map((configured) => (
-                  <li key={configured.port}>
+              <ul className="setup-printer-list__rows">
+                {draft.printers.map((printer) => {
+                  const purposes = PRINT_PURPOSES.filter(
+                    (purpose) => draft.assignments[purpose] === printer.id,
+                  );
+                  return (
+                    <li className="setup-printer-row" key={printer.id}>
+                      <div className="setup-printer-row__detail">
+                        <h3>{printer.name}</h3>
+                        <p className="setup-printer-row__connection">{summary(printer)}</p>
+                        <p className="setup-printer-row__purposes">
+                          {purposes.length === 0
+                            ? t("floor.setup.printers.purposes.none")
+                            : purposes
+                                .map((purpose) => t(`floor.setup.printers.purposes.${purpose}`))
+                                .join(" · ")}
+                        </p>
+                      </div>
+                      <div className="setup-printer-row__actions">
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          aria-label={t("floor.setup.printers.editFor", { name: printer.name })}
+                          onClick={() => setEditor(draftOf(printer))}
+                        >
+                          {t("floor.setup.printers.edit")}
+                        </Button>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          aria-label={t("floor.setup.printers.testFor", { name: printer.name })}
+                          {...(test?.kind === "sending"
+                            ? { "aria-disabled": true, style: WAITING_STYLE }
+                            : {})}
+                          onClick={() => void testPrint(printer)}
+                        >
+                          {t("floor.setup.printers.test")}
+                        </Button>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          aria-label={t("floor.setup.printers.removeFor", { name: printer.name })}
+                          onClick={() => remove(printer.id)}
+                        >
+                          {t("floor.setup.printers.remove")}
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {a4Preview !== null && (
+              <div className="setup-a4-preview">
+                <canvas
+                  ref={a4Canvas}
+                  role="img"
+                  aria-label={t("floor.setup.printers.a4Test.preview")}
+                  className="sheet-preview"
+                />
+              </div>
+            )}
+          </div>
+        </section>
+        <section
+          className="setup-card setup-printer-assignments"
+          aria-labelledby="setup-purposes-title"
+        >
+          <h2 id="setup-purposes-title" className="setup-card__title">
+            {t("floor.setup.printers.purposes.title")}
+          </h2>
+          {PRINT_PURPOSES.map((purpose) => (
+            <Select
+              key={purpose}
+              native
+              size="floor"
+              label={t(`floor.setup.printers.purposes.${purpose}`)}
+              value={draft.assignments[purpose] ?? ""}
+              options={purposeOptions(purpose)}
+              {...(purpose === "box" ? {} : { hint: t("floor.setup.printers.purposes.later") })}
+              onValueChange={(id) => assign(purpose, id)}
+            />
+          ))}
+          <p className="setup-card__hint">{t("floor.setup.check.body")}</p>
+        </section>
+      </div>
+    );
+
+  const scannerPanel = (
+    <div className="setup-split setup-split--scanners">
+      <section
+        className="setup-card setup-card--scanner-config"
+        aria-labelledby="setup-scanner-add"
+      >
+        <h2 id="setup-scanner-add" className="setup-card__title">
+          {t("floor.setup.scanners.connection")}
+        </h2>
+        <Input
+          {...manualEntry}
+          size="floor"
+          label={t("floor.setup.scanners.port")}
+          value={scanner.port}
+          onChange={(event) => {
+            setScanner({ ...scanner, port: event.target.value });
+            setScannerError(null);
+            setStatus((now) => (now?.kind === "scanner_unadded" ? null : now));
+          }}
+        />
+        <Input
+          {...manualEntry}
+          size="floor"
+          mono
+          inputMode="numeric"
+          label={t("floor.setup.scanners.baud")}
+          value={scanner.baud}
+          onChange={(event) => {
+            setScanner({ ...scanner, baud: event.target.value });
+            setScannerError(null);
+          }}
+        />
+        <div className="workstation-setup__live" aria-live="polite">
+          {scannerError !== null && (
+            <Alert tone="error" role="presentation">
+              {scannerError}
+            </Alert>
+          )}
+        </div>
+        <div className="setup-card__actions setup-card__actions--fill">
+          <Button size="floor" variant="secondary" onClick={refreshSerial}>
+            {t("floor.setup.scanners.listPorts")}
+          </Button>
+          <Button size="floor" onClick={addScanner}>
+            {t("floor.setup.scanners.add")}
+          </Button>
+        </div>
+        <div className="workstation-setup__live" aria-live="polite">
+          {serialAsking ? (
+            <p className="setup-card__hint">{t("floor.setup.scanners.portsAsking")}</p>
+          ) : (
+            serialPorts !== null && (
+              <p className="setup-card__hint">
+                {serialFailed
+                  ? t("floor.setup.scanners.portsFailed")
+                  : serialPorts.length === 0
+                    ? t("floor.setup.scanners.portsNone")
+                    : t("floor.setup.scanners.ports", { ports: serialPorts.join(", ") })}
+              </p>
+            )
+          )}
+        </div>
+      </section>
+      <section className="setup-card setup-card--scanners" aria-labelledby="setup-scanners-title">
+        <h2
+          id="setup-scanners-title"
+          className="setup-card__title"
+          ref={scannersHeading}
+          tabIndex={-1}
+        >
+          {t("floor.setup.scanners.title")}
+        </h2>
+        {draft.scanners.length === 0 ? (
+          <p className="setup-card__waiting">{t("floor.setup.scanners.empty")}</p>
+        ) : (
+          <ul className="setup-scanner-list">
+            {draft.scanners.map((configured) => {
+              const state = connection(configured);
+              return (
+                <li className="setup-scanner-row" key={configured.port}>
+                  <div className="setup-scanner-row__detail">
                     <strong>
                       {t("floor.setup.scanners.summary", {
                         port: configured.port,
                         baud: configured.baud,
                       })}
                     </strong>
-                    <span aria-live="polite">{connection(configured)}</span>
-                    <div className="standalone-form__actions">
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
-                        onClick={() => {
-                          change({
-                            ...draft,
-                            scanners: draft.scanners.filter((s) => s.port !== configured.port),
-                          });
-                          // The button that was here is gone: the keyboard stays in the section.
-                          scannersHeading.current?.focus();
-                        }}
-                      >
-                        {t("floor.setup.scanners.remove")}
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Input
-              {...manualEntry}
-              size="floor"
-              label={t("floor.setup.scanners.port")}
-              value={scanner.port}
-              onChange={(event) => {
-                setScanner({ ...scanner, port: event.target.value });
-                setScannerError(null);
-                setStatus((now) => (now?.kind === "scanner_unadded" ? null : now));
-              }}
-            />
-            <Input
-              {...manualEntry}
-              size="floor"
-              inputMode="numeric"
-              label={t("floor.setup.scanners.baud")}
-              value={scanner.baud}
-              onChange={(event) => {
-                setScanner({ ...scanner, baud: event.target.value });
-                setScannerError(null);
-              }}
-            />
-            <div className="workstation-setup__live" aria-live="polite">
-              {scannerError !== null && (
-                <Alert tone="error" role="presentation">
-                  {scannerError}
-                </Alert>
-              )}
-            </div>
-            <div className="standalone-form__actions">
-              <Button size="floor" variant="secondary" onClick={addScanner}>
-                {t("floor.setup.scanners.add")}
-              </Button>
-              <Button size="floor" variant="secondary" onClick={refreshSerial}>
-                {t("floor.setup.scanners.listPorts")}
-              </Button>
-            </div>
-            <div className="workstation-setup__live" aria-live="polite">
-              {serialAsking ? (
-                <p>{t("floor.setup.scanners.portsAsking")}</p>
-              ) : (
-                serialPorts !== null && (
-                  <p>
-                    {serialFailed
-                      ? t("floor.setup.scanners.portsFailed")
-                      : serialPorts.length === 0
-                        ? t("floor.setup.scanners.portsNone")
-                        : t("floor.setup.scanners.ports", { ports: serialPorts.join(", ") })}
-                  </p>
-                )
-              )}
-            </div>
-            <p>{t("floor.setup.scanners.keyboard")}</p>
+                    <span aria-live="polite">
+                      <StatusChip size="floor" wrap phase={state.phase} label={state.text} />
+                    </span>
+                  </div>
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
+                    onClick={() => {
+                      change({
+                        ...draft,
+                        scanners: draft.scanners.filter((s) => s.port !== configured.port),
+                      });
+                      // The button that was here is gone: the keyboard stays in the section.
+                      scannersHeading.current?.focus();
+                    }}
+                  >
+                    {t("floor.setup.scanners.remove")}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="setup-card__hint">{t("floor.setup.scanners.keyboard")}</p>
+      </section>
+    </div>
+  );
 
-            <h3>{t("floor.setup.sound.title")}</h3>
-            <p aria-live="polite">
-              {silent
-                ? t("floor.setup.sound.mutedNow")
-                : t("floor.setup.sound.level", { volume: draft.sound.volume })}
-            </p>
-            <div className="standalone-form__actions">
-              {/* At a limit a button stays on the keyboard and does nothing: one that vanished would take the focus. */}
-              <Button
-                size="floor"
-                variant="secondary"
-                {...(draft.sound.muted || draft.sound.volume <= 0
-                  ? { "aria-disabled": true, style: WAITING_STYLE }
-                  : {})}
-                onClick={() => {
-                  if (!draft.sound.muted && draft.sound.volume > 0) {
-                    setVolume(draft.sound.volume - VOLUME_STEP);
-                  }
-                }}
-              >
-                {t("floor.setup.sound.quieter")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                {...(draft.sound.muted || draft.sound.volume >= 100
-                  ? { "aria-disabled": true, style: WAITING_STYLE }
-                  : {})}
-                onClick={() => {
-                  if (!draft.sound.muted && draft.sound.volume < 100) {
-                    setVolume(draft.sound.volume + VOLUME_STEP);
-                  }
-                }}
-              >
-                {t("floor.setup.sound.louder")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                aria-pressed={draft.sound.muted}
-                onClick={() =>
-                  change({ ...draft, sound: { ...draft.sound, muted: !draft.sound.muted } })
-                }
-              >
-                {t("floor.setup.sound.mute")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                onClick={() => playTone(soundLevel(draft.sound))}
-              >
-                {t("floor.setup.sound.try")}
-              </Button>
-            </div>
+  const soundPanel = (
+    <div className="setup-panel setup-panel--sound setup-card">
+      <div className="setup-sound__controls">
+        <Button
+          size="floor"
+          variant="secondary"
+          className="setup-toggle"
+          style={TOGGLE_STYLE}
+          aria-pressed={draft.sound.muted}
+          onClick={() => change({ ...draft, sound: { ...draft.sound, muted: !draft.sound.muted } })}
+        >
+          <span className="setup-toggle__box" aria-hidden="true">
+            {draft.sound.muted ? "✓" : ""}
+          </span>
+          {t("floor.setup.sound.mute")}
+        </Button>
+        <div className="setup-sound__level">
+          {/* At a limit a button stays on the keyboard and does nothing: one that vanished would take the focus. */}
+          <Button
+            size="floor"
+            variant="secondary"
+            {...(draft.sound.muted || draft.sound.volume <= 0
+              ? { "aria-disabled": true, style: WAITING_STYLE }
+              : {})}
+            onClick={() => {
+              if (!draft.sound.muted && draft.sound.volume > 0) {
+                setVolume(draft.sound.volume - VOLUME_STEP);
+              }
+            }}
+          >
+            {t("floor.setup.sound.quieter")}
+          </Button>
+          <p className="setup-sound__value" aria-live="polite">
+            {silent
+              ? t("floor.setup.sound.mutedNow")
+              : t("floor.setup.sound.level", { volume: draft.sound.volume })}
+          </p>
+          <Button
+            size="floor"
+            variant="secondary"
+            {...(draft.sound.muted || draft.sound.volume >= 100
+              ? { "aria-disabled": true, style: WAITING_STYLE }
+              : {})}
+            onClick={() => {
+              if (!draft.sound.muted && draft.sound.volume < 100) {
+                setVolume(draft.sound.volume + VOLUME_STEP);
+              }
+            }}
+          >
+            {t("floor.setup.sound.louder")}
+          </Button>
+        </div>
+        <Button size="floor" variant="secondary" onClick={() => playTone(soundLevel(draft.sound))}>
+          {t("floor.setup.sound.try")}
+        </Button>
+      </div>
+    </div>
+  );
 
-            <h3>{t("floor.setup.check.title")}</h3>
-            <p>{t("floor.setup.check.body")}</p>
-            <p>{t("floor.setup.check.later")}</p>
+  const tabs = [
+    { id: "scanner" as const, label: t("floor.setup.tabs.scanner"), panel: scannerPanel },
+    { id: "printer" as const, label: t("floor.setup.tabs.printer"), panel: printersPanel },
+    { id: "sound" as const, label: t("floor.setup.tabs.sound"), panel: soundPanel },
+  ];
+  const routing = activeTab === "printer" && editor === null;
+  const showTest = routing && test !== null;
+  const hint =
+    activeTab === "printer"
+      ? editor !== null
+        ? t("floor.setup.hint.editor")
+        : t("floor.setup.check.later")
+      : activeTab === "scanner"
+        ? t("floor.setup.hint.scanner")
+        : t("floor.setup.hint.sound");
+
+  return (
+    <main className="workstation-setup floor-fit" aria-labelledby="workstation-setup-title">
+      <header className="workstation-setup__header">
+        <h1 id="workstation-setup-title">{t("floor.setup.title")}</h1>
+      </header>
+
+      <SetupTabs
+        tabs={tabs}
+        label={t("floor.setup.tabs.label")}
+        activeTab={activeTab}
+        locked={editor !== null}
+        onTabChange={setActiveTab}
+      />
+
+      <div
+        className={`workstation-setup__feedback${routing ? " workstation-setup__feedback--printers" : ""}`}
+      >
+        {routing && (
+          <div className="setup-printer-verification">
             <Button
               size="floor"
               variant="secondary"
+              className="setup-toggle"
+              style={ROW_TOGGLE_STYLE}
               aria-pressed={draft.verifyPrintedLabel}
               onClick={() => change({ ...draft, verifyPrintedLabel: !draft.verifyPrintedLabel })}
             >
+              <span className="setup-toggle__box" aria-hidden="true">
+                {draft.verifyPrintedLabel ? "✓" : ""}
+              </span>
               {t("floor.setup.check.toggle")}
             </Button>
-            <p aria-live="polite">
+            <p className="setup-printer-verification__state" aria-live="polite">
               {t(draft.verifyPrintedLabel ? "floor.setup.check.on" : "floor.setup.check.off")}
             </p>
-          </>
+          </div>
         )}
-        <div className="workstation-setup__live" aria-live="polite">
-          {status !== null && (
-            <Alert tone={status.kind === "saved" ? "ok" : "error"} role="presentation">
-              {t(`floor.setup.status.${status.kind}`)}
-            </Alert>
-          )}
-        </div>
-        <div className="standalone-form__actions">
-          {/* Kept on the keyboard while it saves or has nothing to save: a button that vanishes from the tab order takes the focus with it. */}
-          <Button
-            size="floor"
-            disabled={editor !== null}
-            {...(!canSave || saving ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
-            onClick={() => void save()}
-          >
-            {t("floor.setup.save")}
-          </Button>
-          {/* Never held by a save or a test print: leaving is always open. */}
-          <Button size="floor" variant="secondary" onClick={onBack}>
-            {t(dirty ? "floor.setup.backUnsaved" : "floor.setup.back")}
-          </Button>
+        <div className="workstation-setup__result">
+          {/* Regions that are always there, so a reader hears what comes into them; their alerts are no alerts of their own. */}
+          <div className="workstation-setup__live" aria-live="polite">
+            {showTest && (
+              <Alert tone={testText(test).tone} role="presentation">
+                {testText(test).text}
+              </Alert>
+            )}
+          </div>
+          <div className="workstation-setup__live" aria-live="polite">
+            {status !== null && (
+              <Alert tone={status.kind === "saved" ? "ok" : "error"} role="presentation">
+                {t(`floor.setup.status.${status.kind}`)}
+              </Alert>
+            )}
+          </div>
+          {!showTest && status === null && <p className="workstation-setup__hint">{hint}</p>}
         </div>
       </div>
-    </Card>
+
+      <footer className="workstation-setup__footer">
+        {/* Never held by a save or a test print: leaving is always open. */}
+        <Button size="floor" variant="secondary" onClick={onBack}>
+          {t(dirty ? "floor.setup.backUnsaved" : "floor.setup.back")}
+        </Button>
+        <span className="workstation-setup__footer-spacer" />
+        {/* Kept on the keyboard while it saves or has nothing to save: a button that vanishes from the tab order takes the focus with it. */}
+        <Button
+          size="floor"
+          disabled={editor !== null}
+          {...(!canSave || saving ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
+          onClick={() => void save()}
+        >
+          {t("floor.setup.save")}
+        </Button>
+      </footer>
+    </main>
   );
 }
