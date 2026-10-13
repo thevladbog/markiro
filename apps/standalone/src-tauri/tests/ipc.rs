@@ -2098,18 +2098,34 @@ fn put_package(dir: &std::path::Path, version: &str) -> String {
     dir.join(name).to_string_lossy().into_owned()
 }
 
-/// A launcher that records what it was asked to start and answers `answer`.
+/// A launcher that records what it was asked to start, and whether the mark
+/// was already written when it was (spec §10.11.4: before the start), and
+/// answers `answer`.
 struct RecordingLauncher {
     calls: std::sync::Mutex<Vec<(std::path::PathBuf, String)>>,
+    marked: std::sync::Mutex<Vec<bool>>,
+    mark: std::sync::Mutex<Option<std::path::PathBuf>>,
     answer: Result<(), LaunchError>,
 }
 
 impl Launcher for RecordingLauncher {
-    fn launch(&self, installer: &std::path::Path, arguments: &str) -> Result<(), LaunchError> {
+    fn launch(
+        &self,
+        installer: &std::path::Path,
+        arguments: &str,
+        _owner: usize,
+    ) -> Result<(), LaunchError> {
         self.calls
             .lock()
             .unwrap()
             .push((installer.to_path_buf(), arguments.to_owned()));
+        let written = self
+            .mark
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|path| path.exists());
+        self.marked.lock().unwrap().push(written);
         self.answer
     }
 }
@@ -2140,6 +2156,8 @@ fn update_app(
     std::fs::create_dir_all(&updates).unwrap();
     let launcher = std::sync::Arc::new(RecordingLauncher {
         calls: std::sync::Mutex::new(Vec::new()),
+        marked: std::sync::Mutex::new(Vec::new()),
+        mark: std::sync::Mutex::new(Some(data.path().join("update-pending.json"))),
         answer,
     });
     let exits = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2255,6 +2273,15 @@ fn update_commands_answer_through_the_ipc_shapes() {
         vec![(installer, "/P /UPDATE /R".to_owned())]
     );
     assert_eq!(*update.exits.lock().unwrap(), vec![0]);
+    assert_eq!(
+        *update.launcher.marked.lock().unwrap(),
+        vec![true],
+        "the mark is written before the start"
+    );
+    assert!(
+        update.app.state::<UpdateState>().holds_started_installer(),
+        "the installer stays held until the app has left"
+    );
     assert!(
         !update.app.state::<LockdownState>().is_locked(),
         "the close guard lets the exit through"
@@ -2293,6 +2320,76 @@ fn a_refused_administrator_prompt_keeps_the_app_and_drops_the_mark() {
         cfg!(not(windows))
     );
     assert!(!update.data.path().join("update-pending.json").exists());
+}
+
+/// A confirmed reinstall starts; a mark that cannot be written starts nothing.
+#[test]
+fn a_confirmed_reinstall_starts_and_a_mark_that_cannot_be_written_starts_nothing() {
+    let update = update_app("0.2.0", Ok(()), |_| {});
+    let path = put_package(&update.updates, "0.2.0");
+    invoke(&update.webview, "update_scan", json!({})).unwrap();
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": [] })
+        ),
+        Err(json!("confirmation_required"))
+    );
+    assert!(update.launcher.calls.lock().unwrap().is_empty());
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": ["reinstall"] })
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(update.launcher.calls.lock().unwrap().len(), 1);
+    assert_eq!(*update.exits.lock().unwrap(), vec![0]);
+
+    // The data folder is a file: the mark cannot be written.
+    let blocked = update_app("0.1.0", Ok(()), |data| {
+        std::fs::remove_dir(data).unwrap();
+        std::fs::write(data, b"not a folder").unwrap();
+    });
+    let path = put_package(&blocked.updates, "0.2.0");
+    invoke(&blocked.webview, "update_scan", json!({})).unwrap();
+    assert_eq!(
+        invoke(
+            &blocked.webview,
+            "update_install",
+            json!({ "path": path, "confirm": [] })
+        ),
+        Err(json!("storage"))
+    );
+    assert!(blocked.launcher.calls.lock().unwrap().is_empty());
+    assert!(blocked.exits.lock().unwrap().is_empty());
+}
+
+/// A refused start after an attempt that did not finish keeps that
+/// attempt's mark: the next start still says it did not finish.
+#[test]
+fn a_refused_retry_keeps_the_mark_of_the_attempt_before() {
+    let earlier = r#"{"from":"0.1.0","to":"0.2.0","startedAtMs":1760000000000}"#;
+    let update = update_app("0.1.0", Err(LaunchError::Cancelled), |dir| {
+        std::fs::write(dir.join("update-pending.json"), earlier).unwrap();
+    });
+    let path = put_package(&update.updates, "0.2.0");
+    invoke(&update.webview, "update_scan", json!({})).unwrap();
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": [] })
+        ),
+        Err(json!("uac_cancelled"))
+    );
+    let kept: Value = serde_json::from_slice(
+        &std::fs::read(update.data.path().join("update-pending.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(kept["startedAtMs"], json!(1_760_000_000_000_u64));
 }
 
 /// The mark of an update that did not finish is reported until it is

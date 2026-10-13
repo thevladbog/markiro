@@ -37,9 +37,12 @@ impl LaunchError {
 }
 
 /// Starts `installer` with `arguments` and returns once Windows started it
-/// (or refused); never waits for it to finish.
+/// (or refused); never waits for it to finish. `owner` is the app's window
+/// (its `HWND` as a number, 0 for none): the administrator prompt comes in
+/// front of it, which matters in kiosk mode, where the window is above all
+/// others and has no taskbar button a prompt without an owner could flash in.
 pub trait Launcher: Send + Sync {
-    fn launch(&self, installer: &Path, arguments: &str) -> Result<(), LaunchError>;
+    fn launch(&self, installer: &Path, arguments: &str, owner: usize) -> Result<(), LaunchError>;
 }
 
 /// The real launch: `ShellExecuteExW` with `runas` on Windows.
@@ -47,7 +50,7 @@ pub struct SystemLauncher;
 
 impl Launcher for SystemLauncher {
     #[cfg(windows)]
-    fn launch(&self, installer: &Path, arguments: &str) -> Result<(), LaunchError> {
+    fn launch(&self, installer: &Path, arguments: &str, owner: usize) -> Result<(), LaunchError> {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
 
@@ -70,6 +73,8 @@ impl Launcher for SystemLauncher {
             // installer), the call finished before it returns, and no error
             // dialog of the shell's own: the office shows the refusal.
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+            // The app's window owns the prompt (null when there is none).
+            hwnd: owner as windows_sys::Win32::Foundation::HWND,
             lpVerb: verb.as_ptr(),
             lpFile: file.as_ptr(),
             lpParameters: parameters.as_ptr(),
@@ -95,7 +100,12 @@ impl Launcher for SystemLauncher {
     }
 
     #[cfg(not(windows))]
-    fn launch(&self, _installer: &Path, _arguments: &str) -> Result<(), LaunchError> {
+    fn launch(
+        &self,
+        _installer: &Path,
+        _arguments: &str,
+        _owner: usize,
+    ) -> Result<(), LaunchError> {
         Err(LaunchError::Unsupported)
     }
 }
@@ -124,7 +134,7 @@ mod tests {
     #[test]
     fn nothing_is_started_outside_windows() {
         assert_eq!(
-            SystemLauncher.launch(Path::new("setup.exe"), INSTALLER_ARGUMENTS),
+            SystemLauncher.launch(Path::new("setup.exe"), INSTALLER_ARGUMENTS, 0),
             Err(LaunchError::Unsupported)
         );
     }

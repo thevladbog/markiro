@@ -45,7 +45,7 @@ fn put_package(dir: &Path, version: &str) -> String {
 struct NoLauncher;
 
 impl Launcher for NoLauncher {
-    fn launch(&self, _: &Path, _: &str) -> Result<(), LaunchError> {
+    fn launch(&self, _: &Path, _: &str, _: usize) -> Result<(), LaunchError> {
         panic!("these tests start nothing")
     }
 }
@@ -96,7 +96,7 @@ fn on_the_hosts_pc_an_older_package_is_refused_and_the_same_one_asks_first() {
         json!({ "code": "older", "installed": "0.3.0" })
     );
     assert_eq!(
-        block_on(older.state.install(&device, &lockdown, &path, &[])).err(),
+        block_on(older.state.install(&device, &lockdown, &path, &[], 0)).err(),
         Some(UpdateError::UpdateRefused)
     );
 
@@ -106,7 +106,7 @@ fn on_the_hosts_pc_an_older_package_is_refused_and_the_same_one_asks_first() {
     let report = block_on(same.state.verify(&device, &path)).unwrap();
     assert_eq!(report.confirmations, vec![Confirmation::Reinstall]);
     assert_eq!(
-        block_on(same.state.install(&device, &lockdown, &path, &[])).err(),
+        block_on(same.state.install(&device, &lockdown, &path, &[], 0)).err(),
         Some(UpdateError::ConfirmationRequired)
     );
 
@@ -262,7 +262,26 @@ fn a_station_whose_host_is_silent_needs_a_confirmation() {
     assert_eq!(report.refusal, None);
     assert_eq!(report.host, None);
     assert_eq!(
-        block_on(site.state.install(&device, &lockdown, &path, &[])).err(),
+        block_on(site.state.install(&device, &lockdown, &path, &[], 0)).err(),
         Some(UpdateError::ConfirmationRequired)
     );
+    // Every warning must be confirmed: one of two is not enough.
+    let same = self::site("0.2.0", vec![]);
+    let again = put_package(&same.updates, "0.2.0");
+    block_on(same.state.scan()).unwrap();
+    assert_eq!(
+        block_on(same.state.verify(&device, &again))
+            .unwrap()
+            .confirmations,
+        vec![Confirmation::Reinstall, Confirmation::HostUnreachable]
+    );
+    for confirmed in [
+        &[Confirmation::Reinstall][..],
+        &[Confirmation::HostUnreachable][..],
+    ] {
+        assert_eq!(
+            block_on(same.state.install(&device, &lockdown, &again, confirmed, 0)).err(),
+            Some(UpdateError::ConfirmationRequired)
+        );
+    }
 }

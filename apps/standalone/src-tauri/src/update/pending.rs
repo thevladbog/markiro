@@ -68,15 +68,26 @@ pub fn remove(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// The mark in `dir`, when there is a readable one.
+pub fn read(dir: &Path) -> Option<Pending> {
+    let text = fs::read_to_string(dir.join(FILE_NAME)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 /// The outcome of the mark in `dir` for this app's version `installed`; the
-/// mark is removed unless the update did not finish.
+/// mark is removed unless the update did not finish. A reinstall of the same
+/// version (`from` equal to `to`) says nothing either way: the version alone
+/// cannot tell whether the installer finished, so its mark just goes.
 pub fn take_outcome(dir: &Path, installed: &str) -> Option<UpdateOutcome> {
     let text = fs::read_to_string(dir.join(FILE_NAME)).ok()?;
     let Ok(pending) = serde_json::from_str::<Pending>(&text) else {
         let _ = remove(dir);
         return None;
     };
-    if pending.to == installed {
+    if pending.from == pending.to {
+        let _ = remove(dir);
+        None
+    } else if pending.to == installed {
         let _ = remove(dir);
         Some(UpdateOutcome::Updated {
             from: pending.from,
@@ -162,6 +173,27 @@ mod tests {
             assert_eq!(take_outcome(dir.path(), "0.1.0"), None, "{text}");
             assert!(!dir.path().join(FILE_NAME).exists());
         }
+    }
+
+    #[test]
+    fn a_reinstall_of_the_same_version_says_nothing_and_its_mark_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &Pending {
+                from: "0.2.0".into(),
+                to: "0.2.0".into(),
+                started_at_ms: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read(dir.path()).map(|mark| mark.to),
+            Some("0.2.0".to_owned())
+        );
+        assert_eq!(take_outcome(dir.path(), "0.2.0"), None);
+        assert!(!dir.path().join(FILE_NAME).exists());
+        assert_eq!(read(dir.path()), None);
     }
 
     #[test]

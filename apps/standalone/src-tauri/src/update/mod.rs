@@ -17,6 +17,7 @@ pub mod package;
 pub mod pending;
 pub mod rules;
 
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -150,6 +151,10 @@ pub struct UpdateState {
     exit: Arc<dyn Fn(i32) + Send + Sync>,
     found: Mutex<Vec<PathBuf>>,
     outcome: Mutex<Option<UpdateOutcome>>,
+    /// The installer's handle once Windows started it: kept until the
+    /// process ends, so the file cannot be written, renamed or deleted while
+    /// the installer reopens itself to read its data (NSIS does).
+    leaving: Mutex<Option<File>>,
 }
 
 /// Runs blocking file work (a search, a 60 MB hash, the launch) off the IPC thread.
@@ -196,6 +201,7 @@ impl UpdateState {
             exit: config.exit,
             found: Mutex::new(Vec::new()),
             outcome: Mutex::new(outcome),
+            leaving: Mutex::new(None),
         }
     }
 
@@ -271,13 +277,16 @@ impl UpdateState {
 
     /// Checks the package again, refuses what the rules refuse or what was
     /// not confirmed, writes the mark, starts the installer with the
-    /// administrator prompt and leaves the app (spec §10.4 steps 2, 5–7).
+    /// administrator prompt in front of `owner` (the app's window, 0 for
+    /// none; see [`Launcher`]) and leaves the app (spec §10.4 steps 2, 5–7).
+    /// A refused start puts back the mark an earlier attempt left, if any.
     pub async fn install(
         &self,
         device: &DeviceState,
         lockdown: &LockdownState,
         path: &str,
         confirmed: &[Confirmation],
+        owner: usize,
     ) -> Result<(), UpdateError> {
         let (checked, decision, _) = self.check(device, path).await?;
         if decision.refusal.is_some() {
@@ -290,6 +299,7 @@ impl UpdateState {
         {
             return Err(UpdateError::ConfirmationRequired);
         }
+        let earlier = pending::read(&self.data_dir);
         let mark = Pending {
             from: self.installed.clone(),
             to: checked.manifest.manifest.version.clone(),
@@ -303,32 +313,29 @@ impl UpdateState {
             UpdateError::Storage
         })?;
         let launcher = Arc::clone(&self.launcher);
-        // The handle opened for the hash goes along and is held until the
-        // app leaves: nothing changes the file between the hash and the start.
+        // The handle opened for the hash goes along, and on a start it is
+        // kept in `leaving` until the process ends: nothing changes the file
+        // between the hash and the start, nor while the installer runs.
         let joined = blocking(move || {
-            let launched = launcher.launch(&checked.launch_path, INSTALLER_ARGUMENTS);
+            let launched = launcher.launch(&checked.launch_path, INSTALLER_ARGUMENTS, owner);
             (launched, checked)
         })
         .await;
-        let (launched, _held) = match joined {
+        let (launched, held) = match joined {
             Ok(done) => done,
             Err(error) => {
-                let _ = pending::remove(&self.data_dir);
+                self.restore_mark(earlier.as_ref());
                 return Err(error);
             }
         };
         match launched {
             Ok(()) => {
+                *self.leaving.lock().unwrap_or_else(PoisonError::into_inner) = Some(held.installer);
                 self.exit_for_update(lockdown);
                 Ok(())
             }
             Err(error) => {
-                if let Err(io) = pending::remove(&self.data_dir) {
-                    eprintln!(
-                        "standalone: update_install could not drop its mark: {:?}",
-                        io.kind()
-                    );
-                }
+                self.restore_mark(earlier.as_ref());
                 eprintln!(
                     "standalone: update_install: the installer did not start: {}",
                     error.code()
@@ -336,6 +343,29 @@ impl UpdateState {
                 Err(error.into())
             }
         }
+    }
+
+    /// After a refused start: the mark an earlier attempt left comes back
+    /// (its «не завершилось» stays true), or none is left.
+    fn restore_mark(&self, earlier: Option<&Pending>) {
+        let restored = match earlier {
+            Some(mark) => pending::write(&self.data_dir, mark),
+            None => pending::remove(&self.data_dir),
+        };
+        if let Err(io) = restored {
+            eprintln!(
+                "standalone: update_install could not put its mark back: {:?}",
+                io.kind()
+            );
+        }
+    }
+
+    /// Whether the installer Windows started is still held (tests).
+    pub fn holds_started_installer(&self) -> bool {
+        self.leaving
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
     }
 
     /// The one way the app leaves for an update: kiosk mode's flag off first
@@ -404,7 +434,8 @@ pub async fn update_verify(
 /// `confirm` holds the codes of the report's confirmations the person
 /// accepted; an unknown code is `invalid_request` before anything is read.
 #[tauri::command]
-pub async fn update_install(
+pub async fn update_install<R: tauri::Runtime>(
+    webview: tauri::WebviewWindow<R>,
     state: tauri::State<'_, UpdateState>,
     device: tauri::State<'_, DeviceState>,
     lockdown: tauri::State<'_, LockdownState>,
@@ -416,8 +447,16 @@ pub async fn update_install(
         .map(|text| Confirmation::from_code(text))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| code(UpdateError::InvalidRequest))?;
+    // The window that asked owns the administrator prompt (see `Launcher`).
+    #[cfg(windows)]
+    let owner = webview.hwnd().map(|native| native.0 as usize).unwrap_or(0);
+    #[cfg(not(windows))]
+    let owner = {
+        let _ = &webview;
+        0
+    };
     state
-        .install(&device, &lockdown, &path, &confirmed)
+        .install(&device, &lockdown, &path, &confirmed, owner)
         .await
         .map_err(code)
 }
