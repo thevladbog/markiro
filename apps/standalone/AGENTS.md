@@ -220,9 +220,9 @@ Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 device records itself (plans 2a5–2a8 and ПЛ-Ц: shifts, boxes, scans, the
 outbox, the print jobs, the pallets), each row tagged with the pairing that
 wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
-pairing. Of the 28 tables 12 are `Disposable`, the 8 of migration `0006`,
+pairing. Of the 29 tables 12 are `Disposable`, the 8 of migration `0006`,
 `floor_print_jobs` of `0007`, the two pallet tables of `0008`, the three warehouse tables of
-`0012` and `floor_block_drops` of `0013` are `DeviceData` (below), and
+`0012`, `floor_block_drops` of `0013` and `floor_unit_labels` of `0015` are `DeviceData` (below), and
 `workstation_settings` of `0007` is the one `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
@@ -448,6 +448,34 @@ the shell's setup, before the window appears: about 43 s for 1 000 000 codes
 and 1 000 000 scans with `secure_delete` on, on a Mac NVMe, the WAL growing to
 about 0.9 GB. Owner check: its time and disk on the station's Windows
 hardware.
+
+Migration `0015_floor_unit_labels.sql` (plan РЕЖ, part B) adds
+`floor_unit_labels` (`DeviceData`, in `RETAINED_TABLES`): one row per unit
+label job of a validation shift that prints the Data Matrix duplicate, holding
+the job's current attempt as the domain's projection does
+(`ProductLabelProjection`); a reprint moves the row to the next attempt with
+its reason and the same bytes, and every event of every attempt is a
+`unit_label` fact in the outbox (the attempts' history; «История этикеток»
+lists jobs). The CHECKs are the domain's: the attempt states, the policy kept
+on the job (`verification_policy`) and the check's outcome
+(`not_required` under none, `pending` under a required check, a skip only
+after `sent` of a required check, a verification only after
+`delivery_unknown` or `sent` of a required check), a reason exactly on an
+attempt after the first, an error code exactly in `failed_before_send` and
+`delivery_unknown` from the fact's lists, and the bytes, printer and digests
+from the preparation on (the domain's `prepared` event carries them; the
+cloud prepares a label only on a configured printer).
+`test/unit-label-schema.test.ts` checks that the rows the CHECKs take are
+exactly the domain's reachable projections and that the unique index's
+predicate (`floor_unit_labels_unresolved`, `UNRESOLVED_UNIT_LABEL_SQL`: one
+unresolved job per shift and pairing) is exactly «not completed» of
+`productLabelStatus`. `floor_unit_labels_shift` serves the history and the
+retention's delete, the partial `floor_unit_labels_sending` the recovery at
+start. The statements of `src/floor/unit-labels/unit-label-store.ts` are pinned
+in both lists of plans (`the_unit_label_reads_search_an_index`). The full code
+lives only in the job's `fields` and bytes; the retention deletes the whole row
+with its shift and keeps a shift while a unit label of it is unresolved (its
+outcome may be unknown), as it does for a waiting label of `floor_print_jobs`.
 
 ## Writes
 
@@ -4190,7 +4218,8 @@ every hour (`scheduleRetention`, never two passes at a time): a shift of the
 pairing that this station closed, whose close the host accepted at least 30
 days ago (the instant of the receipt, `acked_at <= now − 30 × 24 h`, so the
 30th day itself counts; a fixed span of UTC instants), with every record
-answered and no label waiting, goes with all its rows — the tables of
+answered, no label waiting and no unit label unresolved (plan РЕЖ part B),
+goes with all its rows — the tables of
 `RETAINED_TABLES` by `shift_id`, then the copy, one shift per transaction,
 whose first statement deletes the copy only while that still holds. Only an
 ACCEPTED close starts the clock: a refused close, and a shift the office

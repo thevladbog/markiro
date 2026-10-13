@@ -94,6 +94,13 @@ import {
   UPDATE_SESSION_SQL,
 } from "../src/floor/warehouse/warehouse-store.js";
 import { KNOWN_ORGANIZATION_SQL } from "../src/floor/warehouse/warehouse-logo.js";
+import {
+  JOB_SQL as UNIT_LABEL_JOB_SQL,
+  MOVE_JOB_SQL as UNIT_LABEL_MOVE_SQL,
+  SENDING_JOBS_SQL,
+  SHIFT_JOBS_SQL,
+  UNRESOLVED_JOB_SQL,
+} from "../src/floor/unit-labels/unit-label-store.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -101,7 +108,10 @@ const testModuleUrl = import.meta.url;
 
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
-/** The tables of this device's own records (migrations `0006`–`0008` and `0013`; `TableClass::DeviceData`). */
+/**
+ * The tables of this device's own records (migrations `0006`–`0008`, `0013` and the unit labels
+ * of `0015`; `TableClass::DeviceData`).
+ */
 const DEVICE_TABLES = [
   "floor_block_drops",
   "floor_block_requests",
@@ -114,6 +124,7 @@ const DEVICE_TABLES = [
   "floor_scans",
   "floor_shifts",
   "floor_sscc_blocks",
+  "floor_unit_labels",
   "outbox",
 ];
 
@@ -662,6 +673,31 @@ const COLUMNS: Record<string, string[]> = {
     "created_at TEXT NOT NULL",
     "updated_at TEXT NOT NULL",
   ],
+  // Plan РЕЖ part B (migration `0015`): one row per unit label job, its current attempt.
+  floor_unit_labels: [
+    "id TEXT NOT NULL PK1",
+    "host_id TEXT NOT NULL",
+    "device_id TEXT NOT NULL",
+    "shift_id TEXT NOT NULL",
+    "code_hash TEXT NOT NULL",
+    "scan_id TEXT NOT NULL",
+    "attempt_no INTEGER NOT NULL",
+    "attempt_state TEXT NOT NULL",
+    "verification_policy TEXT NOT NULL",
+    "verification TEXT NOT NULL",
+    "reason TEXT",
+    "error_code TEXT",
+    "printer TEXT NOT NULL",
+    "bytes_base64 TEXT NOT NULL",
+    "bytes_digest TEXT NOT NULL",
+    "payload_digest TEXT NOT NULL",
+    "template_id TEXT NOT NULL",
+    "template_rev INTEGER NOT NULL",
+    "fields TEXT NOT NULL",
+    "operator_id TEXT NOT NULL",
+    "created_at TEXT NOT NULL",
+    "updated_at TEXT NOT NULL",
+  ],
   outbox: [
     "seq INTEGER PK1",
     "id TEXT NOT NULL",
@@ -767,6 +803,24 @@ describe("the shape of the production tables (migration 0006)", () => {
         name: "floor_sscc_blocks_prefix",
         isUnique: 0,
         isPartial: 0,
+      },
+      {
+        tableName: "floor_unit_labels",
+        name: "floor_unit_labels_sending",
+        isUnique: 0,
+        isPartial: 1,
+      },
+      {
+        tableName: "floor_unit_labels",
+        name: "floor_unit_labels_shift",
+        isUnique: 0,
+        isPartial: 0,
+      },
+      {
+        tableName: "floor_unit_labels",
+        name: "floor_unit_labels_unresolved",
+        isUnique: 1,
+        isPartial: 1,
       },
       { tableName: "outbox", name: "outbox_settled", isUnique: 0, isPartial: 1 },
       { tableName: "outbox", name: "outbox_shift", isUnique: 0, isPartial: 0 },
@@ -1179,6 +1233,8 @@ describe("the shape of the production tables (migration 0006)", () => {
       // index, `r` apart from the walk of `o`; `outbox_settled` stays the one step of `o`.
       "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+      // An unresolved unit label keeps its shift (plan РЕЖ part B), found by the unique index.
+      "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
       "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     ]) {
       expect(due.join("\n"), key).toContain(key);
@@ -1192,6 +1248,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
       "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+      "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
     ]) {
       expect(purge, key).toContain(key);
     }
@@ -1220,6 +1277,7 @@ describe("the shape of the production tables (migration 0006)", () => {
         "floor_pallet_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
       ],
       ["outbox", "outbox_shift (shift_id=? AND host_id=? AND device_id=?"],
+      ["floor_unit_labels", "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?"],
     ]);
     for (const table of RETAINED_TABLES) {
       const steps = plan(purgeTableSql(table)).split("\n");
@@ -1281,7 +1339,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       REFUSED_CLOSES_SQL,
       ...RETAINED_TABLES.map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(11);
+    expect(new Set(retention).size).toBe(12);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
   });
 
@@ -2031,6 +2089,48 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     for (const [sql] of STATEMENTS.filter(([sql]) => !sql.startsWith(columns))) {
       expect(source, sql).toContain(`"${sql}"`);
     }
+  });
+});
+
+// The unit label jobs (plan РЕЖ part B, migration 0015): every read and write the station repeats
+// on its growing table searches an index; pinned on the shell's SQLite too
+// (`the_unit_label_reads_search_an_index` in `tests/local_db.rs`), with the same texts.
+describe("the unit label jobs' statements (migration 0015)", () => {
+  const STATEMENTS: readonly (readonly [string, string])[] = [
+    // The shift's one unresolved job: the unique partial index, by its predicate.
+    [UNRESOLVED_JOB_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)"],
+    [UNIT_LABEL_JOB_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
+    // «История этикеток»: the shift's jobs newest first, in the index's own rowid order.
+    [SHIFT_JOBS_SQL, "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)"],
+    // The recovery at start: the pairing's sending jobs, through their own partial index.
+    [SENDING_JOBS_SQL, "floor_unit_labels_sending (host_id=? AND device_id=?)"],
+    [UNIT_LABEL_MOVE_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
+  ];
+
+  it("search an index, never a whole table, and sort nothing of their own", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    for (const [sql, index] of STATEMENTS) {
+      expect(
+        plan(sql).some((step) => step.includes(index)),
+        `${sql}\n${plan(sql).join("\n")}`,
+      ).toBe(true);
+      expect(
+        plan(sql).filter((step) => step.startsWith("SCAN ") || step.includes("TEMP")),
+        sql,
+      ).toEqual([]);
+    }
+  });
+
+  it("are pinned on the shell's SQLite with the same texts", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    for (const [sql] of STATEMENTS) expect(source, sql).toContain(`"${sql}"`);
   });
 });
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { OPEN_JOB_SQL } from "../floor/print/print-jobs.js";
+import { UNRESOLVED_UNIT_LABEL_SQL } from "../floor/unit-labels/unit-label-store.js";
 import { LocalDbError, type LocalExecutor } from "./executor.js";
 import type { Pairing } from "./reference-sync.js";
 
@@ -19,7 +20,8 @@ export const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
  * retention deletes their rows with the shift's copy. A later plan's table
  * of a shift's records joins this list, or a test that reads every table of
  * the database fails; the pallets' plan (ПЛ-Ц) added `floor_pallets` and
- * `floor_pallet_exceptions`.
+ * `floor_pallet_exceptions`, plan РЕЖ part B `floor_unit_labels` (whose
+ * fields and bytes hold the full code: the whole row goes).
  */
 export const RETAINED_TABLES = [
   "floor_scans",
@@ -29,6 +31,7 @@ export const RETAINED_TABLES = [
   "floor_print_jobs",
   "floor_boxes",
   "floor_pallets",
+  "floor_unit_labels",
   "outbox",
 ] as const;
 
@@ -40,8 +43,9 @@ const dueRow = z.object({ id: z.string() });
  * `alreadyClosed` too — what makes the copy `closed`) at least 30 days
  * before the cutoff, every record of the shift has its receipt, no refused or
  * conflicting record of it waits for a person (plan ОЧ: a refusal leaves the
- * station only when someone resolved it on the queue screen), and no
- * label of it waits. Parameters: host id, device id, the cutoff (an instant
+ * station only when someone resolved it on the queue screen), no label of
+ * it waits, and no unit label of it is unresolved (plan РЕЖ part B: its
+ * outcome may be unknown). Parameters: host id, device id, the cutoff (an instant
  * as `Date.toISOString` writes it, as `acked_at` is).
  */
 const DONE_WITH =
@@ -55,7 +59,9 @@ const DONE_WITH =
   "AND r.device_id = s.device_id AND r.shift_id = s.id " +
   "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
-  `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL})`;
+  `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) ` +
+  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = s.host_id " +
+  `AND l.device_id = s.device_id AND l.shift_id = s.id AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
 
 /**
  * The shifts of the pairing that are done with; parameters: host id, device
@@ -78,7 +84,9 @@ export const DUE_SHIFTS_SQL =
   "AND r.device_id = o.device_id AND r.shift_id = o.shift_id " +
   "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id " +
-  `AND j.device_id = o.device_id AND j.shift_id = o.shift_id AND ${OPEN_JOB_SQL})`;
+  `AND j.device_id = o.device_id AND j.shift_id = o.shift_id AND ${OPEN_JOB_SQL}) ` +
+  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = o.host_id " +
+  `AND l.device_id = o.device_id AND l.shift_id = o.shift_id AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
 
 /**
  * The shift's copy goes while the shift is still done with; parameters: shift
@@ -93,7 +101,7 @@ export const purgeTableSql = (table: (typeof RETAINED_TABLES)[number]): string =
 /**
  * Deletes the records of this pairing's shifts done with for 30 days
  * (stage 2a spec, decision 31): the copy, its scans, exceptions, codes,
- * print jobs, boxes, pallets, pallet exceptions and outbox records, one shift
+ * print jobs, boxes, pallets, pallet exceptions, unit labels and outbox records, one shift
  * per transaction. The copy
  * goes first and only while the shift is still done with, so a shift that
  * took a record meanwhile keeps everything. The SSCC blocks and the

@@ -123,6 +123,7 @@ describe("local database on node:sqlite", () => {
       "floor_shifts",
       "floor_sign_in_failures",
       "floor_sscc_blocks",
+      "floor_unit_labels",
       "outbox",
       "ref_lines",
       "ref_operator_badges",

@@ -79,6 +79,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_shifts",
             "floor_sign_in_failures",
             "floor_sscc_blocks",
+            "floor_unit_labels",
             "outbox",
             "ref_lines",
             "ref_operator_badges",
@@ -1115,7 +1116,14 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
         ],
         "the two tables and their indexes, no trigger"
     );
-    assert_eq!(master_rows(&mut raw, "NOT IN").await, others);
+    // A later migration's table (`0015`, plan РЕЖ part B) comes with this start too, beside;
+    // every object that was there stays as it was.
+    let later: Vec<Value> = master_rows(&mut raw, "NOT IN")
+        .await
+        .into_iter()
+        .filter(|row| row["tbl_name"] != "floor_unit_labels")
+        .collect();
+    assert_eq!(later, others);
     let after = plans_of(&mut raw, &statements).await;
     assert_eq!(after, plans, "the plans stay");
     assert!(after[0]
@@ -1296,6 +1304,87 @@ async fn migration_0014_keeps_each_rows_rowid() {
     assert!(version.0 >= 14, "0014 is applied");
     assert_eq!(rowids_and_last_code(&mut raw).await, seeded);
     raw.close().await.unwrap();
+}
+
+/// Migration `0015` (plan РЕЖ part B) over a station's database of `0014`, on the shell's own
+/// SQLite and through the application's start: it adds `floor_unit_labels` with its key and its
+/// three indexes, and every object and row that was there stays as it was.
+/// `test/unit-label-schema.test.ts` pins the same on Node's SQLite.
+#[tokio::test]
+async fn migration_0015_adds_the_unit_labels_and_keeps_every_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 15)
+        .cloned()
+        .collect();
+    assert!(before.iter().any(|migration| migration.version == 14));
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 15));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+         scanned_at) VALUES ('host', 'device', 'hash-1', 'shift-1', NULL, 'scan-1', \
+         '2026-10-13T08:00:00.000Z')",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    let mut old = master_rows(&mut raw, "IN").await;
+    old.extend(master_rows(&mut raw, "NOT IN").await);
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    assert_eq!(count(&db, "floor_codes").await, json!(1));
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    let mut new = master_rows(&mut raw, "IN").await;
+    new.extend(master_rows(&mut raw, "NOT IN").await);
+    raw.close().await.unwrap();
+    let added: Vec<&Value> = new.iter().filter(|row| !old.contains(row)).collect();
+    assert_eq!(
+        new.iter().filter(|row| old.contains(row)).count(),
+        old.len(),
+        "every object that was there stays as it was"
+    );
+    assert_eq!(
+        added
+            .iter()
+            .map(|row| (
+                row["type"].as_str().unwrap(),
+                row["name"].as_str().unwrap(),
+                row["tbl_name"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("index", "floor_unit_labels_sending", "floor_unit_labels"),
+            ("index", "floor_unit_labels_shift", "floor_unit_labels"),
+            ("index", "floor_unit_labels_unresolved", "floor_unit_labels"),
+            (
+                "index",
+                "sqlite_autoindex_floor_unit_labels_1",
+                "floor_unit_labels"
+            ),
+            ("table", "floor_unit_labels", "floor_unit_labels"),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -1619,7 +1708,8 @@ async fn every_table_has_a_forget_class() {
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
     // This device's own records are the production tables of `0006`, the
-    // print jobs of `0007`, the pallets of `0008` and the dropped blocks of `0013`; the sign-in lockouts
+    // print jobs of `0007`, the pallets of `0008`, the dropped blocks of `0013` and the unit
+    // label jobs of `0015`; the sign-in lockouts
     // stay with the copies (an open owner question); the workstation's
     // settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
@@ -1641,6 +1731,7 @@ async fn every_table_has_a_forget_class() {
             "floor_scans",
             "floor_shifts",
             "floor_sscc_blocks",
+            "floor_unit_labels",
             "outbox",
             "wh_jobs",
             "wh_outbox",
@@ -1770,6 +1861,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
         "floor_scans",
         "floor_shifts",
         "floor_sscc_blocks",
+        "floor_unit_labels",
         "outbox",
         "wh_jobs",
         "wh_outbox",
@@ -1834,7 +1926,7 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
 }
 
 /// One row in each table of this device's own records (migrations
-/// `0006`–`0008`, `0012` and `0013`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// `0006`–`0008`, `0012`, `0013` and `0015`), each of the pairing `(HOST, DEVICE)`, as the floor's
 /// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -1911,6 +2003,17 @@ fn device_records() -> Vec<LocalStatement> {
             json!([HOST, DEVICE]),
         ),
         outbox_record("record-1", HOST, DEVICE, None),
+        // A unit label job (plan РЕЖ part B, `0015`), completed.
+        statement(
+            "INSERT INTO floor_unit_labels (id, host_id, device_id, shift_id, code_hash, scan_id, \
+             attempt_no, attempt_state, verification_policy, verification, printer, \
+             bytes_base64, bytes_digest, payload_digest, template_id, template_rev, fields, \
+             operator_id, created_at, updated_at) VALUES ('label-1', ?, ?, 'shift-1', \
+             printf('%064x', 1), 'scan-1', 1, 'sent', 'none', 'not_required', '{}', 'XlhB', \
+             printf('%064x', 2), printf('%064x', 3), 'template-1', 3, '{}', 'operator-1', \
+             '2026-10-08T06:03:01.000Z', '2026-10-08T06:03:02.000Z')",
+            json!([HOST, DEVICE]),
+        ),
         // The warehouse reprint's own (plan СКЛ, `0012`): a session, a job and a record.
         statement(
             "INSERT INTO wh_sessions (id, host_id, device_id, reason, started_by, started_at, \
@@ -2205,7 +2308,9 @@ const DUE_SHIFTS: &str =
      'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j \
      WHERE j.host_id = o.host_id AND j.device_id = o.device_id AND j.shift_id = o.shift_id \
      AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
-     verify = 1)))";
+     verify = 1))) AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = \
+     o.host_id AND l.device_id = o.device_id AND l.shift_id = o.shift_id AND (verification = \
+     'pending' OR (verification = 'not_required' AND attempt_state <> 'sent')))";
 const PURGE_COPY: &str =
     "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
      AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
@@ -2217,7 +2322,10 @@ const PURGE_COPY: &str =
      ('rejected', 'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM \
      floor_print_jobs j WHERE j.host_id = s.host_id AND j.device_id = s.device_id AND \
      j.shift_id = s.id AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR \
-     (state = 'sent' AND verify = 1)))";
+     (state = 'sent' AND verify = 1))) AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l \
+     WHERE l.host_id = s.host_id AND l.device_id = s.device_id AND l.shift_id = s.id AND \
+     (verification = 'pending' OR (verification = 'not_required' AND attempt_state <> \
+     'sent')))";
 
 /// The shift list's read of the refused closes (`readRefusedCloses` in `src/floor/close/shift-close.ts`,
 /// plan 2a8): it runs again on every bump of the outbox while the list is shown, a reconnect's every
@@ -2427,7 +2535,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 102] = [
+    let reads: [(&str, &str); 105] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -2710,6 +2818,11 @@ async fn the_floors_repeating_reads_search_an_index() {
         (DUE_SHIFTS, "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)"),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
+        // An unresolved unit label keeps its shift (plan РЕЖ part B): the unique partial index.
+        (
+            DUE_SHIFTS,
+            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+        ),
         (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
         (
             PURGE_COPY,
@@ -2724,6 +2837,10 @@ async fn the_floors_repeating_reads_search_an_index() {
             "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
         ),
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
+        (
+            PURGE_COPY,
+            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+        ),
         (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (
             "DELETE FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
@@ -2757,6 +2874,10 @@ async fn the_floors_repeating_reads_search_an_index() {
             "DELETE FROM floor_pallet_exceptions WHERE host_id = ? AND device_id = ? \
              AND shift_id = ?",
             "floor_pallet_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
+        ),
+        (
+            "DELETE FROM floor_unit_labels WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?",
         ),
         // The pallets (plan ПЛ-Ц): the open pallet and its two counts on every box close and render,
         // a pallet's close and a box joining it by their keys, the shift close's check and summary,
@@ -4046,6 +4167,92 @@ async fn the_warehouse_reads_search_an_index() {
                 && !step.contains("json_each")
                 && !step.starts_with("SCAN r ")),
             "{sql}\n  scans a table: {plan:?}"
+        );
+    }
+    raw.close().await.unwrap();
+}
+
+/// The unit label jobs (plan РЕЖ part B, migration `0015`,
+/// `src/floor/unit-labels/unit-label-store.ts`): the shift's one unresolved job through the
+/// unique partial index (its predicate named word for word), a job by its key, «История
+/// этикеток» through the shift's index in its rowid order, the recovery's sending jobs of the
+/// pairing through their partial index and a job's step by its key. No statement scans a table or sorts on
+/// its own. `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite and
+/// checks that they appear here word for word.
+#[tokio::test]
+async fn the_unit_label_reads_search_an_index() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    // (the statement, what its plan must name)
+    let reads: [(&str, &str); 5] = [
+        (
+            "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
+             verification_policy, verification, reason, error_code, printer, bytes_digest, \
+             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
+             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ? AND (verification = 'pending' OR (verification = 'not_required' \
+             AND attempt_state <> 'sent'))",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
+             verification_policy, verification, reason, error_code, printer, bytes_digest, \
+             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
+             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND id = ?",
+            "sqlite_autoindex_floor_unit_labels_1 (id=?)",
+        ),
+        (
+            "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
+             verification_policy, verification, reason, error_code, printer, bytes_digest, \
+             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
+             updated_at FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ? ORDER BY rowid DESC LIMIT ?",
+            "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
+             verification_policy, verification, reason, error_code, printer, bytes_digest, \
+             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
+             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND attempt_state = 'sending'",
+            "floor_unit_labels_sending (host_id=? AND device_id=?)",
+        ),
+        (
+            "UPDATE floor_unit_labels SET attempt_no = ?, attempt_state = ?, verification = ?, \
+             reason = ?, error_code = ?, printer = ?, updated_at = ? WHERE host_id = ? \
+             AND device_id = ? AND id = ? AND attempt_no = ? AND attempt_state = ? \
+             AND verification = ?",
+            "sqlite_autoindex_floor_unit_labels_1 (id=?)",
+        ),
+    ];
+    for (sql, index) in reads {
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..sql.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{sql}\n  should use {index}, its plan is {plan:?}"
+        );
+        assert!(
+            !plan
+                .iter()
+                .any(|step| step.starts_with("SCAN ") || step.contains("TEMP")),
+            "{sql}\n  scans a table or sorts: {plan:?}"
         );
     }
     raw.close().await.unwrap();

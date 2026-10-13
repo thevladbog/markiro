@@ -51,7 +51,9 @@ function plans(db: DatabaseSync): Record<string, string> {
     DUE_SHIFTS_SQL,
     PURGE_COPY_SQL,
     ...RETAINED_TABLES.map(purgeTableSql),
-  ].filter((sql) => !sql.includes("resolved_at"));
+  ]
+    // The unit labels' table comes with migration `0015` (plan РЕЖ part B), after this one.
+    .filter((sql) => !sql.includes("resolved_at") && !sql.includes("floor_unit_labels"));
   return Object.fromEntries(
     statements.map((sql) => [
       sql,
