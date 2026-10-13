@@ -6,6 +6,7 @@ import { Select } from "@markiro/ui";
 import type { EmployeeRecord, OfficeOperator } from "../../host/protocol.js";
 import { employeeUpdate } from "../../host/requests.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { searchableSelect } from "../select-search.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
@@ -131,7 +132,7 @@ export function EmployeeOperatorDialog({
       alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
     >
       <Select
-        native
+        {...searchableSelect(t)}
         label={t("office.employees.link.field")}
         hint={t(free.length === 0 ? "office.employees.link.none" : "office.employees.link.hint")}
         options={[
