@@ -426,3 +426,31 @@ async fn a_technologist_turned_off_after_the_extractor_passed_writes_nothing() {
         assert_eq!(audit_rows(&admin.app).await, rows, "{method}");
     }
 }
+
+#[tokio::test]
+async fn the_same_bytes_with_other_sides_are_a_change() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    let mut wider = photo();
+    wider["width"] = json!(4);
+    let (status, body) = admin.call("PUT", &path(&id), Some(wider)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["photo"]["width"], 4);
+    assert_eq!(audit_trail(&admin.app, "product.photo.set").await.len(), 2);
+    assert_eq!(stored(&admin, &id).await.map(|row| row.0), Some(4));
+}
+
+#[tokio::test]
+async fn deleting_the_photo_of_an_unknown_product_is_not_found() {
+    let admin = admin().await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, error) = admin
+        .call("DELETE", &path(&uuid::Uuid::new_v4().to_string()), None)
+        .await;
+    assert_eq!(
+        (status, error["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}

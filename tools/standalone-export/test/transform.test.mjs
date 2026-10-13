@@ -1924,8 +1924,8 @@ test("a beer product's EGAIS code and a kept default counterparty move over; oth
       (note) => note.field === "egaisCode" || note.field === "defaultCounterparty",
     ),
   );
-  // A code is trimmed free text: blanks around it go without a note, a
-  // replaced control character with one, and a blank one is none.
+  // A code is never changed: blanks around it go, and a code with a
+  // control character, a blank one or one past 64 characters is cleared.
   const beerOf = (file) => file.payload.products.find((each) => each.id.endsWith("05"));
   const egaisNotes = (file) =>
     file.notes
@@ -1939,8 +1939,13 @@ test("a beer product's EGAIS code and a kept default counterparty move over; oth
   const controlled = build((source) => {
     source.products[4].egaisCode = "01503\u000720000001234567";
   });
-  assert.equal(beerOf(controlled)?.egaisCode, "01503 20000001234567");
-  assert.deepEqual(egaisNotes(controlled), [["text_changed", null]]);
+  assert.equal(beerOf(controlled)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(controlled), [["product_value_cleared", null]]);
+  // A 64-character code followed by more text is no 64-character code.
+  const followed = build((source) => {
+    source.products[4].egaisCode = `${"1".repeat(64)} 2`;
+  });
+  assert.equal(beerOf(followed)?.egaisCode, null);
   const blank = build((source) => {
     source.products[4].egaisCode = "   ";
   });

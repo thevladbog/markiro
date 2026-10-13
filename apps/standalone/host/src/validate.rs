@@ -386,8 +386,9 @@ pub const MAX_EGAIS_CODE_CHARS: usize = 64;
 /// the rule every text field shares (`optional_text`: trimmed, 1 to 64
 /// characters, no control characters), `None` for none or a blank one.
 /// Nineteen digits are not required: the cloud's field does not require
-/// them, and a client's older products may carry another form (an A4 sheet
-/// refuses such a code, as the cloud's does).
+/// them, and a client's older products may carry another form (the station
+/// prints such a code on the thermal labels and leaves it off an A4 sheet,
+/// whose renderer takes only 19 digits).
 pub fn egais_code(field: &str, value: Option<&str>) -> Result<Option<String>, ApiError> {
     optional_text(field, value, MAX_EGAIS_CODE_CHARS, "an EGAIS code")
 }

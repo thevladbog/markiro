@@ -428,22 +428,20 @@ export function buildExportFile(raw, options) {
     // The EGAIS code (plan ТОВ): free text the host keeps only for ЧЗ group
     // 15; another group's, or a blank one, is cleared with a note. A raw
     // output of format 1 has none (it named the code as lost).
-    // A code longer than the host's bound is cleared, never cut (a cut
-    // identifier names nothing), and one whose control characters were
-    // replaced is kept with a note, as a name is.
+    // An identifier is never changed: a code with a control character, or
+    // longer than the host's bound, is cleared (a code cut or with a space
+    // for a control character would print another code), as is a blank one;
+    // only the blanks around it go.
     const egais = each.egaisCode ?? null;
     let egaisCode = null;
     if (egais !== null) {
-      const text = plainText(egais, MAX_EGAIS_CODE + 1);
+      const text = egais.trim();
       if (each.chzProductGroupCode !== EGAIS_PRODUCT_GROUP_CODE) {
         note({ code: "product_value_cleared", id: each.id, field: "egaisCode", reason: "group" });
-      } else if (text === "" || Array.from(text).length > MAX_EGAIS_CODE) {
+      } else if (text === "" || /\p{Cc}/u.test(text) || Array.from(text).length > MAX_EGAIS_CODE) {
         note({ code: "product_value_cleared", id: each.id, field: "egaisCode" });
       } else {
         egaisCode = text;
-        if (text !== egais.trim()) {
-          note({ code: "text_changed", entity: "products", id: each.id, field: "egaisCode" });
-        }
       }
     }
     const counterpartyId = each.defaultCounterpartyId ?? null;

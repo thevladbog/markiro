@@ -1135,8 +1135,11 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   EGAIS code and default counterparty as values (raw format 2; the tool
   still reads raw format 1), and `transform.mjs` keeps a code only for ЧЗ
   group 15 and a counterparty only one the file keeps, clearing others
-  with `product_value_cleared` (the office words those two by their rule,
-  `office.cloudImport.ruleCleared`). Photos stay a lost field (`photo`,
+  with `product_value_cleared` (the office words a code of another group,
+  `reason: "group"`, and a dropped counterparty by their rule,
+  `office.cloudImport.ruleCleared`). A code is never changed: one with a
+  control character, a blank one or one past 64 characters is cleared too,
+  only the blanks around it go. Photos stay a lost field (`photo`,
   question ТОВ-1: the cloud's pictures live in object storage, which the
   tool does not read). The host and the office read files of formats 1
   and 2 (`CLOUD_IMPORT_FORMAT_VERSIONS`): a format-1 file's products carry
