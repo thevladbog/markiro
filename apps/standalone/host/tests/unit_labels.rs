@@ -746,6 +746,143 @@ async fn a_job_keeps_its_code_and_its_text() {
     assert_eq!(event_count(&admin).await, 3);
 }
 
+/// A job is its station's and prints the same bytes in every attempt (the
+/// domain refuses a reprint with other bytes): an event of a job the shift
+/// knows with another `bytesDigest` is `invalid_record` on
+/// `data.bytesDigest`, a reprint of other bytes included, and one of a job
+/// that another station's event names is `invalid_record` on `data.jobId`.
+/// Only a shift's owner enters it, so another station's event of the same
+/// job in the same shift cannot come through the API: that row is written
+/// here directly. Nothing is kept but the receipts; the same record again
+/// gets its receipt, and the same bytes in a reprint are taken.
+#[tokio::test]
+async fn a_job_keeps_its_station_and_its_bytes() {
+    let (admin, _, floor) = printing_floor("none").await;
+    let scans = [
+        fact(
+            &record_id(1),
+            "scan",
+            &floor.shift,
+            checked_scan(1, &instant(1, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "scan",
+            &floor.shift,
+            checked_scan(2, &instant(2, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &scans).await,
+        [accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    let first = fact(
+        &record_id(10),
+        "unit_label",
+        &floor.shift,
+        label(1, 1, "prepared", &instant(3, 0)),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, std::slice::from_ref(&first)).await,
+        [accepted(&record_id(10))]
+    );
+    let mut other_bytes = label(1, 1, "sending", &instant(4, 0));
+    other_bytes["bytesDigest"] = json!(code_hash(899));
+    let mut reprint_of_other_bytes = label(1, 2, "prepared", &instant(4, 0));
+    reprint_of_other_bytes["reason"] = json!("lost");
+    reprint_of_other_bytes["bytesDigest"] = json!(code_hash(899));
+    let mut reprint_of_other_bytes = fact(
+        &record_id(12),
+        "unit_label",
+        &floor.shift,
+        reprint_of_other_bytes,
+    );
+    reprint_of_other_bytes["operatorId"] = json!(OPERATOR);
+    let refused = [
+        fact(&record_id(11), "unit_label", &floor.shift, other_bytes),
+        reprint_of_other_bytes,
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        (11..=12)
+            .map(|n| rejected(
+                Some(&record_id(n)),
+                "invalid_record",
+                Some("data.bytesDigest")
+            ))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(event_count(&admin).await, 1);
+    // Another station's event of a second job of this shift.
+    let (colleague, _) = pair_device(&admin.app, "station").await;
+    const THEIR_JOB: &str = "4e7f4a9c-6b1d-4c3e-9a5f-8d0b1c2e3f4a";
+    sqlx::query(
+        "INSERT INTO unit_label_events (id, record_id, device_id, shift_id, operator_id, job_id, \
+         code_hash, attempt_no, event, reason, error_code, payload_digest, bytes_digest, at, \
+         received_at) VALUES ('their-event', ?, ?, ?, NULL, ?, ?, 1, 'prepared', NULL, NULL, ?, \
+         ?, ?, ?)",
+    )
+    .bind(record_id(90))
+    .bind(&colleague)
+    .bind(&floor.shift)
+    .bind(THEIR_JOB)
+    .bind(code_hash(2))
+    .bind(code_hash(702))
+    .bind(code_hash(802))
+    .bind(instant(5, 0))
+    .bind(instant(5, 0))
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let mut theirs = label(2, 1, "sending", &instant(6, 0));
+    theirs["jobId"] = json!(THEIR_JOB);
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(&record_id(13), "unit_label", &floor.shift, theirs)]
+        )
+        .await,
+        [rejected(
+            Some(&record_id(13)),
+            "invalid_record",
+            Some("data.jobId")
+        )]
+    );
+    assert_eq!(event_count(&admin).await, 2);
+    // The same record again; the job's next events, and a reprint of the same bytes.
+    let mut reprint = label(1, 2, "prepared", &instant(8, 0));
+    reprint["reason"] = json!("damaged");
+    let mut reprint = fact(&record_id(16), "unit_label", &floor.shift, reprint);
+    reprint["operatorId"] = json!(OPERATOR);
+    let batch = [
+        first,
+        fact(
+            &record_id(14),
+            "unit_label",
+            &floor.shift,
+            label(1, 1, "sending", &instant(7, 0)),
+        ),
+        fact(
+            &record_id(15),
+            "unit_label",
+            &floor.shift,
+            label(1, 1, "sent", &instant(7, 500)),
+        ),
+        reprint,
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        [
+            accepted(&record_id(10)),
+            accepted(&record_id(14)),
+            accepted(&record_id(15)),
+            accepted(&record_id(16))
+        ]
+    );
+    assert_eq!(event_count(&admin).await, 5);
+}
+
 /// Every rule a row of `unit_label_events` keeps is checked before the
 /// write, so a record that breaks one is `invalid_record` on its field (the
 /// batch answers 200), never a database error that the station would send

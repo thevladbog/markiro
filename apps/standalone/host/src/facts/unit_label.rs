@@ -27,10 +27,11 @@ const ACCEPTED_SCAN: &str = "SELECT 1 FROM scans WHERE code_hash = ?1 AND shift_
      AND device_id = ?3 AND verdict = 'ok' LIMIT 1";
 
 /// What the shift knows of a job (`?1` the shift, `?2` the job) already:
-/// the code and the printed text's digest of one of its events, found
-/// through `unit_label_events_shift` (a unit test pins the plan).
-const JOB_SUBJECT: &str = "SELECT code_hash, payload_digest FROM unit_label_events \
-     WHERE shift_id = ?1 AND job_id = ?2 LIMIT 1";
+/// the station, the code, the printed text's digest and the bytes' digest of
+/// one of its events, found through `unit_label_events_shift` (a unit test
+/// pins the plan).
+const JOB_SUBJECT: &str = "SELECT device_id, code_hash, payload_digest, bytes_digest \
+     FROM unit_label_events WHERE shift_id = ?1 AND job_id = ?2 LIMIT 1";
 
 /// The event's own fields: the job a client UUID, the rules both sides hold
 /// (`UnitLabelFact::check`, every `CHECK` of `unit_label_events`), a device's
@@ -76,18 +77,27 @@ pub async fn apply(
     if scanned.is_none() {
         return Err(Reject::new(receipt_codes::SUBJECT_UNKNOWN).into());
     }
-    // A job prints one code with one text: an event of a job the shift
-    // knows names both as its first event did.
-    let known: Option<(String, String)> = sqlx::query_as(JOB_SUBJECT)
+    // A job is one station's and prints one code with one text in the same
+    // bytes in every attempt (the domain refuses a reprint of other bytes):
+    // an event of a job the shift knows names them as its first event did.
+    // Only the shift's owner enters it, so another station's event of the
+    // job can come only from a row the API did not write.
+    let known: Option<(String, String, String, String)> = sqlx::query_as(JOB_SUBJECT)
         .bind(&context.shift.id)
         .bind(&fact.job_id)
         .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-    if known.is_some_and(|(code_hash, payload_digest)| {
-        code_hash != fact.code_hash || payload_digest != fact.payload_digest
-    }) {
-        return Err(Reject::field("data.codeHash").into());
+    if let Some((device_id, code_hash, payload_digest, bytes_digest)) = known {
+        if device_id != context.device_id {
+            return Err(Reject::field("data.jobId").into());
+        }
+        if code_hash != fact.code_hash || payload_digest != fact.payload_digest {
+            return Err(Reject::field("data.codeHash").into());
+        }
+        if bytes_digest != fact.bytes_digest {
+            return Err(Reject::field("data.bytesDigest").into());
+        }
     }
     sqlx::query(
         "INSERT INTO unit_label_events (id, record_id, device_id, shift_id, operator_id, job_id, \

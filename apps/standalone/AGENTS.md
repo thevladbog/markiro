@@ -3463,9 +3463,14 @@ are `invalid_record` on `operatorId`, and `factRecordSchema` refuses to form
 such a record on the station. Other events may come without one, because the
 station's recovery after a restart writes `delivery_unknown` with nobody signed
 in. This also differs from the cloud, which requires `operatorId` on every
-event. A job prints one code with one text: an event whose job the shift
-already knows (`unit_label_events_shift`) with another `codeHash` or
-`payloadDigest` is `invalid_record` on `data.codeHash`. An exact replay keeps
+event. A job is one station's and prints one code with one text in the same
+bytes in every attempt (the domain refuses a reprint of other bytes): an event
+whose job the shift already knows (`unit_label_events_shift`) under another
+`device_id` is `invalid_record` on `data.jobId`, with another `codeHash` or
+`payloadDigest` on `data.codeHash`, with another `bytesDigest` on
+`data.bytesDigest`. Only a shift's owner enters it, so the first can come only
+from a row the API did not write (its test writes that row directly); a job id
+is not checked across shifts. An exact replay keeps
 its receipt, and the same event in a new record is taken (a check may arrive
 twice). Every rule a row of `unit_label_events` keeps is checked before the write, so
 a broken record is `invalid_record` on its field and never a database error
