@@ -2263,7 +2263,11 @@ this PC's open shift. Then `POST /v1/office/updates/started` writes
 session's device as the target, `{ from, to, installerSha256, source }`, no
 revision — what the office reported, like `shift.export`), and the shell
 starts the installer. A host that does not answer the report stops nothing
-only when the person confirmed an update without the host. The installer's
+only when the person confirmed an update without the host. Nothing is
+installed while this PC's role is unknown (the host's PC would skip its
+copy), the confirmation keeps the report and the role its warnings were
+computed for, and an update whose section is left stops before its report
+and its launch (`update-flow.ts`, `cancelled`). The installer's
 hook asks no network question on an update (`$UpdateMode = 1`). Nothing here
 runs on Windows in the macOS tests: the administrator prompt, the handle's
 sharing on NTFS, a process started from a held file and the final path
