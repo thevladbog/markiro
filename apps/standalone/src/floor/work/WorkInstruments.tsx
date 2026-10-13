@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button, type ButtonProps } from "@markiro/ui";
 
+import { hueFromGtin, productMonogram } from "../shifts/product-accent.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 
 /*
@@ -12,25 +13,6 @@ import { formatQuantity } from "../shifts/shift-text.js";
  * there (a photo, the shift's total across terminals, the journal) the
  * standalone does not have, and the figures come from the work screen.
  */
-
-/**
- * A hue for the product's band from its GTIN, the cloud's fallback when the
- * product has no photo (apps/station/src/lib/product-accent.ts, `hueFromGtin`).
- */
-export function hueFromGtin(gtin: string): number {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < gtin.length; index += 1) {
-    hash ^= gtin.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0) % 360;
-}
-
-/** «Молоко 3,2%» → «М». The photo slot's stand-in. */
-export function productMonogram(name: string): string {
-  const first = [...name.normalize("NFC")].find((character) => /[\p{L}\p{N}]/u.test(character));
-  return first ? ([...first.toUpperCase()][0] ?? "?") : "?";
-}
 
 const PERCENT = new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: 0 });
 
@@ -315,15 +297,6 @@ export function WorkFacts({ facts }: WorkFactsProps) {
         ))}
       </dl>
     </section>
-  );
-}
-
-/** The fixed floor action row (the cloud's `FloorFooter` with `WorkFooter`'s three actions). */
-export function WorkFooter({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <footer className="station-floor-footer work-footer" aria-label={label}>
-      {children}
-    </footer>
   );
 }
 

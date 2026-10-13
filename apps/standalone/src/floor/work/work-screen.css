@@ -6,8 +6,7 @@
  * Colours, type and spacing come from @markiro/ui tokens, as in the cloud.
  */
 
-/* The floor frame gives the screen its row; the screen takes all of it (the cloud's is the
-   whole window). */
+/* The floor frame gives the screen its row under the status bar; the screen takes all of it. */
 .floor-frame > .work-screen {
   align-self: stretch;
   justify-self: stretch;
@@ -22,8 +21,6 @@
   min-height: 0;
   overflow: hidden;
   grid-template-rows: minmax(0, 1fr) 72px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-3);
   background: var(--surface-page);
   color: var(--fg-1);
 }
@@ -466,7 +463,7 @@
 }
 
 /* The fixed floor action row: never a scroll region, never the screen's content. */
-.station-floor-footer {
+.work-screen .station-floor-footer {
   display: flex;
   height: 72px;
   min-height: 72px;
@@ -478,7 +475,7 @@
   background: var(--surface-panel);
 }
 
-.station-floor-footer.work-footer {
+.work-screen .station-floor-footer.work-footer {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   justify-content: normal;

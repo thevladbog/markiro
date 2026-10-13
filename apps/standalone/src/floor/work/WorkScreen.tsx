@@ -94,6 +94,7 @@ import type { PrintRuntime } from "../print/print-runtime.js";
 import { shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
@@ -117,7 +118,6 @@ import {
   LastScan,
   ShiftBand,
   WorkFacts,
-  WorkFooter,
   type LastTone,
 } from "./WorkInstruments.js";
 import "./work-screen.css";
@@ -2117,7 +2117,8 @@ export function WorkScreen(props: WorkScreenProps) {
   );
 
   return (
-    <main
+    // A `section`: the app's shell owns the page's `main`.
+    <section
       className="work-screen"
       aria-label={t("floor.work.title", { number: shift.copy.number })}
       ref={actionsRef}
@@ -2196,7 +2197,7 @@ export function WorkScreen(props: WorkScreenProps) {
           </div>
         </div>
       </div>
-      <WorkFooter label={t("floor.work.layout.actions")}>
+      <FloorFooter className="work-footer" ariaLabel={t("floor.work.layout.actions")}>
         <FooterAction
           variant="secondary"
           data-action="exceptions"
@@ -2222,7 +2223,7 @@ export function WorkScreen(props: WorkScreenProps) {
         >
           {t("floor.close.open")}
         </FooterAction>
-      </WorkFooter>
+      </FloorFooter>
       {/*
         The stops and notices share one polite region that is on the screen
         before any of them, so each is heard once, when it comes; the alerts
@@ -2487,6 +2488,6 @@ export function WorkScreen(props: WorkScreenProps) {
           />
         </div>
       )}
-    </main>
+    </section>
   );
 }
