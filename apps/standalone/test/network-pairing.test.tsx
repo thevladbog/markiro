@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { NetworkPairing, type NetworkPairingProps } from "../src/app/NetworkPairing.js";
+import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import { DeviceError } from "../src/host/device.js";
 import { HostProbeError, type HelloObservation, type HostProbe } from "../src/host/probe.js";
 import { observation } from "./support/fixtures.js";
@@ -525,5 +526,105 @@ describe("NetworkPairing", () => {
     const props = renderPairing();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A COM scanner as the shell delivers it: `emit` hands one frame to every listener. */
+function comScanner() {
+  const listeners = new Set<ScanListener>();
+  const source: ScanSource = {
+    start: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    clearPendingInput: () => undefined,
+    setManualTextEntryActive: () => undefined,
+  };
+  return {
+    source,
+    listening: () => listeners.size,
+    emit: (raw: string) => {
+      act(() => {
+        for (const listener of [...listeners]) listener(raw);
+      });
+    },
+  };
+}
+
+describe("NetworkPairing on a station before pairing (owner feedback, first Windows test)", () => {
+  it("pairs with a code a COM scanner sent, though no field took it", async () => {
+    const com = comScanner();
+    const props = renderPairing({ comScans: com.source });
+    com.emit(PAYLOAD);
+    await waitFor(() =>
+      expect(props.onClaim).toHaveBeenCalledWith({
+        address: "https://192.168.1.10:45710",
+        fingerprint: FINGERPRINT,
+        code: "7K3MQ9XV2D",
+        name: "Станция",
+      }),
+    );
+  });
+
+  it("explains a COM scan that is not a pairing code, as a typed one", async () => {
+    const com = comScanner();
+    const props = renderPairing({ comScans: com.source });
+    com.emit("4600682000013");
+    expect(
+      await screen.findByText("Это не код подключения Markiro. Отсканируйте код с экрана офиса."),
+    ).toBeTruthy();
+    expect(props.probe.hello).not.toHaveBeenCalled();
+  });
+
+  it("drops a COM scan while the manual form or the fingerprint check is on screen", async () => {
+    const com = comScanner();
+    const props = renderPairing({ comScans: com.source });
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    com.emit(PAYLOAD);
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Отпечаток хоста https://192.168.1.10:45710");
+    com.emit(PAYLOAD);
+    // Only the manual form's own probe: the scans went nowhere.
+    expect(props.probe.hello).toHaveBeenCalledTimes(1);
+    expect(props.onClaim).not.toHaveBeenCalled();
+  });
+
+  it("stops listening to the COM scanner when the screen goes", () => {
+    const com = comScanner();
+    renderPairing({ comScans: com.source });
+    expect(com.listening()).toBe(1);
+    cleanup();
+    expect(com.listening()).toBe(0);
+  });
+
+  it("opens the scanner settings from the scan form, with a 64 px button, and keeps the typed code", () => {
+    const onScannerSetup = vi.fn();
+    renderPairing({ onScannerSetup });
+    const button = screen.getByRole("button", { name: "Настройки сканера" });
+    expect(button.style.height).toBe("var(--control-floor)");
+    fireEvent.click(button);
+    expect(onScannerSetup).toHaveBeenCalledTimes(1);
+    // Typing the code stays open next to it.
+    expect(screen.getByRole("button", { name: "Ввести адрес и код вручную" })).toBeTruthy();
+  });
+
+  it("makes every button of the screen a 64 px floor control", () => {
+    renderPairing({ onScannerSetup: vi.fn() });
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.style.height, button.textContent ?? "").toBe("var(--control-floor)");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.style.height, button.textContent ?? "").toBe("var(--control-floor)");
+    }
+  });
+
+  it("offers no scanner settings where the app gives none", () => {
+    renderPairing();
+    expect(screen.queryByRole("button", { name: "Настройки сканера" })).toBeNull();
   });
 });
