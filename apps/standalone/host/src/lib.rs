@@ -15,6 +15,7 @@ pub mod inn;
 pub mod install;
 #[cfg(windows)]
 pub mod install_windows;
+pub mod license;
 pub mod logging;
 pub mod network;
 pub mod network_profile;
