@@ -17,6 +17,7 @@ pub mod printer;
 pub mod scanner;
 pub mod secret_store;
 pub mod tls;
+pub mod update;
 pub mod window_policy;
 
 use std::path::Path;

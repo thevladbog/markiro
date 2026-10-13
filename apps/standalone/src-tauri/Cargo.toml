@@ -35,20 +35,31 @@ tokio = { version = "=1.53.1", features = ["sync", "macros", "time"] }
 # Win32_Storage_Xps: StartDocW and DOCINFOW of driver printing (printer/driver.rs).
 # Win32_System_Power with Win32_System_Threading: set_system_awake
 # (power/windows.rs; PowerCreateRequest takes a REASON_CONTEXT).
+# Win32_Storage_FileSystem: GetLogicalDrives and GetDriveTypeW, the removable
+# drives an update is looked for on (update/package.rs). Win32_UI_Shell with
+# Win32_System_Registry: ShellExecuteExW with the "runas" verb
+# (update/launch.rs; SHELLEXECUTEINFOW holds an HKEY, so windows-sys gates
+# the struct and the function on Win32_System_Registry).
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_Graphics_Printing",
   "Win32_Security",
   "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
   "Win32_Storage_Xps",
   "Win32_System_Power",
+  "Win32_System_Registry",
   "Win32_System_Threading",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]
 markiro-host = { path = "../host" }
+# The test keys of plan ЛЦ-1 for the shell's tests only; resolver 2 keeps
+# them out of the app's own build.
+markiro-proto = { path = "../proto", features = ["test-keys"] }
 tauri = { version = "2.11", features = ["test"] }
 tempfile = "3"
 tokio = { version = "=1.53.1", features = ["macros", "rt-multi-thread"] }
