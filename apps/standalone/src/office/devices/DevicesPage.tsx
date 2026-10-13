@@ -174,6 +174,10 @@ export function DevicesPage() {
       // What the device reports on every request since plan ОБН-1.
       key: "version",
       title: t("office.devices.table.version"),
+      // Wraps at «(при подключении)» rather than push «Доступ» and the
+      // actions out of a 1280-pixel window.
+      wrap: true,
+      minWidth: 110,
       render: (device) => deviceVersionText(device, t),
     },
     {
