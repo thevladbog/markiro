@@ -9,8 +9,9 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_rows, audit_trail, default_sheet_is, json as json_request, pallet_shift_body,
-    pallet_template, plan_shift, request, shift_setup, stock_sheet, with_device, Admin, ShiftSetup,
+    admin, audit_rows, audit_trail, default_sheet_is, empty, json as json_request,
+    pallet_shift_body, pallet_template, plan_shift, request, sheet_spec, shift_setup, stock_sheet,
+    with_device, Admin, ShiftSetup,
 };
 
 const DEFAULTS: &str = "/v1/office/template-defaults";
@@ -701,4 +702,89 @@ async fn the_sheet_default_statements_search_by_an_index() {
             "{name} does not use {index}: {steps:?}"
         );
     }
+}
+
+/// A station's new shift (the station needs the host to create one, and names
+/// no sheet) takes the sheet by the product, the category, the organization
+/// as the office's does, and its entry freezes that sheet: a later change of
+/// any default reaches neither the planned shift's sheet nor the open
+/// shift's snapshot.
+#[tokio::test]
+async fn a_station_shift_takes_the_products_sheet_and_its_entry_freezes_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let main = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let category = stock_sheet(&admin, "pallet-a4-landscape").await;
+    default_sheet_is(&admin, &main).await;
+    let (status, _) = put_over(
+        &admin,
+        json!({ "palletSheetCategories": [{ "chzProductGroupCode": 8, "sheetId": category }] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = admin
+        .app
+        .send(json_request(
+            with_device(request("PUT", "/v1/device/line"), &admin.key),
+            json!({ "lineId": setup.line }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, created) = admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/shifts"), &admin.key),
+            json!({
+                "requestId": "3d4e5f60-7182-4a93-8ba4-b5c6d7e8f9a0",
+                "productId": setup.product,
+                "boxTemplateId": setup.template,
+                "productionDate": "2026-10-09",
+                "palletsEnabled": true,
+                "palletTemplateId": pallet
+            }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    // The category's sheet, not the organization's.
+    let shift_path = format!("/v1/office/shifts/{}", created["id"].as_str().unwrap());
+    let (_, office) = admin.call("GET", &shift_path, None).await;
+    assert_eq!(office["palletSheetTemplateId"], json!(category));
+    // A default changed while the shift is planned does not reach it.
+    let (status, _) = put_over(&admin, json!({ "palletSheetCategories": [] })).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, office) = admin.call("GET", &shift_path, None).await;
+    assert_eq!(office["palletSheetTemplateId"], json!(category));
+    // The entry freezes the sheet the shift holds.
+    let enter = format!(
+        "/v1/device/shifts/{}/enter",
+        created["id"].as_str().unwrap()
+    );
+    let (status, entered) = admin
+        .app
+        .send(empty(with_device(request("POST", &enter), &admin.key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(
+        entered["snapshot"]["palletSheet"],
+        json!({
+            "id": category, "name": "pallet-a4-landscape", "revision": 1,
+            "spec": sheet_spec("pallet-a4-landscape")
+        })
+    );
+    // A product's sheet chosen after the entry changes nothing for this shift.
+    let own = stock_sheet(&admin, "pallet-a4-two-a5").await;
+    let (status, _) = update_product(
+        &admin,
+        &setup.product,
+        json!({ "defaultPalletSheetId": own }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, again) = admin
+        .app
+        .send(empty(with_device(request("POST", &enter), &admin.key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["snapshot"]["palletSheet"]["id"], json!(category));
 }
