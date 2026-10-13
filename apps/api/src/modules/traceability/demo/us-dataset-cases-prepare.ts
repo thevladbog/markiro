@@ -25,9 +25,10 @@ import { parseUsDatasetReceivingResult } from "./us-dataset-receiving-contract.j
 import { parseUsDatasetTransformationResult } from "./us-dataset-transformation-contract.js";
 import { lockUsDatasetTransformation } from "./us-dataset-transformation-locks.js";
 import {
-  verifyUsDatasetTransformation,
+  verifyUsDatasetTransformationOrigin,
   type UsDatasetTransformationStores,
 } from "./us-dataset-transformation-verify.js";
+import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
 
 export type UsDatasetCasesPrepared = Readonly<{
   input: UsDatasetCasesInput;
@@ -36,6 +37,7 @@ export type UsDatasetCasesPrepared = Readonly<{
   references: UsDatasetStageRow;
   receiving: UsDatasetStageRow;
   transformation: UsDatasetStageRow;
+  verifiedOrigin: UsDatasetVerifiedOrigin;
 }>;
 export type UsDatasetCasesPreparation =
   | Readonly<{ mode: "application" }>
@@ -147,7 +149,7 @@ export async function prepareUsDatasetCases(
     receiving: parseUsDatasetReceivingResult(receiving.receipt.result),
     transformation: parseUsDatasetTransformationResult(transformation.receipt.result),
   });
-  await verifyUsDatasetTransformation(
+  const verifiedOrigin = await verifyUsDatasetTransformationOrigin(
     tx,
     context,
     transformation.intent,
@@ -155,5 +157,5 @@ export async function prepareUsDatasetCases(
     stores,
     "replay",
   );
-  return { input, intent, cases, references, receiving, transformation };
+  return { input, intent, cases, references, receiving, transformation, verifiedOrigin };
 }

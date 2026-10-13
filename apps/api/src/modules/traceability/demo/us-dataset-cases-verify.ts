@@ -15,15 +15,22 @@ import {
 } from "./us-dataset-cases-contract.js";
 import { prepareUsDatasetCases } from "./us-dataset-cases-prepare.js";
 import { verifyUsDatasetCasesContent } from "./us-dataset-cases-verify-content.js";
+import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
 
 export async function verifyUsDatasetCases(
+  ...args: Parameters<typeof verifyUsDatasetCasesOrigin>
+): Promise<void> {
+  await verifyUsDatasetCasesOrigin(...args);
+}
+
+export async function verifyUsDatasetCasesOrigin(
   tx: UsDemoTransaction,
   context: UsDatasetContext,
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   mode: "fresh" | "replay",
   stores: UsDatasetTransformationStores,
-): Promise<void> {
+): Promise<UsDatasetVerifiedOrigin> {
   // Obtain only the installed identifier, then use the existing target guard before
   // touching any caller evidence (including getters). No separate pool read.
   const headers = schema.traceabilityDemoDatasets;
@@ -71,6 +78,7 @@ export async function verifyUsDatasetCases(
       },
       (code, cause) => datasetCasesError(code, intent.unitKey, cause),
     );
+    return prepared.verifiedOrigin;
   } catch (cause) {
     if (
       cause instanceof Error &&

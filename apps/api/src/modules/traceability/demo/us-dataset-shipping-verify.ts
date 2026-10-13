@@ -21,15 +21,25 @@ import {
 } from "./us-dataset-shipping-prepare.js";
 import { parseUsDatasetTransformationResult } from "./us-dataset-transformation-contract.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
+import {
+  ownUsDatasetShippingProjection,
+  type UsDatasetShippingProjection,
+} from "./us-dataset-shipping-projection.js";
 
 export async function verifyUsDatasetShipping(
+  ...args: Parameters<typeof verifyUsDatasetShippingProjection>
+): Promise<void> {
+  await verifyUsDatasetShippingProjection(...args);
+}
+
+export async function verifyUsDatasetShippingProjection(
   tx: UsDemoTransaction,
   context: UsDatasetContext,
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetShippingStores,
   mode: "fresh" | "replay",
-): Promise<void> {
+): Promise<UsDatasetShippingProjection> {
   const header = await stores.journal.readHeaderInTransaction(tx, context);
   if (!header) throw datasetShippingError("us_dataset_shipping_prerequisite_incomplete", "unknown");
   const intent = parseUsDatasetIntent(rawIntent),
@@ -92,4 +102,5 @@ export async function verifyUsDatasetShipping(
     stores,
     fail,
   );
+  return ownUsDatasetShippingProjection({ ...prepared.verifiedOrigin, shipping: result });
 }

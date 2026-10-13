@@ -20,6 +20,7 @@ import {
   parseUsDatasetReceivingResult,
   usDatasetReceivingLotIdentity,
   usDatasetReceivingRecordIds,
+  type UsDatasetReceivingResult,
 } from "./us-dataset-receiving-contract.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
 import { verifyUsDatasetReferences } from "./us-dataset-reference-verify.js";
@@ -34,12 +35,19 @@ export type UsDatasetReceivingStores = Readonly<{
 }>;
 /** Guarded caller owns the transaction. All locks are retained until its commit. */
 export async function verifyUsDatasetReceiving(
+  ...args: Parameters<typeof verifyUsDatasetReceivingResult>
+): Promise<void> {
+  await verifyUsDatasetReceivingResult(...args);
+}
+
+/** Returns only the schema-owned value that this exact native invocation checked. */
+export async function verifyUsDatasetReceivingResult(
   tx: UsDemoTransaction,
   context: UsDatasetContext,
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetReceivingStores,
-): Promise<void> {
+): Promise<UsDatasetReceivingResult> {
   const intent = parseUsDatasetIntent(rawIntent);
   const receipt = parseUsDemoReceipt(rawReceipt);
   const result = parseUsDatasetReceivingResult(receipt.result);
@@ -362,4 +370,5 @@ export async function verifyUsDatasetReceiving(
       throw mismatch(error);
     throw error;
   }
+  return result;
 }

@@ -34,9 +34,10 @@ import {
   prepareUsDatasetShipping,
   type UsDatasetShippingStores,
 } from "./us-dataset-shipping-prepare.js";
-import { verifyUsDatasetShipping } from "./us-dataset-shipping-verify.js";
+import { verifyUsDatasetShippingProjection } from "./us-dataset-shipping-verify.js";
 import { makeUsSixMonthRegularChain } from "./us-six-month-chains.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
+import type { UsDatasetShippingProjection } from "./us-dataset-shipping-projection.js";
 
 export class UsDatasetShippingSeedStore {
   private readonly stores: UsDatasetShippingStores;
@@ -53,17 +54,23 @@ export class UsDatasetShippingSeedStore {
       shipping: new UsShippingStore(db),
     };
   }
-  initialize(context: UsDatasetContext, index: number): Promise<UsDatasetShippingResult> {
-    return this.execute(context, index, true);
+  async initialize(context: UsDatasetContext, index: number): Promise<UsDatasetShippingResult> {
+    return (await this.execute(context, index, true)).shipping;
   }
-  verify(context: UsDatasetContext, index: number): Promise<UsDatasetShippingResult> {
+  async verify(context: UsDatasetContext, index: number): Promise<UsDatasetShippingResult> {
+    return (await this.execute(context, index, false)).shipping;
+  }
+  verifyTerminalProjection(
+    context: UsDatasetContext,
+    index: number,
+  ): Promise<UsDatasetShippingProjection> {
     return this.execute(context, index, false);
   }
   private async execute(
     context: UsDatasetContext,
     index: number,
     capture: boolean,
-  ): Promise<UsDatasetShippingResult> {
+  ): Promise<UsDatasetShippingProjection> {
     let unitKey = "unknown";
     try {
       const { journal } = this.stores;
@@ -130,6 +137,8 @@ export class UsDatasetShippingSeedStore {
       if (!stage || (!capture && !stage.receipt))
         throw datasetShippingError("us_dataset_shipping_prerequisite_incomplete", unitKey);
       let applied = false;
+      // Invocation-local only: a callback result cannot escape before COMMIT.
+      let projection: UsDatasetShippingProjection | undefined;
       const completed = await journal.runAtomicStage(
         context,
         header.id,
@@ -258,20 +267,22 @@ export class UsDatasetShippingSeedStore {
               resultDigest: canonicalExportDigest(result),
             };
           },
-          verify: (tx, checked, intent, receipt) =>
-            verifyUsDatasetShipping(
+          verify: async (tx, checked, intent, receipt) => {
+            projection = await verifyUsDatasetShippingProjection(
               tx,
               checked,
               intent,
               receipt,
               this.stores,
               applied ? "fresh" : "replay",
-            ),
+            );
+          },
         },
       );
       if (!completed.receipt)
         throw datasetShippingError("us_dataset_shipping_prerequisite_incomplete", unitKey);
-      return parseUsDatasetShippingResult(completed.receipt.result);
+      if (!projection) throw datasetShippingError("us_dataset_shipping_mismatch", unitKey);
+      return projection;
     } catch (error) {
       if (error instanceof Error && Object.isExtensible(error)) {
         try {

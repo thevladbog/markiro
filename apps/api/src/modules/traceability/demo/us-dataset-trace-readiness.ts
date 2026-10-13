@@ -4,8 +4,6 @@ import { z } from "zod";
 import { UsTraceStore } from "../trace/us-trace-store.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
-import { UsDatasetReceivingSeedStore } from "./us-dataset-receiving-seed.js";
-import { UsDatasetTransformationSeedStore } from "./us-dataset-transformation-seed.js";
 import { UsDatasetShippingSeedStore } from "./us-dataset-shipping-seed.js";
 import { UsDatasetSpecialSeedStore } from "./us-dataset-special-seed.js";
 import { UsDatasetCorrectedTransformationSeedStore } from "./us-dataset-corrected-transformation-seed.js";
@@ -85,12 +83,9 @@ export class UsDatasetTraceReadinessStore {
       });
     let expected: DatasetTraceExpectation;
     if (unit.kind === "regular") {
-      const shipping = await new UsDatasetShippingSeedStore(this.db).verify(context, unit.index);
-      const receiving = await new UsDatasetReceivingSeedStore(this.db).verify(context, unit.index);
-      const transformation = await new UsDatasetTransformationSeedStore(this.db).verify(
-        context,
-        unit.index,
-      );
+      const { shipping, receiving, transformation } = await new UsDatasetShippingSeedStore(
+        this.db,
+      ).verifyTerminalProjection(context, unit.index);
       expected = chainTraceExpectation(
         receiving.finalized.record,
         receiving.lots,

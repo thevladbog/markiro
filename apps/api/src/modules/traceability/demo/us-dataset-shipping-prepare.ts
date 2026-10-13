@@ -16,7 +16,7 @@ import {
   parseUsDatasetCasesResult,
   makeUsDatasetTransformationIdentity,
 } from "./us-dataset-cases-contract.js";
-import { verifyUsDatasetCases } from "./us-dataset-cases-verify.js";
+import { verifyUsDatasetCasesOrigin } from "./us-dataset-cases-verify.js";
 import {
   makeUsDatasetReferenceIdentity,
   parseUsDatasetReceivingResult,
@@ -37,6 +37,7 @@ import {
 } from "./us-dataset-shipping-contract.js";
 import { lockUsDatasetShipping } from "./us-dataset-shipping-locks.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
+import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
 
 export type UsDatasetShippingStores = UsDatasetTransformationStores &
   Readonly<{ shipping: UsShippingStore }>;
@@ -48,6 +49,7 @@ export type UsDatasetShippingPrepared = Readonly<{
   receiving: UsDatasetStageRow;
   transformation: UsDatasetStageRow;
   cases: UsDatasetStageRow;
+  verifiedOrigin: UsDatasetVerifiedOrigin;
 }>;
 
 export async function prepareUsDatasetShipping(
@@ -218,7 +220,19 @@ export async function prepareUsDatasetShipping(
     )
     .orderBy(asc(docs.id))
     .for("share");
-  await verifyUsDatasetCases(tx, context, cases.intent, cases.receipt, "replay", stores);
+  const verifiedOrigin = await verifyUsDatasetCasesOrigin(
+    tx,
+    context,
+    cases.intent,
+    cases.receipt,
+    "replay",
+    stores,
+  );
+  // These unit stages are retained FOR UPDATE above. Cases and Transformation
+  // independently check their full dependency identities (including revisions,
+  // intents and receipts); bind the returned checked values to these exact rows.
+  equal(verifiedOrigin.receiving, parseUsDatasetReceivingResult(receiving.receipt.result));
+  equal(verifiedOrigin.transformation, origin);
   if (phase === "application") {
     if (
       existing.some((doc) =>
@@ -237,5 +251,5 @@ export async function prepareUsDatasetShipping(
       remaining: input.chain.transformation.output.quantity,
     });
   }
-  return { input, intent, shipping, references, receiving, transformation, cases };
+  return { input, intent, shipping, references, receiving, transformation, cases, verifiedOrigin };
 }

@@ -15,7 +15,7 @@ import {
   parseUsDatasetReceivingResult,
 } from "./us-dataset-receiving-contract.js";
 import {
-  verifyUsDatasetReceiving,
+  verifyUsDatasetReceivingResult,
   type UsDatasetReceivingStores,
 } from "./us-dataset-receiving-verify.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
@@ -27,6 +27,7 @@ import {
 } from "./us-dataset-transformation-contract.js";
 import { lockUsDatasetTransformation } from "./us-dataset-transformation-locks.js";
 import { verifyUsDatasetShippingOriginStatus } from "./us-dataset-shipping-origin-status.js";
+import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
 
 export type UsDatasetTransformationStores = UsDatasetReceivingStores &
   Readonly<{ transformation: UsTransformationStore }>;
@@ -34,13 +35,19 @@ export type UsDatasetTransformationStores = UsDatasetReceivingStores &
 /** Internal fresh mode is only for newly private native writes in this transaction.
  * Replay must acquire both public roots before any inbound lot or catalogue lock. */
 export async function verifyUsDatasetTransformation(
+  ...args: Parameters<typeof verifyUsDatasetTransformationOrigin>
+): Promise<void> {
+  await verifyUsDatasetTransformationOrigin(...args);
+}
+
+export async function verifyUsDatasetTransformationOrigin(
   tx: UsDemoTransaction,
   context: UsDatasetContext,
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetTransformationStores,
   mode: "fresh" | "replay",
-): Promise<void> {
+): Promise<UsDatasetVerifiedOrigin> {
   const intent = parseUsDatasetIntent(rawIntent);
   const receipt = parseUsDemoReceipt(rawReceipt);
   const result = parseUsDatasetTransformationResult(receipt.result);
@@ -88,7 +95,13 @@ export async function verifyUsDatasetTransformation(
       receiving: upstream,
       transformation: mode === "replay" ? result : null,
     });
-    await verifyUsDatasetReceiving(tx, context, receiving.intent, receiving.receipt, stores);
+    const verifiedReceiving = await verifyUsDatasetReceivingResult(
+      tx,
+      context,
+      receiving.intent,
+      receiving.receipt,
+      stores,
+    );
     await verifyUsDatasetTransformationContent(
       tx,
       context,
@@ -101,6 +114,7 @@ export async function verifyUsDatasetTransformation(
         verifyUsDatasetShippingOriginStatus(tx, context, stores.journal, result, current),
       mismatch,
     );
+    return { receiving: verifiedReceiving, transformation: result };
   } catch (error) {
     if (
       error instanceof NotFoundException ||
