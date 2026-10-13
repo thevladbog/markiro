@@ -3,4 +3,5 @@
 //! trusts, and the gates of new shifts, seats and features. Only the host
 //! decides the state; devices read it (`GET /v1/device`).
 
+pub mod clock;
 pub mod state;
