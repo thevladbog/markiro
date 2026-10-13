@@ -3414,6 +3414,22 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
     expect(read({ ...sent, payloadDigest: "8c1f".repeat(16).slice(1) })).toBe(false);
   });
 
+  it("names the operator of a decision on a unit label record, as the host does", () => {
+    const record = (name: string) => fixture(`fact-unit-label-${name}.json`) as Row;
+    const read = (value: Row) => factRecordSchema.safeParse(value);
+    // A skipped check and a reprint's `prepared` are the operator's decisions.
+    for (const name of ["skipped", "reprint"]) {
+      expect(read(record(name)).success, name).toBe(true);
+      const answer = read({ ...record(name), operatorId: null });
+      expect(answer.success, name).toBe(false);
+      expect(answer.error?.issues.map((issue) => issue.path)).toStrictEqual([["operatorId"]]);
+    }
+    // Every other event may come without one (a restart's `delivery_unknown`).
+    for (const name of ["prepared", "sent", "verified", "unknown"]) {
+      expect(read({ ...record(name), operatorId: null }).success, name).toBe(true);
+    }
+  });
+
   it("keeps the unit label rules of the shared fixture, as the host does", () => {
     const rules = fixture("unit-label-rules.json") as {
       events: string[];

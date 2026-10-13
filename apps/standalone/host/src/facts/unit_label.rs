@@ -5,7 +5,9 @@
 //! duplicate, for a code this station accepted in this shift. The host keeps
 //! the events as sent (`unit_label_events`) and counts them in the shift's
 //! totals; it runs no state machine of its own (the station's is the
-//! domain's), so it checks every rule a row must keep and nothing more.
+//! domain's), so it checks every rule a row must keep, that a decision of
+//! the operator names the operator, and that a job keeps its code and its
+//! printed text, and nothing more.
 
 use markiro_proto::{receipt_codes, UnitLabelFact};
 use serde_json::Value;
@@ -16,15 +18,27 @@ use crate::error::ApiError;
 use crate::validate;
 
 /// An accepted scan of a code (`?1`) in a shift (`?2`) by a station (`?3`),
-/// found through `scans_code_hash` (a unit test pins the plan).
+/// found through `scans_code_hash` (a unit test pins the plan). Whatever
+/// became of the scan's code since: a scan displaced by an earlier one, or
+/// answered `conflict`, is still the scan its label was printed for (the
+/// label exists on the floor; a refusal for good would lose its trace),
+/// unlike the cloud, which quarantines such an event (`ownership_conflict`).
 const ACCEPTED_SCAN: &str = "SELECT 1 FROM scans WHERE code_hash = ?1 AND shift_id = ?2 \
      AND device_id = ?3 AND verdict = 'ok' LIMIT 1";
 
+/// What the shift knows of a job (`?1` the shift, `?2` the job) already:
+/// the code and the printed text's digest of one of its events, found
+/// through `unit_label_events_shift` (a unit test pins the plan).
+const JOB_SUBJECT: &str = "SELECT code_hash, payload_digest FROM unit_label_events \
+     WHERE shift_id = ?1 AND job_id = ?2 LIMIT 1";
+
 /// The event's own fields: the job a client UUID, the rules both sides hold
 /// (`UnitLabelFact::check`, every `CHECK` of `unit_label_events`), a device's
-/// instant. Each broken one is `invalid_record` on its field, never a
-/// database error, which a station would send again forever.
-fn check(fact: &UnitLabelFact) -> Result<(), Reject> {
+/// instant; then the record's operator, which a decision of the operator
+/// names (`UnitLabelFact::is_operator_decision`). Each broken one is
+/// `invalid_record` on its field, never a database error, which a station
+/// would send again forever.
+fn check(fact: &UnitLabelFact, operator_id: Option<&str>) -> Result<(), Reject> {
     if validate::client_uuid("data.jobId", &fact.job_id).is_err() {
         return Err(Reject::field("data.jobId"));
     }
@@ -32,6 +46,9 @@ fn check(fact: &UnitLabelFact) -> Result<(), Reject> {
         .map_err(|field| Reject::field(&format!("data.{field}")))?;
     if rules::device_instant(&fact.at).is_none() {
         return Err(Reject::field("data.at"));
+    }
+    if fact.is_operator_decision() && operator_id.is_none() {
+        return Err(Reject::field("operatorId"));
     }
     Ok(())
 }
@@ -43,7 +60,7 @@ pub async fn apply(
 ) -> Result<Applied, Failure> {
     let fact: UnitLabelFact =
         serde_json::from_value(data.clone()).map_err(|_| Reject::field("data"))?;
-    check(&fact)?;
+    check(&fact, context.operator_id)?;
     // `facts::admits` took the record only in a validation shift; one that
     // prints nothing has no label job.
     if !context.shift.prints_duplicate {
@@ -58,6 +75,19 @@ pub async fn apply(
         .map_err(ApiError::internal)?;
     if scanned.is_none() {
         return Err(Reject::new(receipt_codes::SUBJECT_UNKNOWN).into());
+    }
+    // A job prints one code with one text: an event of a job the shift
+    // knows names both as its first event did.
+    let known: Option<(String, String)> = sqlx::query_as(JOB_SUBJECT)
+        .bind(&context.shift.id)
+        .bind(&fact.job_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    if known.is_some_and(|(code_hash, payload_digest)| {
+        code_hash != fact.code_hash || payload_digest != fact.payload_digest
+    }) {
+        return Err(Reject::field("data.codeHash").into());
     }
     sqlx::query(
         "INSERT INTO unit_label_events (id, record_id, device_id, shift_id, operator_id, job_id, \
@@ -89,7 +119,7 @@ pub async fn apply(
 mod tests {
     use sqlx::Row;
 
-    use super::ACCEPTED_SCAN;
+    use super::{ACCEPTED_SCAN, JOB_SUBJECT};
 
     /// The accepted scan of a code by a station in a shift is found through
     /// `scans_code_hash`, never a scan of the journal.
@@ -110,6 +140,28 @@ mod tests {
         assert_eq!(
             plan,
             ["SEARCH scans USING INDEX scans_code_hash (code_hash=?)"],
+            "{plan:?}"
+        );
+    }
+
+    /// What the shift knows of a job is found through
+    /// `unit_label_events_shift`, never a scan of the table.
+    #[tokio::test]
+    async fn a_job_of_a_shift_is_found_by_its_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&dir.path().join("plan.db")).await.unwrap();
+        let plan: Vec<String> = sqlx::query(&format!("EXPLAIN QUERY PLAN {JOB_SUBJECT}"))
+            .bind("a")
+            .bind("b")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert_eq!(
+            plan,
+            ["SEARCH unit_label_events USING INDEX unit_label_events_shift (shift_id=? AND job_id=?)"],
             "{plan:?}"
         );
     }

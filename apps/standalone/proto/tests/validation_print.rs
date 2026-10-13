@@ -256,6 +256,41 @@ fn every_unit_label_fixture_reads_as_its_event() {
     assert_eq!(jobs.len(), 1, "the fixtures are one job's events");
 }
 
+/// A skipped check and a reprint's `prepared` are the operator's decisions
+/// (their record names the operator, as `isOperatorDecision` in
+/// `protocol.ts`); a first attempt's `prepared` and every other event are
+/// not.
+#[test]
+fn a_skipped_check_and_a_reprint_are_the_operators_decisions() {
+    let data = fixture("fact-unit-label-sent.json")["data"].clone();
+    let fact: UnitLabelFact = serde_json::from_value(data).unwrap();
+    for event in [
+        UnitLabelEvent::Prepared,
+        UnitLabelEvent::Sending,
+        UnitLabelEvent::Sent,
+        UnitLabelEvent::FailedBeforeSend,
+        UnitLabelEvent::DeliveryUnknown,
+        UnitLabelEvent::Verified,
+        UnitLabelEvent::VerificationRejected,
+        UnitLabelEvent::VerificationSkipped,
+    ] {
+        for attempt_no in [1, 2] {
+            let decision = event == UnitLabelEvent::VerificationSkipped
+                || (event == UnitLabelEvent::Prepared && attempt_no == 2);
+            let fact = UnitLabelFact {
+                event,
+                attempt_no,
+                ..fact.clone()
+            };
+            assert_eq!(
+                fact.is_operator_decision(),
+                decision,
+                "{event:?} {attempt_no}"
+            );
+        }
+    }
+}
+
 /// The names are the domain's (`productLabelEventSchema` kinds and its
 /// `ReprintReason`, `packages/domain/src/product-labels/contracts.ts`).
 #[test]

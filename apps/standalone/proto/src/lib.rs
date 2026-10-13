@@ -1798,10 +1798,13 @@ pub struct ShiftTotals {
 /// check was skipped, the reprints (attempts after a job's first), and the
 /// jobs not resolved yet: those whose last event is not `verified`,
 /// `verification_skipped`, or `sent` when the shift requires no check. A
-/// job's last event is its latest by `at`, then by `attemptNo`, then by its
-/// place in the domain's order of an attempt (`prepared`, `sending`, the
-/// print's outcome, a rejected check, a check that passed or was skipped),
-/// then by the host's id: an order the record's arrival does not change.
+/// job's last event is its latest by `attemptNo` (every event of an attempt
+/// precedes the next attempt's), then by its place in the domain's order of
+/// an attempt (`prepared`, `sending`, the print's outcome, a rejected check,
+/// a check that passed or was skipped), then by `at` only among events of
+/// the same place (the device's clock may step back), then by the station's
+/// record id and device: an order neither the record's arrival nor a copy of
+/// the database changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnitLabelTotals {
@@ -2511,7 +2514,10 @@ impl std::str::FromStr for ReprintReason {
 /// (`invalid`, `mismatch`) only. `payloadDigest` and `bytesDigest` are the
 /// domain's digests of the printed text and of the printer's bytes: the
 /// full code never travels in a fact. Which of these rules a record breaks
-/// is the host's to check.
+/// is the host's to check; so is the operator a decision names
+/// ([`UnitLabelFact::is_operator_decision`]) and the code and printed text
+/// a job keeps (an event of a known job with another `codeHash` or
+/// `payloadDigest` is `invalid_record` on `data.codeHash`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UnitLabelFact {
@@ -2527,8 +2533,9 @@ pub struct UnitLabelFact {
 }
 
 /// Whether `text` is a SHA-256 as the domain writes it: 64 lower-case hex
-/// digits.
-fn is_sha256_hex(text: &str) -> bool {
+/// digits (a code's `kmHash`, the digests of a unit label). The host's
+/// `facts::rules::is_code_hash` is this rule.
+pub fn is_sha256_hex(text: &str) -> bool {
     text.len() == 64
         && text
             .bytes()
@@ -2536,6 +2543,19 @@ fn is_sha256_hex(text: &str) -> bool {
 }
 
 impl UnitLabelFact {
+    /// Whether the event is the operator's decision, which names its
+    /// operator on the record (`FactRecord::operator_id`; the host refuses
+    /// one without, `invalid_record` on `operatorId`, as `factRecordSchema`
+    /// does): a skipped check, and the `prepared` event of a reprint (attempt
+    /// 2 and later), which carries its reason. Every other event may come
+    /// without one: the station's recovery after a restart writes
+    /// `delivery_unknown` with nobody signed in. The cloud requires an
+    /// operator on every event; the host keeps an event without one.
+    pub fn is_operator_decision(&self) -> bool {
+        self.event == UnitLabelEvent::VerificationSkipped
+            || (self.event == UnitLabelEvent::Prepared && self.attempt_no > 1)
+    }
+
     /// The rules of the event that serde does not hold, as the webview's
     /// `unitLabelFactSchema` and the `CHECK`s of the host's
     /// `unit_label_events` hold them: `codeHash`, `payloadDigest` and

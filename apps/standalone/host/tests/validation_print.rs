@@ -518,6 +518,94 @@ async fn a_planned_shift_changes_its_policy_and_an_active_one_keeps_it() {
     );
 }
 
+/// An edit refuses as a plan does: a box template that does not fit is named
+/// before a duplicate template that does not fit either.
+#[tokio::test]
+async fn an_edit_names_the_box_template_before_the_duplicate_template() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let duplicate = office_template(&admin, "product_duplicate", true, Value::Null).await;
+    let disabled_box = office_template(&admin, "box", false, Value::Null).await;
+    let disabled = office_template(&admin, "product_duplicate", false, Value::Null).await;
+    let shift = plan_shift(
+        &admin,
+        validation_body(&setup, Some(printing(&duplicate, "none"))),
+    )
+    .await;
+    let before = untouched(&admin).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({
+                "boxTemplateId": disabled_box,
+                "validationPrint": printing(&disabled, "none"),
+                "expectedRev": shift["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (StatusCode::BAD_REQUEST, field("boxTemplateId"))
+    );
+    assert_eq!(untouched(&admin).await, before);
+}
+
+/// `validationPrint: null` in an edit is read as left out, as `mode`,
+/// `lineId` and the other optional fields an edit keeps: the shift keeps its
+/// policy, alone it changes nothing, beside another field it stays.
+#[tokio::test]
+async fn an_edit_with_a_null_policy_keeps_the_shifts_policy() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let duplicate = office_template(&admin, "product_duplicate", true, Value::Null).await;
+    let shift = plan_shift(
+        &admin,
+        validation_body(&setup, Some(printing(&duplicate, "required"))),
+    )
+    .await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let before = untouched(&admin).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "validationPrint": null, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!((status, &same), (StatusCode::OK, &shift));
+    assert_eq!(untouched(&admin).await, before);
+    let (status, planned) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({
+                "validationPrint": null, "plannedQty": 12, "expectedRev": shift["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{planned}");
+    assert_eq!(planned["plannedQty"], 12);
+    assert_eq!(planned["validationPrint"], printing(&duplicate, "required"));
+    assert_eq!(
+        columns(&admin, &id).await,
+        (
+            "validation".to_owned(),
+            "duplicate_dm".to_owned(),
+            Some("required".to_owned()),
+            Some(duplicate.clone())
+        )
+    );
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update")
+            .await
+            .pop()
+            .unwrap()
+            .6["changed"],
+        json!(["plannedQty"])
+    );
+}
+
 /// A template a planned shift prints its duplicates with is not deleted
 /// (`template_in_use`, beside the box and pallet templates); once the shift
 /// is open its layout is in the snapshot and the template may go.
@@ -625,8 +713,8 @@ async fn a_shift_that_prints_is_entered_by_a_station_that_prints_and_freezes_its
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(again["snapshot"], entered["snapshot"]);
     assert_eq!(
-        serde_json::to_string(&again["snapshot"]).unwrap().len(),
-        stored.len()
+        serde_json::from_str::<Value>(&stored).unwrap(),
+        again["snapshot"]
     );
     let (status, refused) = enter(&admin, &admin.key, &shift, &["validation-v1"]).await;
     assert_eq!(

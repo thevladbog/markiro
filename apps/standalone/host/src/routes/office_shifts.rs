@@ -75,14 +75,16 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
                OR (e.event = 'sent' AND shifts.validation_print_verification = 'none')) \
       AND NOT EXISTS (SELECT 1 FROM unit_label_events later \
                       WHERE later.shift_id = e.shift_id AND later.job_id = e.job_id \
-                      AND (later.at, later.attempt_no, \
+                      AND (later.attempt_no, \
                            CASE later.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
                             WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
-                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, later.id) \
-                          > (e.at, e.attempt_no, \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, \
+                           later.at, later.record_id, later.device_id) \
+                          > (e.attempt_no, \
                            CASE e.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
                             WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
-                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, e.id))) \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, \
+                           e.at, e.record_id, e.device_id))) \
       AS labels_unresolved \
      FROM shifts";
 
@@ -599,7 +601,15 @@ pub async fn update_shift(
                     .await?;
                 }
             }
-            // A duplicate template that changes is checked; a kept one stays.
+            if line_id != current.line_id {
+                require_active_line(&mut tx, &line_id).await?;
+            }
+            if box_template_id != current.box_template_id {
+                let product = shifts::shift_product(&mut tx, &current.product_id).await?;
+                shifts::check_box_template(&mut tx, &box_template_id, product.group).await?;
+            }
+            // A duplicate template that changes is checked, after the box
+            // template as at planning; a kept one stays.
             if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
                 let kept = matches!(
                     &current_print,
@@ -609,13 +619,6 @@ pub async fn update_shift(
                     let product = shifts::shift_product(&mut tx, &current.product_id).await?;
                     shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
                 }
-            }
-            if line_id != current.line_id {
-                require_active_line(&mut tx, &line_id).await?;
-            }
-            if box_template_id != current.box_template_id {
-                let product = shifts::shift_product(&mut tx, &current.product_id).await?;
-                shifts::check_box_template(&mut tx, &box_template_id, product.group).await?;
             }
             if let Some(counterparty_id) = &counterparty_id {
                 if current.counterparty_id.as_ref() != Some(counterparty_id) {

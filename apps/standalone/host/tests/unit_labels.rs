@@ -172,8 +172,11 @@ async fn the_events_of_an_accepted_unit_are_kept_as_sent() {
     prepared["operatorId"] = json!(OPERATOR);
     let mut rejected_label = label(1, 1, "verification_rejected", &instant(4, 0));
     rejected_label["errorCode"] = json!("mismatch");
-    let mut reprint = label(1, 2, "prepared", &instant(5, 0));
-    reprint["reason"] = json!("damaged");
+    let mut reprint_label = label(1, 2, "prepared", &instant(5, 0));
+    reprint_label["reason"] = json!("damaged");
+    // A reprint is the operator's decision: it names who took it.
+    let mut reprint = fact(&record_id(6), "unit_label", &floor.shift, reprint_label);
+    reprint["operatorId"] = json!(OPERATOR);
     let batch = [
         prepared,
         fact(
@@ -189,7 +192,7 @@ async fn the_events_of_an_accepted_unit_are_kept_as_sent() {
             label(1, 1, "sent", &instant(3, 0)),
         ),
         fact(&record_id(5), "unit_label", &floor.shift, rejected_label),
-        fact(&record_id(6), "unit_label", &floor.shift, reprint),
+        reprint,
     ];
     let answered = receipts(&admin.app, &floor.key, &batch).await;
     assert_eq!(
@@ -262,7 +265,7 @@ async fn the_events_of_an_accepted_unit_are_kept_as_sent() {
             ),
             row(
                 6,
-                Value::Null,
+                json!(OPERATOR),
                 2,
                 "prepared",
                 json!("damaged"),
@@ -512,6 +515,237 @@ async fn an_event_is_taken_only_in_a_validation_shift_that_prints() {
     assert_eq!(event_count(&admin).await, 0);
 }
 
+/// A decision of the operator names the operator (the cloud requires
+/// `operatorId` on every event): a skipped check and a reprint's `prepared`
+/// without one are `invalid_record` on `operatorId`, and nothing is kept but
+/// the receipt. Every other event may come without one: the station's
+/// recovery after a restart writes `delivery_unknown` with nobody signed in.
+#[tokio::test]
+async fn an_operator_decision_names_its_operator() {
+    let (admin, _, floor) = printing_floor("required").await;
+    let scan = fact(
+        &record_id(1),
+        "scan",
+        &floor.shift,
+        checked_scan(1, &instant(1, 0)),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan]).await,
+        [accepted(&record_id(1))]
+    );
+    let mut reprint = label(1, 2, "prepared", &instant(9, 0));
+    reprint["reason"] = json!("lost");
+    let decisions = [label(1, 1, "verification_skipped", &instant(8, 0)), reprint];
+    let refused: Vec<Value> = decisions
+        .iter()
+        .zip(10..)
+        .map(|(data, n)| fact(&record_id(n), "unit_label", &floor.shift, data.clone()))
+        .collect();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        (10..=11)
+            .map(|n| rejected(Some(&record_id(n)), "invalid_record", Some("operatorId")))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(event_count(&admin).await, 0);
+    // Every other event, without an operator.
+    let mut unknown = label(1, 1, "delivery_unknown", &instant(4, 0));
+    unknown["errorCode"] = json!("interrupted");
+    let mut failed = label(1, 1, "failed_before_send", &instant(4, 0));
+    failed["errorCode"] = json!("printer_changed");
+    let mut rejected_check = label(1, 1, "verification_rejected", &instant(5, 0));
+    rejected_check["errorCode"] = json!("invalid");
+    let others = [
+        label(1, 1, "prepared", &instant(2, 0)),
+        label(1, 1, "sending", &instant(3, 0)),
+        label(1, 1, "sent", &instant(4, 0)),
+        unknown,
+        failed,
+        rejected_check,
+        label(1, 1, "verified", &instant(6, 0)),
+    ];
+    let taken: Vec<Value> = others
+        .iter()
+        .zip(20..)
+        .map(|(data, n)| fact(&record_id(n), "unit_label", &floor.shift, data.clone()))
+        .collect();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &taken).await,
+        (20..=26)
+            .map(|n| accepted(&record_id(n)))
+            .collect::<Vec<_>>()
+    );
+    // The decisions, with their operator.
+    let named: Vec<Value> = decisions
+        .iter()
+        .zip(30..)
+        .map(|(data, n)| {
+            let mut record = fact(&record_id(n), "unit_label", &floor.shift, data.clone());
+            record["operatorId"] = json!(OPERATOR);
+            record
+        })
+        .collect();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &named).await,
+        [accepted(&record_id(30)), accepted(&record_id(31))]
+    );
+    assert_eq!(event_count(&admin).await, 9);
+}
+
+/// A label printed for a scan stays traceable whatever became of the scan's
+/// code: the scan of station A displaced by an earlier scan in another shift
+/// still admits A's label, and so does a scan answered `conflict` (unlike the
+/// cloud, which quarantines it as `ownership_conflict`): the label exists on
+/// the floor, and a refusal for good would lose its trace.
+#[tokio::test]
+async fn a_label_of_a_displaced_or_conflicting_scan_is_taken() {
+    let (admin, setup, floor) = printing_floor("none").await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let body = printing_body(&admin, &setup, "none").await;
+    let colleague = open(&admin, &colleague_key, &setup.other_line, body).await;
+    // A scans code 1 at 10 s and code 2 at 1 s.
+    let ours = [
+        fact(
+            &record_id(1),
+            "scan",
+            &floor.shift,
+            checked_scan(1, &instant(10, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "scan",
+            &floor.shift,
+            checked_scan(2, &instant(1, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &ours).await,
+        [accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    // The colleague scans code 1 earlier (A's scan is displaced) and code 2
+    // later (its scan is answered `conflict`).
+    let theirs = [
+        fact(
+            &record_id(3),
+            "scan",
+            &colleague.shift,
+            checked_scan(1, &instant(5, 0)),
+        ),
+        fact(
+            &record_id(4),
+            "scan",
+            &colleague.shift,
+            checked_scan(2, &instant(3, 0)),
+        ),
+    ];
+    let answered = receipts(&admin.app, &colleague.key, &theirs).await;
+    assert_eq!(answered[0], accepted(&record_id(3)));
+    assert_eq!(answered[1]["outcome"], "conflict", "{answered:?}");
+    let owners: Vec<(String, String)> =
+        sqlx::query_as("SELECT code_hash, device_id FROM code_owners ORDER BY code_hash")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        owners,
+        [
+            (code_hash(1), colleague.station.clone()),
+            (code_hash(2), floor.station.clone())
+        ]
+    );
+    let displaced = [fact(
+        &record_id(10),
+        "unit_label",
+        &floor.shift,
+        label(1, 1, "sent", &instant(11, 0)),
+    )];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &displaced).await,
+        [accepted(&record_id(10))]
+    );
+    let mut losing = label(2, 1, "sent", &instant(4, 0));
+    losing["jobId"] = json!("3e7f4a9c-6b1d-4c3e-9a5f-8d0b1c2e3f4a");
+    let losing = [fact(&record_id(11), "unit_label", &colleague.shift, losing)];
+    assert_eq!(
+        receipts(&admin.app, &colleague.key, &losing).await,
+        [accepted(&record_id(11))]
+    );
+    assert_eq!(event_count(&admin).await, 2);
+}
+
+/// A job prints one code with one text: an event of a job the shift knows
+/// that names another code or another printed text's digest is
+/// `invalid_record` on `data.codeHash`, and nothing is kept but the receipt.
+/// The same record again gets its receipt; another record of the same event
+/// is taken (a check may be received twice), and so is another job of the
+/// other code.
+#[tokio::test]
+async fn a_job_keeps_its_code_and_its_text() {
+    let (admin, _, floor) = printing_floor("none").await;
+    let scans = [
+        fact(
+            &record_id(1),
+            "scan",
+            &floor.shift,
+            checked_scan(1, &instant(1, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "scan",
+            &floor.shift,
+            checked_scan(2, &instant(2, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &scans).await,
+        [accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    let first = fact(
+        &record_id(10),
+        "unit_label",
+        &floor.shift,
+        label(1, 1, "prepared", &instant(3, 0)),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, std::slice::from_ref(&first)).await,
+        [accepted(&record_id(10))]
+    );
+    let mut other_code = label(2, 1, "sending", &instant(4, 0));
+    other_code["payloadDigest"] = json!(code_hash(701));
+    let mut other_text = label(1, 1, "sending", &instant(4, 0));
+    other_text["payloadDigest"] = json!(code_hash(799));
+    let refused = [
+        fact(&record_id(11), "unit_label", &floor.shift, other_code),
+        fact(&record_id(12), "unit_label", &floor.shift, other_text),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        (11..=12)
+            .map(|n| rejected(Some(&record_id(n)), "invalid_record", Some("data.codeHash")))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(event_count(&admin).await, 1);
+    // The same record again; the same event in another record; another job.
+    let mut twice = first.clone();
+    twice["id"] = json!(record_id(13));
+    let mut another_job = label(2, 1, "prepared", &instant(4, 0));
+    another_job["jobId"] = json!("3e7f4a9c-6b1d-4c3e-9a5f-8d0b1c2e3f4a");
+    let batch = [
+        first,
+        twice,
+        fact(&record_id(14), "unit_label", &floor.shift, another_job),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        [
+            accepted(&record_id(10)),
+            accepted(&record_id(13)),
+            accepted(&record_id(14))
+        ]
+    );
+    assert_eq!(event_count(&admin).await, 3);
+}
+
 /// Every rule a row of `unit_label_events` keeps is checked before the
 /// write, so a record that breaks one is `invalid_record` on its field (the
 /// batch answers 200), never a database error that the station would send
@@ -580,7 +814,10 @@ async fn every_rule_of_a_row_is_a_refused_field_never_a_database_error() {
     }
     let mut taken = 0;
     for (n, (data, field)) in (100..).zip(cases) {
-        let record = fact(&record_id(n), "unit_label", &floor.shift, data.clone());
+        let mut record = fact(&record_id(n), "unit_label", &floor.shift, data.clone());
+        // The operator of a decision (a reprint, a skipped check) is the
+        // envelope's rule, its own test's.
+        record["operatorId"] = json!(OPERATOR);
         let (status, body) = support::app::send_facts(&admin.app, &floor.key, &[record]).await;
         assert_eq!(status, StatusCode::OK, "{data}: {body}");
         let expected = match field.as_str() {
@@ -701,12 +938,14 @@ async fn send_events(
         .iter()
         .zip(first + 100..)
         .map(|((job, n, attempt, kind, second), id)| {
-            fact(
+            let mut record = fact(
                 &record_id(id),
                 "unit_label",
                 &floor.shift,
                 job_event(*job, *n, *attempt, kind, &instant(100 + second, 0)),
-            )
+            );
+            record["operatorId"] = json!(OPERATOR);
+            record
         })
         .collect();
     let answered = receipts(&admin.app, &floor.key, &records).await;
@@ -722,10 +961,14 @@ async fn send_events(
 /// attempts verified, jobs whose check was skipped, reprints (attempts after
 /// the first), and the jobs not resolved yet — those whose last event is not
 /// `verified`, `verification_skipped`, or `sent` when no check is required.
-/// The last event of a job is the latest by its `at`, then by attempt, then
-/// by its place in the domain's order (a check after the print), whatever
-/// order the records came in. A shift that prints nothing has no such
-/// totals; a planned shift that prints has zeros.
+/// Each count takes an attempt (a job, for a skipped check) once, whatever
+/// was received twice. The last event of a job is its latest attempt's, by
+/// its place in the domain's order of an attempt (a check after the print),
+/// then by its `at` among events of the same place (a check rejected twice),
+/// then by the station's record id: never by `at` across places or attempts
+/// (a device clock may step back), nor by the order the records came in. A
+/// shift that prints nothing has no such totals; a planned shift that prints
+/// has zeros.
 #[tokio::test]
 async fn the_totals_of_a_shift_that_prints_count_its_labels() {
     let (admin, setup, floor) = printing_floor("required").await;
@@ -743,22 +986,28 @@ async fn the_totals_of_a_shift_that_prints_count_its_labels() {
             (1, 1, 1, "sending", 2),
             (1, 1, 1, "sent", 3),
             (1, 1, 1, "verified", 4),
-            // The same attempt's `sent` received twice counts once.
+            // The same attempt's `sent` and `verified` received twice count
+            // once.
             (1, 1, 1, "sent", 3),
-            // 2: the check skipped.
+            (1, 1, 1, "verified", 4),
+            // 2: the check skipped, received twice.
             (2, 2, 1, "prepared", 1),
             (2, 2, 1, "sending", 2),
             (2, 2, 1, "sent", 3),
             (2, 2, 1, "verification_skipped", 4),
-            // 3: the print's outcome unknown.
+            (2, 2, 1, "verification_skipped", 4),
+            // 3: the print's outcome unknown, received twice: one job.
             (3, 3, 1, "prepared", 1),
             (3, 3, 1, "sending", 2),
             (3, 3, 1, "delivery_unknown", 3),
-            // 4: rejected, printed again, sent and waiting for its check.
+            (3, 3, 1, "delivery_unknown", 3),
+            // 4: rejected, printed again (the reprint received twice), sent
+            // and waiting for its check.
             (4, 4, 1, "prepared", 1),
             (4, 4, 1, "sending", 2),
             (4, 4, 1, "sent", 3),
             (4, 4, 1, "verification_rejected", 4),
+            (4, 4, 2, "prepared", 5),
             (4, 4, 2, "prepared", 5),
             (4, 4, 2, "sending", 6),
             (4, 4, 2, "sent", 7),
@@ -771,18 +1020,54 @@ async fn the_totals_of_a_shift_that_prints_count_its_labels() {
             (6, 6, 1, "sent", 3),
             (6, 6, 1, "verified", 4),
             (6, 6, 1, "verification_rejected", 4),
-            // 7: its `sending` received after its check: by `at` the check
-            // is the last event.
+            // 7: its `sending` received after its check.
             (7, 7, 1, "prepared", 1),
             (7, 7, 1, "sent", 3),
             (7, 7, 1, "verified", 4),
             (7, 7, 1, "sending", 2),
+            // 8: the clock stepped back before the check: verified at 5 s
+            // after the label was sent at 6 s, the check is still the last
+            // event.
+            (8, 8, 1, "prepared", 1),
+            (8, 8, 1, "sending", 2),
+            (8, 8, 1, "sent", 6),
+            (8, 8, 1, "verified", 5),
+            // 9: three attempts, two verified (the label lost after each),
+            // the third sent and waiting for its check.
+            (9, 9, 1, "prepared", 1),
+            (9, 9, 1, "sending", 2),
+            (9, 9, 1, "sent", 3),
+            (9, 9, 1, "verified", 4),
+            (9, 9, 2, "prepared", 5),
+            (9, 9, 2, "sending", 6),
+            (9, 9, 2, "sent", 7),
+            (9, 9, 2, "verified", 8),
+            (9, 9, 3, "prepared", 9),
+            (9, 9, 3, "sending", 10),
+            (9, 9, 3, "sent", 11),
+            // 10: rejected at 20 s, then printed again and verified at 10-13 s
+            // (the clock stepped back): the second attempt's check is last.
+            (10, 10, 1, "prepared", 1),
+            (10, 10, 1, "sending", 2),
+            (10, 10, 1, "sent", 3),
+            (10, 10, 1, "verification_rejected", 20),
+            (10, 10, 2, "prepared", 10),
+            (10, 10, 2, "sending", 11),
+            (10, 10, 2, "sent", 12),
+            (10, 10, 2, "verified", 13),
+            // 11: verified at 20 s, then reprinted at 10 s (the clock stepped
+            // back): the reprint is last, unresolved.
+            (11, 11, 1, "prepared", 1),
+            (11, 11, 1, "sending", 2),
+            (11, 11, 1, "sent", 3),
+            (11, 11, 1, "verified", 20),
+            (11, 11, 2, "prepared", 10),
         ],
     )
     .await;
     assert_eq!(
         totals(&admin, &floor.shift).await,
-        json!({ "sent": 6, "verified": 3, "skipped": 1, "unresolved": 3, "reprints": 1 })
+        json!({ "sent": 13, "verified": 8, "skipped": 1, "unresolved": 5, "reprints": 5 })
     );
 
     // Without a required check a sent label is resolved.
@@ -794,21 +1079,41 @@ async fn the_totals_of_a_shift_that_prints_count_its_labels() {
         &unchecked,
         1000,
         &[
-            (11, 11, 1, "prepared", 1),
-            (11, 11, 1, "sending", 2),
-            (11, 11, 1, "sent", 3),
-            (12, 12, 1, "prepared", 1),
-            (12, 12, 1, "sending", 2),
-            (12, 12, 1, "delivery_unknown", 3),
-            (12, 12, 1, "verified", 4),
-            (13, 13, 1, "prepared", 1),
-            (13, 13, 1, "failed_before_send", 2),
+            (21, 21, 1, "prepared", 1),
+            (21, 21, 1, "sending", 2),
+            (21, 21, 1, "sent", 3),
+            (22, 22, 1, "prepared", 1),
+            (22, 22, 1, "sending", 2),
+            (22, 22, 1, "delivery_unknown", 3),
+            (22, 22, 1, "verified", 4),
+            (23, 23, 1, "prepared", 1),
+            (23, 23, 1, "failed_before_send", 2),
+            // 24: the print's two outcomes, the later one (sent) received
+            // first: by `at`, not by record, it is the last event.
+            (24, 24, 1, "prepared", 1),
+            (24, 24, 1, "sending", 2),
+            (24, 24, 1, "sent", 4),
+            (24, 24, 1, "delivery_unknown", 3),
+            // 25: the clock stepped back through the print: prepared at 9 s,
+            // sending at 8 s, sent at 7 s, and the print is still last.
+            (25, 25, 1, "prepared", 9),
+            (25, 25, 1, "sending", 8),
+            (25, 25, 1, "sent", 7),
+            // 26: rejected at 20 s, printed again and sent at 10-12 s: the
+            // second attempt's print is last.
+            (26, 26, 1, "prepared", 1),
+            (26, 26, 1, "sending", 2),
+            (26, 26, 1, "sent", 3),
+            (26, 26, 1, "verification_rejected", 20),
+            (26, 26, 2, "prepared", 10),
+            (26, 26, 2, "sending", 11),
+            (26, 26, 2, "sent", 12),
         ],
     )
     .await;
     assert_eq!(
         totals(&admin, &unchecked.shift).await,
-        json!({ "sent": 1, "verified": 1, "skipped": 0, "unresolved": 1, "reprints": 0 })
+        json!({ "sent": 5, "verified": 1, "skipped": 0, "unresolved": 1, "reprints": 1 })
     );
 
     // A planned shift that prints: zeros; shifts that print nothing: none.

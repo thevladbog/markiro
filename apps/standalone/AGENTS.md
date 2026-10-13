@@ -2931,7 +2931,8 @@ before either pallet field; then the pallet fields' own rules
 `palletTemplateId`, as before plan РЕЖ; then the status, so an active shift
 sent another mode, or pallets (with a template) its validation mode cannot
 have, is `conflict` on `shift_status`, not `validation_failed`; then, for a
-planned shift, the line, templates and counterparty that change. A station's
+planned shift, the line, templates and counterparty that change (the box
+template before the duplicate template, as at planning). A station's
 own shift (`DeviceShiftCreate`) is created as aggregation, planned until a
 station enters it; while it is planned the office may still edit it like any
 planned shift, its mode included. A validation shift may print a Data Matrix
@@ -2947,8 +2948,8 @@ send `{ "mode": "none" }` in the same edit) and a template of the
 (`shifts::check_duplicate_template`, `validation_failed` on
 `validationPrint.templateId`, after the box template; on an edit only when the
 template changes, a kept one stays like the box template). Left out or `null`,
-a plan has none and an edit keeps the shift's (no helper refuses `null`, as
-for the other optional fields). An edit writes the mode and the three policy
+a plan has none and an edit keeps the shift's (no helper refuses `null`; an
+edit reads it as left out, as it reads `mode` and `lineId`; a test pins it). An edit writes the mode and the three policy
 columns in one `UPDATE`, which the triggers of `0021` check together; an
 active shift's other policy is `conflict` on `shift_status`, the same policy
 again no change. `shift.create` names `validationPrint` only when it prints,
@@ -3424,7 +3425,22 @@ task B3) takes it only in a validation shift that prints (`invalid_record` on
 `validationPrint` in a validation shift that prints nothing), and only for a
 code this station accepted in this shift (`subject_unknown`, a receipt code
 of protocol 5, otherwise; found through `scans_code_hash`, its plan pinned).
-Every rule a row of `unit_label_events` keeps is checked before the write, so
+An accepted scan stays the label's subject whatever became of its code: a
+scan displaced since by an earlier one, or one answered `conflict`, still
+admits its label. This differs from the cloud on purpose (it quarantines such
+an event as `ownership_conflict`): the label exists on the floor, and a final
+refusal would lose its trace. A decision of the operator names the operator
+(`UnitLabelFact::is_operator_decision`): a `verification_skipped` and a
+reprint's `prepared` (attempt 2 and later) without the record's `operatorId`
+are `invalid_record` on `operatorId`, and `factRecordSchema` refuses to form
+such a record on the station. Other events may come without one, because the
+station's recovery after a restart writes `delivery_unknown` with nobody signed
+in. This also differs from the cloud, which requires `operatorId` on every
+event. A job prints one code with one text: an event whose job the shift
+already knows (`unit_label_events_shift`) with another `codeHash` or
+`payloadDigest` is `invalid_record` on `data.codeHash`. An exact replay keeps
+its receipt, and the same event in a new record is taken (a check may arrive
+twice). Every rule a row of `unit_label_events` keeps is checked before the write, so
 a broken record is `invalid_record` on its field and never a database error
 (a 500 would be retried forever and block the station's queue): `jobId` a
 client UUID, `at` a device instant, and `UnitLabelFact::check` in proto (the
@@ -3439,12 +3455,17 @@ A printing shift's card counts them (`ShiftTotals.unitLabels`): attempts
 `sent` and `verified` (each attempt once), jobs whose check was `skipped`,
 `reprints` (attempts after the first) and `unresolved` jobs, whose last event
 is not `verified`, `verification_skipped`, or `sent` when the shift requires
-no check. A job's last event is its latest by `at`, then `attemptNo`, then its
-place in the domain's order of an attempt (`prepared`, `sending`, the print's
-outcome, a rejected check, a check that passed or was skipped), then the
-host's id — not the order the records arrived in (rowids do not survive
-`VACUUM INTO` reliably). Every read runs on `unit_label_events_shift`
-(`routes/office_shifts.rs`, its plan pinned).
+no check. A job's last event is ordered by `attemptNo` first, because in the
+domain every event of attempt n precedes attempt n+1. Next comes its place in
+the domain's order of an attempt (`prepared`, `sending`, the print's outcome,
+a rejected check, a check that passed or was skipped). `at` (the device's
+clock, which may step back) only breaks ties of the same place: a check
+rejected twice, or two outcomes of one print. The station's record id, then
+its device, settle an exact tie. The order is not the order the records
+arrived in, and not the host's random `id` or a rowid (neither survives
+`VACUUM INTO` reliably). Each count takes an attempt once (a job, for a
+skipped check), whatever arrived twice. Every read runs on
+`unit_label_events_shift` (`routes/office_shifts.rs`, its plan pinned).
 
 A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
 an `invalid` one keeps no code, only what it looked like (`rawKind`) and its

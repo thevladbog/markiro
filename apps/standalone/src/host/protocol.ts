@@ -1951,6 +1951,19 @@ export const unitLabelFactSchema = z
   });
 export type UnitLabelFact = z.infer<typeof unitLabelFactSchema>;
 
+/**
+ * Whether a unit label event is the operator's decision
+ * (`UnitLabelFact::is_operator_decision`): a skipped check, and the `prepared`
+ * event of a reprint. Its record names the operator (`factRecordSchema`; the
+ * host refuses one without, `invalid_record` on `operatorId`). Every other
+ * event may come without one: the recovery after a restart writes
+ * `delivery_unknown` with nobody signed in. The cloud requires an operator on
+ * every event.
+ */
+export function isOperatorDecision(fact: UnitLabelFact): boolean {
+  return fact.event === "verification_skipped" || (fact.event === "prepared" && fact.attemptNo > 1);
+}
+
 /** The envelope of every record: its own id, the shift and the operator signed in, or `null`. */
 const factHead = { id: z.uuid(), shiftId: z.uuid(), operatorId: z.uuid().nullable() };
 
@@ -1974,7 +1987,18 @@ export const factRecordSchema = z.discriminatedUnion("kind", [
   z
     .object({ ...factHead, kind: z.literal("pallet_exception"), data: palletExceptionFactSchema })
     .strict(),
-  z.object({ ...factHead, kind: z.literal("unit_label"), data: unitLabelFactSchema }).strict(),
+  z
+    .object({ ...factHead, kind: z.literal("unit_label"), data: unitLabelFactSchema })
+    .strict()
+    .superRefine((record, context) => {
+      if (record.operatorId === null && isOperatorDecision(record.data)) {
+        context.addIssue({
+          code: "custom",
+          path: ["operatorId"],
+          message: "a skipped check and a reprint name their operator",
+        });
+      }
+    }),
 ]);
 export type FactRecord = z.infer<typeof factRecordSchema>;
 export type FactKind = FactRecord["kind"];
