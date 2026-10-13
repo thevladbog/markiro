@@ -75,6 +75,35 @@ function assertOwnership(all) {
   assert.deepEqual(checkWorkflows(all, "codex/us-mvp"), [], "operational release locks preserved");
 }
 
+test("terminal Shipping projection requires the exact four-suite owner and missing-suite denial", () => {
+  const expectedCommand =
+    "corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-trace-readiness.e2e.test.ts test/us-dataset-trace-readiness-stage.e2e.test.ts test/us-dataset-trace-readiness-seed.e2e.test.ts test/us-dataset-shipping-projection.e2e.test.ts --maxWorkers=1";
+  const projection = "test/us-dataset-shipping-projection.e2e.test.ts";
+  assert.equal(workflow.jobs[traceReadinessJobId].steps.at(-1).run, expectedCommand);
+  assert.deepEqual(traceReadinessFiles, [
+    "test/us-dataset-trace-readiness.e2e.test.ts",
+    "test/us-dataset-trace-readiness-stage.e2e.test.ts",
+    "test/us-dataset-trace-readiness-seed.e2e.test.ts",
+    "test/us-dataset-shipping-projection.e2e.test.ts",
+  ]);
+  assert.equal(traceReadinessCommand, expectedCommand);
+  const missing = readWorkflows();
+  missing["us-development.yml"].jobs[traceReadinessJobId].steps.at(-1).run =
+    expectedCommand.replace(` ${projection}`, "");
+  assert.throws(
+    () => assertOwnership(missing),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      error.message.includes(`${projection} has exactly one explicit native selection`),
+  );
+  const changed = missing["us-development.yml"];
+  assert.equal(hasExactTraceReadinessOwner(changed), false);
+  assert.deepEqual(withoutTraceReadinessOwner(changed), changed);
+  const missingBytes = source.replace(` ${projection}`, "");
+  assert.deepEqual(load(missingBytes), changed);
+  assert.equal(withoutTraceReadinessOwnerBytes(missingBytes), missingBytes);
+});
+
 test("Trace/Readiness native suites have a dedicated serial CI job after isolation", () => {
   const job = workflow.jobs.dataset_trace_readiness;
   assert.ok(job, "Trace/Readiness dedicated native job is present");
@@ -82,7 +111,7 @@ test("Trace/Readiness native suites have a dedicated serial CI job after isolati
   const owner = job.steps.at(-1);
   assert.equal(
     owner.run,
-    "corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-trace-readiness.e2e.test.ts test/us-dataset-trace-readiness-stage.e2e.test.ts test/us-dataset-trace-readiness-seed.e2e.test.ts --maxWorkers=1",
+    "corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-trace-readiness.e2e.test.ts test/us-dataset-trace-readiness-stage.e2e.test.ts test/us-dataset-trace-readiness-seed.e2e.test.ts test/us-dataset-shipping-projection.e2e.test.ts --maxWorkers=1",
   );
   assertOwnership(readWorkflows());
 });

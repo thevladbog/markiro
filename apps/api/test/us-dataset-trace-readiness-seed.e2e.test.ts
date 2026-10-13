@@ -39,6 +39,7 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
         const { f, context } = h;
         const coordinator = store();
         const started = performance.now();
+        console.info("Complete durable Trace/Readiness phase", { phase: "fault_setup_started" });
         const remove = await specialFault(
           f,
           "traceability_demo_dataset_stages",
@@ -48,8 +49,16 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
         );
         let failedMs: number;
         try {
+          console.info("Complete durable Trace/Readiness phase", {
+            phase: "faulted_generation_started",
+            totalMs: performance.now() - started,
+          });
           const failed = await outcome(coordinator.initialize(context));
           failedMs = performance.now() - started;
+          console.info("Complete durable Trace/Readiness phase", {
+            phase: "faulted_generation_returned",
+            totalMs: failedMs,
+          });
           expect(failed.error).toMatchObject({
             cause: { code: "40001", message: "special_sql_fault" },
           });
@@ -67,6 +76,10 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
         } finally {
           await remove();
         }
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "partial_progress_verification_started",
+          totalMs: performance.now() - started,
+        });
         const stopped = await f.snapshot();
         await expect(coordinator.verify(context)).rejects.toMatchObject({
           message: "us_dataset_trace_readiness_stage_incomplete",
@@ -81,8 +94,18 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
           )
         ).rows;
         const resumeStarted = performance.now();
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "all_units_resume_started",
+          totalMs: resumeStarted - started,
+        });
         const result = await coordinator.initialize(context);
         const resumeMs = performance.now() - resumeStarted;
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "all_units_resume_returned",
+          phaseMs: resumeMs,
+          totalMs: performance.now() - started,
+          units: result.units.length,
+        });
         expect(
           (
             await f.pool.query(
@@ -112,6 +135,11 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
             result_digest: unit.resultDigest,
           })),
         );
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "boundary_unit_verification_started",
+          totalMs: performance.now() - started,
+          completedStages: completed.rows.length,
+        });
         for (const unit of [
           { kind: "regular", index: 0 },
           { kind: "regular", index: 259 },
@@ -123,6 +151,10 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
             canonicalExportDigest(checked),
           );
         }
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "boundary_unit_verification_completed",
+          totalMs: performance.now() - started,
+        });
         expect(
           (
             await f.pool.query(
@@ -154,18 +186,44 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
         ])
           expect(Object.isFrozen(value)).toBe(true);
         expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(256 * 1024);
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "full_table_baseline_started",
+          totalMs: performance.now() - started,
+        });
         const before = await f.snapshot();
         const verifyStarted = performance.now();
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "completed_verification_started",
+          totalMs: verifyStarted - started,
+        });
         expect(await coordinator.verify(context)).toEqual(result);
         const verifyMs = performance.now() - verifyStarted;
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "completed_verification_returned",
+          phaseMs: verifyMs,
+          totalMs: performance.now() - started,
+        });
         expect(await f.snapshot()).toEqual(before);
         const replayStarted = performance.now();
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "completed_replay_started",
+          totalMs: replayStarted - started,
+        });
         const replay = await coordinator.initialize(context);
         const replayMs = performance.now() - replayStarted;
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "completed_replay_returned",
+          phaseMs: replayMs,
+          totalMs: performance.now() - started,
+        });
         expect(replay).toEqual(result);
         expect(replay).not.toBe(result);
         expect(replay.units).not.toBe(result.units);
         expect(await f.snapshot()).toEqual(before);
+        console.info("Complete durable Trace/Readiness phase", {
+          phase: "full_table_replay_no_write_completed",
+          totalMs: performance.now() - started,
+        });
         console.info("Complete durable Trace/Readiness measurements", {
           failedGenerationMs: failedMs,
           resumeMs,

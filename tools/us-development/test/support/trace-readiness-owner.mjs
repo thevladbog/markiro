@@ -6,6 +6,7 @@ export const traceReadinessFiles = [
   "test/us-dataset-trace-readiness.e2e.test.ts",
   "test/us-dataset-trace-readiness-stage.e2e.test.ts",
   "test/us-dataset-trace-readiness-seed.e2e.test.ts",
+  "test/us-dataset-shipping-projection.e2e.test.ts",
 ];
 export const traceReadinessFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
@@ -98,7 +99,7 @@ export const traceReadinessJobBlock = `
       - name: Verify dataset Trace/Readiness native proof, durable stage and full composition
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-trace-readiness.e2e.test.ts test/us-dataset-trace-readiness-stage.e2e.test.ts test/us-dataset-trace-readiness-seed.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-trace-readiness.e2e.test.ts test/us-dataset-trace-readiness-stage.e2e.test.ts test/us-dataset-trace-readiness-seed.e2e.test.ts test/us-dataset-shipping-projection.e2e.test.ts --maxWorkers=1
 `;
 
 export function hasExactTraceReadinessOwner(workflow) {
