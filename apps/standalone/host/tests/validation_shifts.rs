@@ -8,9 +8,9 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    accepted, admin, box_closed, box_exception, box_id, code, code_hash, fact, fact_rows, instant,
-    issue_block, ok_scan, open_floor, open_validation_floor, pair_device, receipts, record_id,
-    rejected, shift_closed, shift_setup, Admin, Floor, ShiftSetup,
+    accepted, admin, box_closed, box_exception, box_id, code, code_hash, empty, fact, fact_rows,
+    instant, issue_block, ok_scan, open_floor, open_validation_floor, pair_device, receipts,
+    record_id, rejected, request, shift_closed, shift_setup, with_device, Admin, Floor, ShiftSetup,
 };
 
 /// The `data` of an accepted scan of code `n` in a validation shift at `at`:
@@ -86,6 +86,17 @@ async fn conflicts(admin: &Admin) -> Vec<Value> {
     rows.into_iter()
         .map(|row| json!([row.0, row.1, row.2]))
         .collect()
+}
+
+/// `GET /v1/device/codes/{hash}` of code `n`, asked with `key`.
+async fn check_code(admin: &Admin, key: &str, n: u32) -> (StatusCode, Value) {
+    admin
+        .app
+        .send(empty(with_device(
+            request("GET", &format!("/v1/device/codes/{}", code_hash(n))),
+            key,
+        )))
+        .await
 }
 
 /// `GET /v1/office/shifts/{id}` as the administrator.
@@ -201,8 +212,9 @@ async fn an_accepted_scan_names_a_box_exactly_in_an_aggregation_shift() {
 }
 
 /// (б): a code a validation shift accepted is not free for an aggregation
-/// shift: a later scan of it at another station is `conflict` with the
-/// validation scan as the winner, and puts nothing into its box.
+/// shift: the station's check of the code (the host duplicate of Р8) names
+/// the validation scan, a later scan of it at another station is `conflict`
+/// with the validation scan as the winner, and puts nothing into its box.
 #[tokio::test]
 async fn a_code_a_validation_shift_accepted_is_not_free_for_an_aggregation_shift() {
     let (admin, setup, floor) = validation_floor().await;
@@ -221,6 +233,23 @@ async fn a_code_a_validation_shift_accepted_is_not_free_for_an_aggregation_shift
         )
         .await,
         vec![accepted(&record_id(1))]
+    );
+    let taken = |same_device: bool| {
+        json!({
+            "status": "taken",
+            "owner": {
+                "shiftId": floor.shift, "shiftNumber": floor.number, "deviceId": floor.station,
+                "scannedAt": instant(10, 0), "sameDevice": same_device
+            }
+        })
+    };
+    assert_eq!(
+        check_code(&admin, &aggregation.key, 7).await,
+        (StatusCode::OK, taken(false))
+    );
+    assert_eq!(
+        check_code(&admin, &floor.key, 7).await,
+        (StatusCode::OK, taken(true))
     );
     let later = fact(
         &record_id(2),
@@ -259,7 +288,9 @@ async fn a_code_a_validation_shift_accepted_is_not_free_for_an_aggregation_shift
 /// (в): an earlier validation scan that arrives later takes the code from
 /// an aggregation shift's box: the box's item is displaced (the host's
 /// instant), the code is the validation scan's without a box, and the
-/// conflict names the validation scan as the winner.
+/// conflict names the validation scan as the winner. The aggregation
+/// station's undo of that item, sent after, takes nothing out: the item is
+/// no longer live, and the code stays the validation scan's.
 #[tokio::test]
 async fn an_earlier_validation_scan_takes_the_code_out_of_a_box() {
     let (admin, setup, floor) = validation_floor().await;
@@ -324,6 +355,29 @@ async fn an_earlier_validation_scan_takes_the_code_out_of_a_box() {
     // shift counts the code.
     let totals = |shift: &Value| shift["totals"]["acceptedUnits"].clone();
     assert_eq!(totals(&office_shift(&admin, &aggregation.shift).await), 0);
+    assert_eq!(totals(&office_shift(&admin, &floor.shift).await), 1);
+
+    let owners_before = owners(&admin).await;
+    let items_before = items(&admin).await;
+    let mut undo = box_exception("undo", &box_id(1), &instant(200, 0));
+    undo["codeHash"] = json!(code_hash(7));
+    undo["targetScannedAt"] = json!(instant(100, 0));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &aggregation.key,
+            &[fact(
+                &record_id(3),
+                "box_exception",
+                &aggregation.shift,
+                undo
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(3))]
+    );
+    assert_eq!(owners(&admin).await, owners_before);
+    assert_eq!(items(&admin).await, items_before);
     assert_eq!(totals(&office_shift(&admin, &floor.shift).await), 1);
 }
 
@@ -507,6 +561,37 @@ async fn the_totals_of_a_validation_shift_count_the_codes_it_owns() {
     assert_eq!(
         receipts(&admin.app, &aggregation.key, &[earlier]).await,
         vec![accepted(&record_id(9))]
+    );
+    // Code 3 is the box scan's now, with its box; a validation owner has no
+    // item to displace.
+    let validation_owner = |n: u32| {
+        json!([
+            code_hash(n),
+            record_id(n),
+            floor.shift,
+            floor.station,
+            null,
+            instant(10 + n, 0)
+        ])
+    };
+    assert_eq!(
+        owners(&admin).await,
+        vec![
+            validation_owner(1),
+            validation_owner(2),
+            json!([
+                code_hash(3),
+                record_id(9),
+                aggregation.shift,
+                aggregation.station,
+                box_id(1),
+                instant(1, 0)
+            ]),
+        ]
+    );
+    assert_eq!(
+        items(&admin).await,
+        vec![json!([record_id(9), box_id(1), code_hash(3), null, null])]
     );
     let shift = office_shift(&admin, &floor.shift).await;
     assert_eq!(

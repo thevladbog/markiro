@@ -2,8 +2,9 @@
 //! cloud's `code-search` for a single site): `GET /v1/office/codes` lists the
 //! placements of codes in boxes — one row for every accepted scan that put
 //! a code into a box, and since plan РЕЖ for every accepted scan of a
-//! validation shift that took its code without a box — by the hash of a code, a GTIN, the SSCC of a box or a
-//! pallet, a shift's number and a period of scan instants; `GET
+//! validation shift that took its code without a box — by the hash of a
+//! code, a GTIN, the SSCC of a box or a pallet, a shift's number and a period
+//! of scan instants; `GET
 //! /v1/office/codes/{codeHash}` is one code's card with its history. Only
 //! what the facts of this host hold is found: the cloud's history does not
 //! move with the cloud import. `proto/fixtures/office-code-*.json` hold the

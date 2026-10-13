@@ -87,9 +87,10 @@ function eventText(event: OfficeCodeEvent, t: TFunction): string {
   switch (event.type) {
     case "scan": {
       const verdict = t(`office.codeSearch.verdict.${event.verdict}`);
+      // The earlier scan that took the code may be a validation shift's, in no box (plan
+      // РЕЖ): the event does not say, so neither does the text.
       if (event.verdict === "ok" && !event.placed) {
-        const key = event.boxId === null ? "scanLostUnboxed" : "scanLost";
-        return t(`office.codeSearch.event.${key}`, { verdict });
+        return t("office.codeSearch.event.scanLost", { verdict });
       }
       if (event.verdict === "duplicate" && event.duplicateSource !== null) {
         return t(`office.codeSearch.event.duplicate.${event.duplicateSource}`);

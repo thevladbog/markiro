@@ -3,9 +3,9 @@
 //! placements of codes in boxes — one row per accepted scan that put a code
 //! into a box, and per accepted scan of a validation shift that took its
 //! code without one (plan РЕЖ) — and `GET /v1/office/codes/{codeHash}` is
-//! one code's card with its history. Every office role reads them; a device key alone never
-//! does (`OfficeContext`). Read only: nothing is written, not even an audit
-//! row, as the shift's lists.
+//! one code's card with its history. Every office role reads them; a device
+//! key alone never does (`OfficeContext`). Read only: nothing is written, not
+//! even an audit row, as the shift's lists.
 //!
 //! The office classifies what was typed or scanned with the domain's
 //! `classifyScan` and sends the hash of a code (`kmHash`, never the code),

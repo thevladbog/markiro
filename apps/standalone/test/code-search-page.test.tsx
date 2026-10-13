@@ -97,12 +97,34 @@ describe("«Поиск кодов» in the office", () => {
       .map((item) => item.textContent);
     expect(items).toHaveLength(6);
     expect(items[0]).toContain("Скан: чужой товар");
-    expect(items[2]).toContain("повтор, код уже в коробе по данным хоста");
+    // Neither text says where the earlier scan put the code: the event does not carry it.
+    expect(items[2]).toContain("Скан: повтор, код уже принят по данным хоста");
     expect(items[3]).toContain("Изъят: отмена последнего скана");
-    expect(items[4]).toContain("Забран из короба");
+    expect(items[4]).toContain("Забран из короба: тот же код раньше принят другим сканом");
     expect(items[5]).toContain(
       "Перепечатка на складе: напечатана и проверена, причина — Повреждена",
     );
+  });
+
+  it("says a boxed scan lost its code to an earlier scan without saying that scan was in a box", async () => {
+    // The earlier scan may be a validation shift's, which put the code in no box (plan РЕЖ).
+    const value = session();
+    const [, accepted] = CARD.events;
+    if (accepted?.type !== "scan") throw new Error("the fixture's second event is a scan");
+    value.api.getCodeCard.mockResolvedValue({
+      ...CARD,
+      events: [{ ...accepted, placed: false }],
+    });
+    await openSearch(value);
+    search(KM);
+    const history = (await screen.findByRole("heading", { name: "История" })).parentElement;
+    if (history === null) throw new Error("no history");
+    const items = within(history)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toContain("Скан: принят, но код уже был принят раньше другим сканом");
+    expect(items[0]).not.toContain("короб");
   });
 
   it("shows a validation shift's code without a box (plan РЕЖ): «—» for the box, no open box", async () => {

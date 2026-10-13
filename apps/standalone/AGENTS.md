@@ -119,6 +119,24 @@ Tests assert the exact actor, action, target, result and parsed details.
 DDL lives only in `host/migrations` and `src-tauri/migrations`. An applied
 migration is never edited — add a new one; sqlx verifies checksums at start.
 
+A migration that rebuilds a table copies every row WITH its rowid
+(`INSERT INTO t_rebuilt (rowid, …) SELECT rowid, …`, through a temporary copy
+as `rowid AS kept_rowid`): a copy without it renumbers every row past a
+deleted one, and a read by insertion order (`ORDER BY rowid`, the station's
+«Снять последний код») would then take another row. The host's
+`0020_validation_scans.sql` (plan РЕЖ, part A) rebuilds `scans` and
+`code_owners` and re-creates `box_items` and `code_conflicts` this way (the
+procedure, without `defer_foreign_keys`, is in the file's header; a closing
+guard refuses it if a foreign key breaks); `tests/migration_validation_scans.rs`
+compares every row with its rowid and the whole `sqlite_master` before and
+after. It runs when the service starts: on a Mac NVMe in release, about 22 s
+for 1 000 000 scans with 900 000 owners and items (about 50 s with the
+machine heavily loaded; `the_rebuild_of_a_million_scans_takes`, `--release --
+--ignored`), and it needs free disk of about the database's size again (the
+WAL grows by about the rebuilt tables, plus the temporary copies of the
+children). Owner check: its time and disk on the client's Windows hardware
+with a year of facts.
+
 ## Local database
 
 `src-tauri/src/local_db.rs` keeps `standalone-station.db` in the app's local
@@ -422,7 +440,14 @@ refers to the two tables (no foreign key, trigger or view) and both stay
 `0013`: every row stays, `sqlite_master` changes only by the two intended
 texts, and the plans of the reads that search these indexes stay, the work
 screen's count of a shift's codes (`SHIFT_CODES_SQL`, its box-less codes
-included) on `floor_codes_shift`.
+included) on `floor_codes_shift`. Every row keeps its rowid (see «Databases»):
+«Снять последний код» reads a box's newest code by it (`LAST_CODE_SQL`), and
+`migration_0014_keeps_each_rows_rowid` and its Vitest twin check that the
+rowids and that row stay the same over a box with an undone code. It runs in
+the shell's setup, before the window appears: about 43 s for 1 000 000 codes
+and 1 000 000 scans with `secure_delete` on, on a Mac NVMe, the WAL growing to
+about 0.9 GB. Owner check: its time and disk on the station's Windows
+hardware.
 
 ## Writes
 
@@ -2823,15 +2848,16 @@ and capacity stay, unprinted. A planned shift changes its mode by an edit
 (`details.changed` names `mode` with its `{ from, to }`; `shift.create` names
 `mode` only for a validation shift, as it names a sheet only for a shift with
 one); an active one keeps it (`conflict` on `shift_status`). The order of an
-edit's refusals (`update_shift`): the shape of each field first (the pallet
-fields' own rules of `shifts::pallet_request` included, for any status: an
-active shift sent `palletsEnabled: true` without a template is
-`validation_failed` on `palletTemplateId`, as before plan РЕЖ); the mode's
-rule (`check_mode_rules`) only for a planned shift; then the status, so an
-active shift sent another mode, or pallets its validation mode cannot have,
-is `conflict` on `shift_status`, not `validation_failed`; then, for a planned
-shift, the line, templates and counterparty that change. A station's own
-shift (`DeviceShiftCreate`) is created as aggregation, planned until a
+edit's refusals (`update_shift`): the shape of each scalar field first (the
+counts and the date); for a planned shift the mode's rule (`check_mode_rules`),
+before either pallet field; then the pallet fields' own rules
+(`shifts::pallet_request`), for any status: an active shift sent
+`palletsEnabled: true` without a template is `validation_failed` on
+`palletTemplateId`, as before plan РЕЖ; then the status, so an active shift
+sent another mode, or pallets (with a template) its validation mode cannot
+have, is `conflict` on `shift_status`, not `validation_failed`; then, for a
+planned shift, the line, templates and counterparty that change. A station's
+own shift (`DeviceShiftCreate`) is created as aggregation, planned until a
 station enters it; while it is planned the office may still edit it like any
 planned shift, its mode included. A shift with pallets (`palletsEnabled`, plan
 ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
@@ -3218,18 +3244,19 @@ a box of this device in this shift: an unknown box id opens the box, another
 device's or another shift's is `box_unknown`, a closed one `box_closed`. In a
 validation shift (plan РЕЖ, protocol 4) it names none (`boxId: null`); a box
 named in the one mode or missing in the other is `invalid_record` on
-`data.boxId`, and the schema's triggers `scans_ok_box_by_mode` (`0020`) back
-the rule by the shift's mode. Its code goes to the registry
-(`code_owners`, `facts/registry.rs`): the earliest accepted scan since the
+`data.boxId`. The schema's triggers `scans_ok_box_by_mode*` (`0020`) back one
+half of that rule only: an accepted scan of a shift that is not a validation
+shift names a box (`scan_needs_box`). That a validation shift's accepted scan
+names none is the host's code alone (`facts/scan.rs`). Its code goes to the
+registry (`code_owners`, `facts/registry.rs`): the earliest accepted scan since the
 code was last freed owns it whatever order the scans arrive in, compared by
 their device instants to the millisecond. After an exception released the
 code the next scan to ARRIVE owns it, not an earlier displaced item or
 conflict loser (re-electing the earliest remaining claim is plan 2b). A
 scan earlier than the owner takes the code, and the owner's item leaves its
-box (`box_items.displaced_at`; an owner of a validation shift has no item,
-`code_owners.box_id` and its own `box_items` row are NULL and absent, and
-the registry is one for both modes); a later one, or one at the same instant, is
-`conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
+box (`box_items.displaced_at`; a validation owner has `code_owners.box_id`
+NULL and no `box_items` row, and the registry is one for both modes); a later
+one, or one at the same instant, is `conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
 is the sender's own scan). Both write a `code_conflicts` row; telling the
 displaced device and the office's review come with plan 2b.
 
@@ -4429,9 +4456,12 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   validation shift (plan РЕЖ, Р11) has codes and no box, item or pallet; the
   port renders its codes flat and refuses every format with boxes or pallets
   (`BOX_COVERAGE_INCOMPLETE`: no box covers its codes), so a box or pallet
-  file of it is never written with empty groups (the office offers it only
-  the flat TXT and CSV). The codes come by their scan instant, then their
-  hash, the order the port sorts them in. Each
+  file of it is never written with empty groups. The office's export dialog
+  does not read the mode yet: it lists every format, one with boxes or
+  pallets disabled with that refusal's text (written for an aggregation
+  shift: «Не все коды смены распределены по закрытым коробам.»); offering a
+  validation shift only the flat TXT and CSV comes with plan РЕЖ's A8. The
+  codes come by their scan instant, then their hash, the order the port sorts them in. Each
   query searches by an index (`every_query_of_the_source_searches_by_an_index`
   runs `EXPLAIN QUERY PLAN` on them), so a year of facts costs one shift's
   export nothing. `GET …/boxes` and `…/pallets` (`routes/office_boxes.rs`)
