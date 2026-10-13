@@ -476,11 +476,46 @@ describe("Резервные копии", () => {
       secondDir: null,
       expectedRev: 7,
     });
+    // A calm hint in the folder's card, not an alert.
+    const hint = screen.getByText(ru.office.backups.secondNotSetHint);
+    expect(hint.closest(".backup-alerts")).toBeNull();
+    expect(screen.queryByText("Внимание:")).toBeNull();
+    expect(screen.queryByText("Ошибка:")).toBeNull();
+  });
+
+  it("shows a fresh install without a second folder as a hint, not as a warning or an error", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({ ...HEALTHY_BACKUPS, second: null });
+    await openBackups(session);
+    expect(screen.getByText("Вторая папка не задана.")).toBeTruthy();
+    expect(screen.getByText(ru.office.backups.secondNotSetHint)).toBeTruthy();
+    expect(screen.queryByText("Внимание:")).toBeNull();
+    expect(screen.queryByText("Ошибка:")).toBeNull();
     expect(
-      screen.getByText(
-        "Вторая папка не задана: если сломается компьютер хоста, копий не останется.",
-      ),
+      screen.getByText(ru.office.backups.secondNotSetHint).closest(".backup-alerts"),
+    ).toBeNull();
+  });
+
+  it("still shows a configured second folder that cannot take a copy as an error", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      second: {
+        ...HEALTHY_BACKUPS.local,
+        dir: "E:\\Markiro",
+        lastAttempt: {
+          at: "2026-10-09T14:00:03Z",
+          trigger: "scheduled",
+          ok: false,
+          code: "destination_unavailable",
+        },
+      },
+    });
+    await openBackups(session);
+    expect(
+      screen.getByText("Последняя копия во вторую папку не удалась: папка недоступна."),
     ).toBeTruthy();
+    expect(screen.getAllByText("Ошибка:").length).toBeGreaterThan(0);
   });
 
   it("shows the stations a restore waits for, and which of them gave their blocks back", async () => {

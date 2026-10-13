@@ -1743,8 +1743,17 @@ pairing. The host's own PC is the site's station (pilot spec §3) and stays
 locked. A technologist on a station cannot leave the locked window (only an
 administrator can).
 
-An office session opens with the window still locked; the way out is «Оконный
-режим» (`src/office/WindowModeButton.tsx`, in the office header), shown only
+The office is a mouse-and-keyboard app (owner feedback of the first beta), so
+on a host or station PC an administrator's office session opens in an ordinary,
+resizable window by itself (`shouldOpenOfficeWindowed` in `src/app/lockdown.ts`,
+an effect in `App`, once per session token); leaving kiosk mode restores an
+ordinary window of 1280x800 at most, inside the monitor's work area and
+centred (`lockdown::settle_ordinary_window` — the monitor-sized window kiosk
+mode left must not stay), and the app also starts that way (`tauri.conf.json`:
+centred, not maximized, minimum 960x600). A technologist's session stays in the
+locked window, and so do the first-run wizard and the repair screens. When the
+automatic exit failed, the manual way is «Оконный режим»
+(`src/office/WindowModeButton.tsx`, in the office header), shown only
 to an administrator while the window is locked and never in a build that does
 not lock it. It asks first (`FormDialog`), reads the user from the host again
 (`GET /v1/office/me`) and opens the window only if the host still says
@@ -4435,8 +4444,11 @@ the host and the held restore; it reads the state with its own polling loop
 (1 s while a copy runs, slower when idle, paused while the window is hidden)
 and writes times in the organization's zone. «Обзор» repeats the warnings (a
 held restore, a failed copy, no copy, a newest copy older than 26 hours by the
-host's clock, no second folder, a host clock behind the newest copy, a copy
-running for more than 30 minutes). The page lists per station whether it
+host's clock, a host clock behind the newest copy, a copy
+running for more than 30 minutes). No second folder is not among them: a fresh
+install has none, so «Резервные копии» says so as a calm hint beside the
+folder's form (`secondNotSetHint`), and only a second folder that is set and
+refused the last copy (`secondFailed`) is an error. The page lists per station whether it
 sent its blocks back (`reconciled`, plan РК-С); the host sets the flag on the
 last part of a station's blocks (`more` absent), which is empty for a station
 that never got a block.

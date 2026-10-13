@@ -175,7 +175,10 @@ function BackupsContent() {
               )}
             </div>
             {shown.second === null ? (
-              <p className="office-note">{t("office.backups.secondNotSet")}</p>
+              <>
+                <p>{t("office.backups.secondNotSet")}</p>
+                <p className="office-note">{t("office.backups.secondNotSetHint")}</p>
+              </>
             ) : (
               <Destination destination={shown.second} time={time} />
             )}
