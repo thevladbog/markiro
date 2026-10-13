@@ -261,9 +261,10 @@ pub async fn bootstrap(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
-    // The license's first look: the state later looks compare with (plan
-    // ЛЦ-2, Д7), written without a row or a revision.
-    state.license.refresh_after_write(&state).await;
+    // The trial's mark outside the database (plan ЛЦ-2, spec §3.4), then
+    // the license's first look: the state later looks compare with (Д7),
+    // written without a row or a revision.
+    state.license.after_bootstrap(&state).await;
 
     Ok(Json(BootstrapResponse {
         session: OfficeSession {

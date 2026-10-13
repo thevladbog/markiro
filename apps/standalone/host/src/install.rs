@@ -233,6 +233,16 @@ pub fn install_host(
     sleep: &mut dyn FnMut(Duration),
 ) -> Result<(), crate::BoxError> {
     paths.ensure()?;
+    // The trial's mark (plan ЛЦ-2, spec §3.4): a key the service may set
+    // values in. A refusal does not stop the install: the database keeps the
+    // trial too.
+    if let Err(error) = run_checked(
+        commands,
+        "powershell.exe",
+        &powershell_args(&trial_key_script()),
+    ) {
+        tracing::warn!(%error, "the trial mark's registry key was not prepared");
+    }
     install(
         &paths.data_dir,
         executable,
@@ -448,6 +458,22 @@ New-NetFirewallRule -Name '{FIREWALL_RULE}' -DisplayName 'Markiro Хост (TCP 
     )
 }
 
+/// The key of the trial's mark (plan ЛЦ-2, spec §3.4), made with the
+/// installer's administrator rights; LocalService (`*S-1-5-19`) may read it
+/// and set values in this key only (no inheritance to subkeys). An existing
+/// key keeps its values, and an uninstall leaves it.
+pub fn trial_key_script() -> String {
+    "$ErrorActionPreference = 'Stop'; \
+$path = 'HKLM:\\SOFTWARE\\Markiro\\Standalone\\Trial'; \
+if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }; \
+$acl = Get-Acl -LiteralPath $path; \
+$sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-19'); \
+$rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid, 'ReadKey, SetValue', 'None', 'None', 'Allow'); \
+$acl.SetAccessRule($rule); \
+Set-Acl -LiteralPath $path -AclObject $acl"
+        .to_owned()
+}
+
 /// Removes the rule; a rule that is already gone is no error.
 pub fn firewall_close_script() -> String {
     format!("Remove-NetFirewallRule -Name '{FIREWALL_RULE}' -ErrorAction SilentlyContinue; exit 0")
@@ -523,7 +549,8 @@ pub fn trusted_system_root(value: Option<&str>) -> String {
 }
 
 /// The absolute path of the Windows program the installer means by `program`
-/// (`icacls`, `powershell.exe`), under `system_root`; `None` for any other
+/// (`icacls`, `powershell.exe`, and the service's `reg.exe`), under
+/// `system_root`; `None` for any other
 /// name, which is then run as given.
 pub fn system_program(program: &str, system_root: &str) -> Option<String> {
     match program {
@@ -531,6 +558,8 @@ pub fn system_program(program: &str, system_root: &str) -> Option<String> {
         "powershell.exe" => Some(format!(
             r"{system_root}\System32\WindowsPowerShell\v1.0\powershell.exe"
         )),
+        // The trial's mark (plan ЛЦ-2, `license::trial_mark`).
+        "reg.exe" => Some(format!(r"{system_root}\System32\reg.exe")),
         _ => None,
     }
 }

@@ -99,7 +99,7 @@ pub fn office_license(app: &AppState, snapshot: &Snapshot, usage: &Usage) -> Off
         trial: evaluation.trial.map(|trial| TrialInfo {
             started_at: ms_text(trial.started_at),
             ends_at: ms_text(trial.ends_at),
-            inn: snapshot.clock_row.trial_inn.clone(),
+            inn: snapshot.trial_inn.clone(),
         }),
         binding: LicenseBinding {
             host_id: app.host_id.clone(),
@@ -175,7 +175,7 @@ pub async fn activation_request(
         },
         trial: snapshot.evaluation.trial.map(|trial| ActivationTrial {
             started_at: ms_text(trial.started_at),
-            inn: snapshot.clock_row.trial_inn.clone().unwrap_or_default(),
+            inn: snapshot.trial_inn.clone().unwrap_or_default(),
         }),
         current_license: newest.map(|license| ActivationLicense {
             license_id: license.license_id.clone(),

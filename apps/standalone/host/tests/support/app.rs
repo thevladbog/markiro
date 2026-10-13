@@ -222,7 +222,8 @@ pub async fn admin_on(host_id: &str) -> Admin {
     admin_of(TestApp::with_host_id(host_id).await).await
 }
 
-async fn admin_of(app: TestApp) -> Admin {
+/// `admin()` on `app`: a station pairs, runs the wizard and stays signed in.
+pub async fn admin_of(app: TestApp) -> Admin {
     let (_, key) = pair_device(&app, "station").await;
     let token = bootstrap(&app, &key).await;
     let (status, me) = app

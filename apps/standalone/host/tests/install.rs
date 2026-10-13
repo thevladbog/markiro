@@ -15,8 +15,8 @@ use markiro_host::config::{HostConfig, HostPaths};
 use markiro_host::install::{
     self, delete_refusal_is_harmless, encode_command, firewall_close_script, firewall_open_script,
     icacls_args, service_error_text, service_spec, start_refusal_is_harmless,
-    stop_refusal_is_harmless, system_program, trusted_system_root, CommandOutput, Commands,
-    InstallError, ServiceSpec, ServiceState, Services, POLL_EVERY,
+    stop_refusal_is_harmless, system_program, trial_key_script, trusted_system_root, CommandOutput,
+    Commands, InstallError, ServiceSpec, ServiceState, Services, POLL_EVERY,
 };
 
 type Log = Rc<RefCell<Vec<String>>>;
@@ -742,6 +742,11 @@ fn windows_own_programs_are_run_by_their_absolute_path() {
         system_program("powershell.exe", r"D:\WINNT"),
         Some(r"D:\WINNT\System32\WindowsPowerShell\v1.0\powershell.exe".to_owned())
     );
+    // The trial's mark (plan ЛЦ-2).
+    assert_eq!(
+        system_program("reg.exe", r"D:\WINNT"),
+        Some(r"D:\WINNT\System32\reg.exe".to_owned())
+    );
     // Whatever else is asked for is not ours to resolve.
     assert_eq!(system_program("cmd.exe", r"C:\Windows"), None);
     assert_eq!(system_program("icacls.exe.bak", r"C:\Windows"), None);
@@ -891,12 +896,15 @@ fn install_creates_the_data_directory_before_icacls_reads_it_and_opens_the_defau
     result.unwrap();
     assert_eq!(commands.directory_existed, [true, true, true]);
     assert!(paths.logs_dir().is_dir() && paths.tls_dir().is_dir());
+    // The trial's key first (plan ЛЦ-2), then the data folder and the service.
+    assert_eq!(commands.inner.runs[0].0, "powershell.exe");
+    assert_eq!(script_of(&commands.inner.runs[0].1), trial_key_script());
     assert_eq!(
-        commands.inner.runs[2].1[0],
+        commands.inner.runs[3].1[0],
         paths.data_dir.display().to_string()
     );
     assert_eq!(
-        script_of(&commands.inner.runs[3].1),
+        script_of(&commands.inner.runs[4].1),
         firewall_open_script(45710)
     );
 }
@@ -911,7 +919,92 @@ fn install_opens_the_port_the_host_was_configured_with() {
     let (result, commands) = install_host_in(&paths, &log);
     result.unwrap();
     assert_eq!(
-        script_of(&commands.inner.runs[2].1),
+        script_of(&commands.inner.runs[3].1),
         firewall_open_script(46123)
     );
+}
+
+/// The trial's key is a second mark of the trial, not a condition of the
+/// host: a refusal, or a PowerShell that does not start, is reported and the
+/// install goes on, every step of it.
+#[test]
+fn a_trial_key_the_installer_cannot_make_does_not_stop_the_install() {
+    struct TrialKeyFails {
+        inner: FakeCommands,
+        spawn: bool,
+    }
+    impl Commands for TrialKeyFails {
+        fn run(&mut self, program: &str, args: &[String]) -> Result<CommandOutput, InstallError> {
+            let output = self.inner.run(program, args)?;
+            if program == "powershell.exe" && script_of(args) == trial_key_script() {
+                if self.spawn {
+                    return Err(InstallError::Spawn {
+                        program: program.to_owned(),
+                        reason: "not found".to_owned(),
+                    });
+                }
+                return Ok(CommandOutput {
+                    code: Some(1),
+                    ..output
+                });
+            }
+            Ok(output)
+        }
+    }
+    for spawn in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let paths = HostPaths::new(root.path().join("Host"));
+        let log = Log::default();
+        let mut services = FakeServices::new(&log, &[None, Some(ServiceState::Running)]);
+        let mut commands = TrialKeyFails {
+            inner: FakeCommands::new(&log),
+            spawn,
+        };
+        install::install_host(
+            &paths,
+            Path::new(EXE),
+            &mut services,
+            &mut commands,
+            &mut |_| (),
+        )
+        .unwrap();
+        let runs = &commands.inner.runs;
+        assert_eq!(script_of(&runs[0].1), trial_key_script(), "{spawn}");
+        assert_eq!(
+            runs[1..]
+                .iter()
+                .map(|run| run.0.as_str())
+                .collect::<Vec<_>>(),
+            ["icacls", "icacls", "powershell.exe"],
+            "{spawn}"
+        );
+        assert_eq!(
+            script_of(&runs.last().unwrap().1),
+            firewall_open_script(45710)
+        );
+        assert!(log.borrow().iter().any(|entry| entry == "start"), "{spawn}");
+    }
+}
+
+#[test]
+fn the_trial_key_lets_the_service_set_values_in_it_and_keeps_an_existing_one() {
+    let script = trial_key_script();
+    for part in [
+        "$ErrorActionPreference = 'Stop'",
+        r"$path = 'HKLM:\SOFTWARE\Markiro\Standalone\Trial'",
+        "if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }",
+        "SecurityIdentifier('S-1-5-19')",
+        "RegistryAccessRule($sid, 'ReadKey, SetValue', 'None', 'None', 'Allow')",
+        "Set-Acl -LiteralPath $path -AclObject $acl",
+    ] {
+        assert!(script.contains(part), "{part}\n{script}");
+    }
+    for absent in [
+        "Remove-Item",
+        "Remove-ItemProperty",
+        "FullControl",
+        "ContainerInherit",
+    ] {
+        assert!(!script.contains(absent), "{absent}\n{script}");
+    }
 }

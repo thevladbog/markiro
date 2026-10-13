@@ -104,17 +104,20 @@ pub struct Snapshot {
     pub issued_at: Vec<i64>,
     pub clock_row: store::ClockRow,
     pub org_inn: Option<String>,
+    /// The INN of the trial's start in force: the database's or the
+    /// registry's, whichever start is earlier (plan ЛЦ-2 task 12).
+    pub trial_inn: Option<String>,
 }
 
 /// The license of this host: the keys it trusts, the trial's mark in the
 /// registry, and the time it trusts, kept in memory between requests.
 pub struct LicenseService {
     keyset: Keyset,
-    #[allow(dead_code)] // read by plan ЛЦ-2 task 12 (the registry's mark)
     mark: Arc<dyn trial_mark::TrialMark>,
     clock: Mutex<Option<clock::LicenseClock>>,
-    /// The registry's start of the trial, read once at a start.
-    registry_started_at: Mutex<Option<i64>>,
+    /// The registry's mark of the trial as read at the start (plan ЛЦ-2
+    /// task 12): `None` until it is read, then the mark or none.
+    registry: Mutex<Option<Option<trial_mark::Mark>>>,
 }
 
 impl Snapshot {
@@ -134,7 +137,7 @@ impl LicenseService {
             keyset,
             mark,
             clock: Mutex::new(None),
-            registry_started_at: Mutex::new(None),
+            registry: Mutex::new(None),
         }
     }
 
@@ -192,15 +195,29 @@ impl LicenseService {
             newest,
             issued_at,
         } = files;
-        let registry = *self.registry_started_at.lock().expect("registry mark lock");
+        let registry = self
+            .registry
+            .lock()
+            .expect("registry mark lock")
+            .clone()
+            .flatten();
+        // The trial is the earlier start of the database's and the
+        // registry's, with that start's INN (the database's on a tie): a
+        // reinstall buys no trial, and the INN told is the one the trial
+        // started with.
+        let stored = clock_row
+            .trial_started_at
+            .map(|started_at| (started_at, clock_row.trial_inn.clone()));
+        let marked = registry.map(|mark| (mark.started_at, mark.inn));
+        let trial = match (stored, marked) {
+            (Some(stored), Some(marked)) => Some(if marked.0 < stored.0 { marked } else { stored }),
+            (stored, marked) => stored.or(marked),
+        };
+        let trial_inn = trial.as_ref().and_then(|(_, inn)| inn.clone());
         // A start after the time the host trusts (a PC's clock set ahead at
         // the wizard, then back) would make a longer trial: it counts from
         // now at the latest.
-        let trial_started_at = match (clock_row.trial_started_at, registry) {
-            (Some(stored), Some(marked)) => Some(stored.min(marked)),
-            (stored, marked) => stored.or(marked),
-        }
-        .map(|started_at| started_at.min(reading.effective));
+        let trial_started_at = trial.map(|(started_at, _)| started_at.min(reading.effective));
         let inn_mismatch_since = clock_row
             .last_state
             .as_deref()
@@ -227,6 +244,7 @@ impl LicenseService {
             issued_at,
             clock_row,
             org_inn,
+            trial_inn,
         }
     }
 
@@ -335,6 +353,7 @@ impl LicenseService {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        self.mark_trial(app, true).await?;
         self.refresh(app).await?;
         let mut tx = app.pool.begin().await?;
         let snapshot = self.snapshot(app, &mut tx).await?;
@@ -349,6 +368,94 @@ impl LicenseService {
             "license state"
         );
         Ok(())
+    }
+
+    /// The registry's mark, read off the async threads. What the host could
+    /// not have written is no mark: a start out of range ([`bounded_ms`]) is
+    /// none at all, an INN that is no INN (`crate::inn::is_valid`) is none.
+    /// The service log holds neither value.
+    async fn read_mark(&self) -> Option<trial_mark::Mark> {
+        let mark = self.mark.clone();
+        let read = tokio::task::spawn_blocking(move || mark.read())
+            .await
+            .ok()
+            .flatten()?;
+        let Some(started_at) = bounded_ms(read.started_at) else {
+            tracing::warn!("the trial mark in the registry holds a start out of range; not used");
+            return None;
+        };
+        let inn = read.inn.filter(|inn| {
+            let valid = crate::inn::is_valid(inn);
+            if !valid {
+                tracing::warn!("the trial mark in the registry holds no valid INN; not used");
+            }
+            valid
+        });
+        Some(trial_mark::Mark {
+            started_at,
+            inn,
+            ..read
+        })
+    }
+
+    /// Write the mark off the async threads; whether it was written.
+    async fn write_mark(&self, mark: trial_mark::Mark) -> bool {
+        let writer = self.mark.clone();
+        match tokio::task::spawn_blocking(move || writer.write(&mark)).await {
+            Ok(Ok(())) => true,
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "the trial mark was not written");
+                false
+            }
+            Err(_) => {
+                tracing::warn!("the trial mark's writer did not finish");
+                false
+            }
+        }
+    }
+
+    /// The registry's mark (spec §3.4, plan Д11): read once at a start
+    /// (`at_start`) and kept; after the wizard, read only if no start has
+    /// read it yet. When it has none, the database's trial (its start and
+    /// INN) is written into it; a write that fails is logged and tried
+    /// again at the next start.
+    async fn mark_trial(&self, app: &AppState, at_start: bool) -> Result<(), sqlx::Error> {
+        let known = self.registry.lock().expect("registry mark lock").clone();
+        let registry = match known {
+            Some(read) if !at_start => read,
+            _ => {
+                let read = self.read_mark().await;
+                *self.registry.lock().expect("registry mark lock") = Some(read.clone());
+                read
+            }
+        };
+        if registry.is_some() {
+            return Ok(());
+        }
+        let mut conn = app.pool.acquire().await?;
+        let row = store::clock_row(&mut conn).await?;
+        drop(conn);
+        let Some(started_at) = row.trial_started_at else {
+            return Ok(());
+        };
+        let mark = trial_mark::Mark {
+            started_at,
+            host_id: app.host_id.clone(),
+            inn: row.trial_inn,
+        };
+        if self.write_mark(mark.clone()).await {
+            *self.registry.lock().expect("registry mark lock") = Some(Some(mark));
+        }
+        Ok(())
+    }
+
+    /// After the wizard: the trial's mark (when the registry has none) and
+    /// the license's first look.
+    pub async fn after_bootstrap(&self, app: &AppState) {
+        if let Err(error) = self.mark_trial(app, false).await {
+            tracing::warn!(%error, "the trial mark was not checked");
+        }
+        self.refresh_after_write(app).await;
     }
 
     /// `GET /v1/office/license` as of now, read in one transaction.

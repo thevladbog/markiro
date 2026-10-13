@@ -150,7 +150,12 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
     let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())
-        .with_backups(backups.clone());
+        .with_backups(backups.clone())
+        // The trial's mark: the registry on Windows, none elsewhere.
+        .with_license(std::sync::Arc::new(license::LicenseService::new(
+            markiro_proto::trust::license_keyset(),
+            license::trial_mark::system(),
+        )));
     let stopping = state.stopping.clone();
     let backup_worker = backup::worker::spawn(backups, clock, stopping.subscribe());
     // The license (plan ЛЦ-2): the trial of a site from before it, the state
