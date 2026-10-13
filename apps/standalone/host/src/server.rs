@@ -390,6 +390,14 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_boxes::list_pallets),
         )
         .route(
+            "/v1/office/shifts/{id}/exceptions",
+            get(crate::routes::office_shift_review::list_exceptions),
+        )
+        .route(
+            "/v1/office/shifts/{id}/rejections",
+            get(crate::routes::office_shift_review::list_rejections),
+        )
+        .route(
             "/v1/office/conflicts",
             get(crate::routes::office_conflicts::list_conflicts),
         )

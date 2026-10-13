@@ -18,6 +18,7 @@ pub mod office_codes;
 pub mod office_conflicts;
 pub mod office_exports;
 pub mod office_reports;
+pub mod office_shift_review;
 pub mod office_shifts;
 pub mod office_users;
 pub mod operators;
