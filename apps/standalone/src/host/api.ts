@@ -136,6 +136,18 @@ import {
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
+import {
+  conflictsPath,
+  officeConflictPageSchema,
+  officeConflictSchema,
+  officeShiftExceptionsSchema,
+  officeShiftRejectionsSchema,
+  type ConflictQuery,
+  type OfficeConflict,
+  type OfficeConflictPage,
+  type OfficeShiftExceptions,
+  type OfficeShiftRejections,
+} from "./review.js";
 
 /** An SSCC counter's address: its issuer prefix and extension digit (0 box, 1 pallet). */
 export interface SsccCounterKey {
@@ -272,6 +284,21 @@ export interface HostApi {
    * one snapshot (plan О-Ф); every office role. A shift without pallets has none.
    */
   getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
+  /**
+   * One page of the code conflicts the facts wrote, newest detection first,
+   * narrowed to the losing shift and to reviewed or not (plan КНФ); every
+   * office role. The code travels as its hash, GTIN and serial only.
+   */
+  listConflicts: (token: string, query: ConflictQuery) => Promise<OfficeConflictPage>;
+  /**
+   * Marks a conflict reviewed and answers it (plan КНФ); administrators and
+   * technologists. A conflict reviewed already answers as it is.
+   */
+  reviewConflict: (token: string, id: string) => Promise<OfficeConflict>;
+  /** A shift's box and pallet exceptions, newest first, up to 500 (plan КНФ); every office role. */
+  listShiftExceptions: (token: string, id: string) => Promise<OfficeShiftExceptions>;
+  /** The shift's records the host refused, newest first, up to 500 (plan КНФ); every office role. */
+  listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
   /**
    * One page of the placements of codes the criteria find, newest scan
    * first («Поиск кодов»); every office role. At least one criterion.
@@ -752,6 +779,26 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/shifts/${id}/pallet-report-data`, {
         officeToken: token,
         schema: palletReportRowsSchema,
+      }),
+    listConflicts: (token, query) =>
+      client.request("GET", conflictsPath(query), {
+        officeToken: token,
+        schema: officeConflictPageSchema,
+      }),
+    reviewConflict: (token, id) =>
+      client.request("POST", `/v1/office/conflicts/${id}/review`, {
+        officeToken: token,
+        schema: officeConflictSchema,
+      }),
+    listShiftExceptions: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/exceptions`, {
+        officeToken: token,
+        schema: officeShiftExceptionsSchema,
+      }),
+    listShiftRejections: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/rejections`, {
+        officeToken: token,
+        schema: officeShiftRejectionsSchema,
       }),
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
