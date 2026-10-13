@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{ExceptionKind, FactKind};
+use crate::{CodeOwner, ExceptionKind, FactKind};
 
 /// The rows of one page of conflicts.
 pub const CONFLICT_PAGE_SIZE: u32 = 50;
@@ -154,4 +154,60 @@ pub struct OfficeShiftRejection {
 pub struct OfficeShiftRejections {
     pub items: Vec<OfficeShiftRejection>,
     pub total: u32,
+}
+
+/// The most records one `POST /v1/device/conflicts/status` names.
+pub const MAX_CONFLICT_STATUS_RECORDS: usize = 200;
+/// The displacements one `GET /v1/device/displacements` answers at most.
+pub const DISPLACEMENT_PAGE_SIZE: u32 = 100;
+
+/// `POST /v1/device/conflicts/status` (plan КНФ, the cloud's
+/// `/station/conflicts/status`): the station's records whose conflict or
+/// displacement nobody has resolved yet, by id. Strict, like every request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConflictStatusRequest {
+    pub record_ids: Vec<String>,
+}
+
+/// One of the asked records whose conflict the office marked reviewed, with
+/// the host's instant of that review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewedRecord {
+    pub record_id: String,
+    pub reviewed_at: String,
+}
+
+/// Of the asked records, those the office reviewed; the device's own only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictStatusResponse {
+    pub reviewed: Vec<ReviewedRecord>,
+}
+
+/// A scan of this device an earlier scan elsewhere took the code from (a
+/// `displaced` conflict): its record, shift, code hash and box, when the host
+/// saw it, the winner as a `conflict` receipt names one, and whether the
+/// office reviewed it already.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDisplacement {
+    pub conflict_id: String,
+    pub record_id: String,
+    pub shift_id: String,
+    pub code_hash: String,
+    pub box_id: Option<String>,
+    pub detected_at: String,
+    pub winner: CodeOwner,
+    pub reviewed_at: Option<String>,
+}
+
+/// One page of a device's displacements, oldest detection first after the
+/// cursor it sent; `more` when another page follows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDisplacements {
+    pub items: Vec<DeviceDisplacement>,
+    pub more: bool,
 }

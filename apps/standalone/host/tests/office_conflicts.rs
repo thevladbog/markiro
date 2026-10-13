@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 use sqlx::migrate::Migrator;
 use sqlx::{Connection, SqliteConnection};
 use support::app::{
-    accepted, add_operator, admin, audit_row, audit_rows, audit_trail, box_closed, box_id, empty,
-    fact, host_revision, instant, issue_block, ok_scan, open_floor, pair_device, receipts,
-    record_id, request, shift_setup, sscc, with_device, Admin, Floor,
+    admin, audit_row, audit_rows, audit_trail, box_id, empty, host_revision, instant, record_id,
+    request, sscc, with_device, Floor,
 };
+use support::conflicts::{conflict_id, conflict_scene};
 
 /// Every migration before `0022`: a host of the integration branch before plan КНФ.
 fn before_0022() -> Migrator {
@@ -136,108 +136,6 @@ async fn migration_0022_gives_old_conflicts_their_kind_and_adds_the_review() {
     assert_eq!(integrity, "ok");
 }
 
-const BLOCK_A: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
-
-/// Two stations, each in its own shift on its own line. Station A scans code 8
-/// at 10 s and code 7 at 100 s into box 1 and closes it with SSCC 1500. Then,
-/// a minute later on the host's clock, station B sends what it scanned
-/// offline: code 7 at 50 s takes the code from A's box (`displaced`, loser A),
-/// code 8 at 200 s by its operator loses to A (`late`, loser B, box 2 open).
-struct Scene {
-    admin: Admin,
-    a: Floor,
-    b: Floor,
-    detected_at: String,
-}
-
-async fn scene() -> Scene {
-    let admin = admin().await;
-    let setup = shift_setup(&admin).await;
-    let a = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
-    let (_, colleague) = pair_device(&admin.app, "station").await;
-    let b = open_floor(&admin, &setup, &colleague, &setup.other_line).await;
-    for (id, name) in [(&a.station, "Станция А"), (&b.station, "Станция Б")] {
-        sqlx::query("UPDATE devices SET name = ? WHERE id = ?")
-            .bind(name)
-            .bind(id)
-            .execute(&admin.app.state.pool)
-            .await
-            .unwrap();
-    }
-    let (operator, _) = add_operator(&admin, "1001").await;
-    let block = issue_block(&admin.app, &a.key, BLOCK_A).await;
-    let from_a = [
-        fact(
-            &record_id(1),
-            "scan",
-            &a.shift,
-            ok_scan(8, &box_id(1), &instant(10, 0)),
-        ),
-        fact(
-            &record_id(2),
-            "scan",
-            &a.shift,
-            ok_scan(7, &box_id(1), &instant(100, 0)),
-        ),
-        fact(
-            &record_id(3),
-            "box_closed",
-            &a.shift,
-            box_closed(
-                &box_id(1),
-                &block,
-                1500,
-                &[8, 7],
-                &instant(10, 0),
-                &instant(110, 0),
-            ),
-        ),
-    ];
-    let answered = receipts(&admin.app, &a.key, &from_a).await;
-    assert!(
-        answered.iter().all(|r| r["outcome"] == "accepted"),
-        "{answered:?}"
-    );
-    admin.app.clock.advance(time::Duration::minutes(1));
-    let detected_at = admin.app.state.timestamp();
-    let mut late = fact(
-        &record_id(12),
-        "scan",
-        &b.shift,
-        ok_scan(8, &box_id(2), &instant(200, 0)),
-    );
-    late["operatorId"] = json!(operator);
-    let from_b = [
-        fact(
-            &record_id(11),
-            "scan",
-            &b.shift,
-            ok_scan(7, &box_id(2), &instant(50, 0)),
-        ),
-        late,
-    ];
-    let answered = receipts(&admin.app, &b.key, &from_b).await;
-    assert_eq!(answered[0], accepted(&record_id(11)));
-    assert_eq!(answered[1]["outcome"], "conflict", "{answered:?}");
-    Scene {
-        admin,
-        a,
-        b,
-        detected_at,
-    }
-}
-
-async fn conflict_id(admin: &Admin, loser_record: &str) -> String {
-    sqlx::query_scalar(
-        "SELECT c.id FROM code_conflicts c JOIN scans l ON l.id = c.loser_scan_id \
-         WHERE l.record_id = ?",
-    )
-    .bind(loser_record)
-    .fetch_one(&admin.app.state.pool)
-    .await
-    .unwrap()
-}
-
 fn side(floor: &Floor, name: &str, operator: Value, at: String, n: u32, sscc: Value) -> Value {
     json!({
         "shiftId": floor.shift, "shiftNumber": floor.number, "deviceId": floor.station,
@@ -248,7 +146,7 @@ fn side(floor: &Floor, name: &str, operator: Value, at: String, n: u32, sscc: Va
 
 #[tokio::test]
 async fn the_list_names_both_sides_of_each_conflict_newest_first_without_the_full_code() {
-    let s = scene().await;
+    let s = conflict_scene().await;
     let (status, page) = s.admin.call("GET", "/v1/office/conflicts", None).await;
     assert_eq!(status, StatusCode::OK, "{page}");
     let late = conflict_id(&s.admin, &record_id(12)).await;
@@ -282,7 +180,7 @@ async fn the_list_names_both_sides_of_each_conflict_newest_first_without_the_ful
 
 #[tokio::test]
 async fn the_list_narrows_by_the_losing_shift_and_by_review_and_checks_its_parameters() {
-    let s = scene().await;
+    let s = conflict_scene().await;
     let late = conflict_id(&s.admin, &record_id(12)).await;
     let displaced = conflict_id(&s.admin, &record_id(2)).await;
     let list = |query: String| {
@@ -372,7 +270,7 @@ async fn the_list_narrows_by_the_losing_shift_and_by_review_and_checks_its_param
 /// the pages; the page count follows.
 #[tokio::test]
 async fn the_list_pages_by_fifty_in_one_order() {
-    let s = scene().await;
+    let s = conflict_scene().await;
     // Fifty more rows over the scene's scans, each detected later than the last.
     let (winner, loser): (String, String) = sqlx::query_as(
         "SELECT winner_scan_id, loser_scan_id FROM code_conflicts WHERE kind = 'late'",
@@ -436,7 +334,7 @@ async fn the_list_pages_by_fifty_in_one_order() {
 
 #[tokio::test]
 async fn a_review_is_kept_once_with_its_reviewer_audit_row_and_revision() {
-    let s = scene().await;
+    let s = conflict_scene().await;
     let displaced = conflict_id(&s.admin, &record_id(2)).await;
     let path = format!("/v1/office/conflicts/{displaced}/review");
     let rev = host_revision(&s.admin.app).await;
@@ -506,7 +404,7 @@ async fn a_review_is_kept_once_with_its_reviewer_audit_row_and_revision() {
 
 #[tokio::test]
 async fn an_unknown_conflict_and_a_request_without_a_session_change_nothing() {
-    let s = scene().await;
+    let s = conflict_scene().await;
     let audit_before = audit_rows(&s.admin.app).await;
     let rev = host_revision(&s.admin.app).await;
     let (status, body) = s

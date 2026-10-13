@@ -219,6 +219,14 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::codes::check_code),
         )
         .route(
+            "/v1/device/conflicts/status",
+            post(crate::routes::device_conflicts::conflict_status),
+        )
+        .route(
+            "/v1/device/displacements",
+            get(crate::routes::device_conflicts::list_displacements),
+        )
+        .route(
             "/v1/device/warehouse/lookup",
             post(crate::routes::warehouse::lookup),
         )

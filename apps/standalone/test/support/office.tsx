@@ -155,6 +155,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
+    conflictStatus: vi.fn<HostApi["conflictStatus"]>(() => unexpected("conflictStatus")),
+    listDisplacements: vi.fn<HostApi["listDisplacements"]>(() => unexpected("listDisplacements")),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.

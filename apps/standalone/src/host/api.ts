@@ -137,12 +137,18 @@ import {
   type WarehouseLookupResult,
 } from "./protocol.js";
 import {
+  conflictStatusResponseSchema,
   conflictsPath,
+  deviceDisplacementsSchema,
+  displacementsPath,
   officeConflictPageSchema,
   officeConflictSchema,
   officeShiftExceptionsSchema,
   officeShiftRejectionsSchema,
   type ConflictQuery,
+  type ConflictStatusRequest,
+  type ConflictStatusResponse,
+  type DeviceDisplacements,
   type OfficeConflict,
   type OfficeConflictPage,
   type OfficeShiftExceptions,
@@ -306,6 +312,17 @@ export interface HostApi {
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
+  /**
+   * Of the station's records it names (1–200), those whose conflict the office
+   * marked reviewed (plan КНФ), with the device key only; a host before plan
+   * КНФ answers `not_found`.
+   */
+  conflictStatus: (request: ConflictStatusRequest) => Promise<ConflictStatusResponse>;
+  /**
+   * The station's scans an earlier scan elsewhere took the code from, oldest
+   * first after `after` (plan КНФ), with the device key only.
+   */
+  listDisplacements: (after: { at: string; id: string } | null) => Promise<DeviceDisplacements>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -800,6 +817,13 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: officeShiftRejectionsSchema,
       }),
+    conflictStatus: (request) =>
+      client.request("POST", "/v1/device/conflicts/status", {
+        body: request,
+        schema: conflictStatusResponseSchema,
+      }),
+    listDisplacements: (after) =>
+      client.request("GET", displacementsPath(after), { schema: deviceDisplacementsSchema }),
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
         officeToken: token,

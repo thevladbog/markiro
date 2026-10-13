@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  conflictStatusRequestSchema,
+  conflictStatusResponseSchema,
+  deviceDisplacementsSchema,
+  displacementsPath,
   CONFLICT_MAX_PAGE,
   CONFLICT_PAGE_SIZE,
   SHIFT_REVIEW_LIMIT,
@@ -22,6 +26,9 @@ describe.each([
   ["office-conflict-page.json", officeConflictPageSchema],
   ["office-shift-exceptions.json", officeShiftExceptionsSchema],
   ["office-shift-rejections.json", officeShiftRejectionsSchema],
+  ["conflict-status-request.json", conflictStatusRequestSchema],
+  ["conflict-status-response.json", conflictStatusResponseSchema],
+  ["device-displacements.json", deviceDisplacementsSchema],
 ] as const)("review fixture %s (plan КНФ)", (name, schema) => {
   it("parses without losing a field", () => {
     expect(schema.parse(fixture(name))).toEqual(fixture(name));
@@ -53,5 +60,26 @@ describe("conflictsPath", () => {
       "/v1/office/conflicts?shift=s-1&reviewed=false&page=3",
     );
     expect(conflictsPath({ reviewed: true })).toBe("/v1/office/conflicts?reviewed=true");
+  });
+});
+
+describe("a station's requests after its conflicts (plan КНФ)", () => {
+  it("names 1 to 200 record ids and nothing else", () => {
+    const id = "00000000-0000-4000-8000-000000000002";
+    expect(conflictStatusRequestSchema.safeParse({ recordIds: [] }).success).toBe(false);
+    expect(
+      conflictStatusRequestSchema.safeParse({ recordIds: Array.from({ length: 201 }, () => id) })
+        .success,
+    ).toBe(false);
+    expect(conflictStatusRequestSchema.safeParse({ recordIds: [id], extra: 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it("asks for displacements after both ends of its cursor, or from the start", () => {
+    expect(displacementsPath(null)).toBe("/v1/device/displacements");
+    expect(displacementsPath({ at: "2026-10-08T07:12:03Z", id: "c-1" })).toBe(
+      "/v1/device/displacements?afterAt=2026-10-08T07%3A12%3A03Z&afterId=c-1",
+    );
   });
 });

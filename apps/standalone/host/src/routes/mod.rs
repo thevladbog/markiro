@@ -6,6 +6,7 @@ pub mod changes;
 pub mod cloud_import;
 pub mod codes;
 pub mod counterparties;
+pub mod device_conflicts;
 pub mod device_shifts;
 pub mod devices;
 pub mod employees;

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { codeOwnerSchema } from "./protocol.js";
+
 // The office's review of production (plan КНФ): mirrors `markiro_proto::review`.
 // Answers are lenient like the Rust response types (a field a newer host adds is
 // tolerated); `proto/fixtures/office-*.json` hold the shapes both sides read.
@@ -106,4 +108,49 @@ export function conflictsPath(query: ConflictQuery): string {
   if (query.page !== undefined && query.page !== 1) params.set("page", String(query.page));
   const text = params.toString();
   return text === "" ? "/v1/office/conflicts" : `/v1/office/conflicts?${text}`;
+}
+
+/** The most records one status request names (`MAX_CONFLICT_STATUS_RECORDS`). */
+export const MAX_CONFLICT_STATUS_RECORDS = 200;
+
+/**
+ * `POST /v1/device/conflicts/status` (plan КНФ): the station's records whose
+ * conflict or displacement nobody resolved yet; strict, like every request.
+ */
+export const conflictStatusRequestSchema = z.strictObject({
+  recordIds: z.array(z.uuid()).min(1).max(MAX_CONFLICT_STATUS_RECORDS),
+});
+export type ConflictStatusRequest = z.infer<typeof conflictStatusRequestSchema>;
+
+/** Of the asked records, those the office reviewed, with the host's instant. */
+export const conflictStatusResponseSchema = z.object({
+  reviewed: z.array(z.object({ recordId: z.string(), reviewedAt: instant })),
+});
+export type ConflictStatusResponse = z.infer<typeof conflictStatusResponseSchema>;
+
+/** A scan of this station an earlier scan elsewhere took the code from. */
+export const deviceDisplacementSchema = z.object({
+  conflictId: z.uuid(),
+  recordId: z.string(),
+  shiftId: z.string(),
+  codeHash,
+  boxId: z.string().nullable(),
+  detectedAt: instant,
+  winner: codeOwnerSchema,
+  reviewedAt: instant.nullable(),
+});
+export type DeviceDisplacement = z.infer<typeof deviceDisplacementSchema>;
+
+/** One page of the station's displacements, oldest first after its cursor. */
+export const deviceDisplacementsSchema = z.object({
+  items: z.array(deviceDisplacementSchema),
+  more: z.boolean(),
+});
+export type DeviceDisplacements = z.infer<typeof deviceDisplacementsSchema>;
+
+/** `GET /v1/device/displacements` after the cursor a station holds (both ends, or none). */
+export function displacementsPath(after: { at: string; id: string } | null): string {
+  return after === null
+    ? "/v1/device/displacements"
+    : `/v1/device/displacements?afterAt=${encodeURIComponent(after.at)}&afterId=${encodeURIComponent(after.id)}`;
 }

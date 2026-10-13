@@ -1,6 +1,8 @@
 use markiro_proto::review::{
-    ConflictKind, ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions,
-    OfficeShiftRejections, CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, SHIFT_REVIEW_LIMIT,
+    ConflictKind, ConflictStatusRequest, ConflictStatusResponse, DeviceDisplacements,
+    ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions, OfficeShiftRejections,
+    CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, DISPLACEMENT_PAGE_SIZE, MAX_CONFLICT_STATUS_RECORDS,
+    SHIFT_REVIEW_LIMIT,
 };
 use markiro_proto::{ExceptionKind, FactKind};
 use serde::{de::DeserializeOwned, Serialize};
@@ -55,4 +57,25 @@ fn a_newer_hosts_extra_field_is_tolerated_in_an_answer() {
     let mut page = fixture("office-conflict-page.json");
     page["items"][0]["newField"] = serde_json::json!(1);
     assert!(serde_json::from_value::<OfficeConflictPage>(page).is_ok());
+}
+
+#[test]
+fn a_devices_conflict_status_and_displacements_round_trip() {
+    let request: ConflictStatusRequest = round_trip("conflict-status-request.json");
+    assert_eq!(request.record_ids.len(), 2);
+    let response: ConflictStatusResponse = round_trip("conflict-status-response.json");
+    assert_eq!(response.reviewed[0].reviewed_at, "2026-10-08T09:00:00Z");
+    let page: DeviceDisplacements = round_trip("device-displacements.json");
+    assert!(!page.items[0].winner.same_device && !page.more);
+    assert_eq!(
+        (MAX_CONFLICT_STATUS_RECORDS, DISPLACEMENT_PAGE_SIZE),
+        (200, 100)
+    );
+}
+
+#[test]
+fn a_status_request_with_a_field_it_does_not_know_is_refused() {
+    let mut request = fixture("conflict-status-request.json");
+    request["extra"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<ConflictStatusRequest>(request).is_err());
 }
