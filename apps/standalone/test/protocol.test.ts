@@ -99,6 +99,7 @@ import {
   templateDefaultsUpdateSchema,
   templateSpecSchema,
   templateUpdateSchema,
+  updateStartedSchema,
 } from "../src/host/protocol.js";
 import {
   badgeCreate,
@@ -122,6 +123,7 @@ import {
   templateCreate,
   templateDefaultsUpdate,
   templateUpdate,
+  updateStarted,
 } from "../src/host/requests.js";
 
 // Vite statically rewrites the literal pattern `new URL(..., import.meta.url)`
@@ -362,6 +364,7 @@ const REQUESTS = [
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["shift-export-record.json", shiftExportRecordSchema],
+  ["update-started.json", updateStartedSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
   ["device-shift-create-pallets.json", deviceShiftCreateSchema],
   ["sscc-block-request.json", ssccBlockRequestSchema],
@@ -3239,5 +3242,40 @@ describe("the A4 pallet sheets (plan А4)", () => {
     expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: null }).success).toBe(true);
     expect(palletSheetDefaultUpdateSchema.safeParse({}).success).toBe(false);
     expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: "x" }).success).toBe(false);
+  });
+});
+
+describe("the report of a started update (plan ОБН-2)", () => {
+  const record = fixture("update-started.json") as Record<string, unknown>;
+
+  it("is built field by field, the source named, and no device: the host takes the session's", () => {
+    expect(
+      updateStarted(
+        {
+          from: "0.1.0",
+          to: "0.2.0",
+          installerSha256: "9f2b5c0e6d1a4b8c7e3f2a1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b",
+        },
+        "file",
+      ),
+    ).toStrictEqual(record);
+    expect(updateStartedSchema.parse({ ...record, source: "host" }).source).toBe("host");
+  });
+
+  it("takes only plain versions, a lower-case SHA-256 and a known source", () => {
+    for (const change of [
+      { from: "0.1" },
+      { to: "v0.2.0" },
+      { to: "0.2.0-beta.1" },
+      { from: "01.1.0" },
+      { installerSha256: String(record.installerSha256).toUpperCase() },
+      { installerSha256: "ab" },
+      { source: "usb" },
+    ]) {
+      expect(
+        updateStartedSchema.safeParse({ ...record, ...change }).success,
+        JSON.stringify(change),
+      ).toBe(false);
+    }
   });
 });
