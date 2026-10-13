@@ -33,6 +33,28 @@ fn milk_record(id: &str, rev: i64) -> Value {
     })
 }
 
+/// A beer product (ЧЗ group 15) with an EGAIS code to trim.
+fn beer() -> Value {
+    json!({
+        "gtin14": "04607001234560", "name": "Пиво светлое 0,5 л",
+        "chzProductGroupCode": 15, "boxCapacity": 20, "palletBoxCapacity": 60,
+        "egaisCode": " 0150320000001234567 "
+    })
+}
+
+/// A counterparty of the office's; returns its record.
+async fn counterparty(admin: &Admin, name: &str, gln: &str) -> Value {
+    let (status, created) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(json!({ "name": name, "gln": gln, "gs1Prefixes": [] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    created
+}
+
 /// A `PUT` body: every field of `record`, over `expected_rev`.
 fn full(record: &Value, expected_rev: i64) -> Value {
     let mut body = record.clone();
@@ -108,8 +130,12 @@ async fn an_administrator_creates_lists_and_updates_products() {
     // Stations get the product without the office's id and revision fields.
     let mut data = full(&created, 0);
     data.as_object_mut().unwrap().remove("expectedRev");
-    // The preferred A4 sheet is the office's only: no station prints from it.
-    data.as_object_mut().unwrap().remove("defaultPalletSheetId");
+    // The preferred A4 sheet is the office's only: no station prints from it;
+    // nor from the EGAIS code (a shift freezes it in its snapshot) or the
+    // default counterparty (plan ТОВ).
+    for office_only in ["defaultPalletSheetId", "egaisCode", "defaultCounterpartyId"] {
+        data.as_object_mut().unwrap().remove(office_only);
+    }
     data["status"] = json!("active");
     assert_eq!(
         admin.feed(1).await,
@@ -274,11 +300,9 @@ async fn product_fields_are_checked() {
         );
     }
     // A field the host does not keep, or a count that is not one, is refused
-    // as a whole.
-    for (field, value) in [
-        ("egaisCode", json!("0101234567890123456")),
-        ("boxCapacity", json!(-1)),
-    ] {
+    // as a whole. (Plan ТОВ keeps an EGAIS code, but only for group 15: on
+    // this product of group 8 it is refused as a field, see below.)
+    for (field, value) in [("unitPrice", json!(120)), ("boxCapacity", json!(-1))] {
         let mut body = milk();
         body[field] = value;
         let (status, error) = admin.call("POST", "/v1/office/products", Some(body)).await;
@@ -838,6 +862,7 @@ async fn an_update_writes_every_field_to_its_own_column() {
         "boxCapacity": 24, "palletBoxCapacity": 48, "shelfLifeDays": 14,
         "defaultBoxTemplateId": box_template, "defaultPalletTemplateId": pallet_template,
         "defaultPalletSheetId": null,
+        "egaisCode": null, "defaultCounterpartyId": null, "photoChecksum": null,
         "archived": true, "status": "active", "rev": rev + 1
     });
     assert_eq!(updated, expected);
@@ -942,7 +967,244 @@ async fn an_update_needs_the_whole_record_and_is_checked_like_a_create() {
             "palletBoxCapacity": null, "shelfLifeDays": null,
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
             "defaultPalletSheetId": null,
+            "egaisCode": null, "defaultCounterpartyId": null, "photoChecksum": null,
             "archived": false, "status": "draft", "rev": rev + 1
         })
+    );
+}
+
+#[tokio::test]
+async fn a_beer_product_keeps_its_trimmed_egais_code() {
+    let admin = admin().await;
+    let created = create(&admin, beer()).await;
+    assert_eq!(created["egaisCode"], "0150320000001234567");
+    assert_eq!(created["defaultCounterpartyId"], Value::Null);
+    assert_eq!(created["photoChecksum"], Value::Null);
+    let stored: Option<String> = sqlx::query_scalar("SELECT egais_code FROM products WHERE id = ?")
+        .bind(created["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored.as_deref(), Some("0150320000001234567"));
+    assert_eq!(
+        audit_trail(&admin.app, "product.create").await[0].6["egaisCode"],
+        "0150320000001234567"
+    );
+    // A blank code is none.
+    let mut body = beer();
+    body["gtin14"] = json!("04607001234577");
+    body["egaisCode"] = json!("   ");
+    assert_eq!(create(&admin, body).await["egaisCode"], Value::Null);
+}
+
+#[tokio::test]
+async fn an_egais_code_outside_group_15_is_refused() {
+    let admin = admin().await;
+    let rows = audit_rows(&admin.app).await;
+    for group in [json!(8), Value::Null] {
+        let mut body = milk();
+        body["chzProductGroupCode"] = group.clone();
+        body["egaisCode"] = json!("0150320000001234567");
+        let (status, error) = admin.call("POST", "/v1/office/products", Some(body)).await;
+        assert_eq!(
+            (
+                status,
+                error["error"]["code"].clone(),
+                error["error"]["details"]["field"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!("egaisCode")
+            ),
+            "group {group}: {error}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+#[tokio::test]
+async fn changing_the_group_away_from_15_with_the_code_kept_is_refused() {
+    let admin = admin().await;
+    let created = create(&admin, beer()).await;
+    let rev = created["rev"].as_i64().unwrap();
+    let mut body = full(&created, rev);
+    body["chzProductGroupCode"] = json!(8);
+    let (status, error) = admin.call("PUT", &path(&created), Some(body.clone())).await;
+    assert_eq!(
+        (status, error["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("egaisCode")),
+        "{error}"
+    );
+    // Left out (an office from before plan ТОВ), the code is kept, so the
+    // change is refused the same way.
+    body.as_object_mut().unwrap().remove("egaisCode");
+    let (status, error) = admin.call("PUT", &path(&created), Some(body.clone())).await;
+    assert_eq!(
+        (status, error["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("egaisCode")),
+        "{error}"
+    );
+    // Cleared with it, the group changes.
+    body["egaisCode"] = Value::Null;
+    let (status, updated) = admin.call("PUT", &path(&created), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(
+        (
+            updated["chzProductGroupCode"].clone(),
+            updated["egaisCode"].clone()
+        ),
+        (json!(8), Value::Null)
+    );
+}
+
+#[tokio::test]
+async fn an_egais_code_of_65_characters_or_with_a_control_character_is_refused() {
+    let admin = admin().await;
+    let rows = audit_rows(&admin.app).await;
+    for code in ["1".repeat(65), "0150320\u{1}000001234567".to_owned()] {
+        let mut body = beer();
+        body["egaisCode"] = json!(code);
+        let (status, error) = admin.call("POST", "/v1/office/products", Some(body)).await;
+        assert_eq!(
+            (
+                status,
+                error["error"]["code"].clone(),
+                error["error"]["details"]["field"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!("egaisCode")
+            ),
+            "{code:?}: {error}"
+        );
+    }
+    // 64 characters, the cloud's bound, are kept.
+    let mut body = beer();
+    body["egaisCode"] = json!("Я".repeat(64));
+    assert_eq!(
+        create(&admin, body).await["egaisCode"],
+        json!("Я".repeat(64))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows + 1);
+}
+
+#[tokio::test]
+async fn the_default_counterparty_must_be_in_use() {
+    let admin = admin().await;
+    let north = counterparty(&admin, "ООО «Север»", "4601234000017").await;
+    let south = counterparty(&admin, "ООО «Юг»", "4609876000013").await;
+    // South is archived.
+    let mut archive = south.clone();
+    for computed in ["id", "rev"] {
+        archive.as_object_mut().unwrap().remove(computed);
+    }
+    archive["archived"] = json!(true);
+    archive["expectedRev"] = south["rev"].clone();
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!(
+                "/v1/office/counterparties/{}",
+                south["id"].as_str().unwrap()
+            ),
+            Some(archive),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = audit_rows(&admin.app).await;
+    for id in [json!(uuid::Uuid::new_v4().to_string()), south["id"].clone()] {
+        let mut body = milk();
+        body["defaultCounterpartyId"] = id.clone();
+        let (status, error) = admin.call("POST", "/v1/office/products", Some(body)).await;
+        assert_eq!(
+            (
+                status,
+                error["error"]["code"].clone(),
+                error["error"]["details"]["field"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!("defaultCounterpartyId")
+            ),
+            "{id}: {error}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    let mut body = milk();
+    body["defaultCounterpartyId"] = north["id"].clone();
+    let created = create(&admin, body).await;
+    assert_eq!(created["defaultCounterpartyId"], north["id"]);
+    // Archiving it later keeps the product's pointer, and an update that
+    // keeps it is not refused.
+    let mut archive = north.clone();
+    for computed in ["id", "rev"] {
+        archive.as_object_mut().unwrap().remove(computed);
+    }
+    archive["archived"] = json!(true);
+    archive["expectedRev"] = north["rev"].clone();
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!(
+                "/v1/office/counterparties/{}",
+                north["id"].as_str().unwrap()
+            ),
+            Some(archive),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, list) = admin.call("GET", "/v1/office/products", None).await;
+    assert_eq!(
+        (status, list[0]["defaultCounterpartyId"].clone()),
+        (StatusCode::OK, north["id"].clone())
+    );
+    let mut change = full(&list[0], list[0]["rev"].as_i64().unwrap());
+    change["shelfLifeDays"] = json!(12);
+    let (status, updated) = admin.call("PUT", &path(&list[0]), Some(change)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["defaultCounterpartyId"], north["id"]);
+}
+
+#[tokio::test]
+async fn the_update_audits_the_egais_code_and_the_counterparty() {
+    let admin = admin().await;
+    let north = counterparty(&admin, "ООО «Север»", "4601234000017").await;
+    let created = create(&admin, beer()).await;
+    let mut body = full(&created, created["rev"].as_i64().unwrap());
+    body["egaisCode"] = json!("0150320000007654321");
+    body["defaultCounterpartyId"] = north["id"].clone();
+    let (status, updated) = admin.call("PUT", &path(&created), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let id = created["id"].as_str().unwrap();
+    assert_eq!(
+        audit_trail(&admin.app, "product.update").await,
+        vec![admin.row(
+            "product.update",
+            "product",
+            id,
+            json!({
+                "changed": ["egaisCode", "defaultCounterpartyId"],
+                "egaisCode": { "from": "0150320000001234567", "to": "0150320000007654321" },
+                "defaultCounterpartyId": { "from": null, "to": north["id"] }
+            })
+        )]
+    );
+    // Left out of an update, both are kept.
+    let mut body = full(&updated, updated["rev"].as_i64().unwrap());
+    let fields = body.as_object_mut().unwrap();
+    fields.remove("egaisCode");
+    fields.remove("defaultCounterpartyId");
+    body["shelfLifeDays"] = json!(30);
+    let (status, kept) = admin.call("PUT", &path(&created), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(
+        (
+            kept["egaisCode"].clone(),
+            kept["defaultCounterpartyId"].clone()
+        ),
+        (json!("0150320000007654321"), north["id"].clone())
     );
 }

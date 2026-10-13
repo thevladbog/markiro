@@ -37,9 +37,12 @@ pub async fn list_product_groups(
     ))
 }
 
-const SELECT: &str = "SELECT id, gtin14, name, print_name, chz_group_code, box_capacity, \
-     pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, \
-     default_pallet_sheet_id, archived, status, rev FROM products";
+const SELECT: &str = "SELECT p.id, p.gtin14, p.name, p.print_name, p.chz_group_code, \
+     p.box_capacity, p.pallet_box_capacity, p.shelf_life_days, p.default_box_template_id, \
+     p.default_pallet_template_id, p.default_pallet_sheet_id, p.egais_code, \
+     p.default_counterparty_id, \
+     (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = p.id) AS photo_checksum, \
+     p.archived, p.status, p.rev FROM products p";
 
 #[derive(sqlx::FromRow)]
 struct ProductRow {
@@ -54,6 +57,9 @@ struct ProductRow {
     default_box_template_id: Option<String>,
     default_pallet_template_id: Option<String>,
     default_pallet_sheet_id: Option<String>,
+    egais_code: Option<String>,
+    default_counterparty_id: Option<String>,
+    photo_checksum: Option<String>,
     archived: bool,
     status: String,
     rev: i64,
@@ -72,9 +78,9 @@ fn record(row: ProductRow) -> Result<OfficeProduct, ApiError> {
         default_box_template_id: row.default_box_template_id,
         default_pallet_template_id: row.default_pallet_template_id,
         default_pallet_sheet_id: row.default_pallet_sheet_id,
-        egais_code: None,
-        default_counterparty_id: None,
-        photo_checksum: None,
+        egais_code: row.egais_code,
+        default_counterparty_id: row.default_counterparty_id,
+        photo_checksum: row.photo_checksum,
         archived: row.archived,
         status: row.status.parse().map_err(ApiError::internal)?,
         rev: row.rev,
@@ -82,7 +88,7 @@ fn record(row: ProductRow) -> Result<OfficeProduct, ApiError> {
 }
 
 async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeProduct>, ApiError> {
-    let row: Option<ProductRow> = sqlx::query_as(&format!("{SELECT} WHERE id = ?"))
+    let row: Option<ProductRow> = sqlx::query_as(&format!("{SELECT} WHERE p.id = ?"))
         .bind(id)
         .fetch_optional(conn)
         .await
@@ -103,6 +109,10 @@ struct Sent<'a> {
     default_pallet_template_id: Option<&'a str>,
     /// `None`: keep the stored sheet (an update that leaves it out).
     default_pallet_sheet_id: Option<Option<&'a str>>,
+    /// `None`: keep the stored code (an update that leaves it out).
+    egais_code: Option<Option<&'a str>>,
+    /// `None`: keep the stored counterparty (an update that leaves it out).
+    default_counterparty_id: Option<Option<&'a str>>,
 }
 
 impl<'a> From<&'a ProductCreate> for Sent<'a> {
@@ -118,6 +128,8 @@ impl<'a> From<&'a ProductCreate> for Sent<'a> {
             default_box_template_id: create.default_box_template_id.as_deref(),
             default_pallet_template_id: create.default_pallet_template_id.as_deref(),
             default_pallet_sheet_id: Some(create.default_pallet_sheet_id.as_deref()),
+            egais_code: Some(create.egais_code.as_deref()),
+            default_counterparty_id: Some(create.default_counterparty_id.as_deref()),
         }
     }
 }
@@ -138,6 +150,11 @@ impl<'a> From<&'a ProductUpdate> for Sent<'a> {
                 .default_pallet_sheet_id
                 .as_ref()
                 .map(|id| id.as_deref()),
+            egais_code: update.egais_code.as_ref().map(|code| code.as_deref()),
+            default_counterparty_id: update
+                .default_counterparty_id
+                .as_ref()
+                .map(|id| id.as_deref()),
         }
     }
 }
@@ -155,6 +172,11 @@ struct Fields {
     default_pallet_template_id: Option<String>,
     /// `None`: keep the stored sheet.
     default_pallet_sheet_id: Option<Option<String>>,
+    /// `None`: keep the stored code; checked against the group once the
+    /// stored one is known (`effective_egais_code`).
+    egais_code: Option<Option<String>>,
+    /// `None`: keep the stored counterparty.
+    default_counterparty_id: Option<Option<String>>,
 }
 
 impl Sent<'_> {
@@ -173,6 +195,10 @@ impl Sent<'_> {
             self.shelf_life_days,
             validate::MAX_SHELF_LIFE_DAYS,
         )?;
+        let egais_code = self
+            .egais_code
+            .map(|code| validate::egais_code("egaisCode", code))
+            .transpose()?;
         Ok(Fields {
             gtin14,
             name,
@@ -184,8 +210,29 @@ impl Sent<'_> {
             default_box_template_id: self.default_box_template_id.map(str::to_owned),
             default_pallet_template_id: self.default_pallet_template_id.map(str::to_owned),
             default_pallet_sheet_id: self.default_pallet_sheet_id.map(|id| id.map(str::to_owned)),
+            egais_code,
+            default_counterparty_id: self.default_counterparty_id.map(|id| id.map(str::to_owned)),
         })
     }
+}
+
+/// The code a write leaves on the product — the one sent, or the stored one
+/// when an update leaves it out — and the rule that only a product of ЧЗ
+/// group 15 carries one (plan ТОВ, the cloud's `isEgaisApplicable`): a code
+/// with another group or none is `validation_failed` on `egaisCode`, also
+/// when an older office keeps the code and changes the group.
+fn effective_egais_code(fields: &Fields, stored: Option<&str>) -> Result<Option<String>, ApiError> {
+    let code = match &fields.egais_code {
+        Some(sent) => sent.clone(),
+        None => stored.map(str::to_owned),
+    };
+    if code.is_some() && fields.chz_product_group_code != Some(validate::EGAIS_PRODUCT_GROUP_CODE) {
+        return Err(ApiError::validation(
+            "egaisCode",
+            "only a product of ЧЗ group 15 carries an EGAIS code",
+        ));
+    }
+    Ok(code)
 }
 
 /// What the fields refer to exists: the product group, and for each default
@@ -246,6 +293,26 @@ async fn check_references(conn: &mut SqliteConnection, fields: &Fields) -> Resul
     Ok(())
 }
 
+/// The default counterparty a write SENDS must be in use, as a shift's
+/// (`shifts::counterparty_in_use`); one archived after it was chosen stays
+/// on the product, so an update that keeps it — sent unchanged or left out —
+/// is not refused for it.
+async fn check_default_counterparty(
+    conn: &mut SqliteConnection,
+    sent: Option<&str>,
+    stored: Option<&str>,
+) -> Result<(), ApiError> {
+    let Some(id) = sent else { return Ok(()) };
+    if Some(id) == stored || crate::shifts::counterparty_in_use(conn, id).await? {
+        Ok(())
+    } else {
+        Err(ApiError::validation(
+            "defaultCounterpartyId",
+            "no such counterparty in use",
+        ))
+    }
+}
+
 /// A write that hit `products_active_gtin14`: another product in use has
 /// the GTIN.
 fn gtin_taken(error: sqlx::Error) -> ApiError {
@@ -256,10 +323,11 @@ pub async fn list_products(
     State(state): State<AppState>,
     _context: OfficeContext,
 ) -> Result<Json<Vec<OfficeProduct>>, ApiError> {
-    let rows: Vec<ProductRow> = sqlx::query_as(&format!("{SELECT} ORDER BY archived, name, id"))
-        .fetch_all(&state.pool)
-        .await
-        .map_err(ApiError::internal)?;
+    let rows: Vec<ProductRow> =
+        sqlx::query_as(&format!("{SELECT} ORDER BY p.archived, p.name, p.id"))
+            .fetch_all(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
     rows.into_iter()
         .map(record)
         .collect::<Result<Vec<_>, _>>()
@@ -276,14 +344,18 @@ pub async fn create_product(
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    let egais_code = effective_egais_code(&fields, None)?;
+    let default_counterparty_id = fields.default_counterparty_id.clone().flatten();
     context.require_catalog_in(&mut tx).await?;
     check_references(&mut tx, &fields).await?;
+    check_default_counterparty(&mut tx, default_counterparty_id.as_deref(), None).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
          pallet_box_capacity, shelf_life_days, default_box_template_id, \
-         default_pallet_template_id, default_pallet_sheet_id, archived, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+         default_pallet_template_id, default_pallet_sheet_id, egais_code, \
+         default_counterparty_id, archived, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
     )
     .bind(&id)
     .bind(&fields.gtin14)
@@ -301,6 +373,8 @@ pub async fn create_product(
             .as_ref()
             .and_then(Option::as_deref),
     )
+    .bind(&egais_code)
+    .bind(&default_counterparty_id)
     .bind(rev)
     .execute(&mut *tx)
     .await
@@ -314,7 +388,16 @@ pub async fn create_product(
             target_type: Some("product"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "gtin14": fields.gtin14, "name": fields.name }),
+            details: if egais_code.is_some() || default_counterparty_id.is_some() {
+                json!({
+                    "gtin14": fields.gtin14,
+                    "name": fields.name,
+                    "egaisCode": egais_code,
+                    "defaultCounterpartyId": default_counterparty_id,
+                })
+            } else {
+                json!({ "gtin14": fields.gtin14, "name": fields.name })
+            },
         },
     )
     .await
@@ -350,6 +433,17 @@ pub async fn update_product(
         .default_pallet_sheet_id
         .clone()
         .unwrap_or_else(|| current.default_pallet_sheet_id.clone());
+    let egais_code = effective_egais_code(&fields, current.egais_code.as_deref())?;
+    let default_counterparty_id = fields
+        .default_counterparty_id
+        .clone()
+        .unwrap_or_else(|| current.default_counterparty_id.clone());
+    check_default_counterparty(
+        &mut tx,
+        default_counterparty_id.as_deref(),
+        current.default_counterparty_id.as_deref(),
+    )
+    .await?;
     let Some(details) = audit::update_details(&[
         ("gtin14", json!(current.gtin14), json!(fields.gtin14)),
         ("name", json!(current.name), json!(fields.name)),
@@ -393,6 +487,12 @@ pub async fn update_product(
             json!(current.default_pallet_sheet_id),
             json!(default_pallet_sheet_id),
         ),
+        ("egaisCode", json!(current.egais_code), json!(egais_code)),
+        (
+            "defaultCounterpartyId",
+            json!(current.default_counterparty_id),
+            json!(default_counterparty_id),
+        ),
         ("archived", json!(current.archived), json!(update.archived)),
     ]) else {
         // Nothing actually changed: report the product as-is without bumping
@@ -404,7 +504,8 @@ pub async fn update_product(
         "UPDATE products SET gtin14 = ?, name = ?, print_name = ?, chz_group_code = ?, \
          box_capacity = ?, pallet_box_capacity = ?, shelf_life_days = ?, \
          default_box_template_id = ?, default_pallet_template_id = ?, \
-         default_pallet_sheet_id = ?, archived = ?, rev = ? WHERE id = ?",
+         default_pallet_sheet_id = ?, egais_code = ?, default_counterparty_id = ?, \
+         archived = ?, rev = ? WHERE id = ?",
     )
     .bind(&fields.gtin14)
     .bind(&fields.name)
@@ -416,6 +517,8 @@ pub async fn update_product(
     .bind(&fields.default_box_template_id)
     .bind(&fields.default_pallet_template_id)
     .bind(&default_pallet_sheet_id)
+    .bind(&egais_code)
+    .bind(&default_counterparty_id)
     .bind(update.archived)
     .bind(rev)
     .bind(&id)

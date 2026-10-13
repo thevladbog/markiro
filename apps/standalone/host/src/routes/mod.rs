@@ -24,6 +24,7 @@ pub mod org;
 pub mod org_logo;
 pub mod pairing;
 pub mod pallet_sheets;
+pub mod product_photos;
 pub mod products;
 pub mod sscc;
 pub mod sscc_blocks;

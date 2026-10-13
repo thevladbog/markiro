@@ -374,6 +374,70 @@ pub fn print_name(field: &str, name: Option<&str>) -> Result<Option<String>, Api
     optional_text(field, name, 200, "the print name")
 }
 
+/// The ЧЗ product group whose products carry an EGAIS code (beer, cider,
+/// mead): the domain's `EGAIS_PRODUCT_GROUP_CODE`
+/// (`packages/domain/src/product-attributes/egais.ts`), plan ТОВ.
+pub const EGAIS_PRODUCT_GROUP_CODE: u32 = 15;
+
+/// The longest EGAIS code, the cloud's `egaisCode` bound.
+pub const MAX_EGAIS_CODE_CHARS: usize = 64;
+
+/// A product's EGAIS code (plan ТОВ, the cloud's `egaisCode`): trimmed, 1 to
+/// 64 characters, no control characters; `None` for none or a blank one.
+/// Nineteen digits are not required: the cloud's field does not require
+/// them, and a client's older products may carry another form.
+pub fn egais_code(field: &str, value: Option<&str>) -> Result<Option<String>, ApiError> {
+    let Some(value) = value else { return Ok(None) };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.chars().count() > MAX_EGAIS_CODE_CHARS || trimmed.chars().any(char::is_control) {
+        return Err(ApiError::validation(
+            field,
+            "an EGAIS code is 1 to 64 characters without control characters",
+        ));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
+/// The largest product photo the host keeps (plan ТОВ): 640 × 640, at most
+/// 300 000 bytes of JPEG.
+pub const MAX_PHOTO_SIDE: u32 = 640;
+pub const MAX_PHOTO_BYTES: usize = 300_000;
+/// The base64 of `MAX_PHOTO_BYTES`: 4 × ceil(300 000 / 3).
+const MAX_PHOTO_BASE64: usize = 400_000;
+
+/// A product photo's JPEG: standard base64 of 4 to `MAX_PHOTO_BYTES` bytes
+/// that start with the JPEG signature `FF D8 FF`, within 1..=640 dots on each
+/// side; returns the bytes. The host parses no picture: the office made the
+/// JPEG, and the sides are the office's word for it.
+pub fn product_photo(width: u32, height: u32, data_base64: &str) -> Result<Vec<u8>, ApiError> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    for (field, side) in [("width", width), ("height", height)] {
+        if !(1..=MAX_PHOTO_SIDE).contains(&side) {
+            return Err(ApiError::validation(field, "a photo side is 1 to 640 dots"));
+        }
+    }
+    // Before decoding, so an oversized body costs no allocation.
+    if data_base64.len() > MAX_PHOTO_BASE64 {
+        return Err(ApiError::validation(
+            "dataBase64",
+            "a photo is at most 300 000 bytes",
+        ));
+    }
+    let bytes = STANDARD
+        .decode(data_base64)
+        .map_err(|_| ApiError::validation("dataBase64", "standard base64 is required"))?;
+    if bytes.len() < 4 || bytes.len() > MAX_PHOTO_BYTES || !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Err(ApiError::validation(
+            "dataBase64",
+            "a JPEG of at most 300 000 bytes is required",
+        ));
+    }
+    Ok(bytes)
+}
+
 /// The most units a box holds. The cloud bounds none; this cap only keeps a
 /// typing slip out of production.
 pub const MAX_BOX_CAPACITY: u32 = 100_000;

@@ -43,6 +43,10 @@ pub mod actions {
     pub const DEVICE_REVOKE: &str = "device.revoke";
     pub const PRODUCT_CREATE: &str = "product.create";
     pub const PRODUCT_UPDATE: &str = "product.update";
+    /// A product's photo set or replaced, and cleared (plan ТОВ); the
+    /// details name the size, never the bytes.
+    pub const PRODUCT_PHOTO_SET: &str = "product.photo.set";
+    pub const PRODUCT_PHOTO_CLEAR: &str = "product.photo.clear";
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";

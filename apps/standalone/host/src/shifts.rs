@@ -138,13 +138,7 @@ pub async fn shift_product(
 /// `validation_failed` on `counterpartyId` unless `id` names a counterparty
 /// that is not archived.
 pub async fn check_counterparty(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
-    let archived: Option<bool> =
-        sqlx::query_scalar("SELECT archived FROM counterparties WHERE id = ?")
-            .bind(id)
-            .fetch_optional(conn)
-            .await
-            .map_err(ApiError::internal)?;
-    if archived == Some(false) {
+    if counterparty_in_use(conn, id).await? {
         Ok(())
     } else {
         Err(ApiError::validation(
@@ -152,6 +146,19 @@ pub async fn check_counterparty(conn: &mut SqliteConnection, id: &str) -> Result
             "no such counterparty in use",
         ))
     }
+}
+
+/// Whether `id` names a counterparty that exists and is not archived; a
+/// failed read is an internal error, never a refusal. A shift's counterparty
+/// and a product's default one (plan ТОВ) follow this rule.
+pub async fn counterparty_in_use(conn: &mut SqliteConnection, id: &str) -> Result<bool, ApiError> {
+    let archived: Option<bool> =
+        sqlx::query_scalar("SELECT archived FROM counterparties WHERE id = ?")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+            .map_err(ApiError::internal)?;
+    Ok(archived == Some(false))
 }
 
 /// `validation_failed` on `boxTemplateId` unless `id` names a box template
