@@ -163,6 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
       entitlementRevision: preview.next.entitlementRevision,
       previousSequence: 0,
       boundaryAt: f.endsAt?.toISOString(),
+      termsDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
     expect(await issuedRows(f.tenantId)).toEqual([]);
 
@@ -463,6 +464,110 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
     ).toEqual({ status: 409, body: { code: "standalone_license_request_conflict" } });
   });
 
+  it("refuses to sign anything the preview did not show: another grace, a rebound host, a changed name", async () => {
+    const f = await siteFor();
+    const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+      graceDays: null,
+      offline: null,
+    });
+    const stale = { status: 409, body: { code: "standalone_license_preview_stale" } };
+    expect(
+      await httpRefusal(
+        issuance.confirm(f.admin, f.tenantId, f.site.id, {
+          requestId: randomUUID(),
+          graceDays: 30,
+          offline: null,
+          expected: preview.expected,
+        }),
+      ),
+    ).toEqual(stale);
+    await db
+      .update(schema.organization)
+      .set({ name: "ООО «Новое имя»" })
+      .where(eq(schema.organization.id, f.tenantId));
+    expect(
+      await httpRefusal(
+        issuance.confirm(f.admin, f.tenantId, f.site.id, {
+          requestId: randomUUID(),
+          graceDays: null,
+          offline: null,
+          expected: preview.expected,
+        }),
+      ),
+    ).toEqual(stale);
+    const renamed = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+      graceDays: null,
+      offline: null,
+    });
+    await sites.register(f.admin, f.tenantId, {
+      intent: "rebind",
+      requestId: randomUUID(),
+      siteId: f.site.id,
+      request: activationRequest({ inn: "7707083893" }),
+      acknowledgedWarnings: [],
+    });
+    expect(
+      await httpRefusal(
+        issuance.confirm(f.admin, f.tenantId, f.site.id, {
+          requestId: randomUUID(),
+          graceDays: null,
+          offline: null,
+          expected: renamed.expected,
+        }),
+      ),
+    ).toEqual(stale);
+    expect(await issuedRows(f.tenantId)).toEqual([]);
+  });
+
+  it("replays a request id only for its own administrator and site", async () => {
+    const f = await siteFor();
+    const other = await platformActor(db);
+    const second = await sites.register(f.admin, f.tenantId, {
+      intent: "create",
+      requestId: randomUUID(),
+      name: "Склад",
+      request: activationRequest({ inn: "7707083893" }),
+      acknowledgedWarnings: [],
+    });
+    const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+      graceDays: null,
+      offline: null,
+    });
+    const requestId = randomUUID();
+    const file = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+      requestId,
+      graceDays: null,
+      offline: null,
+      expected: preview.expected,
+    });
+    expect(
+      await httpRefusal(
+        issuance.confirm(other, f.tenantId, f.site.id, {
+          requestId,
+          graceDays: null,
+          offline: null,
+          expected: preview.expected,
+        }),
+      ),
+    ).toEqual({ status: 409, body: { code: "standalone_license_request_conflict" } });
+    // The same request id on the tenant's other site is a new issuance there, not this file.
+    const secondPreview = await issuance.preview(f.admin, f.tenantId, second.id, {
+      graceDays: null,
+      offline: null,
+    });
+    const secondFile = await issuance.confirm(f.admin, f.tenantId, second.id, {
+      requestId,
+      graceDays: null,
+      offline: null,
+      expected: secondPreview.expected,
+    });
+    expect(secondFile.issuance).toMatchObject({ siteId: second.id, sequence: 1 });
+    expect(secondFile.issuance.licenseId).not.toBe(file.issuance.licenseId);
+    await expect(
+      issuance.download(f.admin, f.tenantId, second.id, file.issuance.licenseId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it("refuses a stale expectation without writing anything", async () => {
     const f = await siteFor();
     const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
@@ -476,6 +581,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
       },
       { ...preview.expected, previousSequence: 1 },
       { ...preview.expected, boundaryAt: new Date(clock.getTime() + DAY).toISOString() },
+      { ...preview.expected, termsDigest: "0".repeat(64) },
     ]) {
       expect(
         await httpRefusal(
@@ -577,7 +683,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
     const f = await siteFor();
     await db
       .update(schema.organization)
-      .set({ name: "ООО\u202eЗавод\u0085 «Тест»\u2028\u2066" })
+      .set({ name: "ООО\u202eЗавод\u0085 «Тест»\u2028\u2066\t\n\u007f\u2029" })
       .where(eq(schema.organization.id, f.tenantId));
     const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
       graceDays: null,
@@ -593,6 +699,38 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone license issuance (plan Л
     expect(await verifyStandaloneLicense(file.compact, trustedKeyset())).toMatchObject({
       ok: true,
     });
+  });
+
+  it("cuts a long name with emoji to 300 UTF-16 units and names a tenant of control characters with a dash", async () => {
+    const f = await siteFor();
+    await db
+      .update(schema.organization)
+      .set({ name: `${"Я".repeat(290)}${"🏭".repeat(60)}` })
+      .where(eq(schema.organization.id, f.tenantId));
+    const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+      graceDays: null,
+      offline: null,
+    });
+    expect(preview.next.customer.name).toBe(`${"Я".repeat(290)}${"🏭".repeat(5)}`);
+    expect(preview.next.customer.name).toHaveLength(300);
+    const file = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+      requestId: randomUUID(),
+      graceDays: null,
+      offline: null,
+      expected: preview.expected,
+    });
+    expect(await verifyStandaloneLicense(file.compact, trustedKeyset())).toMatchObject({
+      ok: true,
+    });
+
+    await db
+      .update(schema.organization)
+      .set({ name: "\u0001\u202e\u2028" })
+      .where(eq(schema.organization.id, f.tenantId));
+    expect(
+      (await issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline: null }))
+        .next.customer.name,
+    ).toBe("—");
   });
 
   it("keeps tenants apart and denies roles without the capability", async () => {
@@ -751,6 +889,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         entitlementRevision: "0",
         previousSequence: 0,
         boundaryAt: null,
+        termsDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
       });
 
       const requestId = randomUUID();
@@ -884,7 +1023,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
             requestId: randomUUID(),
             graceDays: null,
             offline: null,
-            expected: { entitlementRevision: "0", previousSequence: 0, boundaryAt: null },
+            expected: {
+              entitlementRevision: "0",
+              previousSequence: 0,
+              boundaryAt: null,
+              termsDigest: "0".repeat(64),
+            },
           }),
         ),
       ).toEqual({ status: 409, body: { code: "standalone_license_offline_terms_required" } });
@@ -899,6 +1043,52 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }),
         ),
       ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+      const cloudPreview = await issuance.preview(cloud.admin, cloud.tenantId, cloud.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(
+        await httpRefusal(
+          issuance.confirm(cloud.admin, cloud.tenantId, cloud.site.id, {
+            requestId: randomUUID(),
+            graceDays: null,
+            offline: { planVersionId: cloud.planVersionId, termDays: 30 },
+            expected: cloudPreview.expected,
+          }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+    });
+
+    it("refuses offline terms or a sequence other than the preview's", async () => {
+      const f = await offlineSiteFor();
+      const offline = { planVersionId: f.planVersionId, termDays: 90 };
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline,
+      });
+      const other = await createPublishedPlan(db, {
+        maxLines: 9,
+        maxStations: 9,
+        maxKiosks: 0,
+        maxCabinetUsers: 9,
+      });
+      for (const [terms, expected] of [
+        [{ ...offline, termDays: 365 }, preview.expected],
+        [{ ...offline, planVersionId: other }, preview.expected],
+        [offline, { ...preview.expected, previousSequence: 1 }],
+      ] as const) {
+        expect(
+          await httpRefusal(
+            issuance.confirm(f.admin, f.tenantId, f.site.id, {
+              requestId: randomUUID(),
+              graceDays: null,
+              offline: terms,
+              expected,
+            }),
+          ),
+        ).toEqual({ status: 409, body: { code: "standalone_license_preview_stale" } });
+      }
+      expect(await issuedRows(f.tenantId)).toEqual([]);
     });
 
     it("denies support and accountant the offline path too", async () => {

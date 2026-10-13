@@ -8,7 +8,12 @@ import {
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, desc, eq } from "drizzle-orm";
-import { STANDALONE_LICENSE_TYP, standaloneLicensePayloadV1Schema } from "@markiro/domain";
+import {
+  STANDALONE_FEATURE_KEYS,
+  STANDALONE_LICENSE_TYP,
+  STANDALONE_QUOTA_KEYS,
+  standaloneLicensePayloadV1Schema,
+} from "@markiro/domain";
 import {
   standaloneIssuanceListSchema,
   standaloneIssuancePreviewSchema,
@@ -79,17 +84,52 @@ function unprintable(code: number): boolean {
     code === 0x2029 ||
     (code >= 0x202a && code <= 0x202e) ||
     (code >= 0x2066 && code <= 0x2069) ||
+    // Defensive: Postgres text cannot hold a lone surrogate, so the database never yields one.
     (code >= 0xd800 && code <= 0xdfff)
   );
 }
 
-/** The signed customer name (plan Д4): refused characters become spaces, at most 300 characters. */
+/**
+ * The signed customer name (plan Д4): refused characters become spaces; at most
+ * 300 UTF-16 units, as Zod's `.max(300)` and the host's `utf16_len` count them,
+ * never splitting a surrogate pair.
+ */
 function plainName(value: string): string {
   const printable = [...value]
     .map((character) => (unprintable(character.codePointAt(0) ?? 0) ? " " : character))
     .join("")
     .trim();
-  return [...printable].slice(0, 300).join("").trim() || "—";
+  let cut = "";
+  for (const character of printable) {
+    if (cut.length + character.length > 300) break;
+    cut += character;
+  }
+  return cut.trim() || "—";
+}
+
+/**
+ * What the operator saw in the preview, apart from the instants (they are the
+ * confirmation's own): confirmation refuses a file whose terms moved (plan Д7).
+ */
+function termsDigest(
+  draft: IssuanceDraft,
+  hostId: string,
+  offline: StandaloneOfflineTerms | null,
+): string {
+  const canonical = JSON.stringify([
+    draft.source,
+    draft.plan,
+    draft.planVersionId,
+    draft.graceDays,
+    hostId,
+    draft.customer.name,
+    draft.customer.inn,
+    STANDALONE_QUOTA_KEYS.map((key) => draft.rights.quotas[key]),
+    STANDALONE_FEATURE_KEYS.map((key) => draft.rights.features[key]),
+    offline === null ? null : [offline.planVersionId, offline.termDays],
+    draft.validity.reason,
+  ]);
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 /** The same request id must carry the same terms to replay its file. */
@@ -162,6 +202,7 @@ export class StandaloneLicenseIssuanceService {
             entitlementRevision: draft.entitlementRevision,
             previousSequence: site.lastIssuedSequence,
             boundaryAt: draft.validity.boundaryAt?.toISOString() ?? null,
+            termsDigest: termsDigest(draft, site.hostId, body.offline),
           },
         });
       },
@@ -208,7 +249,8 @@ export class StandaloneLicenseIssuanceService {
         if (
           body.expected.entitlementRevision !== draft.entitlementRevision ||
           body.expected.previousSequence !== site.lastIssuedSequence ||
-          body.expected.boundaryAt !== boundaryAt
+          body.expected.boundaryAt !== boundaryAt ||
+          body.expected.termsDigest !== termsDigest(draft, site.hostId, body.offline)
         )
           throw stale();
         const sequence = site.lastIssuedSequence + 1;
@@ -288,6 +330,7 @@ export class StandaloneLicenseIssuanceService {
             ? {
                 licenseId: draft.previous.id,
                 sequence: draft.previous.sequence,
+                source: draft.previous.source,
                 plan: draft.previous.plan,
                 validUntil: draft.previous.validUntil.toISOString(),
               }
@@ -320,9 +363,11 @@ export class StandaloneLicenseIssuanceService {
       });
     } catch (error) {
       const failure = postgresFailure(error);
+      // A lost sequence race, or a serialization failure that outlived the retries.
       if (
-        failure.code === "23505" &&
-        failure.constraint === "standalone_license_issuances_site_sequence_uq"
+        (failure.code === "23505" &&
+          failure.constraint === "standalone_license_issuances_site_sequence_uq") ||
+        failure.code === "40001"
       )
         throw stale();
       throw error;

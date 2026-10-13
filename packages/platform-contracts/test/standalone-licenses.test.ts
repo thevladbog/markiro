@@ -187,7 +187,12 @@ describe("standalone site registration body", () => {
 
 describe("standalone issuance confirmation and file", () => {
   it("requires the preview expectation and bounds grace days", () => {
-    const expected = { entitlementRevision: "7", previousSequence: 0, boundaryAt: null };
+    const expected = {
+      entitlementRevision: "7",
+      previousSequence: 0,
+      boundaryAt: null,
+      termsDigest: "b".repeat(64),
+    };
     expect(
       standaloneIssuanceConfirmSchema.parse({
         requestId: randomUUID(),
@@ -202,6 +207,18 @@ describe("standalone issuance confirmation and file", () => {
       { requestId: randomUUID(), graceDays: 61, offline: null, expected },
       { requestId: randomUUID(), graceDays: -1, offline: null, expected },
       { requestId: "not-a-uuid", graceDays: 0, offline: null, expected },
+      {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: { ...expected, termsDigest: "B".repeat(64) },
+      },
+      {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: { entitlementRevision: "7", previousSequence: 0, boundaryAt: null },
+      },
     ]) {
       expect(standaloneIssuanceConfirmSchema.safeParse(invalid).success).toBe(false);
     }

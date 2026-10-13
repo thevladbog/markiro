@@ -284,6 +284,11 @@ export const standaloneIssuanceExpectationSchema = z
     entitlementRevision: entitlementRevisionSchema,
     previousSequence: z.number().int().nonnegative().max(2_147_483_647),
     boundaryAt: platformTimestampSchema.nullable(),
+    /**
+     * SHA-256 of everything the file would sign apart from its instants: source,
+     * plan, plan version, grace, host, customer, rights, offline terms, reason.
+     */
+    termsDigest: sha256Schema,
   })
   .strict();
 

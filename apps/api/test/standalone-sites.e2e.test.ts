@@ -333,20 +333,24 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
     };
     const rebound = await sites.register(admin, tenantId, rebind);
 
+    // Thunks: each replay starts only when awaited, so no rejection goes unhandled.
     for (const replay of [
-      sites.register(other, tenantId, create),
-      sites.register(admin, tenantId, {
-        ...create,
-        request: activationRequest({ inn: "7707083893" }),
-      }),
-      sites.register(other, tenantId, rebind),
-      sites.register(admin, tenantId, {
-        ...rebind,
-        request: activationRequest({ inn: "7707083893" }),
-      }),
-      sites.register(admin, tenantId, { ...rebind, requestId: create.requestId, request: first }),
+      () => sites.register(other, tenantId, create),
+      () =>
+        sites.register(admin, tenantId, {
+          ...create,
+          request: activationRequest({ inn: "7707083893" }),
+        }),
+      () => sites.register(other, tenantId, rebind),
+      () =>
+        sites.register(admin, tenantId, {
+          ...rebind,
+          request: activationRequest({ inn: "7707083893" }),
+        }),
+      () =>
+        sites.register(admin, tenantId, { ...rebind, requestId: create.requestId, request: first }),
     ]) {
-      expect(await refusal(replay)).toEqual({ code: "standalone_site_request_conflict" });
+      expect(await refusal(replay())).toEqual({ code: "standalone_site_request_conflict" });
     }
     // The create still replays after the site moved to its new host.
     expect(await sites.register(admin, tenantId, create)).toEqual(rebound);

@@ -115,6 +115,7 @@ export const STANDALONE_PREVIEW = standaloneIssuancePreviewSchema.parse({
     entitlementRevision: "8",
     previousSequence: 1,
     boundaryAt: "2100-10-01T09:00:00.000Z",
+    termsDigest: "c".repeat(64),
   },
 });
 
