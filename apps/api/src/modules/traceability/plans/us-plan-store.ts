@@ -97,6 +97,20 @@ export class UsPlanStore {
     if (profile !== "US_FSMA204_PROCESSOR")
       throw new ForbiddenException({ code: "us_plan_profile_unsupported" });
   }
+  private async authorizeCommand(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+  ) {
+    await this.authorize(tx, tenantId, actorUserId, true);
+    // Organization -> version lock order serializes allocation even when no draft exists.
+    const [organization] = await tx
+      .select({ id: schema.organization.id })
+      .from(schema.organization)
+      .where(eq(schema.organization.id, tenantId))
+      .for("update");
+    if (!organization) throw new NotFoundException({ code: "us_plan_version_not_found" });
+  }
   async listVersions(
     tenantId: string,
     actorUserId: string,
@@ -136,14 +150,7 @@ export class UsPlanStore {
   ): Promise<T> {
     try {
       return await this.db.transaction(async (tx) => {
-        await this.authorize(tx, tenantId, actorUserId, true);
-        // Organization -> version lock order serializes allocation even when no draft exists.
-        const [organization] = await tx
-          .select({ id: schema.organization.id })
-          .from(schema.organization)
-          .where(eq(schema.organization.id, tenantId))
-          .for("update");
-        if (!organization) throw new NotFoundException({ code: "us_plan_version_not_found" });
+        await this.authorizeCommand(tx, tenantId, actorUserId);
         return run(tx);
       });
     } catch (caught) {
@@ -196,41 +203,61 @@ export class UsPlanStore {
     requestId: string,
   ): Promise<UsPlanDraftView> {
     const action = "traceability.plan.draft_created";
-    return this.command(tenantId, actorUserId, requestId, action, null, async (tx) => {
-      const value = parseMasterDataInput(usPlanDraftCreateBodySchema, input);
-      const [draft] = await tx
-        .select({ id: table.id })
-        .from(table)
-        .where(and(eq(table.tenantId, tenantId), eq(table.status, "draft")))
-        .limit(1);
-      if (draft) throw new ConflictException({ code: "us_plan_draft_exists" });
-      const [maximum] = await tx
-        .select({ number: max(table.versionNumber) })
-        .from(table)
-        .where(eq(table.tenantId, tenantId));
-      const [row] = await tx
-        .insert(table)
-        .values({
-          tenantId,
-          createdBy: actorUserId,
-          versionNumber: (maximum?.number ?? 0) + 1,
-          ...value,
-        })
-        .returning();
-      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        requestId,
-        action,
-        outcome: "success",
-        targetType: "traceability_plan_version",
-        targetId: row.id,
-        before: null,
-        after: metadata(row),
-      });
-      return parseUsPlanDraftRow(row);
+    return this.command(tenantId, actorUserId, requestId, action, null, (tx) =>
+      this.createDraftBody(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+  /** Caller owns commit/rollback and any retry of the complete transaction. */
+  async createDraftCommandInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<UsPlanDraftView> {
+    await this.authorizeCommand(tx, tenantId, actorUserId);
+    return this.createDraftBody(tx, tenantId, actorUserId, input, requestId);
+  }
+  private async createDraftBody(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<UsPlanDraftView> {
+    const value = parseMasterDataInput(usPlanDraftCreateBodySchema, input);
+    const [draft] = await tx
+      .select({ id: table.id })
+      .from(table)
+      .where(and(eq(table.tenantId, tenantId), eq(table.status, "draft")))
+      .limit(1);
+    if (draft) throw new ConflictException({ code: "us_plan_draft_exists" });
+    const [maximum] = await tx
+      .select({ number: max(table.versionNumber) })
+      .from(table)
+      .where(eq(table.tenantId, tenantId));
+    const [row] = await tx
+      .insert(table)
+      .values({
+        tenantId,
+        createdBy: actorUserId,
+        versionNumber: (maximum?.number ?? 0) + 1,
+        ...value,
+      })
+      .returning();
+    if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      requestId,
+      action: "traceability.plan.draft_created",
+      outcome: "success",
+      targetType: "traceability_plan_version",
+      targetId: row.id,
+      before: null,
+      after: metadata(row),
     });
+    return parseUsPlanDraftRow(row);
   }
   private async lockedDraft(
     tx: UsMasterDataTransaction,
