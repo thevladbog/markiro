@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use markiro_proto::backup::BackupTrigger;
+use markiro_proto::backup::{failure, BackupTrigger};
 use serde_json::{json, Value};
 use sqlx::migrate::Migrator;
 use sqlx::{SqliteConnection, SqlitePool};
@@ -171,13 +171,23 @@ impl std::fmt::Display for OpenError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Database(error) => write!(formatter, "{error}"),
-            Self::Copy { pending, failure } => write!(
-                formatter,
-                "the copy of the database before migrations {} to {} failed ({}): no migration \
-                 ran and the host does not start; free space or restore access in the folder \
-                 of copies, then start the service again",
-                pending.from, pending.to, failure.code
-            ),
+            Self::Copy { pending, failure } => {
+                // The folder's own troubles have a remedy on site; anything
+                // else (a copy that did not check out) is for support.
+                let advice = match failure.code {
+                    failure::DISK_FULL | failure::ACCESS_DENIED | failure::WRITE_FAILED => {
+                        "free space or restore access in the folder of copies, then start the \
+                         service again"
+                    }
+                    _ => "the database may be damaged: call support before anything else",
+                };
+                write!(
+                    formatter,
+                    "the copy of the database before migrations {} to {} failed ({}): no \
+                     migration ran and the host does not start; {advice}",
+                    pending.from, pending.to, failure.code
+                )
+            }
         }
     }
 }
@@ -207,12 +217,20 @@ pub struct Prepared {
     pub reused: bool,
 }
 
-/// The newest audit row, when it is a failed `host.upgrade` of the same
-/// migrations: nothing has written to the database since (the host did not
-/// start in between).
+/// The newest audit row, when it is a failed `host.upgrade` towards the same
+/// newest migration: nothing has written to the database since but this
+/// build's own migrations (the host did not start in between: every start
+/// writes rows at once, the worker's first `backup.create` among them, and a
+/// restore writes `host.restore`).
 struct LastFailure {
     file: Option<String>,
     code: String,
+    /// What the row's copy protects: its `from` and how many migrations
+    /// were pending then. A migration that committed before a later one
+    /// failed moves the database's own `from` on; the copy still holds the
+    /// state before all of them.
+    from: i64,
+    migrations: usize,
 }
 
 /// Before the migrations: `None` when nothing is pending, otherwise the copy
@@ -231,19 +249,25 @@ pub async fn prepare(
         return Ok(None);
     };
     let last = last_failure(&mut conn, &pending).await?;
-    if let Some(file) = last.as_ref().and_then(|last| last.file.clone()) {
-        if reusable(&pre.backups_dir, &file).await {
-            tracing::info!(
-                %file,
-                from = pending.from,
-                to = pending.to,
-                "the copy of the earlier start protects the migrations again"
-            );
-            return Ok(Some(Prepared {
-                pending,
-                file,
-                reused: true,
-            }));
+    if let Some(last) = &last {
+        if let Some(file) = &last.file {
+            if reusable(&pre.backups_dir, file, last.from, &pre.host_id).await {
+                tracing::info!(
+                    %file,
+                    from = last.from,
+                    to = pending.to,
+                    "the copy of the earlier start protects the migrations again"
+                );
+                return Ok(Some(Prepared {
+                    pending: Pending {
+                        from: last.from,
+                        to: pending.to,
+                        migrations: last.migrations,
+                    },
+                    file: file.clone(),
+                    reused: true,
+                }));
+            }
         }
     }
     let identity = read_identity(pre).await;
@@ -366,26 +390,44 @@ async fn last_failure(
         return Ok(None);
     }
     let details: Value = serde_json::from_str(&details).unwrap_or(Value::Null);
-    if details["from"] != json!(pending.from) || details["to"] != json!(pending.to) {
+    if details["to"] != json!(pending.to) {
         return Ok(None);
     }
+    let (Some(from), Some(migrations)) = (details["from"].as_i64(), details["migrations"].as_u64())
+    else {
+        return Ok(None);
+    };
+    // Only this build's migrations can have moved the database on since.
+    if from > pending.from {
+        return Ok(None);
+    }
+    let Ok(migrations) = usize::try_from(migrations) else {
+        return Ok(None);
+    };
     Ok(Some(LastFailure {
         file: details["file"].as_str().map(str::to_owned),
         code: details["code"].as_str().unwrap_or_default().to_owned(),
+        from,
+        migrations,
     }))
 }
 
 /// Whether `file`, which an earlier start named, is still a verified copy in
-/// `dir`: a copy's name, its manifest reads and names it, and the file has
-/// the manifest's size.
-async fn reusable(dir: &Path, file: &str) -> bool {
+/// `dir` of the database at migration `from` of host `host_id`: a copy's
+/// name, its manifest reads and names it with that schema and host, and the
+/// file has the manifest's size (no hash: a large database every 60 s).
+async fn reusable(dir: &Path, file: &str, from: i64, host_id: &str) -> bool {
     if !copy::is_copy_file_name(file) {
         return false;
     }
     let db = dir.join(file);
+    let host_id = host_id.to_owned();
     tokio::task::spawn_blocking(move || {
         copy::read_manifest(&db).is_ok_and(|manifest| {
-            std::fs::metadata(&db).is_ok_and(|metadata| metadata.len() == manifest.size_bytes)
+            manifest.schema_version == from
+                && manifest.host_id == host_id
+                && std::fs::metadata(&db)
+                    .is_ok_and(|metadata| metadata.len() == manifest.size_bytes)
         })
     })
     .await

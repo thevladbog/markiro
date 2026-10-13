@@ -470,3 +470,306 @@ async fn a_host_whose_copy_fails_does_not_start_and_runs_no_migration() {
     assert!(!versions.contains(&ADDED), "{versions:?}");
     assert!(names(&backups).is_empty(), "nothing of the copy stays");
 }
+
+/// Opens the folder's database for a test's own writes, without migrating.
+async fn raw_conn(paths: &HostPaths) -> SqliteConnection {
+    db::options(&paths.database_file()).connect().await.unwrap()
+}
+
+/// `0031` made to fail: the database already has its column.
+async fn break_added(paths: &HostPaths) {
+    let mut conn = raw_conn(paths).await;
+    sqlx::query("ALTER TABLE devices ADD COLUMN version_seen_at TEXT")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+}
+
+async fn mend_added(paths: &HostPaths) {
+    let mut conn = raw_conn(paths).await;
+    sqlx::query("ALTER TABLE devices DROP COLUMN version_seen_at")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+}
+
+/// Two migrations pending, the first commits and the second fails: the next
+/// start still takes the copy made before both (the database changed only by
+/// this build's own migrations), and the row of the start that succeeds
+/// describes that copy — the migrations it protects, from its own `from`.
+#[tokio::test]
+async fn a_partial_upgrade_keeps_the_copy_made_before_all_its_migrations() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, to) = versions();
+    let second = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version < ADDED)
+        .max()
+        .unwrap();
+    let without_both: Vec<i64> = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version != ADDED && *version != second)
+        .collect();
+    let from = *without_both.iter().max().unwrap();
+    // A database of a build that lacked both `second` and `ADDED`.
+    write_identity(dir.path(), HOST_ID);
+    let paths = HostPaths::new(dir.path());
+    let mut conn = db::options(&paths.database_file())
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    Migrator {
+        migrations: MIGRATOR
+            .iter()
+            .filter(|migration| without_both.contains(&migration.version))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    }
+    .run(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+    break_added(&paths).await;
+    let file = copy_name(at(AT), &format!("pre-upgrade-{from}-{to}"));
+
+    let opened = db::open_upgrading(&paths.database_file(), &pre(&paths, AT)).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    // `second` committed before `ADDED` failed.
+    assert!(applied(&paths).await.contains(&second));
+    let opened =
+        db::open_upgrading(&paths.database_file(), &pre(&paths, "2026-10-13T09:01:00Z")).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    assert_eq!(
+        names(&paths.backups_dir()).len(),
+        3,
+        "one copy for both tries"
+    );
+
+    mend_added(&paths).await;
+    let pool = db::open_upgrading(&paths.database_file(), &pre(&paths, "2026-10-13T09:02:00Z"))
+        .await
+        .unwrap();
+    let common = |reused: bool, code: Option<&str>| {
+        json!({
+            "from": from, "to": to, "migrations": 2, "file": file, "reused": reused,
+            "code": code, "appVersion": env!("CARGO_PKG_VERSION"),
+        })
+    };
+    assert_eq!(
+        audit_trail_in(&pool, "host.upgrade").await,
+        vec![
+            upgrade_row(
+                Some(&file),
+                "failed",
+                common(false, Some("migration_failed"))
+            ),
+            upgrade_row(Some(&file), "ok", common(true, None)),
+        ]
+    );
+    pool.close().await;
+}
+
+/// The earlier copy is used again only while the failed `host.upgrade` row
+/// is the newest of the log (nothing wrote since) and the copy is still
+/// whole: a row written after it, or a copy without its manifest, takes a
+/// new copy.
+#[tokio::test]
+async fn the_earlier_copy_is_not_used_again_after_a_write_or_without_its_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = old_host(dir.path()).await;
+    let (from, to) = versions();
+    break_added(&paths).await;
+    let opened = db::open_upgrading(&paths.database_file(), &pre(&paths, AT)).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    let first = copy_name(at(AT), &format!("pre-upgrade-{from}-{to}"));
+
+    // A row after the failed one: something wrote in between.
+    let mut conn = raw_conn(&paths).await;
+    sqlx::query(
+        "INSERT INTO audit_log (at, actor_kind, action, result, details) \
+         VALUES ('2026-10-13T09:00:30Z', 'system', 'backup.create', 'ok', '{}')",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+    let opened =
+        db::open_upgrading(&paths.database_file(), &pre(&paths, "2026-10-13T09:01:00Z")).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    let second = copy_name(
+        at("2026-10-13T09:01:00Z"),
+        &format!("pre-upgrade-{from}-{to}"),
+    );
+    assert!(paths.backups_dir().join(&second).exists());
+
+    // The newest copy loses its manifest: the next start makes another.
+    std::fs::remove_file(paths.backups_dir().join(second.replace(".db", ".json"))).unwrap();
+    let opened =
+        db::open_upgrading(&paths.database_file(), &pre(&paths, "2026-10-13T09:02:00Z")).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    let third = copy_name(
+        at("2026-10-13T09:02:00Z"),
+        &format!("pre-upgrade-{from}-{to}"),
+    );
+    assert!(paths.backups_dir().join(&third).exists());
+    assert!(paths.backups_dir().join(&first).exists());
+
+    // A failed row towards another newest migration (another build's) is no
+    // proof for this one.
+    let mut conn = raw_conn(&paths).await;
+    sqlx::query(
+        "UPDATE audit_log SET details = json_set(details, '$.to', 9999) \
+         WHERE id = (SELECT max(id) FROM audit_log)",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+    let opened =
+        db::open_upgrading(&paths.database_file(), &pre(&paths, "2026-10-13T09:03:00Z")).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    let fourth = copy_name(
+        at("2026-10-13T09:03:00Z"),
+        &format!("pre-upgrade-{from}-{to}"),
+    );
+    assert!(paths.backups_dir().join(&fourth).exists());
+}
+
+/// Two different failures of the copy are two rows.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_different_copy_failure_is_written_again() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let paths = old_host(dir.path()).await;
+    let (from, to) = versions();
+    let file = copy_name(at(AT), &format!("pre-upgrade-{from}-{to}"));
+    let backups = paths.backups_dir();
+    std::fs::write(backups.join(&file), b"not ours").unwrap();
+    assert!(db::open_upgrading(&paths.database_file(), &pre(&paths, AT))
+        .await
+        .is_err());
+    std::fs::remove_file(backups.join(&file)).unwrap();
+    std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let opened = db::open_upgrading(&paths.database_file(), &pre(&paths, AT)).await;
+    std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(matches!(opened, Err(OpenError::Copy { .. })), "{opened:?}");
+    let pool = raw_pool(&paths).await;
+    let codes: Vec<serde_json::Value> = audit_trail_in(&pool, "host.upgrade")
+        .await
+        .into_iter()
+        .map(|row| row.6["code"].clone())
+        .collect();
+    assert_eq!(codes, [json!("write_failed"), json!("access_denied")]);
+    pool.close().await;
+}
+
+/// A database of the very first migration (no audit log yet) is copied too,
+/// and a data folder whose identity names another host gives a copy without
+/// it rather than none.
+#[tokio::test]
+async fn a_database_without_an_audit_log_and_a_foreign_identity_still_get_a_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    write_identity(dir.path(), "0e0e0e0e-0000-4000-8000-000000000000");
+    let paths = HostPaths::new(dir.path());
+    let mut conn = db::options(&paths.database_file())
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    let first = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .min()
+        .unwrap();
+    Migrator {
+        migrations: MIGRATOR
+            .iter()
+            .filter(|migration| migration.version == first)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    }
+    .run(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+
+    let pool = db::open_upgrading(&paths.database_file(), &pre(&paths, AT))
+        .await
+        .unwrap();
+    let copies: Vec<String> = names(&paths.backups_dir())
+        .into_iter()
+        .filter(|name| name.ends_with(".db"))
+        .collect();
+    assert_eq!(copies.len(), 1, "{copies:?}");
+    let manifest = read_manifest(&paths.backups_dir().join(&copies[0])).unwrap();
+    assert_eq!(manifest.schema_version, first);
+    assert!(
+        manifest.identity.is_none(),
+        "another host's identity stays out"
+    );
+    assert_eq!(audit_trail_in(&pool, "host.upgrade").await.len(), 1);
+    pool.close().await;
+}
+
+/// A migrations table whose rows the copy's question cannot read runs no
+/// migration: sqlx itself would read past such a row and migrate a database
+/// nobody copied.
+#[tokio::test]
+async fn a_migrations_table_the_copy_cannot_read_runs_no_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = old_host(dir.path()).await;
+    let (from, _) = versions();
+    let mut conn = raw_conn(&paths).await;
+    sqlx::query("UPDATE _sqlx_migrations SET success = 'yes' WHERE version = 1")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+    let opened = db::open_upgrading(&paths.database_file(), &pre(&paths, AT)).await;
+    assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+    let mut conn = raw_conn(&paths).await;
+    let newest: i64 = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    conn.close().await.unwrap();
+    assert_eq!(newest, from);
+    assert!(names(&paths.backups_dir()).is_empty());
+}
+
+/// The message of a failed copy gives the advice its code calls for.
+#[test]
+fn a_failed_copy_says_what_to_do_for_its_code() {
+    use markiro_host::backup::copy::Failure;
+
+    let pending = Pending {
+        from: 16,
+        to: 31,
+        migrations: 1,
+    };
+    let full = OpenError::Copy {
+        pending,
+        failure: Failure::new("disk_full", "no space"),
+    }
+    .to_string();
+    assert!(full.contains("free space"), "{full}");
+    let broken = OpenError::Copy {
+        pending,
+        failure: Failure::new("verify_failed", "malformed"),
+    }
+    .to_string();
+    assert!(broken.contains("no migration ran"), "{broken}");
+    assert!(!broken.contains("free space"), "{broken}");
+    assert!(broken.contains("support"), "{broken}");
+}
