@@ -120,6 +120,7 @@ const SITE_ENTITIES: ReadonlySet<string> = new Set([
   "category_template_defaults",
   "products",
   "label_templates",
+  "employees",
   "operators",
   "counterparties",
 ]);

@@ -19,6 +19,9 @@ import {
   counterpartyCreateSchema,
   counterpartyRecordSchema,
   counterpartyUpdateSchema,
+  employeeCreateSchema,
+  employeeRecordSchema,
+  employeeUpdateSchema,
   credentialSchema,
   deviceInfoSchema,
   deviceRecordSchema,
@@ -99,6 +102,8 @@ import {
   counterpartyCreate,
   counterpartyUpdate,
   deviceShiftCreate,
+  employeeCreate,
+  employeeUpdate,
   deviceUpdate,
   lineCreate,
   lineUpdate,
@@ -275,6 +280,7 @@ const RESPONSES = [
   ["pairing-code.json", pairingCodeSchema],
   ["changes-response.json", changesResponseSchema],
   ["counterparty-record.json", counterpartyRecordSchema],
+  ["employee-record.json", employeeRecordSchema],
   ["office-line.json", officeLineSchema],
   ["office-operator.json", officeOperatorSchema],
   ["badge-salt.json", badgeSaltSchema],
@@ -317,6 +323,8 @@ const REQUESTS = [
   ["password-change.json", passwordChangeSchema],
   ["counterparty-create.json", counterpartyCreateSchema],
   ["counterparty-update.json", counterpartyUpdateSchema],
+  ["employee-create.json", employeeCreateSchema],
+  ["employee-update.json", employeeUpdateSchema],
   ["line-create.json", lineCreateSchema],
   ["line-update.json", lineUpdateSchema],
   ["device-update.json", deviceUpdateSchema],
@@ -576,6 +584,25 @@ describe("request builders produce their fixtures exactly", () => {
         12,
       ),
     ).toStrictEqual(fixture("counterparty-update.json"));
+  });
+
+  it("an employee to create linked to an operator, and one archived and unlinked", () => {
+    const employee = employeeRecordSchema.parse(fixture("employee-record.json"));
+    expect(
+      employeeCreate({
+        name: "Анна Кузнецова",
+        role: "Упаковщик",
+        operatorId: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      }),
+    ).toStrictEqual(fixture("employee-create.json"));
+    expect(
+      employeeUpdate(employee, {
+        name: "Анна Кузнецова",
+        role: null,
+        operatorId: null,
+        archived: true,
+      }),
+    ).toStrictEqual(fixture("employee-update.json"));
   });
 
   it("a line to create and one to archive", () => {

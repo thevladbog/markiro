@@ -35,6 +35,10 @@ pub mod actions {
     pub const OPERATOR_UPDATE: &str = "operator.update";
     pub const OPERATOR_BADGE_CREATE: &str = "operator_badge.create";
     pub const OPERATOR_BADGE_REVOKE: &str = "operator_badge.revoke";
+    /// An employee of the site's register (migration `0018`); linking and
+    /// unlinking an operator are updates of its `operatorId`.
+    pub const EMPLOYEE_CREATE: &str = "employee.create";
+    pub const EMPLOYEE_UPDATE: &str = "employee.update";
     pub const DEVICE_UPDATE: &str = "device.update";
     pub const DEVICE_REVOKE: &str = "device.revoke";
     pub const PRODUCT_CREATE: &str = "product.create";

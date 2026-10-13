@@ -7,6 +7,9 @@ import type {
   DeviceRecord,
   DeviceShiftCreate,
   DeviceUpdate,
+  EmployeeCreate,
+  EmployeeRecord,
+  EmployeeUpdate,
   LabelTemplate,
   LineCreate,
   LineUpdate,
@@ -68,6 +71,39 @@ export function counterpartyUpdate(
     gs1Prefixes: [...company.gs1Prefixes],
     archived,
     expectedRev,
+  };
+}
+
+/**
+ * An employee's fields, trimmed from a form: `role: null` for none,
+ * `operatorId: null` for no operator.
+ */
+export interface EmployeeInput {
+  name: string;
+  role: string | null;
+  operatorId: string | null;
+}
+
+/** `POST /v1/office/employees` (`employee-create.json`). */
+export function employeeCreate(employee: EmployeeInput): EmployeeCreate {
+  return { name: employee.name, role: employee.role, operatorId: employee.operatorId };
+}
+
+/**
+ * `PUT /v1/office/employees/{id}` (`employee-update.json`): the whole
+ * record with the loaded revision. Archiving sends `operatorId: null`
+ * itself: an archived employee is linked to no operator.
+ */
+export function employeeUpdate(
+  employee: Pick<EmployeeRecord, "rev">,
+  next: EmployeeInput & { archived: boolean },
+): EmployeeUpdate {
+  return {
+    name: next.name,
+    role: next.role,
+    operatorId: next.archived ? null : next.operatorId,
+    archived: next.archived,
+    expectedRev: employee.rev,
   };
 }
 

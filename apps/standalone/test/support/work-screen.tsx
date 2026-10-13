@@ -173,3 +173,8 @@ export function renderWork(
 export function lastLine(): string | null {
   return document.querySelector(".work-screen__last")?.textContent ?? null;
 }
+
+/** The open box's count, as the screen shows it beside «Открытый короб» («2 из 12»). */
+export function openBoxLine(): string | null {
+  return document.querySelector(".work-box-fill__count")?.textContent ?? null;
+}

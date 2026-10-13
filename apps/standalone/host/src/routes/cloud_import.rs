@@ -35,8 +35,9 @@ pub const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// names it: a row that needs another (a shift its product, a block its
 /// device) comes before what it needs, so each entry is the answer for a
 /// site that holds only it. Lines may be there (the wizard made them), and
-/// so may the wizard's stock templates; badges need operators.
-const NOT_EMPTY: [(&str, &str); 7] = [
+/// so may the wizard's stock templates; badges need operators, and an
+/// employee may need its operator.
+const NOT_EMPTY: [(&str, &str); 8] = [
     ("shifts", "SELECT EXISTS (SELECT 1 FROM shifts)"),
     ("sscc_blocks", "SELECT EXISTS (SELECT 1 FROM sscc_blocks)"),
     (
@@ -48,6 +49,7 @@ const NOT_EMPTY: [(&str, &str); 7] = [
         "label_templates",
         "SELECT EXISTS (SELECT 1 FROM label_templates WHERE stock = 0)",
     ),
+    ("employees", "SELECT EXISTS (SELECT 1 FROM employees)"),
     ("operators", "SELECT EXISTS (SELECT 1 FROM operators)"),
     (
         "counterparties",

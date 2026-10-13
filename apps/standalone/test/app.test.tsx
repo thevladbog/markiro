@@ -4352,8 +4352,12 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
   });
 
+  // Owner decision 2026-10-13 (it replaced «a host or station PC stays locked
+  // even with an office pairing on its disk»): a host PC never locks, and a
+  // station locks only once configured as a station with a line, which an
+  // office pairing is not.
   it.each(["host", "station"] as const)(
-    "keeps a %s PC locked even when its disk holds an office pairing",
+    "leaves a %s PC whose disk holds an office pairing an ordinary window",
     async (role) => {
       const kiosk = recordingLockdown();
       const device = fakeDevice(OFFICE_PC);
@@ -4364,11 +4368,17 @@ describe("an office PC and the host's address (plan УСТ)", () => {
         host: fakeHost(),
         lockdown: kiosk.lockdown,
       });
-      await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+      expect(await screen.findByText("Вход в офис")).toBeTruthy();
+      await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(kiosk.commands).toEqual([]);
     },
   );
 
-  it.each(["host", "station"] as const)(
+  // The host's PC never locks at all (`test/station-first-run.test.tsx`).
+  it.each(["station"] as const)(
     "opens a %s PC's office session in an ordinary window, and the floor stays locked",
     async (role) => {
       const kiosk = recordingLockdown();
