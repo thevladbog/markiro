@@ -25,6 +25,15 @@ use sqlx::sqlite::{
 use sqlx::{Column, ConnectOptions, Connection, Row, Sqlite, TypeInfo, ValueRef};
 
 pub const FILE_NAME: &str = "standalone-station.db";
+/// The copy of the database before this build's pending migrations (plan
+/// ОБН-1, spec §10.6): `standalone-station.pre-<app version>.db` beside it.
+/// Only the newest is kept.
+pub const PRE_UPGRADE_PREFIX: &str = "standalone-station.pre-";
+
+/// `standalone-station.pre-<version>.db`.
+pub fn pre_upgrade_file(version: &str) -> String {
+    format!("{PRE_UPGRADE_PREFIX}{version}.db")
+}
 /// The files SQLite keeps beside [`FILE_NAME`]: the database itself, its WAL,
 /// the WAL's shared-memory index and a rollback journal.
 const FILE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
@@ -256,8 +265,17 @@ pub struct LocalDb {
 
 impl LocalDb {
     /// Open `standalone-station.db` in `dir`, creating the directory, the
-    /// file and the schema as needed.
+    /// file and the schema as needed. Before this build's pending migrations
+    /// the database is copied to `standalone-station.pre-<version>.db` (plan
+    /// ОБН-1); a copy that fails runs no migration and fails the open as an
+    /// I/O error ([`OpenFailure::Other`]: the file stays where it is).
     pub async fn open(dir: &Path) -> Result<Self, sqlx::Error> {
+        Self::open_versioned(dir, env!("CARGO_PKG_VERSION")).await
+    }
+
+    /// [`Self::open`] as the app of `version`, for tests.
+    #[doc(hidden)]
+    pub async fn open_versioned(dir: &Path, version: &str) -> Result<Self, sqlx::Error> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join(FILE_NAME);
         let writer = SqlitePoolOptions::new()
@@ -288,6 +306,26 @@ impl LocalDb {
                     .pragma("secure_delete", "ON"),
             )
             .await?;
+        // A failure to read the migrations goes back as it is: a corrupt
+        // file stays `Corrupt` for the forget.
+        match has_pending_migrations(&writer).await {
+            Ok(false) => {}
+            Ok(true) => {
+                if let Err(error) = copy_before_migrations(&writer, dir, version).await {
+                    // The kind only: a path names the Windows user.
+                    eprintln!(
+                        "standalone: the copy of the local database before its migrations failed: {:?}",
+                        error.kind()
+                    );
+                    writer.close().await;
+                    return Err(sqlx::Error::Io(error));
+                }
+            }
+            Err(error) => {
+                writer.close().await;
+                return Err(error);
+            }
+        }
         if let Err(error) = MIGRATOR.run(&writer).await {
             // Closed before the error goes back, not left to close on its
             // own: an open handle keeps the file from moving on Windows.
@@ -705,6 +743,120 @@ impl LocalDbState {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
         Ok(database)
     }
+}
+
+/// Whether this build brings migrations the database lacks, on top of at
+/// least one it has. A new file, a failed migration and one this build does
+/// not know answer `false`: nothing to protect, or sqlx refuses it anyway.
+async fn has_pending_migrations(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    let tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if tables == 0 {
+        return Ok(false);
+    }
+    let applied: Vec<(i64, bool)> = sqlx::query_as("SELECT version, success FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await?;
+    let known: Vec<i64> = MIGRATOR
+        .iter()
+        .filter(|migration| !migration.migration_type.is_down_migration())
+        .map(|migration| migration.version)
+        .collect();
+    if applied.is_empty()
+        || applied
+            .iter()
+            .any(|(version, success)| !success || !known.contains(version))
+    {
+        return Ok(false);
+    }
+    Ok(known
+        .iter()
+        .any(|version| !applied.iter().any(|(applied, _)| applied == version)))
+}
+
+/// `VACUUM INTO <copy>.partial`, `integrity_check` on it read-only, flushed,
+/// renamed to `standalone-station.pre-<version>.db` (over one of that name),
+/// then every older such copy goes. A failure leaves the database as it was
+/// and no partial file behind.
+async fn copy_before_migrations(
+    pool: &SqlitePool,
+    dir: &Path,
+    version: &str,
+) -> std::io::Result<()> {
+    let name = pre_upgrade_file(version);
+    let target = dir.join(&name);
+    let partial = dir.join(format!("{name}.partial"));
+    match std::fs::remove_file(&partial) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    if let Err(error) = write_pre_upgrade(pool, &partial).await {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error);
+    }
+    rename_retrying(RENAME_ATTEMPTS, RENAME_RETRY_DELAY, || {
+        std::fs::rename(&partial, &target)
+    })
+    .await?;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let Some(other) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let older = other != name
+            && other.starts_with(PRE_UPGRADE_PREFIX)
+            && (other.ends_with(".db") || other.ends_with(".db.partial"));
+        if older {
+            // The new copy is in place: an older one that does not go is
+            // only noted.
+            if let Err(error) = std::fs::remove_file(entry.path()) {
+                eprintln!(
+                    "standalone: an older copy of the local database could not be removed: {:?}",
+                    error.kind()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn write_pre_upgrade(pool: &SqlitePool, partial: &Path) -> std::io::Result<()> {
+    let target = partial.to_str().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the copy's path is no UTF-8",
+        )
+    })?;
+    sqlx::query("VACUUM INTO ?")
+        .bind(target)
+        .execute(pool)
+        .await
+        .map_err(std::io::Error::other)?;
+    let mut check = SqliteConnectOptions::new()
+        .filename(partial)
+        .read_only(true)
+        .immutable(true)
+        .connect()
+        .await
+        .map_err(std::io::Error::other)?;
+    let rows: Result<Vec<String>, sqlx::Error> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&mut check)
+        .await;
+    let _ = check.close().await;
+    if rows.map_err(std::io::Error::other)? != ["ok"] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the copy did not check out",
+        ));
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(partial)?
+        .sync_all()
 }
 
 /// `rename` tried up to `attempts` times, `delay` apart. A source that is not

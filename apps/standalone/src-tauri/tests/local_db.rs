@@ -2,8 +2,8 @@
 //! query path and the one-transaction batch path (stage 1 spec §5.2).
 
 use markiro_standalone_lib::local_db::{
-    table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement, OpenFailure, TableClass,
-    UnsentGuard, FILE_NAME, MIGRATOR, TABLE_CLASSES,
+    pre_upgrade_file, table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement,
+    OpenFailure, TableClass, UnsentGuard, FILE_NAME, MIGRATOR, PRE_UPGRADE_PREFIX, TABLE_CLASSES,
 };
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -3648,4 +3648,186 @@ async fn the_forget_counts_read_only_the_unsent_indexes() {
         assert_eq!(plan, expected, "{sql}");
     }
     raw.close().await.unwrap();
+}
+
+/// The newest migration of the shell, and the newest below it.
+fn shell_versions() -> (i64, i64) {
+    let newest = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .unwrap();
+    let previous = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| *version < newest)
+        .max()
+        .unwrap();
+    (previous, newest)
+}
+
+/// A database of the previous build (every migration below the newest) with
+/// one line.
+async fn previous_build_database(dir: &std::path::Path) {
+    let (_, newest) = shell_versions();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < newest)
+        .cloned()
+        .collect();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(INSERT_LINE)
+        .bind(LINE_1)
+        .bind("Линия 1")
+        .bind(0)
+        .bind(1)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+}
+
+/// The copies before an upgrade in `dir`, sorted.
+fn pre_upgrade_copies(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with(PRE_UPGRADE_PREFIX))
+        .collect();
+    names.sort();
+    names
+}
+
+/// The newest migration a database file has, read without migrating it.
+async fn newest_applied(path: &std::path::Path) -> i64 {
+    let mut raw = SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    let newest = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    newest
+}
+
+/// The copy before this build's pending migrations (plan ОБН-1, spec §10.6):
+/// `standalone-station.pre-<version>.db` beside the database, sound, of the
+/// schema before the migrations and with the data; the older copy goes, so
+/// one stays.
+#[tokio::test]
+async fn a_database_with_pending_migrations_is_copied_before_they_run_and_one_copy_stays() {
+    let dir = tempfile::tempdir().unwrap();
+    let (previous, newest) = shell_versions();
+    previous_build_database(dir.path()).await;
+    std::fs::write(dir.path().join(pre_upgrade_file("0.0.1")), b"an older copy").unwrap();
+
+    let db = LocalDb::open_versioned(dir.path(), "9.9.9").await.unwrap();
+
+    assert_eq!(
+        pre_upgrade_copies(dir.path()),
+        ["standalone-station.pre-9.9.9.db"]
+    );
+    let copy = dir.path().join(pre_upgrade_file("9.9.9"));
+    let mut read = SqliteConnectOptions::new()
+        .filename(&copy)
+        .read_only(true)
+        .immutable(true)
+        .connect()
+        .await
+        .unwrap();
+    let check: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&mut read)
+        .await
+        .unwrap();
+    assert_eq!(check, ["ok"]);
+    let lines: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ref_lines")
+        .fetch_one(&mut read)
+        .await
+        .unwrap();
+    assert_eq!(lines, 1);
+    read.close().await.unwrap();
+    assert_eq!(newest_applied(&copy).await, previous);
+    assert_eq!(lines_count(&db).await, 1);
+    assert_eq!(newest_applied(&dir.path().join(FILE_NAME)).await, newest);
+}
+
+/// A new file and an up-to-date database take no copy.
+#[tokio::test]
+async fn a_new_or_current_database_takes_no_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = LocalDb::open_versioned(dir.path(), "9.9.9").await.unwrap();
+    drop(db);
+    let db = LocalDb::open_versioned(dir.path(), "9.9.10").await.unwrap();
+    drop(db);
+    assert!(pre_upgrade_copies(dir.path()).is_empty());
+}
+
+/// A copy that cannot be made runs no migration: the database stays at the
+/// previous build's schema and is no corrupt file, so a forget never sets it
+/// aside (`OpenFailure::Other`).
+#[tokio::test]
+async fn a_copy_that_fails_runs_no_migration_and_keeps_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (previous, _) = shell_versions();
+    previous_build_database(dir.path()).await;
+    // A folder where the copy's partial file must go: it cannot be cleared.
+    std::fs::create_dir(dir.path().join(format!(
+        "{}.partial",
+        pre_upgrade_file(env!("CARGO_PKG_VERSION"))
+    )))
+    .unwrap();
+
+    let local = LocalDbState::open(dir.path()).await;
+
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+    assert_eq!(newest_applied(&dir.path().join(FILE_NAME)).await, previous);
+}
+
+async fn lines_count(db: &LocalDb) -> usize {
+    db.query("SELECT id FROM ref_lines", vec![])
+        .await
+        .unwrap()
+        .len()
+}
+
+/// A migrations table whose rows cannot be read for the copy's question runs
+/// no migration either (plan ОБН-1): sqlx itself would read past such a row
+/// and migrate a database nobody copied.
+#[tokio::test]
+async fn a_migrations_table_the_copy_cannot_read_runs_no_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let (previous, _) = shell_versions();
+    previous_build_database(dir.path()).await;
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    // Not `false` for sqlx's dirty check, and no boolean for the copy's read.
+    sqlx::query("UPDATE _sqlx_migrations SET success = 'yes' WHERE version = 1")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+
+    assert!(LocalDb::open_versioned(dir.path(), "9.9.9").await.is_err());
+    assert!(pre_upgrade_copies(dir.path()).is_empty());
+    assert_eq!(newest_applied(&dir.path().join(FILE_NAME)).await, previous);
 }
