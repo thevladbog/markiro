@@ -127,19 +127,38 @@ describe.skipIf(!base)("bounded complete dataset snapshots on owned PostgreSQL",
   it(
     "uses one read-only repeatable-read client and exhausts real batches of at most 64 without aggregates",
     scope.phase(async () => {
+      const tables = await f.pool.query<{ tablename: string }>(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename",
+      );
+      const counts = tables.rows.map(({ tablename }) => {
+        if (!/^[a-z_][a-z0-9_]*$/.test(tablename)) throw new Error("Invalid owned count table");
+        return `SELECT count(*) AS n FROM public."${tablename}"`;
+      });
+      const total = await f.pool.query<{ n: number }>(
+        `SELECT sum(n)::int AS n FROM (${counts.join(" UNION ALL ")}) snapshot_counts`,
+      );
+      const rowCount = total.rows[0]?.n;
+      if (rowCount === undefined) throw new Error("Missing complete snapshot row count");
       const witness = observe(f);
       try {
         await f.snapshot();
-        expect(witness.statements.some((text) => /jsonb_agg|UNION ALL/i.test(text))).toBe(false);
+        expect(witness.statements.some((text) => /jsonb_agg|json_agg|array_agg/i.test(text))).toBe(
+          false,
+        );
         expect(witness.clients.size).toBe(1);
         expect(witness.statements[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
         expect(witness.statements.at(-1)).toBe("COMMIT");
         expect(witness.batches.filter((count) => count === 64).length).toBeGreaterThanOrEqual(2);
         expect(witness.batches.every((count) => count <= 64)).toBe(true);
-        expect(witness.batches).toContain(4);
+        expect(witness.batches.reduce((sum, count) => sum + count, 0)).toBe(rowCount);
+        expect(witness.batches.at(-2)).toBe(rowCount % 64 || 64);
         const declarations = witness.statements.filter((text) => /^DECLARE /i.test(text));
         expect(witness.batches.filter((count) => count === 0)).toHaveLength(declarations.length);
-        expect(declarations.length).toBeGreaterThan(198);
+        expect(declarations).toHaveLength(1);
+        expect(tables.rows.length).toBeGreaterThan(198);
+        expect(declarations[0]?.match(/FROM public\."/g)).toHaveLength(tables.rows.length);
+        for (const { tablename } of tables.rows)
+          expect(declarations[0]).toContain(`FROM public."${tablename}" t`);
         expect(witness.statements.filter((text) => /^CLOSE /i.test(text))).toHaveLength(
           declarations.length,
         );

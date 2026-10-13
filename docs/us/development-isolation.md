@@ -2542,3 +2542,19 @@ steps and their byte/AST pins remain unchanged. Only the worker-entry build runs
 in both Requests and worker/browser, as an explicit failure-propagating prerequisite;
 every specialized verification still has exactly one owner. The original
 30-minute job and test budgets remain unchanged.
+
+The five-segment run then exposed one 5-second corrected-Transformation test
+timeout. Its all-public-table snapshots made hundreds of cursor round trips.
+The fixture now streams a single ordered cursor across all catalogued public
+tables, within the same read-only repeatable-read transaction and 64-row batches.
+Each table still hashes its exact full-row JSON sequence, including duplicates
+and empty arrays; no table or column is omitted. Error, rollback and connection
+discard behavior stays unchanged. The regression proved unchanged hashes while
+reducing one owned snapshot from 614 calls to exactly 9.
+
+All six files of the failing remote stage passed locally: 347/347, without skips.
+The separate native snapshot suite also passed 12/12, retaining complete hash
+parity, concurrent-commit isolation and actual driver/cleanup failure assertions.
+Only its old per-table-cursor shape assertions were replaced with exact single
+cursor coverage, total row count and tail-batch checks. No test or job timeout
+was increased, and no runtime product behavior changed.

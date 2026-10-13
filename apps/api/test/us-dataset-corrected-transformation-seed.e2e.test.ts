@@ -1,5 +1,5 @@
 import { canonicalExportDigest } from "@markiro/domain";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { describe, expect, it, vi, type TestContext } from "vitest";
 import { UsDatasetCorrectedTransformationSeedStore } from "../src/modules/traceability/demo/us-dataset-corrected-transformation-seed";
@@ -18,6 +18,7 @@ import {
   consumeCorrectedTransformation,
 } from "./support/us-dataset-corrected-transformation-fixture";
 import { outcome, barrier, abortable } from "./support/us-transformation-lock-fixture";
+import { snapshotUsDatasetTables } from "./support/us-dataset-snapshot";
 
 const base = process.env.US_TEST_DATABASE_URL;
 describe.skipIf(!base)("Corrected Transformation atomic execution", () => {
@@ -29,6 +30,58 @@ describe.skipIf(!base)("Corrected Transformation atomic execution", () => {
     const stage = await c.stores.journal.captureIntent(h.context, c.header.id, c.intent);
     return { ...c, stage };
   }
+  it(
+    "streams every public table with unchanged row hashes and bounded SQL round trips",
+    h.phase(async () => {
+      await h.f.pool.query(
+        "CREATE TABLE public.us_snapshot_cursor_test_rows (body jsonb); CREATE TABLE public.us_snapshot_cursor_test_empty (body jsonb)",
+      );
+      try {
+        await h.f.pool.query(
+          "INSERT INTO public.us_snapshot_cursor_test_rows SELECT jsonb_build_object('index', n, 'unicode', 'Árbol 🌿', 'nullable', NULL) FROM generate_series(1, 129) n",
+        );
+        const tables = await h.f.pool.query<{ tablename: string }>(
+          "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename",
+        );
+        const expected: Record<string, string> = {};
+        let rowCount = 0;
+        for (const { tablename } of tables.rows) {
+          if (!/^[a-z_][a-z0-9_]*$/.test(tablename))
+            throw new Error("Invalid owned snapshot table");
+          const rows = await h.f.pool.query<{ body: unknown }>(
+            `SELECT to_jsonb(t) AS body FROM public."${tablename}" t ORDER BY to_jsonb(t)::text`,
+          );
+          rowCount += rows.rows.length;
+          Object.defineProperty(expected, tablename, {
+            value: createHash("sha256")
+              .update(JSON.stringify(rows.rows.map(({ body }) => body)))
+              .digest("hex"),
+            enumerable: true,
+          });
+        }
+        const client = await h.f.pool.connect();
+        const queries = vi.spyOn(client, "query");
+        try {
+          expect(await snapshotUsDatasetTables({ connect: async () => client })).toEqual(expected);
+          expect(queries.mock.calls).toHaveLength(6 + Math.ceil(rowCount / 64));
+          expect(
+            queries.mock.calls
+              .filter(([query]) => typeof query === "string" && query.startsWith("FETCH "))
+              .every(([query]) => query === "FETCH 64 FROM dataset_snapshot"),
+          ).toBe(true);
+          expect(expected.us_snapshot_cursor_test_empty).toBe(
+            createHash("sha256").update("[]").digest("hex"),
+          );
+        } finally {
+          queries.mockRestore();
+        }
+      } finally {
+        await h.f.pool.query(
+          "DROP TABLE public.us_snapshot_cursor_test_rows; DROP TABLE public.us_snapshot_cursor_test_empty",
+        );
+      }
+    }),
+  );
   it(
     "installs actual amended 300/400 lb to 60 case and publishes its receipt atomically",
     h.phase(async () => {
