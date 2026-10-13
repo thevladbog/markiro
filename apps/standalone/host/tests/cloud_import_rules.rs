@@ -953,6 +953,16 @@ fn a_products_egais_code_and_default_counterparty_follow_the_hosts_rules() {
         beer.default_counterparty_id.as_deref(),
         Some("0c0c0000-0000-4000-8000-000000000001")
     );
+    // A code is kept trimmed, and a blank one is none whatever the group.
+    let mut body = request();
+    body["payload"]["products"][3]["egaisCode"] = json!(" 0150320000001234567 ");
+    body["payload"]["products"][0]["egaisCode"] = json!("   ");
+    let valid = check(&typed(body)).unwrap();
+    assert_eq!(
+        valid.products[3].egais_code.as_deref(),
+        Some("0150320000001234567")
+    );
+    assert_eq!(valid.products[0].egais_code, None);
     // A code outside group 15, an overlong one and one with a control
     // character are refused where they stand.
     assert_eq!(

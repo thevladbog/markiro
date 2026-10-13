@@ -1506,8 +1506,7 @@
         "egaisCode": "код ЕГАИС",
         "externalRef": "внешний код",
         "photo": "фото",
-        "defaultCounterparty": "контрагент по умолчанию",
-        "defaultCounterpartyId": "контрагент по умолчанию"
+        "defaultCounterparty": "контрагент по умолчанию"
       },
       "reasons": {
         "gln": "GLN не из 13 цифр",

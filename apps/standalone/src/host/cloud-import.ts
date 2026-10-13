@@ -18,12 +18,10 @@ import { canonicalSaltSchema, templatePurposeSchema, templateSpecSchema } from "
  * its kind, and for a shape problem the path of the field, never the value.
  */
 
-/** Mirrors `markiro_proto::cloud_import::CLOUD_IMPORT_FORMAT_VERSION`: the tool writes 2 since plan ТОВ. */
-export const CLOUD_EXPORT_FORMAT_VERSION = 2;
-
 /**
- * Mirrors `CLOUD_IMPORT_FORMAT_VERSIONS`: a file of format 1, made before plan
- * ТОВ, stays good; its products carry no EGAIS code or default counterparty.
+ * Mirrors `markiro_proto::cloud_import::CLOUD_IMPORT_FORMAT_VERSIONS`: the
+ * tool writes 2 since plan ТОВ, and a file of format 1, made before it, stays
+ * good; its products carry no EGAIS code or default counterparty.
  */
 export const CLOUD_EXPORT_FORMAT_VERSIONS: readonly number[] = [1, 2];
 export const CLOUD_EXPORT_FORMAT = "markiro-cloud-export";
@@ -147,7 +145,10 @@ export type ExportNote = z.infer<typeof exportNoteSchema>;
 
 export const cloudExportFileSchema = z.strictObject({
   format: z.literal(CLOUD_EXPORT_FORMAT),
-  formatVersion: z.union([z.literal(1), z.literal(2)]),
+  formatVersion: z
+    .number()
+    .int()
+    .refine((version) => CLOUD_EXPORT_FORMAT_VERSIONS.includes(version)),
   tool: z.string(),
   exportedAt: z.iso.datetime(),
   rehearsal: z.boolean(),

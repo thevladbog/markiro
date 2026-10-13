@@ -1924,22 +1924,47 @@ test("a beer product's EGAIS code and a kept default counterparty move over; oth
       (note) => note.field === "egaisCode" || note.field === "defaultCounterparty",
     ),
   );
-  // A code is trimmed free text, and a blank one is none.
+  // A code is trimmed free text: blanks around it go without a note, a
+  // replaced control character with one, and a blank one is none.
+  const beerOf = (file) => file.payload.products.find((each) => each.id.endsWith("05"));
+  const egaisNotes = (file) =>
+    file.notes
+      .filter((note) => note.field === "egaisCode" && note.id?.endsWith("05"))
+      .map(({ code, reason }) => [code, reason ?? null]);
   const trimmed = build((source) => {
-    source.products[4].egaisCode = " 0150320000001234567\u0007 ";
+    source.products[4].egaisCode = " 0150320000001234567 ";
   });
-  assert.equal(
-    trimmed.payload.products.find((each) => each.id.endsWith("05"))?.egaisCode,
-    "0150320000001234567",
-  );
+  assert.equal(beerOf(trimmed)?.egaisCode, "0150320000001234567");
+  assert.deepEqual(egaisNotes(trimmed), []);
+  const controlled = build((source) => {
+    source.products[4].egaisCode = "01503\u000720000001234567";
+  });
+  assert.equal(beerOf(controlled)?.egaisCode, "01503 20000001234567");
+  assert.deepEqual(egaisNotes(controlled), [["text_changed", null]]);
   const blank = build((source) => {
     source.products[4].egaisCode = "   ";
   });
-  assert.equal(blank.payload.products.find((each) => each.id.endsWith("05"))?.egaisCode, null);
-  assert.ok(
-    notesOf(blank, "product_value_cleared").some(
-      (note) => note.id.endsWith("05") && note.field === "egaisCode",
-    ),
+  assert.equal(beerOf(blank)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(blank), [["product_value_cleared", null]]);
+  // 64 characters stay; 65 are cleared, never cut.
+  const longest = build((source) => {
+    source.products[4].egaisCode = "1".repeat(64);
+  });
+  assert.equal(beerOf(longest)?.egaisCode, "1".repeat(64));
+  const over = build((source) => {
+    source.products[4].egaisCode = "1".repeat(65);
+  });
+  assert.equal(beerOf(over)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(over), [["product_value_cleared", null]]);
+  // Another group's code is cleared for its group.
+  assert.deepEqual(
+    notesOf(
+      build(() => {}),
+      "product_value_cleared",
+    )
+      .filter((note) => note.field === "egaisCode")
+      .map((note) => [note.id.slice(-2), note.reason]),
+    [["03", "group"]],
   );
 });
 

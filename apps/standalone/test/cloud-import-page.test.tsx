@@ -385,7 +385,7 @@ describe("«Перенос из облака»", () => {
 
     expect(await screen.findByText("ООО «Атолл», ИНН 7701234567, GLN 4600682000010")).toBeTruthy();
     expect(screen.queryByText(/не совпадает с файлом/)).toBeNull();
-    expect(valueOf("Контрольная сумма")).toBe("sha256:d4401554…");
+    expect(valueOf("Контрольная сумма")).toBe("sha256:121376dd…");
     expect(valueOf("Организация в облаке")).not.toBe("");
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
@@ -1027,6 +1027,7 @@ describe("the notes of the export tool", () => {
         code: "product_value_cleared",
         id: "0e0e0000-0000-4000-8000-000000000003",
         field: "egaisCode",
+        reason: "group",
       }),
     ).toBe(
       "Товар «Молоко (старая карточка)»: код ЕГАИС не перенесён — в автономе он есть только у товаров группы 15 (пиво и пивные напитки).",
@@ -1040,6 +1041,14 @@ describe("the notes of the export tool", () => {
     ).toBe(
       "Товар «Молоко 3,2% 0,9 л»: контрагент по умолчанию не перенесён — этого контрагента нет в файле.",
     );
+    // A blank code of a beer product is cleared as any value out of bounds.
+    expect(
+      say({
+        code: "product_value_cleared",
+        id: "0e0e0000-0000-4000-8000-000000000005",
+        field: "egaisCode",
+      }),
+    ).toBe("Товар «Пиво светлое 0,5 л»: «код ЕГАИС» вне допустимых пределов, поле очищено.");
     // A format-1 file still names them as lost fields.
     expect(say({ code: "product_fields_lost", field: "egaisCode", count: 1 })).toBe(
       "Не переносится «код ЕГАИС» у товаров: 1.",

@@ -4,7 +4,7 @@
   "tool": "standalone-export/1",
   "exportedAt": "2026-10-09T18:30:00.000Z",
   "rehearsal": false,
-  "checksum": "sha256:d440155471a406e3cfff1e04c3eee3305cf1a73169e5323bc764e767bcd826e7",
+  "checksum": "sha256:121376ddc7e4be57c17521cf85267b2bf3852ca4865249749f91e3db1aa79103",
   "source": {
     "tenantId": "imp-test-atoll",
     "tenantName": "ООО «Атолл»"
@@ -408,7 +408,8 @@
     {
       "code": "product_value_cleared",
       "id": "0e0e0000-0000-4000-8000-000000000003",
-      "field": "egaisCode"
+      "field": "egaisCode",
+      "reason": "group"
     },
     {
       "code": "product_dropped",

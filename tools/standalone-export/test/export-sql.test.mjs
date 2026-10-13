@@ -124,6 +124,11 @@ test(
         withExtras.products.map((product) => product.lost),
         [["price"], ["externalRef"], [], ["photo"], []],
       );
+      // The default counterparty set above comes out as a value (format 2).
+      assert.equal(
+        withExtras.products[3].defaultCounterpartyId,
+        "0c0c0000-0000-4000-8000-000000000001",
+      );
 
       // The other tenant's active shift and stale station did not count;
       // the same rows of this tenant do.

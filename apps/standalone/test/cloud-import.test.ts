@@ -112,6 +112,20 @@ describe("the cloud export file", () => {
     ).toBe(true);
   });
 
+  it("refuses a file of format 2 whose product lacks the EGAIS code or the default counterparty", async () => {
+    for (const key of ["egaisCode", "defaultCounterpartyId"]) {
+      const broken = JSON.parse(GOLDEN) as Record<string, unknown>;
+      const payload = broken.payload as { products: Record<string, unknown>[] };
+      delete payload.products[0]![key];
+      broken.checksum = await fileChecksum(broken);
+      expect(await readCloudExportFile(JSON.stringify(broken))).toEqual({
+        kind: "problem",
+        problem: "format",
+        path: `payload.products.0.${key}`,
+      });
+    }
+  });
+
   it("carries a beer product's EGAIS code and default counterparty to the host (format 2)", async () => {
     const file = await golden();
     expect(file.formatVersion).toBe(2);
@@ -210,9 +224,9 @@ afterEach(() => {
 });
 
 describe("the checksum is the tool's, byte for byte", () => {
-  it("is the golden file's own checksum, sha256:d4401554...26e7", async () => {
+  it("is the golden file's own checksum, sha256:121376dd...9103", async () => {
     const parsed = JSON.parse(GOLDEN) as Record<string, unknown>;
-    expect(parsed.checksum).toMatch(/^sha256:d4401554[0-9a-f]{52}26e7$/);
+    expect(parsed.checksum).toMatch(/^sha256:121376dd[0-9a-f]{52}9103$/);
     expect(await fileChecksum(parsed)).toBe(parsed.checksum);
   });
 
