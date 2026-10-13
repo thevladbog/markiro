@@ -88,10 +88,7 @@ impl LicenseService {
             let clock = guard.get_or_insert_with(|| {
                 // A loaded file proves the time is not before its issue less
                 // a day (§7).
-                let floor = licenses
-                    .iter()
-                    .map(|license| license.issued_at - state::DAY_MS)
-                    .max();
+                let floor = clock::issue_floor(licenses.iter().map(|license| license.issued_at));
                 clock::LicenseClock::at_start(clock_row.max_seen_at, wall, mono, floor)
             });
             clock.observe(wall, mono)

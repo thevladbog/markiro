@@ -1,9 +1,20 @@
-//! The time the license trusts (plan ЛЦ-2, spec 2026-10-13 §7): the PC's
-//! clock, never earlier than the last time the host knew, never further
-//! ahead than the process's monotonic time allows while it runs, at most 400
-//! days ahead of the last mark at a start, and never before a loaded file's
-//! issue less a day. A clock set back only stops the license's time; a
-//! clock set far ahead is flagged and not believed.
+//! The time the license trusts (plan ЛЦ-2, spec 2026-10-13 §7):
+//! `max(the PC's clock, the mark)`, the mark being the last time the host
+//! knew; while the host runs, never further ahead than the process's
+//! monotonic time since the last believable reading plus
+//! [`RUNNING_SLACK_MS`]; at a start, at most 400 days ahead of the stored
+//! mark; and never before the latest issue of a loaded file less a day.
+//!
+//! What this allows, plainly:
+//! - A clock set back freezes the license's time while it runs: the mark
+//!   holds until the PC's clock catches up, so the time never runs back, and
+//!   a clock more than a day behind is flagged.
+//! - A clock set far ahead in one step is flagged and believed only up to
+//!   the ceiling.
+//! - Every believable reading moves the ceiling's anchor to it, so a clock
+//!   moved forward in steps, each under the slack, makes the license's time
+//!   run faster than real time. That only shortens the customer's own term;
+//!   it never lengthens it.
 
 use std::time::Duration;
 
@@ -22,6 +33,16 @@ pub const AHEAD_FLAG_MS: i64 = DAY_MS;
 /// How often the mark is written to the database at most, besides every
 /// change of state.
 pub const PERSIST_EVERY_MS: i64 = 60 * 60 * 1000;
+
+/// The floor loaded files put under the time (§7): the latest issue among
+/// all of them (not only the newest by `sequence`) less a day; `None`
+/// without a file. Saturating: a corrupt row neither panics nor wraps.
+pub fn issue_floor(issued_at: impl IntoIterator<Item = i64>) -> Option<i64> {
+    issued_at
+        .into_iter()
+        .map(|issued| issued.saturating_sub(DAY_MS))
+        .max()
+}
 
 /// One look at the time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,8 +81,8 @@ fn millis(duration: Duration) -> i64 {
 
 impl LicenseClock {
     /// At a start: `stored` is `license_clock.max_seen_at`, `wall` the PC's
-    /// clock, `mono` the monotonic time, `floor` the newest file's issue less
-    /// a day.
+    /// clock, `mono` the monotonic time, `floor` the [`issue_floor`] of every
+    /// stored file.
     pub fn at_start(stored: Option<i64>, wall: i64, mono: Duration, floor: Option<i64>) -> Self {
         let base = stored.unwrap_or(wall);
         let mut mark = if wall >= base {
@@ -101,8 +122,8 @@ impl LicenseClock {
         self.mark = effective;
         Reading {
             effective,
-            behind_ms: (effective - wall).max(0),
-            ahead: wall - effective > AHEAD_FLAG_MS,
+            behind_ms: effective.saturating_sub(wall).max(0),
+            ahead: wall.saturating_sub(effective) > AHEAD_FLAG_MS,
         }
     }
 
@@ -217,6 +238,68 @@ mod tests {
             T0 + 20 * DAY_MS
         );
         assert_eq!(clock.mark(), T0 + 20 * DAY_MS);
+        // A lower floor never moves the time back.
+        clock.raise_floor(T0 + 15 * DAY_MS, secs(6));
+        assert_eq!(clock.mark(), T0 + 20 * DAY_MS);
+        assert_eq!(
+            clock.observe(T0 + 6000, secs(6)).effective,
+            T0 + 20 * DAY_MS
+        );
+    }
+
+    #[test]
+    fn a_believable_reading_moves_the_anchor_of_the_ceiling() {
+        let hour = 3_600_000;
+        let mut clock = LicenseClock::at_start(None, T0, secs(100), None);
+        clock.observe(T0, secs(100));
+        clock.observe(T0 + hour, secs(100 + 3600));
+        // One second of the process later the PC's clock says ten minutes:
+        // the ceiling counts from the last believable reading.
+        let reading = clock.observe(T0 + hour + 600_000, secs(100 + 3601));
+        assert_eq!(reading.effective, T0 + hour + 1000 + RUNNING_SLACK_MS);
+    }
+
+    #[test]
+    fn ahead_is_flagged_past_exactly_one_day() {
+        let reading = |ahead_by: i64| {
+            let mut clock = LicenseClock::at_start(None, T0, secs(0), None);
+            clock.observe(T0 + RUNNING_SLACK_MS + ahead_by, secs(0))
+        };
+        let edge = reading(DAY_MS);
+        assert_eq!((edge.effective, edge.ahead), (T0 + RUNNING_SLACK_MS, false));
+        assert!(reading(DAY_MS + 1).ahead);
+    }
+
+    #[test]
+    fn corrupt_times_neither_panic_nor_wrap() {
+        let mut ahead = LicenseClock::at_start(Some(i64::MAX), i64::MIN, secs(0), Some(i64::MIN));
+        let reading = ahead.observe(i64::MIN, secs(0));
+        assert_eq!(
+            (reading.effective, reading.behind_ms, reading.ahead),
+            (i64::MAX, i64::MAX, false)
+        );
+        assert_eq!(reading.behind_days(), Some(u32::MAX));
+        let mut behind = LicenseClock::at_start(Some(i64::MIN), i64::MAX, secs(5), None);
+        assert_eq!(behind.mark(), i64::MIN + START_JUMP_MS);
+        // The ceiling is the mark plus the process's time: still capped.
+        let reading = behind.observe(i64::MAX, Duration::MAX);
+        assert_eq!(
+            (reading.effective, reading.behind_ms, reading.ahead),
+            (START_JUMP_MS + RUNNING_SLACK_MS - 1, 0, true)
+        );
+        let mut early = LicenseClock::at_start(None, 0, secs(0), None);
+        early.raise_floor(i64::MAX, secs(0));
+        assert!(!early.observe(i64::MIN, secs(0)).ahead);
+    }
+
+    #[test]
+    fn the_floor_is_the_latest_issue_of_any_file_less_a_day() {
+        assert_eq!(issue_floor([]), None);
+        assert_eq!(
+            issue_floor([T0, T0 + 5 * DAY_MS, T0 + 2 * DAY_MS]),
+            Some(T0 + 4 * DAY_MS)
+        );
+        assert_eq!(issue_floor([i64::MIN]), Some(i64::MIN));
     }
 
     #[test]

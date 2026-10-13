@@ -176,7 +176,7 @@ pub fn days_until(end: i64, now: i64) -> u32 {
     if end <= now {
         return 0;
     }
-    u32::try_from((end - now + DAY_MS - 1) / DAY_MS).unwrap_or(u32::MAX)
+    u32::try_from(end.saturating_sub(now).saturating_add(DAY_MS - 1) / DAY_MS).unwrap_or(u32::MAX)
 }
 
 /// The file in force at `now`: the highest `sequence` among those that began.
@@ -224,9 +224,16 @@ fn of_trial(trial: Trial, now: i64) -> Phased {
     }
 }
 
+/// The end of `file`'s grace (times read from the database: saturating, so
+/// a corrupt row neither panics nor wraps).
+fn grace_end(file: &StoredLicense) -> i64 {
+    file.valid_until
+        .saturating_add(file.grace_days.saturating_mul(DAY_MS))
+}
+
 fn of_term(file: &StoredLicense, warn: i64, now: i64) -> Phased {
-    let expiring_from = file.valid_until - warn * DAY_MS;
-    let grace_end = file.valid_until + file.grace_days * DAY_MS;
+    let expiring_from = file.valid_until.saturating_sub(warn.saturating_mul(DAY_MS));
+    let grace_end = grace_end(file);
     if now < expiring_from {
         Phased {
             phase: Phase::Active,
@@ -264,7 +271,7 @@ pub fn evaluate(inputs: &Inputs<'_>) -> Evaluation {
     let now = inputs.now;
     let trial = inputs.trial_started_at.map(|started_at| Trial {
         started_at,
-        ends_at: started_at + TRIAL_DAYS * DAY_MS,
+        ends_at: started_at.saturating_add(TRIAL_DAYS * DAY_MS),
     });
     let license = effective(inputs.licenses, now).cloned();
     let mut wrong_host_since = None;
@@ -273,17 +280,21 @@ pub fn evaluate(inputs: &Inputs<'_>) -> Evaluation {
         None => {
             let trial = trial.unwrap_or(Trial {
                 started_at: now,
-                ends_at: now + TRIAL_DAYS * DAY_MS,
+                ends_at: now.saturating_add(TRIAL_DAYS * DAY_MS),
             });
             (of_trial(trial, now), warn_days(TRIAL_DAYS * DAY_MS), None)
         }
         Some(file) => {
-            let warn = warn_days(file.valid_until - file.valid_from);
+            let warn = warn_days(file.valid_until.saturating_sub(file.valid_from));
             let matches = inn_matches(inputs.org_inn, &file.customer_inn);
             let phased = if file.host_id != inputs.host_id {
                 let seen = inputs.wrong_host_since.unwrap_or(now);
                 wrong_host_since = Some(seen);
-                let ends = seen + WRONG_HOST_DAYS * DAY_MS;
+                let window_end = seen.saturating_add(WRONG_HOST_DAYS * DAY_MS);
+                // Another host's file does not outlive its own term (§3.2:
+                // `restricted` is a grace that ended, or `wrong_host` for
+                // more than 30 days): whichever end comes first restricts.
+                let ends = window_end.min(grace_end(file));
                 if now < ends {
                     Phased {
                         phase: Phase::WrongHost,
@@ -548,6 +559,88 @@ mod tests {
             at(day(3), &[file(1, day(0), day(365), 14)]).wrong_host_since,
             None
         );
+    }
+
+    #[test]
+    fn a_foreign_file_past_its_grace_is_restricted() {
+        // Spec §3.2: `restricted` is a grace that ended, or `wrong_host` for
+        // more than 30 days; another host's file does not outlive its term.
+        let mut foreign = file(1, day(0), day(10), 2);
+        foreign.host_id = OTHER_HOST.to_owned();
+        let files = [foreign];
+        let in_grace = at(day(11), &files);
+        assert_eq!(
+            (
+                in_grace.phase,
+                in_grace.since,
+                in_grace.phase_ends_at,
+                in_grace.days_left,
+                in_grace.wrong_host_since
+            ),
+            (
+                Phase::WrongHost,
+                day(11),
+                Some(day(12)),
+                Some(1),
+                Some(day(11))
+            )
+        );
+        let ended = evaluate(&Inputs {
+            wrong_host_since: Some(day(11)),
+            ..inputs(day(12), &files)
+        });
+        assert_eq!(
+            (
+                ended.phase,
+                ended.since,
+                ended.phase_ends_at,
+                ended.days_left,
+                ended.wrong_host_since
+            ),
+            (Phase::Restricted, day(12), None, None, Some(day(11)))
+        );
+        assert!(!ended.opens_new_shifts && ended.emergency_available);
+        // Seen only after its grace: restricted at once, the window still kept.
+        let late = at(day(20), &files);
+        assert_eq!(
+            (late.phase, late.since, late.wrong_host_since),
+            (Phase::Restricted, day(12), Some(day(20)))
+        );
+    }
+
+    #[test]
+    fn corrupt_times_neither_panic_nor_wrap() {
+        let mut wild = file(1, i64::MIN, i64::MAX, i64::MAX);
+        wild.issued_at = i64::MIN;
+        let files = [wild.clone()];
+        let at_end = evaluate(&Inputs {
+            trial_started_at: Some(i64::MAX),
+            emergency: Some((wild.license_id.as_str(), i64::MIN)),
+            ..inputs(i64::MAX, &files)
+        });
+        assert_eq!(
+            (at_end.phase, at_end.since, at_end.warn_days),
+            (Phase::Restricted, i64::MAX, 30)
+        );
+        assert!(at_end.emergency_used && at_end.emergency_until.is_none());
+        let trial = evaluate(&Inputs {
+            trial_started_at: Some(i64::MAX),
+            ..inputs(i64::MIN, &[])
+        });
+        assert_eq!(
+            (trial.phase, trial.phase_ends_at, trial.days_left),
+            (Phase::Trial, Some(i64::MAX), Some(u32::MAX))
+        );
+        let mut foreign = file(1, day(0), day(365), i64::MIN);
+        foreign.host_id = OTHER_HOST.to_owned();
+        let window = evaluate(&Inputs {
+            wrong_host_since: Some(i64::MAX),
+            ..inputs(day(1), &[foreign])
+        });
+        // A negative grace ends the term at once: restricted, not a wrap.
+        assert_eq!(window.phase, Phase::Restricted);
+        assert_eq!(days_until(i64::MAX, i64::MIN), u32::MAX);
+        assert_eq!(warn_days(i64::MIN), 0);
     }
 
     #[test]
