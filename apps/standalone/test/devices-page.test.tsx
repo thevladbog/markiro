@@ -176,6 +176,22 @@ describe("office devices", () => {
     expect(within(retired).queryByRole("button")).toBeNull();
   });
 
+  it("shows the version each device reported with its protocol, and the pairing's for one that reported none", async () => {
+    const session = adminSession();
+    session.api.listDevices.mockResolvedValue([
+      { ...HOST_PC, appVersion: "0.3.0", protocol: 3, versionSeenAt: "2026-10-13T09:00:00Z" },
+      PACKING,
+      { ...OFFICE_PC, protocol: 3, versionSeenAt: null },
+      RETIRED,
+    ]);
+    await openDevices(session);
+    expect(screen.getByRole("columnheader", { name: "Версия" })).toBeTruthy();
+    expect(within(rowOf("Рабочее место хоста")).getByText("0.3.0, протокол 3")).toBeTruthy();
+    // An app before plan ОБН-1, or a host before it: the version named at pairing.
+    expect(within(rowOf("Станция упаковки")).getByText("0.1.0 (при подключении)")).toBeTruthy();
+    expect(within(rowOf("Офис бухгалтерии")).getByText("0.1.0 (при подключении)")).toBeTruthy();
+  });
+
   it("renames a station and moves it to another line, sending only what changed", async () => {
     const session = adminSession();
     const other = LINES[2];
