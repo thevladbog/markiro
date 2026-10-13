@@ -1331,17 +1331,40 @@ change) build their bodies inline, field by field, as does the wizard; its
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
 change, a new fact kind or a new `data` field of a fact included (see Facts);
-the host keeps accepting the previous version. It is 4 since plan РЕЖ (shift
-modes: the body of a shift entry, `ShiftEnter`, and a validation shift's `ok`
-scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since plan 2a1),
-with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
-of stage 2a and of pallets, and a station finds a host of an older protocol
-too old (`host_too_old` at the probe).
+the host keeps accepting the previous version. It is 5 since part B of plan
+РЕЖ (the duplicate print: the print policy `validationPrint` of a shift, the
+snapshot's frozen `validationPrint` and the `unit_label` fact; 4 since its part
+A for shift modes: the body of a shift entry, `ShiftEnter`, and a validation
+shift's `ok` scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since
+plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of
+stage 1, of stage 2a, of pallets and of shift modes, and a station finds a
+host of an older protocol too old (`host_too_old` at the probe;
+`hello-future.json` stays one protocol ahead, now 6).
+The print policy (`markiro_proto::ValidationPrint`, `validationPrintSchema`) is
+the cloud's `validationPrint` without its reprocessing of earlier codes (part
+C): `{ "mode": "none" }` or `{ "mode": "duplicate_dm", "verification":
+"none" | "required", "templateId" }`, each shape with exactly its own fields
+(`None {}` is an empty struct variant because serde lets a unit variant of an
+internally tagged enum ignore unknown fields). It is an optional field of
+`ShiftCreate`, `ShiftUpdate`, `OfficeShift` and `DeviceShift` (left out: none;
+a host before protocol 5 sends none), and `ShiftSnapshot.validationPrint`
+(`SnapshotValidationPrint { verification, template }`, the duplicate template
+whole) is left out unless the shift prints, so a snapshot frozen before part
+B reads and writes back as stored (`proto/tests/validation_print.rs`). Zod
+adds the cross-field rules: a duplicate only with `mode: validation` (a plan
+without a mode is aggregation; an edit without one is the host's to check),
+and an entered shift's snapshot froze exactly the shift's policy (same
+`verification`, `template.id = templateId`, none when the shift prints none).
+Until task B3 the host keeps no policy: it takes `{ "mode": "none" }` and
+answers `duplicate_dm` `validation_failed` on `validationPrint`, and it answers
+a `unit_label` record exactly as a kind it does not know (see Facts). The
+station keeps entering with `STATION_SHIFT_ENTER` = `["validation-v1"]`; it
+names `validation-dm-duplicate-v1` only once it prints unit labels (B5/B6).
 The host does not look at the protocol of a station that enters a shift (it
 records it at pairing only), so a station of protocol 2 could enter a shift
 the office planned with pallets and produce boxes without them. The pilot
 rules that out by installation, not by a refusal: every station of a site runs
-the current protocol (4), installed together with the host's update, and the installer's
+the current protocol (5), installed together with the host's update, and the installer's
 check of it is owed to the plan УСТ (it is not done yet; nothing here was run
 on a real station). Validation shifts do not rely on that: since protocol 4 a
 station names what it works in the body of every entry
@@ -3243,7 +3266,8 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
 - A shift made on a station (`DeviceShiftCreate`) is created as aggregation;
   choosing the mode on the station's new-shift steps is part C (owner's
   decision), as are reprocessing codes of earlier shifts and modes on the
-  handheld. The duplicate print under «Проверка» is part B (protocol 5).
+  handheld. The duplicate print under «Проверка» is part B (protocol 5; its
+  wire is in «Protocol» and «Facts»).
 - Parity with the cloud is held by `test/scan-verdict-parity.test.ts` (every
   raw scan of the domain's KM fixtures and a line's scanner rows: the same
   verdict and duplicate key as `validateShiftScan`, in both modes; the one
@@ -3306,7 +3330,17 @@ production data: they write no audit row and take no revision, but for a
 station's close of its shift and a closed shift's first late fact (below).
 A new fact kind, or a new field in a kind's `data`, raises `PROTOCOL_VERSION`:
 an older host answers the unknown kind or field `invalid_record`, and that
-receipt is kept for good.
+receipt is kept for good. `unit_label` (protocol 5, plan РЕЖ part B,
+`markiro_proto::UnitLabelFact`, `unitLabelFactSchema`,
+`fact-unit-label-*.json`) is one event of a unit label job: `jobId`,
+`codeHash`, `attemptNo`, `event` (the domain's `productLabelEventSchema`
+kinds), `reason` (a `ReprintReason`, on the `prepared` event of a reprint
+only), `errorCode` (exactly on `failed_before_send`, `delivery_unknown` and
+`verification_rejected`, from `UNIT_LABEL_ERROR_CODES`), `payloadDigest`,
+`bytesDigest`, `at`; never the full code. Until task B3 the host refuses it in
+`facts::apply` before anything is read, as an unknown kind: `invalid_record`
+without a field, the receipt kept without a kind or a shift
+(`host/tests/validation_shifts.rs`).
 
 A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
 an `invalid` one keeps no code, only what it looked like (`rawKind`) and its

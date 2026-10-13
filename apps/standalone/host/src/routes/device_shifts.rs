@@ -84,6 +84,8 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         box_template_id: row.box_template_id,
         pallet_box_capacity: row.pallet_box_capacity,
         pallet_template_id: row.pallet_template_id,
+        // The host keeps no policy before task B3 (part B of plan РЕЖ).
+        validation_print: None,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,

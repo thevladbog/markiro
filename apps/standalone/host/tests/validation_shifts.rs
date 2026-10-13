@@ -479,6 +479,66 @@ async fn box_and_pallet_facts_of_a_validation_shift_are_refused_on_its_mode() {
     assert_eq!(receipts(&admin.app, &floor.key, &batch).await, refused);
 }
 
+/// A `unit_label` fact (protocol 5, part B of plan РЕЖ) is not taken before
+/// task B3 reads it: this host answers it exactly as a kind it does not know
+/// (`invalid_record` with no field, the receipt kept without a kind or a
+/// shift), whatever the shift, writes nothing else, and gives the same
+/// receipt again.
+#[tokio::test]
+async fn a_unit_label_fact_is_answered_as_a_kind_this_host_does_not_read_yet() {
+    let (admin, _, floor) = validation_floor().await;
+    let accepted_scan = fact(
+        &record_id(1),
+        "scan",
+        &floor.shift,
+        checked_scan(1, &instant(1, 0)),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[accepted_scan]).await,
+        [accepted(&record_id(1))]
+    );
+    let label = |n: u32, shift: &str| {
+        fact(
+            &record_id(n),
+            "unit_label",
+            shift,
+            json!({
+                "jobId": "2e7f4a9c-6b1d-4c3e-9a5f-8d0b1c2e3f4a", "codeHash": code_hash(1),
+                "attemptNo": 1, "event": "prepared", "reason": null, "errorCode": null,
+                "payloadDigest": code_hash(7), "bytesDigest": code_hash(8),
+                "at": instant(2, 0)
+            }),
+        )
+    };
+    let unknown_shift = "00000000-0000-4000-8000-00000000ffff";
+    let batch = [label(2, &floor.shift), label(3, unknown_shift)];
+    let before = fact_rows(&admin.app).await;
+    let refused = vec![
+        rejected(Some(&record_id(2)), "invalid_record", None),
+        rejected(Some(&record_id(3)), "invalid_record", None),
+    ];
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, refused);
+    let mut expected = before.clone();
+    expected["fact_receipts"] = json!(before["fact_receipts"].as_u64().unwrap() + 2);
+    assert_eq!(fact_rows(&admin.app).await, expected);
+    let kept: Vec<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT record_id, kind, shift_id, code FROM fact_receipts WHERE record_id <> ? \
+         ORDER BY record_id",
+    )
+    .bind(record_id(1))
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept,
+        [
+            (record_id(2), None, None, "invalid_record".to_owned()),
+            (record_id(3), None, None, "invalid_record".to_owned()),
+        ]
+    );
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, refused);
+}
+
 /// (е): a station's close of a validation shift counts no boxes: one with
 /// `closedBoxCount` other than 0 is `invalid_record` on
 /// `data.closedBoxCount` and the shift stays open; with 0 it closes.

@@ -130,8 +130,9 @@ mod tests {
             Err(ProbeError::HostTooOld)
         );
         // A host of stage 1 speaks protocol 1 only, a host of stage 2a up to
-        // 2, a host of pallets (plan ПЛ-Х) up to 3: a station that knows
-        // shift modes (protocol 4, plan РЕЖ) asks for an update of the host.
+        // 2, a host of pallets (plan ПЛ-Х) up to 3, a host of shift modes
+        // (plan РЕЖ part A) up to 4: a station that knows the duplicate print
+        // (protocol 5, part B) asks for an update of the host.
         assert_eq!(
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 1, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
@@ -144,12 +145,16 @@ mod tests {
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
         );
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 4, "minProtocol": 1})),
+            Err(ProbeError::HostTooOld)
+        );
     }
 
     #[test]
     fn an_app_older_than_the_host_accepts_is_rejected() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5})),
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 6})),
             Err(ProbeError::AppTooOld)
         );
     }

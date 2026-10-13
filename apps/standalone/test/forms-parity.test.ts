@@ -38,9 +38,13 @@ function read(name: string): unknown {
 
 // The cases are the cloud's, written before a shift named an A4 sheet (plan А4):
 // a shift of theirs has none, and the printed forms never read the sheet.
-const parityShiftSchema = officeShiftSchema.extend({
-  palletSheetTemplateId: officeShiftSchema.shape.palletSheetTemplateId.default(null),
-});
+// The schema is refined (plan РЕЖ part B: the print policy), so it takes the
+// missing sheet as `null` before it reads the shift rather than by `.extend`.
+const parityShiftSchema = z.preprocess(
+  (value) =>
+    typeof value === "object" && value !== null ? { palletSheetTemplateId: null, ...value } : value,
+  officeShiftSchema,
+);
 
 const format = z.enum(["a4", "a5"]);
 const caseSchema = z.discriminatedUnion("form", [

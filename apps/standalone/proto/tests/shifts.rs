@@ -31,7 +31,8 @@ fn round_trip<T: DeserializeOwned + Serialize>(name: &str) -> T {
 
 #[test]
 fn protocol_4_carries_the_shift_modes() {
-    assert_eq!(PROTOCOL_VERSION, 4);
+    // Protocol 4 brought them; 5 (part B, `validation_print.rs`) keeps them.
+    assert_eq!(PROTOCOL_VERSION, 5);
     assert_eq!(shift_supports::VALIDATION, "validation-v1");
     assert_eq!(
         shift_supports::VALIDATION_DM_DUPLICATE,

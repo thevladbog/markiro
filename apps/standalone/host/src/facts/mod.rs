@@ -307,6 +307,15 @@ async fn apply(
             Reject::new(receipt_codes::INVALID_RECORD),
         ));
     };
+    // `unit_label` (protocol 5, part B of plan РЕЖ) is read from task B3 on:
+    // until then this host answers it as a kind it does not know, before
+    // anything of it is read (no kind, no shift kept with the receipt).
+    if record.kind == FactKind::UnitLabel {
+        return Ok(Applying::refused(
+            None,
+            Reject::new(receipt_codes::INVALID_RECORD),
+        ));
+    }
     let kind = Some(record.kind);
     for (field, text) in [
         ("id", Some(record.id.as_str())),
@@ -354,6 +363,8 @@ async fn apply(
         FactKind::PalletClosed => pallet_closed::apply(conn, &context, &record.data).await,
         FactKind::PalletLabel => pallet_label::apply(conn, &context, &record.data).await,
         FactKind::PalletException => pallet_exception::apply(conn, &context, &record.data).await,
+        // Refused above until task B3.
+        FactKind::UnitLabel => Err(Failure::Reject(Reject::new(receipt_codes::INVALID_RECORD))),
     };
     let answer = match answer {
         Ok(applied) => {
@@ -382,7 +393,7 @@ async fn apply(
 /// (plan РЕЖ, Р7) has no boxes and no pallets, so a box or pallet fact of it
 /// is `invalid_record` on `shift_mode` whatever its content, before anything
 /// of it is read; its scans and its close are its own (`scan.rs`,
-/// `shift_closed.rs`).
+/// `shift_closed.rs`), and so are its unit labels (part B).
 fn admits(mode: ShiftMode, kind: FactKind) -> bool {
     match kind {
         FactKind::Scan | FactKind::ShiftClosed => true,
@@ -392,6 +403,7 @@ fn admits(mode: ShiftMode, kind: FactKind) -> bool {
         | FactKind::PalletClosed
         | FactKind::PalletLabel
         | FactKind::PalletException => mode == ShiftMode::Aggregation,
+        FactKind::UnitLabel => mode == ShiftMode::Validation,
     }
 }
 

@@ -19,7 +19,7 @@ use markiro_proto::{
     ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
     ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
     SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    TemplateDefaultsUpdate, TemplatePurpose, UnitLabelFact, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -80,7 +80,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 5);
+    assert_eq!(hello.protocol, 6);
     assert!(hello.initialized);
 }
 
@@ -97,7 +97,8 @@ fn envelope_decides_compatibility_before_the_rest() {
     assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(5, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(6, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(7, &future), Compatibility::HostTooOld);
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1313,6 +1314,9 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::PalletException => {
                 serde_json::to_value(typed::<PalletExceptionFact>(&record.data)).unwrap()
+            }
+            FactKind::UnitLabel => {
+                serde_json::to_value(typed::<UnitLabelFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);

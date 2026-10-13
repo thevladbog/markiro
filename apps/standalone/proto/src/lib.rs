@@ -13,14 +13,17 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 4 since plan РЕЖ (the shift modes:
-/// the body of a shift entry naming what the station works, [`ShiftEnter`],
-/// and a validation shift's `ok` scan without a box); 3 came with plan ПЛ-Х
+/// Protocol version this build speaks: 5 since part B of plan РЕЖ (the
+/// duplicate print of a validation shift: its [`ValidationPrint`] policy, the
+/// snapshot's [`SnapshotValidationPrint`] and the `unit_label` fact,
+/// [`UnitLabelFact`]); 4 came with part A (the shift modes: the body of a
+/// shift entry naming what the station works, [`ShiftEnter`], and a
+/// validation shift's `ok` scan without a box); 3 came with plan ПЛ-Х
 /// (pallets: the shift's pallet fields, pallet blocks, the pallet facts and a
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -1649,6 +1652,53 @@ pub mod shift_supports {
     pub const VALIDATION_DM_DUPLICATE: &str = "validation-dm-duplicate-v1";
 }
 
+/// Whether the operator must scan a printed duplicate before the next unit
+/// (the cloud's `verification` of `validationPrint`): `none` lets the next
+/// unit go once the label is sent, `required` waits for the check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelVerification {
+    None,
+    Required,
+}
+
+impl LabelVerification {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LabelVerification::None => "none",
+            LabelVerification::Required => "required",
+        }
+    }
+}
+
+impl std::str::FromStr for LabelVerification {
+    type Err = UnknownVariant;
+
+    /// The name [`LabelVerification::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("label verification", text)
+    }
+}
+
+/// The print policy of a validation shift (part B of plan РЕЖ, protocol 5),
+/// the cloud's `validationPrint` without its reprocessing of earlier codes
+/// (part C): `{ "mode": "none" }`, or `{ "mode": "duplicate_dm",
+/// "verification", "templateId" }`, a Data Matrix duplicate of each accepted
+/// code printed with a `product_duplicate` template. Only a validation shift
+/// prints one; an aggregation shift's policy is `none`. Each shape takes
+/// exactly its own fields (so `None` is an empty struct variant: serde lets
+/// a unit variant of an internally tagged enum ignore unknown fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ValidationPrint {
+    None {},
+    DuplicateDm {
+        verification: LabelVerification,
+        #[serde(rename = "templateId")]
+        template_id: String,
+    },
+}
+
 /// The body of `POST /v1/device/shifts/{id}/enter` (protocol 4, plan РЕЖ):
 /// what the station can work, from [`shift_supports`]. A station of
 /// protocol 3 sends no body, which reads as `{}`: it names nothing, so it
@@ -1689,6 +1739,10 @@ pub struct OfficeShift {
     /// `null` for none, and always `null` without pallets.
     #[serde(default)]
     pub pallet_sheet_template_id: Option<String>,
+    /// The shift's print policy (part B of plan РЕЖ, protocol 5); left out
+    /// by a host before it, which reads as `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     /// The station that opened the shift; `null` while it is planned.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
@@ -1760,6 +1814,10 @@ pub struct ShiftCreate {
     /// with pallets takes the organization's default sheet when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_sheet_template_id: Option<String>,
+    /// The print policy (part B of plan РЕЖ, protocol 5); left out, `none`.
+    /// `duplicate_dm` only with `mode: validation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
 }
 
 /// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
@@ -1800,6 +1858,10 @@ pub struct ShiftUpdate {
     /// its sheet, and pallets just turned on take the main one.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
     pub pallet_sheet_template_id: Option<Option<String>>,
+    /// The print policy (part B of plan РЕЖ, protocol 5), only of a planned
+    /// shift; left out, the shift keeps its policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     pub expected_rev: i64,
 }
 
@@ -1842,6 +1904,11 @@ pub struct DeviceShift {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
+    /// The shift's print policy (part B of plan РЕЖ, protocol 5); left out
+    /// by a host before it, which reads as `none`. Once the shift is open,
+    /// the snapshot's [`SnapshotValidationPrint`] is the same policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     /// The station that opened the shift: another one's id means the shift
     /// is busy (stage 2a puts one device on a shift).
     pub owner_device_id: Option<String>,
@@ -1882,6 +1949,22 @@ pub struct ShiftSnapshot {
     /// box. Left out by a host before plan А4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<ShiftSnapshotOrganization>,
+    /// The duplicate print as the shift froze it (part B of plan РЕЖ): only
+    /// for a validation shift that prints one; left out otherwise, and by
+    /// every snapshot frozen before part B, which therefore reads and writes
+    /// back as it was stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<SnapshotValidationPrint>,
+}
+
+/// A shift's `duplicate_dm` policy as the shift froze it: the check of the
+/// printed label and the `product_duplicate` template, its layout whole (its
+/// `id` is the policy's `templateId`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotValidationPrint {
+    pub verification: LabelVerification,
+    pub template: ShiftSnapshotTemplate,
 }
 
 /// The product as a shift froze it; only an active product opens a shift,
@@ -1897,8 +1980,9 @@ pub struct ShiftSnapshotProduct {
     pub shelf_life_days: Option<u32>,
 }
 
-/// A label template as a shift froze it (its box template, and its pallet
-/// template when it has pallets), its layout whole. The host never checks a
+/// A label template as a shift froze it (its box template, its pallet
+/// template when it has pallets, its duplicate template when it prints one),
+/// its layout whole. The host never checks a
 /// layout; the station checks it with `labelTemplateSpecSchema` when it
 /// enters the shift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1983,7 +2067,8 @@ pub struct DeviceShiftCreate {
 /// to read the record's `data`. A kind added later is a new variant; a host
 /// that does not know it answers the record `invalid_record`, for good, as it
 /// does a new `data` field: either raises `PROTOCOL_VERSION` (the pallet
-/// kinds came with protocol 3, plan ПЛ-Х).
+/// kinds came with protocol 3, plan ПЛ-Х; `unit_label` with protocol 5, part
+/// B of plan РЕЖ).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
@@ -1995,6 +2080,7 @@ pub enum FactKind {
     PalletClosed,
     PalletLabel,
     PalletException,
+    UnitLabel,
 }
 
 impl FactKind {
@@ -2008,6 +2094,7 @@ impl FactKind {
             FactKind::PalletClosed => "pallet_closed",
             FactKind::PalletLabel => "pallet_label",
             FactKind::PalletException => "pallet_exception",
+            FactKind::UnitLabel => "unit_label",
         }
     }
 }
@@ -2288,6 +2375,105 @@ pub struct BoxExceptionFact {
     pub reason_code: Option<String>,
     pub reason_text: Option<String>,
     pub occurred_at: String,
+}
+
+/// An event of a unit label job (part B of plan РЕЖ): the kinds of the
+/// domain's `productLabelEventSchema` (`@markiro/domain` `product-labels`),
+/// by name. An attempt is `prepared`, then `sending`, then `sent` or
+/// `delivery_unknown` (never sent again on its own), or `failed_before_send`
+/// when the printer no longer fits; its label is then `verified`,
+/// `verification_rejected` (the scan did not match) or
+/// `verification_skipped` (only after `sent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnitLabelEvent {
+    Prepared,
+    Sending,
+    Sent,
+    FailedBeforeSend,
+    DeliveryUnknown,
+    Verified,
+    VerificationRejected,
+    VerificationSkipped,
+}
+
+impl UnitLabelEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UnitLabelEvent::Prepared => "prepared",
+            UnitLabelEvent::Sending => "sending",
+            UnitLabelEvent::Sent => "sent",
+            UnitLabelEvent::FailedBeforeSend => "failed_before_send",
+            UnitLabelEvent::DeliveryUnknown => "delivery_unknown",
+            UnitLabelEvent::Verified => "verified",
+            UnitLabelEvent::VerificationRejected => "verification_rejected",
+            UnitLabelEvent::VerificationSkipped => "verification_skipped",
+        }
+    }
+}
+
+impl std::str::FromStr for UnitLabelEvent {
+    type Err = UnknownVariant;
+
+    /// The name [`UnitLabelEvent::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("unit label event", text)
+    }
+}
+
+/// Why a unit label is printed again (the domain's `ReprintReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReprintReason {
+    NotPrinted,
+    Damaged,
+    Lost,
+}
+
+impl ReprintReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReprintReason::NotPrinted => "not_printed",
+            ReprintReason::Damaged => "damaged",
+            ReprintReason::Lost => "lost",
+        }
+    }
+}
+
+impl std::str::FromStr for ReprintReason {
+    type Err = UnknownVariant;
+
+    /// The name [`ReprintReason::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("reprint reason", text)
+    }
+}
+
+/// `data` of a `unit_label` fact (protocol 5, part B of plan РЕЖ): one event
+/// of the job that prints the Data Matrix duplicate of an accepted code of a
+/// validation shift. `jobId` is the station's job (a lower-case hyphenated
+/// UUID), `codeHash` the accepted code's `kmHash`, `attemptNo` the attempt
+/// from 1 (a reprint is a new attempt with the same bytes). `reason` is set
+/// on the `prepared` event of a reprint only (attempt 2 and later), as the
+/// domain's rule; `errorCode` on `failed_before_send` (`printer_unconfigured`,
+/// `printer_changed`), `delivery_unknown` (`transport_failed`,
+/// `persistence_failed`, `interrupted`) and `verification_rejected`
+/// (`invalid`, `mismatch`) only. `payloadDigest` and `bytesDigest` are the
+/// domain's digests of the printed text and of the printer's bytes: the
+/// full code never travels in a fact. Which of these rules a record breaks
+/// is the host's to check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnitLabelFact {
+    pub job_id: String,
+    pub code_hash: String,
+    pub attempt_no: u32,
+    pub event: UnitLabelEvent,
+    pub reason: Option<ReprintReason>,
+    pub error_code: Option<String>,
+    pub payload_digest: String,
+    pub bytes_digest: String,
+    pub at: String,
 }
 
 /// `data` of a `shift_closed` fact: a station closed its shift. The numbers
@@ -2907,6 +3093,7 @@ mod tests {
             FactKind::PalletClosed,
             FactKind::PalletLabel,
             FactKind::PalletException,
+            FactKind::UnitLabel,
         ];
         for kind in &kinds {
             match kind {
@@ -2917,7 +3104,8 @@ mod tests {
                 | FactKind::ShiftClosed
                 | FactKind::PalletClosed
                 | FactKind::PalletLabel
-                | FactKind::PalletException => {}
+                | FactKind::PalletException
+                | FactKind::UnitLabel => {}
             }
         }
         kinds

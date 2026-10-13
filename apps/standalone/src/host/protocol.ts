@@ -1,10 +1,14 @@
+import type { ProductLabelEvent, ReprintReason, VerificationPolicy } from "@markiro/domain";
 import { z } from "zod";
 
 import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
-/** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto): 4 since plan РЕЖ. */
-export const PROTOCOL_VERSION = 4;
+/**
+ * Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto): 4 since
+ * plan РЕЖ part A (the shift modes), 5 since its part B (the duplicate print).
+ */
+export const PROTOCOL_VERSION = 5;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
@@ -656,6 +660,68 @@ export type ShiftMode = z.infer<typeof shiftModeSchema>;
 export const shiftOriginSchema = z.enum(["office", "station"]);
 export type ShiftOrigin = z.infer<typeof shiftOriginSchema>;
 
+/**
+ * Whether the operator must scan a printed duplicate before the next unit
+ * (`markiro_proto::LabelVerification`, the domain's `VerificationPolicy`).
+ */
+export const LABEL_VERIFICATIONS = [
+  "none",
+  "required",
+] as const satisfies readonly VerificationPolicy[];
+const labelVerificationSchema = z.enum(LABEL_VERIFICATIONS);
+
+/**
+ * The print policy of a shift (`markiro_proto::ValidationPrint`, protocol 5,
+ * plan РЕЖ part B): the cloud's `validationPrint` without its reprocessing of
+ * earlier codes (part C). `duplicate_dm` prints a Data Matrix duplicate of
+ * each accepted code with a `product_duplicate` template; only a validation
+ * shift has one. Each shape takes exactly its own fields, as the host's. The
+ * request schemas use this one; a response reads `validationPrintReadSchema`,
+ * which tolerates a field a newer host adds.
+ */
+export const validationPrintSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("none") }),
+  z.strictObject({
+    mode: z.literal("duplicate_dm"),
+    verification: labelVerificationSchema,
+    templateId: z.uuid(),
+  }),
+]);
+export type ValidationPrint = z.infer<typeof validationPrintSchema>;
+
+/** `validationPrintSchema` as a response reads it. */
+const validationPrintReadSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("none") }),
+  z.object({
+    mode: z.literal("duplicate_dm"),
+    verification: labelVerificationSchema,
+    templateId: z.uuid(),
+  }),
+]);
+
+/**
+ * The rule every shape of a shift shares (plan РЕЖ part B): a duplicate is
+ * printed only by a validation shift. `mode` left out is the shift's own
+ * when `keeps` (an edit, which the host checks), aggregation otherwise (a
+ * plan).
+ */
+function printsOnlyInValidation(keeps: boolean) {
+  return (
+    shift: { mode?: ShiftMode | undefined; validationPrint?: { mode: string } | undefined },
+    context: z.core.$RefinementCtx,
+  ): void => {
+    if (shift.validationPrint?.mode !== "duplicate_dm") return;
+    const mode = shift.mode ?? (keeps ? undefined : "aggregation");
+    if (mode === "aggregation") {
+      context.addIssue({
+        code: "custom",
+        path: ["validationPrint"],
+        message: "only a validation shift prints a duplicate",
+      });
+    }
+  };
+}
+
 /** A civil date as the host writes it, `YYYY-MM-DD`; the host has checked it is a real date. */
 const civilDateTextSchema = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
 
@@ -689,7 +755,7 @@ export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
  * `closeReasonText` is the office's words. The pallet capacity and template
  * are set exactly when `palletsEnabled` (plan ПЛ-Х).
  */
-export const officeShiftSchema = z.object({
+const officeShiftObject = z.object({
   id: z.uuid(),
   number: z.string().min(1),
   status: shiftStatusSchema,
@@ -706,6 +772,8 @@ export const officeShiftSchema = z.object({
   palletBoxCapacity: z.number().int().positive().nullable(),
   palletTemplateId: z.uuid().nullable(),
   palletSheetTemplateId: z.uuid().nullable(),
+  /** The print policy (protocol 5); left out by a host before it, which is `none`. */
+  validationPrint: validationPrintReadSchema.optional(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
@@ -716,6 +784,7 @@ export const officeShiftSchema = z.object({
   rev: z.number().int(),
   totals: shiftTotalsSchema,
 });
+export const officeShiftSchema = officeShiftObject.superRefine(printsOnlyInValidation(false));
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
 
 /**
@@ -906,6 +975,16 @@ export const shiftSnapshotSheetSchema = z.object({
   spec: z.unknown(),
 });
 
+/**
+ * Mirrors `markiro_proto::SnapshotValidationPrint`: a shift's `duplicate_dm`
+ * policy as the shift froze it, the check and the `product_duplicate`
+ * template with its whole layout (plan РЕЖ part B).
+ */
+export const snapshotValidationPrintSchema = z.object({
+  verification: labelVerificationSchema,
+  template: shiftSnapshotTemplateSchema,
+});
+
 /** Mirrors `markiro_proto::ShiftSnapshotOrganization`: the organization a shift froze (plan А4). */
 export const shiftSnapshotOrganizationSchema = z.object({
   name: z.string(),
@@ -929,6 +1008,12 @@ export const shiftSnapshotSchema = z.object({
   palletTemplate: shiftSnapshotTemplateSchema.optional(),
   palletSheet: shiftSnapshotSheetSchema.optional(),
   organization: shiftSnapshotOrganizationSchema.optional(),
+  /**
+   * The duplicate print the shift froze (protocol 5): only for a validation
+   * shift that prints one; left out otherwise and by every snapshot frozen
+   * before part B.
+   */
+  validationPrint: snapshotValidationPrintSchema.optional(),
 });
 export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
 
@@ -940,7 +1025,7 @@ export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
  * capacity and template (protocol 3, plan ПЛ-Х); one without names neither —
  * the fields are absent, not `null`.
  */
-export const deviceShiftSchema = z.object({
+const deviceShiftObject = z.object({
   id: z.uuid(),
   number: z.string().min(1),
   status: shiftStatusSchema,
@@ -958,10 +1043,13 @@ export const deviceShiftSchema = z.object({
   boxTemplateId: z.uuid(),
   palletBoxCapacity: z.number().int().positive().optional(),
   palletTemplateId: z.uuid().optional(),
+  /** The print policy (protocol 5); left out by a host before it, which is `none`. */
+  validationPrint: validationPrintReadSchema.optional(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
 });
+export const deviceShiftSchema = deviceShiftObject.superRefine(printsOnlyInValidation(false));
 export type DeviceShift = z.infer<typeof deviceShiftSchema>;
 
 /** `GET /v1/device/shifts`: the station's shifts, without snapshots. */
@@ -969,9 +1057,32 @@ export const deviceShiftsSchema = z.object({ shifts: z.array(deviceShiftSchema) 
 
 /**
  * The answer of `POST /v1/device/shifts/{id}/enter`: the shift, now active and
- * this station's, with its snapshot (the same one on every re-entry).
+ * this station's, with its snapshot (the same one on every re-entry). The
+ * snapshot froze the shift's own print policy (plan РЕЖ part B): the same
+ * check and the template the policy names when it prints a duplicate, and
+ * none when it does not, so the station never prints by another policy than
+ * the shift's.
  */
-export const enteredShiftSchema = deviceShiftSchema.extend({ snapshot: shiftSnapshotSchema });
+export const enteredShiftSchema = deviceShiftObject
+  .extend({ snapshot: shiftSnapshotSchema })
+  .superRefine(printsOnlyInValidation(false))
+  .superRefine((shift, context) => {
+    const policy = shift.validationPrint;
+    const frozen = shift.snapshot.validationPrint;
+    const same =
+      policy?.mode === "duplicate_dm"
+        ? frozen !== undefined &&
+          frozen.verification === policy.verification &&
+          frozen.template.id === policy.templateId
+        : frozen === undefined;
+    if (!same) {
+      context.addIssue({
+        code: "custom",
+        path: ["snapshot", "validationPrint"],
+        message: "the snapshot froze another print policy than the shift's",
+      });
+    }
+  });
 export type EnteredShift = z.infer<typeof enteredShiftSchema>;
 
 /**
@@ -1495,8 +1606,11 @@ export const shiftCreateSchema = z
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
     palletSheetTemplateId: z.uuid().optional(),
+    /** The print policy (protocol 5); left out, `none`. `duplicate_dm` only with `mode: validation`. */
+    validationPrint: validationPrintSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(printsOnlyInValidation(false));
 export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
 
 /**
@@ -1520,9 +1634,12 @@ export const shiftUpdateSchema = z
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
     palletSheetTemplateId: z.uuid().nullable().optional(),
+    /** The print policy (protocol 5), only of a planned shift; left out, kept. */
+    validationPrint: validationPrintSchema.optional(),
     expectedRev: z.number().int(),
   })
-  .strict();
+  .strict()
+  .superRefine(printsOnlyInValidation(true));
 export type ShiftUpdate = z.infer<typeof shiftUpdateSchema>;
 
 /** `POST /v1/office/shifts/{id}/close`: the office's reason in words, over the loaded revision. */
@@ -1721,6 +1838,102 @@ export const palletExceptionFactSchema = z
   .strict();
 export type PalletExceptionFact = z.infer<typeof palletExceptionFactSchema>;
 
+/**
+ * The events of a unit label job (`markiro_proto::UnitLabelEvent`): the kinds
+ * of the domain's `productLabelEventSchema`, by name.
+ */
+export const UNIT_LABEL_EVENTS = [
+  "prepared",
+  "sending",
+  "sent",
+  "failed_before_send",
+  "delivery_unknown",
+  "verified",
+  "verification_rejected",
+  "verification_skipped",
+] as const satisfies readonly ProductLabelEvent["kind"][];
+export type UnitLabelEvent = (typeof UNIT_LABEL_EVENTS)[number];
+
+/** Why a unit label is printed again (`markiro_proto::ReprintReason`, the domain's `ReprintReason`). */
+export const REPRINT_REASONS = [
+  "not_printed",
+  "damaged",
+  "lost",
+] as const satisfies readonly ReprintReason[];
+
+type ProductLabelEventOf<K extends ProductLabelEvent["kind"]> = Extract<
+  ProductLabelEvent,
+  { kind: K }
+>;
+
+/**
+ * The error codes of a unit label event, each event's own list: the domain's
+ * `errorCode` of `failed_before_send` and `delivery_unknown`, and its
+ * rejection `reason` of `verification_rejected`. No other event has one.
+ */
+export const UNIT_LABEL_ERROR_CODES = {
+  failed_before_send: ["printer_unconfigured", "printer_changed"],
+  delivery_unknown: ["transport_failed", "persistence_failed", "interrupted"],
+  verification_rejected: ["invalid", "mismatch"],
+} as const satisfies {
+  failed_before_send: readonly ProductLabelEventOf<"failed_before_send">["errorCode"][];
+  delivery_unknown: readonly ProductLabelEventOf<"delivery_unknown">["errorCode"][];
+  verification_rejected: readonly ProductLabelEventOf<"verification_rejected">["reason"][];
+};
+
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/**
+ * `data` of a `unit_label` fact (`markiro_proto::UnitLabelFact`, protocol 5,
+ * plan РЕЖ part B): one event of the job that prints the Data Matrix
+ * duplicate of an accepted code. The full code never travels: the code's
+ * `kmHash` and the digests of the printed text and of the printer's bytes.
+ * `reason` is set on the `prepared` event of a reprint only (the domain's
+ * rule: attempt 1 has none, a later attempt has one); `errorCode` exactly on
+ * the events of `UNIT_LABEL_ERROR_CODES`, from that event's list.
+ */
+export const unitLabelFactSchema = z
+  .object({
+    jobId: z.uuid(),
+    codeHash: sha256HexSchema,
+    attemptNo: z.number().int().positive(),
+    event: z.enum(UNIT_LABEL_EVENTS),
+    reason: z.enum(REPRINT_REASONS).nullable(),
+    errorCode: z.string().nullable(),
+    payloadDigest: sha256HexSchema,
+    bytesDigest: sha256HexSchema,
+    at: z.string(),
+  })
+  .strict()
+  .superRefine((fact, context) => {
+    const reprint = fact.event === "prepared" && fact.attemptNo > 1;
+    if ((fact.reason !== null) !== reprint) {
+      context.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "only the prepared event of a reprint names a reason",
+      });
+    }
+    const codes: readonly string[] | undefined =
+      fact.event === "failed_before_send" ||
+      fact.event === "delivery_unknown" ||
+      fact.event === "verification_rejected"
+        ? UNIT_LABEL_ERROR_CODES[fact.event]
+        : undefined;
+    const fits =
+      codes === undefined
+        ? fact.errorCode === null
+        : fact.errorCode !== null && codes.includes(fact.errorCode);
+    if (!fits) {
+      context.addIssue({
+        code: "custom",
+        path: ["errorCode"],
+        message: "an error code only on its own events, from their list",
+      });
+    }
+  });
+export type UnitLabelFact = z.infer<typeof unitLabelFactSchema>;
+
 /** The envelope of every record: its own id, the shift and the operator signed in, or `null`. */
 const factHead = { id: z.uuid(), shiftId: z.uuid(), operatorId: z.uuid().nullable() };
 
@@ -1744,6 +1957,7 @@ export const factRecordSchema = z.discriminatedUnion("kind", [
   z
     .object({ ...factHead, kind: z.literal("pallet_exception"), data: palletExceptionFactSchema })
     .strict(),
+  z.object({ ...factHead, kind: z.literal("unit_label"), data: unitLabelFactSchema }).strict(),
 ]);
 export type FactRecord = z.infer<typeof factRecordSchema>;
 export type FactKind = FactRecord["kind"];

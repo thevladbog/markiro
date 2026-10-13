@@ -587,6 +587,8 @@ pub async fn snapshot(
             inn: org_inn,
             logo,
         }),
+        // No duplicate print before task B3 (part B of plan РЕЖ).
+        validation_print: None,
     })
 }
 
@@ -621,6 +623,7 @@ mod tests {
             pallet_template: None,
             pallet_sheet: None,
             organization: None,
+            validation_print: None,
         }
     }
 

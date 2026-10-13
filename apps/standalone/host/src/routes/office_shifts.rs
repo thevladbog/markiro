@@ -11,6 +11,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
     OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftTotals, ShiftUpdate,
+    ValidationPrint,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -118,6 +119,9 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         pallet_box_capacity: row.pallet_box_capacity,
         pallet_template_id: row.pallet_template_id,
         pallet_sheet_template_id: row.pallet_sheet_template_id,
+        // The host keeps no policy before task B3 (part B of plan РЕЖ): every
+        // shift's is `none`, left out.
+        validation_print: None,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -244,6 +248,20 @@ pub fn check_mode_rules(mode: ShiftMode, pallets_enabled: bool) -> Result<(), Ap
     Ok(())
 }
 
+/// The print policy (protocol 5, part B of plan РЕЖ) before the host keeps
+/// it (task B3): `{ "mode": "none" }`, every shift's, is taken and changes
+/// nothing; `duplicate_dm` is `validation_failed` on `validationPrint`, so no
+/// shift is planned as printing a duplicate this host would not print.
+pub fn check_validation_print(policy: Option<&ValidationPrint>) -> Result<(), ApiError> {
+    match policy {
+        None | Some(ValidationPrint::None {}) => Ok(()),
+        Some(ValidationPrint::DuplicateDm { .. }) => Err(ApiError::validation(
+            "validationPrint",
+            "this host does not print a duplicate yet",
+        )),
+    }
+}
+
 /// `POST /v1/office/shifts`: a planned shift of an active product on an
 /// active line, with a box template that fits the product, and with pallets
 /// a pallet template that fits it too (`shifts::pallet_request`).
@@ -254,6 +272,7 @@ pub async fn create_shift(
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
     check_mode_rules(create.mode, create.pallets_enabled)?;
+    check_validation_print(create.validation_print.as_ref())?;
     let pallet_request = shifts::pallet_request(
         create.pallets_enabled,
         create.pallet_box_capacity,
@@ -371,6 +390,7 @@ pub async fn update_shift(
     ApiJson(update): ApiJson<ShiftUpdate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
+    check_validation_print(update.validation_print.as_ref())?;
     validate::count(
         "palletBoxCapacity",
         update.pallet_box_capacity,

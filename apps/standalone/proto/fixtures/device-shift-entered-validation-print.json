@@ -1,0 +1,91 @@
+{
+  "id": "6a1d3e5f-8b2c-4d7e-9f0a-1b3c5d7e9f20",
+  "number": "OCT26-006",
+  "status": "active",
+  "mode": "validation",
+  "palletsEnabled": false,
+  "createdFrom": "office",
+  "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+  "productName": "Молоко 3,2% 0,9 л",
+  "productGtin14": "04600682000013",
+  "counterpartyName": "ООО «Северный берег»",
+  "productionDate": "2026-10-08",
+  "plannedQty": 1200,
+  "boxCapacity": 12,
+  "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  "ownerDeviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "openedAt": "2026-10-08T06:02:00Z",
+  "closedAt": null,
+  "validationPrint": {
+    "mode": "duplicate_dm",
+    "verification": "none",
+    "templateId": "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e"
+  },
+  "snapshot": {
+    "product": {
+      "id": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+      "gtin14": "04600682000013",
+      "name": "Молоко 3,2% 0,9 л",
+      "printName": "Молоко 3,2%",
+      "chzProductGroupCode": 8,
+      "shelfLifeDays": 10
+    },
+    "boxTemplate": {
+      "id": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+      "name": "Молоко 58×40",
+      "rev": 62,
+      "spec": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "dpi": 203,
+        "language": "tspl",
+        "elements": [
+          {
+            "kind": "field",
+            "id": "name",
+            "xMm": 2,
+            "yMm": 2,
+            "field": "product.printName",
+            "fontSizePt": 10
+          }
+        ]
+      }
+    },
+    "issuerPrefix": "460068200",
+    "counterpartyName": "ООО «Северный берег»",
+    "validationPrint": {
+      "verification": "none",
+      "template": {
+        "id": "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+        "name": "Дубликат DM 30×20",
+        "rev": 64,
+        "spec": {
+          "widthMm": 30,
+          "heightMm": 20,
+          "dpi": 203,
+          "language": "tspl",
+          "elements": [
+            {
+              "kind": "barcode",
+              "id": "km",
+              "xMm": 2,
+              "yMm": 2,
+              "format": "datamatrix",
+              "data": "km.code",
+              "sizeMm": 16
+            },
+            {
+              "kind": "field",
+              "id": "gtin",
+              "xMm": 19,
+              "yMm": 2,
+              "field": "product.gtin",
+              "fontSizePt": 6
+            }
+          ]
+        }
+      }
+    }
+  }
+}
