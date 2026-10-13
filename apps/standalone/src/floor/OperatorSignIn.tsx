@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Input, PinPad, Spinner } from "@markiro/ui";
+import { Alert, Button, Input, PinPad, Spinner } from "@markiro/ui";
 
 import type { FloorNotice, SyncState } from "../app/shell.js";
+import type { HardwareApi } from "../hardware/hardware.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import {
@@ -14,6 +23,7 @@ import {
   type RosterEntry,
 } from "./operator-search.js";
 import type { ScanSource } from "./scan-source.js";
+import { signInScannerState, useScannerIndicator } from "./scanner-indicator.js";
 import {
   readFloorReadiness,
   readOperatorRoster,
@@ -25,6 +35,9 @@ import {
   type SignInRefusal,
   type SignInResult,
 } from "./sign-in.js";
+import { BadgeScanIllustration } from "./sign-in/BadgeScanIllustration.js";
+import { StationBrand } from "./sign-in/StationBrand.js";
+import "./sign-in/operator-sign-in.css";
 
 export interface OperatorSignInProps {
   local: LocalExecutor;
@@ -51,6 +64,11 @@ export interface OperatorSignInProps {
    */
   onSync: () => void;
   onOffice: () => void;
+  /**
+   * The shell's COM scanners (`HardwareApi.watchScanners`), for the scanner
+   * chip; without it the keyboard wedge alone is assumed (it always scans).
+   */
+  watchScanners?: HardwareApi["watchScanners"];
 }
 
 type Stage = "badge" | "login" | "search" | "pin";
@@ -118,8 +136,10 @@ export function OperatorSignIn({
   onSignedIn,
   onSync,
   onOffice,
+  watchScanners,
 }: OperatorSignInProps) {
   const { t } = useTranslation();
+  const scanner = useScannerIndicator(watchScanners);
   const [readiness, setReadiness] = useState<FloorReadiness | "failed" | null>(null);
   const [readAttempt, setReadAttempt] = useState(0);
   const [stage, setStage] = useState<Stage>("badge");
@@ -292,10 +312,29 @@ export function OperatorSignIn({
     return t((shown.via === "badge" ? BADGE_REFUSAL_KEY : REFUSAL_KEY)[shown.reason]);
   };
 
-  const body = () => {
+  const ready = readiness !== null && readiness !== "failed" && readiness.kind === "ready";
+  const working = ready && readiness.operators > 0;
+  const scannerState = signInScannerState(
+    scanner,
+    message?.kind === "locked" && message.scope === "station",
+  );
+
+  /** What the header says under «Вход оператора»: the step, or nothing while the screen says why not. */
+  const prompt = () => {
+    if (!working) return null;
+    if (stage === "badge") return t("floor.signIn.badgePrompt");
+    if (stage === "search") return t("floor.signIn.namePrompt");
+    if (stage === "login") return t("floor.signIn.loginPrompt");
+    return chosenName !== null
+      ? t("floor.signIn.pinPromptNamed", { name: chosenName, login })
+      : t("floor.signIn.pinPrompt", { login });
+  };
+
+  /** Loading, an unreadable copy, no copies yet, no operators: one centred statement. */
+  const statement = () => {
     if (readiness === null) {
       return (
-        <div className="standalone-probing" role="status">
+        <div className="operator-login__state standalone-probing" role="status">
           <Spinner size={32} />
           <p>{t("floor.signIn.loading")}</p>
         </div>
@@ -303,191 +342,256 @@ export function OperatorSignIn({
     }
     if (readiness === "failed") {
       return (
-        <Alert
-          tone="error"
-          action={
-            <Button
-              variant="secondary"
-              size="floor"
-              onClick={() => {
-                setReadiness(null);
-                setReadAttempt((count) => count + 1);
-              }}
-            >
-              {t("floor.signIn.retry")}
-            </Button>
-          }
-        >
-          {t("floor.signIn.readFailed")}
-        </Alert>
+        <div className="operator-login__state">
+          <Alert
+            tone="error"
+            action={
+              <Button
+                variant="secondary"
+                size="floor"
+                onClick={() => {
+                  setReadiness(null);
+                  setReadAttempt((count) => count + 1);
+                }}
+              >
+                {t("floor.signIn.retry")}
+              </Button>
+            }
+          >
+            {t("floor.signIn.readFailed")}
+          </Alert>
+        </div>
       );
     }
-    if (readiness.kind === "not_ready") return <p>{t("floor.signIn.notSynced")}</p>;
-    if (readiness.operators === 0) return <p>{t("floor.signIn.noOperators")}</p>;
+    return (
+      <div className="operator-login__state">
+        <p>
+          {readiness.kind === "not_ready"
+            ? t("floor.signIn.notSynced")
+            : t("floor.signIn.noOperators")}
+        </p>
+      </div>
+    );
+  };
+
+  const searchResults = (): ReactNode => {
+    const matches = Array.isArray(roster) ? searchOperatorsByName(roster, query) : [];
+    const hint = (text: string) => <p className="operator-name-search__hint">{text}</p>;
+    if (roster === null) return hint(t("floor.signIn.loading"));
+    if (roster === "failed") return hint(t("floor.signIn.readFailed"));
+    if (roster === "not_ready") return hint(t("floor.signIn.errors.notReady"));
+    if (nameQueryLetters(query) < NAME_SEARCH_MIN_LETTERS) return hint(t("floor.signIn.nameHint"));
+    if (matches.length === 0) return hint(t("floor.signIn.nameEmpty"));
+    return matches.map((entry) => (
+      <Button
+        key={entry.id}
+        size="floor"
+        variant="secondary"
+        fullWidth
+        disabled={busy}
+        onClick={() => choose(entry)}
+      >
+        <span className="operator-name-search__result-label">
+          {t("floor.signIn.nameResult", { name: entry.name, login: entry.login })}
+        </span>
+      </Button>
+    ));
+  };
+
+  const openSearch = () => {
+    setQuery("");
+    toStage("search");
+  };
+
+  const body = () => {
+    if (!working)
+      return <div className="operator-login__body operator-login__body--state">{statement()}</div>;
     if (stage === "badge") {
       return (
-        <div className="floor-sign-in">
-          <p className="floor-sign-in__prompt">{t("floor.signIn.badgePrompt")}</p>
-          <div className="standalone-form__actions">
-            <Button size="floor" disabled={busy} onClick={() => toStage("login")}>
-              {t("floor.signIn.useLogin")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => {
-                setQuery("");
-                toStage("search");
-              }}
+        <div className="operator-login__body operator-login__body--badge">
+          <div className="operator-login__keypad-zone">
+            <div
+              className="operator-login__badge-panel"
+              data-scanner={scannerState.tone === "error" ? "error" : "ready"}
             >
-              {t("floor.signIn.useName")}
-            </Button>
+              <BadgeScanIllustration />
+              <div className="operator-login__badge-copy">
+                <h2>{t("floor.signIn.badgeInstruction")}</h2>
+                <p>{t("floor.signIn.badgeExplanation")}</p>
+              </div>
+            </div>
           </div>
         </div>
       );
     }
     if (stage === "search") {
-      const matches = Array.isArray(roster) ? searchOperatorsByName(roster, query) : [];
-      let results: ReactNode;
-      if (roster === null) results = <p>{t("floor.signIn.loading")}</p>;
-      else if (roster === "failed") results = <p>{t("floor.signIn.readFailed")}</p>;
-      else if (roster === "not_ready") results = <p>{t("floor.signIn.errors.notReady")}</p>;
-      else if (nameQueryLetters(query) < NAME_SEARCH_MIN_LETTERS) {
-        results = <p>{t("floor.signIn.nameHint")}</p>;
-      } else if (matches.length === 0) results = <p>{t("floor.signIn.nameEmpty")}</p>;
-      else {
-        results = matches.map((entry) => (
-          <Button
-            key={entry.id}
-            size="floor"
-            variant="secondary"
-            fullWidth
-            disabled={busy}
-            onClick={() => choose(entry)}
-          >
-            {t("floor.signIn.nameResult", { name: entry.name, login: entry.login })}
-          </Button>
-        ));
-      }
       return (
-        <div className="floor-sign-in">
-          <p className="floor-sign-in__prompt">{t("floor.signIn.namePrompt")}</p>
-          <Input
-            size="floor"
-            label={t("floor.signIn.nameLabel")}
-            value={query}
-            maxLength={NAME_QUERY_MAX_LENGTH}
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            disabled={busy}
-            onFocus={() => source.setManualTextEntryActive(true)}
-            onBlur={() => source.setManualTextEntryActive(false)}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
-          <div className="floor-sign-in__results" aria-live="polite">
-            {results}
-          </div>
-          <div className="standalone-form__actions">
-            <Button
+        <div className="operator-login__body operator-login__body--search">
+          <section className="operator-name-search" aria-label={t("floor.signIn.nameSearchTitle")}>
+            <Input
               size="floor"
-              variant="secondary"
+              label={t("floor.signIn.nameLabel")}
+              value={query}
+              maxLength={NAME_QUERY_MAX_LENGTH}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
               disabled={busy}
-              onClick={() => toStage("badge")}
+              onFocus={() => source.setManualTextEntryActive(true)}
+              onBlur={() => source.setManualTextEntryActive(false)}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+            <div
+              className="operator-name-search__results floor-sign-in__results"
+              aria-live="polite"
             >
-              {t("floor.signIn.back")}
-            </Button>
-          </div>
+              {searchResults()}
+            </div>
+          </section>
         </div>
       );
     }
-    const entering = stage === "login" ? login : pin;
     return (
-      <div className="floor-sign-in">
-        <p className="floor-sign-in__prompt">
-          {stage === "login"
-            ? t("floor.signIn.loginPrompt")
-            : chosenName !== null
-              ? t("floor.signIn.pinPromptNamed", { name: chosenName, login })
-              : t("floor.signIn.pinPrompt", { login })}
-        </p>
-        <output className="floor-sign-in__readout" aria-label={t(`floor.signIn.${stage}Readout`)}>
+      <div className="operator-login__body operator-login__body--pad">
+        <output
+          className="operator-login__readout floor-sign-in__readout"
+          aria-label={t(`floor.signIn.${stage}Readout`)}
+        >
           {stage === "login" ? login : "•".repeat(pin.length)}
         </output>
-        <PinPad
-          value={entering}
-          onChange={stage === "login" ? setLogin : setPin}
-          maxLength={stage === "login" ? 12 : 6}
-          size="floor"
-          disabled={busy}
-          ariaLabel={t(stage === "login" ? "floor.signIn.loginKeypad" : "floor.signIn.pinKeypad")}
-          backspaceLabel={t("floor.signIn.backspace")}
-          clearLabel={t("floor.signIn.clear")}
-        />
-        <div className="standalone-form__actions">
-          <Button
+        <div className="operator-login__keypad-zone">
+          <PinPad
+            value={stage === "login" ? login : pin}
+            onChange={stage === "login" ? setLogin : setPin}
+            maxLength={stage === "login" ? 12 : 6}
             size="floor"
-            variant="secondary"
             disabled={busy}
-            onClick={() => toStage(stage === "pin" ? pinFrom : "badge")}
-          >
-            {t("floor.signIn.back")}
-          </Button>
-          {stage === "login" ? (
-            <Button
-              size="floor"
-              disabled={busy || !LOGIN.test(login)}
-              onClick={() => {
-                setPinFrom("login");
-                setChosenName(null);
-                toStage("pin");
-              }}
-            >
-              {t("floor.signIn.next")}
-            </Button>
-          ) : (
-            <Button
-              size="floor"
-              loading={busy}
-              disabled={!PIN.test(pin)}
-              onClick={() => void attempt("pin", (context) => signInWithPin(context, login, pin))}
-            >
-              {t("floor.signIn.submit")}
-            </Button>
-          )}
+            ariaLabel={t(stage === "login" ? "floor.signIn.loginKeypad" : "floor.signIn.pinKeypad")}
+            backspaceLabel={t("floor.signIn.backspace")}
+            clearLabel={t("floor.signIn.clear")}
+          />
         </div>
       </div>
     );
   };
 
+  /** The step's actions, one row of equal columns under the screen (the cloud's order). */
+  const actions = (): ReactNode[] => {
+    if (!working) return [];
+    const back = (
+      <Button
+        key="back"
+        size="floor"
+        variant="secondary"
+        disabled={busy}
+        onClick={() => toStage(stage === "pin" ? pinFrom : "badge")}
+      >
+        {t("floor.signIn.back")}
+      </Button>
+    );
+    const byName = (
+      <Button key="name" size="floor" variant="secondary" disabled={busy} onClick={openSearch}>
+        {t("floor.signIn.useName")}
+      </Button>
+    );
+    const byLogin = (primary: boolean) => (
+      <Button
+        key="login"
+        size="floor"
+        {...(primary ? {} : { variant: "secondary" as const })}
+        disabled={busy}
+        onClick={() => toStage("login")}
+      >
+        {t("floor.signIn.useLogin")}
+      </Button>
+    );
+    if (stage === "badge") return [byName, byLogin(true)];
+    if (stage === "search") return [back, byLogin(true)];
+    if (stage === "login") {
+      return [
+        back,
+        byName,
+        <Button
+          key="next"
+          size="floor"
+          disabled={busy || !LOGIN.test(login)}
+          onClick={() => {
+            setPinFrom("login");
+            setChosenName(null);
+            toStage("pin");
+          }}
+        >
+          {t("floor.signIn.next")}
+        </Button>,
+      ];
+    }
+    return [
+      back,
+      <Button
+        key="submit"
+        size="floor"
+        loading={busy}
+        disabled={!PIN.test(pin)}
+        onClick={() => void attempt("pin", (context) => signInWithPin(context, login, pin))}
+      >
+        {t("floor.signIn.submit")}
+      </Button>,
+    ];
+  };
+
+  const stepActions = actions();
+  const promptText = prompt();
   return (
-    <Card className="standalone-card" title={t("floor.title")} titleAs="h2">
-      <div className="standalone-form">
-        {/* Heard once, by this region: its messages are not alerts of their own (`role="presentation"`). */}
-        <div className="floor-sign-in__message" aria-live="polite">
-          {message !== null ? (
-            <Alert
-              tone={message.kind === "refused" && message.reason === "not_ready" ? "warn" : "error"}
-              role="presentation"
-            >
-              {messageText(message)}
-            </Alert>
-          ) : notice !== null && !noticeDismissed ? (
-            <Alert tone="info" role="presentation">
-              {t(NOTICE_KEY[notice])}
-            </Alert>
-          ) : null}
-          {busy && <p>{t("floor.signIn.checking")}</p>}
+    <section className="operator-login" aria-labelledby="floor-sign-in-title">
+      <header className="operator-login__header">
+        <StationBrand label={t("floor.signIn.brand")} />
+        <div className="operator-login__prompt">
+          <h1 id="floor-sign-in-title">{t("floor.signIn.title")}</h1>
+          {promptText !== null && <p>{promptText}</p>}
         </div>
-        {body()}
-        <div className="standalone-form__actions">
+        <div className="operator-login__aside">
+          {working && (
+            <div
+              className="operator-login__scanner-status"
+              role="status"
+              data-testid="scanner-state"
+              data-tone={scannerState.tone}
+            >
+              <span className="operator-login__scanner-status-icon" aria-hidden="true">
+                {scannerState.tone === "ok" ? "✓" : "!"}
+              </span>
+              <span>{t(`floor.signIn.scanner.${scannerState.key}`)}</span>
+            </div>
+          )}
           {/* Never held by a check: one that never settles must not trap the station here. */}
           <Button variant="secondary" size="floor" onClick={onOffice}>
             {t("floor.office")}
           </Button>
         </div>
+      </header>
+      {/* Heard once, by this region: its messages are not alerts of their own (`role="presentation"`). */}
+      <div className="operator-login__message floor-sign-in__message" aria-live="polite">
+        {message !== null ? (
+          <Alert
+            tone={message.kind === "refused" && message.reason === "not_ready" ? "warn" : "error"}
+            role="presentation"
+          >
+            {messageText(message)}
+          </Alert>
+        ) : notice !== null && !noticeDismissed ? (
+          <Alert tone="info" role="presentation">
+            {t(NOTICE_KEY[notice])}
+          </Alert>
+        ) : null}
+        {busy && <p>{t("floor.signIn.checking")}</p>}
       </div>
-    </Card>
+      {body()}
+      <div
+        className="operator-login__actions"
+        style={{ "--operator-login-action-columns": stepActions.length } as CSSProperties}
+      >
+        {stepActions}
+      </div>
+    </section>
   );
 }
