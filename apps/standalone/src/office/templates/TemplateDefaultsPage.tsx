@@ -371,6 +371,7 @@ function TemplateDefaultsForm({
       key: "category",
       title: t("office.templateDefaults.table.category"),
       wrap: true,
+      minWidth: 180,
       render: (row) => groupName(groups.data, row.code, t),
     },
     {

@@ -1477,6 +1477,36 @@ describe("геометрия тега", () => {
 });
 
 describe("Table", () => {
+  it("holds a column at its minimum width, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[{ key: "name", title: "Название", wrap: true, minWidth: 180 }]}
+        rows={[{ name: "Молоко 3,2% 0,9 л" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Название" }).style.minWidth).toBe("180px");
+    expect(screen.getByRole("cell", { name: "Молоко 3,2% 0,9 л" }).style.minWidth).toBe("180px");
+  });
+
+  it("wraps a wrapping column by words and never letter by letter", () => {
+    render(
+      <Table
+        columns={[
+          { key: "line", title: "Линия", wrap: true },
+          { key: "date", title: "Дата" },
+        ]}
+        rows={[{ line: "Линия 1 — розлив", date: "13.10.2026" }]}
+      />,
+    );
+
+    // `anywhere` would make the column's minimum width one character.
+    expect(screen.getByRole("cell", { name: "Линия 1 — розлив" }).style.overflowWrap).toBe(
+      "break-word",
+    );
+    expect(screen.getByRole("cell", { name: "13.10.2026" }).style.whiteSpace).toBe("nowrap");
+  });
+
   it("keeps headings on one line unless the column asks for a wrapping heading", () => {
     render(
       <Table

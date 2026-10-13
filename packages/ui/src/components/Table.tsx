@@ -19,6 +19,8 @@ export interface TableColumn<Row> {
   mono?: boolean;
   /** Разрешить перенос строк в ячейках (по умолчанию nowrap) */
   wrap?: boolean;
+  /** Least width of the column: a wrapping column stops at it and the table scrolls, instead of squeezing the text. */
+  minWidth?: number | string;
   /** Разрешить перенос заголовка (по умолчанию nowrap): для узкой колонки с длинным названием */
   wrapTitle?: boolean;
   sortable?: boolean;
@@ -120,6 +122,7 @@ export function Table<Row>({
                     cursor: column.sortable ? "pointer" : "default",
                     whiteSpace: column.wrapTitle ? "normal" : "nowrap",
                     width: column.width,
+                    minWidth: column.minWidth,
                     userSelect: "none",
                   }}
                 >
@@ -180,8 +183,11 @@ export function Table<Row>({
                       font: column.mono ? "var(--text-code)" : "var(--text-body)",
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
+                      minWidth: column.minWidth,
                       whiteSpace: column.wrap ? "normal" : "nowrap",
-                      overflowWrap: column.wrap ? "anywhere" : undefined,
+                      // `break-word`, not `anywhere`: a squeezed column keeps its longest word whole
+                      // (the table scrolls instead) and never breaks letter by letter.
+                      overflowWrap: column.wrap ? "break-word" : undefined,
                     }}
                   >
                     {column.render ? column.render(row) : cellValue(row, column.key)}

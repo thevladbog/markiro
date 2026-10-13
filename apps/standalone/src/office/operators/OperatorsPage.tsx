@@ -112,6 +112,7 @@ export function OperatorsPage() {
       key: "badges",
       title: t("office.operators.table.badges"),
       wrap: true,
+      minWidth: 140,
       render: badgeSummary,
     },
     {

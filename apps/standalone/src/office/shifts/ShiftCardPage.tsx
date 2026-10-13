@@ -411,6 +411,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       key: "closedAt",
       title: t("office.shiftCard.boxes.closedAt"),
       wrap: true,
+      minWidth: 150,
       render: (box) => at(box.closedAt),
     },
     ...(shift.palletsEnabled
@@ -427,6 +428,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       key: "state",
       title: t("office.shiftCard.boxes.state"),
       wrap: true,
+      minWidth: 180,
       render: (box) => (
         <PackStateCell
           pack={box}
@@ -555,12 +557,14 @@ function ShiftPallets({ shift, at, onForm }: SectionProps) {
       key: "closedAt",
       title: t("office.shiftCard.pallets.closedAt"),
       wrap: true,
+      minWidth: 150,
       render: (pallet) => at(pallet.closedAt),
     },
     {
       key: "state",
       title: t("office.shiftCard.pallets.state"),
       wrap: true,
+      minWidth: 180,
       render: (pallet) => <PackStateCell pack={pallet} kind="pallet" at={at} />,
     },
     {

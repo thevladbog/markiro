@@ -78,6 +78,7 @@ export function ProductsPage() {
       key: "name",
       title: t("office.products.table.name"),
       wrap: true,
+      minWidth: 220,
       render: (product) => (
         <span className="product-name">
           <span>{product.name}</span>
@@ -93,6 +94,7 @@ export function ProductsPage() {
       key: "group",
       title: t("office.products.table.group"),
       wrap: true,
+      minWidth: 150,
       render: (product) => groupLabel(groups.data, product.chzProductGroupCode, t),
     },
     {

@@ -197,12 +197,14 @@ export function ShiftsPage() {
       key: "line",
       title: t("office.shifts.table.line"),
       wrap: true,
+      minWidth: 150,
       render: (shift) => recordLabel("line", lines.data, shift.lineId, t),
     },
     {
       key: "product",
       title: t("office.shifts.table.product"),
       wrap: true,
+      minWidth: 200,
       render: (shift) => (
         <span className="shift-cell">
           <span>{productName(shift)}</span>
@@ -235,6 +237,7 @@ export function ShiftsPage() {
       key: "status",
       title: t("office.shifts.table.status"),
       wrap: true,
+      minWidth: 220,
       render: (shift) => {
         const blocker = openBlocker(shift, products.data, templates.data);
         return (
@@ -244,7 +247,11 @@ export function ShiftsPage() {
               label={t(`office.shifts.statuses.${shift.status}`)}
             />
             {blocker !== null && (
-              <StatusChip phase="attention" wrap label={t(`office.shifts.blockers.${blocker}`)} />
+              // A sentence, not a chip: a long warning in a chip is a tall box in a narrow column.
+              <span className="shift-cell__warn">
+                <span aria-hidden="true">!</span>
+                <span>{t(`office.shifts.blockers.${blocker}`)}</span>
+              </span>
             )}
             {shift.lateDataAt !== null && (
               <StatusChip phase="attention" label={t("office.shifts.lateData")} />

@@ -94,6 +94,7 @@ export function TemplatesPage() {
       key: "name",
       title: t("office.templates.table.name"),
       wrap: true,
+      minWidth: 220,
       render: (template) => (
         <span className="template-name">
           <TemplateThumb template={template} />
@@ -127,6 +128,7 @@ export function TemplatesPage() {
       key: "scope",
       title: t("office.templates.table.scope"),
       wrap: true,
+      minWidth: 180,
       render: (template) => {
         const scope = describeScope(template.chzProductGroupCodes, groups.data, t);
         return (

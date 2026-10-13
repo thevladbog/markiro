@@ -218,6 +218,18 @@
   font-family: var(--font-ui);
 }
 
+/*
+ * The menu stays in view while the page scrolls, and scrolls by itself when the
+ * window is lower than the list (the minimum window is 960 x 600).
+ */
+.office-shell > .mk-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
 .office-shell__main {
   flex: 1;
   display: flex;
@@ -225,11 +237,13 @@
   min-width: 0;
 }
 
+/* The header's identity, link and buttons wrap onto a second line in a narrow window. */
 .office-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--line);
 }
@@ -249,15 +263,32 @@
 
 .office-header__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
+/*
+ * The page's one column is as wide as the window leaves it, never as wide as its
+ * widest child: an implicit `auto` column would grow to a table's full width and
+ * push the page sideways. A table scrolls inside its own card instead.
+ */
 .office-shell__content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 16px;
   padding: 24px;
+}
+
+/* A page header's title and buttons wrap; the buttons stay together at the right. */
+.office-shell__content .mk-page-header {
+  flex-wrap: wrap;
+}
+
+.office-shell__content .mk-page-header > div {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* Focus lands on the page container only programmatically, after a menu navigation. */
@@ -411,6 +442,21 @@
 
 .shift-cell__quiet {
   color: var(--fg-2);
+}
+
+/* A warning of a cell: a sentence that wraps by words, with its mark; never a tall chip. */
+.shift-cell__warn {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--warn-fg);
+  font: var(--text-body-sm);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.shift-cell__warn > :first-child {
+  font-weight: 700;
 }
 
 /* The note under the close reason: the hint, or the refusal in the error tone, as `Input` writes them. */

@@ -222,6 +222,12 @@ describe("office shifts: the list", () => {
     );
     expect(cells("A-8")[6]).toBe("◷Запланирована");
     expect(cells("A-6")[6]).toBe("▸Активна");
+    // A warning is a sentence of its own under the status chip, never a chip: a long warning in
+    // a chip is a tall box in a narrow column.
+    const warning = screen.getByText("Не откроется: товар в архиве");
+    expect(warning.closest(".shift-cell__warn")).not.toBeNull();
+    expect(warning.closest(".mk-chip")).toBeNull();
+    expect(warning.closest(".shift-cell")?.querySelectorAll(".mk-chip")).toHaveLength(1);
   });
 
   it("keeps the list when a list of names does not load, names records by their ids and claims no mark it cannot check", async () => {
