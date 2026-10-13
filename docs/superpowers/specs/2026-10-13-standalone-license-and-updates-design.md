@@ -211,7 +211,7 @@
 
 **Все параметры лицензии — внутри подписанного файла** (раздел 4.2): срок (`validFrom`,
 `validUntil`), льготный срок (`graceDays`), вид (`plan`: `demo` или `subscription`), возможности
-(`features`), лимиты (`limits`, пока пустые), клиент и привязка к хосту. Хост берёт их **только из
+(`features`), квоты (`quotas`), клиент и привязка к хосту. Хост берёт их **только из
 проверенного файла**; в коде нет ни сроков подписки, ни тарифов, ни умолчаний для них. Зашиты лишь
 встроенный пробный период (14 дней, без льготы), порог предупреждения раздела 3.2, окно `wrong_host`
 (30 дней) и аварийное продление (72 часа, раздел 3.5).
@@ -397,7 +397,7 @@
   `@markiro/domain` (`isValidInn`, `normalizeInn`), API импортирует оттуда, а хост получает порт на
   Rust (`host/src/inn.rs`), и общая фикстура `packages/domain/fixtures/inn-cases.json` держит их
   ответы одинаковыми (как `pairing-codes.json`).
-- **Несовпадение при загрузке** — файл отвергнут: «ИНН в файле лицензии (7701234567) не совпадает с
+- **Несовпадение при загрузке** — файл отвергнут: «ИНН в файле лицензии (7707083893) не совпадает с
   ИНН организации в программе (7707654321). Исправьте ИНН в «Профиле организации» или запросите файл
   для этой организации». ИНН организации не указан — «Укажите ИНН организации в «Профиле
   организации»: лицензия выдаётся на ИНН».
@@ -491,8 +491,8 @@ sequence)`), подпись, строка `standalone_license_issuances`, пла
   "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
   "hostFingerprint": "<64 hex>",
   "hostVersion": "0.3.0",
-  "organization": { "name": "…", "inn": "7701234567" },
-  "trial": { "startedAt": "2026-10-20T09:00:00Z", "inn": "7701234567" },
+  "organization": { "name": "…", "inn": "7707083893" },
+  "trial": { "startedAt": "2026-10-20T09:00:00Z", "inn": "7707083893" },
   "currentLicense": { "licenseId": "…", "sequence": 3 },
   "usage": { "stations": 4, "cabinetUsers": 2, "lines": 2 },
   "createdAt": "2026-10-20T09:00:00Z"
@@ -559,7 +559,7 @@ sequence)`), подпись, строка `standalone_license_issuances`, пла
 | `GET /v1/office/license`                    | каждая офисная роль | `{ state, flags, effectiveAt, phaseEndsAt, daysLeft, warnDays, license: { licenseId, sequence, customer, plan, planVersionId, validFrom, validUntil, graceDays, issuedAt } \| null, trial: { startedAt, endsAt, inn } \| null, binding: { hostId, fingerprint, orgInn, innMatches }, quotas: { <ключ>: { limit, used, over } }, features: { <ключ>: bool }, emergency: { available, until } }` |
 | `POST /v1/office/license/preview`           | администратор       | тело как у `PUT`; проверка раздела 4.3 без записи и без строки аудита; ответ `{ before, after, changes, warnings }` — для таблицы «было → станет» (раздел 4.8)                                                                                                                                                                                                                                 |
 | `PUT /v1/office/license`                    | администратор       | тело `{ "file": "<текст файла>" }` (≤ 16 КиБ); ответ — то же, что `GET`, плюс `warnings`; отказ — `validation_failed` на `file` с `details.reason` из раздела 4.3                                                                                                                                                                                                                              |
-| `GET /v1/office/license/activation-request` | администратор       | JSON раздела 6.2                                                                                                                                                                                                                                                                                                                                                                               |
+| `GET /v1/office/license/activation-request` | администратор       | JSON раздела 6.3                                                                                                                                                                                                                                                                                                                                                                               |
 | `POST /v1/office/license/emergency`         | администратор       | раздел 3.5 (если владелец примет ЛО5); `conflict` на `emergency_used` при повторе                                                                                                                                                                                                                                                                                                              |
 | `POST /v1/office/updates/started`           | администратор       | офис сообщает о запуске обновления на своём ПК: `{ deviceId, from, to, installerSha256 }` → строка `app.update.start` (раздел 10.4); ничего не меняет, ревизии нет, как `shift.export`                                                                                                                                                                                                         |
 | `GET /v1/device` (существующий)             | станция, ПК офиса   | добавляется необязательное поле `license: { state, since, phaseEndsAt }`. Ответ читается терпимо (`AGENTS.md`, «Protocol»: типы ответов терпят неизвестные поля), поэтому старые станции не ломаются                                                                                                                                                                                           |
