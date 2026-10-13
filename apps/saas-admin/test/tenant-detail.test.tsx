@@ -97,6 +97,20 @@ describe("tenant subscription detail", () => {
     expect(screen.getByText("Линия розлива")).toBeDefined();
     expect(screen.getByText("ТСД склада")).toBeDefined();
     expect(screen.queryByRole("heading", { name: "Текущий тариф" })).toBeNull();
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "Автоном: площадки и офлайн-лицензии" }),
+    ).toBeDefined();
+    expect(await screen.findByText("У клиента нет площадок автонома.")).toBeDefined();
+  });
+
+  it("hides standalone sites from a role without the standalone license capability", async () => {
+    installTenantApi({ me: SUPPORT_ME });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=equipment` });
+
+    expect(await screen.findByRole("heading", { name: "Контур оборудования" })).toBeDefined();
+    expect(
+      screen.queryByRole("heading", { name: "Автоном: площадки и офлайн-лицензии" }),
+    ).toBeNull();
   });
 
   it("keeps tenant legal data usable when optional DaData health is unavailable", async () => {

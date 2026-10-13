@@ -1,0 +1,332 @@
+import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+  STANDALONE_FEATURE_KEYS,
+  STANDALONE_OPAQUE_ID_PATTERN,
+  STANDALONE_QUOTA_KEYS,
+  standaloneActivationRequestSchema,
+  standaloneLicensePayloadV1Schema,
+} from "@markiro/domain";
+import {
+  platformStandaloneLicenseContracts,
+  standaloneIssuanceConfirmSchema,
+  standaloneIssuancePreviewRequestSchema,
+  standaloneIssuanceSummarySchema,
+  standaloneIssuanceWarningSchema,
+  standaloneLicenseFileSchema,
+  standaloneLicenseSigningKeysetSchema,
+  standaloneLicenseRightsSchema,
+  standaloneSiteRegisterSchema,
+} from "../src/index.js";
+
+const ORIGIN = "https://api.example.invalid";
+const request = standaloneActivationRequestSchema.parse(
+  JSON.parse(
+    readFileSync(
+      new URL("../../domain/fixtures/standalone-license/activation-request.json", import.meta.url),
+      "utf8",
+    ),
+  ),
+);
+
+function publicJwk() {
+  const jwk = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey.export({
+    format: "jwk",
+  });
+  return { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y };
+}
+
+function keyset(overrides: Record<string, unknown> = {}) {
+  return {
+    protocol: "standalone-license-v1",
+    origin: ORIGIN,
+    revision: "lic-v1",
+    keys: [{ kid: "lic-1", jwk: publicJwk() }],
+    retiredKids: [],
+    ...overrides,
+  };
+}
+
+describe("standalone license keyset (plan ЛЦ-0, Д11)", () => {
+  it("accepts the grant keyset shape under its own protocol literal", () => {
+    expect(standaloneLicenseSigningKeysetSchema.parse(keyset()).keys[0]?.kid).toBe("lic-1");
+  });
+
+  it("refuses the grant protocol literal, a path origin, duplicate kids and duplicate retired kids", () => {
+    const key = { kid: "lic-1", jwk: publicJwk() };
+    for (const invalid of [
+      keyset({ protocol: "offline-grants-v1" }),
+      keyset({ origin: `${ORIGIN}/` }),
+      keyset({ origin: `${ORIGIN}/licenses` }),
+      keyset({ keys: [key, key] }),
+      keyset({ retiredKids: ["old", "old"] }),
+      keyset({ keys: [{ kid: "lic-1", jwk: { ...publicJwk(), d: "private" } }] }),
+      { ...keyset(), extra: true },
+    ]) {
+      expect(standaloneLicenseSigningKeysetSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+});
+
+describe("standalone license rights", () => {
+  it("names exactly the cloud quota and feature keys the payload carries", () => {
+    expect(Object.keys(standaloneLicenseRightsSchema.shape.quotas.shape)).toEqual([
+      ...STANDALONE_QUOTA_KEYS,
+    ]);
+    expect(Object.keys(standaloneLicenseRightsSchema.shape.features.shape)).toEqual([
+      ...STANDALONE_FEATURE_KEYS,
+    ]);
+  });
+
+  it("keeps null as unlimited for quotas and refuses null features", () => {
+    const rights = {
+      quotas: { lines: null, stations: 3, kiosks: 0, cabinetUsers: 5 },
+      features: {
+        labelEditor: true,
+        publicApi: false,
+        pallets: true,
+        chzIntegration: false,
+        inventory: false,
+        commerceMl: false,
+        handheld: true,
+      },
+    };
+    expect(standaloneLicenseRightsSchema.parse(rights)).toEqual(rights);
+    expect(
+      standaloneLicenseRightsSchema.safeParse({
+        ...rights,
+        features: { ...rights.features, handheld: null },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("standalone license payload tenant id (owner decision 2026-10-13)", () => {
+  const payload = {
+    version: 1,
+    licenseId: randomUUID(),
+    sequence: 1,
+    issuer: ORIGIN,
+    tenantId: randomUUID(),
+    siteId: randomUUID(),
+    hostId: request.hostId,
+    customer: { name: "ООО «Завод»", inn: "7707083893" },
+    plan: "subscription",
+    planVersionId: randomUUID(),
+    entitlementRevision: "7",
+    issuedAt: 1_792_000_000_000,
+    validFrom: 1_792_000_000_000,
+    validUntil: 1_799_000_000_000,
+    graceDays: 14,
+    quotas: { lines: null, stations: 3, kiosks: 0, cabinetUsers: 5 },
+    features: {
+      labelEditor: true,
+      publicApi: false,
+      pallets: true,
+      chzIntegration: false,
+      inventory: false,
+      commerceMl: false,
+      handheld: true,
+    },
+    replaces: null,
+  };
+
+  it("accepts a platform UUID and a cabinet-era Better Auth id the counterparty chose", () => {
+    for (const tenantId of [randomUUID(), "Zq4bL0x9cabinetTenant01", "a", "x".repeat(64)]) {
+      expect(standaloneLicensePayloadV1Schema.safeParse({ ...payload, tenantId }).success).toBe(
+        true,
+      );
+      expect(STANDALONE_OPAQUE_ID_PATTERN.test(tenantId)).toBe(true);
+    }
+  });
+
+  it("refuses an empty, too long, spaced, control-character or look-alike tenant id", () => {
+    for (const tenantId of [
+      "",
+      "x".repeat(65),
+      "tenant 1",
+      "tenant\u0000",
+      "tenant\n",
+      "tenant/1",
+      "t\u0435nant",
+      "ｔenant",
+    ]) {
+      expect(standaloneLicensePayloadV1Schema.safeParse({ ...payload, tenantId }).success).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("standalone site registration body", () => {
+  const base = { requestId: randomUUID(), request, acknowledgedWarnings: [] };
+
+  it("accepts a new site and a new host id for an existing site", () => {
+    expect(
+      standaloneSiteRegisterSchema.parse({ ...base, intent: "create", name: "  Цех  " }),
+    ).toMatchObject({ intent: "create", name: "Цех" });
+    const siteId = randomUUID();
+    expect(standaloneSiteRegisterSchema.parse({ ...base, intent: "rebind", siteId })).toMatchObject(
+      { intent: "rebind", siteId },
+    );
+  });
+
+  it("refuses a blank name, an unknown warning, an unknown field and a malformed request", () => {
+    for (const invalid of [
+      { ...base, intent: "create", name: "   " },
+      { ...base, intent: "create", name: "Цех", acknowledgedWarnings: ["inn_whatever"] },
+      { ...base, intent: "create", name: "Цех", tenantId: "other" },
+      { ...base, intent: "create", name: "Цех", request: { ...request, extra: 1 } },
+      { ...base, intent: "rebind", name: "Цех" },
+    ]) {
+      expect(standaloneSiteRegisterSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+});
+
+describe("standalone issuance confirmation and file", () => {
+  it("requires the preview expectation and bounds grace days", () => {
+    const expected = {
+      entitlementRevision: "7",
+      previousSequence: 0,
+      boundaryAt: null,
+      termsDigest: "b".repeat(64),
+    };
+    expect(
+      standaloneIssuanceConfirmSchema.parse({
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected,
+      }),
+    ).toMatchObject({ graceDays: null, offline: null, expected });
+    for (const invalid of [
+      { requestId: randomUUID(), graceDays: null, offline: null },
+      { requestId: randomUUID(), graceDays: null, expected },
+      { requestId: randomUUID(), graceDays: 61, offline: null, expected },
+      { requestId: randomUUID(), graceDays: -1, offline: null, expected },
+      { requestId: "not-a-uuid", graceDays: 0, offline: null, expected },
+      {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: { ...expected, termsDigest: "B".repeat(64) },
+      },
+      {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: { entitlementRevision: "7", previousSequence: 0, boundaryAt: null },
+      },
+    ]) {
+      expect(standaloneIssuanceConfirmSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it("captures offline terms as a catalog plan version and a term of 1 to 365 days, never unlimited", () => {
+    const planVersionId = randomUUID();
+    expect(
+      standaloneIssuancePreviewRequestSchema.parse({
+        graceDays: null,
+        offline: { planVersionId, termDays: 365 },
+      }),
+    ).toEqual({ graceDays: null, offline: { planVersionId, termDays: 365 } });
+    for (const offline of [
+      { planVersionId, termDays: 0 },
+      { planVersionId, termDays: 366 },
+      { planVersionId, termDays: null },
+      { planVersionId },
+      { planVersionId, termDays: 1.5 },
+      { planVersionId: "plan", termDays: 30 },
+      { planVersionId, termDays: 30, quotas: { stations: 9 } },
+    ]) {
+      expect(
+        standaloneIssuancePreviewRequestSchema.safeParse({ graceDays: null, offline }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("marks every issuance with its source and ties offline files to the offline term reason", () => {
+    const summary = {
+      licenseId: randomUUID(),
+      siteId: randomUUID(),
+      sequence: 1,
+      hostId: request.hostId,
+      source: "offline",
+      plan: "subscription",
+      planVersionId: randomUUID(),
+      entitlementRevision: "0",
+      validFrom: "2026-10-13T00:00:00.000Z",
+      validUntil: "2027-10-13T00:00:00.000Z",
+      validUntilReason: "offline_term",
+      graceDays: 14,
+      kid: "lic-1",
+      sha256: "a".repeat(64),
+      issuedAt: "2026-10-13T00:00:00.000Z",
+      issuedByPlatformUserId: "admin",
+      replaces: null,
+      customer: { name: "ООО «Завод»", inn: "7707083893" },
+      rights: {
+        quotas: { lines: null, stations: 3, kiosks: 0, cabinetUsers: 5 },
+        features: {
+          labelEditor: true,
+          publicApi: false,
+          pallets: true,
+          chzIntegration: false,
+          inventory: false,
+          commerceMl: false,
+          handheld: true,
+        },
+      },
+    };
+    expect(standaloneIssuanceSummarySchema.parse(summary).source).toBe("offline");
+    for (const invalid of [
+      { ...summary, validUntilReason: "subscription_end" },
+      { ...summary, source: "subscription" },
+      { ...summary, plan: "demo", graceDays: 0 },
+      { ...summary, source: "cloud" },
+    ]) {
+      expect(standaloneIssuanceSummarySchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it("bounds the file to 16 KiB and the canonical file name", () => {
+    const shape = standaloneLicenseFileSchema.shape;
+    expect(shape.compact.safeParse("a".repeat(16_384)).success).toBe(true);
+    expect(shape.compact.safeParse("a".repeat(16_385)).success).toBe(false);
+    expect(shape.fileName.safeParse("markiro-3f1c2d4e-001.mklic").success).toBe(true);
+    expect(shape.fileName.safeParse("../markiro-3f1c2d4e-001.mklic").success).toBe(false);
+  });
+
+  it("describes each issuance warning by code with its own facts", () => {
+    expect(
+      standaloneIssuanceWarningSchema.parse({
+        code: "quota_below_usage",
+        quota: "stations",
+        limit: 2,
+        used: 4,
+      }),
+    ).toEqual({ code: "quota_below_usage", quota: "stations", limit: 2, used: 4 });
+    expect(
+      standaloneIssuanceWarningSchema.safeParse({ code: "feature_unmapped", feature: "lines" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("publishes every route under the tenant's standalone sites", () => {
+    expect(
+      Object.values(platformStandaloneLicenseContracts).map(
+        ({ method, path }) => `${method} ${path}`,
+      ),
+    ).toEqual([
+      "GET /platform/tenants/:tenantId/standalone-sites",
+      "POST /platform/tenants/:tenantId/standalone-sites/inspect",
+      "POST /platform/tenants/:tenantId/standalone-sites",
+      "POST /platform/tenants/:tenantId/standalone-sites/:siteId/issuances/preview",
+      "POST /platform/tenants/:tenantId/standalone-sites/:siteId/issuances",
+      "GET /platform/tenants/:tenantId/standalone-sites/:siteId/issuances",
+      "GET /platform/tenants/:tenantId/standalone-sites/:siteId/issuances/:licenseId/file",
+    ]);
+  });
+});

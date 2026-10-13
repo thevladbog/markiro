@@ -2,6 +2,7 @@ import {
   factualObservation,
   preview,
 } from "../../../apps/saas-admin/test/device-replacement-fixtures.js";
+import { STANDALONE_SITE_LIST } from "../../../apps/saas-admin/test/standalone-fixtures.js";
 import type {
   DeviceReplacementPreparation,
   DeviceRetentionInspection,
@@ -157,6 +158,11 @@ export const test = base.extend<{ fixture: ReturnType<typeof makeFixture> }>({
             ? [{ preparation: fixture.replacement, needsReview: false }]
             : [],
         };
+      } else if (
+        url.pathname === `/api/platform/tenants/${TENANT_ID}/standalone-sites` &&
+        method === "GET"
+      ) {
+        json = STANDALONE_SITE_LIST;
       } else if (
         url.pathname === `/api/platform/tenants/${TENANT_ID}/device-licensing/retention` &&
         method === "GET"

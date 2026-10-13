@@ -281,6 +281,7 @@ export function TenantPage() {
               principal.capabilities.includes("tenants.write") &&
               principal.capabilities.includes("billing.write")
             }
+            canManageStandalone={principal.capabilities.includes("standaloneLicenses.manage")}
           />
         </div>
       ) : (
