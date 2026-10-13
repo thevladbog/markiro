@@ -99,6 +99,9 @@ pub enum LockdownError {
     NoWindow,
     /// The window refused a property (or, on Windows, covering its monitor).
     WindowFailed,
+    /// Kiosk mode may not lock this PC (`window_policy::kiosk_permitted`: a
+    /// host or office PC, `"kiosk": false`, a `--windowed` launch).
+    NotPermitted,
 }
 
 impl LockdownError {
@@ -106,6 +109,7 @@ impl LockdownError {
         match self {
             Self::NoWindow => "no_window",
             Self::WindowFailed => "window_failed",
+            Self::NotPermitted => "kiosk_off",
         }
     }
 }
@@ -189,7 +193,15 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, Lockd
 /// fullscreen over its monitor. The flag is set only once every property
 /// held; a failure rolls every property back and leaves the flag off, so a
 /// window that is not fully locked can still be closed.
+/// A PC kiosk mode may not lock (`window_policy`) is refused before anything
+/// changes, whatever the webview asked: the host's PC is never locked.
 pub fn lock<R: Runtime>(app: &AppHandle<R>, state: &LockdownState) -> Result<(), LockdownError> {
+    let permitted = app
+        .try_state::<crate::window_policy::KioskPolicyState>()
+        .is_none_or(|policy| policy.permitted());
+    if !permitted {
+        return Err(LockdownError::NotPermitted);
+    }
     let window = main_window(app)?;
     let applied = window
         .set_decorations(false)
@@ -305,5 +317,6 @@ mod tests {
     fn refusals_are_bare_codes() {
         assert_eq!(LockdownError::NoWindow.code(), "no_window");
         assert_eq!(LockdownError::WindowFailed.code(), "window_failed");
+        assert_eq!(LockdownError::NotPermitted.code(), "kiosk_off");
     }
 }

@@ -325,6 +325,23 @@ section.workstation-setup {
   grid-template-columns: minmax(320px, 480px) minmax(0, 1fr);
 }
 
+/* Before pairing (scope «scanners»): the cloud's scanner check as a third card. */
+.setup-split--scanners-check {
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.setup-card--check {
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.workstation-setup__single {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .setup-scanner-list {
   display: grid;
   margin: 0;

@@ -391,6 +391,14 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_reports::box_report),
         )
         .route(
+            "/v1/office/codes",
+            get(crate::routes::office_codes::search_codes),
+        )
+        .route(
+            "/v1/office/codes/{code_hash}",
+            get(crate::routes::office_codes::code_card),
+        )
+        .route(
             "/v1/office/backups",
             get(crate::routes::backups::get_backups).post(crate::routes::backups::start_backup),
         )

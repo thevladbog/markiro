@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input } from "@markiro/ui";
 
+import type { ScanSource } from "../floor/scan-source.js";
 import { DeviceError, type ClaimInput, type DeviceErrorCode } from "../host/device.js";
 import { hasCyrillic, normalizePairingCode, parsePairingPayload } from "../host/pairing-code.js";
 import { HostProbeError, type HostProbe } from "../host/probe.js";
@@ -25,6 +26,14 @@ export interface NetworkPairingProps {
   /** Pairs with the confirmed host; rejects with a `DeviceError` the screen explains. */
   onClaim: (input: ClaimInput) => Promise<void>;
   onBack: () => void;
+  /**
+   * A scanner that does not type (the shell's COM scanners): each scan is read
+   * as if it had been scanned into the field, while the scan form is on
+   * screen and nothing is being sent; at other times it is dropped.
+   */
+  comScans?: ScanSource;
+  /** Opens the scanner settings (a «Настройки сканера» button); none without it. */
+  onScannerSetup?: () => void;
 }
 
 /** A typed code waiting for a person to compare the host's fingerprint with the office screen. */
@@ -100,7 +109,13 @@ function searchNotice(search: Exclude<HostSearch, { kind: "found" }>, addresses:
  * code goes out only after a person confirmed it against the office screen.
  * A refused claim is never retried on its own.
  */
-export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) {
+export function NetworkPairing({
+  probe,
+  onClaim,
+  onBack,
+  comScans,
+  onScannerSetup,
+}: NetworkPairingProps) {
   const { t } = useTranslation();
   const [manual, setManual] = useState(false);
   const [name, setName] = useState(() => t("shell.networkPairing.defaultName"));
@@ -139,6 +154,23 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
     }
   }, [notice, manual, confirmation]);
 
+  // A COM scan goes the way of a scan typed into the field, but only on the
+  // scan form and while nothing is on its way: the latest render's state is
+  // read through a ref, so the subscription lasts as long as the screen.
+  const comScanRef = useRef<(raw: string) => void>(() => undefined);
+  // Two frames in one moment see the same `busy`: this ref holds the second off.
+  const comReading = useRef(false);
+  useLayoutEffect(() => {
+    comScanRef.current = (raw) => {
+      if (manual || confirmation !== null || busy || comReading.current) return;
+      comReading.current = true;
+      void readScan(raw).finally(() => {
+        comReading.current = false;
+      });
+    };
+  });
+  useEffect(() => comScans?.start((raw) => comScanRef.current(raw)), [comScans]);
+
   const checkedName = (): string | null => {
     const parsed = deviceNameRule.safeParse(name);
     // The first refusal in its own words, as the office's forms show it: a tab
@@ -168,6 +200,10 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
     const text = scan;
     // A scan is read once: the next one starts in an empty field.
     setScan("");
+    await readScan(text);
+  };
+
+  const readScan = async (text: string) => {
     setNotice(null);
     const deviceName = checkedName();
     const payload = parsePairingPayload(text);
@@ -246,6 +282,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
 
   const nameField = (
     <Input
+      size="floor"
       label={t("shell.networkPairing.name")}
       hint={t("shell.networkPairing.nameHint")}
       value={name}
@@ -268,6 +305,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
           <p className="standalone-fingerprint">{formatFingerprint(confirmation.fingerprint)}</p>
           <div className="standalone-form__actions">
             <Button
+              size="floor"
               variant="secondary"
               disabled={busy}
               onClick={() => {
@@ -277,7 +315,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
             >
               {t("shell.networkPairing.fingerprintDiffers")}
             </Button>
-            <Button loading={busy} onClick={() => void confirm(confirmation)}>
+            <Button size="floor" loading={busy} onClick={() => void confirm(confirmation)}>
               {t("shell.networkPairing.fingerprintMatches")}
             </Button>
           </div>
@@ -294,6 +332,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
         >
           {nameField}
           <Input
+            size="floor"
             label={t("shell.networkPairing.address")}
             hint={t("shell.networkPairing.addressHint")}
             value={address}
@@ -301,6 +340,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
             {...errorProp(addressInvalid ? t("shell.networkPairing.addressInvalid") : undefined)}
           />
           <Input
+            size="floor"
             label={t("shell.networkPairing.code")}
             hint={t("shell.networkPairing.codeHint")}
             mono
@@ -310,6 +350,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
           />
           <div className="standalone-form__actions">
             <Button
+              size="floor"
               variant="secondary"
               disabled={busy}
               onClick={() => {
@@ -319,7 +360,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
             >
               {t("shell.networkPairing.scanInstead")}
             </Button>
-            <Button type="submit" loading={busy}>
+            <Button size="floor" type="submit" loading={busy}>
               {t("shell.networkPairing.next")}
             </Button>
           </div>
@@ -339,6 +380,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
             renders instead, to move focus back after a notice (item D). */}
         <div ref={scanFieldHostRef}>
           <Input
+            size="floor"
             label={t("shell.networkPairing.scan")}
             hint={t("shell.networkPairing.scanHint")}
             value={scan}
@@ -349,6 +391,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
         </div>
         <div className="standalone-form__actions">
           <Button
+            size="floor"
             variant="secondary"
             disabled={busy}
             onClick={() => {
@@ -358,7 +401,12 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
           >
             {t("shell.networkPairing.manual")}
           </Button>
-          <Button type="submit" loading={busy}>
+          {onScannerSetup && (
+            <Button size="floor" variant="secondary" disabled={busy} onClick={onScannerSetup}>
+              {t("shell.networkPairing.scannerSetup")}
+            </Button>
+          )}
+          <Button size="floor" type="submit" loading={busy}>
             {t("shell.networkPairing.pair")}
           </Button>
         </div>
@@ -373,7 +421,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
         {notice && <Alert tone="error">{t(notice.key, notice.values ?? {})}</Alert>}
         {body()}
         <div className="standalone-form__actions">
-          <Button variant="secondary" disabled={busy} onClick={onBack}>
+          <Button size="floor" variant="secondary" disabled={busy} onClick={onBack}>
             {t("shell.networkPairing.back")}
           </Button>
         </div>

@@ -17,6 +17,7 @@ import type {
   ScannerSnapshot,
   UsbPrinter,
 } from "../../hardware/hardware.js";
+import { checkScan, type ScanCheck } from "../../app/scan-check.js";
 import { paintMonoRaster } from "../../labels/sheet-render.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
@@ -83,6 +84,13 @@ export interface WorkstationSetupProps {
    * floor opens the setup mostly for a printer.
    */
   initialTab?: SetupTabId;
+  /**
+   * `scanners` — the scanner settings a station opens before its pairing
+   * (owner feedback, first Windows test): the COM scanners and a check of what
+   * a scan read, under «Настройки сканера»; printers, sound and the label
+   * check stay as stored. `all` (the default) — the whole workstation setup.
+   */
+  scope?: "all" | "scanners";
 }
 
 /**
@@ -148,8 +156,12 @@ export function WorkstationSetup({
   onSaved,
   onBack,
   initialTab = "printer",
+  scope = "all",
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
+  const scannersOnly = scope === "scanners";
+  // What the last scan read, for the scanner check (scanners only).
+  const [scanCheck, setScanCheck] = useState<ScanCheck | null>(null);
   const [activeTab, setActiveTab] = useState<SetupTabId>(initialTab);
   const [stored, setStored] = useState<WorkstationSettings | null>(null);
   const [draft, setDraft] = useState<WorkstationSettings | null>(null);
@@ -228,11 +240,13 @@ export function WorkstationSetup({
   // form — takes the focus when the screen opens and when the form opens or
   // closes: a keyboard starts at the section, not on the page behind it.
   const sectionHeading = useRef<HTMLHeadingElement>(null);
+  const scannersHeading = useRef<HTMLHeadingElement>(null);
   const loaded = draft !== null && stored !== null;
   const editing = editor !== null;
   useEffect(() => {
-    if (loaded) sectionHeading.current?.focus();
-  }, [loaded, editing]);
+    if (!loaded) return;
+    (scannersOnly ? scannersHeading : sectionHeading).current?.focus();
+  }, [loaded, editing, scannersOnly]);
 
   // The test print as the scanner's listener reads it: kept as it is set, so
   // a scan right after the label went is checked against it, never missed.
@@ -249,6 +263,8 @@ export function WorkstationSetup({
   useEffect(
     () =>
       source.start((raw) => {
+        // The scanner check says what any scan read, never its text.
+        if (scannersOnly) setScanCheck(checkScan(raw));
         const now = testRef.current;
         // The check stays open after a wrong scan, until the right code comes.
         if (now?.kind !== "sent" && now?.kind !== "mismatch") return;
@@ -261,7 +277,7 @@ export function WorkstationSetup({
             : { kind: "mismatch", name: now.name, code: now.code, sheet: now.sheet },
         );
       }),
-    [source, setTest],
+    [source, setTest, scannersOnly],
   );
 
   // The keys typed into a text field are the field's, not a scan: the scan
@@ -337,8 +353,6 @@ export function WorkstationSetup({
     );
   };
 
-  const scannersHeading = useRef<HTMLHeadingElement>(null);
-
   const change = (next: WorkstationSettings) => {
     setDraft(next);
     setStatus(null);
@@ -348,7 +362,9 @@ export function WorkstationSetup({
     return (
       <section className="workstation-setup" aria-labelledby="workstation-setup-title">
         <header className="workstation-setup__header">
-          <h2 id="workstation-setup-title">{t("floor.setup.title")}</h2>
+          <h2 id="workstation-setup-title">
+            {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+          </h2>
         </header>
         <div className="workstation-setup__loading" aria-live="polite">
           {readFailed ? (
@@ -971,8 +987,29 @@ export function WorkstationSetup({
       </div>
     );
 
+  const scanCheckTone = (check: ScanCheck) =>
+    check.kind === "unreadable" ? "warn" : check.kind === "pairing" ? "ok" : "info";
+  const scanCheckText = (check: ScanCheck): string => {
+    if (check.kind === "unreadable") return t("floor.setup.scannerScope.unreadable");
+    const parts =
+      check.kind === "pairing"
+        ? [
+            check.addresses.length === 0
+              ? t("floor.setup.scannerScope.pairingNoAddress")
+              : t("floor.setup.scannerScope.pairing", { addresses: check.addresses.join(", ") }),
+          ]
+        : [
+            t("floor.setup.scannerScope.other", { length: check.length }),
+            ...(check.groupSeparator ? [t("floor.setup.scannerScope.groupSeparator")] : []),
+          ];
+    if (check.russianLayout) parts.push(t("floor.setup.scannerScope.russianLayout"));
+    return parts.join(" ");
+  };
+
   const scannerPanel = (
-    <div className="setup-split setup-split--scanners">
+    <div
+      className={`setup-split setup-split--scanners${scannersOnly ? " setup-split--scanners-check" : ""}`}
+    >
       <section
         className="setup-card setup-card--scanner-config"
         aria-labelledby="setup-scanner-add"
@@ -1084,6 +1121,25 @@ export function WorkstationSetup({
         )}
         <p className="setup-card__hint">{t("floor.setup.scanners.keyboard")}</p>
       </section>
+      {scannersOnly && (
+        <section
+          className="setup-card setup-card--check"
+          aria-labelledby="setup-scan-check"
+          data-testid="scanner-check"
+        >
+          <h2 id="setup-scan-check" className="setup-card__title">
+            {t("floor.setup.scannerScope.checkTitle")}
+          </h2>
+          <p className="setup-card__hint">{t("floor.setup.scannerScope.checkBody")}</p>
+          <div className="workstation-setup__live" aria-live="polite">
+            {scanCheck !== null && (
+              <Alert tone={scanCheckTone(scanCheck)} role="presentation">
+                {scanCheckText(scanCheck)}
+              </Alert>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 
@@ -1151,30 +1207,38 @@ export function WorkstationSetup({
     { id: "printer" as const, label: t("floor.setup.tabs.printer"), panel: printersPanel },
     { id: "sound" as const, label: t("floor.setup.tabs.sound"), panel: soundPanel },
   ];
-  const routing = activeTab === "printer" && editor === null;
+  // Before its pairing a station sets its scanners only: no tabs, the scanner panel alone.
+  const shownTab: SetupTabId = scannersOnly ? "scanner" : activeTab;
+  const routing = shownTab === "printer" && editor === null;
   const showTest = routing && test !== null;
   const hint =
-    activeTab === "printer"
+    shownTab === "printer"
       ? editor !== null
         ? t("floor.setup.hint.editor")
         : t("floor.setup.check.later")
-      : activeTab === "scanner"
+      : shownTab === "scanner"
         ? t("floor.setup.hint.scanner")
         : t("floor.setup.hint.sound");
 
   return (
     <section className="workstation-setup" aria-labelledby="workstation-setup-title">
       <header className="workstation-setup__header">
-        <h2 id="workstation-setup-title">{t("floor.setup.title")}</h2>
+        <h2 id="workstation-setup-title">
+          {t(scannersOnly ? "floor.setup.scannerScope.title" : "floor.setup.title")}
+        </h2>
       </header>
 
-      <SetupTabs
-        tabs={tabs}
-        label={t("floor.setup.tabs.label")}
-        activeTab={activeTab}
-        locked={editor !== null}
-        onTabChange={setActiveTab}
-      />
+      {scannersOnly ? (
+        <div className="workstation-setup__single">{scannerPanel}</div>
+      ) : (
+        <SetupTabs
+          tabs={tabs}
+          label={t("floor.setup.tabs.label")}
+          activeTab={activeTab}
+          locked={editor !== null}
+          onTabChange={setActiveTab}
+        />
+      )}
 
       <div
         className={`workstation-setup__feedback${routing ? " workstation-setup__feedback--printers" : ""}`}

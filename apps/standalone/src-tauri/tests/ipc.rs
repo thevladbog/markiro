@@ -15,7 +15,7 @@ use markiro_proto::DeviceKind;
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
-use markiro_standalone_lib::installation::InstallRole;
+use markiro_standalone_lib::installation::{InstallRole, InstallationFile};
 use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
@@ -24,6 +24,7 @@ use markiro_standalone_lib::office_files::OfficeFilesState;
 use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
 use markiro_standalone_lib::secret_store;
+use markiro_standalone_lib::window_policy::KioskPolicyState;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -1271,14 +1272,22 @@ fn the_app_manages_every_state_its_commands_read() {
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
-    let link =
-        markiro_standalone_lib::manage_state(app.handle(), dir.path(), Some(InstallRole::Station));
+    let link = markiro_standalone_lib::manage_state(
+        app.handle(),
+        dir.path(),
+        Some(InstallationFile {
+            role: InstallRole::Station,
+            kiosk: true,
+        }),
+        ["markiro-standalone.exe"],
+    );
 
     assert!(app.try_state::<DeviceState>().is_some());
     assert!(app.try_state::<LocalDbState>().is_some());
     assert!(app.try_state::<ConnectionState>().is_some());
     assert!(app.try_state::<ScannerManager>().is_some());
     assert!(app.try_state::<LockdownState>().is_some());
+    assert!(app.try_state::<KioskPolicyState>().is_some());
     assert!(app.try_state::<SystemAwakeState>().is_some());
     assert!(app.try_state::<OfficeFilesState>().is_some());
     // An unpaired app has no link yet; the receiver is the device's own.
