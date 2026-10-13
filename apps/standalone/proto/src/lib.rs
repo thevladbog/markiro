@@ -136,6 +136,10 @@ pub mod receipt_codes {
     /// The pallet is not in the state the record needs (a label check or an
     /// exception of an open pallet, an exception of one taken apart).
     pub const PALLET_STATE: &str = "pallet_state";
+    /// What the record is about is not on the host: a unit label event (plan
+    /// РЕЖ, part B) of a code this station has no accepted scan of in this
+    /// shift.
+    pub const SUBJECT_UNKNOWN: &str = "subject_unknown";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -154,6 +158,7 @@ pub mod receipt_codes {
         PALLET_UNKNOWN,
         PALLET_ALREADY_CLOSED,
         PALLET_STATE,
+        SUBJECT_UNKNOWN,
     ];
 }
 
@@ -2410,6 +2415,27 @@ impl UnitLabelEvent {
             UnitLabelEvent::VerificationSkipped => "verification_skipped",
         }
     }
+
+    /// The error codes an event of this kind carries, one of them exactly
+    /// (`UNIT_LABEL_ERROR_CODES` in `protocol.ts`, the `CHECK` of
+    /// `unit_label_events` in the host's `0021`): the domain's `errorCode` of
+    /// `failed_before_send` and `delivery_unknown`, its rejection `reason` of
+    /// `verification_rejected`; none for every other event, which carries
+    /// none. `proto/fixtures/unit-label-rules.json` pins the lists.
+    pub fn error_codes(self) -> &'static [&'static str] {
+        match self {
+            UnitLabelEvent::FailedBeforeSend => &["printer_unconfigured", "printer_changed"],
+            UnitLabelEvent::DeliveryUnknown => {
+                &["transport_failed", "persistence_failed", "interrupted"]
+            }
+            UnitLabelEvent::VerificationRejected => &["invalid", "mismatch"],
+            UnitLabelEvent::Prepared
+            | UnitLabelEvent::Sending
+            | UnitLabelEvent::Sent
+            | UnitLabelEvent::Verified
+            | UnitLabelEvent::VerificationSkipped => &[],
+        }
+    }
 }
 
 impl std::str::FromStr for UnitLabelEvent {
@@ -2474,6 +2500,55 @@ pub struct UnitLabelFact {
     pub payload_digest: String,
     pub bytes_digest: String,
     pub at: String,
+}
+
+/// Whether `text` is a SHA-256 as the domain writes it: 64 lower-case hex
+/// digits.
+fn is_sha256_hex(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+impl UnitLabelFact {
+    /// The rules of the event that serde does not hold, as the webview's
+    /// `unitLabelFactSchema` and the `CHECK`s of the host's
+    /// `unit_label_events` hold them: `codeHash`, `payloadDigest` and
+    /// `bytesDigest` are 64 lower-case hex digits, `attemptNo` is 1 or more,
+    /// `reason` is set exactly on the `prepared` event of a later attempt,
+    /// and `errorCode` exactly on the events that have one, from that
+    /// event's list ([`UnitLabelEvent::error_codes`]; a code a newer station
+    /// adds is refused). The error is the broken field's name in `data`.
+    /// `jobId` (a client UUID) and `at` (a device instant) are the host's own
+    /// rules. `proto/fixtures/unit-label-rules.json` pins every case.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if !is_sha256_hex(&self.code_hash) {
+            return Err("codeHash");
+        }
+        if self.attempt_no < 1 {
+            return Err("attemptNo");
+        }
+        let reprint = self.event == UnitLabelEvent::Prepared && self.attempt_no > 1;
+        if self.reason.is_some() != reprint {
+            return Err("reason");
+        }
+        let codes = self.event.error_codes();
+        let fits = match &self.error_code {
+            None => codes.is_empty(),
+            Some(code) => codes.contains(&code.as_str()),
+        };
+        if !fits {
+            return Err("errorCode");
+        }
+        if !is_sha256_hex(&self.payload_digest) {
+            return Err("payloadDigest");
+        }
+        if !is_sha256_hex(&self.bytes_digest) {
+            return Err("bytesDigest");
+        }
+        Ok(())
+    }
 }
 
 /// `data` of a `shift_closed` fact: a station closed its shift. The numbers

@@ -3409,5 +3409,51 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
     expect(read({ ...sent, codeHash: "3F6C" })).toBe(false);
     expect(read({ ...sent, bytesDigest: "x".repeat(64) })).toBe(false);
     expect(read({ ...sent, code: "0104600682000013215Yq'Ct;\u001d93dGVz" })).toBe(false);
+    // The printed text's digest has the shape of the others (B1 review).
+    expect(read({ ...sent, payloadDigest: "8C1F" })).toBe(false);
+    expect(read({ ...sent, payloadDigest: "8c1f".repeat(16).slice(1) })).toBe(false);
+  });
+
+  it("keeps the unit label rules of the shared fixture, as the host does", () => {
+    const rules = fixture("unit-label-rules.json") as {
+      events: string[];
+      errorCodes: Record<string, string[]>;
+      reasons: string[];
+      base: Row;
+      cases: { change: Row; field: string | null }[];
+    };
+    expect(rules.events).toStrictEqual([...UNIT_LABEL_EVENTS]);
+    expect(rules.reasons).toStrictEqual([...REPRINT_REASONS]);
+    const codes: Readonly<Record<string, readonly string[]>> = UNIT_LABEL_ERROR_CODES;
+    expect(Object.keys(rules.errorCodes)).toStrictEqual([...UNIT_LABEL_EVENTS]);
+    for (const event of UNIT_LABEL_EVENTS) {
+      expect(rules.errorCodes[event], event).toStrictEqual([...(codes[event] ?? [])]);
+    }
+    for (const { change, field } of rules.cases) {
+      const answer = unitLabelFactSchema.safeParse({ ...rules.base, ...change });
+      const paths = answer.success ? [] : answer.error.issues.map((issue) => issue.path);
+      expect(paths, JSON.stringify(change)).toStrictEqual(field === null ? [] : [[field]]);
+    }
+  });
+
+  it("enters no aggregation shift that prints (B1 review)", () => {
+    const shift = { ...entered, mode: "aggregation" };
+    const answer = enteredShiftSchema.safeParse(shift);
+    expect(answer.success).toBe(false);
+    expect(answer.error?.issues.map((issue) => issue.path)).toStrictEqual([["validationPrint"]]);
+  });
+
+  it("reads a policy with a field a newer host adds (B1 review)", () => {
+    const office = fixture("office-shift-validation-print.json") as Row;
+    const newer = {
+      ...office,
+      validationPrint: { ...printing, policyRevision: 3 },
+    };
+    expect(officeShiftSchema.safeParse(newer).success).toBe(true);
+    const listed: Row = { ...entered, validationPrint: { mode: "none", note: "x" } };
+    delete listed["snapshot"];
+    expect(deviceShiftSchema.safeParse(listed).success).toBe(true);
+    // A request takes exactly the policy's own fields.
+    expect(validationPrintSchema.safeParse({ ...printing, policyRevision: 3 }).success).toBe(false);
   });
 });

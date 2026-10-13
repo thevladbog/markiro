@@ -1166,6 +1166,7 @@ export const FACT_RECEIPT_CODES = [
   "pallet_unknown",
   "pallet_already_closed",
   "pallet_state",
+  "subject_unknown",
 ] as const;
 
 /**

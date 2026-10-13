@@ -294,3 +294,65 @@ fn a_unit_label_fact_refuses_what_it_does_not_know() {
     attempt["attemptNo"] = json!(-1);
     assert!(read(attempt).is_err());
 }
+
+/// The rules of a unit label event that every record must keep and the host
+/// checks before it writes one (`UnitLabelFact::check`), from the fixture the
+/// webview's `unitLabelFactSchema` is held to as well
+/// (`proto/fixtures/unit-label-rules.json`): the events and each one's error
+/// codes, the reprint reasons, and each case's refused field.
+#[test]
+fn a_unit_label_fact_keeps_the_rules_of_the_shared_fixture() {
+    let rules = fixture("unit-label-rules.json");
+    let events: Vec<&str> = rules["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event.as_str().unwrap())
+        .collect();
+    let all = [
+        UnitLabelEvent::Prepared,
+        UnitLabelEvent::Sending,
+        UnitLabelEvent::Sent,
+        UnitLabelEvent::FailedBeforeSend,
+        UnitLabelEvent::DeliveryUnknown,
+        UnitLabelEvent::Verified,
+        UnitLabelEvent::VerificationRejected,
+        UnitLabelEvent::VerificationSkipped,
+    ];
+    assert_eq!(
+        events,
+        all.iter().map(|event| event.as_str()).collect::<Vec<_>>()
+    );
+    for event in all {
+        assert_eq!(
+            json!(event.error_codes()),
+            rules["errorCodes"][event.as_str()],
+            "{}",
+            event.as_str()
+        );
+    }
+    assert_eq!(
+        rules["reasons"],
+        json!([
+            ReprintReason::NotPrinted.as_str(),
+            ReprintReason::Damaged.as_str(),
+            ReprintReason::Lost.as_str()
+        ])
+    );
+    let cases = rules["cases"].as_array().unwrap();
+    assert!(cases.len() > 20, "{}", cases.len());
+    for case in cases {
+        let mut data = rules["base"].clone();
+        for (key, value) in case["change"].as_object().unwrap() {
+            data[key] = value.clone();
+        }
+        let fact: UnitLabelFact = serde_json::from_value(data.clone())
+            .unwrap_or_else(|error| panic!("{}: {error}", case["change"]));
+        assert_eq!(
+            fact.check().err(),
+            case["field"].as_str(),
+            "{}",
+            case["change"]
+        );
+    }
+}
