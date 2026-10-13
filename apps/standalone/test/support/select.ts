@@ -1,4 +1,11 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+  type waitForOptions,
+} from "@testing-library/react";
 
 /**
  * Helpers for `@markiro/ui`'s `Select`, the office's only dropdown: a Radix
@@ -124,4 +131,19 @@ export async function settleSelect(): Promise<void> {
   await act(async () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
+}
+
+/**
+ * `waitFor` for a check that opens a list (`optionTexts`, `chooseValue`…).
+ * Opening and closing a list changes the page, and `waitFor` runs its check
+ * again on every change it observes: a check that fails wakes itself in a loop
+ * of microtasks that no timer breaks — not the query that would make it pass,
+ * nor the test's timeout — and the test file hangs for good. This one watches
+ * an empty, detached element instead of the page, so it only polls.
+ */
+export function waitForList<T>(
+  check: () => T | Promise<T>,
+  options: Omit<waitForOptions, "container"> = {},
+): Promise<T> {
+  return waitFor(check, { ...options, container: document.createElement("div") });
 }

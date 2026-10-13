@@ -25,6 +25,7 @@ import {
   optionTexts,
   settleSelect,
   valueOf,
+  waitForList,
 } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
@@ -911,7 +912,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     choose("Шаблон короба", BOX_100.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await screen.findByText(UNFIT);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(choices("Шаблон короба")).toEqual([
         "Не выбран",
         "Коробка 58×40",
@@ -1315,7 +1316,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     choose(MILK_ROW, BOX_100.id);
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     const message = await screen.findByText(UNFIT);
-    await waitFor(() =>
+    await waitForList(() =>
       expect(choices(MILK_ROW)).toEqual([
         "Коробка 58×40",
         "Молоко 58×40",

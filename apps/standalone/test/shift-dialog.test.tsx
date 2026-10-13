@@ -31,6 +31,7 @@ import {
   settleSelect,
   shownOn,
   valueOn,
+  waitForList,
 } from "./support/select.js";
 
 const TOKEN = "office-session-token";
@@ -185,7 +186,7 @@ describe("office shifts: planning a shift", () => {
     await openShifts(session);
     fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
     await screen.findByRole("dialog", { name: "Новая смена" });
-    await waitFor(() => expect(options("Товар")).toHaveLength(2));
+    await waitForList(() => expect(options("Товар")).toHaveLength(2));
     expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
     act(() => answer(DEFAULTS));
     await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
@@ -355,7 +356,7 @@ describe("office shifts: planning a shift", () => {
         "Шаблон паллеты выключен или больше не подходит товару. Выберите другой.",
       ),
     );
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150 — не подходит"]),
     );
   });
@@ -514,7 +515,7 @@ describe("office shifts: planning a shift", () => {
         "Шаблон выключен или больше не подходит товару. Выберите другой.",
       ),
     );
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Шаблон этикетки короба")).toEqual([
         "Коробка 58×40",
         "Молоко 100×72 — не подходит",
@@ -960,7 +961,7 @@ describe("office shifts: planning a shift", () => {
       await waitFor(() => expect(session.api[list]).toHaveBeenCalledTimes(before + 1));
       // The refused record is no longer offered as a normal choice, but the form still holds it,
       // so the select shows it - marked - rather than another record or «Не выбран».
-      await waitFor(() => expect(options(label)).toContain(marked));
+      await waitForList(() => expect(options(label)).toContain(marked));
       expect(options(label).filter((text) => text.startsWith(name))).toEqual([marked]);
       const control = field(label);
       expect(valueOn(control)).toBe(id);
@@ -982,7 +983,9 @@ describe("office shifts: planning a shift", () => {
     await waitFor(() =>
       expect(messageOf("Контрагент")).toBe("Контрагент в архиве. Выберите другого."),
     );
-    await waitFor(() => expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"));
+    await waitForList(() =>
+      expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"),
+    );
     await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
     submit();
     await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(2));
@@ -1051,7 +1054,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+    await waitForList(() => expect(options("Лист А4")[0]).toBe(MAIN));
   }
 
   it("has no sheet field without pallets, reads the sheets only when they are on, and offers the main sheet first", async () => {
@@ -1062,7 +1065,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     fillMilk();
     expect(session.api.listPalletSheets).not.toHaveBeenCalled();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+    await waitForList(() => expect(options("Лист А4")[0]).toBe(MAIN));
     expect(options("Лист А4")).toEqual([
       MAIN,
       "Палета А4 · вертикальная",
@@ -1131,7 +1134,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Лист А4")).toEqual([
         "По умолчанию для товара (Палета А4 · две одинаковые А5)",
         "Палета А4 · вертикальная",
@@ -1183,7 +1186,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(document.activeElement).toBe(field("Лист А4")));
     // The sheet the person chose stays visible, marked, so the select does not show another.
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
     );
     // The sheet does not depend on the product: a new product leaves the refusal where it is.
@@ -1217,7 +1220,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")).toHaveLength(3));
+    await waitForList(() => expect(options("Лист А4")).toHaveLength(3));
     expect(options("Лист А4").slice(1)).toEqual([
       `${PORTRAIT.name} · ${PORTRAIT.id.slice(0, 8)}`,
       `${PORTRAIT.name} · ${LANDSCAPE.id.slice(0, 8)}`,
