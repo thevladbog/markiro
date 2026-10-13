@@ -69,7 +69,8 @@ journal owns the transaction and validates returned address/key/body/digest.
 Expose `UsDatasetPlanSeedStore(db, artifacts).initialize(context)` and
 `.verify(context)`, returning a bounded deeply frozen result with dataset identity,
 state `plan_verified`, `datasetComplete:false`, exact Plan identity, approved
-evidence digest and immutable artifact descriptor.
+evidence digest, public immutable artifact fields and canonical full native
+descriptor digest. The private object key is never persisted in journal JSON.
 
 - [ ] Read current owned references through the real reference verifier. Define
       a bounded separately versioned `us-six-month-plan-v1` English synthetic
@@ -90,7 +91,10 @@ evidence digest and immutable artifact descriptor.
       synthetic confirmations; no provider I/O inside journal transactions.
 - [ ] Validate live effective published Plan/evidence/ownership and actual bytes
       with `readVerified`, then record the exact completed receipt. No public
-      audited download calls or historical re-rendering in verification.
+      audited download calls or historical re-rendering in verification. Preserve
+      the journal's existing object-key ban: persist public artifact fields plus
+      complete native descriptor digest, retain raw private key only in the
+      guarded live read, and reject same-content object-identity replacement.
 - [ ] Actual native/provider-boundary tests: stable synthetic PDF/audit; SQL
       interruption before/after preparation and after publication before receipt;
       original-key resume preserving IDs/time/bytes; unowned and tenant/role/owner

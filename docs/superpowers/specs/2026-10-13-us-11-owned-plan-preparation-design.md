@@ -100,8 +100,15 @@ the existing adapter's authority. Do not call the public audited download comman
 from read-only verification, since that writes an audit row. Do not re-render
 historical PDF bytes or recalculate approval time/current configuration as facts.
 
-Store one bounded frozen result and final receipt for the exact Plan identity,
-approved-evidence digest and artifact descriptor; `datasetComplete` remains false.
+The existing journal's secret-key walker forbids `objectKey`; preserve that
+policy. Persist the public artifact fields (SHA-256, length, MIME and renderer)
+plus the canonical digest of the complete native artifact descriptor, including
+its private object identity. Obtain the raw object key only from the guarded
+live Plan read and pass it to `readVerified` outside the transaction; never store
+or rename the private key into journal evidence. Compare the full descriptor
+digest as well as the public fields so same-content object replacement also
+conflicts. Store one bounded frozen result and final receipt for this exact Plan
+identity/evidence/artifact binding; `datasetComplete` remains false.
 Completed initialize and verify recheck actual published state and stored bytes,
 compare the exact receipt and make no business, journal, audit or provider writes.
 Verify refuses a missing or pending stage and never finishes approval implicitly.
