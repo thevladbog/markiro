@@ -7,7 +7,12 @@
 //! - [`package`] finds `*.update.jws` in `Документы\Markiro\Обновления` and on
 //!   removable drives, and reads an installer through a handle that lets
 //!   nobody write, rename or delete it while the app holds it;
-//! - [`rules`] decides what the version rules of spec §10.7–§10.8 allow.
+//! - [`rules`] decides what the version rules of spec §10.7–§10.8 allow;
+//! - [`launch`] starts the installer with Windows' administrator prompt
+//!   (`ShellExecuteExW`, verb `runas`; a fake in tests);
+//! - [`pending`] keeps `update-pending.json`, the outcome the next start reads.
 
+pub mod launch;
 pub mod package;
+pub mod pending;
 pub mod rules;
