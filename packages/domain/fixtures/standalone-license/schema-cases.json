@@ -551,6 +551,24 @@
         "set": {
           "customer.name": "ООО «Тест»"
         }
+      },
+      {
+        "name": "the plan as an object (serde would read an enum from it)",
+        "valid": false,
+        "set": {
+          "plan": {
+            "demo": null
+          }
+        }
+      },
+      {
+        "name": "the plan as an object with a list",
+        "valid": false,
+        "set": {
+          "plan": {
+            "subscription": []
+          }
+        }
       }
     ]
   },
@@ -889,6 +907,15 @@
         "valid": false,
         "set": {
           "notes": ["Обновление"]
+        }
+      },
+      {
+        "name": "the channel as an object (serde would read an enum from it)",
+        "valid": false,
+        "set": {
+          "channel": {
+            "stable": null
+          }
         }
       }
     ]

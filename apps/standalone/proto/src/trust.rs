@@ -189,18 +189,20 @@ fn is_origin(text: &str) -> bool {
         Some((host, port)) => (host, Some(port)),
         None => (authority, None),
     };
-    !host.is_empty()
-        && !host.starts_with(['.', '-'])
-        && !host.ends_with(['.', '-'])
-        && host.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
-        })
-        && port.map_or(true, |port| {
-            (1..=5).contains(&port.len())
-                && port.bytes().all(|byte| byte.is_ascii_digit())
-                && !port.starts_with('0')
-                && port.parse::<u16>().is_ok()
-        })
+    // Every DNS label non-empty, of lower-case letters, digits and inner hyphens.
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    }) && port.map_or(true, |port| {
+        (1..=5).contains(&port.len())
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && !port.starts_with('0')
+            && port.parse::<u16>().is_ok()
+    })
 }
 
 fn keyset(file: KeysetFile, name: &str) -> Result<Keyset, String> {
@@ -543,11 +545,25 @@ pub struct LicenseCustomer {
     pub inn: String,
 }
 
+/// Read from a JSON string only: serde alone would also take an enum from a
+/// one-key object (`{"demo": null}`), which the domain's `z.enum` refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", try_from = "String")]
 pub enum LicensePlan {
     Demo,
     Subscription,
+}
+
+impl TryFrom<String> for LicensePlan {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "demo" => Ok(Self::Demo),
+            "subscription" => Ok(Self::Subscription),
+            _ => Err("not a license plan"),
+        }
+    }
 }
 
 /// The cloud's quotas; `None` is no limit.
@@ -639,11 +655,24 @@ pub struct UpdateManifestV1 {
     pub notes: Vec<String>,
 }
 
+/// Read from a JSON string only, as `LicensePlan`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", try_from = "String")]
 pub enum UpdateChannel {
     Beta,
     Stable,
+}
+
+impl TryFrom<String> for UpdateChannel {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "beta" => Ok(Self::Beta),
+            "stable" => Ok(Self::Stable),
+            _ => Err("not an update channel"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -365,6 +365,10 @@ fn a_keyset_document_takes_public_p256_keys_alone() {
             "https://license.invalid:65536",
             "https://license.invalid:",
             "https://.invalid",
+            "https://license..invalid",
+            "https://license.-invalid",
+            "https://license-.invalid",
+            "https://license.invalid.",
         ]
         .map(|origin| {
             (
