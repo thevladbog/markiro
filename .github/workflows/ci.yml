@@ -776,6 +776,17 @@ jobs:
         run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace --no-fail-fast
       - name: Build the host for the installer
         run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host
+      # The release host trusts the production keys alone (spec 2026-10-13
+      # §5.2, plan ЛЦ-1): a test key (`test-…`) never reaches an installer.
+      - name: The release host trusts no test key
+        shell: bash
+        run: |
+          kids="$(apps/standalone/target/release/markiro-host.exe trust-keys)"
+          printf '%s\n' "$kids"
+          if printf '%s\n' "$kids" | grep -q '^test-'; then
+            echo "the release host trusts a test key" >&2
+            exit 1
+          fi
       # Tauri bundles `bundle.externalBin` from src-tauri/binaries under the
       # target triple; tauri.installer.conf.json names it.
       - name: Put the host beside the app as its sidecar
