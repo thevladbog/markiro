@@ -1,23 +1,36 @@
 //! The license's routes (plan ЛЦ-2, spec §8.2) and the wire shapes they
 //! answer with (`markiro_proto::license`).
 
-use axum::extract::State;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, State};
+use axum::http::StatusCode;
 use axum::Json;
+use markiro_proto::codes;
 use markiro_proto::license::{
-    LicenseBinding, LicenseCustomer, LicenseEmergency, LicenseFeatures, LicenseFlags,
-    LicenseQuotas, LicenseSummary, OfficeLicense, QuotaUse, TrialInfo,
+    plans, LicenseBinding, LicenseCustomer, LicenseEmergency, LicenseFeatures, LicenseFlags,
+    LicenseLoadRequest, LicensePreview, LicenseQuotas, LicenseSummary, LicenseTerms, OfficeLicense,
+    QuotaUse, TrialInfo,
 };
 use markiro_proto::trust::{
     ActivationLicense, ActivationOrganization, ActivationRequest, ActivationTrial, ActivationUsage,
     ACTIVATION_REQUEST_FORMAT,
 };
+use serde_json::{json, Value};
 
 use super::seats::{self, Usage};
-use super::state::{Features, Quotas, StoredLicense};
-use super::{ms_text, Snapshot};
+use super::state::{Evaluation, Features, Quotas, StoredLicense};
+use super::verify::{self, Admission, Refusal};
+use super::{clock, ms_text, store, Snapshot};
+use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::error::ApiError;
+use crate::db::{begin_write, commit_with_revision, next_revision};
+use crate::error::{ApiError, ApiJson};
 use crate::server::AppState;
+
+/// The body limit of a preview and a load: a file is at most 16 KiB, and its
+/// JSON envelope a little more.
+pub const MAX_BODY_BYTES: usize = 32 * 1024;
 
 fn quota_use(limit: Option<u64>, used: u64) -> QuotaUse {
     QuotaUse {
@@ -162,4 +175,315 @@ pub async fn activation_request(
         },
         created_at: app.timestamp(),
     }))
+}
+
+/// One column of «было → станет» for a file.
+fn terms_of_file(license: &StoredLicense, usage: &Usage) -> LicenseTerms {
+    LicenseTerms {
+        license_id: Some(license.license_id.clone()),
+        sequence: u64::try_from(license.sequence).ok(),
+        plan: license.plan.clone(),
+        valid_from: Some(ms_text(license.valid_from)),
+        valid_until: Some(ms_text(license.valid_until)),
+        grace_days: u32::try_from(license.grace_days).unwrap_or(0),
+        quotas: quotas_wire(&license.quotas, usage),
+        features: features_wire(&license.features),
+    }
+}
+
+/// The column of what is in force now: the file, or the built-in trial.
+fn terms_now(evaluation: &Evaluation, usage: &Usage) -> LicenseTerms {
+    match &evaluation.license {
+        Some(license) => terms_of_file(license, usage),
+        None => LicenseTerms {
+            license_id: None,
+            sequence: None,
+            plan: plans::TRIAL.to_owned(),
+            valid_from: evaluation.trial.map(|trial| ms_text(trial.started_at)),
+            valid_until: evaluation.trial.map(|trial| ms_text(trial.ends_at)),
+            grace_days: 0,
+            quotas: quotas_wire(&Quotas::default(), usage),
+            features: features_wire(&Features::ALL),
+        },
+    }
+}
+
+fn quota_list(quotas: &LicenseQuotas) -> [(&'static str, QuotaUse); 4] {
+    [
+        ("lines", quotas.lines),
+        ("stations", quotas.stations),
+        ("kiosks", quotas.kiosks),
+        ("cabinetUsers", quotas.cabinet_users),
+    ]
+}
+
+fn feature_list(features: &LicenseFeatures) -> [(&'static str, bool); 7] {
+    [
+        ("labelEditor", features.label_editor),
+        ("publicApi", features.public_api),
+        ("pallets", features.pallets),
+        ("chzIntegration", features.chz_integration),
+        ("inventory", features.inventory),
+        ("commerceMl", features.commerce_ml),
+        ("handheld", features.handheld),
+    ]
+}
+
+/// The fields of `after` that differ from `before`, in the preview's order
+/// (plan Д4): `plan`, `validFrom`, `validUntil`, `graceDays`,
+/// `quotas.<key>`, `features.<key>`.
+fn changes(before: &LicenseTerms, after: &LicenseTerms) -> Vec<String> {
+    let mut changes = Vec::new();
+    if before.plan != after.plan {
+        changes.push("plan".to_owned());
+    }
+    if before.valid_from != after.valid_from {
+        changes.push("validFrom".to_owned());
+    }
+    if before.valid_until != after.valid_until {
+        changes.push("validUntil".to_owned());
+    }
+    if before.grace_days != after.grace_days {
+        changes.push("graceDays".to_owned());
+    }
+    for ((key, was), (_, will)) in quota_list(&before.quotas)
+        .into_iter()
+        .zip(quota_list(&after.quotas))
+    {
+        if was.limit != will.limit {
+            changes.push(format!("quotas.{key}"));
+        }
+    }
+    for ((key, was), (_, will)) in feature_list(&before.features)
+        .into_iter()
+        .zip(feature_list(&after.features))
+    {
+        if was != will {
+            changes.push(format!("features.{key}"));
+        }
+    }
+    changes
+}
+
+/// «было → станет» of `license` against what is in force (spec §4.8).
+pub fn preview_of(snapshot: &Snapshot, usage: &Usage, license: &StoredLicense) -> LicensePreview {
+    let before = terms_now(&snapshot.evaluation, usage);
+    let after = terms_of_file(license, usage);
+    LicensePreview {
+        changes: changes(&before, &after),
+        warnings: verify::warnings_for(license, snapshot.reading.effective, usage),
+        before,
+        after,
+    }
+}
+
+/// `validation_failed` on `file` with the refusal's reason and what the
+/// office's text needs (the file's host, both INNs, the newest number).
+fn refused(refusal: &Refusal) -> ApiError {
+    let mut details = json!({ "field": "file", "reason": refusal.reason() });
+    match refusal {
+        Refusal::WrongHost { file_host_id, .. } => details["fileHostId"] = json!(file_host_id),
+        Refusal::InnMismatch {
+            file_inn, org_inn, ..
+        } => {
+            details["fileInn"] = json!(file_inn);
+            details["orgInn"] = json!(org_inn);
+        }
+        Refusal::Older { newest, .. } => details["newestSequence"] = json!(newest),
+        Refusal::Malformed
+        | Refusal::UnknownKey
+        | Refusal::Signature
+        | Refusal::InnMissing { .. } => {}
+    }
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        codes::VALIDATION_FAILED,
+        "the license file was refused",
+    )
+    .with_details(details)
+}
+
+/// `POST /v1/office/license/preview` (administrators): the file checked as
+/// a load checks it, nothing written and no audit row.
+pub async fn preview_license(
+    State(app): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    context: OfficeContext,
+    ApiJson(request): ApiJson<LicenseLoadRequest>,
+) -> Result<Json<LicensePreview>, ApiError> {
+    context.require_admin()?;
+    app.license_limiter.check(peer.ip())?;
+    let read = verify::read(&request.file, app.license.keyset());
+    let mut tx = app.pool.begin().await.map_err(ApiError::internal)?;
+    let snapshot = app
+        .license
+        .snapshot(&app, &mut tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let usage = seats::usage(&mut tx).await.map_err(ApiError::internal)?;
+    tx.rollback().await.map_err(ApiError::internal)?;
+    let verified = read
+        .and_then(|verified| {
+            verify::admit(
+                &verified,
+                &app.host_id,
+                snapshot.org_inn.as_deref(),
+                &snapshot.licenses,
+            )
+            .map(|_| verified)
+        })
+        .map_err(|refusal| refused(&refusal))?;
+    Ok(Json(preview_of(&snapshot, &usage, &verified.license)))
+}
+
+/// `PUT /v1/office/license` (administrators): load a file. Nothing is
+/// written before every check passed; a refused file writes only its
+/// `denied` row (spec §8.3: a foreign or forged file is an event); the same
+/// file again writes nothing. The service log names only the file's id, its
+/// number and a refusal's code: never the file, its signature, the INN or
+/// the customer's name.
+pub async fn load_license(
+    State(app): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    context: OfficeContext,
+    ApiJson(request): ApiJson<LicenseLoadRequest>,
+) -> Result<Json<OfficeLicense>, ApiError> {
+    context.require_admin()?;
+    app.license_limiter.check(peer.ip())?;
+    let read = verify::read(&request.file, app.license.keyset());
+    let at = app.timestamp();
+    let mut tx = begin_write(&app.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let snapshot = app
+        .license
+        .snapshot(&app, &mut tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let admitted = read.and_then(|verified| {
+        verify::admit(
+            &verified,
+            &app.host_id,
+            snapshot.org_inn.as_deref(),
+            &snapshot.licenses,
+        )
+        .map(|admission| (verified, admission))
+    });
+    let (verified, admission) = match admitted {
+        Ok(admitted) => admitted,
+        Err(refusal) => {
+            let mut details = json!({ "reason": refusal.reason() });
+            if let Refusal::WrongHost { file_host_id, .. } = &refusal {
+                details["fileHostId"] = json!(file_host_id);
+            }
+            audit::record(
+                &mut tx,
+                &at,
+                Entry {
+                    actor: context.actor(),
+                    action: actions::LICENSE_LOAD,
+                    target_type: Some("license"),
+                    target_id: refusal.license_id(),
+                    outcome: Outcome::Denied,
+                    details,
+                },
+            )
+            .await
+            .map_err(ApiError::internal)?;
+            tx.commit().await.map_err(ApiError::internal)?;
+            tracing::info!(reason = refusal.reason(), "a license file was refused");
+            return Err(refused(&refusal));
+        }
+    };
+    let usage = seats::usage(&mut tx).await.map_err(ApiError::internal)?;
+    let warnings = verify::warnings_for(&verified.license, snapshot.reading.effective, &usage);
+    if admission == Admission::Same {
+        tx.rollback().await.map_err(ApiError::internal)?;
+        let mut answer = office_license(&app, &snapshot, &usage);
+        answer.warnings = warnings;
+        return Ok(Json(answer));
+    }
+    let license = &verified.license;
+    let previous = snapshot
+        .licenses
+        .iter()
+        .max_by_key(|license| license.sequence);
+    store::insert(
+        &mut tx,
+        license,
+        &verified.compact,
+        &at,
+        Some(&context.user.id),
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    let mut details = json!({
+        "licenseId": license.license_id,
+        "sequence": license.sequence,
+        "previousSequence": previous.map(|previous| previous.sequence),
+        "kid": license.kid,
+        "warnings": warnings,
+    });
+    let changed = audit::update_details(&[
+        (
+            "quotas",
+            previous.map_or(Value::Null, |previous| json!(previous.quotas)),
+            json!(license.quotas),
+        ),
+        (
+            "features",
+            previous.map_or(Value::Null, |previous| json!(previous.features)),
+            json!(license.features),
+        ),
+        (
+            "validUntil",
+            previous.map_or(Value::Null, |previous| json!(ms_text(previous.valid_until))),
+            json!(ms_text(license.valid_until)),
+        ),
+        (
+            "plan",
+            previous.map_or(Value::Null, |previous| json!(previous.plan)),
+            json!(license.plan),
+        ),
+    ])
+    .unwrap_or_else(|| json!({ "changed": [] }));
+    if let (Value::Object(target), Value::Object(source)) = (&mut details, changed) {
+        target.extend(source);
+    }
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::LICENSE_LOAD,
+            target_type: Some("license"),
+            target_id: Some(&license.license_id),
+            outcome: Outcome::Ok,
+            details,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    commit_with_revision(tx, &app.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    // Every stored file, the new one with them, proves the time is not
+    // before its issue less a day (§7).
+    if let Some(floor) = clock::issue_floor(
+        snapshot
+            .licenses
+            .iter()
+            .chain([license])
+            .map(|license| license.issued_at),
+    ) {
+        app.license.raise_floor(&app, floor);
+    }
+    tracing::info!(
+        license_id = %license.license_id,
+        sequence = license.sequence,
+        "a license file was loaded"
+    );
+    let mut answer = app.license.office_license_now(&app).await?;
+    answer.warnings = warnings;
+    Ok(Json(answer))
 }

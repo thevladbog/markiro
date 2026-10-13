@@ -43,6 +43,9 @@ pub struct AppState {
     /// Pairing claims, per address; separate from `login_limiter`, so a
     /// mistyped pairing code never locks the office out on the same computer.
     pub claim_limiter: Arc<crate::rate_limit::RateLimiter>,
+    /// License previews and loads, per address (plan ЛЦ-2, spec §8.3: like
+    /// the sign-in); its refusals write no row.
+    pub license_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
     /// Raised by `commit_with_revision` after each commit that moved the
     /// revision; it starts at 0, so read `db::current_revision` for the
@@ -75,6 +78,11 @@ impl AppState {
                 clock.clone(),
             )),
             claim_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
+                10,
+                time::Duration::minutes(1),
+                clock.clone(),
+            )),
+            license_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
                 10,
                 time::Duration::minutes(1),
                 clock.clone(),
@@ -459,7 +467,17 @@ fn protected_routes() -> Router<AppState> {
         .route("/v1/pairing/claim", post(crate::routes::pairing::claim))
         .route(
             "/v1/office/license",
-            get(crate::license::routes::get_license),
+            get(crate::license::routes::get_license)
+                .put(crate::license::routes::load_license)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::license::routes::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/office/license/preview",
+            post(crate::license::routes::preview_license).layer(
+                axum::extract::DefaultBodyLimit::max(crate::license::routes::MAX_BODY_BYTES),
+            ),
         )
         .route(
             "/v1/office/license/activation-request",

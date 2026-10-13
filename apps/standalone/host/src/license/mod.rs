@@ -9,6 +9,7 @@ pub mod seats;
 pub mod state;
 pub mod store;
 pub mod trial_mark;
+pub mod verify;
 
 use std::sync::{Arc, Mutex};
 
@@ -69,6 +70,15 @@ impl LicenseService {
     /// The license keys this build trusts (`markiro_proto::trust`).
     pub fn keyset(&self) -> &Keyset {
         &self.keyset
+    }
+
+    /// Files just stored prove the time is not before `floor`
+    /// ([`clock::issue_floor`], §7). It never lowers the time.
+    pub fn raise_floor(&self, app: &AppState, floor: i64) {
+        let mono = app.clock.monotonic();
+        if let Some(clock) = self.clock.lock().expect("license clock lock").as_mut() {
+            clock.raise_floor(floor, mono);
+        }
     }
 
     /// The state now, read on `conn` (a writer's transaction or a reader's).

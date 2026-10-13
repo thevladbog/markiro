@@ -149,6 +149,25 @@ pub fn file(host_id: &str, edit: impl FnOnce(&mut Value)) -> String {
     sign(&payload)
 }
 
+/// The payload of a compact file, as JSON.
+pub fn payload_of(file: &str) -> Value {
+    let segment = file.split('.').nth(1).expect("three segments");
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(segment).unwrap()).unwrap()
+}
+
+/// Set the organization's INN in the profile (`null` clears it; the profile
+/// takes any 10 or 12 digits, plan ЛЦ-2 leaves its rule alone).
+pub async fn set_org_inn(admin: &Admin, inn: Value) {
+    let (status, org) = admin.call("GET", "/v1/office/org", None).await;
+    assert_eq!(status, StatusCode::OK, "{org}");
+    let body = json!({
+        "name": org["name"], "inn": inn, "gln": org["gln"],
+        "gs1Prefixes": org["gs1Prefixes"], "timeZone": org["timeZone"], "expectedRev": org["rev"]
+    });
+    let (status, updated) = admin.call("PUT", "/v1/office/org", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+}
+
 /// The host's timestamp text of `ms`.
 pub fn text(ms: i64) -> String {
     markiro_host::license::ms_text(ms)
