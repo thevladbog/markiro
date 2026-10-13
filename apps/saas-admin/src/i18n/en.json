@@ -2019,7 +2019,11 @@
             "planRequired": "Choose a plan.",
             "termDays": "Term, days",
             "termHint": "1 to 365 days from issuance; no unlimited term.",
-            "termInvalid": "A whole number from 1 to 365."
+            "termInvalid": "A whole number from 1 to 365.",
+            "version": "version {{version}}",
+            "catalogError": "Could not load the catalog plans.",
+            "planEmpty": "No published plans.",
+            "planLoading": "Loading plans…"
           },
           "issued": "File No. {{sequence}} issued and downloaded."
         },

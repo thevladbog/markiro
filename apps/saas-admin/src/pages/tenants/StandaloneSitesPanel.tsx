@@ -7,6 +7,8 @@ import type { StandaloneSite } from "@markiro/platform-contracts";
 import { getStandaloneSites } from "./standalone-api.js";
 import { licensePhase, standaloneSitesKey, useStandaloneDate } from "./standalone-format.js";
 import { StandaloneIssuanceHistory } from "./StandaloneIssuanceHistory.js";
+import { StandaloneLicenseIssue } from "./StandaloneLicenseIssue.js";
+import { StandaloneSiteRegistration } from "./StandaloneSiteRegistration.js";
 
 /** «Автоном: площадки и офлайн-лицензии» (spec 2026-10-13 §6.2). */
 export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
@@ -17,6 +19,8 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
     queryFn: () => getStandaloneSites(tenantId),
   });
   const [historyFor, setHistoryFor] = useState<StandaloneSite | null>(null);
+  const [issuingFor, setIssuingFor] = useState<StandaloneSite | null>(null);
+  const [registering, setRegistering] = useState(false);
   const now = new Date();
   const columns: TableColumn<StandaloneSite>[] = [
     {
@@ -62,6 +66,13 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
       title: t("tenants.detail.standalone.columns.actions"),
       render: (site) => (
         <span className="standalone-site-actions">
+          <Button
+            size="compact"
+            disabled={!query.data?.signingConfigured}
+            onClick={() => setIssuingFor(site)}
+          >
+            {t("tenants.detail.standalone.issue.open")}
+          </Button>{" "}
           <Button variant="secondary" size="compact" onClick={() => setHistoryFor(site)}>
             {t("tenants.detail.standalone.history.open")}
           </Button>
@@ -74,6 +85,11 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
       title={t("tenants.detail.standalone.title")}
       titleAs="h3"
       className="standalone-sites-panel"
+      actions={
+        <Button variant="secondary" disabled={!query.data} onClick={() => setRegistering(true)}>
+          {t("tenants.detail.standalone.register.open")}
+        </Button>
+      }
     >
       <p>{t("tenants.detail.standalone.description")}</p>
       {query.isPending ? (
@@ -121,6 +137,21 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
           tenantId={tenantId}
           site={historyFor}
           onClose={() => setHistoryFor(null)}
+        />
+      ) : null}
+      {issuingFor ? (
+        <StandaloneLicenseIssue
+          tenantId={tenantId}
+          site={issuingFor}
+          source={query.data?.issuanceSource ?? "subscription"}
+          onClose={() => setIssuingFor(null)}
+        />
+      ) : null}
+      {registering && query.data ? (
+        <StandaloneSiteRegistration
+          tenantId={tenantId}
+          sites={query.data.sites}
+          onClose={() => setRegistering(false)}
         />
       ) : null}
     </Card>
