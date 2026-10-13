@@ -23,7 +23,9 @@ import type {
   ProductUpdate,
   ShiftClose,
   ShiftCreate,
+  ShiftEnter,
   ShiftExportRecord,
+  ShiftMode,
   ShiftUpdate,
   TemplateCreate,
   TemplateDefaultsUpdate,
@@ -31,6 +33,7 @@ import type {
   TemplateSpec,
   TemplateUpdate,
 } from "./protocol.js";
+import { SHIFT_SUPPORTS } from "./protocol.js";
 
 // The office's request bodies, each built field by field and never spread
 // from form values: a field reaches the host only when its builder names it,
@@ -430,11 +433,14 @@ export interface ShiftInput {
   plannedQty: number | null;
   counterpartyId: string | null;
   pallets: ShiftPallets | null;
+  /** The shift's mode (plan РЕЖ); left out, aggregation. */
+  mode?: ShiftMode;
 }
 
 /**
- * `POST /v1/office/shifts` (`shift-create.json`, `shift-create-pallets.json`):
- * every field, `null` for none, the mode and whether pallets are collected,
+ * `POST /v1/office/shifts` (`shift-create.json`, `shift-create-pallets.json`,
+ * `shift-create-validation.json`): every field, `null` for none, the mode
+ * (aggregation unless the input names one) and whether pallets are collected,
  * so the host's defaults never decide what was planned; a shift with pallets
  * names their capacity and template, one without names neither.
  */
@@ -447,7 +453,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     boxCapacity: shift.boxCapacity,
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,
-    mode: "aggregation",
+    mode: shift.mode ?? "aggregation",
     ...(shift.pallets === null
       ? { palletsEnabled: false }
       : {
@@ -585,6 +591,12 @@ export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
 }
 
 /** What a station's new shift carries: the operator's choices and the request's id. */
+/**
+ * The body of every shift entry this station sends (`shift-enter.json`, plan
+ * РЕЖ): it works validation shifts, so the host lets it enter one.
+ */
+export const STATION_SHIFT_ENTER: ShiftEnter = { supports: [SHIFT_SUPPORTS.validation] };
+
 export interface DeviceShiftInput {
   requestId: string;
   productId: string;

@@ -13,11 +13,14 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 3 since plan ПЛ-Х (pallets: the
-/// shift's pallet fields, pallet blocks, the pallet facts and a box's
-/// `palletId`). A new fact kind or a new field of a fact's `data` raises it,
-/// because an older host refuses such a record for good.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Protocol version this build speaks: 4 since plan РЕЖ (the shift modes:
+/// the body of a shift entry naming what the station works, [`ShiftEnter`],
+/// and a validation shift's `ok` scan without a box); 3 came with plan ПЛ-Х
+/// (pallets: the shift's pallet fields, pallet blocks, the pallet facts and a
+/// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
+/// new meaning of one raises it, because an older host refuses such a record
+/// for good.
+pub const PROTOCOL_VERSION: u32 = 4;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -1605,8 +1608,9 @@ impl std::str::FromStr for ShiftStatus {
 }
 
 /// What a shift does, as the cloud's: aggregation into boxes, or validation
-/// of single codes. The host takes only aggregation in stage 2a; validation
-/// (stage 3) needs no new shape.
+/// of single codes. Stage 2a took only aggregation; validation (plan РЕЖ,
+/// protocol 4) also needed a new shape: the entry's [`ShiftEnter`] and an
+/// `ok` [`ScanFact`] without a box.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShiftMode {
@@ -1631,6 +1635,28 @@ impl std::str::FromStr for ShiftMode {
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         parse_variant("shift mode", text)
     }
+}
+
+/// What a station can work, as it names it in the body of
+/// `POST /v1/device/shifts/{id}/enter` ([`ShiftEnter::supports`], plan РЕЖ).
+pub mod shift_supports {
+    /// Validation shifts: single codes accepted without a box.
+    pub const VALIDATION: &str = "validation-v1";
+    /// Validation shifts that print a Data Matrix duplicate of each accepted
+    /// code (part B of plan РЕЖ; declared with protocol 4, checked by the
+    /// host from protocol 5).
+    pub const VALIDATION_DM_DUPLICATE: &str = "validation-dm-duplicate-v1";
+}
+
+/// The body of `POST /v1/device/shifts/{id}/enter` (protocol 4, plan РЕЖ):
+/// what the station can work, from [`shift_supports`]. A station of
+/// protocol 3 sends no body, which reads as `{}`: it names nothing, so it
+/// enters an aggregation shift as before and no validation shift.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftEnter {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supports: Vec<String>,
 }
 
 /// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
@@ -2023,7 +2049,8 @@ pub struct FactBatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanVerdict {
-    /// Accepted into the box.
+    /// Accepted: into the box in an aggregation shift, without one in a
+    /// validation shift.
     Ok,
     /// A code already taken, by this station's own copy or by the host.
     Duplicate,
@@ -2099,8 +2126,11 @@ pub struct ScannedCode {
 
 /// `data` of a `scan` fact: every scan of the work screen, accepted or not.
 /// An `invalid` scan carries no text, only its length and what it looked
-/// like (it may be a badge, whose code is a secret); an `ok` one names the
-/// box it went into.
+/// like (it may be a badge, whose code is a secret). `boxId` is always sent:
+/// an `ok` scan of an aggregation shift names the box it went into; an `ok`
+/// scan of a validation shift is `null` (protocol 4, plan РЕЖ), and so is
+/// every scan not accepted. Which of the two an `ok` scan must be is the
+/// host's to check against the shift's mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanFact {
@@ -2110,6 +2140,8 @@ pub struct ScanFact {
     pub raw_kind: ScanRawKind,
     pub raw_length: u32,
     pub code: Option<ScannedCode>,
+    /// `ok` in an aggregation shift: the box; `ok` in a validation shift:
+    /// `null`.
     pub box_id: Option<String>,
 }
 

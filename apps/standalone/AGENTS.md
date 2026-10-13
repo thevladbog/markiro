@@ -1288,17 +1288,26 @@ change) build their bodies inline, field by field, as does the wizard; its
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
 change, a new fact kind or a new `data` field of a fact included (see Facts);
-the host keeps accepting the previous version. It is 3 since plan ПЛ-Х
-(pallets; 2 since plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host
-takes the stations of stage 1 and of stage 2a, and a station that knows
-pallets finds a host of stage 1 or 2a too old (`host_too_old` at the probe).
+the host keeps accepting the previous version. It is 4 since plan РЕЖ (shift
+modes: the body of a shift entry, `ShiftEnter`, and a validation shift's `ok`
+scan with `boxId: null`; 3 since plan ПЛ-Х for pallets, 2 since plan 2a1),
+with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
+of stage 2a and of pallets, and a station finds a host of an older protocol
+too old (`host_too_old` at the probe).
 The host does not look at the protocol of a station that enters a shift (it
 records it at pairing only), so a station of protocol 2 could enter a shift
 the office planned with pallets and produce boxes without them. The pilot
 rules that out by installation, not by a refusal: every station of a site runs
 protocol 3, installed together with the host's update, and the installer's
 check of it is owed to the plan УСТ (it is not done yet; nothing here was run
-on a real station).
+on a real station). Validation shifts do not rely on that: since protocol 4 a
+station names what it works in the body of every entry
+(`POST /v1/device/shifts/{id}/enter`, `ShiftEnter.supports` from
+`markiro_proto::shift_supports`; the webview sends `STATION_SHIFT_ENTER`,
+`{ "supports": ["validation-v1"] }`, through `HostApi.enterShift`), and a
+station of protocol 3 sends no body, which reads as naming nothing. The host
+refuses a validation shift to a station that does not name `validation-v1`
+from plan РЕЖ task A4 on.
 `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
 mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,

@@ -78,8 +78,10 @@ import {
   productGroupSchema,
   productRecordSchema,
   productUpdateSchema,
+  SHIFT_SUPPORTS,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftEnterSchema,
   shiftExportRecordSchema,
   shiftExportRowsSchema,
   shiftUpdateSchema,
@@ -116,6 +118,7 @@ import {
   shiftCreate,
   shiftExportRecord,
   shiftUpdate,
+  STATION_SHIFT_ENTER,
   templateCreate,
   templateDefaultsUpdate,
   templateUpdate,
@@ -291,6 +294,7 @@ const RESPONSES = [
   ["template-defaults.json", templateDefaultsSchema],
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
+  ["office-shift-validation.json", officeShiftSchema],
   ["shift-export-rows.json", shiftExportRowsSchema],
   ["box-report-rows.json", boxReportRowsSchema],
   ["pallet-report-rows.json", palletReportRowsSchema],
@@ -301,6 +305,7 @@ const RESPONSES = [
   ["device-shift-entered.json", enteredShiftSchema],
   ["device-shift-entered-pallets.json", enteredShiftSchema],
   ["device-shift-entered-sheet.json", enteredShiftSchema],
+  ["device-shift-entered-validation.json", enteredShiftSchema],
   ["sscc-block.json", ssccBlockSchema],
   ["code-check-free.json", codeCheckSchema],
   ["code-check-taken.json", codeCheckSchema],
@@ -341,6 +346,9 @@ const REQUESTS = [
   ["shift-create.json", shiftCreateSchema],
   ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-create-pallet-sheet.json", shiftCreateSchema],
+  ["shift-create-validation.json", shiftCreateSchema],
+  ["shift-enter.json", shiftEnterSchema],
+  ["shift-enter-empty.json", shiftEnterSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
@@ -350,6 +358,7 @@ const REQUESTS = [
   ["sscc-block-request.json", ssccBlockRequestSchema],
   ["facts-request.json", factBatchSchema],
   ["facts-request-pallets.json", factBatchSchema],
+  ["fact-scan-validation.json", factRecordSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -457,6 +466,65 @@ describe.each(REQUESTS)("request fixture %s", (name, schema) => {
 
   it("rejects an unknown field, like the host", () => {
     expect(schema.safeParse(extended(name)).success).toBe(false);
+  });
+});
+
+describe("protocol 4: the shift modes (plan РЕЖ)", () => {
+  const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+  const input = {
+    productId: shift.productId,
+    lineId: shift.lineId,
+    productionDate: shift.productionDate,
+    boxTemplateId: shift.boxTemplateId,
+    boxCapacity: shift.boxCapacity,
+    plannedQty: 1200,
+    counterpartyId: shift.counterpartyId,
+    pallets: null,
+  };
+
+  it("speaks protocol 4 and enters a shift naming what this station works", () => {
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(SHIFT_SUPPORTS).toStrictEqual({
+      validation: "validation-v1",
+      validationDmDuplicate: "validation-dm-duplicate-v1",
+    });
+    // The station of part A works validation, and says so on every entry.
+    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
+    expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
+  });
+
+  it("bounds the capabilities an entry names", () => {
+    const enter = (supports: unknown) => shiftEnterSchema.safeParse({ supports }).success;
+    expect(enter([])).toBe(true);
+    expect(enter(["x".repeat(64)])).toBe(true);
+    expect(enter(Array.from({ length: 32 }, (_, index) => `cap-${index}`))).toBe(true);
+    expect(enter([""])).toBe(false);
+    expect(enter(["x".repeat(65)])).toBe(false);
+    expect(enter(Array.from({ length: 33 }, (_, index) => `cap-${index}`))).toBe(false);
+    expect(enter("validation-v1")).toBe(false);
+    expect(enter([1])).toBe(false);
+  });
+
+  it("plans a shift in the mode the office chose, aggregation when it names none", () => {
+    expect(shiftCreate({ ...input, mode: "validation" })).toStrictEqual(
+      fixture("shift-create-validation.json"),
+    );
+    expect(shiftCreate({ ...input, mode: "aggregation" })).toStrictEqual(
+      fixture("shift-create.json"),
+    );
+    expect(shiftCreate(input)).toStrictEqual(fixture("shift-create.json"));
+  });
+
+  it("reads a validation scan accepted without a box; whether an ok scan needs one is the host's", () => {
+    const record = factRecordSchema.parse(fixture("fact-scan-validation.json"));
+    expect(record.kind).toBe("scan");
+    if (record.kind !== "scan") return;
+    expect(record.data.verdict).toBe("ok");
+    expect(record.data.boxId).toBeNull();
+    // The station never leaves `boxId` out: a scan names its box or `null`.
+    const withoutBox: Record<string, unknown> = { ...record.data };
+    delete withoutBox["boxId"];
+    expect(factRecordSchema.safeParse({ ...record, data: withoutBox }).success).toBe(false);
   });
 });
 

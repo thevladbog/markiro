@@ -625,8 +625,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 3 (pallets, plan ПЛ-Х) is this build's; 2 (stage 2a) and
-        // 1 (stage 1) are still taken.
+        // Protocol 4 (shift modes, plan РЕЖ) is this build's; 3 (pallets,
+        // plan ПЛ-Х), 2 (stage 2a) and 1 (stage 1) are still taken.
+        assert_eq!(call(Some("4")).await.0, StatusCode::OK);
         assert_eq!(call(Some("3")).await.0, StatusCode::OK);
         assert_eq!(call(Some("2")).await.0, StatusCode::OK);
         assert_eq!(call(Some("1")).await.0, StatusCode::OK);
@@ -639,7 +640,7 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 3);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 4);
     }
 
     #[tokio::test]
@@ -649,6 +650,6 @@ mod tests {
         assert_eq!(body["error"]["details"]["protocol"], 7);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("4")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("5")).await.0, StatusCode::BAD_REQUEST);
     }
 }

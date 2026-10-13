@@ -3,8 +3,8 @@ import { z } from "zod";
 import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
-/** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto). */
-export const PROTOCOL_VERSION = 3;
+/** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto): 4 since plan РЕЖ. */
+export const PROTOCOL_VERSION = 4;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
@@ -645,7 +645,10 @@ export type TemplateDefaults = z.infer<typeof templateDefaultsSchema>;
 export const shiftStatusSchema = z.enum(["planned", "active", "closed"]);
 export type ShiftStatus = z.infer<typeof shiftStatusSchema>;
 
-/** Mirrors `markiro_proto::ShiftMode`: the host takes only `aggregation` in stage 2a. */
+/**
+ * Mirrors `markiro_proto::ShiftMode`: aggregation into boxes, or validation of
+ * single codes accepted without a box (plan РЕЖ, protocol 4).
+ */
 export const shiftModeSchema = z.enum(["aggregation", "validation"]);
 export type ShiftMode = z.infer<typeof shiftModeSchema>;
 
@@ -970,6 +973,27 @@ export const deviceShiftsSchema = z.object({ shifts: z.array(deviceShiftSchema) 
  */
 export const enteredShiftSchema = deviceShiftSchema.extend({ snapshot: shiftSnapshotSchema });
 export type EnteredShift = z.infer<typeof enteredShiftSchema>;
+
+/**
+ * What a station can work, as it names it entering a shift (mirrors
+ * `markiro_proto::shift_supports`, plan РЕЖ). `validationDmDuplicate` is
+ * declared with protocol 4 and checked by the host from protocol 5 (part B).
+ */
+export const SHIFT_SUPPORTS = {
+  validation: "validation-v1",
+  validationDmDuplicate: "validation-dm-duplicate-v1",
+} as const;
+
+/**
+ * The body of `POST /v1/device/shifts/{id}/enter` (`markiro_proto::ShiftEnter`,
+ * protocol 4, `shift-enter.json`): what the station can work. Left out, as
+ * the Rust type's default, it names nothing (`shift-enter-empty.json`), which
+ * is how the host reads a station of protocol 3 that sends no body.
+ */
+export const shiftEnterSchema = z.strictObject({
+  supports: z.array(z.string().min(1).max(64)).max(32).optional(),
+});
+export type ShiftEnter = z.infer<typeof shiftEnterSchema>;
 
 /**
  * The scan that owns a code on the host (`markiro_proto::CodeOwner`): the

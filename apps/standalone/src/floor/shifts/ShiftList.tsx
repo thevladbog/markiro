@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Pager } from "@markiro/ui";
 
-import type { EnteredShift } from "../../host/protocol.js";
+import type { EnteredShift, ShiftEnter } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { readRefusedCloses } from "../close/shift-close.js";
@@ -27,7 +27,7 @@ export interface ShiftListProps {
    */
   outboxVersion?: number;
   /** `HostApi.enterShift`. */
-  enter: (shiftId: string) => Promise<EnteredShift>;
+  enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   onEntered: (shift: WorkShift) => void;
   /** A refused key or a changed certificate: the shell's to route. */
   onHostError: (error: unknown) => void;

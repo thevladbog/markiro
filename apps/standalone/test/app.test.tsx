@@ -2868,7 +2868,7 @@ describe("the operator on the floor", () => {
 
   it("shows the shifts the host lists for the line and opens one into its work screen", async () => {
     const { host } = await inTheShift();
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, { supports: ["validation-v1"] });
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     isOnTheList();
@@ -3205,7 +3205,7 @@ describe("the operator on the floor", () => {
       plannedQty: null,
       counterpartyId: null,
     });
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, { supports: ["validation-v1"] });
     // A refusal that comes now waits for the operator to leave this shift.
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));

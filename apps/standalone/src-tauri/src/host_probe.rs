@@ -153,7 +153,9 @@ mod tests {
     #[test]
     fn a_compatible_envelope_with_an_unreadable_body_is_invalid() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
+            classify_hello(
+                json!({"product": HOST_PRODUCT, "protocol": PROTOCOL_VERSION, "minProtocol": 1})
+            ),
             Err(ProbeError::InvalidResponse)
         );
     }
@@ -162,7 +164,7 @@ mod tests {
     fn a_compatible_hello_is_read() {
         let hello = classify_hello(json!({
             "product": "markiro-host",
-            "protocol": 3,
+            "protocol": PROTOCOL_VERSION,
             "minProtocol": 1,
             "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
             "version": "0.1.0",
