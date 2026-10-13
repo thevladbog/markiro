@@ -262,6 +262,15 @@ export const productNameRule = plainTextRule(MAX_PRODUCT_NAME, "rules.productNam
 /** A product's print name (`validate::print_name`): up to 200 characters, blank for none. */
 export const printNameRule = optionalTextRule(MAX_PRODUCT_NAME, "rules.printName");
 
+/** The longest EGAIS code, the host's `MAX_EGAIS_CODE_CHARS` and the cloud's bound. */
+export const MAX_EGAIS_CODE = 64;
+
+/** A product's EGAIS code as typed (`validate::egais_code`, plan ТОВ): blank for none, at most 64 characters. */
+export const egaisCodeRule = optionalTextRule(
+  MAX_EGAIS_CODE,
+  "office.products.errors.egaisTooLong",
+);
+
 /** A whole number as typed: ASCII digits with no sign, leading zero, point, comma or exponent. */
 const WHOLE_NUMBER = /^[1-9][0-9]*$/;
 

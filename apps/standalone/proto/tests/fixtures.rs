@@ -15,11 +15,12 @@ use markiro_proto::{
     OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
     PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
     PalletSheet, PalletSheetCreate, PalletSheetDefaultUpdate, PalletSheetUpdate, PalletSheets,
-    PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus,
-    ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
-    ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
-    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductPhotoPut, ProductPhotoState,
+    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
+    ShiftClosedFact, ShiftCreate, ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin,
+    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
+    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -649,6 +650,76 @@ fn product_fixtures_round_trip_and_requests_reject_unknown_fields() {
         .remove("defaultPalletSheetId");
     let older: OfficeProduct = serde_json::from_value(value).unwrap();
     assert_eq!(older.default_pallet_sheet_id, None);
+}
+
+#[test]
+fn the_product_fixtures_of_plan_tov_round_trip() {
+    for name in ["office-product.json", "office-product-egais.json"] {
+        round_trip::<OfficeProduct>(name);
+    }
+    let beer: OfficeProduct = round_trip("office-product-egais.json");
+    assert_eq!(
+        (
+            beer.egais_code.as_deref(),
+            beer.default_counterparty_id.as_deref(),
+            beer.photo_checksum.as_deref()
+        ),
+        (
+            Some("0150320000001234567"),
+            Some("0b9e7c1a-2d3f-4a5b-9c8d-7e6f5a4b3c2d"),
+            Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
+        )
+    );
+    let create: ProductCreate = round_trip("product-create.json");
+    assert_eq!(
+        (create.egais_code, create.default_counterparty_id),
+        (None, None)
+    );
+    let update: ProductUpdate = round_trip("product-update.json");
+    assert_eq!(
+        (update.egais_code, update.default_counterparty_id),
+        (Some(None), Some(None))
+    );
+    // Left out of an update, both are kept (an office from before plan ТОВ),
+    // as the preferred A4 sheet is.
+    let mut value = fixture("product-update.json");
+    let object = value.as_object_mut().unwrap();
+    object.remove("egaisCode");
+    object.remove("defaultCounterpartyId");
+    let keep: ProductUpdate = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        (keep.egais_code, keep.default_counterparty_id),
+        (None, None)
+    );
+    let photo: ProductPhotoState = round_trip("product-photo-state.json");
+    assert_eq!(photo.photo.map(|photo| photo.width), Some(2));
+    let put: ProductPhotoPut = round_trip("product-photo-put.json");
+    assert_eq!((put.width, put.height), (2, 1));
+}
+
+#[test]
+fn a_photo_put_refuses_an_unknown_field() {
+    let mut put = fixture("product-photo-put.json");
+    put["mime"] = serde_json::json!("image/png");
+    assert!(serde_json::from_value::<ProductPhotoPut>(put).is_err());
+}
+
+#[test]
+fn a_snapshot_of_a_host_before_plan_tov_reads_without_an_egais_code() {
+    let mut entered = fixture("device-shift-entered.json");
+    entered["snapshot"]["product"]
+        .as_object_mut()
+        .unwrap()
+        .remove("egaisCode");
+    let shift: DeviceShift = serde_json::from_value(entered).unwrap();
+    assert_eq!(shift.snapshot.unwrap().product.egais_code, None);
+    let mut entered = fixture("device-shift-entered.json");
+    entered["snapshot"]["product"]["egaisCode"] = serde_json::json!("0150320000001234567");
+    let shift: DeviceShift = serde_json::from_value(entered).unwrap();
+    assert_eq!(
+        shift.snapshot.unwrap().product.egais_code.as_deref(),
+        Some("0150320000001234567")
+    );
 }
 
 #[test]

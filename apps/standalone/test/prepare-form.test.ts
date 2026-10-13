@@ -73,27 +73,55 @@ describe("the records a blank is drawn from (plan О-Ф)", () => {
   const north: CounterpartyRecord = NORTH;
 
   it("takes the shift's own product, line, counterparty and the organization", () => {
-    expect(taskFormInputs(ACTIVE, [WATER, MILK], [LINE_10, LINE_2], [north], ORG_PROFILE)).toEqual({
+    expect(
+      taskFormInputs(ACTIVE, [WATER, MILK], [LINE_10, LINE_2], [north], ORG_PROFILE, null),
+    ).toEqual({
       shift: ACTIVE,
       product: MILK,
       line: LINE_2,
       counterparty: north,
       organization: ORG_PROFILE,
+      photo: null,
     });
   });
 
   it("names no counterparty for a shift with none, and reads none for it", () => {
-    expect(taskFormInputs(PLANNED, [WATER], [LINE_10], [], ORG_PROFILE)?.counterparty).toBeNull();
+    expect(
+      taskFormInputs(PLANNED, [WATER], [LINE_10], [], ORG_PROFILE, null)?.counterparty,
+    ).toBeNull();
+  });
+
+  it("reads the product's photo when it has one, waits for it, and goes without it when it does not read (plan ТОВ)", () => {
+    const photo = {
+      width: 2,
+      height: 1,
+      dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
+      updatedAt: "2026-10-13T09:00:00.000Z",
+    };
+    const pictured = { ...MILK, photoChecksum: photo.checksum };
+    const read = (given: typeof photo | null | undefined) =>
+      taskFormInputs(ACTIVE, [pictured], [LINE_2], [north], ORG_PROFILE, given);
+    expect(read(photo)?.photo).toEqual(photo);
+    // Still reading: the blank waits, as for every record it names.
+    expect(read(undefined)).toBeNull();
+    // Not read: the blank goes without it.
+    expect(read(null)?.photo).toBeNull();
+    // A product without a photo never waits for one.
+    expect(
+      taskFormInputs(ACTIVE, [MILK], [LINE_2], [north], ORG_PROFILE, undefined)?.photo,
+    ).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], [north], ORG_PROFILE, photo)?.photo).toBeNull();
   });
 
   it("is nothing while any record it names is not read", () => {
-    expect(taskFormInputs(ACTIVE, undefined, [LINE_2], [north], ORG_PROFILE)).toBeNull();
-    expect(taskFormInputs(ACTIVE, [MILK], undefined, [north], ORG_PROFILE)).toBeNull();
-    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], undefined, ORG_PROFILE)).toBeNull();
-    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], [north], undefined)).toBeNull();
+    expect(taskFormInputs(ACTIVE, undefined, [LINE_2], [north], ORG_PROFILE, null)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], undefined, [north], ORG_PROFILE, null)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], undefined, ORG_PROFILE, null)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], [north], undefined, null)).toBeNull();
     // A record the list lacks is not read either.
-    expect(taskFormInputs(ACTIVE, [WATER], [LINE_2], [north], ORG_PROFILE)).toBeNull();
-    expect(taskFormInputs(ACTIVE, [MILK], [LINE_10], [north], ORG_PROFILE)).toBeNull();
-    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], [], ORG_PROFILE)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [WATER], [LINE_2], [north], ORG_PROFILE, null)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], [LINE_10], [north], ORG_PROFILE, null)).toBeNull();
+    expect(taskFormInputs(ACTIVE, [MILK], [LINE_2], [], ORG_PROFILE, null)).toBeNull();
   });
 });

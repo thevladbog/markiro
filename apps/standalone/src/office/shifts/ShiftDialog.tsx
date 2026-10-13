@@ -115,6 +115,9 @@ function ShiftForm({
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
   // The refused field, focused once the form is on again after a submit.
   const focusAfterRender = useRef<(typeof SHIFT_FIELD_ORDER)[number] | null>(null);
+  // The counterparty a chosen product offered (plan ТОВ), while the person has not changed it:
+  // it follows the product as the capacity does; one the person chose stays.
+  const offeredCounterparty = useRef<string | null>(null);
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   // The key of the text that says the shift was opened, closed or deleted meanwhile: a
@@ -258,6 +261,20 @@ function ShiftForm({
     setValue("boxTemplateId", suggested ?? "", { shouldDirty: true });
     // A refusal of the earlier values does not outlive them.
     clearErrors(["boxCapacity", "boxTemplateId"]);
+    // The product's default counterparty, when it is in use, fills an empty choice or
+    // replaces one an earlier product offered; a choice of the person's own stays.
+    const current = watch("counterpartyId");
+    if (current === "" || current === offeredCounterparty.current) {
+      const offer = counterparties.data?.find(
+        (each) => each.id === chosen.defaultCounterpartyId && !each.archived,
+      );
+      const next = offer?.id ?? "";
+      offeredCounterparty.current = offer === undefined ? null : offer.id;
+      if (next !== current) {
+        setValue("counterpartyId", next, { shouldDirty: true });
+        clearErrors("counterpartyId");
+      }
+    }
     // So do the pallets', when they are on; a product without a pallet capacity turns them off.
     if (palletsEnabled && chosen.palletBoxCapacity === null) {
       setValue("palletsEnabled", false, { shouldDirty: true });
@@ -374,9 +391,16 @@ function ShiftForm({
               options={productOptions}
               value={field.value}
               onValueChange={(id) => chooseProduct(id, field.onChange)}
-              // The template follows the product, so the product waits for the templates and the defaults.
+              // The template follows the product, so the product waits for the templates and the
+              // defaults; and so does its default counterparty (plan ТОВ), for the counterparties.
               id={fieldId("productId")}
-              disabled={locked || !products.isSuccess || templates.isPending || defaults.isPending}
+              disabled={
+                locked ||
+                !products.isSuccess ||
+                templates.isPending ||
+                defaults.isPending ||
+                counterparties.isPending
+              }
               {...(products.isError ? { hint: t("office.shifts.fields.productsUnavailable") } : {})}
               {...fieldError(errors.productId?.message)}
             />

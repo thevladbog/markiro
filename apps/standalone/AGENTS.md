@@ -92,6 +92,9 @@ and a template's `spec`: they are named in `changed` without a value
 because it may be 256 KB. A station's writes (shift create and open, SSCC
 blocks) carry the device as the actor (`Actor::Device`), and a request a
 station repeats (a create, a re-entry, a block) writes no row.
+A product's photo (plan ТОВ) writes `product.photo.set` (`details`: `width`, `height`, `bytes`,
+never the picture) and `product.photo.clear` (only when there was one); `product.create` names
+`egaisCode` and `defaultCounterpartyId` when either is set, `product.update` both as any field.
 Backups (plan РК) write `backup.create` (the host or the office user who asked;
 `failed` when a folder did not get the copy), `backup.settings.update`,
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
@@ -867,9 +870,52 @@ category's default, then the organization's, then the operator's choice
 category's default and the organization's and omits the product's
 preference, and an applied migration is never edited. (The
 cloud has no per-product template since its 2026-09-02 spec; these follow the
-stage-1 spec.) National-catalog links, photos, EGAIS
-codes, prices and default counterparties are not part of the standalone
-catalog yet.
+stage-1 spec.) National-catalog links and prices are not part of the
+standalone catalog; plan ТОВ added the EGAIS code, the default counterparty
+and the photo (below).
+
+The EGAIS code, the default counterparty and the photo (plan ТОВ, host
+migration `0023`; parity spec §5.5). `products.egais_code` is the code the
+labels print — the cloud's `products.egais_code`, its regulatory profile's
+primary code; one code a product (open question ТОВ-2): free text by the
+rule every text field shares (`validate::egais_code`: trimmed, 1–64
+characters, no control character; 19 digits are not required, as in the
+cloud, question ТОВ-3), and only with ЧЗ group 15 (`EGAIS_PRODUCT_GROUP_CODE`,
+the domain's `isEgaisApplicable`): `validation_failed` on `egaisCode` for a
+code with another group or none, checked before anything is read when the
+code is sent, and against the stored code when an update leaves it out (an
+office before plan ТОВ: `egaisCode` and `defaultCounterpartyId`, like
+`defaultPalletSheetId`, are kept when left out of a `PUT`, so changing such
+a product's group away from 15 is refused until the code is cleared).
+`products.default_counterparty_id` is a preference the office's new-shift
+dialog offers: a counterparty sent must be in use
+(`shifts::counterparty_in_use`, `validation_failed` on
+`defaultCounterpartyId`); one archived later stays named, an update that
+keeps it is not refused, and the dialog never offers it. Neither field is in
+the station feed's product record: the code reaches the station only in a
+shift's snapshot (`ShiftSnapshotProduct.egaisCode`, `#[serde(default)]`,
+frozen when the shift opens; a snapshot of an older host has none), and the
+counterparty only the office reads. The office shows «Код ЕГАИС» only for
+group 15, keeps a typed code while the field is hidden and sends it only
+with group 15 (its rule `egaisCodeRule` applies only while the field
+shows); a code of another form than 19 digits gets a note that the A4 sheet
+goes without it (below, «Floor printing»). A new shift's product fills an
+empty counterparty with its default in use and replaces one an earlier
+product offered, never one the person chose; the product waits for the
+counterparties. A product's photo is `product_photos` (one row a product):
+a JPEG of at most 640 × 640 and 300 000 bytes that the office makes in the
+webview (`photo-encode.ts`: a JPEG, PNG or WebP of at most 25 MiB and
+8192 × 4096 declared pixels, checked before a byte is decoded; drawn on
+white, quality 0.85, 0.7, 0.5 until it fits). The host checks the sides, the
+length and the JPEG signature `FF D8 FF` (`validate::product_photo`) and
+parses no picture, as the logo. `GET/PUT/DELETE /v1/office/products/{id}/photo`:
+every office role reads, administrators and technologists write (the roles
+read again inside the write transaction), an unknown product is
+`not_found`; the photo takes no revision and rides no feed, the same photo
+again writes nothing, and the list names it by `photoChecksum` (SHA-256 of
+the bytes) without the bytes. The dialog writes it at once by its own
+buttons, not by «Сохранить». A backup copies the whole database file, so it
+holds the photos (a thousand products — up to 300 MB).
 
 Label templates (`GET/POST/PUT/DELETE /v1/office/templates`): every office
 role reads them — the list as summaries without the layout, whose size,
@@ -1085,6 +1131,19 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   under one of this tenant's prefixes (its numbers are NOT in the file) and
   the credential-verifier warning. A file whose cloud was not clean
   (`--rehearsal`) carries `rehearsal: true`.
+  The file's format is 2 since plan ТОВ: `export.sql` reads a product's
+  EGAIS code and default counterparty as values (raw format 2; the tool
+  still reads raw format 1), and `transform.mjs` keeps a code only for ЧЗ
+  group 15 and a counterparty only one the file keeps, clearing others
+  with `product_value_cleared` (the office words a code of another group,
+  `reason: "group"`, and a dropped counterparty by their rule,
+  `office.cloudImport.ruleCleared`). A code is never changed: one with a
+  control character, a blank one or one past 64 characters is cleared too,
+  only the blanks around it go. Photos stay a lost field (`photo`,
+  question ТОВ-1: the cloud's pictures live in object storage, which the
+  tool does not read). The host and the office read files of formats 1
+  and 2 (`CLOUD_IMPORT_FORMAT_VERSIONS`): a format-1 file's products carry
+  neither field, and the host checks both by the product route's rules.
 - `POST /v1/office/import` (`routes/cloud_import.rs`, administrators, its
   own 32 MiB body limit): its extractor checks the office session and the
   administrator role BEFORE the body is read, and answers every unreadable
@@ -3838,6 +3897,18 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
   whole setup visit could overwrite a newer level); a spooler queue whose port is a
   COM port is not known to the app.
 
+The EGAIS code (plan ТОВ). The box and pallet labels take `product.egais` from the
+shift's snapshot (`snapshot.product.egaisCode ?? null`, `label-render.ts`), as the
+cloud station takes it from its frozen grant: the stock box label's bytes equal those
+the cloud's `boxLabelFields` make for the same product, in ZPL and TSPL at 203 and 300
+dpi (`test/label-egais.test.ts`). A snapshot of a host before plan ТОВ has no code and
+prints the field empty. A pallet's A4 sheet takes it too, but the sheet's renderer
+(`pallet-sheet-render.ts`) takes only 19 digits: a frozen code of another form is left
+off the sheet with one diagnostic line (`EGAIS_NOT_ON_SHEET_LINE`) instead of failing
+every sheet of a shift whose code can no longer change; the thermal labels still print
+it, and the office warns when the code is typed. Samples — the sheet preview
+(`sampleSheetContext`) and the A4 test print (`a4-test.ts`) — print no code.
+
 ## Floor exceptions and close
 
 Stage 2a, plan 2a8 (`src/floor/exceptions`, `src/floor/close`,
@@ -4357,6 +4428,10 @@ never finished, or one left open under a pairing since replaced, is never
 purged (the retention takes finished sessions only), so its jobs and records
 stay; a later stage carries that.
 
+The lookup's `product` is the record's shift snapshot as it stands, its EGAIS code
+included (plan ТОВ): a reprint prints the code the first label printed, whatever the
+office changed since, and a record of a shift opened by an older host prints none.
+
 ## Shift exports
 
 Plan ЧЗ ports the cloud's shift exports into the office; the bytes of every
@@ -4540,6 +4615,14 @@ mapping; the bytes are the acceptance rule.
   of thousands of codes freezes the window for seconds (about 8 ms a code in
   jsdom under load), and a press already inside `openInBrowser` cannot be
   cancelled by closing the dialog; a worker is the real fix.
+- «Бланк смены» prints the product's photo (plan ТОВ). The domain's
+  `ShiftTaskFormData` takes an optional `imageSrc`: the office passes the photo
+  as `data:image/jpeg;base64,…` with its checksum as `imageChecksum`; left out,
+  the cloud's relative link is drawn by the same expression, so the cloud's
+  bytes and the parity golden are unchanged. The card waits for the photo of a
+  product that has one (`officeKeys.productPhoto`), a press reads it again, and
+  a photo that does not read leaves the form without it — a photo never stops
+  the form.
 
 ## Backups and restore
 
@@ -4955,6 +5038,19 @@ either; a file log is stage 5.
   row, `host_revision` reads the revision. Add a helper there before copying
   one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
+- Plan ТОВ by hand, on the client's printers and Windows 10/11: a beer label (ЧЗ group 15
+  with an EGAIS code) in ZPL and TSPL at 203 and 300 dpi — the «ЕГАИС» row whole and
+  legible on the box and pallet labels and on the A4 pallet sheet (a long code on a
+  58 × 40 label is the cloud's risk too); an exception reprint and a warehouse reprint
+  after the code changed in the office print the frozen code; a shift opened before the
+  update prints the row empty, without an error, and a new one prints it; the product
+  dialog in WebView2 (the field appears and goes with the group, the default counterparty
+  fills a new shift, Tab/Enter/Esc); photos from a phone (JPEG, PNG and WebP of 4000 ×
+  3000 and 5 MB) compressed and shown, «Бланк смены» with the photo on an A4 printer and
+  in «Открыть в браузере», and without it after a delete; the transfer from a copy of the
+  client's cloud — beer with its code, default counterparties in place, the notes in
+  words, and a format-1 file made earlier still accepted. The encoder ran in desktop
+  Chromium (a 4000 × 3000 PNG became a 640 × 480 JPEG of 147 KB), never in WebView2.
 - The floor's shifts (plan 2a5) by hand, on Windows 10 and 11: the list, the
   new shift and the work screen on the real screen and touch panel (64 px
   controls, a long product name on a card); a product scanned on the new

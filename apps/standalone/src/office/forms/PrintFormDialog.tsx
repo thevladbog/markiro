@@ -9,13 +9,16 @@ import type { HostApi } from "../../host/api.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type {
   BoxReportRows,
+  OfficeProduct,
   OfficeShift,
   OrgProfile,
   PalletReportRows,
+  ProductPhoto,
 } from "../../host/protocol.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import type { TaskFormInputs } from "./form-data.js";
 import { usePrintForm } from "./form-printer-context.js";
@@ -134,6 +137,7 @@ export function PrintFormDialog({
   const files = useOfficeFiles();
   const print = usePrintForm();
   const queryClient = useQueryClient();
+  const { api, call } = useOfficeSession();
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [stage, setStage] = useState<Stage | null>(null);
   const inFlight = useRef(false);
@@ -210,15 +214,37 @@ export function PrintFormDialog({
             queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true }),
           ),
         );
+        const current =
+          queryClient.getQueryData<Listed<"getShift">>(officeKeys.shift(shift.id)) ?? shift;
+        const products = queryClient.getQueryData<Listed<"listProducts">>(officeKeys.products);
         const inputs = taskFormInputs(
-          queryClient.getQueryData<Listed<"getShift">>(officeKeys.shift(shift.id)) ?? shift,
-          queryClient.getQueryData<Listed<"listProducts">>(officeKeys.products),
+          current,
+          products,
           queryClient.getQueryData<Listed<"listLines">>(officeKeys.lines),
           queryClient.getQueryData<Listed<"listCounterparties">>(officeKeys.counterparties),
           queryClient.getQueryData<OrgProfile>(officeKeys.org),
+          await readPhoto(products?.find((each) => each.id === current.productId)),
         );
         return { box: undefined, pallets: undefined, task: inputs };
       }
+    }
+  }
+
+  /**
+   * The product's photo read again for a press (plan ТОВ): none without one, and
+   * none when it does not read — a photo never stops «Бланк смены».
+   */
+  async function readPhoto(product: OfficeProduct | undefined): Promise<ProductPhoto | null> {
+    if (product === undefined || product.photoChecksum === null) return null;
+    try {
+      const state = await queryClient.fetchQuery({
+        queryKey: officeKeys.productPhoto(product.id),
+        queryFn: () => call((token) => api.getProductPhoto(token, product.id)),
+        staleTime: 0,
+      });
+      return state.photo;
+    } catch {
+      return null;
     }
   }
 

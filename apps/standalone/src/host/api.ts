@@ -46,6 +46,7 @@ import {
   officeUserRecordSchema,
   officeUserSchema,
   orgLogoStateSchema,
+  productPhotoStateSchema,
   orgProfileSchema,
   palletSheetSchema,
   palletSheetsSchema,
@@ -100,6 +101,8 @@ import {
   type OperatorUpdate,
   type OrgLogoPut,
   type OrgLogoState,
+  type ProductPhotoPut,
+  type ProductPhotoState,
   type OrgProfile,
   type OrgProfileUpdate,
   type PalletSheet,
@@ -163,6 +166,10 @@ export interface HostApi {
   getOrgLogo: (token: string) => Promise<OrgLogoState>;
   putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
   deleteOrgLogo: (token: string) => Promise<OrgLogoState>;
+  /** A product's photo (plan ТОВ): administrators and technologists write it; no revision. */
+  getProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
+  putProductPhoto: (token: string, id: string, put: ProductPhotoPut) => Promise<ProductPhotoState>;
+  deleteProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
   listPalletSheets: (token: string) => Promise<PalletSheets>;
   createPalletSheet: (token: string, create: PalletSheetCreate) => Promise<PalletSheet>;
   updatePalletSheet: (token: string, id: string, update: PalletSheetUpdate) => Promise<PalletSheet>;
@@ -380,6 +387,22 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("DELETE", "/v1/office/org/logo", {
         officeToken: token,
         schema: orgLogoStateSchema,
+      }),
+    getProductPhoto: (token, id) =>
+      client.request("GET", `/v1/office/products/${id}/photo`, {
+        officeToken: token,
+        schema: productPhotoStateSchema,
+      }),
+    putProductPhoto: (token, id, put) =>
+      client.request("PUT", `/v1/office/products/${id}/photo`, {
+        body: put,
+        officeToken: token,
+        schema: productPhotoStateSchema,
+      }),
+    deleteProductPhoto: (token, id) =>
+      client.request("DELETE", `/v1/office/products/${id}/photo`, {
+        officeToken: token,
+        schema: productPhotoStateSchema,
       }),
     listPalletSheets: (token) =>
       client.request("GET", "/v1/office/pallet-sheets", {
