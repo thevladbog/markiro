@@ -26,6 +26,7 @@ import {
 } from "./support/office.js";
 import { warnedExportRows } from "./support/export-rows.js";
 import { ACTIVE, freezeToday, PALLET, shiftsSession } from "./support/shifts.js";
+import { pressRowAction } from "./support/row-menu.js";
 
 const testModuleUrl = import.meta.url;
 const TOKEN = "office-session-token";
@@ -87,7 +88,8 @@ async function openDialog(
   prepare(session);
   renderOffice(session, { files });
   fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
-  fireEvent.click(await screen.findByRole("button", { name: `Выгрузка смены ${shift.number}` }));
+  await screen.findAllByRole("button", { name: /^Изменить смену|^Итоги смены|^Выгрузка смены/ });
+  pressRowAction(screen, `Выгрузка смены ${shift.number}`);
   await screen.findByRole("dialog", { name: `Выгрузка смены ${shift.number}` });
   return session;
 }
@@ -947,7 +949,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     fireEvent.click(within(dialog()).getAllByRole("button", { name: "Закрыть" })[1] as HTMLElement);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     session.api.getShiftExportSource.mockReturnValueOnce(new Promise(() => undefined));
-    fireEvent.click(screen.getByRole("button", { name: "Выгрузка смены OCT26-004" }));
+    pressRowAction(screen, "Выгрузка смены OCT26-004");
     await screen.findByRole("dialog", { name: "Выгрузка смены OCT26-004" });
     expect(within(dialog()).getByText("Загрузка…")).toBeTruthy();
     expect(within(dialog()).queryByText(/^Проверяем, какие форматы/)).toBeNull();

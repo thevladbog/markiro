@@ -138,6 +138,7 @@ export function EmployeesPage() {
     },
     {
       key: "actions",
+      stickyEnd: true,
       title: t("office.employees.table.actions"),
       render: (employee) => (
         <RowActions>

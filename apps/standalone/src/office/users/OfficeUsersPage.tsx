@@ -102,6 +102,7 @@ export function OfficeUsersPage() {
     },
     {
       key: "actions",
+      stickyEnd: true,
       title: t("office.users.table.actions"),
       render: (user) => (
         <RowActions>

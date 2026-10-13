@@ -118,3 +118,6 @@ export type { SectionHeaderProps } from "./SectionHeader.js";
 
 export { RadioCard } from "./RadioCard.js";
 export type { RadioCardProps } from "./RadioCard.js";
+
+export { RowActionMenu } from "./RowActionMenu.js";
+export type { RowActionItem, RowActionMenuProps } from "./RowActionMenu.js";

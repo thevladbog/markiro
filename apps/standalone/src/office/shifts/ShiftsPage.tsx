@@ -13,6 +13,7 @@ import {
   FilterBar,
   Input,
   PageHeader,
+  RowActionMenu,
   RowActions,
   Select,
   StatusChip,
@@ -293,6 +294,7 @@ export function ShiftsPage() {
     // Every role reads a shift's figures; the writes are `planShifts`.
     {
       key: "actions",
+      stickyEnd: true,
       title: t("office.shifts.table.actions"),
       render: (shift) => (
         <RowActions>
@@ -326,28 +328,35 @@ export function ShiftsPage() {
               </Button>
             </>
           )}
+          {/* An open shift's plan, close and export are a menu next to its figures: one line per row. */}
           {canPlan && shift.status === "active" && (
-            <>
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.shifts.planNamed", { number: shift.number })}
-                onClick={() => open({ kind: "plan", shift })}
-              >
-                {t("office.shifts.plan")}
-              </Button>
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.shifts.closeNamed", { number: shift.number })}
-                onClick={() => open({ kind: "close", shift })}
-              >
-                {t("office.shifts.close")}
-              </Button>
-            </>
+            <RowActionMenu
+              label={t("office.common.rowActions", { name: shift.number })}
+              items={[
+                {
+                  key: "plan",
+                  label: t("office.shifts.plan"),
+                  ariaLabel: t("office.shifts.planNamed", { number: shift.number }),
+                  onSelect: () => open({ kind: "plan", shift }),
+                },
+                {
+                  key: "export",
+                  label: t("office.shifts.export"),
+                  ariaLabel: t("office.shifts.exportNamed", { number: shift.number }),
+                  onSelect: () => open({ kind: "export", shift }),
+                },
+                {
+                  key: "close",
+                  label: t("office.shifts.close"),
+                  ariaLabel: t("office.shifts.closeNamed", { number: shift.number }),
+                  destructive: true,
+                  onSelect: () => open({ kind: "close", shift }),
+                },
+              ]}
+            />
           )}
           {/* Every role exports (the cloud's `OPERATIONS_READ`, plan ЧЗ); a shift to come has nothing yet. */}
-          {shift.status !== "planned" && (
+          {shift.status !== "planned" && !(canPlan && shift.status === "active") && (
             <Button
               variant="secondary"
               size="compact"

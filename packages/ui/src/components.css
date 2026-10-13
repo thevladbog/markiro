@@ -365,6 +365,13 @@
   cursor: not-allowed;
 }
 
+.mk-row-action-menu__item:hover:not(:disabled),
+.mk-row-action-menu__item:focus-visible {
+  background: var(--surface-panel) !important;
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .mk-select__item[data-highlighted] {
   background: var(--surface-panel);
 }

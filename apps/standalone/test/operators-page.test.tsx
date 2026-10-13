@@ -15,6 +15,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { findRowAction, hasRowAction, pressRowAction } from "./support/row-menu.js";
 
 /** `office-operator.json`, with a role: one badge revoked, one in use. */
 const ANNA: OfficeOperator = {
@@ -172,6 +173,44 @@ describe("office operators", () => {
     localStorage.removeItem("markiro.theme");
   });
 
+  it("keeps a row one button tall: «Изменить» and the «⋯» menu with the rest, the turn-off set apart, the column pinned to the card's right edge", async () => {
+    await openOperators(adminSession());
+    const anna = rowOf("Анна Кузнецова");
+    const buttons = within(anna).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Изменить оператора «Анна Кузнецова»",
+      "Действия: Анна Кузнецова",
+    ]);
+    fireEvent.click(buttons[1] as HTMLElement);
+    const items = within(
+      screen.getByRole("menu", { name: "Действия: Анна Кузнецова" }),
+    ).getAllByRole("menuitem");
+    expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Сменить PIN оператора «Анна Кузнецова»",
+      "Бейджи оператора «Анна Кузнецова»",
+      "Сотрудник оператора «Анна Кузнецова»",
+      "Выключить оператора «Анна Кузнецова»",
+    ]);
+    expect(items.map((item) => item.getAttribute("data-destructive"))).toEqual([
+      null,
+      null,
+      null,
+      "true",
+    ]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    // Turning an operator back on is no loss: not marked.
+    expect(
+      findRowAction(
+        within(rowOf("Глеб Сидоров")),
+        "Включить оператора «Глеб Сидоров»",
+      ).getAttribute("data-destructive"),
+    ).toBeNull();
+    // The actions column stays in reach when the table is wider than its card.
+    const heading = screen.getByRole("columnheader", { name: "Действия" });
+    expect(heading.style.position).toBe("sticky");
+    expect(heading.style.right).toBe("0px");
+  });
+
   it("sits between «Линии» and «Устройства» in an administrator's menu", async () => {
     renderOffice(adminSession());
     await screen.findByRole("link", { name: "Операторы" });
@@ -221,12 +260,8 @@ describe("office operators", () => {
     expect(within(rowOf("Вера Лебедева")).getByText("2 — Без подписи, Смена Б")).toBeTruthy();
     const gleb = rowOf("Глеб Сидоров");
     expect(within(gleb).getByText("Выключен")).toBeTruthy();
-    expect(
-      within(gleb).getByRole("button", { name: "Включить оператора «Глеб Сидоров»" }),
-    ).toBeTruthy();
-    expect(
-      within(anna).getByRole("button", { name: "Выключить оператора «Анна Кузнецова»" }),
-    ).toBeTruthy();
+    expect(hasRowAction(within(gleb), "Включить оператора «Глеб Сидоров»")).toBe(true);
+    expect(hasRowAction(within(anna), "Выключить оператора «Анна Кузнецова»")).toBe(true);
   });
 
   it("adds an operator with the trimmed values and only a hash of the PIN", async () => {
@@ -486,7 +521,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockRejectedValueOnce(refusal("stale_revision", { currentRev: 70 }));
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Сменить PIN оператора «Анна Кузнецова»" }));
+    pressRowAction(screen, "Сменить PIN оператора «Анна Кузнецова»");
     type("PIN", "1357");
     type("Повторите PIN", "1357");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сменить PIN" }));
@@ -499,7 +534,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockRejectedValueOnce(validationFailed("pinPhc"));
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Сменить PIN оператора «Анна Кузнецова»" }));
+    pressRowAction(screen, "Сменить PIN оператора «Анна Кузнецова»");
     type("PIN", "1357");
     type("Повторите PIN", "1357");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сменить PIN" }));
@@ -512,7 +547,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockResolvedValue({ ...ANNA, rev: 64 });
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Сменить PIN оператора «Анна Кузнецова»" }));
+    pressRowAction(screen, "Сменить PIN оператора «Анна Кузнецова»");
     expect(
       within(dialog()).getByText(
         "Прежний PIN перестанет работать на станциях, как только они получат изменение.",
@@ -541,7 +576,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockRejectedValueOnce(refusal("stale_revision", { currentRev: 70 }));
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить оператора «Анна Кузнецова»" }));
+    pressRowAction(screen, "Выключить оператора «Анна Кузнецова»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -552,7 +587,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockResolvedValue({ ...ANNA, active: false, rev: 65 });
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить оператора «Анна Кузнецова»" }));
+    pressRowAction(screen, "Выключить оператора «Анна Кузнецова»");
     expect(
       within(dialog()).getByText(
         "Оператор «Анна Кузнецова» больше не сможет входить на станциях, как только они получат изменение. Включить его снова можно здесь же.",
@@ -574,7 +609,7 @@ describe("office operators", () => {
     const session = adminSession();
     session.api.updateOperator.mockResolvedValue({ ...GLEB, active: true, rev: 66 });
     await openOperators(session);
-    fireEvent.click(screen.getByRole("button", { name: "Включить оператора «Глеб Сидоров»" }));
+    pressRowAction(screen, "Включить оператора «Глеб Сидоров»");
     expect(
       within(dialog()).getByText(
         "Оператор «Глеб Сидоров» снова сможет входить на станциях по своему PIN и бейджам, как только они получат изменение.",

@@ -11,6 +11,7 @@ import {
   FilterBar,
   Input,
   PageHeader,
+  RowActionMenu,
   RowActions,
   Select,
   StatusChip,
@@ -163,28 +164,10 @@ export function TemplatesPage() {
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.templates.table.actions"),
       render: (template) => (
         <RowActions>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t(
-              template.enabled ? "office.templates.disableNamed" : "office.templates.enableNamed",
-              { name: template.name },
-            )}
-            onClick={() => open({ kind: "state", template })}
-          >
-            {t(template.enabled ? "office.templates.disable" : "office.templates.enable")}
-          </Button>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.templates.categoriesNamed", { name: template.name })}
-            onClick={() => open({ kind: "categories", template })}
-          >
-            {t("office.templates.categories")}
-          </Button>
           {/* A stock template keeps its name and layout (the host refuses a change): it is copied. */}
           {template.stock ? (
             <Button
@@ -205,6 +188,29 @@ export function TemplatesPage() {
               {t("office.templates.edit")}
             </Button>
           )}
+          <RowActionMenu
+            label={t("office.common.rowActions", { name: template.name })}
+            items={[
+              {
+                key: "categories",
+                label: t("office.templates.categories"),
+                ariaLabel: t("office.templates.categoriesNamed", { name: template.name }),
+                onSelect: () => open({ kind: "categories", template }),
+              },
+              {
+                key: "state",
+                label: t(template.enabled ? "office.templates.disable" : "office.templates.enable"),
+                ariaLabel: t(
+                  template.enabled
+                    ? "office.templates.disableNamed"
+                    : "office.templates.enableNamed",
+                  { name: template.name },
+                ),
+                destructive: template.enabled,
+                onSelect: () => open({ kind: "state", template }),
+              },
+            ]}
+          />
         </RowActions>
       ),
     });

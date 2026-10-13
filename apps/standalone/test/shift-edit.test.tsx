@@ -34,6 +34,8 @@ import {
   shownOn,
   valueOn,
 } from "./support/select.js";
+import { pressRowAction } from "./support/row-menu.js";
+import { findRowAction } from "./support/row-menu.js";
 
 const TOKEN = "office-session-token";
 
@@ -97,7 +99,7 @@ async function openEdit(session: FakeOfficeSession, shift: OfficeShift): Promise
 
 async function openPlan(session: FakeOfficeSession, shift: OfficeShift): Promise<string> {
   await openShifts(session);
-  fireEvent.click(screen.getByRole("button", { name: `Изменить план смены ${shift.number}` }));
+  pressRowAction(screen, `Изменить план смены ${shift.number}`);
   const name = `План смены ${shift.number}`;
   await screen.findByRole("dialog", { name });
   return name;
@@ -125,12 +127,20 @@ describe("office shifts: changing a shift", () => {
         within(shiftRow("OCT26-004"))
           .getAllByRole("button")
           .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Итоги смены OCT26-004", "Действия: OCT26-004"]);
+      // The rest of an active shift's actions are the «⋯» menu's items, the close set apart.
+      const items = findRowAction(within(shiftRow("OCT26-004")), "Изменить план смены OCT26-004");
+      expect(items.getAttribute("role")).toBe("menuitem");
+      expect(
+        within(screen.getByRole("menu"))
+          .getAllByRole("menuitem")
+          .map((item) => [item.getAttribute("aria-label"), item.getAttribute("data-destructive")]),
       ).toEqual([
-        "Итоги смены OCT26-004",
-        "Изменить план смены OCT26-004",
-        "Закрыть смену OCT26-004",
-        "Выгрузка смены OCT26-004",
+        ["Изменить план смены OCT26-004", null],
+        ["Выгрузка смены OCT26-004", null],
+        ["Закрыть смену OCT26-004", "true"],
       ]);
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       // A closed shift only reads: its figures and its export (plan ЧЗ).
       expect(
         within(shiftRow(CLOSED.number))
@@ -315,7 +325,7 @@ describe("office shifts: changing a shift", () => {
       plannedQty: 1500,
       expectedRev: 71,
     });
-    fireEvent.click(screen.getByRole("button", { name: "Изменить план смены OCT26-004" }));
+    pressRowAction(screen, "Изменить план смены OCT26-004");
     fireEvent.change(field(name, "План, шт"), { target: { value: "" } });
     fireEvent.click(save(name));
     await waitFor(() =>

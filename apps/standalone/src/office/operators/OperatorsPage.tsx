@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   PageHeader,
+  RowActionMenu,
   RowActions,
   StatusChip,
   Table,
@@ -129,9 +130,10 @@ export function OperatorsPage() {
     },
     {
       key: "actions",
+      stickyEnd: true,
       title: t("office.operators.table.actions"),
       render: (operator) => (
-        <RowActions className="office-row-actions--many">
+        <RowActions>
           <Button
             variant="secondary"
             size="compact"
@@ -140,45 +142,47 @@ export function OperatorsPage() {
           >
             {t("office.operators.edit")}
           </Button>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.operators.pinNamed", { name: operator.name })}
-            onClick={() => open({ kind: "pin", operator })}
-          >
-            {t("office.operators.pin")}
-          </Button>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.operators.badgesNamed", { name: operator.name })}
-            onClick={() => open({ kind: "badges", operatorId: operator.id, notice: null })}
-          >
-            {t("office.operators.badgesOpen")}
-          </Button>
-          {employees.isSuccess && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.operators.employeeNamed", { name: operator.name })}
-              onClick={() => open({ kind: "employee", operator })}
-            >
-              {t("office.operators.employee")}
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t(
-              operator.active
-                ? "office.operators.deactivateNamed"
-                : "office.operators.activateNamed",
-              { name: operator.name },
-            )}
-            onClick={() => open({ kind: "access", operator })}
-          >
-            {t(operator.active ? "office.operators.deactivate" : "office.operators.activate")}
-          </Button>
+          <RowActionMenu
+            label={t("office.common.rowActions", { name: operator.name })}
+            items={[
+              {
+                key: "pin",
+                label: t("office.operators.pin"),
+                ariaLabel: t("office.operators.pinNamed", { name: operator.name }),
+                onSelect: () => open({ kind: "pin", operator }),
+              },
+              {
+                key: "badges",
+                label: t("office.operators.badgesOpen"),
+                ariaLabel: t("office.operators.badgesNamed", { name: operator.name }),
+                onSelect: () => open({ kind: "badges", operatorId: operator.id, notice: null }),
+              },
+              ...(employees.isSuccess
+                ? [
+                    {
+                      key: "employee",
+                      label: t("office.operators.employee"),
+                      ariaLabel: t("office.operators.employeeNamed", { name: operator.name }),
+                      onSelect: () => open({ kind: "employee", operator }),
+                    },
+                  ]
+                : []),
+              {
+                key: "access",
+                label: t(
+                  operator.active ? "office.operators.deactivate" : "office.operators.activate",
+                ),
+                ariaLabel: t(
+                  operator.active
+                    ? "office.operators.deactivateNamed"
+                    : "office.operators.activateNamed",
+                  { name: operator.name },
+                ),
+                destructive: operator.active,
+                onSelect: () => open({ kind: "access", operator }),
+              },
+            ]}
+          />
         </RowActions>
       ),
     },
