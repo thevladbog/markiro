@@ -28,7 +28,8 @@ function unexpected(name: keyof HostApi): Promise<never> {
  * Every method a test did not stub fails loudly; `officeLogout` succeeds,
  * `getOrgLogo` answers no logo (a label preview reads it, #703),
  * `getProductPhoto` no photo (a shift task form reads it, plan ТОВ),
- * `getDeviceShifts` answers no shifts, and `listConflicts`,
+ * `getDeviceShifts` answers no shifts, `conflictStatus` and `listDisplacements`
+ * tell of nothing (the station's link reads them, plan КНФ), and `listConflicts`,
  * `listShiftExceptions` and `listShiftRejections` answer none (the shift card
  * and the export dialog read them in passing, plan КНФ).
  */
@@ -155,8 +156,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
-    conflictStatus: vi.fn<HostApi["conflictStatus"]>(() => unexpected("conflictStatus")),
-    listDisplacements: vi.fn<HostApi["listDisplacements"]>(() => unexpected("listDisplacements")),
+    // The station's link reads them at every revision (plan КНФ): nothing to tell by default.
+    conflictStatus: vi.fn<HostApi["conflictStatus"]>(async () => ({ reviewed: [] })),
+    listDisplacements: vi.fn<HostApi["listDisplacements"]>(async () => ({
+      items: [],
+      more: false,
+    })),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.

@@ -528,7 +528,11 @@ describe("the retention of a shift's records on the station", () => {
       "SELECT m.name AS name FROM sqlite_master m WHERE m.type = 'table' AND EXISTS " +
         "(SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name = 'shift_id') ORDER BY m.name",
     ).map((row) => row["name"]);
-    expect(withShift).toEqual([...RETAINED_TABLES].sort());
+    // Kept on purpose (plan КНФ, migration `0016`): the displaced scans are few, and the
+    // newest one is the cursor of the next read from the host, which must never go back — a
+    // deleted cursor would bring every displacement back as new.
+    const notRetained = ["floor_displacements"];
+    expect(withShift).toEqual([...RETAINED_TABLES, ...notRetained].sort());
   });
 
   // The pallets of a shift (plan ПЛ-Ц) go with it: the pallet, its exception, one pairing's,

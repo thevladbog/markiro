@@ -63,22 +63,25 @@ describe("the outbox's counts", () => {
       unsent: 2,
       rejected: 4,
       conflicts: 5,
+      displaced: 0,
     });
     await expect(readOutboxStatus(executor, OTHER_DEVICE)).resolves.toEqual({
       unsent: 7,
       rejected: 8,
       conflicts: 9,
+      displaced: 0,
     });
     await expect(readOutboxStatus(executor, OTHER_HOST)).resolves.toEqual({
       unsent: 7,
       rejected: 8,
       conflicts: 9,
+      displaced: 0,
     });
   });
 
   it("are all zero for an empty outbox and for a pairing with no record", async () => {
     const { db, executor } = openLocalDb();
-    const zero = { unsent: 0, rejected: 0, conflicts: 0 };
+    const zero = { unsent: 0, rejected: 0, conflicts: 0, displaced: 0 };
     await expect(readOutboxStatus(executor, PAIRING)).resolves.toEqual(zero);
     put(db, OTHER_DEVICE, 3, null);
     await expect(readOutboxStatus(executor, PAIRING)).resolves.toEqual(zero);
@@ -334,6 +337,39 @@ describe("resolved records (plan ОЧ)", () => {
       unsent: 0,
       rejected: 1,
       conflicts: 1,
+      displaced: 0,
+    });
+  });
+});
+
+describe("displaced scans (plan КНФ)", () => {
+  it("count the pairing's open displacements, not the resolved ones nor another pairing's", async () => {
+    const { db, executor } = openLocalDb();
+    const insert = db.prepare(
+      "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
+        "code_hash, detected_at, winner_shift_number, winner_same_device, winner_scanned_at, " +
+        "learned_at, resolved_at, resolved_by) VALUES (?, ?, ?, ?, 'shift-1', ?, " +
+        "'2026-10-08T07:12:03Z', 'OCT26-005', 0, '2026-10-08T06:00:50.000Z', " +
+        "'2026-10-11T08:00:00.000Z', ?, ?)",
+    );
+    const hash = "0".repeat(63) + "7";
+    insert.run(PAIRING.hostId, PAIRING.deviceId, "c-1", "r-1", hash, null, null);
+    insert.run(PAIRING.hostId, PAIRING.deviceId, "c-2", "r-2", hash, null, null);
+    insert.run(
+      PAIRING.hostId,
+      PAIRING.deviceId,
+      "c-3",
+      "r-3",
+      hash,
+      "2026-10-11T08:30:00.000Z",
+      "op-1",
+    );
+    insert.run(OTHER_DEVICE.hostId, OTHER_DEVICE.deviceId, "c-1", "r-1", hash, null, null);
+    await expect(readOutboxStatus(executor, PAIRING)).resolves.toEqual({
+      unsent: 0,
+      rejected: 0,
+      conflicts: 0,
+      displaced: 2,
     });
   });
 });
