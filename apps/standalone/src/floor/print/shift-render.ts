@@ -66,7 +66,8 @@ export async function renderShiftSheet(
       sscc: fields.sscc,
       productPrintName: fields["product.printName"],
       gtin14: product.gtin14,
-      egaisCode: null,
+      // As the shift froze it (plan ТОВ); a sheet refuses a code of another form than 19 digits.
+      egaisCode: product.egaisCode ?? null,
       productionDate: shift.copy.productionDate,
       shelfLifeDays: product.shelfLifeDays,
       boxCount: count(fields["qty.boxes"]),

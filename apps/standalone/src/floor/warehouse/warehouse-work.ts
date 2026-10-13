@@ -257,7 +257,8 @@ export function sourceFields(source: WarehouseSource): LabelFields {
     productName: source.product.name,
     productPrintName: source.product.printName,
     gtin14: source.product.gtin14,
-    egaisCode: null,
+    // The code the record's shift froze (plan ТОВ), as its first label printed it.
+    egaisCode: source.product.egaisCode ?? null,
     shelfLifeDays: source.product.shelfLifeDays,
     operatorName: source.operatorName,
     counterpartyName: source.counterpartyName,
