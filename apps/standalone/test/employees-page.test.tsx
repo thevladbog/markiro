@@ -11,6 +11,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { chooseText, chooseValue, optionTexts } from "./support/select.js";
 
 const ANNA_OP: OfficeOperator = {
   id: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
@@ -90,8 +91,7 @@ function dialog(): HTMLElement {
 }
 
 function optionsOf(label: string): string[] {
-  const select = screen.getByLabelText(label);
-  return [...select.querySelectorAll("option")].map((option) => option.textContent ?? "");
+  return optionTexts(label);
 }
 
 describe("office employees", () => {
@@ -122,9 +122,9 @@ describe("office employees", () => {
     type("Поиск", "0042");
     expect(names()).toEqual(["Анна Кузнецова"]);
     type("Поиск", "");
-    fireEvent.change(screen.getByLabelText("Доступ к станции"), { target: { value: "unlinked" } });
+    chooseText("Доступ к станции", "Нет оператора");
     expect(names()).toEqual(["Пётр Иванов"]);
-    fireEvent.change(screen.getByLabelText("Доступ к станции"), { target: { value: "archived" } });
+    chooseText("Доступ к станции", "В архиве");
     expect(names()).toEqual(["Ольга Белова"]);
     type("Поиск", "нет такого");
     expect(screen.getByText("Никого не найдено.")).toBeTruthy();
@@ -162,7 +162,7 @@ describe("office employees", () => {
       "Новый оператор…",
       "100 · Борис Орлов (выключен)",
     ]);
-    fireEvent.change(screen.getByLabelText("Оператор"), { target: { value: BORIS_OP.id } });
+    chooseValue("Оператор", BORIS_OP.id);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Связать" }));
     await screen.findByText("Сотрудник «Пётр Иванов» связан с оператором 100 · Борис Орлов.");
     expect(session.api.updateEmployee).toHaveBeenCalledWith(expect.any(String), PETR.id, {
@@ -192,7 +192,7 @@ describe("office employees", () => {
         name: "Оператор сотрудника «Пётр Иванов»",
       }),
     );
-    fireEvent.change(screen.getByLabelText("Оператор"), { target: { value: BORIS_OP.id } });
+    chooseValue("Оператор", BORIS_OP.id);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Связать" }));
     expect(
       await within(dialog()).findByText("Этот оператор уже связан с другим сотрудником"),
@@ -274,7 +274,7 @@ describe("office employees", () => {
         name: "Оператор сотрудника «Пётр Иванов»",
       }),
     );
-    fireEvent.change(screen.getByLabelText("Оператор"), { target: { value: "new" } });
+    chooseValue("Оператор", "new");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Создать оператора" }));
     // The operator form opens with the employee's name and role.
     await screen.findByRole("dialog", { name: "Новый оператор" });
@@ -324,7 +324,7 @@ describe("office employees", () => {
         name: "Оператор сотрудника «Пётр Иванов»",
       }),
     );
-    fireEvent.change(screen.getByLabelText("Оператор"), { target: { value: "new" } });
+    chooseValue("Оператор", "new");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Создать оператора" }));
     await screen.findByRole("dialog", { name: "Новый оператор" });
     type("Табельный номер", "0077");

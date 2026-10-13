@@ -1477,6 +1477,25 @@ describe("геометрия тега", () => {
 });
 
 describe("Table", () => {
+  it("keeps headings on one line unless the column asks for a wrapping heading", () => {
+    render(
+      <Table
+        columns={[
+          { key: "login", title: "Табельный номер", wrapTitle: true },
+          { key: "name", title: "Полное имя" },
+        ]}
+        rows={[{ login: "001", name: "Иван" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Табельный номер" }).style.whiteSpace).toBe(
+      "normal",
+    );
+    expect(screen.getByRole("columnheader", { name: "Полное имя" }).style.whiteSpace).toBe(
+      "nowrap",
+    );
+  });
+
   it("renders an overflow-x:auto wrapper and font-mono nowrap numeric cells", () => {
     const { container } = render(
       <Table

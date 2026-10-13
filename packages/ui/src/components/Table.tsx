@@ -19,6 +19,8 @@ export interface TableColumn<Row> {
   mono?: boolean;
   /** Разрешить перенос строк в ячейках (по умолчанию nowrap) */
   wrap?: boolean;
+  /** Разрешить перенос заголовка (по умолчанию nowrap): для узкой колонки с длинным названием */
+  wrapTitle?: boolean;
   sortable?: boolean;
   render?: (row: Row) => ReactNode;
 }
@@ -116,7 +118,7 @@ export function Table<Row>({
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
                     cursor: column.sortable ? "pointer" : "default",
-                    whiteSpace: "nowrap",
+                    whiteSpace: column.wrapTitle ? "normal" : "nowrap",
                     width: column.width,
                     userSelect: "none",
                   }}
