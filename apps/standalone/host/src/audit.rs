@@ -13,6 +13,10 @@ pub mod actions {
     pub const HOST_RESTORE: &str = "host.restore";
     /// An administrator resumed the stations' facts a restore held.
     pub const HOST_RESTORE_RESUME: &str = "host.restore.resume";
+    /// The host copied its database before this build's pending migrations
+    /// (plan ОБН-1); `failed` when the copy or the migrations failed. The
+    /// host is the actor, the copy its target.
+    pub const HOST_UPGRADE: &str = "host.upgrade";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";

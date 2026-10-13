@@ -338,6 +338,25 @@ pub async fn make_copy_with_identity(
     make_copy_in(conn, dir, at, trigger, host_id, &tag, identity).await
 }
 
+/// [`make_copy_with_identity`] with the name's `tag` given: the copy before
+/// pending migrations (plan ОБН-1) is named for them
+/// (`…-pre-upgrade-<from>-<to>.db`). A copy of that name already in `dir` is
+/// never replaced.
+#[allow(clippy::too_many_arguments)]
+pub async fn make_copy_with_identity_tagged(
+    conn: &mut SqliteConnection,
+    dir: &Path,
+    at: OffsetDateTime,
+    trigger: BackupTrigger,
+    host_id: &str,
+    tag: &str,
+    identity: Option<Arc<HostIdentity>>,
+    guard: Arc<dyn KeyFileGuard>,
+) -> Result<Manifest, Failure> {
+    let identity = identity.map(|identity| (identity, guard));
+    make_copy_in(conn, dir, at, trigger, host_id, tag, identity).await
+}
+
 /// An identity and the guard that closes it beside a copy.
 type Attached = Option<(Arc<HostIdentity>, Arc<dyn KeyFileGuard>)>;
 

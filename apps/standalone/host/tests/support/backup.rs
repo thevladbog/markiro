@@ -6,7 +6,7 @@ use markiro_host::backup::copy::{copy_name, manifest_path, sha256_file, Manifest
 use markiro_host::backup::identity::HostIdentity;
 use markiro_host::config::HostPaths;
 use markiro_proto::backup::BackupTrigger;
-use sqlx::{ConnectOptions, SqliteConnection};
+use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use time::OffsetDateTime;
 
 use super::app::TestApp;
@@ -84,4 +84,28 @@ pub fn write_identity(dir: &Path, host_id: &str) -> HostIdentity {
     .unwrap();
     markiro_host::tls::TlsIdentity::load_or_create(&paths.tls_dir(), host_id).unwrap();
     HostIdentity::read(&paths).unwrap()
+}
+
+/// `host.db` of the data folder `dir` with every migration of this build but
+/// `version` (plan ОБН-1): what a host of the previous build left behind.
+pub async fn database_without(dir: &Path, version: i64) {
+    let path = HostPaths::new(dir).database_file();
+    let mut conn = markiro_host::db::options(&path)
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: markiro_host::db::MIGRATOR
+            .iter()
+            .filter(|migration| migration.version != version)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut conn)
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
 }
