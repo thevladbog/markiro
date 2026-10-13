@@ -677,14 +677,66 @@ async fn an_office_request_records_the_version_of_its_device() {
         ))
         .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, list) = admin.call("GET", "/v1/office/devices", None).await;
-    let own = list
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|device| device["appVersion"] == "0.5.0")
-        .cloned();
-    assert!(own.is_some(), "{list}");
+    let own: String = sqlx::query_scalar("SELECT id FROM devices WHERE key_hash = ?")
+        .bind(markiro_host::secrets::key_hash(&admin.key))
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        version_of(&admin, &own).await,
+        (
+            json!("0.5.0"),
+            json!(markiro_proto::PROTOCOL_VERSION),
+            json!(admin.app.state.timestamp())
+        )
+    );
+}
+
+/// `GET /v1/device` with `key`, naming `version` and speaking `protocol`.
+async fn ask_device_speaking(admin: &Admin, key: &str, version: &str, protocol: u32) -> StatusCode {
+    let builder = with_device(
+        axum::http::Request::builder()
+            .method("GET")
+            .uri("/v1/device")
+            .header(markiro_proto::PROTOCOL_HEADER, protocol.to_string()),
+        key,
+    )
+    .header(markiro_proto::APP_VERSION_HEADER, version);
+    admin.app.send(empty(builder)).await.0
+}
+
+/// The first report records its time even when it names the version the
+/// device paired with, and a new protocol under the same version is a new
+/// report (plan ОБН-1).
+#[tokio::test]
+async fn the_first_report_and_a_new_protocol_are_recorded() {
+    let admin = admin().await;
+    let (station, key) = pair_device(&admin.app, "station").await;
+    let current = markiro_proto::PROTOCOL_VERSION;
+    assert_eq!(version_of(&admin, &station).await.2, Value::Null);
+
+    let first = admin.app.state.timestamp();
+    assert_eq!(
+        ask_device_speaking(&admin, &key, "0.1.0", current).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.1.0"), json!(current), json!(first))
+    );
+
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let older = markiro_proto::MIN_PROTOCOL_VERSION;
+    assert_ne!(older, current);
+    let second = admin.app.state.timestamp();
+    assert_eq!(
+        ask_device_speaking(&admin, &key, "0.1.0", older).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        version_of(&admin, &station).await,
+        (json!("0.1.0"), json!(older), json!(second))
+    );
 }
 
 /// A device that names the version already stored takes no write lock for

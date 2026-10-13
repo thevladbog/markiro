@@ -109,8 +109,8 @@ async fn authenticate(
             {
                 sqlx::query(
                     "UPDATE devices SET app_version = ?, protocol = ?, version_seen_at = ? \
-                     WHERE id = ? AND (version_seen_at IS NULL OR app_version IS NOT ? \
-                     OR protocol IS NOT ?)",
+                     WHERE id = ? AND revoked_at IS NULL AND (version_seen_at IS NULL \
+                     OR app_version IS NOT ? OR protocol IS NOT ?)",
                 )
                 .bind(&reported_version)
                 .bind(reported_protocol)

@@ -305,6 +305,16 @@ fn device_line_and_record_fixtures_round_trip() {
     );
 }
 
+/// `device-record-legacy.json` (a host before plan ОБН-1) pins the Zod
+/// schema's tolerance only: no Rust code reads a device record (the host
+/// writes it), and the Rust type requires `protocol`. A future Rust reader of
+/// an older host's list must make it optional first.
+#[test]
+fn the_legacy_device_record_is_a_zod_tolerance_pin() {
+    let legacy = fixture("device-record-legacy.json");
+    assert!(serde_json::from_value::<DeviceRecord>(legacy).is_err());
+}
+
 /// The header every request of the shell carries (plan ОБН-1): one name for
 /// the shell, which sends it, and the host, which records it.
 #[test]
