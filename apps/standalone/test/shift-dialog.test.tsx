@@ -27,6 +27,7 @@ import {
   chooseValueOn,
   isSelectTrigger,
   optionTextsOn,
+  settleSelect,
   shownOn,
   valueOn,
 } from "./support/select.js";
@@ -153,7 +154,8 @@ describe("office shifts: planning a shift", () => {
     ]);
     expect(options("Линия")).toEqual(["Линия 2", "Линия 10"]);
     expect(options("Контрагент")).toEqual(["Не выбран", "ООО «Северный берег»"]);
-    expect(options("Шаблон этикетки короба")).toEqual(["Сначала выберите товар"]);
+    expect(options("Шаблон этикетки короба")).toEqual([]);
+    expect(shownOn(field("Шаблон этикетки короба"))).toBe("Сначала выберите товар");
     expect((field("Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(true);
   });
 
@@ -162,10 +164,7 @@ describe("office shifts: planning a shift", () => {
     set("Товар", MILK.id);
     expect(valueOf("Вместимость короба, шт")).toBe("12");
     expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
-    expect(options("Шаблон этикетки короба")).toEqual([
-      "Коробка 58×40",
-      "Молоко 100×72",
-    ]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40", "Молоко 100×72"]);
     // Water has no preference and its group no default; milk's template is not of its group.
     set("Вместимость короба, шт", "6");
     set("Товар", WATER.id);
@@ -185,7 +184,7 @@ describe("office shifts: planning a shift", () => {
     await openShifts(session);
     fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
     await screen.findByRole("dialog", { name: "Новая смена" });
-    await waitFor(() => expect(options("Товар")).toHaveLength(3));
+    await waitFor(() => expect(options("Товар")).toHaveLength(2));
     expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
     act(() => answer(DEFAULTS));
     await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
@@ -303,6 +302,7 @@ describe("office shifts: planning a shift", () => {
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     expect(valueOf("Шаблон этикетки паллеты")).toBe("");
     set("Коробов на паллете", "");
+    await settleSelect();
     submit();
     await waitFor(() =>
       expect(messageOf("Шаблон этикетки паллеты")).toBe("Выберите шаблон этикетки паллеты"),
@@ -353,9 +353,7 @@ describe("office shifts: planning a shift", () => {
       ),
     );
     await waitFor(() =>
-      expect(options("Шаблон этикетки паллеты")).toEqual([
-        "Паллета 100×150 — не подходит",
-      ]),
+      expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150 — не подходит"]),
     );
   });
 
@@ -420,10 +418,7 @@ describe("office shifts: planning a shift", () => {
     await openCreate(session);
     set("Товар", MILK.id);
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    expect(options("Шаблон этикетки паллеты")).toEqual([
-      "Паллета 100×150",
-      "Паллета молочная",
-    ]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150", "Паллета молочная"]);
     set("Товар", WATER.id);
     // Water is not of group 8; the template of the organization still fits.
     expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150"]);
@@ -729,6 +724,7 @@ describe("office shifts: planning a shift", () => {
     session.api.createShift.mockRejectedValue(api("validation_failed", { field: "lineId" }));
     await openCreate(session);
     fillMilk();
+    await settleSelect();
     submit();
     await waitFor(() => expect(messageOf("Линия")).toBe("Линия в архиве. Выберите другую."));
     await waitFor(() => expect(document.activeElement).toBe(field("Линия")));

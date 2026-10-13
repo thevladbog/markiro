@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 
 /**
  * Helpers for `@markiro/ui`'s `Select`, the office's only dropdown: a Radix
@@ -114,3 +114,14 @@ export const optionTexts = (name: Name) => optionTextsOn(selectTrigger(name));
 export const chooseText = (name: Name, text: string) => chooseTextOn(selectTrigger(name), text);
 export const chooseValue = (name: Name, value: string) => chooseValueOn(selectTrigger(name), value);
 export const valueOf = (name: Name) => valueOn(selectTrigger(name));
+
+/**
+ * Lets the select that was just picked finish: Radix hands focus back to the
+ * trigger one macrotask after its list closes. A person is slower than that; a
+ * test that goes on at once and then asks where focus is must wait for it.
+ */
+export async function settleSelect(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
