@@ -110,6 +110,12 @@ test("prepares the installer, its evidence and checksums, and verifies them", as
   assert.equal(prepared.draftName, DRAFT);
   assert.equal(updateDraftName(VERSION), DRAFT);
   assert.throws(() => updateDraftName("0.1"), /not a version/);
+  // At most 9 digits a part, as the app reads a manifest's versions.
+  assert.throws(() => updateDraftName("1234567890.0.0"), /not a version/);
+  assert.equal(
+    updateDraftName("123456789.0.0"),
+    "markiro-standalone-123456789.0.0.update-draft.json",
+  );
 });
 
 test("refuses a bundle with no installer or with two", async () => {
@@ -405,6 +411,8 @@ test("a protocol range that is not one is refused before anything is written", a
     { protocol: 1, minProtocol: 2 },
     { protocol: 3.5, minProtocol: 1 },
     { protocol: 3, minProtocol: undefined },
+    // Past `u32`, the type the host and the app read it as.
+    { protocol: 2 ** 32, minProtocol: 1 },
   ]) {
     const { bundleDir, outputDir } = await bundle("x-setup.exe");
     await assert.rejects(

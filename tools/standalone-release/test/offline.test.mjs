@@ -17,7 +17,7 @@ function lockedCrates(lock) {
 
 /** Crates that speak a network protocol, resolve names or wrap sockets and TLS. */
 const NETWORK =
-  /^(?:reqwest|ureq|curl.*|isahc|surf|attohttpc|hyper.*|h2|h3.*|quinn.*|tungstenite|tokio-tungstenite|async-tungstenite|.*websocket.*|native-tls|openssl.*|hickory.*|trust-dns.*|axum.*|tower-http|tokio-rustls|rustls.*|webpki.*|socket2|mio|if-addrs|url|cookie.*|ipnet|tauri-plugin-.*)$/u;
+  /^(?:reqwest|ureq|curl.*|isahc|surf|attohttpc|hyper.*|h2|h3.*|quinn.*|tungstenite|tokio-tungstenite|async-tungstenite|.*websocket.*|native-tls|openssl.*|hickory.*|trust-dns.*|axum.*|tower-http|tokio-rustls|rustls.*|webpki.*|socket2|mio|if-addrs|url|cookie.*|ipnet|tauri-plugin-.*|tokio-native-tls|async-native-tls|sentry.*|opentelemetry.*|tonic.*|lettre|minreq|tiny_http|actix.*|warp|ssh2|git2|ws)$/u;
 
 // What the workspace links today: the host's own HTTPS server (axum, hyper,
 // tokio-rustls), the shell's client pinned to that host (reqwest with

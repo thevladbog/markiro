@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,11 +20,14 @@ import { findJwk } from "../generate-update-fixtures.mjs";
 import { prepareStandaloneRelease } from "../prepare.mjs";
 import {
   MAX_NOTE_CHARS,
+  assertOutsideRepository,
   buildManifest,
   checkManifest,
   compareVersions,
   manifestFileName,
   parseNotes,
+  readPassphrase,
+  readReleaseKeyset,
   signCompact,
   signUpdate,
   updateFolderName,
@@ -68,6 +81,12 @@ async function release() {
   return { root, releaseDir };
 }
 
+/** A release keyset that lists `publicKey` under `kid`, as `trust-keys.json` would. */
+function keysetOf(publicKey, kid = "upd-2026-1", retiredKids = []) {
+  const { kty, crv, x, y } = publicKey.export({ format: "jwk" });
+  return { keys: [{ kid, jwk: { kty, crv, x, y } }], retiredKids };
+}
+
 /** A fresh release key and its PKCS#8 PEM under the test's passphrase. */
 function releaseKey() {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -92,6 +111,13 @@ test("notes are 1-30 trimmed lines of at most 200 characters, without control ch
     Array.from({ length: 31 }, (_, index) => `строка ${index}`).join("\n"),
     "я".repeat(MAX_NOTE_CHARS + 1),
     "табуляция\tвнутри",
+    "a\u202eb",
+    "a\u2066b",
+    "a\u0085b",
+    "a\u2028b",
+    "a\u007fb",
+    // 101 characters, 202 UTF-16 units: the length Rust and Zod count.
+    "😀".repeat(101),
   ]) {
     assert.throws(() => parseNotes(bad), /notes/u, JSON.stringify(bad.slice(0, 20)));
   }
@@ -143,6 +169,7 @@ test("the manifest is the draft with the owner's channel, date, minimum and note
     ],
     ["a newer minimum", { ...OPTIONS, minUpgradeFrom: "0.4.0" }, /not be newer/u],
     ["no version", { ...OPTIONS, minUpgradeFrom: "0.2" }, /not a version/u],
+    ["ten digits", { ...OPTIONS, minUpgradeFrom: "0.0.1234567890" }, /not a version/u],
   ]) {
     assert.throws(() => buildManifest(DRAFT, options), expected, what);
   }
@@ -152,6 +179,7 @@ test("the manifest is the draft with the owner's channel, date, minimum and note
     ["a range upside down", { ...DRAFT, minProtocol: 5 }],
     ["another product", { ...DRAFT, product: "station" }],
     ["a short hash", { ...DRAFT, installer: { ...DRAFT.installer, sha256: "c".repeat(63) } }],
+    ["a protocol past u32", { ...DRAFT, protocol: 2 ** 32 }],
   ]) {
     assert.throws(() => buildManifest(draft, OPTIONS), /draft|shape/u, what);
   }
@@ -204,6 +232,7 @@ test("signs a prepared release into the folder the customer gets, after checking
     passphrase: PASSPHRASE,
     kid: "upd-2026-1",
     outputDir,
+    keyset: keysetOf(publicKey),
   });
   assert.equal(result.folder, join(outputDir, updateFolderName(VERSION)));
   assert.deepEqual(
@@ -236,9 +265,61 @@ test("signs a prepared release into the folder the customer gets, after checking
       passphrase: PASSPHRASE,
       kid: "upd-2026-1",
       outputDir,
+      keyset: keysetOf(publicKey),
     }),
     /EEXIST/u,
   );
+  // Nothing but the folder is left behind: no partial copy.
+  assert.deepEqual(await readdir(outputDir), [updateFolderName(VERSION)]);
+});
+
+test("a key the build does not list under its id, or a retired one, signs nothing", async () => {
+  const { root, releaseDir } = await release();
+  const { keyPem, publicKey } = releaseKey();
+  const base = { releaseDir, ...OPTIONS, keyPem, passphrase: PASSPHRASE, kid: "upd-2026-1" };
+  for (const [what, keyset, expected] of [
+    ["an empty keyset", { keys: [], retiredKids: [] }, /not a release key of this build/u],
+    ["another kid", keysetOf(publicKey, "upd-2026-2"), /not a release key of this build/u],
+    ["retired", keysetOf(publicKey, "upd-2026-1", ["upd-2026-1"]), /not a release key/u],
+    ["another key under the kid", keysetOf(releaseKey().publicKey), /not the public key/u],
+    [
+      "the kid twice",
+      { keys: [...keysetOf(publicKey).keys, ...keysetOf(publicKey).keys], retiredKids: [] },
+      /not a release key/u,
+    ],
+  ]) {
+    const outputDir = join(root, what);
+    await assert.rejects(signUpdate({ ...base, keyset, outputDir }), expected, what);
+    await assert.rejects(stat(outputDir), { code: "ENOENT" }, what);
+  }
+  // The build's own keyset is the one the command line reads; today it lists no key.
+  const built = await readReleaseKeyset();
+  assert.ok(Array.isArray(built.keys) && Array.isArray(built.retiredKids));
+});
+
+test("a key file with a plain key beside the encrypted one is refused", async () => {
+  const { root, releaseDir } = await release();
+  const { keyPem, privateKey, publicKey } = releaseKey();
+  const plain = privateKey.export({ type: "pkcs8", format: "pem" });
+  for (const [what, pem] of [
+    ["plain first", `${plain}${keyPem}`],
+    ["plain after", `${keyPem}${plain}`],
+    ["text around", `note\n${keyPem}`],
+  ]) {
+    await assert.rejects(
+      signUpdate({
+        releaseDir,
+        ...OPTIONS,
+        keyPem: pem,
+        passphrase: "wrong",
+        kid: "upd-2026-1",
+        outputDir: join(root, what),
+        keyset: keysetOf(publicKey),
+      }),
+      /encrypted PKCS#8/u,
+      what,
+    );
+  }
 });
 
 test("a wrong passphrase, a key without one and an installer changed after prepare.mjs are refused, and nothing is written", async () => {
@@ -374,4 +455,136 @@ test("importing the module runs nothing, and CI never signs", async () => {
     workflow,
     /sign-update|generate-update-fixtures|update-key|STANDALONE_UPDATE/u,
   );
+});
+
+test("the manifest's own check refuses each field that is not the spec's", () => {
+  const good = buildManifest(DRAFT, OPTIONS);
+  assert.deepEqual(checkManifest(good), good);
+  for (const [what, change] of Object.entries({
+    "v 2": (m) => (m.v = 2),
+    "another product": (m) => (m.product = "station"),
+    "a ten-digit version": (m) => (m.version = "1234567890.0.0"),
+    "a channel": (m) => (m.channel = "nightly"),
+    "a date": (m) => (m.releasedAt = "2026-11-02"),
+    "a short commit": (m) => (m.sourceSha = "b".repeat(39)),
+    "an upper-case commit": (m) => (m.sourceSha = "B".repeat(40)),
+    "another installer name": (m) => (m.installer.name = "setup.exe"),
+    "an upper-case hash": (m) => (m.installer.sha256 = "C".repeat(64)),
+    "an empty installer": (m) => (m.installer.sizeBytes = 0),
+    "a fractional size": (m) => (m.installer.sizeBytes = 1.5),
+    "a protocol as text": (m) => (m.protocol = "4"),
+    "a protocol past u32": (m) => {
+      m.protocol = 2 ** 32;
+      m.minProtocol = 1;
+    },
+    "a zero minimum": (m) => (m.minProtocol = 0),
+    "a range upside down": (m) => (m.minProtocol = 5),
+    "a newer minimum version": (m) => (m.minUpgradeFrom = "0.4.0"),
+    "no notes": (m) => (m.notes = []),
+    "31 notes": (m) => (m.notes = Array.from({ length: 31 }, (_, index) => `n${index}`)),
+    "an empty note": (m) => (m.notes = [""]),
+    "an untrimmed note": (m) => (m.notes = [" a"]),
+    "a long note": (m) => (m.notes = ["я".repeat(MAX_NOTE_CHARS + 1)]),
+    "a note with an override": (m) => (m.notes = ["a\u202eb"]),
+    "a note that is no text": (m) => (m.notes = [7]),
+    "an extra key": (m) => (m.extra = 1),
+    "an extra installer key": (m) => (m.installer.extra = 1),
+    "a missing key": (m) => delete m.notes,
+  })) {
+    const manifest = structuredClone(good);
+    change(manifest);
+    assert.throws(() => checkManifest(manifest), /shape/u, what);
+  }
+});
+
+test("a compact JWS with an empty part or a kid of another form is not verified", () => {
+  const { privateKey, publicKey } = releaseKey();
+  const compact = signCompact(privateKey, "upd-2026-1", buildManifest(DRAFT, OPTIONS));
+  const [header, payload, signature] = compact.split(".");
+  for (const broken of [
+    `${header}..${signature}`,
+    `${header}.${payload}.`,
+    `.${payload}.${signature}`,
+  ]) {
+    assert.throws(() => verifyCompact(publicKey, broken), /compact JWS/u);
+  }
+  const spaced = Buffer.from(
+    JSON.stringify({ typ: "markiro-standalone-update+jws", alg: "ES256", kid: "a kid" }),
+  ).toString("base64url");
+  assert.throws(() => verifyCompact(publicKey, `${spaced}.${payload}.${signature}`), /header/u);
+  assert.throws(
+    () => verifyCompact(publicKey, `${header}.${payload}.${signature}=`),
+    /canonical|compact/u,
+  );
+});
+
+test("a path is outside the repository only when no link and no Git work tree brings it in", async () => {
+  const root = await mkdtemp(join(tmpdir(), "standalone-outside-"));
+  const repository = join(root, "repo");
+  await mkdir(join(repository, "inner"), { recursive: true });
+  const outside = join(root, "outside");
+  await mkdir(outside);
+  assert.equal(
+    await assertOutsideRepository(join(outside, "new", "deeper"), "x", repository),
+    join(await realpath(outside), "new", "deeper"),
+  );
+  await assert.rejects(
+    assertOutsideRepository(join(repository, "inner"), "x", repository),
+    /outside/u,
+  );
+  await assert.rejects(
+    assertOutsideRepository(join(repository, "missing"), "x", repository),
+    /outside/u,
+  );
+  // A link to the repository among the ancestors of a folder not made yet.
+  await symlink(repository, join(root, "link"));
+  await assert.rejects(
+    assertOutsideRepository(join(root, "link", "new", "out"), "the signed update", repository),
+    /the signed update must live outside the repository/u,
+  );
+  // Another Git work tree above the path (the main checkout above a worktree).
+  const checkout = join(root, "checkout");
+  await mkdir(join(checkout, ".git"), { recursive: true });
+  await mkdir(join(checkout, "keys"));
+  await assert.rejects(
+    assertOutsideRepository(join(checkout, "keys", "release.pem"), "the release key", repository),
+    /the release key must live outside the repository/u,
+  );
+});
+
+/** A terminal for `readPassphrase`: records raw mode and takes typed chunks. */
+function fakeTerminal() {
+  const input = new EventEmitter();
+  input.isTTY = true;
+  input.raw = [];
+  input.setRawMode = (on) => input.raw.push(on);
+  input.resume = () => {};
+  input.pause = () => {};
+  input.setEncoding = () => {};
+  const written = [];
+  const output = { write: (text) => written.push(text) };
+  return { input, output, written };
+}
+
+test("the passphrase is typed on a terminal, not echoed, and raw mode is always restored", async () => {
+  const typed = fakeTerminal();
+  const reading = readPassphrase("Фраза: ", typed.input, typed.output);
+  typed.input.emit("data", "ab");
+  typed.input.emit("data", "x\u007fc\r");
+  assert.equal(await reading, "abc");
+  assert.deepEqual(typed.input.raw, [true, false]);
+  assert.deepEqual(typed.written, ["Фраза: ", "\n"]);
+  assert.equal(typed.input.listenerCount("data"), 0);
+  const cancelled = fakeTerminal();
+  const refused = readPassphrase("Фраза: ", cancelled.input, cancelled.output);
+  cancelled.input.emit("data", "ab\u0003");
+  await assert.rejects(refused, /cancelled/u);
+  assert.deepEqual(cancelled.input.raw, [true, false]);
+  const piped = fakeTerminal();
+  piped.input.isTTY = false;
+  await assert.rejects(readPassphrase("Фраза: ", piped.input, piped.output), /terminal only/u);
+  const noRaw = fakeTerminal();
+  noRaw.input.setRawMode = undefined;
+  await assert.rejects(readPassphrase("Фраза: ", noRaw.input, noRaw.output), /terminal only/u);
+  assert.deepEqual(piped.written, []);
 });

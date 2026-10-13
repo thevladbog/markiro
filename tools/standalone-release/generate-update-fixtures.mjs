@@ -96,7 +96,7 @@ export function findJwk(value, kid) {
 
 async function main() {
   const jwk = findJwk(
-    JSON.parse(await readFile(join(TEST_KEYS, "test-private-keys.json"), "utf8")),
+    JSON.parse(await readFile(join(TEST_KEYS, "test-private-keys.json"), "utf8")).update,
     TEST_UPDATE_KID,
   );
   if (jwk === null || typeof jwk.d !== "string") {

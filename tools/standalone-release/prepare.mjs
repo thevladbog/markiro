@@ -30,7 +30,8 @@ export const ROLES = Object.freeze(["host", "station", "office"]);
 /** `Get-AuthenticodeSignature`'s status for a signed and for an unsigned file. */
 export const AUTHENTICODE_STATUSES = Object.freeze(["Valid", "NotSigned"]);
 
-const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+// At most 9 digits a part: the update manifest's versions are read so (`markiro_proto::trust`).
+const VERSION = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/;
 
 export function standaloneInstallerName(version) {
   if (!VERSION.test(version ?? "")) throw new Error(`${String(version)} is not a version`);
@@ -58,7 +59,8 @@ function validateProtocolRange(range) {
     !Number.isSafeInteger(protocol) ||
     !Number.isSafeInteger(minProtocol) ||
     minProtocol < 1 ||
-    minProtocol > protocol
+    minProtocol > protocol ||
+    protocol > 4_294_967_295
   ) {
     throw new Error("the protocol range is invalid: 1 <= minProtocol <= protocol");
   }
