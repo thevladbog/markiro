@@ -3201,6 +3201,58 @@ print of that shift ends `render_failed`. The snapshot keeps its bound of 327 68
 sheet or logo can make the entry `snapshot_too_large`; the station table is unchanged (the
 snapshot is the text of `floor_shifts.snapshot`).
 
+## Shift modes
+
+Plan РЕЖ, part A (`docs/superpowers/plans/2026-10-13-standalone-shift-modes.md`;
+pilot spec §32). A shift is «Агрегация» (`aggregation`, the default) or
+«Проверка» (`validation`); the rules are where they act, this is their map:
+
+- The mode is a field of the shift, not of the line. The office chooses it
+  when it plans a shift («Режим работы», «Office pages»); the host takes it
+  on a create and on an edit of a planned shift only and freezes it when a
+  station opens the shift (an active shift's other mode is `conflict` on
+  `shift_status`, «Shifts»). A validation shift has no pallets and no A4
+  sheet; its box template and capacity stay, unprinted.
+- Entry needs capabilities: since protocol 4 a station names what it works in
+  `ShiftEnter.supports`, and a validation shift requires `validation-v1`; a
+  station that does not name it (protocol 3 sends no body) is refused with
+  `conflict`, `details.constraint = "station_update"`, on every entry
+  («Protocol»).
+- The box rule by mode has two halves: the host's triggers
+  `scans_ok_box_by_mode*` (`0020`) refuse an accepted scan without a box in a
+  shift that is not a validation shift, and the host's code
+  (`facts/scan.rs`) refuses a box in a validation shift («Facts»). The
+  station's tables (`0014`) hold no mode rule; its scan path keeps it
+  («Local database», «Floor work»).
+- The registry of codes is one for both modes: a code accepted in a
+  validation shift is a duplicate in an aggregation shift and the other way
+  round, and the earliest scan owns it (`code_owners.box_id` NULL for a
+  validation owner, no `box_items` row). The office's code search shows such
+  a placement as «Принят без короба» (`checked`, `OfficeCodeItem.boxId`
+  null; `routes/office_codes.rs`, `office-code-card-validation.json`).
+- A validation shift has no exceptions (Р9): no box, pallet or label facts
+  (`facts::admits`, `invalid_record` on `shift_mode`), no «Исключения» on the
+  station, no SSCC blocks.
+- Its close counts codes: `actualQty` is the shift's codes, `closedBoxCount`
+  is 0 (the host refuses any other), no open box can block it («Floor work»,
+  «Facts»); the office's totals are «Принято кодов» from
+  `code_owners_shift_unboxed`.
+- Its exports are flat only: the office offers `shift_txt_flat` and
+  `shift_csv_flat`, the port refuses every box or pallet format
+  («Shift exports»).
+- A shift made on a station (`DeviceShiftCreate`) is created as aggregation;
+  choosing the mode on the station's new-shift steps is part C (owner's
+  decision), as are reprocessing codes of earlier shifts and modes on the
+  handheld. The duplicate print under «Проверка» is part B (protocol 5).
+- Parity with the cloud is held by `test/scan-verdict-parity.test.ts` (every
+  raw scan of the domain's KM fixtures and a line's scanner rows: the same
+  verdict and duplicate key as `validateShiftScan`, in both modes; the one
+  deliberate difference is a serial over `HOST_MAX_SERIAL_BYTES`, unknown
+  here), `test/forms-parity.test.ts` (each task case as a validation shift
+  draws the cloud renderer's bytes) and `test/export-parity.test.ts` (a
+  validation shift's flat TXT and CSV are the domain's bytes for the codes
+  in the cloud's order).
+
 ## Facts
 
 Stage 2a, plan 2a2 (`host/src/facts`). A station sends what happened on the
