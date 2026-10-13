@@ -165,7 +165,7 @@ export function ShiftCardPage() {
     true;
 
   return (
-    <div className="shift-card">
+    <div className="office-stack">
       {back}
       <PageHeader
         title={t("office.shiftCard.title", { number: current.number })}

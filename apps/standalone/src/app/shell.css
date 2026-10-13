@@ -351,12 +351,25 @@
 }
 
 /*
- * A filter bar: one row of controls of one height on one line, bottom edges
- * together (a hint would push its field up, so a filter has none: its hint is
- * the placeholder). A select or a date has the width of its content otherwise.
+ * A filter bar: one row of controls of one height on one line, their tops
+ * together (a hint under one field hangs below the row and moves nothing). A
+ * select or a date has the width of its content otherwise.
  */
+.office-shell__content .mk-filter-bar__controls {
+  align-items: flex-start;
+}
+
 .office-shell__content .mk-filter-bar__controls > .mk-field {
   min-width: 168px;
+}
+
+/*
+ * A button beside the fields starts level with their inputs, not with the
+ * bottom of the tallest field (a hint under one would pull it down): 22px is
+ * a label (16px) and the gap under it (6px).
+ */
+.office-shell__content .mk-filter-bar__controls > .mk-btn {
+  margin-top: 22px;
 }
 
 /* The search field, the one text input of a bar, gets the room its placeholder needs. */
@@ -410,8 +423,12 @@
   color: var(--err-fg);
 }
 
-/* The card of a shift (plan О-Ф): its parts one under another. */
-.shift-card {
+/*
+ * The parts of an office page that is not one card (the card of a shift, the
+ * code search): one under another. It had been `.shift-card`, a name the
+ * station's shift card (below) also takes, with its own padding and gap.
+ */
+.office-stack {
   display: grid;
   gap: 16px;
 }
