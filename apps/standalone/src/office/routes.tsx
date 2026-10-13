@@ -1,6 +1,7 @@
 import type { RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
+import { CodeSearchPage } from "./codes/CodeSearchPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
@@ -37,6 +38,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
+      { path: "codes", element: <CodeSearchPage /> },
       {
         path: "operators",
         element: (

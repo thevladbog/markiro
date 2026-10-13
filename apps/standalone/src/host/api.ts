@@ -10,6 +10,14 @@ import {
 } from "./backups.js";
 import type { HostClient } from "./client.js";
 import {
+  codeSearchPath,
+  officeCodeCardSchema,
+  officeCodePageSchema,
+  type CodeSearchQuery,
+  type OfficeCodeCard,
+  type OfficeCodePage,
+} from "./code-search.js";
+import {
   cloudImportSummarySchema,
   type CloudImportRequest,
   type CloudImportSummary,
@@ -250,6 +258,13 @@ export interface HostApi {
    * one snapshot (plan О-Ф); every office role. A shift without pallets has none.
    */
   getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
+  /**
+   * One page of the placements of codes the criteria find, newest scan
+   * first («Поиск кодов»); every office role. At least one criterion.
+   */
+  searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
+  /** One code's card with its history; `not_found` for a code the host never saw. */
+  getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -691,6 +706,20 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: palletReportRowsSchema,
       }),
+    searchCodes: (token, query) =>
+      client.request("GET", codeSearchPath(query), {
+        officeToken: token,
+        schema: officeCodePageSchema,
+      }),
+    getCodeCard: (token, codeHash) => {
+      if (!/^[0-9a-f]{64}$/.test(codeHash)) {
+        return Promise.reject(new RangeError("not a code hash"));
+      }
+      return client.request("GET", `/v1/office/codes/${codeHash}`, {
+        officeToken: token,
+        schema: officeCodeCardSchema,
+      });
+    },
     getBackups: (token) =>
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
