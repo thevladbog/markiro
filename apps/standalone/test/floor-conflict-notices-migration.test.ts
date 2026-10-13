@@ -105,6 +105,14 @@ describe("migration 0016 over a database of 0013 (plan КНФ)", () => {
     expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
     // The new column and table re-plan nothing the station reads or the retention deletes.
     expect(plans(db)).toEqual(plansBefore);
+    // The office's review is kept only on a record the station resolved.
+    expect(() =>
+      db.prepare("UPDATE outbox SET office_reviewed_at = ? WHERE id = 'conflict'").run(AT),
+    ).toThrow();
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, office_reviewed_at = ? " +
+        "WHERE id = 'conflict'",
+    ).run(AT, AT);
     db.close();
   });
 

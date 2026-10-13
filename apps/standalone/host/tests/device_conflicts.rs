@@ -110,6 +110,16 @@ async fn a_displaced_station_learns_of_its_displacements_after_its_cursor() {
     )
     .await;
     assert_eq!(after["items"], json!([]));
+    // From the start of that second (the nil id): the station reads its newest second again.
+    let (_, second) = list(
+        s.a.key.clone(),
+        format!(
+            "?afterAt={}&afterId=00000000-0000-0000-0000-000000000000",
+            s.detected_at
+        ),
+    )
+    .await;
+    assert_eq!(second["items"][0]["conflictId"], conflict);
     // One end of the cursor without the other, or either end malformed: an instant the host
     // never writes (its text would not order with `detected_at`), an id that is no UUID.
     let upper = conflict.to_uppercase();

@@ -61,6 +61,7 @@ import {
   APPLY_REVIEWED_DISPLACEMENTS_SQL,
   APPLY_REVIEWED_OUTBOX_SQL,
   DISPLACEMENT_CURSOR_SQL,
+  INSERT_DISPLACEMENTS_SQL,
   OPEN_NOTICE_IDS_SQL,
 } from "../src/local/conflict-notices.js";
 import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
@@ -2075,6 +2076,8 @@ describe("the conflict notices' statements (migration 0016, plan КНФ)", () =>
     [DISPLACEMENT_CURSOR_SQL, "floor_displacements_cursor (host_id=? AND device_id=?)"],
     [APPLY_REVIEWED_OUTBOX_SQL, "sqlite_autoindex_outbox_1 (id=?)"],
     [APPLY_REVIEWED_DISPLACEMENTS_SQL, "floor_displacements_open (host_id=? AND device_id=?)"],
+    // The insert reads only its own list.
+    [INSERT_DISPLACEMENTS_SQL, "SCAN j VIRTUAL TABLE"],
     [DISPLACED_COUNT_SQL, "floor_displacements_open (host_id=? AND device_id=?)"],
     [QUEUE_DISPLACED_SQL, "floor_displacements_cursor (host_id=? AND device_id=?)"],
     [
@@ -2095,11 +2098,11 @@ describe("the conflict notices' statements (migration 0016, plan КНФ)", () =>
         plan(sql).some((step) => step.includes(index)),
         `${sql}\n${plan(sql).join("\n")}`,
       ).toBe(true);
-      // `json_each` (alias `r`, `d`) is the statement's own list.
+      // `json_each` (alias `r`, `j`) is the statement's own list.
       expect(
         plan(sql).filter(
           (step) =>
-            step.startsWith("SCAN ") && !step.startsWith("SCAN r ") && !step.startsWith("SCAN d "),
+            step.startsWith("SCAN ") && !step.startsWith("SCAN r ") && !step.startsWith("SCAN j "),
         ),
         sql,
       ).toEqual([]);
@@ -2113,7 +2116,7 @@ describe("the conflict notices' statements (migration 0016, plan КНФ)", () =>
       // A line continuation of a Rust string drops the newline and the next line's indent.
       .replace(/\\\n\s*/g, "");
     const statements = [...new Set(STATEMENTS.map(([sql]) => sql))];
-    expect(statements).toHaveLength(7);
+    expect(statements).toHaveLength(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

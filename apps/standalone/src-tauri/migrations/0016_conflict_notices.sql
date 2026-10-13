@@ -5,7 +5,8 @@
 -- `resolved_by` NULL: no operator of this station did it), so the status bar,
 -- the queue screen and the retention stop counting it. NULL for every record
 -- written before this migration and for every one the office did not review.
-ALTER TABLE outbox ADD COLUMN office_reviewed_at TEXT;
+ALTER TABLE outbox ADD COLUMN office_reviewed_at TEXT
+  CHECK (office_reviewed_at IS NULL OR resolved_at IS NOT NULL);
 
 -- The scans of this station an earlier scan elsewhere took the code from
 -- (`GET /v1/device/displacements`): the host had accepted them, so no receipt

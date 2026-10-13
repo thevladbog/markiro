@@ -1984,12 +1984,15 @@ const NOTICE_APPLY_DISPLACEMENTS: &str =
 const NOTICE_INSERT_DISPLACEMENTS: &str =
     "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, \
      code_hash, box_id, detected_at, winner_shift_number, winner_same_device, \
-     winner_scanned_at, learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, d.value ->> \
-     'conflictId', d.value ->> 'recordId', d.value ->> 'shiftId', d.value ->> 'codeHash', \
-     d.value ->> 'boxId', d.value ->> 'detectedAt', d.value ->> '$.winner.shiftNumber', \
-     (d.value ->> '$.winner.sameDevice') = 1, d.value ->> '$.winner.scannedAt', ?, CASE WHEN \
-     d.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, d.value ->> 'reviewedAt' FROM \
-     json_each(?) AS d WHERE true ON CONFLICT DO NOTHING";
+     winner_scanned_at, learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, j.value ->> \
+     'conflictId', j.value ->> 'recordId', j.value ->> 'shiftId', j.value ->> 'codeHash', \
+     j.value ->> 'boxId', j.value ->> 'detectedAt', j.value ->> '$.winner.shiftNumber', \
+     (j.value ->> '$.winner.sameDevice') = 1, j.value ->> '$.winner.scannedAt', ?, CASE WHEN \
+     j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, j.value ->> 'reviewedAt' FROM \
+     json_each(?) AS j WHERE true ON CONFLICT (host_id, device_id, conflict_id) DO NOTHING ON \
+     CONFLICT (host_id, device_id, record_id) DO UPDATE SET conflict_id = \
+     excluded.conflict_id, detected_at = excluded.detected_at WHERE excluded.detected_at > \
+     floor_displacements.detected_at";
 const DISPLACED_COUNT: &str =
     "SELECT count(*) AS n FROM floor_displacements WHERE host_id = ? AND device_id = ? AND \
      resolved_at IS NULL";
@@ -4215,7 +4218,7 @@ async fn the_conflict_notices_search_an_index() {
         assert!(
             !plan.iter().any(|step| step.starts_with("SCAN ")
                 && !step.starts_with("SCAN r ")
-                && !step.starts_with("SCAN d ")),
+                && !step.starts_with("SCAN j ")),
             "{sql}\n  scans a table: {plan:?}"
         );
         if sql == QUEUE_DISPLACED {
@@ -4240,7 +4243,7 @@ async fn the_conflict_notices_search_an_index() {
         .collect();
     assert!(
         plan.iter()
-            .all(|step| !step.starts_with("SCAN ") || step.starts_with("SCAN d ")),
+            .all(|step| !step.starts_with("SCAN ") || step.starts_with("SCAN j ")),
         "{plan:?}"
     );
 }
@@ -4307,6 +4310,14 @@ async fn migration_0016_keeps_the_outbox_and_adds_the_conflict_notices() {
         table_class("floor_displacements"),
         Some(TableClass::DeviceData)
     );
+    // The office's review is kept only on a record the station resolved.
+    assert!(db
+        .transaction(vec![statement(
+            "UPDATE outbox SET office_reviewed_at = '2026-10-09T09:00:00Z' WHERE id = 'record-1'",
+            json!([]),
+        )])
+        .await
+        .is_err());
     // The office's review needs the instant the station resolved the record at.
     let displaced = |conflict: &str, record: &str, resolved: Value, reviewed: Value| {
         statement(

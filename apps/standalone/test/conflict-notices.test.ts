@@ -16,10 +16,12 @@ import {
 import {
   NOTICE_STATUS_CHUNK,
   readConflictNotices,
+  SECOND_START_ID,
   type NoticeContext,
 } from "../src/local/conflict-notices.js";
 import type { LocalExecutor } from "../src/local/executor.js";
-import { PAIRING, rows, unsentScans } from "./support/floor-work.js";
+import { dismissRecord } from "../src/floor/queue/outbox-recovery.js";
+import { OPERATOR_ID, PAIRING, rows, unsentScans } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -158,7 +160,8 @@ describe("what the host tells the station of its conflicts (plan КНФ)", () =>
     // The next read starts after it, and the same displacement sent again stays one row.
     list.mockResolvedValueOnce(PAGE);
     await readConflictNotices(context(executor, status, list));
-    expect(list).toHaveBeenNthCalledWith(2, { at: FIRST.detectedAt, id: FIRST.conflictId });
+    // From the start of the newest second kept: a later conflict of that second may sort first.
+    expect(list).toHaveBeenNthCalledWith(2, { at: FIRST.detectedAt, id: SECOND_START_ID });
     expect(rows(db, "SELECT count(*) AS n FROM floor_displacements")).toEqual([{ n: 1 }]);
   });
 
@@ -304,5 +307,151 @@ describe("what the host tells the station of its conflicts (plan КНФ)", () =>
     // Another pairing's newest row is no cursor of this one, and its record is not asked after.
     expect(list).toHaveBeenCalledWith(null);
     expect(status).not.toHaveBeenCalled();
+  });
+
+  it("catches a conflict of the newest second kept that the host committed later under a lower id", async () => {
+    const { db, executor } = openLocalDb();
+    const late = displacement(9, { conflictId: "00000000-0000-4000-8000-0000000000aa" });
+    const list = vi
+      .fn<HostApi["listDisplacements"]>()
+      .mockResolvedValueOnce({ items: [displacement(1)], more: false })
+      .mockResolvedValueOnce({ items: [late, displacement(1)], more: false });
+    await readConflictNotices(context(executor, noStatus(), list));
+    await expect(readConflictNotices(context(executor, noStatus(), list))).resolves.toEqual({
+      changed: true,
+    });
+    expect(rows(db, "SELECT conflict_id FROM floor_displacements ORDER BY conflict_id")).toEqual([
+      { conflict_id: late.conflictId },
+      { conflict_id: displacement(1).conflictId },
+    ]);
+  });
+
+  it("moves past a page of records it keeps already, and keeps a restored host's conflict on the record's row", async () => {
+    const { db, executor } = openLocalDb();
+    const kept = Array.from({ length: 100 }, (_, n) => displacement(n + 1));
+    const seed = vi.fn<HostApi["listDisplacements"]>(async () => ({ items: kept, more: false }));
+    await readConflictNotices(context(executor, noStatus(), seed));
+    db.prepare(
+      "UPDATE floor_displacements SET resolved_at = ?, resolved_by = ? WHERE record_id = ?",
+    ).run(AT, OPERATOR_ID, displacement(1).recordId);
+    // A restored host writes the same 100 records again, under new ids and a later instant.
+    const again = kept.map((item, n) => ({
+      ...item,
+      conflictId: `e0000000-0000-4000-8000-${String(n + 1).padStart(12, "0")}`,
+      detectedAt: "2026-10-09T07:00:00Z",
+    }));
+    const fresh = displacement(200, { detectedAt: "2026-10-09T07:00:01Z" });
+    const list = vi
+      .fn<HostApi["listDisplacements"]>()
+      .mockResolvedValueOnce({ items: again, more: true })
+      .mockResolvedValueOnce({ items: [fresh], more: false });
+    await readConflictNotices(context(executor, noStatus(), list));
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenNthCalledWith(2, {
+      at: "2026-10-09T07:00:00Z",
+      id: again.at(-1)?.conflictId,
+    });
+    expect(rows(db, "SELECT count(*) AS n FROM floor_displacements")).toEqual([{ n: 101 }]);
+    // The record's row moved to the newer conflict and kept who resolved it.
+    expect(
+      rows(
+        db,
+        "SELECT conflict_id, detected_at, resolved_by FROM floor_displacements WHERE record_id = ?",
+        displacement(1).recordId,
+      ),
+    ).toEqual([
+      {
+        conflict_id: again[0]?.conflictId,
+        detected_at: "2026-10-09T07:00:00Z",
+        resolved_by: OPERATOR_ID,
+      },
+    ]);
+    // The next read starts at the newest second it keeps now.
+    const next = vi.fn<HostApi["listDisplacements"]>(async () => NONE);
+    await readConflictNotices(context(executor, noStatus(), next));
+    expect(next).toHaveBeenCalledWith({ at: "2026-10-09T07:00:01Z", id: SECOND_START_ID });
+  });
+
+  it("stops at a page that says more but holds nothing", async () => {
+    const { executor } = openLocalDb();
+    const list = vi.fn<HostApi["listDisplacements"]>(async () => ({ items: [], more: true }));
+    await expect(readConflictNotices(context(executor, noStatus(), list))).resolves.toEqual({
+      changed: false,
+    });
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a record an operator resolved while the host answered as they resolved it", async () => {
+    const { db, executor } = openLocalDb();
+    const [record = ""] = await unsentScans(executor, 1);
+    conflicted(db, [record]);
+    const status = vi.fn<HostApi["conflictStatus"]>(async () => {
+      await dismissRecord(
+        {
+          local: executor,
+          pairing: PAIRING,
+          operatorId: OPERATOR_ID,
+          newId: () => "x",
+          now: () => NOW,
+        },
+        record,
+      );
+      return { reviewed: [{ recordId: record, reviewedAt: "2026-10-11T07:00:00Z" }] };
+    });
+    await expect(readConflictNotices(context(executor, status))).resolves.toEqual({
+      changed: false,
+    });
+    expect(rows(db, "SELECT resolved_by, office_reviewed_at FROM outbox")).toEqual([
+      { resolved_by: OPERATOR_ID, office_reviewed_at: null },
+    ]);
+  });
+
+  it("touches only this pairing's conflicting records and displacements", async () => {
+    const { db, executor } = openLocalDb();
+    const [conflict = "", reopened = ""] = await unsentScans(executor, 2);
+    conflicted(db, [conflict, reopened]);
+    const list = vi.fn<HostApi["listDisplacements"]>(async () => ({
+      items: [displacement(1)],
+      more: false,
+    }));
+    // Another pairing holds a displacement of the same record id.
+    db.prepare(
+      "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
+        "code_hash, detected_at, winner_shift_number, winner_same_device, winner_scanned_at, " +
+        "learned_at) VALUES (?, ?, 'c-other', ?, 's', ?, ?, 'N', 0, ?, ?)",
+    ).run(
+      OTHER_PAIRING.hostId,
+      OTHER_PAIRING.deviceId,
+      displacement(1).recordId,
+      FIRST.codeHash,
+      AT,
+      AT,
+      AT,
+    );
+    const status = vi.fn<HostApi["conflictStatus"]>(async () => {
+      // A restore's reconciliation reopened one record meanwhile: it is no conflict now.
+      db.prepare(
+        "UPDATE outbox SET outcome = NULL, outcome_details = NULL, acked_at = NULL WHERE id = ?",
+      ).run(reopened);
+      return {
+        reviewed: [conflict, reopened, displacement(1).recordId].map((recordId) => ({
+          recordId,
+          reviewedAt: "2026-10-11T07:00:00Z",
+        })),
+      };
+    });
+    await readConflictNotices(context(executor, status, list));
+    expect(rows(db, "SELECT id, resolved_at FROM outbox ORDER BY id")).toEqual([
+      { id: conflict, resolved_at: NOW.toISOString() },
+      { id: reopened, resolved_at: null },
+    ]);
+    expect(
+      rows(db, "SELECT device_id, resolved_at FROM floor_displacements ORDER BY device_id"),
+    ).toEqual(
+      [
+        { device_id: PAIRING.deviceId, resolved_at: NOW.toISOString() },
+        { device_id: OTHER_PAIRING.deviceId, resolved_at: null },
+      ].sort((a, b) => a.device_id.localeCompare(b.device_id)),
+    );
   });
 });

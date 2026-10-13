@@ -30,7 +30,11 @@ export const APPLY_REVIEWED_OUTBOX_SQL =
   "WHERE outbox.id = r.value ->> 'recordId' AND +outbox.host_id = ? AND +outbox.device_id = ? " +
   "AND +outbox.outcome = 'conflict' AND outbox.resolved_at IS NULL";
 
-/** The same for displacements; parameters as `APPLY_REVIEWED_OUTBOX_SQL`. */
+/**
+ * The same for displacements; parameters as `APPLY_REVIEWED_OUTBOX_SQL`. The
+ * planner walks the pairing's open displacements (their partial index) and
+ * matches each against the list: both are few.
+ */
 export const APPLY_REVIEWED_DISPLACEMENTS_SQL =
   "UPDATE floor_displacements SET resolved_at = ?, office_reviewed_at = r.value ->> 'reviewedAt' " +
   "FROM json_each(?) AS r WHERE floor_displacements.host_id = ? " +
@@ -43,20 +47,35 @@ export const DISPLACEMENT_CURSOR_SQL =
   "ORDER BY detected_at DESC, conflict_id DESC LIMIT 1";
 
 /**
- * The displacements the host sent, each once (by conflict, and by record: a
- * restored host writes a conflict again under a new id). Parameters: host id,
- * device id, the instant, the instant again, the JSON list. One the office
- * reviewed already comes resolved, by nobody of this station.
+ * The displacements the host sent, each once. The same conflict again changes
+ * nothing; the same record under a new conflict (a restored host writes it
+ * again under a new id and a later instant) keeps its row and its
+ * resolution and only moves to the newer conflict, so the cursor of the next
+ * read moves on. One the office reviewed already comes resolved, by nobody of
+ * this station. Parameters: host id, device id, the instant, the instant
+ * again, the JSON list.
  */
 export const INSERT_DISPLACEMENTS_SQL =
   "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
   "code_hash, box_id, detected_at, winner_shift_number, winner_same_device, winner_scanned_at, " +
-  "learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, d.value ->> 'conflictId', " +
-  "d.value ->> 'recordId', d.value ->> 'shiftId', d.value ->> 'codeHash', d.value ->> 'boxId', " +
-  "d.value ->> 'detectedAt', d.value ->> '$.winner.shiftNumber', " +
-  "(d.value ->> '$.winner.sameDevice') = 1, d.value ->> '$.winner.scannedAt', ?, " +
-  "CASE WHEN d.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, d.value ->> 'reviewedAt' " +
-  "FROM json_each(?) AS d WHERE true ON CONFLICT DO NOTHING";
+  "learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, j.value ->> 'conflictId', " +
+  "j.value ->> 'recordId', j.value ->> 'shiftId', j.value ->> 'codeHash', j.value ->> 'boxId', " +
+  "j.value ->> 'detectedAt', j.value ->> '$.winner.shiftNumber', " +
+  "(j.value ->> '$.winner.sameDevice') = 1, j.value ->> '$.winner.scannedAt', ?, " +
+  "CASE WHEN j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, j.value ->> 'reviewedAt' " +
+  "FROM json_each(?) AS j WHERE true " +
+  "ON CONFLICT (host_id, device_id, conflict_id) DO NOTHING " +
+  "ON CONFLICT (host_id, device_id, record_id) DO UPDATE SET conflict_id = excluded.conflict_id, " +
+  "detected_at = excluded.detected_at WHERE excluded.detected_at > floor_displacements.detected_at";
+
+/**
+ * The first id of all: a read starts at the beginning of the newest second it
+ * keeps. The host stamps a conflict in whole seconds and names it by a random
+ * id, so a conflict committed later in that second may sort before the
+ * newest one kept; reading the whole second again (each row is kept once)
+ * never skips it.
+ */
+export const SECOND_START_ID = "00000000-0000-0000-0000-000000000000";
 
 const idRow = z.object({ id: z.string() });
 const cursorRow = z.object({ detected_at: z.string(), conflict_id: z.string() });
@@ -76,7 +95,7 @@ function olderHost(error: unknown): boolean {
 
 /**
  * What the host tells this station of its conflicts (plan КНФ): first the
- * displacements after the newest one kept, a page at a time, each kept once
+ * displacements from the newest second kept on, a page at a time, each kept once
  * (one the office reviewed already comes resolved); then, of every record
  * whose conflict or displacement nobody resolved, the ones the office
  * reviewed, in parts of `NOTICE_STATUS_CHUNK` — resolved here with the
@@ -90,16 +109,19 @@ export async function readConflictNotices(context: NoticeContext): Promise<{ cha
   const key = [pairing.hostId, pairing.deviceId];
   let changed = false;
   try {
+    const [newest] = await local.query(DISPLACEMENT_CURSOR_SQL, key, cursorRow);
+    let after: { at: string; id: string } | null =
+      newest === undefined ? null : { at: newest.detected_at, id: SECOND_START_ID };
     for (;;) {
-      const [cursor] = await local.query(DISPLACEMENT_CURSOR_SQL, key, cursorRow);
-      const page = await context.listDisplacements(
-        cursor === undefined ? null : { at: cursor.detected_at, id: cursor.conflict_id },
-      );
-      if (page.items.length > 0) {
+      const page = await context.listDisplacements(after);
+      const last = page.items.at(-1);
+      if (last !== undefined) {
         changed = (await keep(context, page.items)) || changed;
+        // The next page follows this one's last row, whatever the station kept of it.
+        after = { at: last.detectedAt, id: last.conflictId };
       }
       // A page that says more but holds nothing would ask the same cursor forever.
-      if (!page.more || page.items.length === 0) break;
+      if (!page.more || last === undefined) break;
     }
     const open = await local.query(OPEN_NOTICE_IDS_SQL, [...key, ...key], idRow);
     const ids = open.map((row) => row.id).sort();
@@ -111,14 +133,15 @@ export async function readConflictNotices(context: NoticeContext): Promise<{ cha
       if (reviewed.length === 0) continue;
       const at = context.now().toISOString();
       const list = JSON.stringify(reviewed);
-      await local.transaction([
+      const [records = 0, displacements = 0] = await local.transaction([
         { sql: APPLY_REVIEWED_OUTBOX_SQL, values: [at, list, pairing.hostId, pairing.deviceId] },
         {
           sql: APPLY_REVIEWED_DISPLACEMENTS_SQL,
           values: [at, list, pairing.hostId, pairing.deviceId],
         },
       ]);
-      changed = true;
+      // A record a person resolved meanwhile is left as they resolved it.
+      changed = records + displacements > 0 || changed;
     }
   } catch (error) {
     if (olderHost(error)) return { changed };

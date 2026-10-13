@@ -449,7 +449,8 @@ developers only.
 
 Migration `0016_conflict_notices.sql` (plan КНФ; `0014`–`0015` are plan
 РЕЖ's) adds `outbox.office_reviewed_at` — the host's instant of the office's
-review of a record's conflict, NULL for every record before it — and
+review of a record's conflict, NULL for every record before it and only on a
+record the station resolved (`CHECK`) — and
 `floor_displacements` (`DeviceData`): the scans of this station an earlier
 scan elsewhere took the code from, one row per conflict and pairing and one
 per record (`floor_displacements_record`, so a conflict a restored host
@@ -4219,9 +4220,13 @@ What the host tells the station of its conflicts (plan КНФ,
 `src/local/conflict-notices.ts`) is read by the link's own scheduler
 (`noticeReader`, `src/app/host-link.ts`) at the link's first watch, at every
 revision and on reconnect, retried like the other reads; a host without the
-routes (`not_found`) is no failure. First the displacements after the newest
-kept (`GET /v1/device/displacements`, a page at a time, each kept once; one
-the office reviewed already comes resolved); then, of every record whose
+routes (`not_found`) is no failure. First the displacements from the start of the
+newest second kept (`GET /v1/device/displacements` with the nil id: the host
+stamps whole seconds and random ids, so a conflict committed later in that
+second may sort first), a page at a time after each page's last row, each
+kept once (the same record under a restored host's new conflict keeps its
+row and resolution and moves to the newer conflict, so the cursor moves on;
+one the office reviewed already comes resolved); then, of every record whose
 conflict or displacement nobody resolved, in parts of 200, the ones the
 office reviewed (`POST /v1/device/conflicts/status`): the record is resolved
 by the station itself (`dismissed`, `resolved_at` its clock, `resolved_by`
@@ -4235,7 +4240,9 @@ the status bar counts them («Вытеснено кодов»). The floor's own 
 (`floor_codes`, `floor_scans.conflict`, `floor_boxes.needs_fix`) are left as
 they were, and a station's «Разобрано» never reaches the host (as in the
 cloud). Known limits: a displacement is heard at the next revision or
-reconnect, not at once; a restored host no longer knows the conflicts after
+reconnect, not at once; a host clock that goes back can still hide one; a
+shift the retention purged before its displacement arrived shows no SSCC or
+number; a restored host no longer knows the conflicts after
 its copy, so those rows can only be settled on the station.
 
 The status bar also warns of the serials left (`readShiftStock`): the boxes'
