@@ -23,6 +23,7 @@ import {
   KNOWN_NOTE_CODES,
   NOTE_ENTITIES,
   NOTE_FIELDS,
+  RULE_CLEARED_FIELDS,
   NOTE_PURPOSES,
   NOTE_REASONS,
   noteText,
@@ -384,7 +385,7 @@ describe("«Перенос из облака»", () => {
 
     expect(await screen.findByText("ООО «Атолл», ИНН 7701234567, GLN 4600682000010")).toBeTruthy();
     expect(screen.queryByText(/не совпадает с файлом/)).toBeNull();
-    expect(valueOf("Контрольная сумма")).toBe("sha256:99628cca…");
+    expect(valueOf("Контрольная сумма")).toBe("sha256:d4401554…");
     expect(valueOf("Организация в облаке")).not.toBe("");
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row");
@@ -401,7 +402,7 @@ describe("«Перенос из облака»", () => {
     expect(
       screen.getByText("Номера смен продолжат облачные: NOV26 → 1, OCT26 → 7, SEP26 → 41."),
     ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Замечания выгрузки: 26" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Замечания выгрузки: 27" })).toBeTruthy();
     expect(
       screen.getByText(
         "Шаблон #0d0d0000 не перенесён: это А4-лист паллеты, а автоном переносит только термоэтикетки.",
@@ -1020,6 +1021,29 @@ describe("the notes of the export tool", () => {
     expect(say({ code: "sscc_prefix_shared", issuerPrefix: "460068200", extension: 1 })).toBe(
       "Под префиксом организации 460068200 (паллеты) номера выдаёт и другой арендатор облака; выгрузку сделали вопреки этому. До первой смены автонома тот арендатор должен быть остановлен, а его счётчик переведён за окно автонома, иначе SSCC повторятся.",
     );
+    // Plan ТОВ: a field cleared by the standalone's rule says why in its own words.
+    expect(
+      say({
+        code: "product_value_cleared",
+        id: "0e0e0000-0000-4000-8000-000000000003",
+        field: "egaisCode",
+      }),
+    ).toBe(
+      "Товар «Молоко (старая карточка)»: код ЕГАИС не перенесён — в автономе он есть только у товаров группы 15 (пиво и пивные напитки).",
+    );
+    expect(
+      say({
+        code: "product_value_cleared",
+        id: "0e0e0000-0000-4000-8000-000000000001",
+        field: "defaultCounterpartyId",
+      }),
+    ).toBe(
+      "Товар «Молоко 3,2% 0,9 л»: контрагент по умолчанию не перенесён — этого контрагента нет в файле.",
+    );
+    // A format-1 file still names them as lost fields.
+    expect(say({ code: "product_fields_lost", field: "egaisCode", count: 1 })).toBe(
+      "Не переносится «код ЕГАИС» у товаров: 1.",
+    );
     expect(say({ code: "something_new" })).toBe("Замечание «something_new».");
     // A word the tool grows before the office knows it is shown as it stands, not as a missing text.
     expect(
@@ -1049,6 +1073,7 @@ describe("the notes of the export tool", () => {
     );
     expect(sorted(NOTE_ENTITIES)).toEqual(sorted(Object.keys(words.entities)));
     expect(sorted(NOTE_FIELDS)).toEqual(sorted(Object.keys(words.fields)));
+    expect(sorted(RULE_CLEARED_FIELDS)).toEqual(sorted(Object.keys(words.ruleCleared)));
     expect(sorted(NOTE_REASONS)).toEqual(sorted(Object.keys(words.reasons)));
     expect(sorted(NOTE_PURPOSES)).toEqual(sorted(Object.keys(words.purposes)));
   });

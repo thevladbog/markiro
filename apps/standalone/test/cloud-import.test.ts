@@ -84,10 +84,42 @@ describe("the cloud export file", () => {
       kind: "problem",
       problem: "format",
     });
-    expect(await readCloudExportFile(changed((file) => (file.formatVersion = 2)))).toEqual({
+    expect(await readCloudExportFile(changed((file) => (file.formatVersion = 3)))).toEqual({
       kind: "problem",
       problem: "version",
     });
+  });
+
+  it("reads a file of format 1, made before plan ТОВ, whose products carry no EGAIS code or default counterparty", async () => {
+    const older = JSON.parse(GOLDEN) as Record<string, unknown>;
+    older.formatVersion = 1;
+    const payload = older.payload as { products: Record<string, unknown>[] };
+    for (const product of payload.products) {
+      delete product.egaisCode;
+      delete product.defaultCounterpartyId;
+    }
+    older.checksum = await fileChecksum(older);
+    const read = await readCloudExportFile(JSON.stringify(older));
+    expect(read.kind).toBe("ok");
+    if (read.kind !== "ok") return;
+    const request = cloudImportRequest(read.file, IMPORT_ID, true);
+    expect(request.formatVersion).toBe(1);
+    // Read as none: the host keeps no code or counterparty for them.
+    expect(
+      request.payload.products.every(
+        (each) => each.egaisCode === null && each.defaultCounterpartyId === null,
+      ),
+    ).toBe(true);
+  });
+
+  it("carries a beer product's EGAIS code and default counterparty to the host (format 2)", async () => {
+    const file = await golden();
+    expect(file.formatVersion).toBe(2);
+    const beer = file.payload.products.find((each) => each.chzProductGroupCode === 15);
+    expect([beer?.egaisCode, beer?.defaultCounterpartyId]).toEqual([
+      "0150320000001234567",
+      "0c0c0000-0000-4000-8000-000000000001",
+    ]);
   });
 
   it("refuses a file whose checksum matches but whose shape does not", async () => {
@@ -133,7 +165,7 @@ describe("the cloud export file", () => {
     };
     const request = cloudImportRequest(await golden(), IMPORT_ID, true);
     const answer = await createHostApi(client).importFromCloud("office-session-token", request);
-    expect(answer.products).toBe(3);
+    expect(answer.products).toBe(4);
     expect(sent).toEqual([
       {
         method: "POST",
@@ -178,9 +210,9 @@ afterEach(() => {
 });
 
 describe("the checksum is the tool's, byte for byte", () => {
-  it("is the golden file's own checksum, sha256:99628cca...469a", async () => {
+  it("is the golden file's own checksum, sha256:d4401554...26e7", async () => {
     const parsed = JSON.parse(GOLDEN) as Record<string, unknown>;
-    expect(parsed.checksum).toMatch(/^sha256:99628cca[0-9a-f]{52}469a$/);
+    expect(parsed.checksum).toMatch(/^sha256:d4401554[0-9a-f]{52}26e7$/);
     expect(await fileChecksum(parsed)).toBe(parsed.checksum);
   });
 

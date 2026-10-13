@@ -15,8 +15,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CategoryTemplateDefaultInput, Secret, TemplatePurpose};
 
-/// The import file's `formatVersion` this build reads.
-pub const CLOUD_IMPORT_FORMAT_VERSION: u32 = 1;
+/// The import file's `formatVersion` the tool writes: 2 since plan ТОВ (a
+/// product's EGAIS code and default counterparty).
+pub const CLOUD_IMPORT_FORMAT_VERSION: u32 = 2;
+
+/// Every `formatVersion` this build reads: a file of format 1, already made
+/// at a client's, stays good (its products carry neither new field).
+pub const CLOUD_IMPORT_FORMAT_VERSIONS: [u32; 2] = [1, 2];
 
 /// The import, or its trial (`dryRun`: every check and every write, then a
 /// rollback). `importId`, a lower-case hyphenated UUID the office makes up
@@ -129,6 +134,12 @@ pub struct CloudProduct {
     pub shelf_life_days: Option<u32>,
     pub default_box_template_id: Option<String>,
     pub default_pallet_template_id: Option<String>,
+    /// The EGAIS code (plan ТОВ, format 2): only with ЧЗ group 15.
+    #[serde(default)]
+    pub egais_code: Option<String>,
+    /// A counterparty of the same file (plan ТОВ, format 2).
+    #[serde(default)]
+    pub default_counterparty_id: Option<String>,
     pub archived: bool,
 }
 

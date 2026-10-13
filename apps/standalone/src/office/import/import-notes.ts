@@ -57,6 +57,18 @@ export const NOTE_FIELDS: ReadonlySet<string> = new Set([
   "externalRef",
   "photo",
   "defaultCounterparty",
+  "defaultCounterpartyId",
+]);
+
+/**
+ * The fields the tool clears by the standalone's rule rather than a bound
+ * (plan ТОВ): an EGAIS code outside ЧЗ group 15 or blank, a default
+ * counterparty the file left out. Their `product_value_cleared` note says why
+ * in words of its own (`office.cloudImport.ruleCleared`).
+ */
+export const RULE_CLEARED_FIELDS: ReadonlySet<string> = new Set([
+  "egaisCode",
+  "defaultCounterpartyId",
 ]);
 export const NOTE_REASONS: ReadonlySet<string> = new Set([
   "gln",
@@ -124,7 +136,11 @@ export function noteText(t: TFunction, note: ExportNote, file: CloudExportFile):
   const reason = text(note.reason);
   const field = text(note.field);
   const extension = note.extension === 1 ? "pallet" : "box";
-  return t(`office.cloudImport.notes.${note.code}`, {
+  const key =
+    note.code === "product_value_cleared" && RULE_CLEARED_FIELDS.has(field)
+      ? `ruleCleared.${field}`
+      : `notes.${note.code}`;
+  return t(`office.cloudImport.${key}`, {
     number: text(note.number),
     name: text(note.name),
     entity: worded(t, "entities", NOTE_ENTITIES, entity),

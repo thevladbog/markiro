@@ -1,10 +1,10 @@
 {
   "format": "markiro-cloud-export",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "tool": "standalone-export/1",
   "exportedAt": "2026-10-09T18:30:00.000Z",
   "rehearsal": false,
-  "checksum": "sha256:99628cca2f1715e1744c2c07fd887bd62236634926fe98c6880516e3a494469a",
+  "checksum": "sha256:d440155471a406e3cfff1e04c3eee3305cf1a73169e5323bc764e767bcd826e7",
   "source": {
     "tenantId": "imp-test-atoll",
     "tenantName": "ООО «Атолл»"
@@ -148,6 +148,8 @@
         "shelfLifeDays": 10,
         "defaultBoxTemplateId": "0d0d0000-0000-4000-8000-000000000002",
         "defaultPalletTemplateId": null,
+        "egaisCode": null,
+        "defaultCounterpartyId": null,
         "archived": false
       },
       {
@@ -161,6 +163,8 @@
         "shelfLifeDays": null,
         "defaultBoxTemplateId": null,
         "defaultPalletTemplateId": "0d0d0000-0000-4000-8000-000000000003",
+        "egaisCode": null,
+        "defaultCounterpartyId": null,
         "archived": false
       },
       {
@@ -174,7 +178,24 @@
         "shelfLifeDays": null,
         "defaultBoxTemplateId": null,
         "defaultPalletTemplateId": null,
+        "egaisCode": null,
+        "defaultCounterpartyId": null,
         "archived": true
+      },
+      {
+        "id": "0e0e0000-0000-4000-8000-000000000005",
+        "gtin14": "04607001234562",
+        "name": "Пиво светлое 0,5 л",
+        "printName": null,
+        "chzProductGroupCode": 15,
+        "boxCapacity": 20,
+        "palletBoxCapacity": 60,
+        "shelfLifeDays": 180,
+        "defaultBoxTemplateId": null,
+        "defaultPalletTemplateId": null,
+        "egaisCode": "0150320000001234567",
+        "defaultCounterpartyId": "0c0c0000-0000-4000-8000-000000000001",
+        "archived": false
       }
     ],
     "operators": [
@@ -359,6 +380,11 @@
       "count": 2
     },
     {
+      "code": "product_value_cleared",
+      "id": "0e0e0000-0000-4000-8000-000000000001",
+      "field": "defaultCounterpartyId"
+    },
+    {
       "code": "text_changed",
       "entity": "products",
       "id": "0e0e0000-0000-4000-8000-000000000002",
@@ -380,14 +406,14 @@
       "templateId": "0d0d0000-0000-4000-8000-000000000004"
     },
     {
+      "code": "product_value_cleared",
+      "id": "0e0e0000-0000-4000-8000-000000000003",
+      "field": "egaisCode"
+    },
+    {
       "code": "product_dropped",
       "id": "0e0e0000-0000-4000-8000-000000000004",
       "reason": "gtin"
-    },
-    {
-      "code": "product_fields_lost",
-      "field": "egaisCode",
-      "count": 1
     },
     {
       "code": "product_fields_lost",

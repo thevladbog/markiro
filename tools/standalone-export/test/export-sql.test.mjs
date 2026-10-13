@@ -112,8 +112,9 @@ test(
         "INSERT INTO org_pallet_sheet_template_defaults (tenant_id, chz_product_group_code, template_id) VALUES ('imp-test-atoll', 8, '0d0d0000-0000-4000-8000-000000000007')",
       ]);
 
-      // What a product loses on the way: the two causes the fixture has no
-      // row for are added here (a default counterparty, a photo).
+      // What a product loses on the way: a photo, which the fixture has no
+      // row for, is added here; the EGAIS code and the default counterparty
+      // move over since plan ТОВ (format 2), so they are no loss any more.
       const withExtras = exportAfter(env, [
         "INSERT INTO media_assets (id, owner_tenant_id, object_key, content_type, byte_size, checksum) VALUES ('0aaa0000-0000-4000-8000-000000000001', 'imp-test-atoll', 'imp-test/photo.jpg', 'image/jpeg', 1, 'x');",
         "INSERT INTO product_images (tenant_id, product_id, asset_id) VALUES ('imp-test-atoll', '0e0e0000-0000-4000-8000-000000000004', '0aaa0000-0000-4000-8000-000000000001');",
@@ -121,7 +122,7 @@ test(
       ]);
       assert.deepEqual(
         withExtras.products.map((product) => product.lost),
-        [["price"], ["externalRef"], ["egaisCode"], ["defaultCounterparty", "photo"]],
+        [["price"], ["externalRef"], [], ["photo"], []],
       );
 
       // The other tenant's active shift and stale station did not count;

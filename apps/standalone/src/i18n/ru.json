@@ -1506,7 +1506,8 @@
         "egaisCode": "код ЕГАИС",
         "externalRef": "внешний код",
         "photo": "фото",
-        "defaultCounterparty": "контрагент по умолчанию"
+        "defaultCounterparty": "контрагент по умолчанию",
+        "defaultCounterpartyId": "контрагент по умолчанию"
       },
       "reasons": {
         "gln": "GLN не из 13 цифр",
@@ -1564,6 +1565,10 @@
         "operators": "операторы",
         "counterparties": "контрагенты",
         "unknown": "записи"
+      },
+      "ruleCleared": {
+        "egaisCode": "Товар {{record}}: код ЕГАИС не перенесён — в автономе он есть только у товаров группы 15 (пиво и пивные напитки).",
+        "defaultCounterpartyId": "Товар {{record}}: контрагент по умолчанию не перенесён — этого контрагента нет в файле."
       }
     },
     "backups": {
