@@ -149,10 +149,11 @@ pub async fn bootstrap(
         .map_err(ApiError::internal)?;
     // The built-in trial starts with the wizard (plan ЛЦ-2, spec §3.4),
     // once, with the INN the wizard took (it goes into the activation
-    // request).
+    // request). Migration 0030 seeds the clock's one row: without it the
+    // host would come up with no trial at all, so the wizard fails instead.
     let started_at =
         i64::try_from(now.unix_timestamp_nanos() / 1_000_000).map_err(ApiError::internal)?;
-    sqlx::query(
+    let trial = sqlx::query(
         "UPDATE license_clock SET trial_started_at = coalesce(trial_started_at, ?), \
          trial_inn = coalesce(trial_inn, ?) WHERE id = 1",
     )
@@ -161,6 +162,9 @@ pub async fn bootstrap(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    if trial.rows_affected() != 1 {
+        return Err(ApiError::internal("the license clock row is missing"));
+    }
 
     // The templates first: the organization's defaults refer to them.
     let mut template_ids: Vec<String> = Vec::with_capacity(templates.len());

@@ -119,6 +119,18 @@ async fn the_tables_refuse_what_no_verified_file_holds() {
             )
             .await,
         ),
+        ("quotas that are not JSON", {
+            let sql = INSERT.replacen("'{}', '{}'", "'x', '{}'", 1);
+            sqlx::query(&sql)
+                .bind("6d1f0a52-3c4b-4e8f-9a1d-000000000008")
+                .bind(8_i64)
+                .bind(2_i64)
+                .bind(0_i64)
+                .bind("demo")
+                .execute(&app.state.pool)
+                .await
+                .map(|_| ())
+        }),
     ] {
         let error = result.expect_err(name);
         assert!(error.to_string().contains("CHECK"), "{name}: {error}");
