@@ -23,12 +23,12 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 /// The shift's exceptions, newest first; ?1 the shift, ?2 the limit. An
-/// undo's serial is its target scan's (a scan of the box, the code and the
-/// instant the undo names; `scans_code_hash` finds it).
+/// undo's serial is its code's: every scan of one hash carries the same
+/// serial, so any scan of it answers (`scans_code_hash` finds one), even when
+/// the undo arrived before the scan it names.
 pub const EXCEPTIONS_SQL: &str = "SELECT * FROM ( \
      SELECT e.id, 'box' AS subject, e.kind, e.box_id AS subject_id, b.sscc, \
-       (SELECT s.serial FROM scans s WHERE s.code_hash = e.code_hash AND s.box_id = e.box_id \
-        AND s.scanned_at = e.target_scanned_at AND s.verdict = 'ok' LIMIT 1) AS serial, \
+       (SELECT s.serial FROM scans s WHERE s.code_hash = e.code_hash LIMIT 1) AS serial, \
        e.reason_code, e.reason_text, e.device_id, d.name AS device_name, \
        o.name AS operator_name, e.occurred_at, e.received_at \
      FROM box_exceptions e JOIN boxes b ON b.id = e.box_id JOIN devices d ON d.id = e.device_id \

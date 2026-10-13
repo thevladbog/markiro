@@ -3,9 +3,9 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    add_operator, admin, box_closed, box_exception, box_id, code_hash, fact, instant, issue_block,
-    issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pallet_closed, pallet_id,
-    pallet_sscc, receipts, record_id, shift_setup,
+    add_operator, admin, box_closed, box_exception, box_id, code_hash, empty, fact, instant,
+    issue_block, issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pallet_closed,
+    pallet_id, pallet_sscc, receipts, record_id, request, shift_setup, sscc, with_device,
 };
 
 const BLOCK: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
@@ -51,6 +51,9 @@ async fn a_shifts_exceptions_name_their_box_or_pallet_reason_station_and_operato
                 "reasonText": "Паллета упала", "occurredAt": instant(70, 0) }),
     );
     pallet_apart["operatorId"] = json!(operator);
+    // Box 1's label printed again, by no operator.
+    let mut reprint = box_exception("reprint", &box_id(1), &instant(30, 0));
+    reprint["reasonCode"] = json!("damaged_label");
     let answered = receipts(
         &admin.app,
         &floor.key,
@@ -80,6 +83,7 @@ async fn a_shifts_exceptions_name_their_box_or_pallet_reason_station_and_operato
                 &shift,
                 ok_scan(4, &box_id(3), &instant(50, 0)),
             ),
+            fact(&record_id(9), "box_exception", &shift, reprint),
             undo_record,
             fact(
                 &record_id(7),
@@ -112,19 +116,32 @@ async fn a_shifts_exceptions_name_their_box_or_pallet_reason_station_and_operato
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body["items"].as_array().unwrap();
-    assert_eq!(body["total"], 2);
+    assert_eq!(body["total"], 3);
     // Each row is its exception's own: the pallet's first, then the box's.
     let pallet_exception: String = sqlx::query_scalar("SELECT id FROM pallet_exceptions")
         .fetch_one(&admin.app.state.pool)
         .await
         .unwrap();
-    let box_exception: String = sqlx::query_scalar("SELECT id FROM box_exceptions")
-        .fetch_one(&admin.app.state.pool)
-        .await
-        .unwrap();
+    let box_exception_id = |kind: &'static str| {
+        let pool = admin.app.state.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT id FROM box_exceptions WHERE kind = ?")
+                .bind(kind)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
     assert_eq!(
-        (items[0]["id"].clone(), items[1]["id"].clone()),
-        (json!(pallet_exception), json!(box_exception))
+        items
+            .iter()
+            .map(|item| item["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            json!(pallet_exception),
+            json!(box_exception_id("undo").await),
+            json!(box_exception_id("reprint").await)
+        ]
     );
     let strip_id = |item: &Value| {
         let mut item = item.clone();
@@ -146,8 +163,129 @@ async fn a_shifts_exceptions_name_their_box_or_pallet_reason_station_and_operato
                 "deviceId": floor.station, "deviceName": "Станция А",
                 "operatorName": "Анна Кузнецова", "occurredAt": instant(55, 0), "receivedAt": received
             }),
+            json!({
+                "subject": "box", "kind": "reprint", "subjectId": box_id(1), "sscc": sscc(1500),
+                "serial": null, "reasonCode": "damaged_label", "reasonText": null,
+                "deviceId": floor.station, "deviceName": "Станция А",
+                "operatorName": null, "occurredAt": instant(30, 0), "receivedAt": received
+            }),
         ]
     );
+    // Another shift's exception is that shift's only.
+    let other = open_floor(&admin, &setup, &floor.key, &setup.line).await;
+    let answered = receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(31),
+                "scan",
+                &other.shift,
+                ok_scan(9, &box_id(9), &instant(80, 0)),
+            ),
+            fact(
+                &record_id(32),
+                "box_exception",
+                &other.shift,
+                box_exception("clear", &box_id(9), &instant(81, 0)),
+            ),
+        ],
+    )
+    .await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    let (_, again) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{shift}/exceptions"),
+            None,
+        )
+        .await;
+    assert_eq!(again, body);
+    let (_, of_other) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}/exceptions", other.shift),
+            None,
+        )
+        .await;
+    assert_eq!(of_other["total"], 1);
+    assert_eq!(of_other["items"][0]["kind"], "clear");
+}
+
+/// A shift lists its newest 500 exceptions and counts them all.
+#[tokio::test]
+async fn a_shifts_exceptions_stop_at_five_hundred_and_count_all() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let answered = receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(1),
+            "scan",
+            &floor.shift,
+            ok_scan(1, &box_id(1), &instant(10, 0)),
+        )],
+    )
+    .await;
+    assert_eq!(answered[0]["outcome"], "accepted");
+    for n in 0..501 {
+        sqlx::query(
+            "INSERT INTO box_exceptions (id, record_id, kind, box_id, shift_id, device_id, \
+             occurred_at, received_at) VALUES (?, ?, 'clear', ?, ?, ?, ?, ?)",
+        )
+        .bind(format!("e0000000-0000-4000-8000-{n:012}"))
+        .bind(format!("10000000-0000-4000-8000-{n:012}"))
+        .bind(box_id(1))
+        .bind(&floor.shift)
+        .bind(&floor.station)
+        .bind(instant(100 + n, 0))
+        .bind(admin.app.state.timestamp())
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    }
+    let (status, body) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}/exceptions", floor.shift),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!((items.len(), body["total"].clone()), (500, json!(501)));
+    // Newest first: the oldest one is left out.
+    assert_eq!(items[0]["occurredAt"], instant(600, 0));
+    assert_eq!(items[499]["occurredAt"], instant(101, 0));
+}
+
+/// A device key alone, or a session that is no session, reads no shift's
+/// review: both routes are the office's.
+#[tokio::test]
+async fn a_shifts_review_needs_an_office_session() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (tech, _) = admin.technologist_session().await;
+    for tail in ["exceptions", "rejections"] {
+        let path = format!("/v1/office/shifts/{}/{tail}", floor.shift);
+        let (status, body) = admin
+            .app
+            .send(empty(with_device(request("GET", &path), &floor.key)))
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{tail}: {body}");
+        let (status, body) = admin.call_as("not-a-session", "GET", &path, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{tail}: {body}");
+        let (status, _) = admin.call("GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{tail}");
+        let (status, _) = admin.call_as(&tech, "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{tail}");
+    }
 }
 
 /// The shift's refused records newest first: an unreadable field of a scan
@@ -269,4 +407,29 @@ async fn an_unknown_shift_is_not_found_and_the_refusals_read_their_own_index() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(text.contains("fact_receipts_rejected"), "{text}");
+    for sql in [
+        markiro_host::routes::office_shift_review::EXCEPTIONS_SQL,
+        markiro_host::routes::office_shift_review::EXCEPTIONS_COUNT_SQL,
+    ] {
+        let plan: Vec<(i64, i64, i64, String)> =
+            sqlx::query_as(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .bind("shift-1")
+                .bind(500_i64)
+                .fetch_all(&admin.app.state.pool)
+                .await
+                .unwrap();
+        let text = plan
+            .iter()
+            .map(|row| row.3.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for index in ["box_exceptions_shift", "pallet_exceptions_shift"] {
+            assert!(text.contains(index), "{sql}: {text}");
+        }
+        // An undo's serial is looked up by its code's hash.
+        if sql.contains("serial FROM scans") {
+            assert!(text.contains("scans_code_hash"), "{text}");
+        }
+        assert!(!text.contains("SCAN e"), "{text}");
+    }
 }
