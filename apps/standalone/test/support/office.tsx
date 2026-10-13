@@ -71,6 +71,11 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateCounterparty: vi.fn<HostApi["updateCounterparty"]>(() =>
       unexpected("updateCounterparty"),
     ),
+    // «Операторы» reads the employees for its «Сотрудник» column; a test
+    // about something else gets none.
+    listEmployees: vi.fn<HostApi["listEmployees"]>(async () => []),
+    createEmployee: vi.fn<HostApi["createEmployee"]>(() => unexpected("createEmployee")),
+    updateEmployee: vi.fn<HostApi["updateEmployee"]>(() => unexpected("updateEmployee")),
     listLines: vi.fn<HostApi["listLines"]>(() => unexpected("listLines")),
     createLine: vi.fn<HostApi["createLine"]>(() => unexpected("createLine")),
     updateLine: vi.fn<HostApi["updateLine"]>(() => unexpected("updateLine")),

@@ -5,11 +5,12 @@ use markiro_proto::{
     CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility,
     CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
     DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
-    ErrorBody, ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
-    LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
-    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
-    OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
-    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    EmployeeCreate, EmployeeRecord, EmployeeUpdate, ErrorBody, ExceptionKind, FactBatch, FactKind,
+    FactOutcome, FactReceipts, Hello, HelloEnvelope, LabelOutcome, LabelTemplate,
+    LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary, LabelTemplateUpdate,
+    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox, OfficeLine,
+    OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole, OfficeSession,
+    OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgLogoPut, OrgLogoState,
     OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
     PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
@@ -409,6 +410,32 @@ fn counterparty_fixtures_round_trip_and_requests_reject_unknown_fields() {
     let mut value = fixture("counterparty-update.json");
     value["notes"] = Value::Bool(true);
     assert!(serde_json::from_value::<CounterpartyUpdate>(value).is_err());
+}
+
+#[test]
+fn employee_fixtures_round_trip_and_requests_reject_unknown_fields() {
+    let record: EmployeeRecord = round_trip("employee-record.json");
+    assert_eq!(
+        record.operator_id.as_deref(),
+        Some("8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b")
+    );
+    let create: EmployeeCreate = round_trip("employee-create.json");
+    assert_eq!(create.role.as_deref(), Some("Упаковщик"));
+    let update: EmployeeUpdate = round_trip("employee-update.json");
+    assert_eq!((update.operator_id, update.archived), (None, true));
+    // An employee is office data: no PIN, badge or personnel number rides it.
+    for name in ["employee-create.json", "employee-update.json"] {
+        for key in ["pinPhc", "login", "notes"] {
+            let mut value = fixture(name);
+            value[key] = Value::String("0042".to_owned());
+            let refused = if name == "employee-create.json" {
+                serde_json::from_value::<EmployeeCreate>(value).is_err()
+            } else {
+                serde_json::from_value::<EmployeeUpdate>(value).is_err()
+            };
+            assert!(refused, "{name} takes {key}");
+        }
+    }
 }
 
 #[test]

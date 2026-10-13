@@ -326,6 +326,7 @@ async fn a_site_that_holds_data_is_refused_and_named() {
         "category_template_defaults",
         "products",
         "label_templates",
+        "employees",
         "operators",
         "counterparties",
     ] {
@@ -384,6 +385,16 @@ async fn a_site_that_holds_data_is_refused_and_named() {
             }
             "operators" => {
                 add_operator(&admin, "777").await;
+            }
+            "employees" => {
+                let (status, body) = admin
+                    .call(
+                        "POST",
+                        "/v1/office/employees",
+                        Some(json!({ "name": "Анна Кузнецова" })),
+                    )
+                    .await;
+                assert_eq!(status, StatusCode::OK, "{body}");
             }
             _ => {
                 let (status, body) = admin
