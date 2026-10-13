@@ -15,8 +15,28 @@
 -- written in the transaction that accepts its unit (`floor_scans`,
 -- `floor_codes`, the outbox's `scan` and `unit_label` `prepared`), with the
 -- label's bytes already rendered for the duplicate printer: the domain's
--- `prepared` event carries their digest and the printer's resolution, and
--- the cloud prepares a label only on a configured printer. Its attempt walks
+-- `prepared` event carries their digest and the printer's resolution. A unit
+-- is not accepted at all — refused before that transaction, as the cloud
+-- answers `error: "printer"` — while no duplicate printer is assigned or the
+-- label cannot be rendered, so the bytes exist from `prepared` on.
+--
+-- The bytes are rendered for one print identity, kept in `print_mode`,
+-- `language` and `dpi` (the domain's `ProductLabelPrintIdentity` and `dpi`):
+-- `raw` with the printer's language, or `windows_driver`, the
+-- `mono-raster-v1` page of the Windows driver (plan ДРВ), which has no
+-- language. A send reads the printer assigned to the duplicate at that
+-- moment and compares it with them, as the cloud does: no printer is
+-- `failed_before_send` with `printer_unconfigured` (one may be removed
+-- between the preparation and the send), another way of printing or
+-- resolution `printer_changed`. The job keeps no copy of the printer
+-- profile: where a label goes is never the job's, only what its bytes are.
+-- A job whose label can never be printed (no printer of its identity comes
+-- back) stays in attention and keeps its shift from the retention, as the
+-- cloud's does (an owner question). The trigger `floor_unit_labels_fixed`
+-- keeps a job's origin, its print identity and its bytes for good: a reprint
+-- sends the same bytes (the domain refuses a `prepared` with other bytes,
+-- another format or another dpi), and the station's step (`MOVE_JOB_SQL`)
+-- writes none of them. A job's attempt walks
 --
 --   prepared -> sending -> sent
 --                       -> delivery_unknown (a label may exist: never sent
@@ -30,7 +50,10 @@
 -- before the bytes go to the shell, so a job found in `sending` after a
 -- restart is `delivery_unknown` with `interrupted`. A job is unresolved
 -- while it is not completed in the domain's words (`productLabelStatus`):
--- its check is pending, or it needs none and its attempt was not sent.
+-- its check is pending, or it needs none and its attempt was not sent. A
+-- station has at most one unresolved job whatever its shift, as the cloud
+-- (`PRODUCT_LABEL_BUSY` across shifts; entering any shift opens it), and one
+-- job per accepted unit (`scan_id`).
 --
 -- The full code never leaves `fields` (the label's fields as rendered, which
 -- the check compares the scanned label with) and the bytes; `code_hash` is
@@ -39,7 +62,9 @@
 -- hex as the fact carries them. The retention deletes the whole row.
 -- `verification_policy` is the shift's frozen policy, kept on the job so
 -- that its status reads without the shift's snapshot. No foreign keys (see
--- `0006`). Times are UTC as `Date.toISOString` writes them.
+-- `0006`), and no CHECK of an id's shape: no table of the station checks one
+-- (its ids are the app's own `crypto.randomUUID`). Times are UTC as
+-- `Date.toISOString` writes them.
 
 CREATE TABLE floor_unit_labels (
   id TEXT NOT NULL PRIMARY KEY,
@@ -57,7 +82,9 @@ CREATE TABLE floor_unit_labels (
     ('not_required', 'pending', 'verified', 'skipped')),
   reason TEXT CHECK (reason IS NULL OR reason IN ('not_printed', 'damaged', 'lost')),
   error_code TEXT,
-  printer TEXT NOT NULL CHECK (json_valid(printer) AND json_type(printer) = 'object'),
+  print_mode TEXT NOT NULL CHECK (print_mode IN ('raw', 'windows_driver')),
+  language TEXT CHECK (language IS NULL OR language IN ('zpl', 'tspl')),
+  dpi INTEGER NOT NULL CHECK (dpi IN (203, 300)),
   bytes_base64 TEXT NOT NULL CHECK (length(bytes_base64) > 0),
   bytes_digest TEXT NOT NULL
     CHECK (length(bytes_digest) = 64 AND bytes_digest NOT GLOB '*[^0-9a-f]*'),
@@ -69,6 +96,8 @@ CREATE TABLE floor_unit_labels (
   operator_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  -- A language exactly for RAW bytes: the driver's page has none.
+  CHECK ((language IS NULL) = (print_mode = 'windows_driver')),
   -- A reprint's reason, exactly on an attempt after the first.
   CHECK ((reason IS NOT NULL) = (attempt_no > 1)),
   -- An error code exactly in the two error states, from that state's list
@@ -90,13 +119,18 @@ CREATE TABLE floor_unit_labels (
       OR (attempt_state = 'sent' AND verification_policy = 'required') END)
 );
 
--- At most one job of a shift and pairing is unresolved: the next unit of a
--- required check waits for it, and a station enters the shift on it. Word
--- for word `UNRESOLVED_UNIT_LABEL_SQL` (`src/floor/unit-labels/unit-label-store.ts`),
--- so its reads search this index.
+-- At most one job of a pairing is unresolved, whatever its shift: the next
+-- unit of a required check waits for it, and a station enters any shift on
+-- it. Word for word `UNRESOLVED_UNIT_LABEL_SQL`
+-- (`src/floor/unit-labels/unit-label-store.ts`), so its reads search this
+-- index: the pairing's unresolved job, and the retention's «no unresolved job
+-- of this shift» (one row at most to look at).
 CREATE UNIQUE INDEX floor_unit_labels_unresolved
-  ON floor_unit_labels (host_id, device_id, shift_id)
+  ON floor_unit_labels (host_id, device_id)
   WHERE (verification = 'pending' OR (verification = 'not_required' AND attempt_state <> 'sent'));
+
+-- One job per accepted unit of a pairing.
+CREATE UNIQUE INDEX floor_unit_labels_scan ON floor_unit_labels (host_id, device_id, scan_id);
 
 -- A shift's jobs: «История этикеток» newest first (by rowid, which the index
 -- keeps in order within a shift), and the retention's delete by shift.
@@ -106,3 +140,23 @@ CREATE INDEX floor_unit_labels_shift ON floor_unit_labels (host_id, device_id, s
 -- most, none in a quiet start), without walking the pairing's every job.
 CREATE INDEX floor_unit_labels_sending ON floor_unit_labels (host_id, device_id)
   WHERE attempt_state = 'sending';
+
+-- A job's origin, its print identity and its bytes never change (see the
+-- head of this file); a column written with its own value is no change.
+CREATE TRIGGER floor_unit_labels_fixed
+  BEFORE UPDATE OF id, host_id, device_id, shift_id, scan_id, code_hash, verification_policy,
+    print_mode, language, dpi, bytes_base64, bytes_digest, payload_digest, template_id,
+    template_rev, fields, created_at
+  ON floor_unit_labels
+  WHEN NEW.id IS NOT OLD.id OR NEW.host_id IS NOT OLD.host_id
+    OR NEW.device_id IS NOT OLD.device_id OR NEW.shift_id IS NOT OLD.shift_id
+    OR NEW.scan_id IS NOT OLD.scan_id OR NEW.code_hash IS NOT OLD.code_hash
+    OR NEW.verification_policy IS NOT OLD.verification_policy
+    OR NEW.print_mode IS NOT OLD.print_mode OR NEW.language IS NOT OLD.language
+    OR NEW.dpi IS NOT OLD.dpi OR NEW.bytes_base64 IS NOT OLD.bytes_base64
+    OR NEW.bytes_digest IS NOT OLD.bytes_digest OR NEW.payload_digest IS NOT OLD.payload_digest
+    OR NEW.template_id IS NOT OLD.template_id OR NEW.template_rev IS NOT OLD.template_rev
+    OR NEW.fields IS NOT OLD.fields OR NEW.created_at IS NOT OLD.created_at
+BEGIN
+  SELECT RAISE(ABORT, 'a unit label job keeps its origin, its print identity and its bytes');
+END;

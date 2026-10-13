@@ -293,10 +293,10 @@ describe("the retention of a shift's records on the station", () => {
     at.db
       .prepare(
         "INSERT INTO floor_unit_labels (id, host_id, device_id, shift_id, code_hash, scan_id, " +
-          "attempt_no, attempt_state, verification_policy, verification, printer, bytes_base64, " +
-          "bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, " +
-          "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'sent', 'required', ?, '{}', " +
-          "'XlhB', ?, ?, 'template-1', 1, ?, 'operator-1', ?, ?)",
+          "attempt_no, attempt_state, verification_policy, verification, print_mode, language, dpi, " +
+          "bytes_base64, bytes_digest, payload_digest, template_id, template_rev, fields, " +
+          "operator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'sent', 'required', " +
+          "?, 'raw', 'zpl', 203, 'XlhB', ?, ?, 'template-1', 1, ?, 'operator-1', ?, ?)",
       )
       .run(
         id,

@@ -687,7 +687,9 @@ const COLUMNS: Record<string, string[]> = {
     "verification TEXT NOT NULL",
     "reason TEXT",
     "error_code TEXT",
-    "printer TEXT NOT NULL",
+    "print_mode TEXT NOT NULL",
+    "language TEXT",
+    "dpi INTEGER NOT NULL",
     "bytes_base64 TEXT NOT NULL",
     "bytes_digest TEXT NOT NULL",
     "payload_digest TEXT NOT NULL",
@@ -802,6 +804,12 @@ describe("the shape of the production tables (migration 0006)", () => {
         tableName: "floor_sscc_blocks",
         name: "floor_sscc_blocks_prefix",
         isUnique: 0,
+        isPartial: 0,
+      },
+      {
+        tableName: "floor_unit_labels",
+        name: "floor_unit_labels_scan",
+        isUnique: 1,
         isPartial: 0,
       },
       {
@@ -1233,12 +1241,14 @@ describe("the shape of the production tables (migration 0006)", () => {
       // index, `r` apart from the walk of `o`; `outbox_settled` stays the one step of `o`.
       "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
-      // An unresolved unit label keeps its shift (plan РЕЖ part B), found by the unique index.
-      "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+      // An unresolved unit label keeps its shift (plan РЕЖ part B): the pairing's one, found by
+      // the unique index (`INDEXED BY`), never by a walk of the shift's jobs.
+      "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
       "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     ]) {
       expect(due.join("\n"), key).toContain(key);
     }
+    expect(due.join("\n")).not.toContain("floor_unit_labels_shift");
     // The delete of a copy searches the one shift's own records: its accepted close and its
     // unsent records through `outbox_shift`, its jobs, the copy by its key; no temporary one.
     const purge = plan(PURGE_COPY_SQL);
@@ -1248,10 +1258,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
       "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
-      "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+      "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
     ]) {
       expect(purge, key).toContain(key);
     }
+    expect(purge).not.toContain("floor_unit_labels_shift");
     expect(purge.split("\n").filter((step) => step.startsWith("SCAN "))).toEqual([]);
     expect(purge).not.toContain("TEMP");
     // The refused closes of the shift list (plan 2a8), read again on every bump of the outbox
@@ -2097,8 +2108,9 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
 // (`the_unit_label_reads_search_an_index` in `tests/local_db.rs`), with the same texts.
 describe("the unit label jobs' statements (migration 0015)", () => {
   const STATEMENTS: readonly (readonly [string, string])[] = [
-    // The shift's one unresolved job: the unique partial index, by its predicate.
-    [UNRESOLVED_JOB_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)"],
+    // The pairing's one unresolved job, whatever its shift: the unique partial index, by its
+    // predicate.
+    [UNRESOLVED_JOB_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=?)"],
     [UNIT_LABEL_JOB_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
     // «История этикеток»: the shift's jobs newest first, in the index's own rowid order.
     [SHIFT_JOBS_SQL, "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)"],

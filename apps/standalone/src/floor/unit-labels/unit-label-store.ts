@@ -49,8 +49,8 @@ export const UNIT_LABEL_ATTEMPT_ERROR_CODES = {
  * A job not completed (the domain's `productLabelStatus` other than
  * `completed`): its check is pending, or it needs none and its attempt was
  * not sent. Word for word the predicate of the unique index
- * `floor_unit_labels_unresolved` (one such job per shift and pairing), so a
- * read that names it searches that index.
+ * `floor_unit_labels_unresolved` (one such job per pairing, whatever its
+ * shift), so a read that names it searches that index.
  */
 export const UNRESOLVED_UNIT_LABEL_SQL =
   "(verification = 'pending' OR (verification = 'not_required' AND attempt_state <> 'sent'))";
@@ -58,20 +58,20 @@ export const UNRESOLVED_UNIT_LABEL_SQL =
 /** Every column of a job but the label's bytes. */
 const COLUMNS =
   "id, shift_id, code_hash, scan_id, attempt_no, attempt_state, verification_policy, " +
-  "verification, reason, error_code, printer, bytes_digest, payload_digest, template_id, " +
-  "template_rev, fields, operator_id, created_at, updated_at";
+  "verification, reason, error_code, print_mode, language, dpi, bytes_digest, payload_digest, " +
+  "template_id, template_rev, fields, operator_id, created_at, updated_at";
 
 /** A whole job, its bytes included (a send, a reprint and the recovery need them). */
 const JOB_COLUMNS = `SELECT ${COLUMNS}, bytes_base64 FROM floor_unit_labels`;
 
 /**
- * The shift's unresolved job (the next unit waits for it while its check is
- * required; entering the shift opens it); parameters: host id, device id,
- * shift id.
+ * The pairing's one unresolved job, whatever its shift, as the cloud's
+ * station has one (`PRODUCT_LABEL_BUSY` across shifts): the next unit waits
+ * for it while its check is required, and entering any shift opens it — the
+ * caller compares its `shift_id` with the shift entered. Parameters: host id,
+ * device id.
  */
-export const UNRESOLVED_JOB_SQL =
-  `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND shift_id = ? ` +
-  `AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
+export const UNRESOLVED_JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
 
 /** One job by its key; parameters: host id, device id, job id. */
 export const JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND id = ?`;
@@ -95,11 +95,15 @@ export const SENDING_JOBS_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id 
 /**
  * A job's step, only from the state it was read in (a stale read changes
  * nothing, `expectedChanges: 1` catches it): the attempt, its state, the
- * check, the reason, the error code, the printer and the time; parameters:
- * those seven, then host id, device id, job id, and the attempt number,
- * attempt state and check it was read with.
+ * check, the reason, the error code and the time; parameters: those six,
+ * then host id, device id, job id, and the attempt number, attempt state and
+ * check it was read with. Never the bytes nor their print identity
+ * (`print_mode`, `language`, `dpi`): a reprint sends the same bytes, and the
+ * trigger `floor_unit_labels_fixed` refuses a change of them. Where a send
+ * goes is read from the workstation at that moment and compared with the
+ * job's identity, not written here.
  */
 export const MOVE_JOB_SQL =
   "UPDATE floor_unit_labels SET attempt_no = ?, attempt_state = ?, verification = ?, " +
-  "reason = ?, error_code = ?, printer = ?, updated_at = ? WHERE host_id = ? AND device_id = ? " +
+  "reason = ?, error_code = ?, updated_at = ? WHERE host_id = ? AND device_id = ? " +
   "AND id = ? AND attempt_no = ? AND attempt_state = ? AND verification = ?";

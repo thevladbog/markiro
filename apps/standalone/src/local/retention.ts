@@ -45,8 +45,12 @@ const dueRow = z.object({ id: z.string() });
  * conflicting record of it waits for a person (plan ОЧ: a refusal leaves the
  * station only when someone resolved it on the queue screen), no label of
  * it waits, and no unit label of it is unresolved (plan РЕЖ part B: its
- * outcome may be unknown). Parameters: host id, device id, the cutoff (an instant
- * as `Date.toISOString` writes it, as `acked_at` is).
+ * outcome may be unknown). The last asks the pairing's one unresolved job
+ * through its unique index (`INDEXED BY`: that index is the pairing's, a
+ * station having one unresolved job whatever its shift, and the planner
+ * would rather walk the shift's every job through `floor_unit_labels_shift`).
+ * Parameters: host id, device id, the cutoff (an instant as
+ * `Date.toISOString` writes it, as `acked_at` is).
  */
 const DONE_WITH =
   "s.host_id = ? AND s.device_id = ? " +
@@ -60,7 +64,8 @@ const DONE_WITH =
   "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
   `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) ` +
-  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = s.host_id " +
+  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l INDEXED BY floor_unit_labels_unresolved " +
+  "WHERE l.host_id = s.host_id " +
   `AND l.device_id = s.device_id AND l.shift_id = s.id AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
 
 /**
@@ -85,7 +90,8 @@ export const DUE_SHIFTS_SQL =
   "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id " +
   `AND j.device_id = o.device_id AND j.shift_id = o.shift_id AND ${OPEN_JOB_SQL}) ` +
-  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = o.host_id " +
+  "AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l INDEXED BY floor_unit_labels_unresolved " +
+  "WHERE l.host_id = o.host_id " +
   `AND l.device_id = o.device_id AND l.shift_id = o.shift_id AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
 
 /**

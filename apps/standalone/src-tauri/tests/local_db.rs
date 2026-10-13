@@ -1307,8 +1307,8 @@ async fn migration_0014_keeps_each_rows_rowid() {
 }
 
 /// Migration `0015` (plan РЕЖ part B) over a station's database of `0014`, on the shell's own
-/// SQLite and through the application's start: it adds `floor_unit_labels` with its key and its
-/// three indexes, and every object and row that was there stays as it was.
+/// SQLite and through the application's start: it adds `floor_unit_labels` with its key, its
+/// four indexes and its trigger, and every object and row that was there stays as it was.
 /// `test/unit-label-schema.test.ts` pins the same on Node's SQLite.
 #[tokio::test]
 async fn migration_0015_adds_the_unit_labels_and_keeps_every_object() {
@@ -1374,6 +1374,7 @@ async fn migration_0015_adds_the_unit_labels_and_keeps_every_object() {
             ))
             .collect::<Vec<_>>(),
         [
+            ("index", "floor_unit_labels_scan", "floor_unit_labels"),
             ("index", "floor_unit_labels_sending", "floor_unit_labels"),
             ("index", "floor_unit_labels_shift", "floor_unit_labels"),
             ("index", "floor_unit_labels_unresolved", "floor_unit_labels"),
@@ -1383,6 +1384,7 @@ async fn migration_0015_adds_the_unit_labels_and_keeps_every_object() {
                 "floor_unit_labels"
             ),
             ("table", "floor_unit_labels", "floor_unit_labels"),
+            ("trigger", "floor_unit_labels_fixed", "floor_unit_labels"),
         ]
     );
 }
@@ -2006,12 +2008,12 @@ fn device_records() -> Vec<LocalStatement> {
         // A unit label job (plan РЕЖ part B, `0015`), completed.
         statement(
             "INSERT INTO floor_unit_labels (id, host_id, device_id, shift_id, code_hash, scan_id, \
-             attempt_no, attempt_state, verification_policy, verification, printer, \
-             bytes_base64, bytes_digest, payload_digest, template_id, template_rev, fields, \
-             operator_id, created_at, updated_at) VALUES ('label-1', ?, ?, 'shift-1', \
-             printf('%064x', 1), 'scan-1', 1, 'sent', 'none', 'not_required', '{}', 'XlhB', \
-             printf('%064x', 2), printf('%064x', 3), 'template-1', 3, '{}', 'operator-1', \
-             '2026-10-08T06:03:01.000Z', '2026-10-08T06:03:02.000Z')",
+             attempt_no, attempt_state, verification_policy, verification, print_mode, \
+             language, dpi, bytes_base64, bytes_digest, payload_digest, template_id, \
+             template_rev, fields, operator_id, created_at, updated_at) VALUES ('label-1', ?, \
+             ?, 'shift-1', printf('%064x', 1), 'scan-1', 1, 'sent', 'none', 'not_required', \
+             'raw', 'zpl', 203, 'XlhB', printf('%064x', 2), printf('%064x', 3), 'template-1', \
+             3, '{}', 'operator-1', '2026-10-08T06:03:01.000Z', '2026-10-08T06:03:02.000Z')",
             json!([HOST, DEVICE]),
         ),
         // The warehouse reprint's own (plan СКЛ, `0012`): a session, a job and a record.
@@ -2308,9 +2310,10 @@ const DUE_SHIFTS: &str =
      'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j \
      WHERE j.host_id = o.host_id AND j.device_id = o.device_id AND j.shift_id = o.shift_id \
      AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
-     verify = 1))) AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l WHERE l.host_id = \
-     o.host_id AND l.device_id = o.device_id AND l.shift_id = o.shift_id AND (verification = \
-     'pending' OR (verification = 'not_required' AND attempt_state <> 'sent')))";
+     verify = 1))) AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l INDEXED BY \
+     floor_unit_labels_unresolved WHERE l.host_id = o.host_id AND l.device_id = o.device_id \
+     AND l.shift_id = o.shift_id AND (verification = 'pending' OR (verification = \
+     'not_required' AND attempt_state <> 'sent')))";
 const PURGE_COPY: &str =
     "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
      AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
@@ -2323,9 +2326,9 @@ const PURGE_COPY: &str =
      floor_print_jobs j WHERE j.host_id = s.host_id AND j.device_id = s.device_id AND \
      j.shift_id = s.id AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR \
      (state = 'sent' AND verify = 1))) AND NOT EXISTS (SELECT 1 FROM floor_unit_labels l \
-     WHERE l.host_id = s.host_id AND l.device_id = s.device_id AND l.shift_id = s.id AND \
-     (verification = 'pending' OR (verification = 'not_required' AND attempt_state <> \
-     'sent')))";
+     INDEXED BY floor_unit_labels_unresolved WHERE l.host_id = s.host_id AND l.device_id = \
+     s.device_id AND l.shift_id = s.id AND (verification = 'pending' OR (verification = \
+     'not_required' AND attempt_state <> 'sent')))";
 
 /// The shift list's read of the refused closes (`readRefusedCloses` in `src/floor/close/shift-close.ts`,
 /// plan 2a8): it runs again on every bump of the outbox while the list is shown, a reconnect's every
@@ -2818,10 +2821,11 @@ async fn the_floors_repeating_reads_search_an_index() {
         (DUE_SHIFTS, "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)"),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
-        // An unresolved unit label keeps its shift (plan РЕЖ part B): the unique partial index.
+        // An unresolved unit label keeps its shift (plan РЕЖ part B): the pairing's one, through
+        // the unique partial index (`INDEXED BY`).
         (
             DUE_SHIFTS,
-            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
         ),
         (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
         (
@@ -2839,7 +2843,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (
             PURGE_COPY,
-            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
         ),
         (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (
@@ -3024,6 +3028,16 @@ async fn the_floors_repeating_reads_search_an_index() {
                 && !step.starts_with("SCAN r ")),
             "{sql}\n  scans a table: {plan:?}"
         );
+        // The retention asks the pairing's one unresolved unit label, never a walk of the
+        // shift's jobs.
+        if sql == DUE_SHIFTS || sql == PURGE_COPY {
+            assert!(
+                !plan
+                    .iter()
+                    .any(|step| step.contains("floor_unit_labels_shift")),
+                "{sql}\n  walks the shift's unit labels: {plan:?}"
+            );
+        }
     }
     // The hourly due select starts from the accepted closes: it walks `outbox_settled` once, as
     // its first step, and everything else is a search per close it found (the unsent records,
@@ -4173,7 +4187,7 @@ async fn the_warehouse_reads_search_an_index() {
 }
 
 /// The unit label jobs (plan РЕЖ part B, migration `0015`,
-/// `src/floor/unit-labels/unit-label-store.ts`): the shift's one unresolved job through the
+/// `src/floor/unit-labels/unit-label-store.ts`): the pairing's one unresolved job through the
 /// unique partial index (its predicate named word for word), a job by its key, «История
 /// этикеток» through the shift's index in its rowid order, the recovery's sending jobs of the
 /// pairing through their partial index and a job's step by its key. No statement scans a table or sorts on
@@ -4192,40 +4206,40 @@ async fn the_unit_label_reads_search_an_index() {
     let reads: [(&str, &str); 5] = [
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
-             verification_policy, verification, reason, error_code, printer, bytes_digest, \
-             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
-             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
-             AND shift_id = ? AND (verification = 'pending' OR (verification = 'not_required' \
+             verification_policy, verification, reason, error_code, print_mode, language, dpi, \
+             bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, \
+             created_at, updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND (verification = 'pending' OR (verification = 'not_required' \
              AND attempt_state <> 'sent'))",
-            "floor_unit_labels_unresolved (host_id=? AND device_id=? AND shift_id=?)",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
         ),
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
-             verification_policy, verification, reason, error_code, printer, bytes_digest, \
-             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
-             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             verification_policy, verification, reason, error_code, print_mode, language, dpi, \
+             bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, \
+             created_at, updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
              AND id = ?",
             "sqlite_autoindex_floor_unit_labels_1 (id=?)",
         ),
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
-             verification_policy, verification, reason, error_code, printer, bytes_digest, \
-             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
-             updated_at FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             verification_policy, verification, reason, error_code, print_mode, language, dpi, \
+             bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, \
+             created_at, updated_at FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
              AND shift_id = ? ORDER BY rowid DESC LIMIT ?",
             "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
-             verification_policy, verification, reason, error_code, printer, bytes_digest, \
-             payload_digest, template_id, template_rev, fields, operator_id, created_at, \
-             updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             verification_policy, verification, reason, error_code, print_mode, language, dpi, \
+             bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, \
+             created_at, updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
              AND attempt_state = 'sending'",
             "floor_unit_labels_sending (host_id=? AND device_id=?)",
         ),
         (
             "UPDATE floor_unit_labels SET attempt_no = ?, attempt_state = ?, verification = ?, \
-             reason = ?, error_code = ?, printer = ?, updated_at = ? WHERE host_id = ? \
+             reason = ?, error_code = ?, updated_at = ? WHERE host_id = ? \
              AND device_id = ? AND id = ? AND attempt_no = ? AND attempt_state = ? \
              AND verification = ?",
             "sqlite_autoindex_floor_unit_labels_1 (id=?)",

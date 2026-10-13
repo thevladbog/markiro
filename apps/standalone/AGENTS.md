@@ -462,20 +462,47 @@ on the job (`verification_policy`) and the check's outcome
 after `sent` of a required check, a verification only after
 `delivery_unknown` or `sent` of a required check), a reason exactly on an
 attempt after the first, an error code exactly in `failed_before_send` and
-`delivery_unknown` from the fact's lists, and the bytes, printer and digests
-from the preparation on (the domain's `prepared` event carries them; the
-cloud prepares a label only on a configured printer).
-`test/unit-label-schema.test.ts` checks that the rows the CHECKs take are
-exactly the domain's reachable projections and that the unique index's
-predicate (`floor_unit_labels_unresolved`, `UNRESOLVED_UNIT_LABEL_SQL`: one
-unresolved job per shift and pairing) is exactly «not completed» of
-`productLabelStatus`. `floor_unit_labels_shift` serves the history and the
-retention's delete, the partial `floor_unit_labels_sending` the recovery at
-start. The statements of `src/floor/unit-labels/unit-label-store.ts` are pinned
-in both lists of plans (`the_unit_label_reads_search_an_index`). The full code
-lives only in the job's `fields` and bytes; the retention deletes the whole row
-with its shift and keeps a shift while a unit label of it is unresolved (its
-outcome may be unknown), as it does for a waiting label of `floor_print_jobs`.
+`delivery_unknown` from the fact's lists, and the bytes, their print identity
+and their digests from the preparation on: the domain's `prepared` event
+carries them, and a unit is not accepted at all — refused before the
+transaction, as the cloud answers `error: "printer"` — while no duplicate
+printer is assigned or the label cannot be rendered. The print identity is
+`print_mode` (`raw` | `windows_driver`), `language` (`zpl` | `tspl`, none for
+the driver's `mono-raster-v1` page) and `dpi` (203 | 300), the domain's
+`ProductLabelPrintIdentity`; the job keeps no copy of the printer profile. A
+send reads the duplicate's printer at that moment and compares it with the
+identity, as the cloud does: none is `failed_before_send`
+`printer_unconfigured` (a printer may be removed between the preparation and
+the send), another mode, language or dpi `printer_changed`. A label that can
+never be printed (no printer of its identity comes back) stays in attention
+and keeps its shift from the retention, as in the cloud (an owner question).
+The trigger `floor_unit_labels_fixed` refuses a change of a job's origin (keys,
+shift, scan, code hash, policy, template, fields, digests, `created_at`), its
+print identity and its bytes — a reprint sends the same bytes — and
+`MOVE_JOB_SQL` writes only the attempt, its state, the check, the reason, the
+error code and the time. `print_mode` is in the trigger for its reader: the
+CHECK that ties it to `language` already refuses a change of it alone, so a
+mutant without it survives. `test/unit-label-schema.test.ts` walks the
+domain's `applyProductLabelEvent` from `prepared` under both policies, every
+event kind at every step (reprints included: 14 projections), and checks that
+the rows the CHECKs take of the 40 «state × policy × check» are exactly those,
+and that the unique index's predicate (`floor_unit_labels_unresolved`,
+`UNRESOLVED_UNIT_LABEL_SQL`) is exactly «not completed» of the status the walk
+reached. A station has one unresolved job whatever its shift
+(`floor_unit_labels_unresolved` on `(host_id, device_id)`, as the cloud's
+`PRODUCT_LABEL_BUSY` across shifts; `UNRESOLVED_JOB_SQL` reads it for entering
+any shift) and one job per accepted unit (`floor_unit_labels_scan`). An id's
+shape is not checked, as in every table of the station.
+`floor_unit_labels_shift` serves the history and the retention's delete, the
+partial `floor_unit_labels_sending` the recovery at start; the retention's
+«no unresolved label of this shift» names `INDEXED BY
+floor_unit_labels_unresolved` (one row at most), where the planner would walk
+the shift's every job through `floor_unit_labels_shift`. The statements of
+`src/floor/unit-labels/unit-label-store.ts` are pinned in both lists of plans
+(`the_unit_label_reads_search_an_index`). The full code lives only in the
+job's `fields` and bytes; the retention deletes the whole row with its shift
+and keeps a shift while a unit label of it is unresolved (its outcome may be
+unknown), as it does for a waiting label of `floor_print_jobs`.
 
 ## Writes
 
