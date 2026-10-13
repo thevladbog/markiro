@@ -128,6 +128,12 @@ export interface FloorAppProps {
   dispatch: (action: ShellAction) => void;
   /** `null` is the operator's own «Сменить оператора». */
   onSignOut: (notice: FloorNotice | null) => void;
+  /**
+   * Hands the shell the operator's own sign-out while this floor is on screen
+   * (`null` once it is gone): «Сменить оператора» stands in the status bar, as
+   * on the cloud station, and the leave waits for the work as every leave does.
+   */
+  onSignOutReady?: (signOut: (() => void) | null) => void;
 }
 
 /**
@@ -170,6 +176,7 @@ export function FloorApp({
   workScreen: Work = WorkScreen,
   dispatch,
   onSignOut,
+  onSignOutReady,
 }: FloorAppProps) {
   const { hostId, deviceId, lineId } = device;
   const { sessionId } = operator;
@@ -257,6 +264,12 @@ export function FloorApp({
     },
     [finish, gate, sessionId],
   );
+
+  useLayoutEffect(() => {
+    if (onSignOutReady === undefined) return undefined;
+    onSignOutReady(() => leave({ kind: "sign_out", notice: null }));
+    return () => onSignOutReady(null);
+  }, [onSignOutReady, leave]);
 
   const idle = useRef<() => void>(() => undefined);
   useLayoutEffect(() => {
@@ -521,7 +534,6 @@ export function FloorApp({
       // another kind (none pairs so in stage 2a) sees no shifts, and the host
       // refuses a shift it would create (`shift_line`): never a blank screen.
       lineId={lineId ?? ""}
-      operator={operator}
       online={online}
       shiftReads={shiftReads}
       outboxVersion={outboxVersion}
@@ -539,7 +551,6 @@ export function FloorApp({
               setView({ kind: "warehouse", leaving: false });
             },
           })}
-      onSignOut={() => leave({ kind: "sign_out", notice: null })}
     />
   );
 }

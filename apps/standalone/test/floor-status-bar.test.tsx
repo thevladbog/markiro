@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -129,6 +129,71 @@ describe("the floor's status bar", () => {
       }),
     );
     expect(await screen.findByText("Анна Кузнецова, табельный номер 0042")).toBeTruthy();
+  });
+
+  it("shows the operator's name as text, whatever characters it holds", async () => {
+    const name = '<img src="x" alt="boom"> Анна & <b>Кузнецова</b>';
+    const view = render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name, role: null },
+      }),
+    );
+    expect(await screen.findByText(`${name}, табельный номер 0042`)).toBeTruthy();
+    expect(view.container.querySelector("img, b")).toBeNull();
+  });
+
+  it("offers «Сменить оператора» in its rail once an operator is in, at the floor's 64 px", async () => {
+    const onSwitchOperator = vi.fn();
+    render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+        onSwitchOperator,
+      }),
+    );
+    const rail = await screen.findByRole("group", { name: "Действия станции" });
+    const button = within(rail).getByRole("button", { name: "Сменить оператора" });
+    expect(button.className).toContain("mk-btn--floor");
+    expect(button).toHaveProperty("disabled", false);
+    // Outside a shift there is nothing to keep: it signs out at once.
+    fireEvent.click(button);
+    expect(onSwitchOperator).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no switch while nobody is signed in", async () => {
+    render(bar({ local: await synced([ORG]), onSwitchOperator: vi.fn() }));
+    await screen.findByText("Никто не вошёл");
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
+  });
+
+  it("asks first in a shift: «Остаться» keeps the operator, the confirmation signs out", async () => {
+    const local = await synced([ORG]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1);
+    const onSwitchOperator = vi.fn();
+    render(
+      bar({
+        local,
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+        shiftId: ENTERED.id,
+        onSwitchOperator,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить оператора" }));
+    const dialog = await screen.findByRole("dialog", { name: "Сменить оператора?" });
+    expect(
+      within(dialog).getByText(
+        "Текущая смена останется открытой. Все записанные операции сохранятся на станции.",
+      ),
+    ).toBeTruthy();
+    expect(onSwitchOperator).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Остаться" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onSwitchOperator).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
+    const again = await screen.findByRole("dialog", { name: "Сменить оператора?" });
+    fireEvent.click(within(again).getByRole("button", { name: "Сменить оператора" }));
+    expect(onSwitchOperator).toHaveBeenCalledTimes(1);
   });
 
   it("shows the link to the host", async () => {

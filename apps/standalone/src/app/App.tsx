@@ -596,6 +596,14 @@ export function App({
     },
     [sessionId],
   );
+  // «Сменить оператора» stands in the status bar (as on the cloud station), but
+  // the leave — waiting for the work a shift's screen tracks — is the floor's:
+  // the floor hands its leave here while it is on screen.
+  const floorSignOut = useRef<(() => void) | null>(null);
+  const floorSignOutReady = useCallback((signOut: (() => void) | null) => {
+    floorSignOut.current = signOut;
+  }, []);
+  const switchOperator = useCallback(() => floorSignOut.current?.(), []);
 
   const session = view.kind === "office" ? view.session : null;
   // The scanner settings belong to the pairing screen: leaving it closes them.
@@ -827,6 +835,7 @@ export function App({
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
             watchScanners={hardwareApi.watchScanners}
+            {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -869,6 +878,7 @@ export function App({
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
               dispatch={dispatch}
               onSignOut={operatorSignedOut}
+              onSignOutReady={floorSignOutReady}
             />
           )}
         </div>

@@ -12,6 +12,7 @@ import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
 import "./floor-status-bar.css";
 import { readStrandedRecords } from "./queue/outbox-recovery.js";
 import { useScannerIndicator, type ScannerIndicator } from "./scanner-indicator.js";
@@ -73,6 +74,12 @@ export interface FloorStatusBarProps {
    * pill; without it the keyboard wedge alone is assumed.
    */
   watchScanners?: HardwareApi["watchScanners"];
+  /**
+   * «Сменить оператора» in the bar's rail, as on the cloud station; shown only
+   * with an operator signed in. The floor leaves (waiting for its work) when it
+   * is pressed; in a shift the control asks first.
+   */
+  onSwitchOperator?: () => void;
 }
 
 const SCANNER_TONE: Readonly<Record<ScannerIndicator, PillTone>> = {
@@ -162,8 +169,9 @@ function stockAlert(t: TFunction, what: "box" | "pallet", stock: SerialStock) {
  * organization and the line from the local copies, the operator, and the
  * link to the host with the health of the copies (`HostStatusLine`). It sits
  * above the sign-in screen and the shifts alike, as a labelled region (the
- * app's `main` holds it, so a `header` would not be a landmark), and holds
- * nothing to press. Plan 2a5 adds the device's own name, the number of the
+ * app's `main` holds it, so a `header` would not be a landmark). Its one
+ * control is «Сменить оператора» in the rail on the right, as on the cloud
+ * station (beta feedback, 2026-10-13). Plan 2a5 adds the device's own name, the number of the
  * shift the operator works in, and two warnings in a polite region of their
  * own that is on the screen before either appears (or it would not be heard):
  * a change the office made to this device (its line, its name) that could not
@@ -203,6 +211,7 @@ export function FloorStatusBar({
   factsFailure,
   now = systemClock,
   watchScanners,
+  onSwitchOperator,
 }: FloorStatusBarProps) {
   const { t } = useTranslation();
   const scanner = useScannerIndicator(watchScanners);
@@ -458,6 +467,11 @@ export function FloorStatusBar({
           />
         </dl>
       </div>
+      {operator !== null && onSwitchOperator !== undefined && (
+        <div className="station-status-actions" role="group" aria-label={t("floor.status.actions")}>
+          <OperatorSwitchControl activeShift={shiftId !== null} onSwitch={onSwitchOperator} />
+        </div>
+      )}
       {/*
         Its own polite region, there before the warnings so that they are
         heard; the warnings are not alerts as well (`role="presentation"`

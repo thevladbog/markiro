@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Pager } from "@markiro/ui";
 
-import type { FloorSession } from "../../app/shell.js";
 import type { EnteredShift } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
@@ -18,7 +17,6 @@ export interface ShiftListProps {
   pairing: Pairing;
   /** The station's line: the list shows its shifts. */
   lineId: string;
-  operator: FloorSession;
   /** The link to the host is online. */
   online: boolean;
   /** `ShellState.shiftReads`: the list reads its copies again after every read. */
@@ -34,7 +32,6 @@ export interface ShiftListProps {
   /** A refused key or a changed certificate: the shell's to route. */
   onHostError: (error: unknown) => void;
   onNew: () => void;
-  onSignOut: () => void;
   /** The workstation setup (plan 2a7); none — no button. */
   onSetup?: () => void;
   /** The warehouse reprint (plan СКЛ); none — no button. */
@@ -57,21 +54,21 @@ type Copies =
  * after every read of the host's list and after every write and every batch of
  * receipts (`outboxVersion`), so the list stays on screen with the host away
  * and says what the outbox has become: a shift closing here, one whose close
- * the host refused (its card names the code), one closed. One entry at a time; «Сменить оператора» is never held by an
- * entry, so one that never settles does not trap the station here, and an
- * answer that lands after the screen is gone is dropped.
+ * the host refused (its card names the code), one closed. One entry at a
+ * time; «Сменить оператора» (in the status bar, as on the cloud station) is
+ * never held by an entry, so one that never settles does not trap the station
+ * here, and an answer that lands after the screen is gone is dropped.
  *
  * What the list says of itself (a refusal of the entry, and the state of the
  * link) is said together in one polite region
  * that is there before any of it: the first never hides the second. The focus
- * starts on the line that names the operator, so a keyboard or a screen reader
- * does not begin on the page after the work screen or the new shift is gone.
+ * starts on the screen's title, so a keyboard or a screen reader does not
+ * begin on the page after the work screen or the new shift is gone.
  */
 export function ShiftList({
   local,
   pairing,
   lineId,
-  operator,
   online,
   shiftReads,
   outboxVersion = 0,
@@ -79,7 +76,6 @@ export function ShiftList({
   onEntered,
   onHostError,
   onNew,
-  onSignOut,
   onSetup,
   onWarehouse,
   onQueue,
@@ -92,7 +88,7 @@ export function ShiftList({
   const [refusal, setRefusal] = useState<EntryRefusal | null>(null);
   const [requestedPage, setRequestedPage] = useState(1);
   const alive = useRef(true);
-  const start = useRef<HTMLParagraphElement>(null);
+  const start = useRef<HTMLHeadingElement>(null);
   // The guard of one entry at a time: two presses in one turn both pass a
   // check of `entering`, which only the next render changes.
   const running = useRef(false);
@@ -238,11 +234,7 @@ export function ShiftList({
     <FloorScreen
       className="shift-hub"
       title={t("floor.shifts.title")}
-      subtitle={
-        <p ref={start} tabIndex={-1} className="shift-hub__operator">
-          {t("floor.operator.signedIn", { name: operator.name, login: operator.login })}
-        </p>
-      }
+      titleRef={start}
       header={
         <>
           <div className="shift-selection__message" aria-live="polite">
@@ -278,10 +270,6 @@ export function ShiftList({
                 {t("floor.shifts.queue")}
               </Button>
             )}
-            {/* Never held by an entry: one that never settles must not trap the station here. */}
-            <Button size="floor" variant="secondary" onClick={onSignOut}>
-              {t("floor.operator.signOut")}
-            </Button>
           </div>
         </FloorFooter>
       }

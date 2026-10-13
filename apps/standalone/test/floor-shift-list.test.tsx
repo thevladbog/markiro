@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import type { FloorSession } from "../src/app/shell.js";
 import {
   keepEnteredShift,
   readShiftCopy,
@@ -49,13 +48,6 @@ const OPENED: EnteredShift = {
   counterpartyName: null,
   snapshot: { ...ENTERED.snapshot, counterpartyName: null },
 };
-const ANNA: FloorSession = {
-  sessionId: 1,
-  id: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
-  login: "0042",
-  name: "Анна Кузнецова",
-  role: null,
-};
 const OTHER_STATION = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const READ = { done: 1, failed: false };
 const SEEN = 1_790_000_000_000;
@@ -80,7 +72,6 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         local={local}
         pairing={PAIRING}
         lineId={LINE_ID}
-        operator={ANNA}
         online={options.online ?? true}
         shiftReads={options.shiftReads ?? READ}
         outboxVersion={options.outboxVersion ?? 0}
@@ -88,7 +79,6 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         onEntered={handlers.onEntered}
         onHostError={handlers.onHostError}
         onNew={handlers.onNew}
-        onSignOut={handlers.onSignOut}
         {...(options.onSetup === undefined ? {} : { onSetup: options.onSetup })}
         {...(options.onWarehouse === undefined ? {} : { onWarehouse: options.onWarehouse })}
         {...(options.onQueue === undefined ? {} : { onQueue: options.onQueue })}
@@ -103,7 +93,6 @@ function handlersOf() {
     onEntered: vi.fn<(shift: WorkShift) => void>(),
     onHostError: vi.fn<(error: unknown) => void>(),
     onNew: vi.fn(),
-    onSignOut: vi.fn(),
   };
 }
 
@@ -150,7 +139,7 @@ describe("the shifts of the station's line", () => {
     expect(within(planned).getByText("Не начата")).toBeTruthy();
     expect(within(planned).getByText("План не указан")).toBeTruthy();
     expect(within(planned).getByRole("button", { name: "Открыть" })).toBeTruthy();
-    expect(screen.getByText("Вошёл: Анна Кузнецова, табельный номер 0042.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Смены линии" })).toBeTruthy();
   });
 
   it("opens a planned shift with the host and hands over the shift with its checked snapshot", async () => {
@@ -347,7 +336,7 @@ describe("the shifts of the station's line", () => {
     expect(screen.queryByText("Смена закрыта.")).toBeNull();
   });
 
-  it("enters one shift at a time and keeps «Сменить оператора» while an entry hangs", async () => {
+  it("enters one shift at a time, the cards and «Новая смена» waiting while an entry hangs", async () => {
     const { executor } = await copiesOf([PLANNED, MINE], [ENTERED_MINE]);
     let answer: (shift: EnteredShift) => void = () => undefined;
     const enter = vi.fn(
@@ -367,10 +356,7 @@ describe("the shifts of the station's line", () => {
     expect(await screen.findByText("Открываем смену…")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Продолжить" })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Новая смена" })).toHaveProperty("disabled", true);
-    const signOut = screen.getByRole("button", { name: "Сменить оператора" });
-    expect(signOut).toHaveProperty("disabled", false);
-    fireEvent.click(signOut);
-    expect(handlers.onSignOut).toHaveBeenCalledTimes(1);
+    // «Сменить оператора» is the status bar's (floor-app.test pins it while an entry hangs).
     await act(async () => {
       answer(OPENED);
     });
@@ -562,7 +548,7 @@ describe("the shifts of the station's line", () => {
     function region(): HTMLElement {
       // The region stands in the screen's title row, beside the title and the operator.
       const element = screen
-        .getByText("Вошёл: Анна Кузнецова, табельный номер 0042.")
+        .getByRole("heading", { name: "Смены линии" })
         .closest("header")
         ?.querySelector('[aria-live="polite"]');
       if (!(element instanceof HTMLElement)) {
@@ -632,9 +618,10 @@ describe("the shifts of the station's line", () => {
     const { executor } = await copiesOf([PLANNED]);
     renderList(executor);
     await screen.findByText("OCT26-005/S");
-    const prompt = screen.getByText("Вошёл: Анна Кузнецова, табельный номер 0042.");
-    expect(document.activeElement).toBe(prompt);
-    expect(prompt.tabIndex).toBe(-1);
+    // The screen's title takes the focus (the operator is named in the status bar).
+    const title = screen.getByRole("heading", { name: "Смены линии" });
+    expect(document.activeElement).toBe(title);
+    expect(title.tabIndex).toBe(-1);
   });
 
   it("does not take the focus back from a button when it reads its copies again", async () => {
@@ -904,11 +891,9 @@ describe("the workstation setup's entry", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await screen.findByText("Открываем смену…");
     expect(setup).toHaveProperty("disabled", true);
-    // Leaving is never held by an entry that does not answer.
-    expect(screen.getByRole("button", { name: "Сменить оператора" })).toHaveProperty(
-      "disabled",
-      false,
-    );
+    // Leaving is the status bar's «Сменить оператора», never held by an entry
+    // (floor-app.test); the hub keeps no second copy of it.
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
   });
 });
 
@@ -939,11 +924,9 @@ describe("the warehouse reprint's entry (plan СКЛ)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await screen.findByText("Открываем смену…");
     expect(reprint).toHaveProperty("disabled", true);
-    // Leaving is never held by an entry that does not answer.
-    expect(screen.getByRole("button", { name: "Сменить оператора" })).toHaveProperty(
-      "disabled",
-      false,
-    );
+    // Leaving is the status bar's «Сменить оператора», never held by an entry
+    // (floor-app.test); the hub keeps no second copy of it.
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
   });
 });
 
@@ -995,9 +978,11 @@ describe("the layout ported from the cloud station's shift selection", () => {
     renderList(executor, { onSetup: vi.fn(), onWarehouse: vi.fn(), onQueue: vi.fn() });
     await screen.findByRole("button", { name: "Открыть" });
     const footer = screen.getByRole("contentinfo", { name: "Действия со сменами" });
-    for (const name of ["Новая смена", "Рабочее место", "Очередь отправки", "Сменить оператора"]) {
+    for (const name of ["Новая смена", "Рабочее место", "Очередь отправки"]) {
       expect(within(footer).getByRole("button", { name })).toBeTruthy();
     }
+    // «Сменить оператора» stands in the status bar, as on the cloud station: one copy only.
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
     // The cloud station's top-right header action is where its warehouse entry stands.
     const reprint = screen.getByRole("button", { name: "Повторная печать этикеток" });
     expect(within(footer).queryByRole("button", { name: "Повторная печать этикеток" })).toBeNull();
