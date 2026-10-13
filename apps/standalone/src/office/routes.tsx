@@ -3,6 +3,7 @@ import type { RouteObject } from "react-router";
 import { BackupsPage } from "./backups/BackupsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
+import { EmployeesPage } from "./employees/EmployeesPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
 import { OfficeOverview } from "./OfficeOverview.js";
@@ -37,6 +38,14 @@ export const officeRoutes: RouteObject[] = [
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
+      {
+        path: "employees",
+        element: (
+          <RequireRole roles={["admin"]}>
+            <EmployeesPage />
+          </RequireRole>
+        ),
+      },
       {
         path: "operators",
         element: (

@@ -22,6 +22,8 @@ const CREATE_CONFLICTS = {
 } as const;
 
 export interface CreateOperatorDialogProps {
+  /** The name and role the form starts with: an employee's, when the operator is made for one. */
+  initial?: { name: string; role: string | null };
   onClose: () => void;
   onCreated: (operator: OfficeOperator) => void;
 }
@@ -31,7 +33,7 @@ export interface CreateOperatorDialogProps {
  * request is built, so neither the request nor the mutation's variables
  * ever hold it; it lives in the form until the dialog closes.
  */
-export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialogProps) {
+export function CreateOperatorDialog({ initial, onClose, onCreated }: CreateOperatorDialogProps) {
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
@@ -47,7 +49,13 @@ export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialo
     formState: { errors },
   } = useForm<NewOperatorValues>({
     resolver: zodResolver(newOperatorSchema),
-    defaultValues: { login: "", name: "", role: "", pin: "", pinConfirm: "" },
+    defaultValues: {
+      login: "",
+      name: initial?.name ?? "",
+      role: initial?.role ?? "",
+      pin: "",
+      pinConfirm: "",
+    },
   });
 
   const submit = handleSubmit(async (values) => {
