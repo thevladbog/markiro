@@ -101,6 +101,16 @@ class RequestRevisionConflict extends ConflictException {
 export class UsRequestStore {
   constructor(private readonly db: Db) {}
 
+  private async authorize(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+  ): Promise<void> {
+    const profile = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.QA_MANAGE);
+    if (profile !== "US_FSMA204_PROCESSOR")
+      throw new ForbiddenException({ code: "us_request_profile_unsupported" });
+  }
+
   private async command<T>(
     tenantId: string,
     actorUserId: string,
@@ -111,14 +121,7 @@ export class UsRequestStore {
   ): Promise<T> {
     try {
       return await transformationTransaction(this.db, async (tx) => {
-        const profile = await authorizeUsMasterData(
-          tx,
-          tenantId,
-          actorUserId,
-          US_CAPABILITY.QA_MANAGE,
-        );
-        if (profile !== "US_FSMA204_PROCESSOR")
-          throw new ForbiddenException({ code: "us_request_profile_unsupported" });
+        await this.authorize(tx, tenantId, actorUserId);
         return run(tx);
       });
     } catch (caught) {
@@ -198,25 +201,45 @@ export class UsRequestStore {
       actorUserId,
       action,
       null,
-      async (tx) => {
-        const value = parseMasterDataInput(usTraceRequestCreateBodySchema, body);
-        const resolved = deadline(value);
-        const [row] = await tx
-          .insert(table)
-          .values({
-            ...value,
-            tenantId,
-            createdBy: actorUserId,
-            receivedAt: new Date(value.receivedAt),
-            dueAt: new Date(resolved.dueAt),
-            alternateDeadlineReason: resolved.alternateDeadlineReason,
-          })
-          .returning();
-        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-        return this.success(tx, actorUserId, action, row, null, httpRequestId);
-      },
+      (tx) => this.createAuthorized(tx, tenantId, actorUserId, body, httpRequestId),
       httpRequestId,
     );
+  }
+
+  /** Caller owns transaction/retry/rollback; success and Request remain atomic in its tx. */
+  async createCommandInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    httpRequestId: string | null = null,
+  ): Promise<UsRequestRow> {
+    await this.authorize(tx, tenantId, actorUserId);
+    return this.createAuthorized(tx, tenantId, actorUserId, input, httpRequestId);
+  }
+
+  private async createAuthorized(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    httpRequestId: string | null,
+  ): Promise<UsRequestRow> {
+    const value = parseMasterDataInput(usTraceRequestCreateBodySchema, input);
+    const resolved = deadline(value);
+    const [row] = await tx
+      .insert(table)
+      .values({
+        ...value,
+        tenantId,
+        createdBy: actorUserId,
+        receivedAt: new Date(value.receivedAt),
+        dueAt: new Date(resolved.dueAt),
+        alternateDeadlineReason: resolved.alternateDeadlineReason,
+      })
+      .returning();
+    if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+    return this.success(tx, actorUserId, "traceability.request.created", row, null, httpRequestId);
   }
 
   private async locked(
