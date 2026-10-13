@@ -145,6 +145,9 @@ describe("what the host tells the station of its conflicts (plan КНФ)", () =>
         shift_id: FIRST.shiftId,
         code_hash: FIRST.codeHash,
         box_id: FIRST.boxId,
+        // The shift's number and the box's SSCC, kept with the row (the owner's decision).
+        shift_number: FIRST.shiftNumber,
+        box_sscc: FIRST.boxSscc,
         detected_at: FIRST.detectedAt,
         winner_shift_number: FIRST.winner.shiftNumber,
         winner_same_device: 0,
@@ -453,5 +456,50 @@ describe("what the host tells the station of its conflicts (plan КНФ)", () =>
         { device_id: OTHER_PAIRING.deviceId, resolved_at: null },
       ].sort((a, b) => a.device_id.localeCompare(b.device_id)),
     );
+  });
+
+  it("keeps the box's SSCC this station closed it with when the host has it open, and never takes the snapshot again", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, closed_at, sscc, " +
+        "block_id, serial, item_count) VALUES (?, ?, ?, ?, ?, ?, '046006820000015009', 'block-1', " +
+        "1509, 1)",
+    ).run(FIRST.boxId, PAIRING.hostId, PAIRING.deviceId, FIRST.shiftId, AT, AT);
+    const open = displacement(1, { boxId: FIRST.boxId, boxSscc: null });
+    await readConflictNotices(
+      context(
+        executor,
+        noStatus(),
+        vi.fn(async () => ({ items: [open], more: false })),
+      ),
+    );
+    const snapshot = () =>
+      rows(
+        db,
+        "SELECT shift_number, box_sscc FROM floor_displacements WHERE record_id = ?",
+        open.recordId,
+      );
+    expect(snapshot()).toEqual([
+      { shift_number: FIRST.shiftNumber, box_sscc: "046006820000015009" },
+    ]);
+    // The box and the shift's copy change or go: the row keeps what it took.
+    db.prepare("UPDATE floor_boxes SET sscc = '046006820000015010' WHERE id = ?").run(FIRST.boxId);
+    const again = {
+      ...open,
+      conflictId: "e0000000-0000-4000-8000-000000000001",
+      detectedAt: "2026-10-09T07:00:00Z",
+      shiftNumber: "OTHER",
+      boxSscc: "046006820000099999",
+    };
+    await readConflictNotices(
+      context(
+        executor,
+        noStatus(),
+        vi.fn(async () => ({ items: [open, again], more: false })),
+      ),
+    );
+    expect(snapshot()).toEqual([
+      { shift_number: FIRST.shiftNumber, box_sscc: "046006820000015009" },
+    ]);
   });
 });

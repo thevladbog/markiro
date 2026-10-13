@@ -2,7 +2,7 @@ mod support;
 
 use axum::http::StatusCode;
 use serde_json::json;
-use support::app::{box_id, empty, instant, json, record_id, request, with_device};
+use support::app::{box_id, empty, instant, json, record_id, request, sscc, with_device};
 use support::conflicts::{conflict_id, conflict_scene};
 
 #[tokio::test]
@@ -94,7 +94,8 @@ async fn a_displaced_station_learns_of_its_displacements_after_its_cursor() {
         body,
         json!({ "items": [{
             "conflictId": conflict, "recordId": record_id(2), "shiftId": s.a.shift,
-            "codeHash": format!("{:064x}", 7), "boxId": box_id(1), "detectedAt": s.detected_at,
+            "shiftNumber": s.a.number, "codeHash": format!("{:064x}", 7), "boxId": box_id(1),
+            "boxSscc": sscc(1500), "detectedAt": s.detected_at,
             "winner": { "shiftId": s.b.shift, "shiftNumber": s.b.number, "deviceId": s.b.station,
                         "scannedAt": instant(50, 0), "sameDevice": false },
             "reviewedAt": null

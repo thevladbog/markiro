@@ -25,8 +25,10 @@ const DISPLACED: DeviceDisplacements = {
       conflictId: "c0000000-0000-4000-8000-000000000001",
       recordId: "00000000-0000-4000-8000-000000000002",
       shiftId: "5a0c9e1e-3d4f-4b8a-9c2d-1e0f9a8b7c6d",
+      shiftNumber: "OCT26-004",
       codeHash: "0".repeat(63) + "7",
       boxId: null,
+      boxSscc: null,
       detectedAt: "2026-10-08T07:12:03Z",
       winner: {
         shiftId: "6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e",

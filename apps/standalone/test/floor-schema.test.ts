@@ -632,6 +632,9 @@ const COLUMNS: Record<string, string[]> = {
     "resolved_at TEXT",
     "resolved_by TEXT",
     "office_reviewed_at TEXT",
+    // Kept when the row is first written, never taken again (the owner's decision).
+    "shift_number TEXT",
+    "box_sscc TEXT",
   ],
   // No column holds the text of a scan: the `invalid` ones keep a length and a class.
   floor_scans: [

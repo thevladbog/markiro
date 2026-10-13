@@ -51,18 +51,24 @@ export const DISPLACEMENT_CURSOR_SQL =
  * nothing; the same record under a new conflict (a restored host writes it
  * again under a new id and a later instant) keeps its row and its
  * resolution and only moves to the newer conflict, so the cursor of the next
- * read moves on. One the office reviewed already comes resolved, by nobody of
+ * read moves on. The shift's number and the box's SSCC are a snapshot taken
+ * once, when the row is first written (the host's SSCC, or this station's of
+ * a box the host still had open), and never again: the row stays readable
+ * after the retention deleted the shift's copy and its boxes. One the office reviewed already comes resolved, by nobody of
  * this station. Parameters: host id, device id, the instant, the instant
  * again, the JSON list.
  */
 export const INSERT_DISPLACEMENTS_SQL =
   "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
   "code_hash, box_id, detected_at, winner_shift_number, winner_same_device, winner_scanned_at, " +
-  "learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, j.value ->> 'conflictId', " +
+  "learned_at, resolved_at, office_reviewed_at, shift_number, box_sscc) " +
+  "SELECT ?, ?, j.value ->> 'conflictId', " +
   "j.value ->> 'recordId', j.value ->> 'shiftId', j.value ->> 'codeHash', j.value ->> 'boxId', " +
   "j.value ->> 'detectedAt', j.value ->> '$.winner.shiftNumber', " +
   "(j.value ->> '$.winner.sameDevice') = 1, j.value ->> '$.winner.scannedAt', ?, " +
-  "CASE WHEN j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, j.value ->> 'reviewedAt' " +
+  "CASE WHEN j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, j.value ->> 'reviewedAt', " +
+  "j.value ->> 'shiftNumber', coalesce(j.value ->> 'boxSscc', " +
+  "(SELECT b.sscc FROM floor_boxes b WHERE b.id = j.value ->> 'boxId')) " +
   "FROM json_each(?) AS j WHERE true " +
   "ON CONFLICT (host_id, device_id, conflict_id) DO NOTHING " +
   "ON CONFLICT (host_id, device_id, record_id) DO UPDATE SET conflict_id = excluded.conflict_id, " +

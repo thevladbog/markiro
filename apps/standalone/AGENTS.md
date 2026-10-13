@@ -469,7 +469,12 @@ writes again under a new id stays one row), the winner by its shift's number
 and whether it is this station's own (never a device's name), `learned_at`
 and `resolved_at` on this computer's clock, `detected_at` and
 `office_reviewed_at` the host's, `resolved_by` the operator or NULL for the
-office's review (`CHECK`s: a person or the office resolves only with the
+office's review — and the shift's number and the box's SSCC as a snapshot taken
+when the row is first written (the host's SSCC, or this station's of a box the
+host still had open) and never again, so a row stays readable after the
+retention deleted the shift's copy and its boxes (the owner's decision; the
+queue reads the snapshot first, the live copy only where the snapshot is
+empty) (`CHECK`s: a person or the office resolves only with the
 instant). It has a `shift_id` but no retention on purpose (rows are few, and
 the newest is the cursor of the next read, which must never go back;
 `test/retention.test.ts` names that exception). Indexes:
@@ -4331,9 +4336,8 @@ the status bar counts them («Вытеснено кодов»). The floor's own 
 they were, and a station's «Разобрано» never reaches the host (as in the
 cloud). Known limits: a displacement is heard at the next revision or
 reconnect, not at once; a host clock that goes back can still hide one; a
-shift the retention purged before its displacement arrived shows no SSCC or
-number; a restored host no longer knows the conflicts after
-its copy, so those rows can only be settled on the station.
+restored host no longer knows the conflicts after its copy, so those rows can
+only be settled on the station.
 
 The status bar also warns of the serials left (`readShiftStock`): the boxes'
 and, in a shift with pallets, the pallets', at a quarter and a tenth of the
@@ -4855,6 +4859,9 @@ Plan КНФ (parity spec §5.2, pilot spec §7).
   and the box (SSCC, `null` while open, no box at all for a validation shift).
   A review is kept once with its reviewer, an audit row and a revision; a
   repeat answers the conflict as it is.
+  The office reads both sides live: the host never deletes a shift or a box
+  its scans name (foreign keys; only a planned shift can be deleted), so they
+  stay readable without a snapshot, unlike the station's copies.
 - A shift's exceptions and refused records each answer at most 500 rows,
   newest first, with `total`. An undo's serial is its code's (any scan of the
   hash). Refusals the host could not tie to a shift (`unknown_shift`,

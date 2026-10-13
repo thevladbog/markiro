@@ -133,8 +133,12 @@ export const deviceDisplacementSchema = z.object({
   conflictId: z.uuid(),
   recordId: z.string(),
   shiftId: z.string(),
+  /** The losing shift's number: the station keeps it with the row. */
+  shiftNumber: z.string(),
   codeHash,
   boxId: z.string().nullable(),
+  /** The box's SSCC on the host, `null` while the host has it open. */
+  boxSscc: z.string().nullable(),
   detectedAt: instant,
   winner: codeOwnerSchema,
   reviewedAt: instant.nullable(),

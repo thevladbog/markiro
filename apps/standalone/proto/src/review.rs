@@ -189,15 +189,21 @@ pub struct ConflictStatusResponse {
 /// A scan of this device an earlier scan elsewhere took the code from (a
 /// `displaced` conflict): its record, shift, code hash and box, when the host
 /// saw it, the winner as a `conflict` receipt names one, and whether the
-/// office reviewed it already.
+/// office reviewed it already; with the shift's number and the box's SSCC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceDisplacement {
     pub conflict_id: String,
     pub record_id: String,
     pub shift_id: String,
+    /// The losing shift's number, which the station keeps with the row so it
+    /// stays readable after its own copy of the shift is gone.
+    pub shift_number: String,
     pub code_hash: String,
     pub box_id: Option<String>,
+    /// The box's SSCC on the host (`null` while the host has it open), kept
+    /// the same way.
+    pub box_sscc: Option<String>,
     pub detected_at: String,
     pub winner: CodeOwner,
     pub reviewed_at: Option<String>,

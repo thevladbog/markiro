@@ -1984,11 +1984,13 @@ const NOTICE_APPLY_DISPLACEMENTS: &str =
 const NOTICE_INSERT_DISPLACEMENTS: &str =
     "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, \
      code_hash, box_id, detected_at, winner_shift_number, winner_same_device, \
-     winner_scanned_at, learned_at, resolved_at, office_reviewed_at) SELECT ?, ?, j.value ->> \
-     'conflictId', j.value ->> 'recordId', j.value ->> 'shiftId', j.value ->> 'codeHash', \
-     j.value ->> 'boxId', j.value ->> 'detectedAt', j.value ->> '$.winner.shiftNumber', \
-     (j.value ->> '$.winner.sameDevice') = 1, j.value ->> '$.winner.scannedAt', ?, CASE WHEN \
-     j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? END, j.value ->> 'reviewedAt' FROM \
+     winner_scanned_at, learned_at, resolved_at, office_reviewed_at, shift_number, box_sscc) \
+     SELECT ?, ?, j.value ->> 'conflictId', j.value ->> 'recordId', j.value ->> 'shiftId', \
+     j.value ->> 'codeHash', j.value ->> 'boxId', j.value ->> 'detectedAt', j.value ->> \
+     '$.winner.shiftNumber', (j.value ->> '$.winner.sameDevice') = 1, j.value ->> \
+     '$.winner.scannedAt', ?, CASE WHEN j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? \
+     END, j.value ->> 'reviewedAt', j.value ->> 'shiftNumber', coalesce(j.value ->> \
+     'boxSscc', (SELECT b.sscc FROM floor_boxes b WHERE b.id = j.value ->> 'boxId')) FROM \
      json_each(?) AS j WHERE true ON CONFLICT (host_id, device_id, conflict_id) DO NOTHING ON \
      CONFLICT (host_id, device_id, record_id) DO UPDATE SET conflict_id = \
      excluded.conflict_id, detected_at = excluded.detected_at WHERE excluded.detected_at > \
@@ -1997,12 +1999,12 @@ const DISPLACED_COUNT: &str =
     "SELECT count(*) AS n FROM floor_displacements WHERE host_id = ? AND device_id = ? AND \
      resolved_at IS NULL";
 const QUEUE_DISPLACED: &str =
-    "SELECT d.conflict_id, d.shift_id, s.number AS shift_number, b.sscc, d.detected_at, \
-     d.winner_shift_number, d.winner_same_device FROM floor_displacements d LEFT JOIN \
-     floor_shifts s ON s.host_id = d.host_id AND s.device_id = d.device_id AND s.id = \
-     d.shift_id LEFT JOIN floor_boxes b ON b.id = d.box_id WHERE d.host_id = ? AND \
-     d.device_id = ? AND d.resolved_at IS NULL ORDER BY d.detected_at, d.conflict_id LIMIT \
-     100";
+    "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, \
+     coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, d.winner_shift_number, \
+     d.winner_same_device FROM floor_displacements d LEFT JOIN floor_shifts s ON s.host_id = \
+     d.host_id AND s.device_id = d.device_id AND s.id = d.shift_id LEFT JOIN floor_boxes b ON \
+     b.id = d.box_id WHERE d.host_id = ? AND d.device_id = ? AND d.resolved_at IS NULL ORDER \
+     BY d.detected_at, d.conflict_id LIMIT 100";
 const QUEUE_DISMISS_DISPLACEMENT: &str =
     "UPDATE floor_displacements SET resolved_at = ?, resolved_by = ? WHERE host_id = ? AND \
      device_id = ? AND conflict_id = ? AND resolved_at IS NULL";

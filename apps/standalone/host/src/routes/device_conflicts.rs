@@ -31,10 +31,13 @@ pub const STATUS_SQL: &str = "SELECT l.record_id, c.reviewed_at FROM scans l \
 /// migration 0022), in their order: `CROSS JOIN` keeps the planner from
 /// starting at the device's scans, whose journal only grows. One batch
 /// detects many at one instant, so the id breaks the tie.
-pub const DISPLACEMENTS_SQL: &str = "SELECT c.id, l.record_id, l.shift_id, c.code_hash, l.box_id, \
+pub const DISPLACEMENTS_SQL: &str = "SELECT c.id, l.record_id, l.shift_id, \
+     ls.number_month_key AS l_month_key, ls.number_seq AS l_seq, ls.created_from AS l_origin, \
+     c.code_hash, l.box_id, lb.sscc AS box_sscc, \
      c.detected_at, c.reviewed_at, w.shift_id AS w_shift_id, ws.number_month_key, \
      ws.number_seq, ws.created_from, w.device_id AS w_device_id, w.scanned_at AS w_scanned_at \
      FROM code_conflicts c CROSS JOIN scans l ON l.id = c.loser_scan_id \
+     JOIN shifts ls ON ls.id = l.shift_id LEFT JOIN boxes lb ON lb.id = l.box_id \
      JOIN scans w ON w.id = c.winner_scan_id JOIN shifts ws ON ws.id = w.shift_id \
      WHERE c.kind = 'displaced' AND l.device_id = ?1 AND (c.detected_at, c.id) > (?2, ?3) \
      ORDER BY c.detected_at, c.id LIMIT ?4";
@@ -81,8 +84,12 @@ struct DisplacementRow {
     id: String,
     record_id: String,
     shift_id: String,
+    l_month_key: String,
+    l_seq: i64,
+    l_origin: String,
     code_hash: String,
     box_id: Option<String>,
+    box_sscc: Option<String>,
     detected_at: String,
     reviewed_at: Option<String>,
     w_shift_id: String,
@@ -137,6 +144,7 @@ pub async fn list_displacements(
         .into_iter()
         .map(|row| {
             let origin: ShiftOrigin = row.created_from.parse().map_err(ApiError::internal)?;
+            let loser_origin: ShiftOrigin = row.l_origin.parse().map_err(ApiError::internal)?;
             Ok(DeviceDisplacement {
                 winner: CodeOwner {
                     shift_number: shifts::format_number(
@@ -152,8 +160,10 @@ pub async fn list_displacements(
                 conflict_id: row.id,
                 record_id: row.record_id,
                 shift_id: row.shift_id,
+                shift_number: shifts::format_number(&row.l_month_key, row.l_seq, loser_origin),
                 code_hash: row.code_hash,
                 box_id: row.box_id,
+                box_sscc: row.box_sscc,
                 detected_at: row.detected_at,
                 reviewed_at: row.reviewed_at,
             })

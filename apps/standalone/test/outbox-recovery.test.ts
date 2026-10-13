@@ -1115,4 +1115,15 @@ describe("displaced scans on the queue screen (plan КНФ)", () => {
     );
     expect((await readQueue(local, PAIRING)).displaced).toEqual([]);
   });
+
+  it("shows a displacement's shift number and box SSCC from the row once the shift's copy is gone", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1", { boxId: "box-gone" });
+    db.prepare(
+      "UPDATE floor_displacements SET shift_number = 'OCT26-004', box_sscc = '046006820000015001'",
+    ).run();
+    db.prepare("DELETE FROM floor_shifts").run();
+    const [record] = (await readQueue(local, PAIRING)).displaced;
+    expect(record).toMatchObject({ shiftNumber: "OCT26-004", sscc: "046006820000015001" });
+  });
 });

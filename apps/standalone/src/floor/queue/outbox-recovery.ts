@@ -119,11 +119,14 @@ export const STRANDED_COUNT_SQL =
 /**
  * The pairing's displaced scans nobody resolved (plan КНФ: the host had
  * accepted them, then an earlier scan elsewhere took the code), oldest first,
- * with their shift's number and their box's SSCC; at most 100. Parameters:
+ * with their shift's number and their box's SSCC — the row's own snapshot, so
+ * they outlive the shift's copy; the live copy only fills a snapshot that
+ * had none; at most 100. Parameters:
  * host id, device id.
  */
 export const QUEUE_DISPLACED_SQL =
-  "SELECT d.conflict_id, d.shift_id, s.number AS shift_number, b.sscc, d.detected_at, " +
+  "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, " +
+  "coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, " +
   "d.winner_shift_number, d.winner_same_device FROM floor_displacements d " +
   "LEFT JOIN floor_shifts s ON s.host_id = d.host_id AND s.device_id = d.device_id " +
   "AND s.id = d.shift_id LEFT JOIN floor_boxes b ON b.id = d.box_id " +

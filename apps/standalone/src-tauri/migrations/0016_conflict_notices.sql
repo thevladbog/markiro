@@ -35,6 +35,12 @@ CREATE TABLE floor_displacements (
   resolved_at TEXT,
   resolved_by TEXT,
   office_reviewed_at TEXT,
+  -- The shift's number and the box's SSCC as they were when the row was first
+  -- written (the host's, or this station's SSCC of a box the host still had
+  -- open), never taken again: the retention deletes the shift's copy and its
+  -- boxes, and the row must still say which box to check.
+  shift_number TEXT,
+  box_sscc TEXT,
   PRIMARY KEY (host_id, device_id, conflict_id),
   CHECK (resolved_by IS NULL OR resolved_at IS NOT NULL),
   CHECK (office_reviewed_at IS NULL OR resolved_at IS NOT NULL)
