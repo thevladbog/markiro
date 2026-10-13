@@ -640,6 +640,29 @@ async fn the_earlier_copy_is_not_used_again_after_a_write_or_without_its_manifes
         &format!("pre-upgrade-{from}-{to}"),
     );
     assert!(paths.backups_dir().join(&fourth).exists());
+
+    // A manifest that names another host, or another schema, is no copy of
+    // this database.
+    let mut previous = fourth;
+    for (field, value, when) in [
+        (
+            "hostId",
+            json!("0e0e0e0e-0000-4000-8000-000000000000"),
+            "2026-10-13T09:04:00Z",
+        ),
+        ("schemaVersion", json!(from - 1), "2026-10-13T09:05:00Z"),
+    ] {
+        let manifest_file = paths.backups_dir().join(previous.replace(".db", ".json"));
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_file).unwrap()).unwrap();
+        manifest[field] = value;
+        std::fs::write(&manifest_file, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let opened = db::open_upgrading(&paths.database_file(), &pre(&paths, when)).await;
+        assert!(matches!(opened, Err(OpenError::Database(_))), "{opened:?}");
+        let next = copy_name(at(when), &format!("pre-upgrade-{from}-{to}"));
+        assert!(paths.backups_dir().join(&next).exists(), "{field}");
+        previous = next;
+    }
 }
 
 /// Two different failures of the copy are two rows.
@@ -758,18 +781,29 @@ fn a_failed_copy_says_what_to_do_for_its_code() {
         to: 31,
         migrations: 1,
     };
-    let full = OpenError::Copy {
-        pending,
-        failure: Failure::new("disk_full", "no space"),
+    let text = |code: &'static str| {
+        OpenError::Copy {
+            pending,
+            failure: Failure::new(code, "detail"),
+        }
+        .to_string()
+    };
+    for code in ["disk_full", "access_denied", "destination_unavailable"] {
+        let text = text(code);
+        assert!(text.contains("no migration ran"), "{text}");
+        assert!(text.contains("free space"), "{text}");
+        assert!(!text.contains("support"), "{text}");
     }
-    .to_string();
-    assert!(full.contains("free space"), "{full}");
-    let broken = OpenError::Copy {
-        pending,
-        failure: Failure::new("verify_failed", "malformed"),
+    // Any other SQLite error of the copy, damage included.
+    let written = text("write_failed");
+    assert!(
+        written.contains("free space") && written.contains("support"),
+        "{written}"
+    );
+    for code in ["verify_failed", "internal"] {
+        let text = text(code);
+        assert!(text.contains("no migration ran"), "{text}");
+        assert!(!text.contains("free space"), "{text}");
+        assert!(text.contains("support"), "{text}");
     }
-    .to_string();
-    assert!(broken.contains("no migration ran"), "{broken}");
-    assert!(!broken.contains("free space"), "{broken}");
-    assert!(broken.contains("support"), "{broken}");
 }

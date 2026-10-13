@@ -174,10 +174,19 @@ impl std::fmt::Display for OpenError {
             Self::Copy { pending, failure } => {
                 // The folder's own troubles have a remedy on site; anything
                 // else (a copy that did not check out) is for support.
+                // `write_failed` is any other SQLite error of `VACUUM INTO`
+                // (`copy::classify_sqlite`), damage in the database included.
                 let advice = match failure.code {
-                    failure::DISK_FULL | failure::ACCESS_DENIED | failure::WRITE_FAILED => {
+                    failure::DISK_FULL
+                    | failure::ACCESS_DENIED
+                    | failure::DESTINATION_UNAVAILABLE => {
                         "free space or restore access in the folder of copies, then start the \
                          service again"
+                    }
+                    failure::WRITE_FAILED => {
+                        "free space or restore access in the folder of copies, then start the \
+                         service again; if it fails the same way, call support: the database \
+                         may be damaged"
                     }
                     _ => "the database may be damaged: call support before anything else",
                 };

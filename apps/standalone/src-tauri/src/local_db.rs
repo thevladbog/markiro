@@ -313,12 +313,17 @@ impl LocalDb {
             Ok(true) => {
                 if let Err(error) = copy_before_migrations(&writer, dir, version).await {
                     // The kind only: a path names the Windows user.
-                    eprintln!(
-                        "standalone: the copy of the local database before its migrations failed: {:?}",
-                        error.kind()
-                    );
+                    match &error {
+                        sqlx::Error::Io(io) => eprintln!(
+                            "standalone: the copy of the local database before its migrations failed: {:?}",
+                            io.kind()
+                        ),
+                        _ => eprintln!(
+                            "standalone: the copy of the local database before its migrations met a damaged database"
+                        ),
+                    }
                     writer.close().await;
-                    return Err(sqlx::Error::Io(error));
+                    return Err(error);
                 }
             }
             Err(error) => {
@@ -413,7 +418,11 @@ impl LocalDb {
     /// included. The tables of this device's own records and of the
     /// workstation's settings keep their rows (stage 2a spec §5.2, decision
     /// 30); `device_forget` decides first whether unsent records allow a
-    /// forget at all. The writer zeroes deleted rows (`secure_delete`), and a
+    /// forget at all. One exception, carried to the owner (plan ОБН-1, Д9):
+    /// the copy before an upgrade (`standalone-station.pre-<version>.db`)
+    /// keeps the PIN and badge hashes it held at that upgrade; the forget does
+    /// not touch it, and only the next upgrade that brings migrations replaces
+    /// it. The writer zeroes deleted rows (`secure_delete`), and a
     /// checkpoint that truncates the WAL follows the commit: it moves the
     /// zeroed pages into the file and empties the WAL, which still held the
     /// frames written before the delete. A reader holding an older snapshot
@@ -779,37 +788,58 @@ async fn has_pending_migrations(pool: &SqlitePool) -> Result<bool, sqlx::Error> 
 
 /// `VACUUM INTO <copy>.partial`, `integrity_check` on it read-only, flushed,
 /// renamed to `standalone-station.pre-<version>.db` (over one of that name),
-/// then every older such copy goes. A failure leaves the database as it was
-/// and no partial file behind.
+/// then every older such copy goes, with its side files. A copy of that name
+/// that is sound and older than the database stays as it is: an earlier
+/// open of this version copied the database, and one of its migrations
+/// committed before a later one failed, so it holds the state before all of
+/// them (plan ОБН-1). A failure leaves the database as it was and no partial
+/// file behind. Errors are I/O ([`OpenFailure::Other`]) except the damage the
+/// copy met in the database itself, which stays SQLite's
+/// ([`OpenFailure::Corrupt`], so a forget may set the file aside).
 async fn copy_before_migrations(
     pool: &SqlitePool,
     dir: &Path,
     version: &str,
-) -> std::io::Result<()> {
+) -> Result<(), sqlx::Error> {
     let name = pre_upgrade_file(version);
     let target = dir.join(&name);
     let partial = dir.join(format!("{name}.partial"));
-    match std::fs::remove_file(&partial) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    let live: Option<i64> =
+        sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations WHERE success = 1")
+            .fetch_one(pool)
+            .await?;
+    if !older_sound_copy(&target, live).await {
+        match std::fs::remove_file(&partial) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(sqlx::Error::Io(error)),
+        }
+        if let Err(error) = write_pre_upgrade(pool, &partial).await {
+            let _ = std::fs::remove_file(&partial);
+            return Err(error);
+        }
+        if let Err(error) = rename_retrying(RENAME_ATTEMPTS, RENAME_RETRY_DELAY, || {
+            std::fs::rename(&partial, &target)
+        })
+        .await
+        {
+            // The partial file holds PIN and badge hashes: it does not stay.
+            let _ = std::fs::remove_file(&partial);
+            return Err(sqlx::Error::Io(error));
+        }
     }
-    if let Err(error) = write_pre_upgrade(pool, &partial).await {
-        let _ = std::fs::remove_file(&partial);
-        return Err(error);
-    }
-    rename_retrying(RENAME_ATTEMPTS, RENAME_RETRY_DELAY, || {
-        std::fs::rename(&partial, &target)
-    })
-    .await?;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let Some(other) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        let older = other != name
-            && other.starts_with(PRE_UPGRADE_PREFIX)
-            && (other.ends_with(".db") || other.ends_with(".db.partial"));
+        let base = FILE_SUFFIXES[1..]
+            .iter()
+            .find_map(|suffix| other.strip_suffix(suffix))
+            .unwrap_or(&other);
+        let older = base != name
+            && base.starts_with(PRE_UPGRADE_PREFIX)
+            && (base.ends_with(".db") || base.ends_with(".db.partial"));
         if older {
             // The new copy is in place: an older one that does not go is
             // only noted.
@@ -824,39 +854,84 @@ async fn copy_before_migrations(
     Ok(())
 }
 
-async fn write_pre_upgrade(pool: &SqlitePool, partial: &Path) -> std::io::Result<()> {
+/// Whether `target` is a sound copy whose newest migration is older than
+/// `live`, the database's: the copy an earlier open of this version made
+/// before its migrations. One as new as the database (a copy put back in
+/// place, then an upgrade again) or one that does not check out is not.
+async fn older_sound_copy(target: &Path, live: Option<i64>) -> bool {
+    let Some(live) = live else {
+        return false;
+    };
+    if !target.exists() {
+        return false;
+    }
+    let Ok(mut check) = SqliteConnectOptions::new()
+        .filename(target)
+        .read_only(true)
+        .immutable(true)
+        .connect()
+        .await
+    else {
+        return false;
+    };
+    let sound = matches!(
+        sqlx::query_scalar::<_, String>("PRAGMA quick_check")
+            .fetch_all(&mut check)
+            .await
+            .as_deref(),
+        Ok([ok]) if ok == "ok"
+    );
+    let newest: Result<Option<i64>, sqlx::Error> =
+        sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations WHERE success = 1")
+            .fetch_one(&mut check)
+            .await;
+    let _ = check.close().await;
+    sound && matches!(newest, Ok(Some(newest)) if newest < live)
+}
+
+async fn write_pre_upgrade(pool: &SqlitePool, partial: &Path) -> Result<(), sqlx::Error> {
     let target = partial.to_str().ok_or_else(|| {
-        std::io::Error::new(
+        sqlx::Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "the copy's path is no UTF-8",
-        )
+        ))
     })?;
-    sqlx::query("VACUUM INTO ?")
+    if let Err(error) = sqlx::query("VACUUM INTO ?")
         .bind(target)
         .execute(pool)
         .await
-        .map_err(std::io::Error::other)?;
+    {
+        // Damage the copy met in the database is the database's; anything
+        // else (a full disk, a locked folder) is the copy's own.
+        return Err(if open_failure_of(&error) == OpenFailure::Corrupt {
+            error
+        } else {
+            sqlx::Error::Io(std::io::Error::other(error))
+        });
+    }
+    let io = |error: sqlx::Error| sqlx::Error::Io(std::io::Error::other(error));
     let mut check = SqliteConnectOptions::new()
         .filename(partial)
         .read_only(true)
         .immutable(true)
         .connect()
         .await
-        .map_err(std::io::Error::other)?;
+        .map_err(io)?;
     let rows: Result<Vec<String>, sqlx::Error> = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_all(&mut check)
         .await;
     let _ = check.close().await;
-    if rows.map_err(std::io::Error::other)? != ["ok"] {
-        return Err(std::io::Error::new(
+    if rows.map_err(io)? != ["ok"] {
+        return Err(sqlx::Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "the copy did not check out",
-        ));
+        )));
     }
     std::fs::OpenOptions::new()
         .write(true)
         .open(partial)?
-        .sync_all()
+        .sync_all()?;
+    Ok(())
 }
 
 /// `rename` tried up to `attempts` times, `delay` apart. A source that is not
