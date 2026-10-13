@@ -1984,7 +1984,7 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   asks first and says that stations already on the line stay there: the host
   does not touch devices when a line is archived.
 - «Операторы» is for administrators only: `RequireRole`, and `OFFICE_NAV`
-  shows it to them alone, between «Смены» and «Устройства». It lists every
+  shows it to them alone, between «Сотрудники» and «Устройства». It lists every
   operator, those turned off included: active ones first, each group by
   personnel number as text, as the host orders them (leading zeros are part
   of the number, so no numeric collator), with the role, whether a PIN is
@@ -2001,6 +2001,34 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   `FormDialog` guard covers the hashing too, and the mutation's variables,
   which the query cache keeps, hold only the hash. There is no delete, and
   the page offers none.
+- «Сотрудники» (owner feedback on the first beta: «связывать сотрудника с
+  оператором, как в вебе»; administrators only, `RequireRole`, right before
+  «Операторы») is the site's register of people, as the cloud's
+  `employees`: a name, an optional role and an archive flag (host migration
+  `0017`, `GET`/`POST`/`PUT /v1/office/employees`, audit `employee.create`
+  and `employee.update`). In the cloud an operator is an employee granted
+  station access (`operator_credentials` keyed by `employee_id`); here
+  operators came first and keep their own record, so the cloud's one person
+  is an optional one-to-one link: `employees.operator_id` UNIQUE, written
+  only through the employee (`operatorId` in its whole-record `PUT`, `null`
+  unlinks; a holder already in the way is `conflict` on `operator` with
+  `details.employeeId`). The link grants nothing and is no fourth identity:
+  the operator keeps its personnel number, PIN, badges and access, the
+  operator record and its revision are never written, and the station feed,
+  `SYNC_SCHEMA_VERSION` and the stations' copies do not change. An archived
+  employee is linked to no operator (a table `CHECK`; archiving sends
+  `operatorId: null` in the same write, and the dialog warns that the
+  operator still signs in until it is turned off on «Операторы»), while a
+  turned-off operator may stay linked. The page searches the name, the role
+  and the linked operator's number and filters by the link; «Оператор» on a
+  row links a free operator, unlinks, or opens «Новый оператор» prefilled
+  with the employee's name and role and then writes the link (two writes:
+  when the second fails the page says the operator was created unlinked).
+  «Операторы» shows each operator's employee («Не связан» for none) and its
+  «Сотрудник» dialog links an operator to a free employee, creates an
+  employee from the operator in one `POST` with `operatorId`, or unlinks.
+  A cloud import refuses a site that holds employees (`site_not_empty`,
+  entity `employees`); the import itself creates none yet.
 - «Бейджи» on an operator's row lists that operator's badges, revoked ones
   too, dimmed and marked «Отозван»: they are the record of what was issued.
   «Добавить бейдж» reads the site's salt (`GET /v1/office/badge-salt`;
