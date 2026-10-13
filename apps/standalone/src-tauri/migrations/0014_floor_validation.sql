@@ -5,7 +5,10 @@
 -- usual way: a new table under another name, every row copied, the old one
 -- dropped, the new one renamed into place (SQLite then records its name
 -- quoted), and every index of `0006` created again with its own text. The
--- rest of each table is exactly as `0006` wrote it.
+-- rest of each table is exactly as `0006` wrote it. Every row keeps its
+-- rowid: «Снять последний код» takes a box's newest code by it
+-- (`LAST_CODE_SQL`, `src/floor/exceptions/box-exceptions.ts`), and a copy
+-- without it would renumber the rows past every deleted one.
 --
 -- `floor_codes.box_id` may be NULL; `floor_scans` keeps a box on an accepted
 -- scan only, but an accepted scan may have none: `box_id IS NULL OR verdict =
@@ -25,9 +28,10 @@ CREATE TABLE floor_codes_rebuilt (
   scanned_at TEXT NOT NULL,
   PRIMARY KEY (host_id, device_id, code_hash)
 );
-INSERT INTO floor_codes_rebuilt (host_id, device_id, code_hash, shift_id, box_id, scan_id,
-  scanned_at)
-SELECT host_id, device_id, code_hash, shift_id, box_id, scan_id, scanned_at FROM floor_codes;
+INSERT INTO floor_codes_rebuilt (rowid, host_id, device_id, code_hash, shift_id, box_id,
+  scan_id, scanned_at)
+SELECT rowid, host_id, device_id, code_hash, shift_id, box_id, scan_id, scanned_at
+FROM floor_codes;
 DROP TABLE floor_codes;
 ALTER TABLE floor_codes_rebuilt RENAME TO floor_codes;
 CREATE INDEX floor_codes_box ON floor_codes (host_id, device_id, box_id, code_hash);
@@ -58,10 +62,10 @@ CREATE TABLE floor_scans_rebuilt (
       AND canonical IS NOT NULL
     ELSE code_hash IS NULL AND gtin14 IS NULL AND serial IS NULL AND canonical IS NULL END)
 );
-INSERT INTO floor_scans_rebuilt (id, host_id, device_id, shift_id, box_id, verdict,
-  duplicate_source, raw_kind, raw_length, code_hash, gtin14, serial, canonical, scanned_at,
-  operator_id, conflict)
-SELECT id, host_id, device_id, shift_id, box_id, verdict, duplicate_source, raw_kind,
+INSERT INTO floor_scans_rebuilt (rowid, id, host_id, device_id, shift_id, box_id,
+  verdict, duplicate_source, raw_kind, raw_length, code_hash, gtin14, serial, canonical,
+  scanned_at, operator_id, conflict)
+SELECT rowid, id, host_id, device_id, shift_id, box_id, verdict, duplicate_source, raw_kind,
   raw_length, code_hash, gtin14, serial, canonical, scanned_at, operator_id, conflict
 FROM floor_scans;
 DROP TABLE floor_scans;

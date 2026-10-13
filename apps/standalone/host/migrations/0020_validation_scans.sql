@@ -22,15 +22,21 @@
 -- migration if any of the four tables breaks a foreign key, so a
 -- connection with the keys off cannot leave an orphan behind either.
 --
+-- Every row of the four tables keeps its rowid: it is copied by name, into
+-- the temporary copies as `kept_rowid` and back. Nothing of the host reads a
+-- rowid today, but a copy without it would renumber every row past a deleted
+-- one, and the shell's own rebuild (`0014`) had to keep it: keeping it is the
+-- rule of a rebuild.
+--
 -- The rule as triggers: on INSERT, and on an UPDATE of the verdict, the box
 -- or the shift (the host never updates a scan: the journal only grows, but
 -- the old CHECK held for every write, and so does the rule). A scan whose
 -- shift is missing reads no mode, and `IS NOT` counts that as no
 -- validation shift: the rule is not skipped where the foreign key is.
 
-CREATE TEMP TABLE box_items_kept AS SELECT * FROM box_items;
-CREATE TEMP TABLE code_owners_kept AS SELECT * FROM code_owners;
-CREATE TEMP TABLE code_conflicts_kept AS SELECT * FROM code_conflicts;
+CREATE TEMP TABLE box_items_kept AS SELECT rowid AS kept_rowid, * FROM box_items;
+CREATE TEMP TABLE code_owners_kept AS SELECT rowid AS kept_rowid, * FROM code_owners;
+CREATE TEMP TABLE code_conflicts_kept AS SELECT rowid AS kept_rowid, * FROM code_conflicts;
 DROP TABLE box_items;
 DROP TABLE code_owners;
 DROP TABLE code_conflicts;
@@ -60,10 +66,10 @@ CREATE TABLE scans_rebuilt (
     AND (code_hash IS NULL) = (canonical IS NULL)),
   CHECK (code_hash IS NULL OR length(code_hash) = 64)
 );
-INSERT INTO scans_rebuilt (id, record_id, device_id, shift_id, verdict, duplicate_source,
-  raw_kind, raw_length, code_hash, gtin14, serial, canonical, box_id, operator_id, scanned_at,
-  received_at)
-SELECT id, record_id, device_id, shift_id, verdict, duplicate_source, raw_kind, raw_length,
+INSERT INTO scans_rebuilt (rowid, id, record_id, device_id, shift_id, verdict,
+  duplicate_source, raw_kind, raw_length, code_hash, gtin14, serial, canonical, box_id,
+  operator_id, scanned_at, received_at)
+SELECT rowid, id, record_id, device_id, shift_id, verdict, duplicate_source, raw_kind, raw_length,
   code_hash, gtin14, serial, canonical, box_id, operator_id, scanned_at, received_at
 FROM scans;
 DROP TABLE scans;
@@ -97,8 +103,9 @@ CREATE TABLE box_items (
   removed_at TEXT,
   displaced_at TEXT
 );
-INSERT INTO box_items (scan_id, box_id, code_hash, added_at, removed_at, displaced_at)
-SELECT scan_id, box_id, code_hash, added_at, removed_at, displaced_at FROM temp.box_items_kept;
+INSERT INTO box_items (rowid, scan_id, box_id, code_hash, added_at, removed_at, displaced_at)
+SELECT kept_rowid, scan_id, box_id, code_hash, added_at, removed_at, displaced_at
+FROM temp.box_items_kept;
 CREATE UNIQUE INDEX box_items_live ON box_items (box_id, code_hash)
   WHERE removed_at IS NULL AND displaced_at IS NULL;
 
@@ -110,8 +117,9 @@ CREATE TABLE code_owners (
   box_id TEXT REFERENCES boxes (id),
   scanned_at TEXT NOT NULL
 );
-INSERT INTO code_owners (code_hash, scan_id, shift_id, device_id, box_id, scanned_at)
-SELECT code_hash, scan_id, shift_id, device_id, box_id, scanned_at FROM temp.code_owners_kept;
+INSERT INTO code_owners (rowid, code_hash, scan_id, shift_id, device_id, box_id, scanned_at)
+SELECT kept_rowid, code_hash, scan_id, shift_id, device_id, box_id, scanned_at
+FROM temp.code_owners_kept;
 -- The owners of a validation shift's codes, which no box lists.
 CREATE INDEX code_owners_shift_unboxed ON code_owners (shift_id) WHERE box_id IS NULL;
 
@@ -124,9 +132,9 @@ CREATE TABLE code_conflicts (
   reviewed_at TEXT,
   CHECK (winner_scan_id <> loser_scan_id)
 );
-INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at,
-  reviewed_at)
-SELECT id, code_hash, winner_scan_id, loser_scan_id, detected_at, reviewed_at
+INSERT INTO code_conflicts (rowid, id, code_hash, winner_scan_id, loser_scan_id,
+  detected_at, reviewed_at)
+SELECT kept_rowid, id, code_hash, winner_scan_id, loser_scan_id, detected_at, reviewed_at
 FROM temp.code_conflicts_kept;
 CREATE INDEX code_conflicts_code ON code_conflicts (code_hash);
 

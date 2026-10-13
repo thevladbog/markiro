@@ -939,6 +939,12 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
              scanned_at, operator_id, conflict) VALUES ('scan-duplicate', 'host', 'device', \
              'shift-1', 'duplicate', 'host', {km}, 'hash-3', '2026-10-09T08:00:02.000Z', 'op-1', 1)"
         ),
+        format!(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, verdict, raw_kind, \
+             raw_length, gtin14, serial, canonical, code_hash, scanned_at) VALUES \
+             ('scan-wrong', 'host', 'device', 'shift-1', 'wrong_gtin', {km}, 'hash-4', \
+             '2026-10-09T08:00:04.000Z')"
+        ),
         "INSERT INTO floor_scans (id, host_id, device_id, shift_id, verdict, raw_kind, \
          raw_length, scanned_at) VALUES ('scan-invalid', 'host', 'device', 'shift-1', \
          'invalid', 'unknown', 7, '2026-10-09T08:00:03.000Z')"
@@ -978,7 +984,7 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
                 .len(),
         );
     }
-    assert_eq!(rows, [2, 3]);
+    assert_eq!(rows, [2, 4]);
     raw.close().await.unwrap();
 
     // The application opens the file as it starts: it applies what is pending.
@@ -1046,6 +1052,15 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
                     "operator_id": null, "conflict": 0
                 }),
                 km_columns("hash-1")
+            ),
+            merge(
+                json!({
+                    "id": "scan-wrong", "host_id": "host", "device_id": "device",
+                    "shift_id": "shift-1", "box_id": null, "verdict": "wrong_gtin",
+                    "duplicate_source": null, "scanned_at": "2026-10-09T08:00:04.000Z",
+                    "operator_id": null, "conflict": 0
+                }),
+                km_columns("hash-4")
             )
         ])
     );
@@ -1161,6 +1176,126 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
         .await
         .unwrap();
     assert_eq!(count[0]["n"], json!(3));
+}
+
+/// `(rowid, key)` rows of a table in rowid order.
+type Rowids = Vec<(i64, String)>;
+/// The rowids of `floor_codes` and `floor_scans` and the last code of the open box.
+type RowidsAndLastCode = (Rowids, Rowids, (String, String, String));
+
+/// `(rowid, key)` of every row of `floor_codes` and `floor_scans`, in rowid order, and the
+/// open box's last code as «Снять последний код» reads it (`LAST_CODE_SQL`).
+async fn rowids_and_last_code(raw: &mut sqlx::SqliteConnection) -> RowidsAndLastCode {
+    let codes = sqlx::query_as("SELECT rowid, code_hash FROM floor_codes ORDER BY rowid")
+        .fetch_all(&mut *raw)
+        .await
+        .unwrap();
+    let scans = sqlx::query_as("SELECT rowid, id FROM floor_scans ORDER BY rowid")
+        .fetch_all(&mut *raw)
+        .await
+        .unwrap();
+    let last = sqlx::query_as(
+        "SELECT code_hash, scan_id, scanned_at FROM floor_codes \
+         WHERE host_id = ? AND device_id = ? AND box_id = ? ORDER BY rowid DESC LIMIT 1",
+    )
+    .bind("host")
+    .bind("device")
+    .bind("box-1")
+    .fetch_one(&mut *raw)
+    .await
+    .unwrap();
+    (codes, scans, last)
+}
+
+/// Migration `0014` keeps each row's rowid: «Снять последний код» takes a box's newest code
+/// by it, and a copy without it renumbers the rows past every deleted one (or reorders them).
+/// An open box whose codes came out of hash order, with an undone code between them, keeps
+/// the same rowids and the same last code. `test/floor-schema.test.ts` pins the same on
+/// Node's SQLite.
+#[tokio::test]
+async fn migration_0014_keeps_each_rows_rowid() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 14)
+        .cloned()
+        .collect();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    let code = |hash: &str| {
+        format!(
+            "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+             scanned_at) VALUES ('host', 'device', '{hash}', 'shift-1', 'box-1', 'scan-{hash}', \
+             '2026-10-09T08:00:00.000Z')"
+        )
+    };
+    let scan = |hash: &str, verdict: &str, box_id: &str| {
+        format!(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+             raw_kind, raw_length, gtin14, serial, canonical, code_hash, scanned_at) VALUES \
+             ('scan-{hash}', 'host', 'device', 'shift-1', {box_id}, '{verdict}', 'km', 31, \
+             '04600682000013', 'abc', '0104600682000013215abc', '{hash}', \
+             '2026-10-09T08:00:00.000Z')"
+        )
+    };
+    for sql in [
+        code("hash-c"),
+        code("hash-a"),
+        code("hash-d"),
+        "DELETE FROM floor_codes WHERE code_hash = 'hash-a'".to_owned(),
+        code("hash-b"),
+        scan("hash-c", "ok", "'box-1'"),
+        scan("hash-a", "ok", "'box-1'"),
+        scan("hash-d", "ok", "'box-1'"),
+        "DELETE FROM floor_scans WHERE id = 'scan-hash-a'".to_owned(),
+        scan("hash-b", "ok", "'box-1'"),
+        scan("hash-e", "wrong_gtin", "NULL"),
+    ] {
+        sqlx::query(&sql).execute(&mut raw).await.unwrap();
+    }
+    let seeded = rowids_and_last_code(&mut raw).await;
+    assert_eq!(
+        seeded.0,
+        [(1, "hash-c"), (3, "hash-d"), (4, "hash-b")].map(|(n, key)| (n, key.to_owned()))
+    );
+    assert_eq!(
+        seeded.1,
+        [
+            (1, "scan-hash-c"),
+            (3, "scan-hash-d"),
+            (4, "scan-hash-b"),
+            (5, "scan-hash-e")
+        ]
+        .map(|(n, key)| (n, key.to_owned()))
+    );
+    assert_eq!(seeded.2 .0, "hash-b");
+    raw.close().await.unwrap();
+
+    let _db = LocalDb::open(dir.path()).await.unwrap();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    let version: (i64,) = sqlx::query_as("SELECT max(version) FROM _sqlx_migrations")
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+    assert!(version.0 >= 14, "0014 is applied");
+    assert_eq!(rowids_and_last_code(&mut raw).await, seeded);
+    raw.close().await.unwrap();
 }
 
 #[tokio::test]

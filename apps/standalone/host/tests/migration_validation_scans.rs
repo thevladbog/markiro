@@ -144,8 +144,55 @@ async fn seed(pool: &SqlitePool) {
     execute(pool, &FACTS).await;
 }
 
-/// Every row of `table` by its key, each value as SQLite quotes it (so a
-/// text, an integer and a blob never read alike).
+/// Rows of each of the four tables whose rowids leave a gap before a later
+/// row (a row taken and deleted between two others), the later row first by
+/// its key: a copy that dropped the rowid would renumber the later rows, and
+/// one in key order would reorder them.
+const GAPS: [&str; 15] = [
+    "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, raw_kind, raw_length, \
+     scanned_at, received_at) VALUES ('scan-x', 'record-x', 'device-1', 'shift-a', 'invalid', \
+     'unknown', 5, '2026-10-09T10:01:00.000Z', '2026-10-09T10:01:01Z')",
+    "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, raw_kind, raw_length, \
+     scanned_at, received_at) VALUES ('scan-0', 'record-0', 'device-1', 'shift-a', 'invalid', \
+     'unknown', 6, '2026-10-09T10:02:00.000Z', '2026-10-09T10:02:01Z')",
+    "DELETE FROM scans WHERE id = 'scan-x'",
+    "INSERT INTO box_items (scan_id, box_id, code_hash, added_at, removed_at) VALUES ('scan-3', \
+     'box-1', printf('%064x', 9), '2026-10-09T10:01:00.000Z', '2026-10-09T10:01:30.000Z')",
+    "INSERT INTO box_items (scan_id, box_id, code_hash, added_at, removed_at) VALUES ('scan-2', \
+     'box-1', printf('%064x', 8), '2026-10-09T10:02:00.000Z', '2026-10-09T10:02:30.000Z')",
+    "DELETE FROM box_items WHERE scan_id = 'scan-3'",
+    "INSERT INTO code_owners (code_hash, scan_id, shift_id, device_id, box_id, scanned_at) \
+     VALUES (printf('%064x', 9), 'scan-3', 'shift-a', 'device-1', 'box-1', \
+     '2026-10-09T10:01:00.000Z')",
+    "INSERT INTO code_owners (code_hash, scan_id, shift_id, device_id, box_id, scanned_at) \
+     VALUES (printf('%064x', 0), 'scan-2', 'shift-a', 'device-1', 'box-1', \
+     '2026-10-09T10:02:00.000Z')",
+    "DELETE FROM code_owners WHERE scan_id = 'scan-3'",
+    "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
+     VALUES ('conflict-x', printf('%064x', 1), 'scan-1', 'scan-2', '2026-10-09T10:01:00Z')",
+    "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
+     VALUES ('conflict-0', printf('%064x', 1), 'scan-1', 'scan-3', '2026-10-09T10:02:00Z')",
+    "DELETE FROM code_conflicts WHERE id = 'conflict-x'",
+    // And one row more of each after the gap, so the gap is not the last.
+    "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, raw_kind, raw_length, \
+     scanned_at, received_at) VALUES ('scan-5', 'record-5', 'device-1', 'shift-a', 'invalid', \
+     'unknown', 7, '2026-10-09T10:03:00.000Z', '2026-10-09T10:03:01Z')",
+    "INSERT INTO box_items (scan_id, box_id, code_hash, added_at, removed_at) VALUES ('scan-5', \
+     'box-1', printf('%064x', 7), '2026-10-09T10:03:00.000Z', '2026-10-09T10:03:30.000Z')",
+    "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
+     VALUES ('conflict-5', printf('%064x', 1), 'scan-1', 'scan-5', '2026-10-09T10:03:00Z')",
+];
+
+/// The rowids of `table`, in order.
+async fn rowids(pool: &SqlitePool, table: &str) -> Vec<i64> {
+    sqlx::query_scalar(&format!("SELECT rowid FROM {table} ORDER BY rowid"))
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// Every row of `table` by its key, its rowid first, each value as SQLite
+/// quotes it (so a text, an integer and a blob never read alike).
 async fn rows(pool: &SqlitePool, table: &str, key: &str) -> Vec<String> {
     let columns: Vec<String> =
         sqlx::query_scalar("SELECT name FROM pragma_table_info(?) ORDER BY cid")
@@ -159,10 +206,12 @@ async fn rows(pool: &SqlitePool, table: &str, key: &str) -> Vec<String> {
         .map(|column| format!("quote({column})"))
         .collect::<Vec<_>>()
         .join(" || '|' || ");
-    sqlx::query_scalar(&format!("SELECT {quoted} FROM {table} ORDER BY {key}"))
-        .fetch_all(pool)
-        .await
-        .unwrap()
+    sqlx::query_scalar(&format!(
+        "SELECT quote(rowid) || '|' || {quoted} FROM {table} ORDER BY {key}"
+    ))
+    .fetch_all(pool)
+    .await
+    .unwrap()
 }
 
 type SchemaRow = (String, String, String, Option<String>);
@@ -246,19 +295,33 @@ async fn the_rebuild_keeps_every_row_and_every_object_but_the_rule_it_moves() {
     );
     let (_dir, pool) = at_0019(true).await;
     seed(&pool).await;
+    execute(&pool, &GAPS).await;
     let mut before = Vec::new();
+    let mut rowids_before = Vec::new();
     for (table, key) in TABLES {
         before.push(rows(&pool, table, key).await);
+        rowids_before.push(rowids(&pool, table).await);
     }
     assert_eq!(
         before.iter().map(Vec::len).collect::<Vec<_>>(),
-        [4, 2, 1, 1]
+        [6, 4, 2, 3]
+    );
+    // Each table's rowids have a gap before a later row.
+    assert_eq!(
+        rowids_before,
+        [
+            vec![1, 2, 3, 4, 6, 7],
+            vec![1, 2, 4, 5],
+            vec![1, 3],
+            vec![1, 3, 4]
+        ]
     );
     let schema_before = schema(&pool).await;
 
     MIGRATOR.run(&pool).await.unwrap();
 
     assert!(applied(&pool).await.contains(&20));
+    // Every row as it was, its rowid with it.
     for ((table, key), rows_before) in TABLES.into_iter().zip(&before) {
         assert_eq!(&rows(&pool, table, key).await, rows_before, "{table}");
     }

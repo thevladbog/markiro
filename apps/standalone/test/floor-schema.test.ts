@@ -2165,6 +2165,42 @@ describe("migration 0014 over a database of 0013 (plan РЕЖ)", () => {
     expect(db.prepare("SELECT * FROM floor_scans ORDER BY id").all()).toEqual(before.scans);
   });
 
+  it("keeps each row's rowid, so «Снять последний код» takes the same code after it", () => {
+    // An open box whose codes came out of hash order, with a row deleted between them (an
+    // undo): a copy without the rowid would renumber them, and one in another order would make
+    // another code the last.
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "0001", "0013");
+    for (const hash of ["hash-c", "hash-a", "hash-d"])
+      insert(db, "floor_codes", codeRow(hash, "box-1"));
+    db.prepare("DELETE FROM floor_codes WHERE code_hash = 'hash-a'").run();
+    insert(db, "floor_codes", codeRow("hash-b", "box-1"));
+    for (const hash of ["hash-c", "hash-a", "hash-d"])
+      insert(
+        db,
+        "floor_scans",
+        scanRow(`scan-${hash}`, { box_id: "box-1", verdict: "ok", ...km(hash) }),
+      );
+    db.prepare("DELETE FROM floor_scans WHERE id = 'scan-hash-a'").run();
+    insert(
+      db,
+      "floor_scans",
+      scanRow("scan-hash-b", { box_id: "box-1", verdict: "ok", ...km("hash-b") }),
+    );
+    insert(db, "floor_scans", scanRow("scan-wrong", { verdict: "wrong_gtin", ...km("hash-e") }));
+    const read = () => ({
+      codes: db.prepare("SELECT rowid, * FROM floor_codes ORDER BY rowid").all(),
+      scans: db.prepare("SELECT rowid, * FROM floor_scans ORDER BY rowid").all(),
+      last: db.prepare(LAST_CODE_SQL).get(HOST_ID, DEVICE_ID, "box-1"),
+    });
+    const before = read();
+    expect(before.codes.map((row) => row["rowid"])).toEqual([1, 3, 4]);
+    expect(before.scans.map((row) => row["rowid"])).toEqual([1, 3, 4, 5]);
+    expect(before.last).toMatchObject({ code_hash: "hash-b", scan_id: "scan-hash-b" });
+    migrate(db, "0014", "0014");
+    expect(read()).toEqual(before);
+  });
+
   it("changes only the box's NOT NULL and the accepted scan's CHECK, and keeps every index and plan", () => {
     const { db, before } = upgraded();
     // The rebuilt table is renamed into place, which SQLite records with the name quoted.
