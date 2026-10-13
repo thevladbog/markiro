@@ -18,8 +18,6 @@ import {
   usDatasetCasesRecordIds,
   type UsDatasetCasesResult,
 } from "./us-dataset-cases-contract.js";
-import { prepareUsDatasetCases } from "./us-dataset-cases-prepare.js";
-import { insertUsDatasetCasesSupport } from "./us-dataset-cases-support.js";
 import { verifyUsDatasetCases } from "./us-dataset-cases-verify.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
@@ -148,17 +146,8 @@ export class UsDatasetCasesSeedStore {
           apply: async (tx, checked, intent) => {
             if (!capture)
               throw datasetCasesError("us_dataset_cases_prerequisite_incomplete", unitKey);
-            const prepared = await prepareUsDatasetCases(
-              tx,
-              checked,
-              header.id,
-              intent.unitKey,
-              { mode: "application" },
-              this.stores,
-            );
-            const support = await insertUsDatasetCasesSupport(tx, checked, prepared.input);
             const requestId = `dataset-cases:${intent.operationKey}`;
-            const linked = await this.cases.linkDemoInTransaction(
+            const application = await this.cases.seedDemoInTransaction(
               tx,
               checked,
               header.id,
@@ -166,11 +155,11 @@ export class UsDatasetCasesSeedStore {
               requestId,
             );
             const result = parseUsDatasetCasesResult({
-              input: prepared.input,
-              support,
+              input: application.input,
+              support: application.support,
               operationKey: intent.operationKey,
               requestId,
-              linked,
+              linked: application.linked,
             });
             const receipt = {
               recordIds: usDatasetCasesRecordIds(result),

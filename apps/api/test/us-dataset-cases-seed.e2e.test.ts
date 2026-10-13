@@ -2,7 +2,16 @@ import { randomUUID } from "node:crypto";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { createDb } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type TestContext,
+} from "vitest";
 import { UsDatasetCasesSeedStore } from "../src/modules/traceability/demo/us-dataset-cases-seed";
 import { UsDatasetReferenceSeedStore } from "../src/modules/traceability/demo/us-dataset-reference-seed";
 import { UsDatasetReceivingSeedStore } from "../src/modules/traceability/demo/us-dataset-receiving-seed";
@@ -16,6 +25,7 @@ import {
 import { parseUsDatasetTransformationResult } from "../src/modules/traceability/demo/us-dataset-transformation-contract";
 import { parseUsDatasetReferenceResult } from "../src/modules/traceability/demo/us-dataset-reference-contract";
 import { UsCaseStore } from "../src/modules/traceability/cases/us-case-store";
+import * as nativeCaseContent from "../src/modules/traceability/cases/us-case-demo-content";
 import { UsShippingStore } from "../src/modules/traceability/shipping/us-shipping-draft";
 import { UsTraceStore } from "../src/modules/traceability/trace/us-trace-store";
 import { lockCaseOperation } from "../src/modules/traceability/cases/us-case-operations";
@@ -59,6 +69,24 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
     const header = await stores().journal.read(context);
     if (!header) throw new Error("Missing installed dataset");
     return { header, transformation };
+  }
+  async function withLostCommittedCasesAcknowledgement<T>(
+    test: TestContext,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const original = UsDatasetJournalStore.prototype.runAtomicStage;
+    const spy = vi
+      .spyOn(UsDatasetJournalStore.prototype, "runAtomicStage")
+      .mockImplementation(async function (this: UsDatasetJournalStore, ...args) {
+        await original.apply(this, args);
+        throw new Error("lost committed Cases acknowledgement");
+      });
+    test.onTestFinished(() => spy.mockRestore());
+    try {
+      return await work();
+    } finally {
+      spy.mockRestore();
+    }
   }
   function connections(own: OwnCleanup) {
     if (!base) throw new Error("Missing isolated US database");
@@ -432,12 +460,12 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
         );
         const code = name === "40001" || name === "40P01" ? name : "P0001";
         let originalFailure: unknown;
-        const original = UsCaseStore.prototype.linkDemoInTransaction;
+        const original = nativeCaseContent.linkPreparedDemoCasesInTransaction;
         const spy = vi
-          .spyOn(UsCaseStore.prototype, "linkDemoInTransaction")
-          .mockImplementation(async function (this: UsCaseStore, ...args) {
+          .spyOn(nativeCaseContent, "linkPreparedDemoCasesInTransaction")
+          .mockImplementation(async (...args) => {
             try {
-              return await original.apply(this, args);
+              return await original(...args);
             } catch (error) {
               originalFailure = error;
               throw error;
@@ -501,18 +529,11 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
     runDatasetCasesFixtureBody(async () => {
       const context = await f.provision(),
         installed = await prerequisites(context);
-      const original = UsDatasetJournalStore.prototype.runAtomicStage;
-      const spy = vi
-        .spyOn(UsDatasetJournalStore.prototype, "runAtomicStage")
-        .mockImplementation(async function (this: UsDatasetJournalStore, ...args) {
-          await original.apply(this, args);
-          throw new Error("lost committed Cases acknowledgement");
-        });
-      test.onTestFinished(() => spy.mockRestore());
-      await expect(seed().initialize(context, 0)).rejects.toThrow(
-        "lost committed Cases acknowledgement",
+      await withLostCommittedCasesAcknowledgement(test, () =>
+        expect(seed().initialize(context, 0)).rejects.toThrow(
+          "lost committed Cases acknowledgement",
+        ),
       );
-      spy.mockRestore();
       const completed = await stores().journal.readStage(
         context,
         installed.header.id,
@@ -524,6 +545,23 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
       expect(await seed().initialize(context, 0)).toEqual(completed.receipt.result);
       expect(await seed().verify(context, 0)).toEqual(completed.receipt.result);
       expect(await f.snapshot()).toEqual(before);
+    }));
+
+  it("restores the acknowledgement-loss spy before a failed tracked body finishes", async (test) =>
+    runDatasetCasesFixtureBody(async () => {
+      const context = await f.provision();
+      await prerequisites(context);
+      const original = UsDatasetJournalStore.prototype.runAtomicStage;
+      const failure = new Error("after-install tracked-body failure");
+      await expect(
+        withLostCommittedCasesAcknowledgement(test, async () => {
+          await expect(seed().initialize(context, 0)).rejects.toThrow(
+            "lost committed Cases acknowledgement",
+          );
+          throw failure;
+        }),
+      ).rejects.toBe(failure);
+      expect(UsDatasetJournalStore.prototype.runAtomicStage).toBe(original);
     }));
 
   it("uses a prior-month captured support descriptor without changing actual clocks", async () =>
@@ -651,7 +689,7 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
             }
           });
         own("capture spy", async () => spy.mockRestore());
-        const native = vi.spyOn(UsCaseStore.prototype, "linkDemoInTransaction");
+        const native = vi.spyOn(UsCaseStore.prototype, "seedDemoInTransaction");
         own("native spy", async () => native.mockRestore());
         const workers = [pools.first, pools.second].map((pool) =>
           outcome(new UsDatasetCasesSeedStore(pool.db).initialize(context, 0)),
@@ -992,11 +1030,11 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
               : kind === "non-error"
                 ? "synthetic non-error failure"
                 : error;
-        const original = UsCaseStore.prototype.linkDemoInTransaction;
+        const original = nativeCaseContent.linkPreparedDemoCasesInTransaction;
         const spy = vi
-          .spyOn(UsCaseStore.prototype, "linkDemoInTransaction")
-          .mockImplementation(async function (this: UsCaseStore, ...args) {
-            await original.apply(this, args);
+          .spyOn(nativeCaseContent, "linkPreparedDemoCasesInTransaction")
+          .mockImplementation(async (...args) => {
+            await original(...args);
             throw failure;
           });
         test.onTestFinished(() => spy.mockRestore());
@@ -1116,12 +1154,12 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
               ),
             );
             await abortable(acquired.promise, signal);
-            const original = UsCaseStore.prototype.linkDemoInTransaction;
+            const original = nativeCaseContent.linkPreparedDemoCasesInTransaction;
             const spy = vi
-              .spyOn(UsCaseStore.prototype, "linkDemoInTransaction")
-              .mockImplementation(async function (this: UsCaseStore, ...args) {
+              .spyOn(nativeCaseContent, "linkPreparedDemoCasesInTransaction")
+              .mockImplementation(async (...args) => {
                 signal.throwIfAborted();
-                return original.apply(this, args);
+                return original(...args);
               });
             // This cleanup is ordered after drain below, so pending native code retains the cancellation guard.
             const running = outcome(

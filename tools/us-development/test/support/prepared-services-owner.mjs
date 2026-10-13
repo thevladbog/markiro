@@ -7,6 +7,7 @@ export const preparedServicesFiles = [
   "test/us-dataset-prepared-intent.e2e.test.ts",
   "test/us-dataset-plan-seed.e2e.test.ts",
   "test/us-request-create-transaction.e2e.test.ts",
+  "test/us-case-demo-owned-application.e2e.test.ts",
 ];
 export const preparedServicesFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
@@ -105,7 +106,7 @@ export const preparedServicesJobBlock = `
       - name: Verify prepared Plan, dataset intent, Plan seed and Request creation transactions
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts --maxWorkers=1
 `;
 
 export function hasExactPreparedServicesOwner(workflow) {
