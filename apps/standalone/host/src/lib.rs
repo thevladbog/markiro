@@ -29,6 +29,7 @@ pub mod service;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
+pub mod upgrade;
 pub mod validate;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
