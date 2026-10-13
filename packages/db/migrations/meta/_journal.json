@@ -1303,6 +1303,13 @@
       "when": 1791679125765,
       "tag": "0185_standard_label_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1791870400308,
+      "tag": "0186_standalone_licenses",
+      "breakpoints": true
     }
   ]
 }
