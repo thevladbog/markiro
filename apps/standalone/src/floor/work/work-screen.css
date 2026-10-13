@@ -260,10 +260,17 @@
   white-space: normal;
 }
 
-/* «5 из 12»: the numbers in the counter's face, the words in the interface's. */
+/* «5 из 12»: the numbers in the counter's face, the words (and the spaces) in the interface's. */
+.work-box-fill__count.work-of-count {
+  font: var(--floor-body);
+}
+
+.work-box-fill__count .work-of-count__number {
+  font: var(--floor-counter-sm);
+}
+
 .work-box-fill__count .work-of-count__word {
   color: var(--fg-2);
-  font: var(--floor-body);
 }
 
 .work-box-fill__grid {
@@ -438,6 +445,7 @@
 .work-facts dl > div {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   min-height: 44px;
   padding-inline: var(--sp-2);
   gap: var(--sp-3);
@@ -452,14 +460,14 @@
   font: var(--floor-body);
 }
 
+/* A long value (the last box's SSCC) wraps under its term on a narrow screen, never cut. */
 .work-facts dd {
   min-width: 0;
-  margin: 0;
-  overflow: hidden;
+  margin: 0 0 0 auto;
   font: 600 20px/1.2 var(--font-mono);
   font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 /* The fixed floor action row: never a scroll region, never the screen's content. */
@@ -639,7 +647,7 @@
     font: 500 20px/1.1 var(--font-mono);
   }
 
-  .work-box-fill__count {
+  .work-box-fill__count .work-of-count__number {
     font: 600 40px/44px var(--font-mono);
   }
 

@@ -41,14 +41,17 @@
   overflow: hidden;
   min-width: 0;
   color: var(--fg-1);
-  font: 600 22px/30px var(--font-mono);
+  font: var(--floor-body);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.pallet-strip__count .work-of-count__number {
+  font: 600 22px/30px var(--font-mono);
+}
+
 .pallet-strip__count .work-of-count__word {
   color: var(--fg-2);
-  font: var(--floor-body);
 }
 
 @media (prefers-reduced-motion: no-preference) {
