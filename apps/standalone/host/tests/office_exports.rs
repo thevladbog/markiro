@@ -207,7 +207,7 @@ async fn the_export_source_of_a_closed_shift_names_its_own_codes_boxes_live_item
                 "stationClosedAt": instant(70, 412),
                 "lateDataAt": null,
             },
-            "organization": { "name": "ООО «Атолл»", "inn": "7701234567" },
+            "organization": { "name": "ООО «Атолл»", "inn": "7707083893" },
             // One instant for codes 1 and 2: the hash orders them.
             "codes": [
                 owned(1, &instant(10, 500)),
@@ -1340,7 +1340,7 @@ async fn the_source_names_the_organization_now_and_a_station_shifts_own_number()
     assert_eq!(source["shift"]["productionDate"], "2026-10-09");
     assert_eq!(
         source["organization"],
-        json!({ "name": "ООО «Атолл»", "inn": "7701234567" })
+        json!({ "name": "ООО «Атолл»", "inn": "7707083893" })
     );
     rename_organization(&admin, "ИП Иванов", json!("770123456789")).await;
     let (_, source) = export_source(&admin, id).await;

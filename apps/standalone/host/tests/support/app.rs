@@ -174,7 +174,7 @@ pub fn bootstrap_body() -> Value {
         "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
         "org": {
             "name": "ООО «Атолл»",
-            "inn": "7701234567",
+            "inn": "7707083893",
             "gln": "4600682000010",
             "gs1Prefixes": ["4600682"],
             "timeZone": "Europe/Moscow"

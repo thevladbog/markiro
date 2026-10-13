@@ -43,6 +43,16 @@ pub async fn bootstrap(
     let name = validate::person_name("admin.name", &request.admin.name)?;
     validate::password("admin.password", request.admin.password.expose())?;
     let org = validate::org("org", &request.org)?;
+    // A license is issued to the organization's INN (plan ЛЦ-2, spec §4.9,
+    // ЛО24): the wizard takes only one whose check digit holds. The office's
+    // profile keeps the plain 10-or-12-digit rule (ЛО27).
+    let trial_inn = org
+        .inn
+        .as_deref()
+        .and_then(crate::inn::normalize)
+        .ok_or_else(|| {
+            ApiError::validation("org.inn", "an INN whose check digit holds is required")
+        })?;
     let prefix = validate::issuer_prefix(&org.gln).to_owned();
     validate::sscc_serial(
         "sscc.boxNextSerial",
@@ -137,6 +147,20 @@ pub async fn bootstrap(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    // The built-in trial starts with the wizard (plan ЛЦ-2, spec §3.4),
+    // once, with the INN the wizard took (it goes into the activation
+    // request).
+    let started_at =
+        i64::try_from(now.unix_timestamp_nanos() / 1_000_000).map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE license_clock SET trial_started_at = coalesce(trial_started_at, ?), \
+         trial_inn = coalesce(trial_inn, ?) WHERE id = 1",
+    )
+    .bind(started_at)
+    .bind(&trial_inn)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
 
     // The templates first: the organization's defaults refer to them.
     let mut template_ids: Vec<String> = Vec::with_capacity(templates.len());

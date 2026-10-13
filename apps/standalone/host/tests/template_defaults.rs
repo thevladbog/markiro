@@ -126,7 +126,7 @@ async fn the_defaults_are_one_document_and_stations_get_them() {
             {
                 "entity": "org_profile", "id": "1", "rev": rev, "deleted": false,
                 "data": {
-                    "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010",
+                    "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000010",
                     "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
                     "defaultBoxTemplateId": t.universal, "defaultPalletTemplateId": t.pallet,
                     "defaultDuplicateTemplateId": null

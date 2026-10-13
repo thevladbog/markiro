@@ -318,7 +318,7 @@ async fn secrets_never_reach_the_process_log() {
         .bearer_auth(&key)
         .json(&json!({
             "admin": { "login": "admin", "name": "Ирина", "password": "correct horse battery" },
-            "org": { "name": "ООО «Атолл»", "gln": "4600682000010", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
+            "org": { "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000010", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
             "sscc": { "boxNextSerial": 1, "palletNextSerial": 0 },
             "lines": ["Линия 1"],
             "templates": [{

@@ -596,7 +596,7 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
         "issuerPrefix": "460068200",
         "counterpartyName": "ООО «Северный берег»",
         // The wizard's organization, without a logo (plan А4).
-        "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
+        "organization": { "name": "ООО «Атолл»", "inn": "7707083893", "logo": null }
     });
     let mut expected = device_shift(&id, "OCT26-001", &setup);
     for (key, value) in [
@@ -1117,7 +1117,7 @@ async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_i
             },
             "issuerPrefix": "460068200",
             "counterpartyName": null,
-            "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
+            "organization": { "name": "ООО «Атолл»", "inn": "7707083893", "logo": null }
         })
     );
     // The number of a shift a station made keeps its `/S` in the audit row.
@@ -2260,7 +2260,7 @@ async fn the_entry_freezes_the_sheet_and_the_organization_with_its_logo() {
     assert_eq!(
         snapshot["organization"],
         json!({
-            "name": "ООО «Атолл»", "inn": "7701234567",
+            "name": "ООО «Атолл»", "inn": "7707083893",
             "logo": { "width": 10, "height": 2, "pixelsBase64": LOGO }
         })
     );
@@ -2456,7 +2456,7 @@ async fn a_shift_with_no_sheet_and_one_without_pallets_freeze_the_organization_o
     assert!(entered["snapshot"].get("palletSheet").is_none());
     assert_eq!(
         entered["snapshot"]["organization"],
-        json!({ "name": "ООО «Атолл»", "inn": "7701234567", "logo": null })
+        json!({ "name": "ООО «Атолл»", "inn": "7707083893", "logo": null })
     );
     // No pallets, a default sheet: none reaches the shift.
     let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;

@@ -124,7 +124,7 @@ async fn the_box_form_prints_the_live_codes_and_a_disassembled_box_its_last_cont
     )
     .await;
 
-    let organization = json!({ "name": "ООО «Атолл»", "inn": "7701234567" });
+    let organization = json!({ "name": "ООО «Атолл»", "inn": "7707083893" });
     let (status, first) = box_report(&admin, &box_id(1)).await;
     assert_eq!(status, StatusCode::OK, "{first}");
     assert_eq!(
@@ -845,7 +845,7 @@ async fn the_pallet_forms_read_every_pallet_with_every_box_that_stood_on_it() {
                 "productName": "Молоко 3,2% 0,9 л", "gtin14": "04600682000013",
                 "shelfLifeDays": 10,
             },
-            "organization": { "name": "ООО «Атолл»", "inn": "7701234567" },
+            "organization": { "name": "ООО «Атолл»", "inn": "7707083893" },
             "pallets": [
                 {
                     "id": p1, "sscc": pallet_sscc(40), "openedAt": instant(20, 0),

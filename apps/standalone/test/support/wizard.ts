@@ -32,7 +32,7 @@ export async function reachReview(): Promise<void> {
 
   await screen.findByText("Шаг 2 из 5 · Организация");
   type("Название организации", " ООО «Атолл» ");
-  type("ИНН", "7701234567");
+  type("ИНН", "7707083893");
   type("GLN организации", "4600682000013");
   type("Префиксы GS1", "4600682, 4607091");
   next();
@@ -84,7 +84,7 @@ export const EXPECTED_REQUEST: BootstrapRequest = {
   admin: { login: "admin", name: "Ирина Смирнова", password: "correct horse battery" },
   org: {
     name: "ООО «Атолл»",
-    inn: "7701234567",
+    inn: "7707083893",
     gln: "4600682000013",
     gs1Prefixes: ["4600682", "4607091"],
     timeZone: "Europe/Moscow",

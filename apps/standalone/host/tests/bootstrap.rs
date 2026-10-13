@@ -44,7 +44,7 @@ async fn the_wizard_initializes_the_host_and_signs_the_admin_in() {
         org,
         (
             "ООО «Атолл»".into(),
-            Some("7701234567".into()),
+            Some("7707083893".into()),
             "4600682000010".into(),
             r#"["4600682"]"#.into(),
             "Europe/Moscow".into(),
@@ -200,12 +200,17 @@ async fn concurrent_wizards_initialize_exactly_once() {
 async fn invalid_wizard_input_names_the_field() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "station").await;
-    let cases: [(&str, Value, &str); 12] = [
+    let cases: [(&str, Value, &str); 15] = [
         ("/admin/login", json!("ад"), "admin.login"),
         ("/admin/name", json!("  "), "admin.name"),
         ("/admin/password", json!("short"), "admin.password"),
         ("/org/name", json!(""), "org.name"),
         ("/org/inn", json!("12345"), "org.inn"),
+        // A license is issued to the INN (plan ЛЦ-2): the wizard takes only
+        // one whose check digit holds, and none at all is refused.
+        ("/org/inn", json!("7707083894"), "org.inn"),
+        ("/org/inn", json!(""), "org.inn"),
+        ("/org/inn", json!(null), "org.inn"),
         ("/org/gln", json!("460068200001"), "org.gln"),
         ("/org/gs1Prefixes", json!(["12"]), "org.gs1Prefixes"),
         ("/sscc/boxNextSerial", json!(0), "sscc.boxNextSerial"),
@@ -398,7 +403,7 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         json!({
             "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"],
             "name": { "from": "ООО «Атолл»", "to": "ООО «Атолл-Юг»" },
-            "inn": { "from": "7701234567", "to": null },
+            "inn": { "from": "7707083893", "to": null },
             "gln": { "from": "4600682000010", "to": "4607091000017" },
             "gs1Prefixes": { "from": ["4600682"], "to": ["4600682", "4607091"] },
             "timeZone": { "from": "Europe/Moscow", "to": "Europe/Samara" }
@@ -487,7 +492,7 @@ async fn putting_the_org_profile_unchanged_is_a_no_op() {
     // Exactly the org fields `bootstrap_body()` set, unchanged.
     let unchanged = json!({
         "name": "ООО «Атолл»",
-        "inn": "7701234567",
+        "inn": "7707083893",
         "gln": "4600682000010",
         "gs1Prefixes": ["4600682"],
         "timeZone": "Europe/Moscow",
@@ -1051,5 +1056,34 @@ async fn a_wizard_that_fails_after_writing_the_templates_leaves_nothing() {
             ("lines", 2),
             ("label_templates", 3)
         ]
+    );
+}
+
+/// The trial starts with the wizard (plan ЛЦ-2, spec §3.4): once, with the
+/// INN the wizard took, normalized.
+#[tokio::test]
+async fn the_wizard_starts_the_trial_with_its_inn() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let mut body = bootstrap_body();
+    body["org"]["inn"] = json!(" 7707083893 ");
+    let (status, answer) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/bootstrap"), &key),
+            body,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let clock: (Option<i64>, Option<String>) =
+        sqlx::query_as("SELECT trial_started_at, trial_inn FROM license_clock WHERE id = 1")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        clock,
+        (
+            Some(support::app::START * 1000),
+            Some("7707083893".to_owned())
+        )
     );
 }
