@@ -2686,3 +2686,16 @@ Node tooling tests passed with zero skips, including188 ownership mutations.
 Fresh API typecheck, repository-wide formatting and diff checks passed. Actual
 full runtime/precise-SHA GitHub success, Plan/Request integration, visitor and
 hosted acceptance remain outstanding; no release or deployment is implied.
+
+### Plan draft transaction seam checkpoint (2026-10-13)
+
+Accepted a minimal internal supplied-transaction draft command after independent
+spec/quality review. The public wrapper retains its original error mappings,
+fresh authorization, organization/version lock order and rejection audits; a
+shared native body creates the draft and exact success audit in the caller's
+transaction, without nested transactions or internal retries. Meaningful native
+RED was followed by 14/14 seam regressions and 191/191 complete Plan-consumer
+checks, zero skips. API types, full lint, build, formatting and diff checks passed.
+Owned test work drained and exact children were disposed normally and absent;
+unowned databases were not modified. Approval, immutable PDF, final dataset Plan
+receipt, Requests, visitor and hosted acceptance remain subsequent gates.

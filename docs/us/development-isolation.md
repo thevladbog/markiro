@@ -2682,3 +2682,15 @@ Independent review approved;117/117 tooling tests and188 ownership mutation chec
 passed without skips, as did fresh API typecheck, full formatting and diff checks.
 The exact pushed SHA's full CI result is still required, with Plan/Requests,
 visitor access and non-RF hosting separate. No complete-demo claim is made.
+
+#### Plan draft transaction boundary (2026-10-13)
+
+The independently reviewed internal Plan draft command now accepts a caller-owned
+native transaction. Draft insertion and exact success audit commit or roll back
+together; the existing public command retains authorization, tenant locking and
+post-rollback conflict/rejection audit behavior. No approval/PDF, route, schema,
+recipe or release behavior changed. Native regression passed 14/14 and all Plan
+consumer suites passed 191/191 with zero skips; API typecheck, full lint, build,
+formatting and diff checks passed. Exact owned test children were normally
+disposed and verified absent; unknown children were preserved. This is only the
+service boundary, not an approved dataset Plan, complete demo or hosted proof.

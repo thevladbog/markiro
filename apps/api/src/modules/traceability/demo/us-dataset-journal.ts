@@ -3,8 +3,12 @@ import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { assertUsDemoTarget } from "./us-demo-target.js";
-import { parseUsDemoReceipt } from "./us-demo-journal-contract.js";
-import type { UsDatasetAtomicStageWork } from "./us-dataset-atomic-stage-contract.js";
+import { assertBoundedSyntheticJson, parseUsDemoReceipt } from "./us-demo-journal-contract.js";
+import type {
+  UsDatasetAtomicStageWork,
+  UsDatasetIntentPreparation,
+  UsDatasetStageAddress,
+} from "./us-dataset-atomic-stage-contract.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import {
   parseUsDatasetDefinition,
@@ -396,48 +400,120 @@ export class UsDatasetJournalStore {
     return this.transaction(value, true, async (tx, checked) => {
       await this.required(tx, checked, datasetId);
       const intent = parseUsDatasetIntent(raw);
-      const unit = this.unit(intent.unitKey, intent.stage);
-      const existingRows = await tx
-        .select()
-        .from(rows)
-        .where(
-          and(
-            this.scope(checked, datasetId),
-            or(
-              and(eq(rows.unitKey, intent.unitKey), eq(rows.stage, intent.stage)),
-              eq(rows.operationKey, intent.operationKey),
-            ),
-          ),
-        )
-        .limit(2);
-      if (existingRows.length) {
-        if (existingRows.length !== 1 || !existingRows[0])
-          return fail("us_dataset_intent_conflict");
-        const existing = this.parseRow(existingRows[0]);
+      this.unit(intent.unitKey, intent.stage);
+      const existing = await this.captureCandidate(tx, checked, datasetId, intent);
+      if (existing) {
         if (!same(existing.intent, intent)) return fail("us_dataset_intent_conflict");
         return existing;
       }
-      const previous = unit.stages[unit.stages.indexOf(intent.stage) - 1];
-      if (
-        previous &&
-        !(await this.stage(tx, checked, datasetId, intent.unitKey, previous))?.receipt
-      )
-        return fail("us_dataset_predecessor_incomplete");
-      const [inserted] = await tx
-        .insert(rows)
-        .values({
-          tenantId: checked.tenantId,
-          datasetId,
-          unitKey: intent.unitKey,
-          stage: intent.stage,
-          operationKey: intent.operationKey,
-          inputDigest: intent.inputDigest,
-          input: intent.input,
-        })
-        .returning();
-      if (!inserted) return fail("us_dataset_journal_invalid");
-      return this.parseRow(inserted);
+      await this.requirePredecessor(tx, checked, datasetId, intent);
+      return this.insertIntent(tx, checked, datasetId, intent);
     });
+  }
+
+  prepareStageIntent(
+    value: UsDatasetContext,
+    datasetId: string,
+    raw: UsDatasetStageAddress,
+    prepare: UsDatasetIntentPreparation,
+  ): Promise<UsDatasetStageRow> {
+    return this.transaction(value, true, async (tx, checked) => {
+      await this.required(tx, checked, datasetId, true);
+      // Validate descriptors before copying the address into the existing strict parser.
+      assertBoundedSyntheticJson(raw);
+      if (Object.keys(raw).some((key) => !["unitKey", "stage", "operationKey"].includes(key)))
+        return fail("us_dataset_intent_invalid");
+      const address = parseUsDatasetIntent({
+        ...raw,
+        input: {},
+        inputDigest: canonicalExportDigest({}),
+      });
+      this.unit(address.unitKey, address.stage);
+      const existing = await this.stage(
+        tx,
+        checked,
+        datasetId,
+        address.unitKey,
+        address.stage,
+        true,
+      );
+      if (existing) return existing;
+      if (await this.captureCandidate(tx, checked, datasetId, address, true))
+        return fail("us_dataset_intent_conflict");
+      await this.requirePredecessor(tx, checked, datasetId, address, true);
+      const intent = parseUsDatasetIntent(await prepare(tx, checked));
+      if (
+        intent.unitKey !== address.unitKey ||
+        intent.stage !== address.stage ||
+        intent.operationKey !== address.operationKey
+      )
+        return fail("us_dataset_intent_conflict");
+      return this.insertIntent(tx, checked, datasetId, intent);
+    });
+  }
+
+  private async captureCandidate(
+    tx: Transaction,
+    value: UsDatasetContext,
+    datasetId: string,
+    address: UsDatasetStageAddress,
+    lock = false,
+  ): Promise<UsDatasetStageRow | null> {
+    const query = tx
+      .select()
+      .from(rows)
+      .where(
+        and(
+          this.scope(value, datasetId),
+          or(
+            and(eq(rows.unitKey, address.unitKey), eq(rows.stage, address.stage)),
+            eq(rows.operationKey, address.operationKey),
+          ),
+        ),
+      )
+      .limit(2);
+    const existingRows = await (lock ? query.for("update") : query);
+    if (!existingRows.length) return null;
+    if (existingRows.length !== 1 || !existingRows[0]) return fail("us_dataset_intent_conflict");
+    return this.parseRow(existingRows[0]);
+  }
+
+  private async requirePredecessor(
+    tx: Transaction,
+    value: UsDatasetContext,
+    datasetId: string,
+    address: UsDatasetStageAddress,
+    lock = false,
+  ): Promise<void> {
+    const unit = this.unit(address.unitKey, address.stage);
+    const previous = unit.stages[unit.stages.indexOf(address.stage) - 1];
+    if (
+      previous &&
+      !(await this.stage(tx, value, datasetId, address.unitKey, previous, lock))?.receipt
+    )
+      return fail("us_dataset_predecessor_incomplete");
+  }
+
+  private async insertIntent(
+    tx: Transaction,
+    value: UsDatasetContext,
+    datasetId: string,
+    intent: UsDatasetIntent,
+  ): Promise<UsDatasetStageRow> {
+    const [inserted] = await tx
+      .insert(rows)
+      .values({
+        tenantId: value.tenantId,
+        datasetId,
+        unitKey: intent.unitKey,
+        stage: intent.stage,
+        operationKey: intent.operationKey,
+        inputDigest: intent.inputDigest,
+        input: intent.input,
+      })
+      .returning();
+    if (!inserted) return fail("us_dataset_journal_invalid");
+    return this.parseRow(inserted);
   }
   recordReceipt(
     value: UsDatasetContext,
