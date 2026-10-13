@@ -1,15 +1,15 @@
 import { buildPalletSheetPresets, decodeMonoRaster, type RasterizeTextFn } from "@markiro/domain";
 import type { MonoBitmap } from "@markiro/domain";
 import { screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { shiftLabelRender } from "../src/floor/print/shift-render.js";
+import { EGAIS_NOT_ON_SHEET_LINE, shiftLabelRender } from "../src/floor/print/shift-render.js";
 import { createPrintRuntime } from "../src/floor/print/print-runtime.js";
 import type { PrintResult, WindowsPrinting } from "../src/hardware/hardware.js";
 import { logoToWire } from "../src/labels/logo.js";
 import { km, rows } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
-import { palletStation, type PalletStation } from "./support/pallets.js";
+import { PALLETS_ENTERED, palletStation, type PalletStation } from "./support/pallets.js";
 import { fakeRaster, GODEX_DRIVER, HP_A4, manualTimers, ZEBRA } from "./support/printing.js";
 import { renderWork } from "./support/work-screen.js";
 
@@ -198,5 +198,89 @@ describe("the work screen prints a pallet's sheet (plan А4)", () => {
     expect(names).toContain("Zebra у линии · ZPL · 203 dpi");
     expect(names).toContain("Godex через драйвер · Драйвер Windows · 203 dpi");
     expect(names.some((name) => name?.includes("Лист А4"))).toBe(false);
+  });
+});
+
+describe("an A4 sheet without the EGAIS code says so (plan ТОВ)", () => {
+  const TITLE = "Лист А4 паллеты — без кода ЕГАИС";
+  const BODY =
+    "Код ЕГАИС товара не из 19 цифр, поэтому на листе А4 его нет; на этикетках короба и паллеты он есть. Исправьте код ЕГАИС в карточке товара в офисе: новые смены возьмут исправленный код.";
+
+  // The diagnostic line stays (`EGAIS_NOT_ON_SHEET_LINE`); it goes to the console.
+  let logged: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    logged.mockRestore();
+  });
+
+  /** The shift's frozen product as beer with `egaisCode`. */
+  function beer(egaisCode: string) {
+    return {
+      ...FROZEN,
+      product: { ...PALLETS_ENTERED.snapshot.product, chzProductGroupCode: 15, egaisCode },
+    };
+  }
+
+  it("prints the sheet and shows a notice that does not stop the work, until «Понятно»", async () => {
+    const at = await station(beer("EG-0150320000001"));
+    const { harness, prints } = work(at);
+    await harness.scanner.listening();
+    await harness.settled();
+    await harness.scan(km("A1"));
+    expect(prints).toHaveLength(1);
+    expect(await screen.findByText(TITLE)).toBeTruthy();
+    expect(screen.getByText(BODY)).toBeTruthy();
+    // No label waits: the pallet's job is sent, the line goes on.
+    expect(rows(at.db, "SELECT purpose, state FROM floor_print_jobs ORDER BY purpose")).toEqual([
+      { purpose: "box", state: "sent" },
+      { purpose: "pallet", state: "sent" },
+    ]);
+    await harness.press("Понятно");
+    expect(screen.queryByText(TITLE)).toBeNull();
+    expect(logged).toHaveBeenCalledWith(EGAIS_NOT_ON_SHEET_LINE);
+  });
+
+  it("says it after a sheet printed again on the A4 printer", async () => {
+    const at = await station(beer("EG-0150320000001"));
+    let calls = 0;
+    const { harness, prints } = work(at, async () => {
+      calls += 1;
+      return calls === 1
+        ? { sent: false, code: "queue_unavailable" }
+        : { sent: true, receipt: { queue: "HP LaserJet", jobId: 6, documentName: "sheet" } };
+    });
+    await harness.scanner.listening();
+    await harness.settled();
+    await harness.scan(km("A1"));
+    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    await harness.press("Напечатать снова");
+    expect(prints).toHaveLength(2);
+    expect(await screen.findByText(TITLE)).toBeTruthy();
+    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+  });
+
+  it("says nothing for a code of 19 digits, which the sheet prints", async () => {
+    const at = await station(beer("0150320000001234567"));
+    const { harness, prints } = work(at);
+    await harness.scanner.listening();
+    await harness.settled();
+    await harness.scan(km("A1"));
+    expect(prints).toHaveLength(1);
+    expect(screen.queryByText(TITLE)).toBeNull();
+  });
+
+  it("says it on the label panel of a sheet that did not print, and not once printed elsewhere as a label", async () => {
+    const at = await station(beer("EG-0150320000001"));
+    const { harness } = work(at, async () => ({ sent: false, code: "queue_unavailable" }));
+    await harness.scanner.listening();
+    await harness.settled();
+    await harness.scan(km("A1"));
+    expect(await screen.findByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText(TITLE)).toBeTruthy();
+    await harness.press("Другой принтер");
+    await harness.press("Zebra у линии · ZPL · 203 dpi");
+    expect(screen.queryByText(TITLE)).toBeNull();
   });
 });
