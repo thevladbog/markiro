@@ -8,6 +8,7 @@ pub mod codes;
 pub mod counterparties;
 pub mod device_shifts;
 pub mod devices;
+pub mod employees;
 pub mod facts;
 pub mod known_blocks;
 pub mod lines;

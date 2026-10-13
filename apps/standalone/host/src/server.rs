@@ -288,6 +288,15 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::lines::update_line),
         )
         .route(
+            "/v1/office/employees",
+            get(crate::routes::employees::list_employees)
+                .post(crate::routes::employees::create_employee),
+        )
+        .route(
+            "/v1/office/employees/{id}",
+            put(crate::routes::employees::update_employee),
+        )
+        .route(
             "/v1/office/operators",
             get(crate::routes::operators::list_operators)
                 .post(crate::routes::operators::create_operator),
