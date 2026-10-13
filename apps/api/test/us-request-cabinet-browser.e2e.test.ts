@@ -12,6 +12,7 @@ import {
 } from "@markiro/platform-contracts";
 import * as processes from "./support/us-request-worker-process-fixture";
 import { startRequestCabinetBrowserFixture } from "./support/us-request-cabinet-browser-fixture";
+import { readActionResponseBody } from "./support/us-browser-response-body";
 
 const browserRequire = createRequire(resolve("../../tools/production-browser/package.json"));
 const apiRequire = createRequire(resolve("package.json"));
@@ -184,8 +185,11 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
       const created = page.waitForResponse(
         (r) => r.url().endsWith("/traceability/requests") && r.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Save request", exact: true }).click();
-      const command = usRequestCommandResponseSchema.parse(await (await created).json());
+      const command = usRequestCommandResponseSchema.parse(
+        await readActionResponseBody(created, () =>
+          page.getByRole("button", { name: "Save request", exact: true }).click(),
+        ),
+      );
       const request = { id: command.requestId };
       await webExpect(page.getByRole("tab", { name: "Scope", exact: true })).toBeVisible();
       await page.getByRole("tab", { name: "Scope", exact: true }).click();
@@ -194,9 +198,10 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
       const savedScopeResponse = page.waitForResponse(
         (r) => r.url().endsWith(`/requests/${request.id}`) && r.request().method() === "PATCH",
       );
-      await page.getByRole("button", { name: "Save scope", exact: true }).click();
       const savedScope = usRequestCommandResponseSchema.parse(
-        await (await savedScopeResponse).json(),
+        await readActionResponseBody(savedScopeResponse, () =>
+          page.getByRole("button", { name: "Save scope", exact: true }).click(),
+        ),
       );
       await page.getByRole("tab", { name: "Validation", exact: true }).click();
       await page.getByRole("button", { name: "Validate current sources", exact: true }).click();
@@ -214,9 +219,10 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
             r.url().endsWith(`/requests/${request.id}/prepare`) && r.request().method() === "POST",
         );
       const incompleteResponse = prepare();
-      await page.getByRole("button", { name: "Prepare incomplete response", exact: true }).click();
       const incomplete = usRequestPrepareResponseSchema.parse(
-        await (await incompleteResponse).json(),
+        await readActionResponseBody(incompleteResponse, () =>
+          page.getByRole("button", { name: "Prepare incomplete response", exact: true }).click(),
+        ),
       );
       const frozen = page.getByRole("region", { name: "Frozen run", exact: true });
       await webExpect(frozen.getByText("Queued", { exact: true })).toBeVisible();
@@ -279,10 +285,11 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
       await webExpect(page.getByText("plan_absent", { exact: true })).toHaveCount(0);
       await page.getByRole("tab", { name: "Package", exact: true }).click();
       const readyResponse = prepare();
-      await page
-        .getByRole("button", { name: "Prepare Export-ready response", exact: true })
-        .click();
-      const accepted = usRequestPrepareResponseSchema.parse(await (await readyResponse).json());
+      const accepted = usRequestPrepareResponseSchema.parse(
+        await readActionResponseBody(readyResponse, () =>
+          page.getByRole("button", { name: "Prepare Export-ready response", exact: true }).click(),
+        ),
+      );
       await webExpect(frozen.getByText(accepted.runId, { exact: true })).toBeVisible();
       await webExpect(frozen.getByText("Ready", { exact: true })).toBeVisible({ timeout: 150_000 });
       const second = await readRun(accepted.runId);
@@ -301,8 +308,11 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
       const editResponse = page.waitForResponse(
         (r) => r.url().endsWith(`/requests/${request.id}`) && r.request().method() === "PATCH",
       );
-      await page.getByRole("button", { name: "Save request", exact: true }).click();
-      const edited = usRequestCommandResponseSchema.parse(await (await editResponse).json());
+      const edited = usRequestCommandResponseSchema.parse(
+        await readActionResponseBody(editResponse, () =>
+          page.getByRole("button", { name: "Save request", exact: true }).click(),
+        ),
+      );
       await webExpect(
         page.getByText("Synthetic edited live requester", { exact: true }),
       ).toBeVisible();
@@ -311,8 +321,11 @@ describe.skipIf(url === undefined)("Configured real Requests cabinet browser", (
       const closeResponse = page.waitForResponse(
         (r) => r.url().endsWith(`/requests/${request.id}/close`) && r.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Confirm close", exact: true }).click();
-      const closed = usRequestCommandResponseSchema.parse(await (await closeResponse).json());
+      const closed = usRequestCommandResponseSchema.parse(
+        await readActionResponseBody(closeResponse, () =>
+          page.getByRole("button", { name: "Confirm close", exact: true }).click(),
+        ),
+      );
       await webExpect(page.getByRole("button", { name: "Edit request", exact: true })).toHaveCount(
         0,
       );

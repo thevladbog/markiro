@@ -2577,3 +2577,14 @@ A deliberately gated real client close reproduced premature cleanup completion
 before the fix. The complete six-file Cases stage then passed locally: 294 passed
 and four intentional expected failures, with no skips or unexpected failures.
 No sleeps or new timeout budgets were added.
+
+The real Requests browser run later exposed a response-body lifetime race:
+mutation JSON was read only after `click()` auto-waiting completed, when Chromium
+could already discard the response resource. A test-only action helper now starts
+reading the matching response body immediately, still awaits the action, and
+preserves original response/action errors without unhandled rejections. All six
+mutation predicates, strict schemas, assertions and existing timeouts are kept.
+A deterministic response-invalidation regression failed with the old ordering;
+all five response-ownership tests then passed. The complete real
+MFA/cabinet/HTTP/separate-worker/download scenario passed five consecutive runs
+on independent owned databases, without retries or skipped checks.

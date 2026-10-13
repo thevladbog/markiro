@@ -1,13 +1,93 @@
 import { access } from "node:fs/promises";
 import { createServer } from "node:net";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDb } from "@markiro/db";
 import * as bootstrap from "../src/deployment/us-bootstrap";
 import * as processes from "./support/us-request-worker-process-fixture";
 import { startRequestCabinetBrowserFixture } from "./support/us-request-cabinet-browser-fixture";
+import { readActionResponseBody } from "./support/us-browser-response-body";
+import { barrier } from "./support/us-transformation-lock-fixture";
 
 const url = process.env.US_TEST_DATABASE_URL;
 afterEach(() => vi.restoreAllMocks());
+
+describe("Requests browser response body ownership", () => {
+  it("captures JSON before the triggering action can invalidate its browser response", async () => {
+    const payload = { runId: "synthetic-run", revision: 2 };
+    let available = true;
+    let respond = (_response: { json(): Promise<unknown> }) => {};
+    const response = new Promise<{ json(): Promise<unknown> }>((resolve) => {
+      respond = resolve;
+    });
+    const body = readActionResponseBody(response, async () => {
+      respond({
+        async json() {
+          if (!available) throw new Error("Response body navigated away");
+          return payload;
+        },
+      });
+      await nextTurn();
+      available = false;
+    });
+    await expect(body).resolves.toBe(payload);
+  });
+
+  it("does not advance the scenario before the triggering action finishes", async () => {
+    const action = barrier(),
+      read = barrier();
+    let completed = false;
+    const body = readActionResponseBody(
+      Promise.resolve({
+        async json() {
+          read.release();
+          return "captured";
+        },
+      }),
+      () => action.promise,
+    ).then((value) => {
+      completed = true;
+      return value;
+    });
+    try {
+      await read.promise;
+      await nextTurn();
+      expect(completed).toBe(false);
+      action.release();
+      await expect(body).resolves.toBe("captured");
+    } finally {
+      action.release();
+      await body;
+    }
+  });
+
+  it.each([new Error("original JSON failure"), undefined])(
+    "preserves the exact response-body failure %s",
+    async (failure) => {
+      await expect(
+        readActionResponseBody(
+          Promise.resolve({
+            json: async () => {
+              throw failure;
+            },
+          }),
+          async () => {},
+        ),
+      ).rejects.toBe(failure);
+    },
+  );
+
+  it("handles a rejected response wait while preserving the primary action failure", async () => {
+    const responseFailure = new Error("response wait ended"),
+      actionFailure = new Error("click failed");
+    await expect(
+      readActionResponseBody(Promise.reject(responseFailure), async () => {
+        throw actionFailure;
+      }),
+    ).rejects.toBe(actionFailure);
+    await nextTurn();
+  });
+});
 
 async function assertDatabaseRemoved(name: string) {
   if (!url || !/^markiro_us_profile_[a-f0-9_]+$/.test(name))
