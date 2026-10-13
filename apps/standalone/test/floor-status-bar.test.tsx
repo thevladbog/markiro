@@ -1396,3 +1396,46 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(screen.queryByText(/Самая старая запись/)).toBeNull();
   });
 });
+
+describe("the scanner on the floor's status bar", () => {
+  /** The value the bar shows under `label`, or `null` when it shows no such item. */
+  function shown(label: string): string | null {
+    const term = screen.queryByText(label);
+    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+  }
+
+  function watching(...statuses: Array<"connected" | "disconnected">) {
+    return (
+      onSnapshot: (next: {
+        revision: number;
+        scanners: Array<{ port: string; baud: number; status: "connected" | "disconnected" }>;
+      }) => void,
+    ) => {
+      onSnapshot({
+        revision: 1,
+        scanners: statuses.map((status, index) => ({
+          port: `COM${index + 3}`,
+          baud: 9600,
+          status,
+        })),
+      });
+      return Promise.resolve(() => undefined);
+    };
+  }
+
+  it("says «Клавиатурный» with only the keyboard wedge", async () => {
+    render(bar({ local: await synced([ORG]) }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(shown("Сканер")).toBe("Клавиатурный");
+  });
+
+  it("follows the COM scanners the shell reports", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local, watchScanners: watching("connected") }));
+    await waitFor(() => expect(shown("Сканер")).toBe("Подключён"));
+    view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
+    await waitFor(() => expect(shown("Сканер")).toBe("Часть сканеров недоступна"));
+    view.rerender(bar({ local, watchScanners: watching("disconnected") }));
+    await waitFor(() => expect(shown("Сканер")).toBe("Нет связи"));
+  });
+});
