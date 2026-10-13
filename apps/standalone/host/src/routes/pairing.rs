@@ -42,6 +42,11 @@ pub async fn local_pair(
     let id = uuid::Uuid::new_v4().to_string();
     let now = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    // A seat of the license (plan ЛЦ-2, spec §4.7); an office PC takes none.
+    // Only the quotas close pairing, never the state (soft enforcement).
+    if let Some(quota) = crate::license::seats::seat_of(request.kind) {
+        crate::license::seats::require_seat(&state, &mut tx, quota).await?;
+    }
     let key = insert_device(
         &mut tx,
         &NewDevice {
@@ -208,6 +213,12 @@ pub async fn claim(
             return Err(ApiError::new(StatusCode::BAD_REQUEST, error_code, message));
         }
     };
+    // The license's seat (plan ЛЦ-2 Д9, spec §4.7), after the code is
+    // verified and before it is used up: a refused device keeps the code for
+    // its next try, and the refusal writes no row.
+    if let Some(quota) = crate::license::seats::seat_of(request.kind) {
+        crate::license::seats::require_seat(&state, &mut tx, quota).await?;
+    }
     sqlx::query("UPDATE pairing_codes SET used_at = ? WHERE id = ?")
         .bind(&at)
         .bind(&code.id)

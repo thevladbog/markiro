@@ -3,10 +3,14 @@
 //! a user or a line over the limit keeps working, and only new ones are
 //! refused until enough are revoked, turned off or archived.
 
+use markiro_proto::license::constraints;
 use markiro_proto::DeviceKind;
+use serde_json::json;
 use sqlx::SqliteConnection;
 
 use super::state::Quotas;
+use crate::error::ApiError;
+use crate::server::AppState;
 
 /// What the site uses of each quota. `u64`, as the wire's `QuotaUse` and
 /// the file's limits.
@@ -103,6 +107,73 @@ pub fn over(quota: Quota, quotas: &Quotas, usage: &Usage) -> bool {
 
 pub fn over_any(quotas: &Quotas, usage: &Usage) -> bool {
     Quota::ALL.iter().any(|quota| over(*quota, quotas, usage))
+}
+
+/// `conflict` on `seat_limit`: every seat of `quota` is taken.
+fn seat_limit(quota: Quota, used: u64, limit: u64) -> ApiError {
+    ApiError::conflict(
+        constraints::SEAT_LIMIT,
+        "every seat of the license is taken",
+    )
+    .with_details(json!({
+        "constraint": constraints::SEAT_LIMIT,
+        "quota": quota.key(),
+        "used": used,
+        "limit": limit,
+    }))
+}
+
+/// A seat of `quota` is free under the license (spec §4.7); else `conflict`
+/// on `seat_limit` with the quota, what is used and the limit. Called inside
+/// the writer's transaction (`BEGIN IMMEDIATE`), so two additions cannot both
+/// take the last seat. A refusal writes no row; what is over the limit
+/// already keeps working.
+pub async fn require_seat(
+    app: &AppState,
+    conn: &mut SqliteConnection,
+    quota: Quota,
+) -> Result<(), ApiError> {
+    let snapshot = app
+        .license
+        .snapshot(app, &mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(limit) = quota.limit(&snapshot.evaluation.quotas) else {
+        return Ok(());
+    };
+    let used = quota.used(&usage(&mut *conn).await.map_err(ApiError::internal)?);
+    if used < limit {
+        return Ok(());
+    }
+    Err(seat_limit(quota, used, limit))
+}
+
+/// `added` seats of `quota` were just written in this writer's transaction
+/// (the cloud's import, which adds lines in bulk): refused as by
+/// [`require_seat`] when they take the site beyond the file, so the caller
+/// rolls the whole write back. `used` names what the site used before them.
+pub async fn require_added_seats(
+    app: &AppState,
+    conn: &mut SqliteConnection,
+    quota: Quota,
+    added: u64,
+) -> Result<(), ApiError> {
+    if added == 0 {
+        return Ok(());
+    }
+    let snapshot = app
+        .license
+        .snapshot(app, &mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(limit) = quota.limit(&snapshot.evaluation.quotas) else {
+        return Ok(());
+    };
+    let used = quota.used(&usage(&mut *conn).await.map_err(ApiError::internal)?);
+    if used <= limit {
+        return Ok(());
+    }
+    Err(seat_limit(quota, used.saturating_sub(added), limit))
 }
 
 #[cfg(test)]

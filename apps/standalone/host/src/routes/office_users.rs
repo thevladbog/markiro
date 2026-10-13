@@ -129,6 +129,13 @@ pub async fn create_user(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
+    // A seat of the license (plan ЛЦ-2): office users, not office PCs.
+    crate::license::seats::require_seat(
+        &state,
+        &mut tx,
+        crate::license::seats::Quota::CabinetUsers,
+    )
+    .await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
@@ -204,6 +211,15 @@ pub async fn update_user(
                 "the last active administrator must stay",
             ));
         }
+    }
+    // Turning a user on again takes a seat of the license (plan ЛЦ-2).
+    if update.active && !current.active {
+        crate::license::seats::require_seat(
+            &state,
+            &mut tx,
+            crate::license::seats::Quota::CabinetUsers,
+        )
+        .await?;
     }
     let Some(details) = audit::update_details(&[
         ("name", json!(current.name), json!(name)),

@@ -441,6 +441,15 @@ pub async fn import(
     require_groups(&mut tx, &valid).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let summary = write(&mut tx, &valid, rev, &at).await?;
+    // The lines it added take seats of the license (plan ЛЦ-2): beyond the
+    // file the import (and its dry run) is refused whole, without a row.
+    crate::license::seats::require_added_seats(
+        &state,
+        &mut tx,
+        crate::license::seats::Quota::Lines,
+        u64::from(summary.lines_created),
+    )
+    .await?;
     if request.dry_run {
         tx.rollback().await.map_err(ApiError::internal)?;
         return Ok(Json(CloudImportSummary {
