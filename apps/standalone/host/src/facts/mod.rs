@@ -26,7 +26,8 @@ pub mod scan;
 pub mod shift_closed;
 
 use markiro_proto::{
-    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftOrigin, ShiftStatus,
+    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftMode, ShiftOrigin,
+    ShiftStatus,
 };
 use serde_json::Value;
 use sqlx::SqliteConnection;
@@ -120,6 +121,8 @@ pub struct FactShift {
     pub id: String,
     pub number: String,
     pub status: ShiftStatus,
+    /// Aggregation or validation (plan РЕЖ); fixed once open.
+    pub mode: ShiftMode,
     /// The GTIN the shift's snapshot froze.
     pub gtin14: String,
     /// The SSCC issuer prefix the shift's snapshot froze.
@@ -328,6 +331,13 @@ async fn apply(
             Reject::new(receipt_codes::NOT_ENTERED),
         ));
     };
+    if !admits(shift.mode, record.kind) {
+        return Ok(Applying {
+            kind,
+            shift_id: Some(shift.id.clone()),
+            answer: Err(Reject::field("shift_mode")),
+        });
+    }
     let context = Context {
         device_id,
         record_id: &record.id,
@@ -368,6 +378,23 @@ async fn apply(
     })
 }
 
+/// Whether a shift of `mode` takes facts of `kind`: a validation shift
+/// (plan РЕЖ, Р7) has no boxes and no pallets, so a box or pallet fact of it
+/// is `invalid_record` on `shift_mode` whatever its content, before anything
+/// of it is read; its scans and its close are its own (`scan.rs`,
+/// `shift_closed.rs`).
+fn admits(mode: ShiftMode, kind: FactKind) -> bool {
+    match kind {
+        FactKind::Scan | FactKind::ShiftClosed => true,
+        FactKind::BoxClosed
+        | FactKind::BoxLabel
+        | FactKind::BoxException
+        | FactKind::PalletClosed
+        | FactKind::PalletLabel
+        | FactKind::PalletException => mode == ShiftMode::Aggregation,
+    }
+}
+
 /// The shift `id` as the device entered it: `None` when there is no such
 /// shift, `Some(None)` when the device never entered it.
 async fn entered_shift(
@@ -378,6 +405,7 @@ async fn entered_shift(
     type ShiftRow = (
         String,
         String,
+        String,
         i64,
         String,
         Option<String>,
@@ -386,7 +414,7 @@ async fn entered_shift(
         bool,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
-        "SELECT s.status, s.number_month_key, s.number_seq, s.created_from, \
+        "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
          s.pallets_enabled, \
          EXISTS (SELECT 1 FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
@@ -399,6 +427,7 @@ async fn entered_shift(
     .map_err(ApiError::internal)?;
     let Some((
         status,
+        mode,
         month_key,
         seq,
         created_from,
@@ -420,6 +449,7 @@ async fn entered_shift(
         id: id.to_owned(),
         number: shifts::format_number(&month_key, seq, origin),
         status: status.parse().map_err(ApiError::internal)?,
+        mode: mode.parse().map_err(ApiError::internal)?,
         gtin14: gtin14.ok_or_else(snapshot)?,
         issuer_prefix: issuer_prefix.ok_or_else(snapshot)?,
         pallets_enabled,

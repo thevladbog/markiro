@@ -623,8 +623,40 @@ pub async fn open_pallet_floor(admin: &Admin, setup: &ShiftSetup, key: &str, lin
     open_floor_of(admin, key, line, pallet_shift_body(setup, &template)).await
 }
 
+/// `open_floor` for a validation shift (plan РЕЖ): the station enters it
+/// naming `validation-v1`.
+pub async fn open_validation_floor(
+    admin: &Admin,
+    setup: &ShiftSetup,
+    key: &str,
+    line: &str,
+) -> Floor {
+    let mut body = shift_body(setup);
+    body["mode"] = Value::String("validation".to_owned());
+    open_floor_with(
+        admin,
+        key,
+        line,
+        body,
+        Some(serde_json::json!({ "supports": ["validation-v1"] })),
+    )
+    .await
+}
+
 /// `open_floor` for a shift planned from `body`.
-async fn open_floor_of(admin: &Admin, key: &str, line: &str, mut body: Value) -> Floor {
+async fn open_floor_of(admin: &Admin, key: &str, line: &str, body: Value) -> Floor {
+    open_floor_with(admin, key, line, body, None).await
+}
+
+/// `open_floor_of`, the station entering with the body `enter` (none: a
+/// station of protocol 3, which sends no body).
+async fn open_floor_with(
+    admin: &Admin,
+    key: &str,
+    line: &str,
+    mut body: Value,
+    enter: Option<Value>,
+) -> Floor {
     let (status, device) = admin
         .app
         .send(empty(with_device(request("GET", "/v1/device"), key)))
@@ -640,15 +672,14 @@ async fn open_floor_of(admin: &Admin, key: &str, line: &str, mut body: Value) ->
     assert_eq!(status, StatusCode::OK, "{moved}");
     body["lineId"] = Value::String(line.to_owned());
     let shift = plan_shift(admin, body).await;
+    let path = format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap());
+    let builder = with_device(request("POST", &path), key);
     let (status, entered) = admin
         .app
-        .send(empty(with_device(
-            request(
-                "POST",
-                &format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap()),
-            ),
-            key,
-        )))
+        .send(match enter {
+            Some(enter) => json(builder, enter),
+            None => empty(builder),
+        })
         .await;
     assert_eq!(status, StatusCode::OK, "{entered}");
     Floor {

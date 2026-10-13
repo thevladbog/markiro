@@ -363,18 +363,27 @@ async fn an_accepted_scan_without_a_box_is_taken_only_in_a_validation_shift() {
            '2026-10-09T11:00:00.000Z')"],
     )
     .await;
-    // Only an accepted scan has a box, in either mode.
+    // Only an accepted scan has a box, in either mode; the rule asks no box
+    // of any other scan, in an aggregation shift too.
     for (id, shift) in [("scan-9", "shift-a"), ("scan-10", "shift-v")] {
         refused(
             scan(&pool, id, shift, "duplicate", Some("box-1"), 1).await,
             "CHECK constraint failed",
         );
     }
+    scan(&pool, "scan-11", "shift-a", "duplicate", None, 1)
+        .await
+        .unwrap();
+    scan(&pool, "scan-12", "shift-a", "wrong_gtin", None, 12)
+        .await
+        .unwrap();
     // An update cannot take the box of an aggregation shift's accepted scan,
-    // nor move a box-less one into an aggregation shift.
+    // nor move a box-less one into an aggregation shift, nor make a box-less
+    // scan of an aggregation shift an accepted one.
     for statement in [
         "UPDATE scans SET box_id = NULL WHERE id = 'scan-7'",
         "UPDATE scans SET shift_id = 'shift-a' WHERE id = 'scan-6'",
+        "UPDATE scans SET verdict = 'ok', duplicate_source = NULL WHERE id = 'scan-11'",
     ] {
         refused(
             sqlx::query(statement).execute(&pool).await.map(|_| ()),
@@ -457,24 +466,37 @@ async fn the_foreign_keys_on_scans_still_hold_after_the_rebuild() {
     );
 }
 
-/// A child row whose scan is gone (only possible if foreign keys were ever
-/// off) fails the migration whole, whatever the connection's foreign keys:
-/// with them on, copying the row back is refused; with them off, the final
-/// guard refuses it. The database stays at `0019`, its rows untouched.
+/// A row of the four tables whose parent is gone (only possible if foreign
+/// keys were ever off): a box item of a scan gone, a scan of a box gone, an
+/// owner of a box gone, a conflict whose loser is gone. Each one fails the
+/// migration whole, whatever the connection's foreign keys: with them on,
+/// copying the row is refused; with them off, the final guard refuses it.
+/// The database stays at `0019`, its rows untouched, nothing left in `temp`.
 #[tokio::test]
-async fn an_orphan_child_row_fails_the_migration_whole() {
-    for foreign_keys in [true, false] {
+async fn an_orphan_row_fails_the_migration_whole() {
+    let orphans = [
+        "INSERT INTO box_items (scan_id, box_id, code_hash, added_at) \
+         VALUES ('scan-gone', 'box-1', printf('%064x', 9), '2026-10-09T11:00:00.000Z')",
+        "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, duplicate_source, \
+         raw_kind, raw_length, code_hash, gtin14, serial, canonical, box_id, operator_id, \
+         scanned_at, received_at) VALUES ('scan-9', 'record-9', 'device-1', 'shift-a', 'ok', \
+         NULL, 'km', 38, printf('%064x', 9), '04600682000013', 'B0000009', \
+         '010460068200001321B0000009', 'box-gone', NULL, '2026-10-09T11:00:00.000Z', \
+         '2026-10-09T11:00:01Z')",
+        "INSERT INTO code_owners (code_hash, scan_id, shift_id, device_id, box_id, scanned_at) \
+         VALUES (printf('%064x', 9), 'scan-3', 'shift-a', 'device-1', 'box-gone', \
+         '2026-10-09T11:00:00.000Z')",
+        "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
+         VALUES ('conflict-2', printf('%064x', 1), 'scan-1', 'scan-gone', \
+         '2026-10-09T11:00:00Z')",
+    ];
+    for (orphan, foreign_keys) in orphans
+        .iter()
+        .flat_map(|orphan| [(orphan, true), (orphan, false)])
+    {
         let (_dir, pool) = at_0019(foreign_keys).await;
         seed(&pool).await;
-        execute(
-            &pool,
-            &[
-                "PRAGMA foreign_keys = OFF",
-                "INSERT INTO box_items (scan_id, box_id, code_hash, added_at) \
-                 VALUES ('scan-gone', 'box-1', printf('%064x', 9), '2026-10-09T11:00:00.000Z')",
-            ],
-        )
-        .await;
+        execute(&pool, &["PRAGMA foreign_keys = OFF", orphan]).await;
         if foreign_keys {
             execute(&pool, &["PRAGMA foreign_keys = ON"]).await;
         }
@@ -493,13 +515,22 @@ async fn an_orphan_child_row_fails_the_migration_whole() {
         };
         assert!(
             error.to_string().contains(expected),
-            "{foreign_keys}: {error}"
+            "{orphan} {foreign_keys}: {error}"
         );
         assert!(!applied(&pool).await.contains(&20));
-        assert_eq!(schema(&pool).await, schema_before, "{foreign_keys}");
+        assert_eq!(
+            schema(&pool).await,
+            schema_before,
+            "{orphan} {foreign_keys}"
+        );
         for ((table, key), rows_before) in TABLES.into_iter().zip(&before) {
             assert_eq!(&rows(&pool, table, key).await, rows_before, "{table}");
         }
+        let temp: Vec<String> = sqlx::query_scalar("SELECT name FROM temp.sqlite_master")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert!(temp.is_empty(), "{orphan} {foreign_keys}: {temp:?}");
     }
 }
 

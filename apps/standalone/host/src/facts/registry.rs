@@ -68,12 +68,13 @@ pub async fn owner(
     .transpose()
 }
 
-/// An accepted scan, already in the journal, that claims its code for its
-/// box.
+/// An accepted scan, already in the journal, that claims its code: for its
+/// box in an aggregation shift, without one in a validation shift (plan
+/// РЕЖ).
 pub struct Claim<'a> {
     pub scan_id: &'a str,
     pub code_hash: &'a str,
-    pub box_id: &'a str,
+    pub box_id: Option<&'a str>,
     pub scanned_at: &'a str,
 }
 
@@ -100,8 +101,9 @@ async fn conflict_row(
 }
 
 /// Give the code to `claim` when it is free or owned by a later scan, and
-/// put it in its box; otherwise keep the owner and answer `conflict` with
-/// it. Two scans at the same instant: the owner keeps the code.
+/// put it in its box when it has one; otherwise keep the owner and answer
+/// `conflict` with it. Two scans at the same instant: the owner keeps the
+/// code. An owner displaced leaves its box, if it was in one.
 pub async fn claim(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
@@ -175,14 +177,18 @@ pub async fn claim(
             .map_err(ApiError::internal)?;
         }
     }
-    sqlx::query("INSERT INTO box_items (scan_id, box_id, code_hash, added_at) VALUES (?, ?, ?, ?)")
+    if let Some(box_id) = claim.box_id {
+        sqlx::query(
+            "INSERT INTO box_items (scan_id, box_id, code_hash, added_at) VALUES (?, ?, ?, ?)",
+        )
         .bind(claim.scan_id)
-        .bind(claim.box_id)
+        .bind(box_id)
         .bind(claim.code_hash)
         .bind(claim.scanned_at)
         .execute(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
+    }
     Ok(Applied::accepted())
 }
 

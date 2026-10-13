@@ -95,7 +95,8 @@ pub mod credentials {
 /// receipt per record, and a record the host refuses names one of these.
 pub mod receipt_codes {
     /// The record could not be read, or one of its fields breaks its rule
-    /// (`details.field` names it when the record itself was readable).
+    /// (`details.field` names it when the record itself was readable). A box
+    /// or pallet fact of a validation shift names `shift_mode` (plan РЕЖ).
     pub const INVALID_RECORD: &str = "invalid_record";
     /// A record with this id was received before with other content.
     pub const PAYLOAD_MISMATCH: &str = "payload_mismatch";

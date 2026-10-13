@@ -27,16 +27,21 @@ use crate::validate;
 
 /// The columns of an office shift, its totals (plan 2a2, pallets plan ПЛ-Х)
 /// included: each a subquery over the shift's facts, served by the indexes
-/// of `0010` and `0012`.
+/// of `0010` and `0012`. A validation shift (plan РЕЖ, Р11) accepts its
+/// units without boxes: they are the codes it owns, each without a box
+/// (`code_owners_shift_unboxed` of `0020`); it has no boxes and no pallets.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
      pallet_sheet_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
      close_reason_text, late_data_at, created_at, rev, \
-     (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
-      WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
-      AS accepted_units, \
+     CASE mode WHEN 'validation' \
+      THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = shifts.id \
+            AND o.box_id IS NULL) \
+      ELSE (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
+            WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
+      END AS accepted_units, \
      (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
       WHERE b.shift_id = shifts.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units_in_closed_boxes, \
@@ -756,6 +761,28 @@ mod tests {
                 .filter(|line| line.starts_with("SCAN") && !line.starts_with("SCAN shifts"))
                 .collect();
             assert!(scans.is_empty(), "{filter}: {scans:?}");
+        }
+    }
+
+    /// A validation shift's units (plan РЕЖ, Р11) are the codes it owns
+    /// without a box, read through the partial `code_owners_shift_unboxed`
+    /// of `0020`, for one shift and for the list alike.
+    #[tokio::test]
+    async fn the_units_of_a_validation_shift_run_on_the_index_of_0020() {
+        for filter in [
+            "WHERE id = ?",
+            "WHERE status <> 'closed' OR production_date >= ?",
+        ] {
+            let plan = plan(filter).await;
+            let found = plan
+                .iter()
+                .filter(|line| line.contains("code_owners"))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                found,
+                ["SEARCH o USING INDEX code_owners_shift_unboxed (shift_id=?)"],
+                "{filter}: {plan:#?}"
+            );
         }
     }
 }

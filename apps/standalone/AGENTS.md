@@ -3181,19 +3181,31 @@ receipt is kept for good.
 A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
 an `invalid` one keeps no code, only what it looked like (`rawKind`) and its
 length, since it may have been a badge. An `ok` one carries the GTIN the
-snapshot froze (`gtin_mismatch` otherwise) and a box of this device in this
-shift: an unknown box id opens the box, another device's or another shift's
-is `box_unknown`, a closed one `box_closed`. Its code goes to the registry
+snapshot froze (`gtin_mismatch` otherwise). In an aggregation shift it names
+a box of this device in this shift: an unknown box id opens the box, another
+device's or another shift's is `box_unknown`, a closed one `box_closed`. In a
+validation shift (plan РЕЖ, protocol 4) it names none (`boxId: null`); a box
+named in the one mode or missing in the other is `invalid_record` on
+`data.boxId`, and the schema's triggers `scans_ok_box_by_mode` (`0020`) back
+the rule by the shift's mode. Its code goes to the registry
 (`code_owners`, `facts/registry.rs`): the earliest accepted scan since the
 code was last freed owns it whatever order the scans arrive in, compared by
 their device instants to the millisecond. After an exception released the
 code the next scan to ARRIVE owns it, not an earlier displaced item or
 conflict loser (re-electing the earliest remaining claim is plan 2b). A
 scan earlier than the owner takes the code, and the owner's item leaves its
-box (`box_items.displaced_at`); a later one, or one at the same instant, is
+box (`box_items.displaced_at`; an owner of a validation shift has no item,
+`code_owners.box_id` and its own `box_items` row are NULL and absent, and
+the registry is one for both modes); a later one, or one at the same instant, is
 `conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
 is the sender's own scan). Both write a `code_conflicts` row; telling the
 displaced device and the office's review come with plan 2b.
+
+A validation shift has no boxes and no pallets: every `box_closed`,
+`box_label`, `box_exception`, `pallet_closed`, `pallet_label` and
+`pallet_exception` of it is `invalid_record` with `details.field =
+"shift_mode"`, whatever its content, before anything of it is read
+(`facts::admits`, from `FactShift.mode`).
 
 A `box_closed` (`facts/box_closed.rs`) closes a box of this device in this
 shift (`box_unknown` otherwise) with an SSCC of 18 digits whose first 17 are
@@ -3248,7 +3260,9 @@ shift, the summary it showed (`plannedQtySnapshot`, `actualQty`,
 `closedBoxCount`) and a reason code of `shift_close_reasons`, required when
 the plan it saw was set and differs from the fact
 (`rules::close_reason_required`; `invalid_record` on `data.reasonCode`); a
-reason the plan did not call for is kept, as in the cloud. An active shift
+reason the plan did not call for is kept, as in the cloud. A validation
+shift's close counts no boxes: `closedBoxCount` other than 0 is
+`invalid_record` on `data.closedBoxCount`. An active shift
 closes: `status = closed`, `closed_at` the station's instant in the host's
 format (whole seconds), `closed_by_kind = device`, `closed_by` the station,
 `close_reason_code`, and the audit row `shift.close` with the station as
@@ -3366,7 +3380,10 @@ Every `OfficeShift` — the list, `GET …/{id}` and the answer of every office
 write — carries `totals` (`ShiftTotals`), read from the facts by subqueries
 of `routes/office_shifts.rs` and never stored: `acceptedUnits` (box items
 neither removed nor displaced, in open and closed boxes alike; the office's
-«Принято кодов», never «в коробах»), `unitsInClosedBoxes` (the live items in
+«Принято кодов», never «в коробах»; for a validation shift, plan РЕЖ, the
+codes it owns, each without a box, through the partial
+`code_owners_shift_unboxed` of `0020`: its box and pallet counts are 0),
+`unitsInClosedBoxes` (the live items in
 boxes closed and not taken apart, as the cloud's `containedUnits`: the
 office's «Кодов в закрытых коробах»; a shift closed with a box open shows the
 gap to `acceptedUnits`), `closedBoxes`
@@ -4355,7 +4372,13 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   `closedAt` (the host's whole seconds) and `stationClosedAt` (the accepted
   `shift_close_events.closed_at`, the device's instant), the organization's
   name and INN, the codes the shift owns with their owning scans' canonical
-  text, every box, the live items of those boxes only and every pallet. Each
+  text, every box, the live items of those boxes only and every pallet. A
+  validation shift (plan РЕЖ, Р11) has codes and no box, item or pallet; the
+  port renders its codes flat and refuses every format with boxes or pallets
+  (`BOX_COVERAGE_INCOMPLETE`: no box covers its codes), so a box or pallet
+  file of it is never written with empty groups (the office offers it only
+  the flat TXT and CSV). The codes come by their scan instant, then their
+  hash, the order the port sorts them in. Each
   query searches by an index (`every_query_of_the_source_searches_by_an_index`
   runs `EXPLAIN QUERY PLAN` on them), so a year of facts costs one shift's
   export nothing. `GET …/boxes` and `…/pallets` (`routes/office_boxes.rs`)
