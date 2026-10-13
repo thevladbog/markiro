@@ -4,6 +4,7 @@
 
 use sqlx::SqliteConnection;
 
+use super::bounded_ms;
 use super::state::StoredLicense;
 
 /// `license_clock`, times in ms UTC.
@@ -53,7 +54,11 @@ fn decode(error: serde_json::Error) -> sqlx::Error {
     sqlx::Error::Decode(Box::new(error))
 }
 
-/// Every stored file, by `sequence`.
+/// Every stored file, by `sequence`. A row with a time out of range
+/// ([`bounded_ms`]) is not used: the host never wrote one, so it is not a
+/// file the office loaded; the service log names only its id. Skipping it
+/// keeps the license (and every device, which reads it with its record)
+/// working on the files before it.
 pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>, sqlx::Error> {
     let rows: Vec<LicenseRow> = sqlx::query_as(
         "SELECT license_id, sequence, kid, host_id, issued_at, valid_from, valid_until, \
@@ -63,6 +68,18 @@ pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>,
     .fetch_all(conn)
     .await?;
     rows.into_iter()
+        .filter(|row| {
+            let usable = [row.issued_at, row.valid_from, row.valid_until]
+                .into_iter()
+                .all(|ms| bounded_ms(ms).is_some());
+            if !usable {
+                tracing::warn!(
+                    license_id = %row.license_id,
+                    "a stored license file holds a time out of range; it is not used"
+                );
+            }
+            usable
+        })
         .map(|row| {
             Ok(StoredLicense {
                 quotas: serde_json::from_str(&row.quotas).map_err(decode)?,
@@ -84,7 +101,12 @@ pub async fn licenses(conn: &mut SqliteConnection) -> Result<Vec<StoredLicense>,
         .collect()
 }
 
-/// The one row of `license_clock` (migration `0030` seeds it).
+/// The one row of `license_clock` (migration `0030` seeds it). A time out
+/// of range ([`bounded_ms`]) is read the safe way: the trial's start, the
+/// emergency's end and a wrong host's first sighting as the epoch (the trial
+/// is over, the extension used and over, the window over — never an endless
+/// trial, a second extension or a fresh window), the mark and the last
+/// state's time as none (the PC's clock, now).
 pub async fn clock_row(conn: &mut SqliteConnection) -> Result<ClockRow, sqlx::Error> {
     let row: ClockRecord = sqlx::query_as(
         "SELECT max_seen_at, trial_started_at, trial_inn, emergency_used_for, emergency_until, \
@@ -92,15 +114,16 @@ pub async fn clock_row(conn: &mut SqliteConnection) -> Result<ClockRow, sqlx::Er
     )
     .fetch_one(conn)
     .await?;
+    let over = |ms: Option<i64>| ms.map(|ms| bounded_ms(ms).unwrap_or(0));
     Ok(ClockRow {
-        max_seen_at: row.max_seen_at,
-        trial_started_at: row.trial_started_at,
+        max_seen_at: row.max_seen_at.and_then(bounded_ms),
+        trial_started_at: over(row.trial_started_at),
         trial_inn: row.trial_inn,
         emergency_used_for: row.emergency_used_for,
-        emergency_until: row.emergency_until,
-        wrong_host_since: row.wrong_host_since,
+        emergency_until: over(row.emergency_until),
+        wrong_host_since: over(row.wrong_host_since),
         last_state: row.last_state,
-        last_state_at: row.last_state_at,
+        last_state_at: row.last_state_at.and_then(bounded_ms),
     })
 }
 

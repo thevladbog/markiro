@@ -151,7 +151,7 @@ pub async fn activation_request(
         .licenses
         .iter()
         .max_by_key(|license| license.sequence);
-    Ok(Json(ActivationRequest {
+    let request = ActivationRequest {
         format: ACTIVATION_REQUEST_FORMAT.to_owned(),
         host_id: app.host_id.clone(),
         host_fingerprint: app.endpoint.fingerprint.clone(),
@@ -174,7 +174,34 @@ pub async fn activation_request(
             lines: usage.lines,
         },
         created_at: app.timestamp(),
-    }))
+    };
+    checked_activation_request(request).map(Json)
+}
+
+/// The request as plan ЛЦ-1's rules want it, or a precise refusal: the
+/// office reads it with the domain's strict schema, so a body that breaks a
+/// rule must never leave. The organization's profile takes names the
+/// request refuses (`validate::clean_text` counts characters and refuses
+/// only `char::is_control`; plan ЛЦ-1 counts UTF-16 units and refuses the
+/// line separators and bidirectional controls too): that is the person's to
+/// fix, on `org.name`. Anything else is the host's own fault; its log line
+/// holds no value.
+fn checked_activation_request(request: ActivationRequest) -> Result<ActivationRequest, ApiError> {
+    if request.is_valid() {
+        return Ok(request);
+    }
+    let mut named = request.clone();
+    named.organization.name = "-".to_owned();
+    if named.is_valid() {
+        return Err(ApiError::validation(
+            "org.name",
+            "the organization's name cannot go into an activation request: \
+             it must be 1-300 characters without control or direction marks",
+        ));
+    }
+    Err(ApiError::internal(
+        "the activation request the host built breaks its own rules",
+    ))
 }
 
 /// One column of «было → станет» for a file.

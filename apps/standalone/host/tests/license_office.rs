@@ -5,7 +5,11 @@
 
 mod support;
 
+use std::sync::Arc;
+
 use axum::http::StatusCode;
+use markiro_host::license::trial_mark::NoMark;
+use markiro_host::license::LicenseService;
 use serde_json::{json, Value};
 use support::app::{admin, empty, request, test_fingerprint, with_device};
 use support::license::{
@@ -297,4 +301,194 @@ async fn an_organization_without_an_inn_is_told_with_an_empty_one() {
     );
     markiro_proto::trust::ActivationRequest::from_json(body.to_string().as_bytes())
         .expect("an empty INN is allowed");
+}
+
+/// An organization's name the profile took but plan ЛЦ-1's request refuses
+/// (a bidi override): a precise refusal on `org.name`, never a body the
+/// office's strict schema would refuse.
+#[tokio::test]
+async fn a_name_the_request_cannot_carry_is_refused_on_org_name() {
+    let admin = admin().await;
+    sqlx::query("UPDATE org_profile SET name = ? WHERE id = 1")
+        .bind("ООО\u{202e}Атолл")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = admin
+        .call("GET", "/v1/office/license/activation-request", None)
+        .await;
+    assert_eq!(
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"].clone()
+        ),
+        (
+            StatusCode::BAD_REQUEST,
+            json!("validation_failed"),
+            json!({ "field": "org.name" })
+        ),
+        "{body}"
+    );
+}
+
+/// Anything else the host built wrong (here a trial INN that is no INN) is
+/// the host's fault: `internal`, and no body the office would refuse.
+#[tokio::test]
+async fn a_request_broken_elsewhere_is_an_internal_error() {
+    let admin = admin().await;
+    sqlx::query("UPDATE license_clock SET trial_inn = 'abc' WHERE id = 1")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = admin
+        .call("GET", "/v1/office/license/activation-request", None)
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{body}"
+    );
+}
+
+/// One past `Number.MAX_SAFE_INTEGER`: no time the file or the domain counts.
+const PAST_SAFE_MS: i64 = 9_007_199_254_740_992;
+
+/// A stored file with a time out of range is not used (plan ЛЦ-2, review of
+/// Task 6): the file before it stays in force.
+#[tokio::test]
+async fn a_stored_file_with_a_time_out_of_range_is_not_used() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    seed(&admin.app, &terms(&host)).await;
+    let mut early = terms(&host);
+    early["licenseId"] = json!(license_id(2));
+    early["sequence"] = json!(2);
+    early["issuedAt"] = json!(-1);
+    seed(&admin.app, &early).await;
+    let mut late = terms(&host);
+    late["licenseId"] = json!(license_id(3));
+    late["sequence"] = json!(3);
+    late["validUntil"] = json!(PAST_SAFE_MS);
+    seed(&admin.app, &late).await;
+    let mut negative_start = terms(&host);
+    negative_start["licenseId"] = json!(license_id(4));
+    negative_start["sequence"] = json!(4);
+    negative_start["validFrom"] = json!(-DAY_MS);
+    seed(&admin.app, &negative_start).await;
+    let (status, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        (body["state"].clone(), body["license"]["sequence"].clone()),
+        (json!("active"), json!(1))
+    );
+}
+
+/// The clock's times out of range (plan ЛЦ-2, review of Task 6), each read
+/// the safe way: a trial start → the trial is over, an emergency end → used
+/// and over, a wrong host's first sighting → its window is over, the mark →
+/// none (the PC's clock), the last state's time → none (now).
+#[tokio::test]
+async fn a_trial_start_out_of_range_is_a_trial_that_is_over() {
+    let admin = admin().await;
+    sqlx::query("UPDATE license_clock SET trial_started_at = ? WHERE id = 1")
+        .bind(PAST_SAFE_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(
+        (body["state"].clone(), body["opensNewShifts"].clone()),
+        (json!("trial_expired"), json!(false)),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn an_emergency_end_out_of_range_is_used_and_over() {
+    let admin = admin().await;
+    sqlx::query(
+        "UPDATE license_clock SET trial_started_at = ?, emergency_used_for = 'trial', \
+         emergency_until = ? WHERE id = 1",
+    )
+    .bind(START_MS - 15 * DAY_MS)
+    .bind(PAST_SAFE_MS)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(
+        (
+            body["state"].clone(),
+            body["opensNewShifts"].clone(),
+            body["emergency"].clone()
+        ),
+        (
+            json!("trial_expired"),
+            json!(false),
+            json!({ "available": false, "until": null })
+        ),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_hosts_sighting_out_of_range_is_a_window_that_is_over() {
+    let admin = admin().await;
+    seed(&admin.app, &terms("9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f")).await;
+    sqlx::query("UPDATE license_clock SET wrong_host_since = ? WHERE id = 1")
+        .bind(PAST_SAFE_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(body["state"], "restricted", "{body}");
+}
+
+#[tokio::test]
+async fn a_mark_out_of_range_is_no_mark() {
+    let admin = admin().await;
+    sqlx::query("UPDATE license_clock SET max_seen_at = ? WHERE id = 1")
+        .bind(PAST_SAFE_MS)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    // A fresh service on the same data is a start of the host.
+    let started = admin
+        .app
+        .state
+        .clone()
+        .with_license(Arc::new(LicenseService::new(
+            markiro_proto::trust::license_keyset(),
+            Arc::new(NoMark),
+        )));
+    let license = started
+        .license
+        .office_license_now(&started)
+        .await
+        .expect("the license now");
+    assert_eq!(
+        (license.effective_at, license.state),
+        (text(START_MS), "trial".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn a_last_states_time_out_of_range_is_now() {
+    let admin = admin().await;
+    let mut payload = terms(&admin.app.state.host_id);
+    payload["customer"]["inn"] = json!(support::license::OTHER_INN);
+    seed(&admin.app, &payload).await;
+    sqlx::query(
+        "UPDATE license_clock SET last_state = 'inn_mismatch', last_state_at = ? WHERE id = 1",
+    )
+    .bind(PAST_SAFE_MS)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (_, body) = admin.call("GET", "/v1/office/license", None).await;
+    assert_eq!(
+        (body["state"].clone(), body["since"].clone()),
+        (json!("inn_mismatch"), json!(text(START_MS)))
+    );
 }

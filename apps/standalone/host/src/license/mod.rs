@@ -23,6 +23,18 @@ use crate::clock::format_timestamp;
 use crate::error::ApiError;
 use crate::server::AppState;
 
+/// `Number.MAX_SAFE_INTEGER`: the latest instant the file, the wire and the
+/// domain count, in ms.
+pub const MAX_MS: i64 = 9_007_199_254_740_991;
+
+/// `ms` when it is an instant the file can count (`0..=MAX_MS`), else none.
+/// Every time read back from the database (and the registry's mark, plan
+/// ЛЦ-2 task 12) goes through it: a value outside was never written by the
+/// host, and the caller picks the safe reading of its absence.
+pub fn bounded_ms(ms: i64) -> Option<i64> {
+    (0..=MAX_MS).contains(&ms).then_some(ms)
+}
+
 /// Milliseconds since the Unix epoch, as the file counts time.
 pub fn to_ms(at: OffsetDateTime) -> i64 {
     i64::try_from(at.unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX)
@@ -96,8 +108,8 @@ impl LicenseService {
         let reading = {
             let mut guard = self.clock.lock().expect("license clock lock");
             let clock = guard.get_or_insert_with(|| {
-                // A loaded file proves the time is not before its issue less
-                // a day (§7).
+                // Loaded files prove the time is not before the latest issue
+                // of any stored file less a day (§7).
                 let floor = clock::issue_floor(licenses.iter().map(|license| license.issued_at));
                 clock::LicenseClock::at_start(clock_row.max_seen_at, wall, mono, floor)
             });
@@ -145,5 +157,20 @@ impl LicenseService {
         let usage = seats::usage(&mut tx).await.map_err(ApiError::internal)?;
         tx.rollback().await.map_err(ApiError::internal)?;
         Ok(routes::office_license(app, &snapshot, &usage))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_time_is_bounded_by_the_epoch_and_the_largest_safe_integer() {
+        assert_eq!(bounded_ms(0), Some(0));
+        assert_eq!(bounded_ms(-1), None);
+        assert_eq!(bounded_ms(9_007_199_254_740_991), Some(MAX_MS));
+        assert_eq!(bounded_ms(9_007_199_254_740_992), None);
+        assert_eq!(bounded_ms(i64::MIN), None);
+        assert_eq!(bounded_ms(i64::MAX), None);
     }
 }

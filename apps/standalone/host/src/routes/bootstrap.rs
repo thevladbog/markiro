@@ -151,8 +151,7 @@ pub async fn bootstrap(
     // once, with the INN the wizard took (it goes into the activation
     // request). Migration 0030 seeds the clock's one row: without it the
     // host would come up with no trial at all, so the wizard fails instead.
-    let started_at =
-        i64::try_from(now.unix_timestamp_nanos() / 1_000_000).map_err(ApiError::internal)?;
+    let started_at = crate::license::to_ms(now);
     let trial = sqlx::query(
         "UPDATE license_clock SET trial_started_at = coalesce(trial_started_at, ?), \
          trial_inn = coalesce(trial_inn, ?) WHERE id = 1",

@@ -81,8 +81,8 @@ fn millis(duration: Duration) -> i64 {
 
 impl LicenseClock {
     /// At a start: `stored` is `license_clock.max_seen_at`, `wall` the PC's
-    /// clock, `mono` the monotonic time, `floor` the [`issue_floor`] of every
-    /// stored file.
+    /// clock, `mono` the monotonic time, `floor` the latest issue of any
+    /// stored file less a day ([`issue_floor`]).
     pub fn at_start(stored: Option<i64>, wall: i64, mono: Duration, floor: Option<i64>) -> Self {
         let base = stored.unwrap_or(wall);
         let mut mark = if wall >= base {
@@ -127,7 +127,8 @@ impl LicenseClock {
         }
     }
 
-    /// A file loaded now proves the time is not before its issue less a day.
+    /// Files just stored prove the time is not before `floor`, the latest
+    /// issue of any stored file less a day ([`issue_floor`]).
     pub fn raise_floor(&mut self, floor: i64, mono: Duration) {
         if floor > self.mark {
             self.mark = floor;
