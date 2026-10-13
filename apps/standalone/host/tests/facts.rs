@@ -3367,8 +3367,9 @@ async fn accepted_by_schema(admin: &Admin, what: &str, sql: &str) {
         .unwrap_or_else(|error| panic!("{what}: {error}"));
 }
 
-/// What no row may break, whatever writes it: the checks of migration 0010.
-/// Every refusal is paired with a control that differs in one thing.
+/// What no row may break, whatever writes it: the checks of migration 0010
+/// (an accepted scan's box: the CHECK and trigger of 0020, plan РЕЖ). Every
+/// refusal is paired with a control that differs in one thing.
 #[tokio::test]
 async fn the_schema_refuses_the_rows_no_fact_may_leave() {
     let (admin, floor) = floor().await;
@@ -3595,7 +3596,8 @@ async fn the_schema_refuses_the_rows_no_fact_may_leave() {
         (
             "an accepted scan with no box",
             scan("s-11", "ok", None, "km", 1, Some(&hash), Some("x"), None),
-            "(verdict = 'ok') = (box_id IS NOT NULL)",
+            // 0020: the trigger of an aggregation shift, no longer a CHECK.
+            "scan_needs_box",
         ),
         (
             "a duplicate in a box",
@@ -3609,7 +3611,7 @@ async fn the_schema_refuses_the_rows_no_fact_may_leave() {
                 Some("x"),
                 Some(b1_ref),
             ),
-            "(verdict = 'ok') = (box_id IS NOT NULL)",
+            "box_id IS NULL OR verdict = 'ok'",
         ),
         (
             "a duplicate with no finder",
