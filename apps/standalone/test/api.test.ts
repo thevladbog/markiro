@@ -15,6 +15,8 @@ import {
   bootstrapRequestSchema,
   counterpartyCreateSchema,
   counterpartyUpdateSchema,
+  employeeCreateSchema,
+  employeeUpdateSchema,
   deviceShiftCreateSchema,
   deviceUpdateSchema,
   factBatchSchema,
@@ -92,6 +94,9 @@ const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const DEVICE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const COUNTERPARTY_CREATE = counterpartyCreateSchema.parse(fixture("counterparty-create.json"));
 const COUNTERPARTY_UPDATE = counterpartyUpdateSchema.parse(fixture("counterparty-update.json"));
+const EMPLOYEE_ID = "4f6a8c2e-1b3d-4e5f-8a7b-9c0d1e2f3a4b";
+const EMPLOYEE_CREATE = employeeCreateSchema.parse(fixture("employee-create.json"));
+const EMPLOYEE_UPDATE = employeeUpdateSchema.parse(fixture("employee-update.json"));
 const LINE_UPDATE = lineUpdateSchema.parse(fixture("line-update.json"));
 const DEVICE_UPDATE = deviceUpdateSchema.parse(fixture("device-update.json"));
 const PAIRING_CODE_REQUEST = pairingCodeRequestSchema.parse(fixture("pairing-code-request.json"));
@@ -316,6 +321,24 @@ const CASES: Case[] = [
       path: `/v1/office/counterparties/${COUNTERPARTY_ID}`,
       body: COUNTERPARTY_UPDATE,
     },
+  ],
+  [
+    "listEmployees",
+    [fixture("employee-record.json")],
+    (api) => api.listEmployees(TOKEN),
+    { method: "GET", path: "/v1/office/employees", body: undefined },
+  ],
+  [
+    "createEmployee",
+    fixture("employee-record.json"),
+    (api) => api.createEmployee(TOKEN, EMPLOYEE_CREATE),
+    { method: "POST", path: "/v1/office/employees", body: EMPLOYEE_CREATE },
+  ],
+  [
+    "updateEmployee",
+    fixture("employee-record.json"),
+    (api) => api.updateEmployee(TOKEN, EMPLOYEE_ID, EMPLOYEE_UPDATE),
+    { method: "PUT", path: `/v1/office/employees/${EMPLOYEE_ID}`, body: EMPLOYEE_UPDATE },
   ],
   [
     "listLines",

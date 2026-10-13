@@ -1161,6 +1161,50 @@ pub struct CounterpartyUpdate {
     pub expected_rev: i64,
 }
 
+/// An employee (`GET /v1/office/employees`, administrators only): a person
+/// of the site, as the cloud's `employees`. Office data, never in the
+/// station feed and never a credential. `operatorId` names the one operator
+/// the employee is (one operator per employee, one employee per operator),
+/// `null` for none; the operator keeps its own personnel number, PIN and
+/// badges. An archived employee is linked to no operator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeRecord {
+    pub id: String,
+    pub name: String,
+    pub role: Option<String>,
+    pub operator_id: Option<String>,
+    pub archived: bool,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/employees`; `operatorId` links the new employee to an
+/// operator at once («Создать сотрудника» from an operator).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EmployeeCreate {
+    pub name: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub operator_id: Option<String>,
+}
+
+/// `PUT /v1/office/employees/{id}`: every field, like a counterparty;
+/// `operatorId: null` unlinks, `archived: true` archives (and needs
+/// `operatorId: null`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EmployeeUpdate {
+    pub name: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub operator_id: Option<String>,
+    pub archived: bool,
+    pub expected_rev: i64,
+}
+
 /// A production line as the office sees it (`GET /v1/office/lines`,
 /// archived lines included).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

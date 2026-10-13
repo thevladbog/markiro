@@ -12,7 +12,8 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
-import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
+import type { BadgeInfo, EmployeeRecord, OfficeOperator } from "../../host/protocol.js";
+import { employeesByOperator, freeEmployees } from "../employees/employee-records.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { useChangeList, useStoreRecord } from "../records.js";
@@ -21,6 +22,7 @@ import { BadgesDialog } from "./BadgesDialog.js";
 import { CreateOperatorDialog } from "./CreateOperatorDialog.js";
 import { EditOperatorDialog } from "./EditOperatorDialog.js";
 import { OperatorAccessDialog } from "./OperatorAccessDialog.js";
+import { OperatorEmployeeDialog } from "./OperatorEmployeeDialog.js";
 import { OperatorPinDialog } from "./OperatorPinDialog.js";
 import { activeFirstByLogin, badgeLabel, withBadge, withBadgeRevoked } from "./operator-records.js";
 import { RevokeBadgeDialog } from "./RevokeBadgeDialog.js";
@@ -32,6 +34,7 @@ type OperatorsDialog =
   | { kind: "edit"; operator: OfficeOperator }
   | { kind: "pin"; operator: OfficeOperator }
   | { kind: "access"; operator: OfficeOperator }
+  | { kind: "employee"; operator: OfficeOperator }
   | { kind: "badges"; operatorId: string; notice: string | null }
   | { kind: "addBadge"; operatorId: string }
   | { kind: "revokeBadge"; operatorId: string; badge: BadgeInfo };
@@ -46,6 +49,10 @@ export function OperatorsPage() {
   const { t } = useTranslation();
   const operators = useOfficeQuery(officeKeys.operators, (api, token) => api.listOperators(token));
   const store = useStoreRecord<OfficeOperator>(officeKeys.operators);
+  // Who each operator is: the employee linked to it (the link is the employee's record).
+  const employees = useOfficeQuery(officeKeys.employees, (api, token) => api.listEmployees(token));
+  const storeEmployee = useStoreRecord<EmployeeRecord>(officeKeys.employees);
+  const linked = employeesByOperator(employees.data ?? []);
   // A badge write answers with the badge, or nothing: the change goes into the
   // cached list at once, and with no list loaded the list is read again.
   const changeList = useChangeList<OfficeOperator>(officeKeys.operators);
@@ -87,6 +94,11 @@ export function OperatorsPage() {
       key: "role",
       title: t("office.operators.table.role"),
       render: (operator) => operator.role ?? t("office.common.none"),
+    },
+    {
+      key: "employee",
+      title: t("office.operators.table.employee"),
+      render: (operator) => linked.get(operator.id)?.name ?? t("office.operators.noEmployee"),
     },
     {
       key: "pin",
@@ -141,6 +153,16 @@ export function OperatorsPage() {
           >
             {t("office.operators.badgesOpen")}
           </Button>
+          {employees.isSuccess && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.operators.employeeNamed", { name: operator.name })}
+              onClick={() => open({ kind: "employee", operator })}
+            >
+              {t("office.operators.employee")}
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="compact"
@@ -281,6 +303,33 @@ export function OperatorsPage() {
             )
           }
           onReload={reload}
+        />
+      )}
+      {dialog?.kind === "employee" && (
+        <OperatorEmployeeDialog
+          operator={dialog.operator}
+          linked={linked.get(dialog.operator.id) ?? null}
+          free={freeEmployees(employees.data ?? [])}
+          onClose={() => setDialog(null)}
+          onSaved={(employee, outcome) => {
+            storeEmployee(employee);
+            setDialog(null);
+            const values = { name: dialog.operator.name, employee: employee.name };
+            setNotice(
+              t(
+                outcome === "create"
+                  ? "office.operators.link.createdLinked"
+                  : outcome === "link"
+                    ? "office.operators.link.linked"
+                    : "office.operators.link.unlinked",
+                values,
+              ),
+            );
+          }}
+          onReload={() => {
+            setDialog(null);
+            void employees.refetch();
+          }}
         />
       )}
       {badgeDialog()}

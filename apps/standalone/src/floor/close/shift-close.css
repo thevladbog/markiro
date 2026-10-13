@@ -1,0 +1,196 @@
+/*
+ * The shift's close on the work screen, in the cloud station's overlay language
+ * (apps/station/src/station.css, «.work-overlay», «.floor-choice-group»): one card
+ * in the middle of the stage with the shift's figures as tiles, the reasons as
+ * floor choices two to a row (a radio mark, the chosen one tinted and ticked),
+ * and the row of floor actions under them. The cloud has no summary of a close;
+ * its figures follow the band's mono counters. Tokens from @markiro/ui.
+ */
+.shift-close {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-4);
+  gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+}
+
+/* The focus lands on the card by code (each change of view), not by Tab. */
+.shift-close:focus {
+  outline: none;
+}
+
+.shift-close h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.shift-close p {
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.shift-close__loading,
+.shift-close__note {
+  color: var(--fg-2);
+}
+
+.shift-close__note {
+  font: 400 15px/20px var(--font-ui) !important;
+}
+
+/* The figures: a tile each, the term over its value. */
+.shift-close__facts {
+  display: grid;
+  margin: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.shift-close__facts > div {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  gap: 2px;
+  align-content: start;
+  border-left: 4px solid var(--line-strong);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+  background: var(--surface-panel);
+}
+
+/* The product's name is a line across the card, «Товар  Молоко…»; the figures are tiles. */
+.shift-close__facts > div:first-child {
+  display: flex;
+  grid-column: 1 / -1;
+  padding: 0;
+  gap: var(--sp-2);
+  align-items: baseline;
+  border: 0;
+  background: none;
+}
+
+.shift-close__facts dt {
+  color: var(--fg-2);
+  font: 600 14px/18px var(--font-ui);
+}
+
+.shift-close__facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 600 22px/28px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-close__facts > div:first-child dt {
+  font: var(--floor-body);
+}
+
+.shift-close__facts > div:first-child dd {
+  font: var(--floor-body-strong);
+}
+
+.shift-close__result {
+  font: var(--floor-body-strong) !important;
+}
+
+.shift-close__result[data-tone="ok"] {
+  color: var(--ok-fg);
+}
+
+.shift-close__result[data-tone="warn"] {
+  color: var(--warn-fg);
+}
+
+/* The reasons: the cloud's warn card around the floor choices. */
+.shift-close__reasons {
+  display: grid;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  gap: var(--sp-2);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-2);
+  background: var(--warn-bg);
+}
+
+.shift-close__reasons-title {
+  color: var(--warn-fg);
+  font: var(--floor-body-strong) !important;
+}
+
+.shift-close .floor-choice-group {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* A reason: a floor button laid out as the cloud's radio choice. */
+.shift-close .floor-choice.mk-btn {
+  min-width: 0 !important;
+  padding: var(--sp-2) var(--sp-3) !important;
+  justify-content: flex-start !important;
+  gap: var(--sp-3) !important;
+  border-color: var(--line-strong) !important;
+  font: var(--floor-body) !important;
+  text-align: left;
+}
+
+.shift-close .floor-choice.mk-btn[data-checked="true"] {
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent) 12%) !important;
+  font: var(--floor-body-strong) !important;
+}
+
+.floor-choice__mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--surface-card);
+  font: 700 14px/1 var(--font-ui);
+}
+
+[data-checked="true"] > .floor-choice__mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.floor-choice__label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+/* The row of floor actions, each an equal share, as the cloud's overlay has it. */
+.shift-close__actions {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--sp-1);
+  gap: var(--sp-3);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.shift-close__actions .mk-btn {
+  min-width: 0 !important;
+  padding-inline: var(--sp-3) !important;
+}
+
+/* The closed shift: the ok card's title at floor size. */
+.shift-close__done {
+  padding: var(--sp-4) !important;
+}
+
+.shift-close__done > div > span:first-child {
+  font: var(--floor-lg) !important;
+}
+
+/* A note or a blocker inside the card: its title at floor size, not the Alert's office size. */
+.shift-close .mk-alert > div > span:first-child {
+  font: var(--floor-body-strong) !important;
+}

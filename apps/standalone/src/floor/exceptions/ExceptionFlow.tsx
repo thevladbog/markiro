@@ -22,6 +22,7 @@ import {
   type ClosedBox,
   type ExceptionReason,
 } from "./box-exceptions.js";
+import "./exception-flow.css";
 import type { ClosedPallet } from "./pallet-exceptions.js";
 
 /** The four exceptions of a box (stage 2a spec §5.7.6) and the two of a pallet (plan ПЛ-Ц). */
@@ -139,6 +140,16 @@ function printerOf(
 }
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
+/** The glyph of an action's card, as the cloud's `ExceptionActions` marks them. */
+const ACTION_GLYPHS: Record<ExceptionAction, string> = {
+  undo: "↩",
+  clear: "⌫",
+  reprint: "⎙",
+  disassemble: "✕",
+  pallet_reprint: "⎙",
+  pallet_disassemble: "✕",
+};
 
 /**
  * The view a stage shows: the guard against a second tap and the focus follow
@@ -485,6 +496,32 @@ export function ExceptionFlow({
       </p>
     );
   };
+  /** An action's card: its glyph and name, and one line of what it does (the cloud's `ExceptionActions`). */
+  const actionCard = (action: ExceptionAction, disabled: boolean, onPress: () => void) => {
+    const name = t(`floor.exceptions.actions.${action}`);
+    const danger = action === "disassemble" || action === "pallet_disassemble";
+    return (
+      <Button
+        key={action}
+        size="floor"
+        variant="secondary"
+        className="exception-action"
+        data-action={action}
+        data-danger={danger ? "true" : undefined}
+        aria-label={name}
+        disabled={disabled}
+        {...press(onPress)}
+      >
+        <span className="exception-action__title">
+          <span aria-hidden="true" className="exception-action__glyph">
+            {ACTION_GLYPHS[action]}
+          </span>
+          {name}
+        </span>
+        <span className="exception-action__hint">{t(`floor.exceptions.hints.${action}`)}</span>
+      </Button>
+    );
+  };
   const body = () => {
     switch (stage.kind) {
       case "actions": {
@@ -497,95 +534,56 @@ export function ExceptionFlow({
           pallets !== null &&
           closedPallets.length === 0;
         return (
-          <>
-            <h4>{label}</h4>
+          <div className="exception-stage exception-stage--action">
+            <h3>{label}</h3>
             {boxes === null && <p>{t("floor.exceptions.loading")}</p>}
             {nothing && <p>{t("floor.exceptions.none")}</p>}
-            <div className="exceptions__choices">
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={openItems === 0}
-                {...press(() => run(onUndo))}
-              >
-                {t("floor.exceptions.actions.undo")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                // The quantity it names is trusted once the numbers were read (`boxes` come after them).
-                disabled={openItems === 0 || boxes === null}
-                {...press(() => setStage({ kind: "confirm_clear" }))}
-              >
-                {t("floor.exceptions.actions.clear")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={closed.length === 0}
-                {...press(() =>
-                  setStage({ kind: "target", action: "reprint", tail: "", note: null }),
-                )}
-              >
-                {t("floor.exceptions.actions.reprint")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={closed.length === 0}
-                {...press(() =>
-                  setStage({ kind: "target", action: "disassemble", tail: "", note: null }),
-                )}
-              >
-                {t("floor.exceptions.actions.disassemble")}
-              </Button>
+            <div className="exception-actions">
+              {actionCard("undo", openItems === 0, () => run(onUndo))}
+              {/* The quantity it names is trusted once the numbers were read (`boxes` come after them). */}
+              {actionCard("clear", openItems === 0 || boxes === null, () =>
+                setStage({ kind: "confirm_clear" }),
+              )}
+              {actionCard("reprint", closed.length === 0, () =>
+                setStage({ kind: "target", action: "reprint", tail: "", note: null }),
+              )}
+              {actionCard("disassemble", closed.length === 0, () =>
+                setStage({ kind: "target", action: "disassemble", tail: "", note: null }),
+              )}
               {pallets !== undefined && (
                 <>
-                  <Button
-                    size="floor"
-                    variant="secondary"
-                    disabled={closedPallets.length === 0}
-                    {...press(() =>
-                      setStage({ kind: "target", action: "pallet_reprint", tail: "", note: null }),
-                    )}
-                  >
-                    {t("floor.exceptions.actions.pallet_reprint")}
-                  </Button>
-                  <Button
-                    size="floor"
-                    variant="secondary"
-                    disabled={closedPallets.length === 0}
-                    {...press(() =>
-                      setStage({
-                        kind: "target",
-                        action: "pallet_disassemble",
-                        tail: "",
-                        note: null,
-                      }),
-                    )}
-                  >
-                    {t("floor.exceptions.actions.pallet_disassemble")}
-                  </Button>
+                  {actionCard("pallet_reprint", closedPallets.length === 0, () =>
+                    setStage({ kind: "target", action: "pallet_reprint", tail: "", note: null }),
+                  )}
+                  {actionCard("pallet_disassemble", closedPallets.length === 0, () =>
+                    setStage({
+                      kind: "target",
+                      action: "pallet_disassemble",
+                      tail: "",
+                      note: null,
+                    }),
+                  )}
                 </>
               )}
             </div>
-            <div className="standalone-form__actions">{back(null)}</div>
-          </>
+          </div>
         );
       }
       case "confirm_clear":
         return (
-          <Alert tone="warn" role="presentation" title={label}>
-            <p>
-              {t("floor.exceptions.confirm.clear.body", { quantity: formatQuantity(openItems) })}
-            </p>
-            <div className="standalone-form__actions exceptions__confirm">
-              {back({ kind: "actions" })}
-              <Button size="floor" variant="destructive" {...press(() => run(onClear))}>
-                {t("floor.exceptions.confirm.clear.action")}
-              </Button>
-            </div>
-          </Alert>
+          <div className="exception-stage exception-confirm">
+            <Alert tone="warn" role="presentation" className="exception-card" title={label}>
+              <p>
+                {t("floor.exceptions.confirm.clear.body", { quantity: formatQuantity(openItems) })}
+              </p>
+              <div className="standalone-form__actions exceptions__confirm">
+                {back({ kind: "actions" })}
+                <Button size="floor" variant="destructive" {...press(() => run(onClear))}>
+                  {t("floor.exceptions.confirm.clear.action")}
+                </Button>
+              </div>
+            </Alert>
+          </div>
         );
       case "target": {
         const listed = subjects(stage.action);
@@ -595,80 +593,108 @@ export function ExceptionFlow({
         const words = onPallet(stage.action)
           ? "floor.exceptions.target.pallet"
           : "floor.exceptions.target";
+        const digit = (value: string) => (
+          <Button
+            key={value}
+            size="floor"
+            variant="secondary"
+            className="sscc-search__key"
+            disabled={stage.tail.length >= MAX_TAIL}
+            {...press(() => type(stage.tail + value))}
+          >
+            {value}
+          </Button>
+        );
         return (
-          <>
-            <h4>{label}</h4>
-            <p>{t(`${words}.hint`)}</p>
-            {stage.note !== null && <p role="alert">{t(`${words}.${stage.note}`)}</p>}
-            <p>
-              {stage.tail === ""
-                ? t("floor.exceptions.target.tailEmpty")
-                : t("floor.exceptions.target.tail", { tail: stage.tail })}
-            </p>
-            <div
-              className="standalone-form__actions exceptions__pad"
-              role="group"
-              aria-label={t("floor.exceptions.target.pad")}
-            >
-              {DIGITS.map((digit) => (
-                <Button
-                  key={digit}
-                  size="floor"
-                  variant="secondary"
-                  disabled={stage.tail.length >= MAX_TAIL}
-                  {...press(() => type(stage.tail + digit))}
-                >
-                  {digit}
-                </Button>
-              ))}
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={stage.tail === ""}
-                {...press(() => type(stage.tail.slice(0, -1)))}
+          <div className="exception-stage exception-stage--target" data-action={stage.action}>
+            <div className="exception-target__finder">
+              <div className="exception-target__scan">
+                <span aria-hidden="true" className="exception-target__scan-glyph">
+                  ⌖
+                </span>
+                <p>{t(`${words}.hint`)}</p>
+              </div>
+              {stage.note !== null && (
+                <Alert tone="error" role="presentation">
+                  <span role="alert">{t(`${words}.${stage.note}`)}</span>
+                </Alert>
+              )}
+              <div
+                className="sscc-search"
+                role="group"
+                aria-label={t("floor.exceptions.target.pad")}
               >
-                {t("floor.exceptions.target.erase")}
-              </Button>
-            </div>
-            {listed === null ? (
-              <p>{t(`${words}.loading`)}</p>
-            ) : shown.length === 0 ? (
-              <p>{t(`${words}.nothing`)}</p>
-            ) : (
-              <div className="exceptions__choices">
-                {shown.map((box) => (
+                <p
+                  className="sscc-search__field"
+                  data-empty={stage.tail === "" ? "true" : undefined}
+                >
+                  {stage.tail === ""
+                    ? t("floor.exceptions.target.tailEmpty")
+                    : t("floor.exceptions.target.tail", { tail: stage.tail })}
+                </p>
+                <div className="sscc-search__pad">
+                  {DIGITS.slice(0, 9).map(digit)}
                   <Button
-                    key={box.id}
                     size="floor"
                     variant="secondary"
-                    {...press(() => setStage({ kind: "reason", action: stage.action, box }))}
+                    className="sscc-search__key sscc-search__key--muted"
+                    aria-label={t("floor.exceptions.target.erase")}
+                    disabled={stage.tail === ""}
+                    {...press(() => type(stage.tail.slice(0, -1)))}
                   >
-                    {t(`${words}.box`, {
-                      sscc: formatSsccHri(box.sscc),
-                      quantity: formatQuantity(box.quantity),
-                    })}
+                    <span aria-hidden="true">⌫</span>
                   </Button>
-                ))}
+                  {digit("0")}
+                </div>
               </div>
-            )}
-            {hidden > 0 && <p>{t(`${words}.more`, { number: formatQuantity(hidden) })}</p>}
-            <div className="standalone-form__actions">{back({ kind: "actions" })}</div>
-          </>
+            </div>
+            <div className="shift-boxes">
+              <h3>{label}</h3>
+              {listed === null ? (
+                <p className="shift-boxes__empty">{t(`${words}.loading`)}</p>
+              ) : shown.length === 0 ? (
+                <p className="shift-boxes__empty">{t(`${words}.nothing`)}</p>
+              ) : (
+                <div className="shift-boxes__list">
+                  {shown.map((box) => (
+                    <Button
+                      key={box.id}
+                      size="floor"
+                      variant="secondary"
+                      className="shift-boxes__row"
+                      {...press(() => setStage({ kind: "reason", action: stage.action, box }))}
+                    >
+                      {t(`${words}.box`, {
+                        sscc: formatSsccHri(box.sscc),
+                        quantity: formatQuantity(box.quantity),
+                      })}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {hidden > 0 && (
+                <p className="shift-boxes__hidden">
+                  {t(`${words}.more`, { number: formatQuantity(hidden) })}
+                </p>
+              )}
+            </div>
+          </div>
         );
       }
       case "reason": {
         const kind = reasonKind(stage.action);
         const reasons = kind === "reprint" ? REPRINT_REASONS : DISASSEMBLE_REASONS;
         return (
-          <>
-            <h4>{label}</h4>
+          <div className="exception-stage exception-stage--reason">
+            <h3>{label}</h3>
             <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
-            <div className="exceptions__choices">
+            <div className="exception-reasons">
               {reasons.map((code) => (
                 <Button
                   key={code}
                   size="floor"
                   variant="secondary"
+                  fullWidth
                   {...press(() =>
                     code === OTHER_REASON
                       ? setStage({ ...stage, kind: "words", text: "", invalid: false })
@@ -679,10 +705,7 @@ export function ExceptionFlow({
                 </Button>
               ))}
             </div>
-            <div className="standalone-form__actions">
-              {back({ kind: "target", action: stage.action, tail: "", note: null })}
-            </div>
-          </>
+          </div>
         );
       }
       case "words": {
@@ -695,8 +718,8 @@ export function ExceptionFlow({
           }
         };
         return (
-          <>
-            <h4>{label}</h4>
+          <div className="exception-stage exception-other-reason">
+            <h3>{label}</h3>
             <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
             <Input
               size="floor"
@@ -716,13 +739,13 @@ export function ExceptionFlow({
               onFocus={() => onTextEntry(true)}
               onBlur={() => onTextEntry(false)}
             />
-            <div className="standalone-form__actions">
+            <div className="standalone-form__actions exceptions__confirm">
               {back({ kind: "reason", action: stage.action, box: stage.box })}
               <Button size="floor" {...press(next)}>
                 {t("floor.exceptions.words.next")}
               </Button>
             </div>
-          </>
+          </div>
         );
       }
       case "confirm": {
@@ -731,43 +754,54 @@ export function ExceptionFlow({
         const reasonText =
           reasoned.reason.text ?? t(`floor.exceptions.reasons.${kind}.${reasoned.reason.code}`);
         return (
-          <Alert tone={kind === "disassemble" ? "error" : "warn"} role="presentation" title={label}>
-            <p>
-              {t(`floor.exceptions.confirm.${reasoned.action}.body`, {
-                sscc: formatSsccHri(box.sscc),
-                quantity: formatQuantity(box.quantity),
-              })}
-            </p>
-            {kind === "disassemble" && (
-              <p>{t(`floor.exceptions.confirm.${reasoned.action}.final`)}</p>
-            )}
-            <p>{t("floor.exceptions.confirm.reason", { reason: reasonText })}</p>
-            {kind === "reprint" && printerLine(reasoned.action)}
-            <div className="standalone-form__actions exceptions__confirm">
-              {back({ kind: "reason", action: reasoned.action, box })}
-              {kind === "reprint" &&
-                reprintPrinter.kind === "ready" &&
-                printerOf(reprintPrinter, reasoned.action) === null &&
-                onSetup !== undefined && (
-                  <Button size="floor" variant="secondary" {...press(onSetup)}>
-                    {t("floor.print.setup")}
-                  </Button>
-                )}
-              <Button
-                size="floor"
-                variant={kind === "disassemble" ? "destructive" : "primary"}
-                // A reprint is confirmed once the operator can see where it goes.
-                disabled={kind === "reprint" && reprintPrinter.kind === "loading"}
-                {...press(() => apply(box, reasoned))}
-              >
-                {t(`floor.exceptions.confirm.${reasoned.action}.action`)}
-              </Button>
-            </div>
-          </Alert>
+          <div className="exception-stage exception-confirm">
+            <Alert
+              tone={kind === "disassemble" ? "error" : "warn"}
+              role="presentation"
+              className="exception-card"
+              title={label}
+            >
+              <p className="exception-confirm__sscc">
+                {t(`floor.exceptions.confirm.${reasoned.action}.body`, {
+                  sscc: formatSsccHri(box.sscc),
+                  quantity: formatQuantity(box.quantity),
+                })}
+              </p>
+              {kind === "disassemble" && (
+                <p>{t(`floor.exceptions.confirm.${reasoned.action}.final`)}</p>
+              )}
+              <p>{t("floor.exceptions.confirm.reason", { reason: reasonText })}</p>
+              {kind === "reprint" && printerLine(reasoned.action)}
+              <div className="standalone-form__actions exceptions__confirm">
+                {back({ kind: "reason", action: reasoned.action, box })}
+                {kind === "reprint" &&
+                  reprintPrinter.kind === "ready" &&
+                  printerOf(reprintPrinter, reasoned.action) === null &&
+                  onSetup !== undefined && (
+                    <Button size="floor" variant="secondary" {...press(onSetup)}>
+                      {t("floor.print.setup")}
+                    </Button>
+                  )}
+                <Button
+                  size="floor"
+                  variant={kind === "disassemble" ? "destructive" : "primary"}
+                  // A reprint is confirmed once the operator can see where it goes.
+                  disabled={kind === "reprint" && reprintPrinter.kind === "loading"}
+                  {...press(() => apply(box, reasoned))}
+                >
+                  {t(`floor.exceptions.confirm.${reasoned.action}.action`)}
+                </Button>
+              </div>
+            </Alert>
+          </div>
         );
       }
       case "applying":
-        return <p>{label}</p>;
+        return (
+          <div className="exception-stage exception-result">
+            <h3>{label}</h3>
+          </div>
+        );
       case "result": {
         const { outcome } = stage;
         const tone =
@@ -777,33 +811,65 @@ export function ExceptionFlow({
               ? "error"
               : "warn";
         return (
-          <Alert tone={tone} role="presentation" title={label}>
-            {outcome.kind === "done" && outcome.action === "undo" && (
-              <p>{t("floor.exceptions.result.hint.undo")}</p>
-            )}
-            <div className="standalone-form__actions">
-              <Button size="floor" {...press(onBack)}>
-                {t("floor.exceptions.result.back")}
-              </Button>
-              <Button
-                size="floor"
-                variant="secondary"
-                {...press(() => setStage({ kind: "actions" }))}
-              >
-                {t("floor.exceptions.result.again")}
-              </Button>
-            </div>
-          </Alert>
+          <div className="exception-stage exception-result">
+            <Alert tone={tone} role="presentation" className="exception-card" title={label}>
+              {outcome.kind === "done" && outcome.action === "undo" && (
+                <p>{t("floor.exceptions.result.hint.undo")}</p>
+              )}
+              <div className="standalone-form__actions exception-result__actions">
+                <Button size="floor" {...press(onBack)}>
+                  {t("floor.exceptions.result.back")}
+                </Button>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  {...press(() => setStage({ kind: "actions" }))}
+                >
+                  {t("floor.exceptions.result.again")}
+                </Button>
+              </div>
+            </Alert>
+          </div>
         );
       }
     }
   };
 
+  // «Назад» in the header, as the cloud's flow has it, where a stage has no row of its own.
+  const headerBack =
+    stage.kind === "actions"
+      ? back(null)
+      : stage.kind === "target"
+        ? back({ kind: "actions" })
+        : stage.kind === "reason"
+          ? back({ kind: "target", action: stage.action, tail: "", note: null })
+          : null;
+  // The heading names the operation the operator is inside of, not the section of the app.
+  const operation =
+    stage.kind === "target" || stage.kind === "reason" || stage.kind === "words"
+      ? stage.action
+      : stage.kind === "confirm"
+        ? stage.reasoned.action
+        : stage.kind === "confirm_clear"
+          ? "clear"
+          : null;
+  const danger = operation === "disassemble" || operation === "pallet_disassemble";
   const content = body();
   return (
-    <section className="exceptions" aria-label={title}>
-      <h3>{title}</h3>
-      <div className="exceptions__view" role="group" aria-label={label} tabIndex={-1} ref={viewRef}>
+    <section className="exception-flow" aria-label={title}>
+      <header className="exception-flow__header">
+        <h2 data-danger={danger ? "true" : undefined}>
+          {operation === null ? title : t(`floor.exceptions.actions.${operation}`)}
+        </h2>
+        <div className="exception-flow__controls">{headerBack}</div>
+      </header>
+      <div
+        className="exception-flow__stage"
+        role="group"
+        aria-label={label}
+        tabIndex={-1}
+        ref={viewRef}
+      >
         {content}
       </div>
     </section>
