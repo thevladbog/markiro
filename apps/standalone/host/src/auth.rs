@@ -337,6 +337,32 @@ impl OfficeContext {
             Err(ApiError::forbidden("a shift planning role is required"))
         }
     }
+
+    /// The early check of a conflict's review (plan КНФ): administrators and
+    /// technologists, as the shift's own actions.
+    pub fn require_conflict_review(&self) -> Result<(), ApiError> {
+        if reviews_conflicts(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "a role that reviews conflicts is required",
+            ))
+        }
+    }
+
+    /// Re-check the review right inside the caller's write transaction.
+    pub async fn require_conflict_review_in(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ApiError> {
+        if reviews_conflicts(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "a role that reviews conflicts is required",
+            ))
+        }
+    }
 }
 
 /// Whether a role plans, edits, deletes and closes shifts (stage 2a spec
@@ -352,6 +378,15 @@ pub fn plans_shifts(role: OfficeRole) -> bool {
 /// (spec §4.8: administrators and technologists). No wildcard arm: a new
 /// role does not compile until it is placed here.
 pub fn edits_catalog(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
+}
+
+/// Whether a role marks a code conflict reviewed (plan КНФ: administrators and
+/// technologists). No wildcard arm: a new role — a viewer of plan РОЛ — does
+/// not compile until it is placed here.
+pub fn reviews_conflicts(role: OfficeRole) -> bool {
     match role {
         OfficeRole::Admin | OfficeRole::Technologist => true,
     }

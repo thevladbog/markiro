@@ -78,6 +78,10 @@ pub mod actions {
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";
+    /// The office marked a code conflict reviewed (plan КНФ); the details name
+    /// its kind, the losing shift and device and the winning shift, never the
+    /// code or its hash. A conflict reviewed already writes no row.
+    pub const CONFLICT_REVIEW: &str = "conflict.review";
     /// After a restore, a station gave the host back a block the copy had
     /// lost (plan РК).
     pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";
