@@ -1791,26 +1791,28 @@ async fn the_wizard_starts_the_trial_with_its_inn() {
 
 Фрагмент:
 
+<!-- prettier-ignore -->
 ```ts
-expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
-  { field: "inn", message: "rules.inn" },
-]);
+    expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
+      { field: "inn", message: "rules.inn" },
+    ]);
 ```
 
 заменить на:
 
+<!-- prettier-ignore -->
 ```ts
-expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
-  { field: "inn", message: "rules.inn" },
-]);
-// A license is issued to the INN (plan ЛЦ-2): the wizard needs one whose check digit holds.
-expect(validateStep("org", values({ inn: "" }))).toEqual([
-  { field: "inn", message: "wizard.errors.innRequired" },
-]);
-expect(validateStep("org", values({ inn: "7707083894" }))).toEqual([
-  { field: "inn", message: "wizard.errors.innChecksum" },
-]);
-expect(validateStep("org", values({ inn: " 7707083893 " }))).toEqual([]);
+    expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
+      { field: "inn", message: "rules.inn" },
+    ]);
+    // A license is issued to the INN (plan ЛЦ-2): the wizard needs one whose check digit holds.
+    expect(validateStep("org", values({ inn: "" }))).toEqual([
+      { field: "inn", message: "wizard.errors.innRequired" },
+    ]);
+    expect(validateStep("org", values({ inn: "7707083894" }))).toEqual([
+      { field: "inn", message: "wizard.errors.innChecksum" },
+    ]);
+    expect(validateStep("org", values({ inn: " 7707083893 " }))).toEqual([]);
 ```
 
 Правка `apps/standalone/test/support/wizard.ts`: `type("ИНН", "7701234567");` → `type("ИНН", "7707083893");` и в `EXPECTED_REQUEST` `inn: "7701234567",` → `inn: "7707083893",`.
