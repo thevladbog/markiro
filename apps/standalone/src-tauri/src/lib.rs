@@ -34,7 +34,7 @@ use installation::InstallRole;
 use local_db::{LocalDbError, LocalDbState, LocalStatement, OpenFailure, UnsentGuard};
 
 /// The host service on this computer.
-fn local_host_address() -> String {
+pub(crate) fn local_host_address() -> String {
     format!("https://127.0.0.1:{}", markiro_proto::DEFAULT_PORT)
 }
 
@@ -308,7 +308,13 @@ pub fn invoke_handler<R: tauri::Runtime>(
         office_files::save_office_files,
         office_files::open_office_folder,
         office_files::open_office_file,
-        external_link::open_external_link
+        external_link::open_external_link,
+        update::update_scan,
+        update::update_verify,
+        update::update_install,
+        update::update_outcome,
+        update::update_outcome_dismiss,
+        update::update_open_folder
     ]
 }
 
@@ -316,7 +322,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
 /// (opened here, before the window shows; when it cannot open, the app still
 /// starts and the local commands say so), the connection status, the scanner
 /// manager (it needs the app's handle for its events), kiosk mode, the
-/// awake lease, the office's folder under the documents folder (plan ЧЗ) and
+/// awake lease, the office's folder under the documents folder (plan ЧЗ),
+/// the update state with the outcome of the last update (plan ОБН-2) and
 /// what the installation and the launch permit of kiosk mode
 /// (`window_policy`). `installation` is the installer's file for this
 /// computer (`installation::read_file_beside_executable` in `run`), and
@@ -351,6 +358,16 @@ where
     app.manage(office_files::OfficeFilesState::from_documents(
         app.path().document_dir().ok(),
     ));
+    let handle = app.clone();
+    app.manage(update::UpdateState::load(update::UpdateConfig {
+        installed: app.package_info().version.to_string(),
+        data_dir: dir.to_path_buf(),
+        documents: app.path().document_dir().ok(),
+        drives: Arc::new(update::package::SystemDrives),
+        launcher: Arc::new(update::launch::SystemLauncher),
+        keyset: markiro_proto::trust::update_keyset(),
+        exit: Arc::new(move |code| handle.exit(code)),
+    }));
     link
 }
 

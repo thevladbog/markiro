@@ -540,6 +540,12 @@ fn show_in_explorer(folder: &Path) -> Result<(), OfficeFilesError> {
     launch_explorer(folder, "open_office_folder")
 }
 
+/// Shows a folder of the app other than the office's (the updates folder,
+/// plan ОБН-2) in Windows Explorer, started as for the office's folders.
+pub(crate) fn show_folder(folder: &Path) -> Result<(), OfficeFilesError> {
+    launch_explorer(folder, "update_open_folder")
+}
+
 /// Opens a form's `.html` (found by [`existing_form`]) with the program
 /// Windows has for it: the default browser.
 fn open_in_default_program(file: &Path) -> Result<(), OfficeFilesError> {

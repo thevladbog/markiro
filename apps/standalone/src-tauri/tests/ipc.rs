@@ -24,6 +24,9 @@ use markiro_standalone_lib::office_files::OfficeFilesState;
 use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
 use markiro_standalone_lib::secret_store;
+use markiro_standalone_lib::update::launch::{LaunchError, Launcher};
+use markiro_standalone_lib::update::package::FixedDrives;
+use markiro_standalone_lib::update::{UpdateConfig, UpdateState};
 use markiro_standalone_lib::window_policy::KioskPolicyState;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -1290,6 +1293,7 @@ fn the_app_manages_every_state_its_commands_read() {
     assert!(app.try_state::<KioskPolicyState>().is_some());
     assert!(app.try_state::<SystemAwakeState>().is_some());
     assert!(app.try_state::<OfficeFilesState>().is_some());
+    assert!(app.try_state::<UpdateState>().is_some());
     // An unpaired app has no link yet; the receiver is the device's own.
     assert!(link.borrow().is_none());
     // Commands that read the managed states answer, instead of Tauri's refusal.
@@ -1314,6 +1318,11 @@ fn the_app_manages_every_state_its_commands_read() {
     );
     assert_eq!(
         invoke(&webview, "set_system_awake", json!({ "awake": false })),
+        Ok(Value::Null)
+    );
+    // No update was pending in a fresh data folder.
+    assert_eq!(
+        invoke(&webview, "update_outcome", json!({})),
         Ok(Value::Null)
     );
 }
@@ -2061,4 +2070,266 @@ fn driver_printing_takes_the_paper_of_a_sheet() {
         print(&a4(false), Some(json!("a4"))),
         refused(reaches_the_queue)
     );
+}
+
+const UPDATE_FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/update");
+
+/// The bytes `tools/standalone-release/generate-update-fixtures.mjs` signed
+/// for `version`'s test installer.
+fn test_installer(version: &str) -> Vec<u8> {
+    format!("markiro test installer {version}\n").into_bytes()
+}
+
+/// The signed test manifest of `version` copied into `dir`, its installer beside it.
+fn put_package(dir: &std::path::Path, version: &str) -> String {
+    let name = format!("markiro-standalone-{version}.update.jws");
+    std::fs::copy(
+        std::path::Path::new(UPDATE_FIXTURES).join(&name),
+        dir.join(&name),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(format!(
+            "markiro-standalone-{version}-windows-x86_64-setup.exe"
+        )),
+        test_installer(version),
+    )
+    .unwrap();
+    dir.join(name).to_string_lossy().into_owned()
+}
+
+/// A launcher that records what it was asked to start and answers `answer`.
+struct RecordingLauncher {
+    calls: std::sync::Mutex<Vec<(std::path::PathBuf, String)>>,
+    answer: Result<(), LaunchError>,
+}
+
+impl Launcher for RecordingLauncher {
+    fn launch(&self, installer: &std::path::Path, arguments: &str) -> Result<(), LaunchError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((installer.to_path_buf(), arguments.to_owned()));
+        self.answer
+    }
+}
+
+/// The shell of the host's own PC (no host to ask) with an update state
+/// over temporary folders, a recording launcher and a recorded exit.
+struct UpdateApp {
+    app: App<MockRuntime>,
+    webview: WebviewWindow<MockRuntime>,
+    launcher: std::sync::Arc<RecordingLauncher>,
+    exits: std::sync::Arc<std::sync::Mutex<Vec<i32>>>,
+    data: tempfile::TempDir,
+    updates: std::path::PathBuf,
+    _documents: tempfile::TempDir,
+    _device: tempfile::TempDir,
+}
+
+fn update_app(
+    installed: &str,
+    answer: Result<(), LaunchError>,
+    before_start: impl FnOnce(&std::path::Path),
+) -> UpdateApp {
+    let data = tempfile::tempdir().unwrap();
+    let documents = tempfile::tempdir().unwrap();
+    let device = tempfile::tempdir().unwrap();
+    before_start(data.path());
+    let updates = documents.path().join("Markiro").join("Обновления");
+    std::fs::create_dir_all(&updates).unwrap();
+    let launcher = std::sync::Arc::new(RecordingLauncher {
+        calls: std::sync::Mutex::new(Vec::new()),
+        answer,
+    });
+    let exits = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = std::sync::Arc::clone(&exits);
+    let state = UpdateState::load(UpdateConfig {
+        installed: installed.to_owned(),
+        data_dir: data.path().to_path_buf(),
+        documents: Some(documents.path().to_path_buf()),
+        drives: std::sync::Arc::new(FixedDrives(Vec::new())),
+        launcher: launcher.clone(),
+        keyset: markiro_proto::trust::update_keyset(),
+        exit: std::sync::Arc::new(move |code: i32| recorded.lock().unwrap().push(code)),
+    });
+    let app = mock_builder()
+        .manage(
+            DeviceState::load(device.path().to_path_buf())
+                .with_install_role(Some(InstallRole::Host)),
+        )
+        .manage(LockdownState::default())
+        .manage(state)
+        .invoke_handler(markiro_standalone_lib::invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    UpdateApp {
+        app,
+        webview,
+        launcher,
+        exits,
+        data,
+        updates,
+        _documents: documents,
+        _device: device,
+    }
+}
+
+/// `update_scan` lists `{ path, place, fileName, manifest, problem }`;
+/// `update_verify` takes only a path that scan found and answers the report;
+/// `update_install` takes the confirmations as codes, writes the mark,
+/// starts the installer with `/P /UPDATE /R`, lets kiosk mode's guard go and
+/// exits with 0 (spec §10.4).
+#[test]
+fn update_commands_answer_through_the_ipc_shapes() {
+    let update = update_app("0.1.0", Ok(()), |_| {});
+    let path = put_package(&update.updates, "0.2.0");
+    assert_eq!(
+        invoke(&update.webview, "update_verify", json!({ "path": path })),
+        Err(json!("invalid_request")),
+        "not found by a scan yet"
+    );
+    let found = invoke(&update.webview, "update_scan", json!({})).unwrap();
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["path"], json!(path));
+    assert_eq!(found[0]["place"], json!("documents"));
+    assert_eq!(
+        found[0]["fileName"],
+        json!("markiro-standalone-0.2.0.update.jws")
+    );
+    assert_eq!(found[0]["manifest"]["version"], json!("0.2.0"));
+    assert_eq!(found[0]["problem"], Value::Null);
+
+    let report = invoke(&update.webview, "update_verify", json!({ "path": path })).unwrap();
+    assert_eq!(report["path"], json!(path));
+    assert_eq!(report["kid"], json!("test-upd-1"));
+    assert_eq!(report["installed"], json!("0.1.0"));
+    assert_eq!(report["comparison"], json!("newer"));
+    assert_eq!(report["refusal"], Value::Null);
+    assert_eq!(report["confirmations"], json!([]));
+    assert_eq!(
+        report["host"],
+        Value::Null,
+        "the host's own PC asks no host"
+    );
+    assert_eq!(
+        report["manifest"]["installer"]["name"],
+        json!("markiro-standalone-0.2.0-windows-x86_64-setup.exe")
+    );
+    let installer = update
+        .updates
+        .join("markiro-standalone-0.2.0-windows-x86_64-setup.exe");
+    assert_eq!(report["installerPath"], json!(installer.to_string_lossy()));
+
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": ["yes"] })
+        ),
+        Err(json!("invalid_request")),
+        "a confirmation of no known name"
+    );
+    assert!(update.launcher.calls.lock().unwrap().is_empty());
+    // The mock window locks outside Windows only (see tests/lockdown.rs).
+    if cfg!(not(windows)) {
+        assert_eq!(
+            invoke(&update.webview, "enter_lockdown", json!({})),
+            Ok(Value::Null)
+        );
+        assert!(update.app.state::<LockdownState>().is_locked());
+    }
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": [] })
+        ),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        *update.launcher.calls.lock().unwrap(),
+        vec![(installer, "/P /UPDATE /R".to_owned())]
+    );
+    assert_eq!(*update.exits.lock().unwrap(), vec![0]);
+    assert!(
+        !update.app.state::<LockdownState>().is_locked(),
+        "the close guard lets the exit through"
+    );
+    let mark: Value = serde_json::from_slice(
+        &std::fs::read(update.data.path().join("update-pending.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mark["from"], json!("0.1.0"));
+    assert_eq!(mark["to"], json!("0.2.0"));
+    assert!(mark["startedAtMs"].as_u64().unwrap() > 0);
+}
+
+/// A refused administrator prompt keeps the app open and locked and drops
+/// the mark; nothing else changed.
+#[test]
+fn a_refused_administrator_prompt_keeps_the_app_and_drops_the_mark() {
+    let update = update_app("0.1.0", Err(LaunchError::Cancelled), |_| {});
+    let path = put_package(&update.updates, "0.2.0");
+    invoke(&update.webview, "update_scan", json!({})).unwrap();
+    if cfg!(not(windows)) {
+        invoke(&update.webview, "enter_lockdown", json!({})).unwrap();
+    }
+    assert_eq!(
+        invoke(
+            &update.webview,
+            "update_install",
+            json!({ "path": path, "confirm": [] })
+        ),
+        Err(json!("uac_cancelled"))
+    );
+    assert_eq!(update.launcher.calls.lock().unwrap().len(), 1);
+    assert!(update.exits.lock().unwrap().is_empty());
+    assert_eq!(
+        update.app.state::<LockdownState>().is_locked(),
+        cfg!(not(windows))
+    );
+    assert!(!update.data.path().join("update-pending.json").exists());
+}
+
+/// The mark of an update that did not finish is reported until it is
+/// hidden; the mark of one that did is reported once and is gone at start.
+#[test]
+fn the_outcome_of_the_last_update_answers_through_the_ipc_shape() {
+    let mark = |dir: &std::path::Path| {
+        std::fs::write(
+            dir.join("update-pending.json"),
+            r#"{"from":"0.1.0","to":"0.2.0","startedAtMs":1760000000000}"#,
+        )
+        .unwrap();
+    };
+    let unfinished = update_app("0.1.0", Ok(()), mark);
+    let expected = json!({ "kind": "not_finished", "from": "0.1.0", "to": "0.2.0", "startedAtMs": 1_760_000_000_000_u64 });
+    assert_eq!(
+        invoke(&unfinished.webview, "update_outcome", json!({})),
+        Ok(expected.clone())
+    );
+    assert_eq!(
+        invoke(&unfinished.webview, "update_outcome", json!({})),
+        Ok(expected)
+    );
+    assert_eq!(
+        invoke(&unfinished.webview, "update_outcome_dismiss", json!({})),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        invoke(&unfinished.webview, "update_outcome", json!({})),
+        Ok(Value::Null)
+    );
+    assert!(!unfinished.data.path().join("update-pending.json").exists());
+
+    let updated = update_app("0.2.0", Ok(()), mark);
+    assert_eq!(
+        invoke(&updated.webview, "update_outcome", json!({})),
+        Ok(json!({ "kind": "updated", "from": "0.1.0", "to": "0.2.0" }))
+    );
+    assert!(!updated.data.path().join("update-pending.json").exists());
 }

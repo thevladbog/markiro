@@ -16,3 +16,423 @@ pub mod launch;
 pub mod package;
 pub mod pending;
 pub mod rules;
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use markiro_proto::trust::Keyset;
+use markiro_proto::update::AppVersion;
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::device::DeviceState;
+use crate::host_probe::{self, HostVersions};
+use crate::installation::InstallRole;
+use crate::lockdown::{self, LockdownState};
+use crate::office_files::{self, OfficeFilesError};
+use launch::{LaunchError, Launcher, INSTALLER_ARGUMENTS};
+use package::{Checked, FoundPackage, PackageError, RemovableDrives};
+use pending::{Pending, UpdateOutcome};
+use rules::{Comparison, Confirmation, Decision, HostCheck, Refusal};
+
+/// Why an update command failed: the bare code the webview reads
+/// (`src/office/info/update-shell.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateError {
+    /// A path the last search did not find, or a confirmation of no known name.
+    InvalidRequest,
+    DocumentsUnavailable,
+    Storage,
+    /// Not Windows, or this build's version is no `X.Y.Z` (a development build).
+    Unsupported,
+    ManifestMalformed,
+    ManifestUnknownKey,
+    ManifestSignature,
+    InstallerMissing,
+    InstallerMismatch,
+    /// The version rules refuse this package (the report says why).
+    UpdateRefused,
+    /// A warning of the report the person has not confirmed.
+    ConfirmationRequired,
+    /// Windows' administrator prompt was refused or cancelled.
+    UacCancelled,
+    LaunchFailed,
+}
+
+impl UpdateError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "invalid_request",
+            Self::DocumentsUnavailable => "documents_unavailable",
+            Self::Storage => "storage",
+            Self::Unsupported => "unsupported",
+            Self::ManifestMalformed => "manifest_malformed",
+            Self::ManifestUnknownKey => "manifest_unknown_key",
+            Self::ManifestSignature => "manifest_signature",
+            Self::InstallerMissing => "installer_missing",
+            Self::InstallerMismatch => "installer_mismatch",
+            Self::UpdateRefused => "update_refused",
+            Self::ConfirmationRequired => "confirmation_required",
+            Self::UacCancelled => "uac_cancelled",
+            Self::LaunchFailed => "launch_failed",
+        }
+    }
+}
+
+impl From<PackageError> for UpdateError {
+    fn from(error: PackageError) -> Self {
+        match error {
+            PackageError::ManifestMalformed => Self::ManifestMalformed,
+            PackageError::ManifestUnknownKey => Self::ManifestUnknownKey,
+            PackageError::ManifestSignature => Self::ManifestSignature,
+            PackageError::InstallerMissing => Self::InstallerMissing,
+            PackageError::InstallerMismatch => Self::InstallerMismatch,
+            PackageError::Storage => Self::Storage,
+        }
+    }
+}
+
+impl From<LaunchError> for UpdateError {
+    fn from(error: LaunchError) -> Self {
+        match error {
+            LaunchError::Cancelled => Self::UacCancelled,
+            LaunchError::Failed(_) => Self::LaunchFailed,
+            LaunchError::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
+/// What the report of a checked package tells the webview.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifiedReport {
+    pub path: String,
+    pub kid: String,
+    /// The signed manifest, camelCase, as `@markiro/domain` reads it.
+    pub manifest: Value,
+    /// This app's version.
+    pub installed: String,
+    /// The installer's full path, for a manual install and `Get-FileHash`.
+    pub installer_path: String,
+    pub comparison: Comparison,
+    pub refusal: Option<Refusal>,
+    pub confirmations: Vec<Confirmation>,
+    /// The host this PC answers to, as its `hello` said; `None` on the host's
+    /// own PC (not asked) or when it did not answer.
+    pub host: Option<HostVersions>,
+}
+
+/// What [`UpdateState::load`] is built from; `run` gives the real ones, tests their own.
+pub struct UpdateConfig {
+    /// This build's version (`tauri.conf.json`, as `getVersion()` reads it).
+    pub installed: String,
+    /// The app's local data folder, where `update-pending.json` lives.
+    pub data_dir: PathBuf,
+    /// The system's documents folder, `None` when the user has none.
+    pub documents: Option<PathBuf>,
+    pub drives: Arc<dyn RemovableDrives>,
+    pub launcher: Arc<dyn Launcher>,
+    /// The release keys this build trusts (`markiro_proto::trust::update_keyset`).
+    pub keyset: Keyset,
+    /// Leaves the app (`AppHandle::exit` in `run`).
+    pub exit: Arc<dyn Fn(i32) + Send + Sync>,
+}
+
+/// The update commands' state: what the last search found (the only paths
+/// `update_verify` and `update_install` take) and the outcome the start read.
+pub struct UpdateState {
+    installed: String,
+    data_dir: PathBuf,
+    updates_dir: Option<PathBuf>,
+    drives: Arc<dyn RemovableDrives>,
+    launcher: Arc<dyn Launcher>,
+    keyset: Arc<Keyset>,
+    exit: Arc<dyn Fn(i32) + Send + Sync>,
+    found: Mutex<Vec<PathBuf>>,
+    outcome: Mutex<Option<UpdateOutcome>>,
+}
+
+/// Runs blocking file work (a search, a 60 MB hash, the launch) off the IPC thread.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, UpdateError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|_| UpdateError::Storage)
+}
+
+/// The host this PC answers to: none asked on the host's own PC; else the
+/// pairing's address, or this computer's host when there is no pairing.
+async fn host_check(device: &DeviceState) -> HostCheck {
+    if device.install_role() == Some(InstallRole::Host) {
+        return HostCheck::NotNeeded;
+    }
+    let address = match device.status() {
+        Ok(Some(status)) => status.host_address,
+        _ => crate::local_host_address(),
+    };
+    match host_probe::host_versions(&address).await {
+        Ok(seen) => HostCheck::Seen(seen),
+        Err(_) => HostCheck::Silent,
+    }
+}
+
+impl UpdateState {
+    /// The state, with the outcome of the last update read from the data
+    /// folder (`pending::take_outcome`).
+    pub fn load(config: UpdateConfig) -> Self {
+        let outcome = pending::take_outcome(&config.data_dir, &config.installed);
+        Self {
+            updates_dir: config.documents.map(|documents| {
+                documents
+                    .join(office_files::APP_FOLDER)
+                    .join(office_files::UPDATES_ROOT)
+            }),
+            installed: config.installed,
+            data_dir: config.data_dir,
+            drives: config.drives,
+            launcher: config.launcher,
+            keyset: Arc::new(config.keyset),
+            exit: config.exit,
+            found: Mutex::new(Vec::new()),
+            outcome: Mutex::new(outcome),
+        }
+    }
+
+    fn installed_version(&self) -> Result<AppVersion, UpdateError> {
+        self.installed.parse().map_err(|_| UpdateError::Unsupported)
+    }
+
+    fn found_path(&self, path: &str) -> Result<PathBuf, UpdateError> {
+        self.found
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|found| found.to_string_lossy() == path)
+            .cloned()
+            .ok_or(UpdateError::InvalidRequest)
+    }
+
+    /// The packages in the updates folder and on removable drives; their
+    /// paths become the ones the other commands take.
+    pub async fn scan(&self) -> Result<Vec<FoundPackage>, UpdateError> {
+        let drives = Arc::clone(&self.drives);
+        let updates_dir = self.updates_dir.clone();
+        let keyset = Arc::clone(&self.keyset);
+        let found = blocking(move || {
+            package::scan(
+                &package::places(updates_dir.as_deref(), &drives.roots()),
+                &keyset,
+            )
+        })
+        .await?;
+        *self.found.lock().unwrap_or_else(PoisonError::into_inner) =
+            found.iter().map(|package| package.source.clone()).collect();
+        Ok(found)
+    }
+
+    /// The package at `path` checked whole, and what the rules say of it.
+    async fn check(
+        &self,
+        device: &DeviceState,
+        path: &str,
+    ) -> Result<(Checked, Decision, HostCheck), UpdateError> {
+        let source = self.found_path(path)?;
+        let installed = self.installed_version()?;
+        let host = host_check(device).await;
+        let keyset = Arc::clone(&self.keyset);
+        let checked = blocking(move || package::verify(&source, &keyset)).await??;
+        let decision = rules::decide(checked.manifest.offered(), &installed, &host);
+        Ok((checked, decision, host))
+    }
+
+    pub async fn verify(
+        &self,
+        device: &DeviceState,
+        path: &str,
+    ) -> Result<VerifiedReport, UpdateError> {
+        let (checked, decision, host) = self.check(device, path).await?;
+        Ok(VerifiedReport {
+            path: path.to_owned(),
+            kid: checked.manifest.kid.clone(),
+            manifest: serde_json::to_value(&checked.manifest.manifest)
+                .map_err(|_| UpdateError::ManifestMalformed)?,
+            installed: self.installed.clone(),
+            installer_path: checked.installer_path.to_string_lossy().into_owned(),
+            comparison: decision.comparison,
+            refusal: decision.refusal,
+            confirmations: decision.confirmations,
+            host: match host {
+                HostCheck::Seen(seen) => Some(seen),
+                HostCheck::NotNeeded | HostCheck::Silent => None,
+            },
+        })
+    }
+
+    /// Checks the package again, refuses what the rules refuse or what was
+    /// not confirmed, writes the mark, starts the installer with the
+    /// administrator prompt and leaves the app (spec §10.4 steps 2, 5–7).
+    pub async fn install(
+        &self,
+        device: &DeviceState,
+        lockdown: &LockdownState,
+        path: &str,
+        confirmed: &[Confirmation],
+    ) -> Result<(), UpdateError> {
+        let (checked, decision, _) = self.check(device, path).await?;
+        if decision.refusal.is_some() {
+            return Err(UpdateError::UpdateRefused);
+        }
+        if decision
+            .confirmations
+            .iter()
+            .any(|needed| !confirmed.contains(needed))
+        {
+            return Err(UpdateError::ConfirmationRequired);
+        }
+        let mark = Pending {
+            from: self.installed.clone(),
+            to: checked.manifest.manifest.version.clone(),
+            started_at_ms: pending::now_ms(),
+        };
+        pending::write(&self.data_dir, &mark).map_err(|error| {
+            eprintln!(
+                "standalone: update_install could not write its mark: {:?}",
+                error.kind()
+            );
+            UpdateError::Storage
+        })?;
+        let launcher = Arc::clone(&self.launcher);
+        // The handle opened for the hash goes along and is held until the
+        // app leaves: nothing changes the file between the hash and the start.
+        let joined = blocking(move || {
+            let launched = launcher.launch(&checked.installer_path, INSTALLER_ARGUMENTS);
+            (launched, checked)
+        })
+        .await;
+        let (launched, _held) = match joined {
+            Ok(done) => done,
+            Err(error) => {
+                let _ = pending::remove(&self.data_dir);
+                return Err(error);
+            }
+        };
+        match launched {
+            Ok(()) => {
+                self.exit_for_update(lockdown);
+                Ok(())
+            }
+            Err(error) => {
+                if let Err(io) = pending::remove(&self.data_dir) {
+                    eprintln!(
+                        "standalone: update_install could not drop its mark: {:?}",
+                        io.kind()
+                    );
+                }
+                eprintln!(
+                    "standalone: update_install: the installer did not start: {}",
+                    error.code()
+                );
+                Err(error.into())
+            }
+        }
+    }
+
+    /// The one way the app leaves for an update: kiosk mode's flag off first
+    /// (its close guard would refuse the window's close), then the exit.
+    pub fn exit_for_update(&self, lockdown: &LockdownState) {
+        lockdown::release_for_exit(lockdown);
+        (self.exit)(0);
+    }
+
+    pub fn outcome(&self) -> Option<UpdateOutcome> {
+        self.outcome
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// «Скрыть»: the mark goes, and the outcome with it.
+    pub fn dismiss_outcome(&self) -> Result<(), UpdateError> {
+        pending::remove(&self.data_dir).map_err(|error| {
+            eprintln!(
+                "standalone: update_outcome_dismiss storage: {:?}",
+                error.kind()
+            );
+            UpdateError::Storage
+        })?;
+        *self.outcome.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        Ok(())
+    }
+
+    /// «Открыть папку»: makes `Документы\Markiro\Обновления` and shows it.
+    pub fn open_folder(&self) -> Result<(), UpdateError> {
+        let folder = self
+            .updates_dir
+            .as_ref()
+            .ok_or(UpdateError::DocumentsUnavailable)?;
+        package::ensure_folder(folder)?;
+        office_files::show_folder(folder).map_err(|error| match error {
+            OfficeFilesError::InvalidRequest => UpdateError::InvalidRequest,
+            OfficeFilesError::DocumentsUnavailable => UpdateError::DocumentsUnavailable,
+            OfficeFilesError::Storage => UpdateError::Storage,
+            OfficeFilesError::Unsupported => UpdateError::Unsupported,
+        })
+    }
+}
+
+fn code(error: UpdateError) -> String {
+    error.code().to_owned()
+}
+
+#[tauri::command]
+pub async fn update_scan(
+    state: tauri::State<'_, UpdateState>,
+) -> Result<Vec<FoundPackage>, String> {
+    state.scan().await.map_err(code)
+}
+
+#[tauri::command]
+pub async fn update_verify(
+    state: tauri::State<'_, UpdateState>,
+    device: tauri::State<'_, DeviceState>,
+    path: String,
+) -> Result<VerifiedReport, String> {
+    state.verify(&device, &path).await.map_err(code)
+}
+
+/// `confirm` holds the codes of the report's confirmations the person
+/// accepted; an unknown code is `invalid_request` before anything is read.
+#[tauri::command]
+pub async fn update_install(
+    state: tauri::State<'_, UpdateState>,
+    device: tauri::State<'_, DeviceState>,
+    lockdown: tauri::State<'_, LockdownState>,
+    path: String,
+    confirm: Vec<String>,
+) -> Result<(), String> {
+    let confirmed = confirm
+        .iter()
+        .map(|text| Confirmation::from_code(text))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| code(UpdateError::InvalidRequest))?;
+    state
+        .install(&device, &lockdown, &path, &confirmed)
+        .await
+        .map_err(code)
+}
+
+#[tauri::command]
+pub fn update_outcome(state: tauri::State<'_, UpdateState>) -> Option<UpdateOutcome> {
+    state.outcome()
+}
+
+#[tauri::command]
+pub fn update_outcome_dismiss(state: tauri::State<'_, UpdateState>) -> Result<(), String> {
+    state.dismiss_outcome().map_err(code)
+}
+
+#[tauri::command]
+pub async fn update_open_folder(state: tauri::State<'_, UpdateState>) -> Result<(), String> {
+    state.open_folder().map_err(code)
+}

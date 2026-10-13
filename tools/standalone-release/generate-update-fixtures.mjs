@@ -21,7 +21,11 @@ export const SHELL_FIXTURES = "apps/standalone/src-tauri/tests/fixtures/update";
 export const TEST_KEYS = "packages/domain/fixtures/standalone-license";
 export const TEST_UPDATE_KID = "test-upd-1";
 
-/** 0.2.0 follows the installed 0.1.0 on the same protocol; 0.3.0 needs 0.2.0 first and a newer host. */
+/**
+ * 0.2.0 follows the installed 0.1.0 on the same protocol; 0.3.0 needs 0.2.0
+ * first and a newer host: protocol 9, past any protocol the app speaks for
+ * now, so the shell's «host first» test holds while the protocol grows.
+ */
 export const FIXTURE_RELEASES = Object.freeze([
   {
     version: "0.2.0",
@@ -34,10 +38,10 @@ export const FIXTURE_RELEASES = Object.freeze([
   {
     version: "0.3.0",
     channel: "beta",
-    protocol: 4,
+    protocol: 9,
     minProtocol: 2,
     minUpgradeFrom: "0.2.0",
-    notes: ["Тестовый выпуск 0.3.0", "Протокол 4: хост площадки обновляется первым"],
+    notes: ["Тестовый выпуск 0.3.0", "Протокол 9: хост площадки обновляется первым"],
   },
 ]);
 
