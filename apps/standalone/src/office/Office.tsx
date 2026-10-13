@@ -61,6 +61,8 @@ export interface OfficeProps {
    * `null` (the default) shows no such control.
    */
   windowMode?: WindowMode | null;
+  /** The page the office opens on: the overview by default; a test may open another. */
+  initialPath?: string;
 }
 
 /**
@@ -78,8 +80,11 @@ export function Office({
   files = TAURI_OFFICE_FILES,
   printForm = FRAME_PRINT_FORM,
   windowMode = null,
+  initialPath = "/",
 }: OfficeProps) {
-  const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
+  const [router] = useState(() =>
+    createMemoryRouter(officeRoutes, { initialEntries: [initialPath] }),
+  );
   const [queryClient] = useState(createOfficeQueryClient);
   const shownRevision = useRef(hostRevision);
   useEffect(() => {

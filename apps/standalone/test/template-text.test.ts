@@ -144,7 +144,7 @@ describe("a refused template write", () => {
   });
 
   it("explains whose default the template is, the categories by name or code, and where to choose another", () => {
-    const hint = "Сначала выберите другой шаблон на странице «Умолчания шаблонов».";
+    const hint = "Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».";
     expect(describeDefaultConflict({ organization: true, categories: [] }, GROUPS, t)).toBe(
       `Шаблон выбран по умолчанию для организации. ${hint}`,
     );

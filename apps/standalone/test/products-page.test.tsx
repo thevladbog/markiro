@@ -31,6 +31,7 @@ const MILK: OfficeProduct = {
   shelfLifeDays: 10,
   defaultBoxTemplateId: null,
   defaultPalletTemplateId: null,
+  defaultPalletSheetId: null,
   archived: false,
   status: "active",
   rev: 65,
