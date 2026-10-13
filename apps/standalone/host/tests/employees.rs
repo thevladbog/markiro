@@ -237,7 +237,7 @@ async fn a_turned_off_operator_can_be_linked_and_stays_linked() {
 }
 
 #[tokio::test]
-async fn an_archived_employee_is_linked_to_no_operator() {
+async fn an_archived_employee_is_linked_to_no_operator_and_its_operator_is_turned_off() {
     let admin = admin().await;
     let (operator, _) = add_operator(&admin, "0042").await;
     let anna = create(&admin, Some(&operator)).await;
@@ -252,7 +252,10 @@ async fn an_archived_employee_is_linked_to_no_operator() {
     assert_eq!(host_revision(&admin.app).await, revision);
     assert_eq!(audit_rows(&admin.app).await, rows);
 
-    // Archiving with the unlink in the same request is one change.
+    // Archiving with the unlink in the same request is one change, and it
+    // turns the linked operator off as «Выключить» does (owner decision В1,
+    // as the cloud drops an archived employee from the roster).
+    let before = host_revision(&admin.app).await;
     let (status, archived) = put(
         &admin,
         &anna,
@@ -277,6 +280,31 @@ async fn an_archived_employee_is_linked_to_no_operator() {
             })
         )]
     );
+    assert_eq!(
+        audit_trail(&admin.app, "operator.update").await,
+        vec![admin.row(
+            "operator.update",
+            "operator",
+            &operator,
+            json!({ "changed": ["active"], "active": { "from": true, "to": false } })
+        )]
+    );
+    // One revision for both rows; the station gets the operator's tombstone
+    // exactly as after a normal turn-off.
+    assert_eq!(archived["rev"], json!(before + 1));
+    let (_, operators) = admin.call("GET", "/v1/office/operators", None).await;
+    assert_eq!(
+        (operators[0]["active"].clone(), operators[0]["rev"].clone()),
+        (json!(false), json!(before + 1))
+    );
+    assert_eq!(
+        admin.feed(before).await,
+        json!([{ "entity": "operators", "id": operator, "rev": before + 1, "deleted": true }])
+    );
+    assert_eq!(
+        tombstones(&admin.app).await,
+        vec![("operators".to_owned(), operator.clone(), before + 1)]
+    );
     // An archived employee is not linked again either.
     let (status, error) = put(&admin, &archived, json!({ "operatorId": operator })).await;
     assert_eq!(
@@ -291,6 +319,45 @@ async fn an_archived_employee_is_linked_to_no_operator() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("CHECK"), "{error}");
+}
+
+#[tokio::test]
+async fn archiving_with_an_operator_already_off_or_with_none_touches_no_operator() {
+    let admin = admin().await;
+    let (operator, rev) = add_operator(&admin, "0042").await;
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/operators/{operator}"),
+            Some(json!({ "active": false, "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    let anna = create(&admin, Some(&operator)).await;
+    let petr = create(&admin, None).await;
+    for employee in [&anna, &petr] {
+        let (status, archived) = put(
+            &admin,
+            employee,
+            json!({ "archived": true, "operatorId": null }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{archived}");
+    }
+    // Only the manual turn-off: archiving wrote no operator row and left the
+    // operator's revision and its one tombstone as they were.
+    assert_eq!(audit_trail(&admin.app, "operator.update").await.len(), 1);
+    let (_, operators) = admin.call("GET", "/v1/office/operators", None).await;
+    assert_eq!(operators[0]["rev"], off["rev"]);
+    assert_eq!(
+        tombstones(&admin.app).await,
+        vec![(
+            "operators".to_owned(),
+            operator.clone(),
+            off["rev"].as_i64().unwrap()
+        )]
+    );
+    assert_eq!(audit_trail(&admin.app, "employee.update").await.len(), 2);
 }
 
 #[tokio::test]

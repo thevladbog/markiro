@@ -2121,9 +2121,16 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   operator record and its revision are never written, and the station feed,
   `SYNC_SCHEMA_VERSION` and the stations' copies do not change. An archived
   employee is linked to no operator (a table `CHECK`; archiving sends
-  `operatorId: null` in the same write, and the dialog warns that the
-  operator still signs in until it is turned off on «Операторы»), while a
-  turned-off operator may stay linked. The page searches the name, the role
+  `operatorId: null` in the same write), while a turned-off operator may
+  stay linked. Archiving an employee whose linked operator is active turns
+  that operator off in the same transaction (owner decision В1, as the cloud
+  drops an archived employee from the roster): `operators::turn_off_in`
+  stamps the operator with the write's one revision, writes its tombstone
+  and an `operator.update` row (`changed: ["active"]`) after the
+  `employee.update` row — the one office write with two audit rows — so the
+  stations lose the operator exactly as after «Выключить». An operator
+  already off is left alone. The dialog says the operator will be turned
+  off and its button reads «Сохранить и выключить оператора». The page searches the name, the role
   and the linked operator's number and filters by the link; «Оператор» on a
   row links a free operator, unlinks, or opens «Новый оператор» prefilled
   with the employee's name and role and then writes the link (two writes:

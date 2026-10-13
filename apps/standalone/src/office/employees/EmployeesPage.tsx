@@ -237,14 +237,27 @@ export function EmployeesPage() {
           employee={dialog.kind === "edit" ? dialog.employee : null}
           operator={dialog.kind === "edit" ? operatorOf(dialog.employee) : null}
           onClose={() => setDialog(null)}
-          onSaved={(employee) =>
+          onSaved={(employee, turnedOff) => {
+            const operator = dialog.kind === "edit" ? operatorOf(dialog.employee) : null;
+            if (turnedOff && operator !== null) {
+              saved(
+                employee,
+                t("office.employees.archivedTurnedOff", {
+                  name: employee.name,
+                  operator: operatorLabel(operator),
+                }),
+              );
+              // The host turned the operator off in the same write.
+              void operators.refetch();
+              return;
+            }
             saved(
               employee,
               dialog.kind === "create"
                 ? t("office.employees.created", { name: employee.name })
                 : t("office.common.saved"),
-            )
-          }
+            );
+          }}
           onReload={reload}
         />
       )}

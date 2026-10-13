@@ -307,6 +307,55 @@ pub async fn update_operator(
     Ok(Json(updated))
 }
 
+/// Turns the operator `id` off inside a write that already took `rev`, as
+/// «Выключить» does through `update_operator`: the record takes `rev`, its
+/// access leaves the station feed as a tombstone, and an `operator.update`
+/// row names `active`. An operator already off, or gone, is left alone and
+/// `false` is returned. Archiving a linked employee calls it (owner decision
+/// В1, as the cloud drops an archived employee from the roster).
+pub(crate) async fn turn_off_in(
+    tx: &mut SqliteConnection,
+    actor: audit::Actor<'_>,
+    at: &str,
+    id: &str,
+    rev: i64,
+) -> Result<bool, ApiError> {
+    let active: Option<bool> = sqlx::query_scalar("SELECT active FROM operators WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if active != Some(true) {
+        return Ok(false);
+    }
+    sqlx::query("UPDATE operators SET active = 0, rev = ? WHERE id = ?")
+        .bind(rev)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    feed::remove(&mut *tx, entities::OPERATORS, id, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    let details = audit::update_details(&[("active", json!(true), json!(false))])
+        .ok_or_else(|| ApiError::internal("a turn-off changed nothing"))?;
+    audit::record(
+        &mut *tx,
+        at,
+        Entry {
+            actor,
+            action: actions::OPERATOR_UPDATE,
+            target_type: Some("operator"),
+            target_id: Some(id),
+            outcome: Outcome::Ok,
+            details,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(true)
+}
+
 /// The site's badge salt; `not_found` before the wizard created it.
 async fn site_salt(conn: &mut SqliteConnection) -> Result<Vec<u8>, ApiError> {
     let salt: Option<Vec<u8>> = sqlx::query_scalar("SELECT badge_salt FROM site WHERE id = 1")
