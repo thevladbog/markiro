@@ -141,8 +141,12 @@ displaced, `conflict` that it came late) and `reviewed_by` (an office user,
 `code_conflicts_loser`, `code_conflicts_detected (detected_at, id)` (the
 office's list and a device's cursor), the partial `fact_receipts_rejected`
 and `box_exceptions_shift`/`pallet_exceptions_shift`. None is on `scans` or
-`code_owners`: plan РЕЖ rebuilds both tables and recreates only its own and
-the code search's indexes.
+`code_owners`: plan РЕЖ rebuilds both tables (and `code_conflicts`, in the
+shape of `0010`) and recreates only its own and the code search's indexes.
+So РЕЖ's `0020` must run before `0022`: a host that applied `0022` first
+would lose `kind`, `reviewed_by` and the two indexes when sqlx applies the
+lower `0020` late, and every fact that meets a conflict would then fail;
+merge РЕЖ first, or give its rebuild the columns of `0022`.
 
 ## Local database
 

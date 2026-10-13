@@ -419,6 +419,14 @@ async fn an_unknown_conflict_and_a_request_without_a_session_change_nothing() {
         (status, body["error"]["code"].clone()),
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
+    let (status, body) = s
+        .admin
+        .call("POST", "/v1/office/conflicts/nonsense/review", None)
+        .await;
+    assert_eq!(
+        (status, body["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("id"))
+    );
     let displaced = conflict_id(&s.admin, &record_id(2)).await;
     // A device key alone is no office session.
     let (status, _) = s

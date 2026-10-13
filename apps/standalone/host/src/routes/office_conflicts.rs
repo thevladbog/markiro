@@ -228,6 +228,8 @@ pub async fn review_conflict(
     ApiPath(id): ApiPath<String>,
 ) -> Result<Json<OfficeConflict>, ApiError> {
     context.require_conflict_review()?;
+    // A conflict's id is the host's UUID: anything else is no conflict, refused before the lock.
+    validate::client_uuid("id", &id)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_conflict_review_in(&mut tx).await?;

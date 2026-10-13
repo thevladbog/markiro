@@ -119,13 +119,13 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
   it("links the loser's box in its shift's card by its SSCC, and only the shift without one", async () => {
     await openConflicts(session());
     const named = screen.getByRole("link", {
-      name: "Короб проигравшего в карточке смены OCT26-004",
+      name: "Короб проигравшего с кодом S000007 в карточке смены OCT26-004",
     });
     expect(named.getAttribute("href")).toBe(
       "/shifts/5a0c9e1e-3d4f-4b8a-9c2d-1e0f9a8b7c6d?box=046006820000015001",
     );
     const bare = within(cell(1, "Проигравший скан")).getByRole("link", {
-      name: "Короб проигравшего в карточке смены OCT26-005/S",
+      name: "Короб проигравшего с кодом S000008 в карточке смены OCT26-005/S",
     });
     expect(bare.getAttribute("href")).toBe("/shifts/6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e");
   });

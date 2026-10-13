@@ -300,15 +300,19 @@ export function ShiftCardPage() {
           },
         ]}
       />
-      {current.status !== "planned" && <ShiftBoxes shift={current} at={at} onForm={setForm} />}
+      {/* Keyed by the shift: a link to another shift's card (a conflict's winner) opens this
+          page again, and its filters and pages, `?box=` included, start afresh. */}
+      {current.status !== "planned" && (
+        <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
+      )}
       {current.status !== "planned" && current.palletsEnabled && (
-        <ShiftPallets shift={current} at={at} onForm={setForm} />
+        <ShiftPallets key={`pallets-${current.id}`} shift={current} at={at} onForm={setForm} />
       )}
       {current.status !== "planned" && (
         <>
-          <ShiftExceptions shift={current} at={at} />
-          <ShiftRejections shift={current} at={at} />
-          <ShiftConflicts shift={current} at={at} />
+          <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
+          <ShiftRejections key={`rejections-${current.id}`} shift={current} at={at} />
+          <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
         </>
       )}
       {form !== null && (
