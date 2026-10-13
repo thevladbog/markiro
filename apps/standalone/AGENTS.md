@@ -1704,8 +1704,13 @@ name from this pairing's copies (`readFloorPlace` in
 is still named, since the station works on it until the office moves it; read
 again after every sync, and a failed read leaves the names out), the operator
 signed in or «Никто не вошёл», and `HostStatusLine`, which the floor screens
-no longer show themselves. It holds nothing to press, so the 64 px rule has
-nothing to apply to. Its presentation is forked from the cloud station's
+no longer show themselves. Its one control is «Сменить оператора» in a rail on
+the right (`OperatorSwitchControl`, the cloud's compact control, 64 px), shown
+only with an operator signed in, on every floor screen; the hub keeps no copy
+of its own. The bar does not leave by itself: the floor hands the shell its
+leave (`FloorApp` `onSignOutReady`), which waits for the work a shift's screen
+tracks like every leave, and in a shift the control asks first («Сменить
+оператора?», the shift stays open). Its presentation is forked from the cloud station's
 one-row header (`apps/station/src/ui/StatusBar.tsx`, `.station-status-*` in
 `src/floor/floor-status-bar.css`): the device and the line strong on the first
 row, the operator, the shift and the organization quieter on the second (the

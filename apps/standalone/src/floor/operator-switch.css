@@ -1,0 +1,43 @@
+/*
+ * The status bar's rail of actions, forked from the cloud station
+ * (apps/station/src/station.css: `.station-status-actions`, `.station-rail-button`,
+ * `.operator-switch-control`): a third column of the one-row header, every
+ * control 64 px high (the floor's touch target), its caption on one line.
+ */
+.station-status-bar:has(> .station-status-actions) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.station-status-actions {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: stretch;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.station-status-actions > * {
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+}
+
+.operator-switch-control {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: end;
+}
+
+.station-rail-button {
+  min-height: 64px;
+  padding-inline: var(--sp-3) !important;
+  white-space: nowrap;
+}
+
+.operator-switch-control__confirmation {
+  max-width: 760px;
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body);
+}

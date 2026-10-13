@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 
 import { cn } from "@markiro/ui";
 
@@ -6,8 +6,8 @@ import "./shift-hub.css";
 
 export interface FloorScreenProps {
   title: string;
-  /** Under the title, in its quiet second voice (the operator's line). */
-  subtitle?: ReactNode;
+  /** The title takes the focus when the screen asks for it (`tabIndex=-1`). */
+  titleRef?: Ref<HTMLHeadingElement>;
   /** Beside the title: the operator, a message slot, a header action. */
   header?: ReactNode;
   /** The fixed action row under the content (`FloorFooter`). */
@@ -24,7 +24,7 @@ export interface FloorScreenProps {
  */
 export function FloorScreen({
   title,
-  subtitle,
+  titleRef,
   header,
   actions,
   className,
@@ -34,10 +34,9 @@ export function FloorScreen({
   return (
     <section className={cn("station-screen", className)} aria-labelledby={titleId}>
       <header className="station-screen__header">
-        <div className="station-screen__title">
-          <h2 id={titleId}>{title}</h2>
-          {subtitle}
-        </div>
+        <h2 id={titleId} ref={titleRef} tabIndex={titleRef === undefined ? undefined : -1}>
+          {title}
+        </h2>
         {header}
       </header>
       <div className="station-screen__content">{children}</div>
