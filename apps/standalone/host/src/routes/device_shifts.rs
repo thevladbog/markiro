@@ -10,8 +10,8 @@
 use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
-    DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftMode, ShiftOrigin,
-    ShiftSnapshot, ShiftStatus,
+    shift_supports, DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftEnter,
+    ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftStatus,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -268,10 +268,35 @@ pub async fn create_device_shift(
     Ok(Json(created))
 }
 
+/// `conflict` on `station_update`: the shift's mode needs what the entering
+/// station did not name (plan РЕЖ, Р5), so it would work the shift as an
+/// older build does; the station asks to be updated.
+pub fn station_update() -> ApiError {
+    ApiError::conflict(
+        "station_update",
+        "this station's app does not work this shift's mode: update it",
+    )
+}
+
+/// What a station must name to enter a shift of `mode`: nothing for
+/// aggregation, [`shift_supports::VALIDATION`] for validation.
+fn require_supports(mode: ShiftMode, enter: &ShiftEnter) -> Result<(), ApiError> {
+    let needed = match mode {
+        ShiftMode::Aggregation => return Ok(()),
+        ShiftMode::Validation => shift_supports::VALIDATION,
+    };
+    if enter.supports.iter().any(|name| name == needed) {
+        Ok(())
+    } else {
+        Err(station_update())
+    }
+}
+
 /// A shift as an entry reads it.
 #[derive(sqlx::FromRow)]
 struct EntryRow {
     status: String,
+    mode: String,
     line_id: String,
     owner_device_id: Option<String>,
     product_id: String,
@@ -294,17 +319,27 @@ struct EntryRow {
 /// not fit the snapshot `snapshot_too_large`, once its templates fit. Opening
 /// takes a revision, so the other stations of the line see the shift busy;
 /// entering again takes none.
+///
+/// The body (`ShiftEnter`, protocol 4, plan РЕЖ) names what the station
+/// works; a station of protocol 3 sends none (no `Content-Type`), which names
+/// nothing. A validation shift needs `validation-v1`, on its opening and on
+/// every entry again (a station rolled back to an older build must not work
+/// it as an aggregation one): otherwise `station_update`, after the shift's
+/// own refusals above and before anything is frozen or written.
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
     ApiPath(id): ApiPath<String>,
+    enter: Option<ApiJson<ShiftEnter>>,
 ) -> Result<Json<DeviceShift>, ApiError> {
     require_station(&device)?;
+    let enter = enter.map(|ApiJson(enter)| enter).unwrap_or_default();
+    validate::shift_supports(&enter.supports)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     device.require_station_in(&mut tx, STATION_ONLY).await?;
     let shift: Option<EntryRow> = sqlx::query_as(
-        "SELECT status, line_id, owner_device_id, product_id, box_template_id, \
+        "SELECT status, mode, line_id, owner_device_id, product_id, box_template_id, \
          pallet_template_id, pallet_sheet_template_id, counterparty_id, snapshot, \
          number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
     )
@@ -332,6 +367,7 @@ pub async fn enter_shift(
     {
         return Err(shifts::busy());
     }
+    require_supports(shift.mode.parse().map_err(ApiError::internal)?, &enter)?;
     let snapshot = match shift.snapshot {
         // The station that opened the shift enters it again.
         Some(text) => {

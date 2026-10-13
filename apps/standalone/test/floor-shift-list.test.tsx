@@ -216,6 +216,11 @@ describe("the shifts of the station's line", () => {
       "pallet_template_not_fit",
       "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
     ],
+    // A mode this build does not name in its entry (plan РЕЖ, Р5).
+    [
+      "station_update",
+      "Эту смену приложение этой станции открыть не может. Обновите приложение станции.",
+    ],
   ])("says why the host refused the entry (%s) and keeps the list", async (constraint, text) => {
     const { executor } = await copiesOf([PLANNED]);
     const refused = new HostError({

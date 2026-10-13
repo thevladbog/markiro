@@ -322,6 +322,24 @@ pub fn device_registration<'a>(
     Ok((name, app_version))
 }
 
+/// The list a station names in a shift entry (`ShiftEnter.supports`, plan
+/// РЕЖ): at most 32 names of 1-64 characters, the bounds of the webview's
+/// `shiftEnterSchema`. A name is only compared with
+/// `markiro_proto::shift_supports`, never stored, so nothing else is asked.
+pub fn shift_supports(supports: &[String]) -> Result<(), ApiError> {
+    if supports.len() > 32
+        || !supports
+            .iter()
+            .all(|name| (1..=64).contains(&name.chars().take(65).count()))
+    {
+        return Err(ApiError::validation(
+            "supports",
+            "at most 32 names of 1-64 characters",
+        ));
+    }
+    Ok(())
+}
+
 /// A device's name: trimmed, 1-100 characters, no control character.
 pub fn device_name<'a>(field: &str, name: &'a str) -> Result<&'a str, ApiError> {
     clean_text(field, name, 100, "the name")

@@ -1272,9 +1272,9 @@ and a reordered list is a change), and never `null` for a name, a flag or a
 layout, which the host would read as «keep»; `templateDefaultsUpdate` sends
 the whole document.
 The shifts' builders (plan 2a3) follow the same rule: `shiftCreate` sends
-every field, `null` for no plan or no counterparty, and `mode: "aggregation"`
-and `palletsEnabled: false`, so the host's defaults never decide what was
-planned; `shiftUpdate` sends what differs from the loaded shift, with its
+every field, `null` for no plan or no counterparty, the mode (`ShiftInput.mode`,
+`"aggregation"` when the input names none, plan РЕЖ) and `palletsEnabled`, so
+the host's defaults never decide what was planned; `shiftUpdate` sends what differs from the loaded shift, with its
 revision, and `null` only to clear the plan or the counterparty (the host reads
 `null` elsewhere as «keep», and the strict `shiftUpdateSchema` refuses it
 there); `shiftClose` sends the reason `closeReasonRule` trimmed, with the
@@ -1298,7 +1298,7 @@ The host does not look at the protocol of a station that enters a shift (it
 records it at pairing only), so a station of protocol 2 could enter a shift
 the office planned with pallets and produce boxes without them. The pilot
 rules that out by installation, not by a refusal: every station of a site runs
-protocol 3, installed together with the host's update, and the installer's
+the current protocol (4), installed together with the host's update, and the installer's
 check of it is owed to the plan УСТ (it is not done yet; nothing here was run
 on a real station). Validation shifts do not rely on that: since protocol 4 a
 station names what it works in the body of every entry
@@ -1306,8 +1306,15 @@ station names what it works in the body of every entry
 `markiro_proto::shift_supports`; the webview sends `STATION_SHIFT_ENTER`,
 `{ "supports": ["validation-v1"] }`, through `HostApi.enterShift`), and a
 station of protocol 3 sends no body, which reads as naming nothing. The host
-refuses a validation shift to a station that does not name `validation-v1`
-from plan РЕЖ task A4 on.
+refuses a validation shift to a station that does not name `validation-v1`:
+`conflict` on `station_update` (`details.constraint`, as every entry
+refusal), on the opening and on every entry again, after the shift's own
+refusals (`shift_status`, `shift_line`, `shift_busy`) and before anything is
+frozen or written; the shift stays planned. The list is bounded like
+`shiftEnterSchema` (at most 32 names of 1-64 characters, `validation_failed`
+on `supports`); an aggregation shift needs no name. The station shows the
+refusal as `floor.shifts.refused.station_update` («Обновите приложение
+станции»).
 `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
 mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
