@@ -18,7 +18,14 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
-import { chooseText, chooseValue, optionTextOf, optionTexts, valueOf } from "./support/select.js";
+import {
+  chooseText,
+  chooseValue,
+  optionTextOf,
+  optionTexts,
+  settleSelect,
+  valueOf,
+} from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -1540,6 +1547,7 @@ describe("office template defaults: the final fixes", () => {
     choose("Шаблон короба", BOX_100.id);
     // The custom select hands focus back to its own trigger after a pick; a failure that names no
     // field must leave focus where it is.
+    await settleSelect();
     const before = document.activeElement;
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await screen.findByText("На хосте произошла ошибка. Повторите попытку.");
@@ -1622,7 +1630,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
     await openDefaults(fake);
     await ready();
     // The organization's selects are the labelled ones; the rows' carry an aria-label.
-    const labels = [...document.querySelectorAll("select")]
+    const labels = [...document.querySelectorAll<HTMLButtonElement>("button[role='combobox']")]
       .map((select) => select.labels?.[0]?.textContent ?? "")
       .filter((label) => label !== "");
     expect(labels).toEqual([
@@ -1636,7 +1644,7 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
       "Палета · две А5",
       "Палета А4 · вертикальная",
     ]);
-    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("value", PORTRAIT.id);
+    expect(valueOf("Лист А4 паллеты")).toBe(PORTRAIT.id);
     // Neither list offers the other's: a pallet label is no sheet.
     expect(choices("Шаблон паллеты")).not.toContain("Палета · две А5");
     expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
@@ -1669,29 +1677,29 @@ describe("office template defaults: the A4 sheets beside the pallet labels", () 
       .slice(1)
       .map((row) => within(row).getAllByRole("cell")[1]?.textContent);
     expect(rows).toEqual(["Короб", "Паллета", "Лист А4 паллеты"]);
-    const select = screen.getByLabelText("Шаблон: Молочная продукция, Лист А4 паллеты");
     // A held sheet that is off stays a marked choice, and «Убрать» clears it.
-    expect(
-      within(select)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
-    ).toEqual(["Палета · две А5", "Палета А4 · вертикальная", "Старый лист — выключен"]);
+    expect(choices("Шаблон: Молочная продукция, Лист А4 паллеты")).toEqual([
+      "Палета · две А5",
+      "Палета А4 · вертикальная",
+      "Старый лист — выключен",
+    ]);
     fireEvent.click(
       screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Лист А4 паллеты" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Добавить умолчание категории" }));
     const add = await screen.findByRole("dialog", { name: "Умолчание категории" });
-    fireEvent.change(within(add).getByLabelText("Категория"), { target: { value: "13" } });
-    const kinds = within(within(add).getByLabelText("Назначение"))
-      .getAllByRole("option")
-      .map((option) => option.textContent);
-    expect(kinds).toEqual(["Не выбрано", "Короб", "Паллета", "Лист А4 паллеты", "Дубликат товара"]);
-    fireEvent.change(within(add).getByLabelText("Назначение"), {
-      target: { value: "pallet_sheet" },
-    });
+    chooseValue("Категория", "13");
+    expect(choices("Назначение")).toEqual([
+      "Не выбрано",
+      "Короб",
+      "Паллета",
+      "Лист А4 паллеты",
+      "Дубликат товара",
+    ]);
+    chooseValue("Назначение", "pallet_sheet");
     // The last field asks for a sheet, in those words.
     expect(within(add).queryByLabelText("Шаблон")).toBeNull();
-    fireEvent.change(within(add).getByLabelText("Лист А4"), { target: { value: PORTRAIT.id } });
+    chooseValue("Лист А4", PORTRAIT.id);
     fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));

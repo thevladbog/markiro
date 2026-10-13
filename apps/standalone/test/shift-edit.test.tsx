@@ -187,11 +187,7 @@ describe("office shifts: changing a shift", () => {
     const session = shiftsSession([shift]);
     session.api.updateShift.mockResolvedValue({ ...shift, boxCapacity: 30, rev: 91 });
     const name = await openEdit(session, shift);
-    expect(options(name, "Линия")).toEqual([
-      "Линия 2",
-      "Линия 10",
-      "Линия 1 (в архиве)",
-    ]);
+    expect(options(name, "Линия")).toEqual(["Линия 2", "Линия 10", "Линия 1 (в архиве)"]);
     expect(options(name, "Контрагент")).toEqual([
       "Не выбран",
       "ООО «Северный берег»",
@@ -658,11 +654,7 @@ describe("office shifts: changing a shift, the edges", () => {
     };
     const session = shiftsSession([shift]);
     const name = await openEdit(session, shift);
-    expect(options(name, "Линия")).toEqual([
-      "Линия 2",
-      "Линия 10",
-      "Линия 11111111…",
-    ]);
+    expect(options(name, "Линия")).toEqual(["Линия 2", "Линия 10", "Линия 11111111…"]);
     expect(options(name, "Контрагент")).toEqual([
       "Не выбран",
       "ООО «Северный берег»",
