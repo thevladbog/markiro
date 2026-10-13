@@ -376,6 +376,36 @@
   overflow-y: auto;
 }
 
+/* A product's photo in its dialog (plan ТОВ): the JPEG the host keeps, shrunk to fit. */
+.product-photo-field {
+  display: grid;
+  gap: 8px;
+}
+
+/* The section's title and hint as a field's label and hint (`@markiro/ui` Field). */
+.product-photo-field__title {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+
+.product-photo-field__hint {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.product-photo-field__preview {
+  display: block;
+  max-width: 160px;
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
 /* The GTIN field, and under it what the dialog says about a valid GTIN. */
 .product-gtin,
 .product-gtin__notes {

@@ -108,6 +108,15 @@ export function ShiftCardPage() {
     },
   );
 
+  // The product's photo for «Бланк смены» (plan ТОВ), read only when the product has one.
+  const cardProduct = products.data?.find((each) => each.id === shift.data?.productId);
+  const productId = cardProduct?.id ?? "";
+  const photo = useOfficeQuery(
+    officeKeys.productPhoto(productId),
+    (api, token) => api.getProductPhoto(token, productId),
+    { enabled: cardProduct !== undefined && cardProduct.photoChecksum !== null },
+  );
+
   useEffect(() => {
     if (notice !== null) document.getElementById(noticeId)?.focus();
   }, [notice, noticeId]);
@@ -158,6 +167,8 @@ export function ShiftCardPage() {
     lines.data,
     counterparties.data,
     org.isSuccess ? org.data : undefined,
+    // Waited for while it is read; one that did not read leaves the blank without it.
+    photo.isError ? null : photo.data?.photo,
   );
   // The cloud offers the shift's placards only when a pallet has one to print.
   const placards =

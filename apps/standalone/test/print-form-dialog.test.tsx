@@ -283,6 +283,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
             line: LINE_10,
             counterparty: null,
             organization: ORG_PROFILE,
+            photo: null,
           },
           generatedAt: now,
         })?.html,
@@ -290,6 +291,35 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     );
     // A planned shift has no placards to print.
     expect(screen.queryByRole("button", { name: "Ярлыки паллет смены" })).toBeNull();
+  });
+
+  it("prints the product's photo on «Бланк смены», read again at the press, and the blank without it when it does not read (plan ТОВ)", async () => {
+    const photo = {
+      width: 2,
+      height: 1,
+      dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
+      updatedAt: "2026-10-13T09:00:00.000Z",
+    };
+    const pictured = { ...WATER, photoChecksum: photo.checksum };
+    const session = formSession(PLANNED);
+    session.api.listProducts.mockResolvedValue([pictured]);
+    session.api.getProductPhoto.mockResolvedValue({ photo });
+    const print = vi.fn<PrintForm>();
+    await openCard(session, PLANNED, print, fakeOfficeFiles());
+    fireEvent.click(await screen.findByRole("button", { name: "Бланк смены" }));
+    const dialog = await readyDialog("Бланк смены OCT26-005");
+    const reads = session.api.getProductPhoto.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(session.api.getProductPhoto.mock.calls.length).toBeGreaterThan(reads);
+    expect(session.api.getProductPhoto).toHaveBeenCalledWith("office-session-token", WATER.id);
+    expect(print.mock.calls[0]?.[0]).toContain(`src="data:image/jpeg;base64,${photo.dataBase64}"`);
+    // The photo does not read at the next press: the blank prints without it.
+    session.api.getProductPhoto.mockRejectedValue(new Error("offline"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+    expect(print.mock.calls[1]?.[0]).toContain('class="product product--no-photo"');
   });
 
   it("has no blank for a closed shift", async () => {

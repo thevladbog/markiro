@@ -13,6 +13,7 @@ import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.j
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import { ProductPhotoField } from "./ProductPhotoField.js";
 import { activeFirstByName } from "../records.js";
 import { recordLabel } from "../shifts/shift-list.js";
 import { sheetChoices } from "../sheet-choice.js";
@@ -349,6 +350,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           />
         )}
       />
+      <ProductPhotoField productId={product?.id ?? null} productName={product?.name ?? ""} />
       {product !== null && (
         <Controller
           control={control}

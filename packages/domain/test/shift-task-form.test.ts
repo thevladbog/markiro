@@ -104,6 +104,30 @@ describe("renderShiftTaskFormHtml", () => {
     expect(html).toContain(`src="../../products/${PRODUCT_ID}/image/${"a".repeat(64)}"`);
   });
 
+  it("takes a photo's own source in place of the cloud's link, and leaving it out changes nothing", () => {
+    const base = fixture();
+    const cloud = renderShiftTaskFormHtml(base);
+    expect(cloud).toContain(`src="../../products/${PRODUCT_ID}/image/${"a".repeat(64)}"`);
+    const standalone = renderShiftTaskFormHtml({
+      ...base,
+      imageSrc: "data:image/jpeg;base64,/9j/4AAQ",
+    });
+    expect(standalone).toContain('src="data:image/jpeg;base64,/9j/4AAQ"');
+    expect(standalone).not.toContain("../../products/");
+    // A source is escaped as any text.
+    expect(renderShiftTaskFormHtml({ ...base, imageSrc: 'x" onerror="alert(1)' })).toContain(
+      'src="x&quot; onerror=&quot;alert(1)"',
+    );
+    // Without a photo there is no box, whatever the source.
+    expect(
+      renderShiftTaskFormHtml({
+        ...base,
+        imageChecksum: null,
+        imageSrc: "data:image/jpeg;base64,x",
+      }),
+    ).not.toContain("<img");
+  });
+
   it("drops the photo box entirely when the product has no image", () => {
     const html = renderShiftTaskFormHtml(fixture({ imageChecksum: null }));
 
