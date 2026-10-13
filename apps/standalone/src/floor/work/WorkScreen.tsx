@@ -8,10 +8,11 @@ import {
   useState,
   type CSSProperties,
   type MutableRefObject,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, SignalOverlay, type SignalTone } from "@markiro/ui";
+import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 
 import type { FloorSession } from "../../app/shell.js";
 import type { SystemAwake } from "../../hardware/awake.js";
@@ -51,6 +52,7 @@ import {
   reprintPallet,
   type ClosedPallet,
 } from "../exceptions/pallet-exceptions.js";
+import { PalletStrip } from "../pallets/PalletStrip.js";
 import {
   closeOpenPallet,
   closePalletIfFull,
@@ -109,6 +111,16 @@ import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
 import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
+import {
+  BoxFill,
+  FooterAction,
+  LastScan,
+  ShiftBand,
+  WorkFacts,
+  WorkFooter,
+  type LastTone,
+} from "./WorkInstruments.js";
+import "./work-screen.css";
 
 /**
  * What the floor gives the work screen of a shift (the contract plans 2a6–2a8
@@ -388,6 +400,23 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
       return t("floor.work.last.closed");
     case "office_closed":
       return t("floor.work.last.officeClosed");
+  }
+}
+
+/** The tone of the last scan's verdict: accepted, refused, not taken, or none yet. */
+function lastTone(last: Last | null): LastTone {
+  if (last === null) return "neutral";
+  switch (last.kind) {
+    case "accepted":
+      return "ok";
+    case "duplicate":
+    case "wrong_gtin":
+    case "invalid":
+      return "error";
+    case "paused":
+    case "shift_closed":
+    case "office_closed":
+      return "warn";
   }
 }
 
@@ -794,7 +823,7 @@ export function WorkScreen(props: WorkScreenProps) {
     [],
   );
   const confirmRef = useRef<HTMLDivElement>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLElement>(null);
   const lastRef = useRef<HTMLParagraphElement>(null);
   // Counted when the operator answers a message: the element that held the
   // focus is gone after that render, and the focus goes to a safe place instead.
@@ -2037,227 +2066,257 @@ export function WorkScreen(props: WorkScreenProps) {
   // its capacity (it closed, or a box was taken off it), nothing waits any more.
   const palletWaitsNow =
     pallet !== null && pallets !== null && pallet.boxCount >= pallets.capacity ? palletWaits : null;
+  // A stage of the work takes the place of the instruments (the cloud's exceptions do):
+  // the exceptions, the close and its end, a label that waits. The instruments stay
+  // mounted under it, out of reach, so that the last scan still says what became of a scan.
+  const staged =
+    stop?.kind === "exceptions" ||
+    stop?.kind === "close" ||
+    stop?.kind === "closed" ||
+    stop?.kind === "label";
+  const facts = [
+    { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
+    {
+      term: t("floor.work.plan"),
+      value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
+    },
+    ...(totals !== null && totals.lastSscc !== null
+      ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
+      : []),
+  ];
+  /** A stop's card over the work: the cloud's overlay alert, its action row under the words. */
+  const card = (
+    tone: "ok" | "warn" | "error",
+    title: string,
+    body: ReactNode,
+    actions: ReactNode = null,
+  ) => (
+    <Alert
+      tone={tone}
+      role="presentation"
+      className="work-overlay"
+      title={<span className="work-overlay__title">{title}</span>}
+    >
+      <div className="work-overlay__body">
+        {body}
+        {actions !== null && <div className="work-overlay__actions">{actions}</div>}
+      </div>
+    </Alert>
+  );
+  /** «Повторить» of a stop: on the keyboard while the leave waits, and a press that does nothing. */
+  const retry = (onClick: () => void) => (
+    <Button
+      size="floor"
+      variant="secondary"
+      aria-disabled={leaving ? true : undefined}
+      style={leaving ? WAITING_STYLE : undefined}
+      onClick={onClick}
+    >
+      {t("floor.work.retry")}
+    </Button>
+  );
 
   return (
-    <Card
-      className="standalone-card work-screen"
-      title={t("floor.work.title", { number: shift.copy.number })}
-      titleAs="h2"
+    <main
+      className="work-screen"
+      aria-label={t("floor.work.title", { number: shift.copy.number })}
+      ref={actionsRef}
     >
-      <div className="standalone-form">
-        {officeClosed && stop?.kind !== "closed" && (
-          <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
-            {t("floor.work.officeClosed.body")}
-          </Alert>
-        )}
-        <p className="shift-card__product">
-          {t("floor.work.product", {
-            name: shift.snapshot.product.name,
-            gtin: shift.snapshot.product.gtin14,
-          })}
-        </p>
-        <dl className="work-screen__facts">
-          <div>
-            <dt>{t("floor.work.box")}</dt>
-            <dd>
-              {items === 0
-                ? t("floor.work.boxEmpty")
-                : t("floor.work.boxItems", {
-                    quantity: formatQuantity(items),
-                    capacity: formatQuantity(capacity),
-                  })}
-            </dd>
-          </div>
-          <div>
-            <dt>{t("floor.work.accepted")}</dt>
-            <dd>{formatQuantity(totals?.accepted ?? 0)}</dd>
-          </div>
-          <div>
-            <dt>{t("floor.work.closedBoxes")}</dt>
-            <dd>{formatQuantity(totals?.closedBoxes ?? 0)}</dd>
-          </div>
-          <div>
-            <dt>{t("floor.work.plan")}</dt>
-            <dd>{plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty)}</dd>
-          </div>
-          {pallets !== null && (
-            <div>
-              <dt>{t("floor.work.pallet")}</dt>
-              <dd>
-                {t("floor.work.palletBoxes", {
-                  quantity: formatQuantity(palletBoxes),
-                  capacity: formatQuantity(pallets.capacity),
-                })}
-              </dd>
-            </div>
-          )}
-          {totals !== null && totals.lastSscc !== null && (
-            <div>
-              <dt>{t("floor.work.lastSscc")}</dt>
-              <dd>{formatSsccHri(totals.lastSscc)}</dd>
-            </div>
-          )}
-        </dl>
-        {/*
-          A refusal is announced by its flash (an alert); this line keeps every
-          verdict in words, and an accepted scan lights it for a moment (the tone
-          and the counts carry the rest: no overlay, no announcement per scan).
-        */}
-        <p
-          className={cued ? "work-screen__last work-screen__last--cue" : "work-screen__last"}
-          ref={lastRef}
-          tabIndex={-1}
-        >
-          {last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
-        </p>
-        {/*
-          The stops and notices share one polite region that is on the screen
-          before any of them, so each is heard once, when it comes; the alerts
-          lose their own role (`presentation`) for that reason.
-        */}
-        <div className="work-screen__alerts" aria-live="polite">
-          {stop?.kind === "system_error" && (
-            <Alert
-              tone="error"
-              role="presentation"
-              title={t(`floor.work.systemError.${stop.cause}.title`)}
-              action={
-                <Button size="floor" variant="secondary" onClick={dismissSystemError}>
-                  {t("floor.work.systemError.dismiss")}
-                </Button>
-              }
-            >
-              {t(`floor.work.systemError.${stop.cause}.body`)}
+      <div className="work-screen__content">
+        {/* Under a stage the instruments are out of reach (`inert`), and still say the last scan. */}
+        <div className="work-screen__work" inert={staged}>
+          <ShiftBand
+            productName={shift.snapshot.product.name}
+            gtin={shift.snapshot.product.gtin14}
+            number={shift.copy.number}
+            counterpartyName={shift.snapshot.counterpartyName}
+            accepted={totals?.accepted ?? 0}
+            plannedQty={plannedQty}
+          />
+          {officeClosed && stop?.kind !== "closed" && (
+            <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
+              {t("floor.work.officeClosed.body")}
             </Alert>
           )}
-          {stop?.kind === "no_serials" && (
-            <Alert
-              tone="warn"
-              role="presentation"
-              title={t("floor.work.noSerials.title")}
-              action={
-                <Button
-                  size="floor"
-                  variant="secondary"
-                  aria-disabled={leaving ? true : undefined}
-                  style={leaving ? WAITING_STYLE : undefined}
-                  onClick={() => closeNow(stop.full)}
-                >
-                  {t("floor.work.retry")}
-                </Button>
-              }
-            >
+          <div className="work-screen__instruments">
+            <div className="work-screen__primary">
+              <BoxFill
+                items={items}
+                capacity={capacity}
+                acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
+                actions={
+                  !confirming && (
+                    <Button
+                      size="floor"
+                      variant="secondary"
+                      data-action="close-box"
+                      disabled={!canClose}
+                      onClick={() => setStop({ kind: "confirm_close" })}
+                    >
+                      {t("floor.work.closeBox")}
+                    </Button>
+                  )
+                }
+              />
+              {pallets !== null && (
+                <PalletStrip
+                  boxCount={palletBoxes}
+                  capacity={pallets.capacity}
+                  closeDisabled={palletBoxes === 0 || stop !== null || leaving}
+                  onClose={() => setStop({ kind: "confirm_pallet" })}
+                  warning={
+                    palletWaitsNow === null
+                      ? null
+                      : {
+                          title: t("floor.work.palletWaits.title"),
+                          body: t(
+                            palletWaitsNow === "invalid"
+                              ? "floor.work.palletWaits.invalid"
+                              : "floor.work.palletWaits.body",
+                          ),
+                        }
+                  }
+                />
+              )}
+            </div>
+            <div className="work-screen__secondary">
+              {/*
+                A refusal is announced by its flash (an alert); this line keeps every
+                verdict in words, and an accepted scan lights it for a moment (the tone
+                and the counts carry the rest: no overlay, no announcement per scan).
+              */}
+              <LastScan
+                text={last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
+                tone={lastTone(last)}
+                cued={cued}
+                lineRef={lastRef}
+              />
+              <WorkFacts facts={facts} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <WorkFooter label={t("floor.work.layout.actions")}>
+        <FooterAction
+          variant="secondary"
+          data-action="exceptions"
+          disabled={stop !== null || leaving}
+          onClick={openExceptions}
+        >
+          {t("floor.exceptions.open")}
+        </FooterAction>
+        {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
+        <FooterAction
+          variant="warning-outline"
+          aria-disabled={leaving ? true : undefined}
+          style={leaving ? WAITING_STYLE : undefined}
+          onClick={leaving ? undefined : onLeave}
+        >
+          {t("floor.work.leave")}
+        </FooterAction>
+        <FooterAction
+          variant="destructive-outline"
+          data-action="close-shift"
+          disabled={stop !== null || leaving}
+          onClick={openClose}
+        >
+          {t("floor.close.open")}
+        </FooterAction>
+      </WorkFooter>
+      {/*
+        The stops and notices share one polite region that is on the screen
+        before any of them, so each is heard once, when it comes; the alerts
+        lose their own role (`presentation`) for that reason. A stage of the
+        work sits in it too, over the instruments.
+      */}
+      <div className="work-screen__overlays work-screen__alerts" aria-live="polite">
+        {stop?.kind === "system_error" &&
+          card(
+            "error",
+            t(`floor.work.systemError.${stop.cause}.title`),
+            <p>{t(`floor.work.systemError.${stop.cause}.body`)}</p>,
+            <Button size="floor" variant="secondary" onClick={dismissSystemError}>
+              {t("floor.work.systemError.dismiss")}
+            </Button>,
+          )}
+        {stop?.kind === "no_serials" &&
+          card(
+            "warn",
+            t("floor.work.noSerials.title"),
+            <p>
               {t(
                 stop.reason === "offline" && linkHeld
                   ? "floor.work.noSerials.held"
                   : `floor.work.noSerials.${stop.reason}`,
               )}
-            </Alert>
+            </p>,
+            retry(() => closeNow(stop.full)),
           )}
-          {stop?.kind === "close_failed" && (
-            <Alert
-              tone="error"
-              role="presentation"
-              title={t("floor.work.closeFailed.title")}
-              action={
-                <Button
-                  size="floor"
-                  variant="secondary"
-                  aria-disabled={leaving ? true : undefined}
-                  style={leaving ? WAITING_STYLE : undefined}
-                  onClick={() => closeNow(stop.full)}
-                >
-                  {t("floor.work.retry")}
-                </Button>
-              }
+        {stop?.kind === "close_failed" &&
+          card(
+            "error",
+            t("floor.work.closeFailed.title"),
+            <p>{t(`floor.work.closeFailed.${stop.cause}`)}</p>,
+            retry(() => closeNow(stop.full)),
+          )}
+        {stop?.kind === "pallets_missing" &&
+          card(
+            "error",
+            t("floor.work.palletsMissing.title"),
+            <p>{t("floor.work.palletsMissing.body")}</p>,
+          )}
+        {stop?.kind === "pallet_no_serials" &&
+          card(
+            "warn",
+            t("floor.work.palletNoSerials.title"),
+            <>
+              <p>
+                {t(
+                  stop.reason === "offline" && linkHeld
+                    ? "floor.work.palletNoSerials.held"
+                    : `floor.work.palletNoSerials.${stop.reason}`,
+                )}
+              </p>
+              {stop.fromClose && <p>{t("floor.work.palletShiftOpen")}</p>}
+            </>,
+            retry(closePalletNow),
+          )}
+        {stop?.kind === "pallet_failed" &&
+          card(
+            "error",
+            t("floor.work.palletFailed.title"),
+            <>
+              <p>{t("floor.work.palletFailed.body")}</p>
+              {stop.fromClose && <p>{t("floor.work.palletShiftOpen")}</p>}
+            </>,
+            retry(closePalletNow),
+          )}
+        {planReached &&
+          card(
+            "ok",
+            t("floor.work.planReached", {
+              quantity: formatQuantity(totals?.accepted ?? 0),
+              planned: formatQuantity(plannedQty ?? 0),
+            }),
+            null,
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => dismiss(() => setPlanReached(false))}
             >
-              {t(`floor.work.closeFailed.${stop.cause}`)}
-            </Alert>
+              {t("floor.work.continue")}
+            </Button>,
           )}
-          {stop?.kind === "pallets_missing" && (
-            <Alert tone="error" role="presentation" title={t("floor.work.palletsMissing.title")}>
-              {t("floor.work.palletsMissing.body")}
-            </Alert>
-          )}
-          {palletWaitsNow !== null && (
-            <Alert tone="warn" role="presentation" title={t("floor.work.palletWaits.title")}>
-              {t(
-                palletWaitsNow === "invalid"
-                  ? "floor.work.palletWaits.invalid"
-                  : "floor.work.palletWaits.body",
-              )}
-            </Alert>
-          )}
-          {stop?.kind === "pallet_no_serials" && (
-            <Alert
-              tone="warn"
-              role="presentation"
-              title={t("floor.work.palletNoSerials.title")}
-              action={
-                <Button
-                  size="floor"
-                  variant="secondary"
-                  aria-disabled={leaving ? true : undefined}
-                  style={leaving ? WAITING_STYLE : undefined}
-                  onClick={closePalletNow}
-                >
-                  {t("floor.work.retry")}
-                </Button>
-              }
-            >
-              {t(
-                stop.reason === "offline" && linkHeld
-                  ? "floor.work.palletNoSerials.held"
-                  : `floor.work.palletNoSerials.${stop.reason}`,
-              )}
-              {stop.fromClose && <div>{t("floor.work.palletShiftOpen")}</div>}
-            </Alert>
-          )}
-          {stop?.kind === "pallet_failed" && (
-            <Alert
-              tone="error"
-              role="presentation"
-              title={t("floor.work.palletFailed.title")}
-              action={
-                <Button
-                  size="floor"
-                  variant="secondary"
-                  aria-disabled={leaving ? true : undefined}
-                  style={leaving ? WAITING_STYLE : undefined}
-                  onClick={closePalletNow}
-                >
-                  {t("floor.work.retry")}
-                </Button>
-              }
-            >
-              {t("floor.work.palletFailed.body")}
-              {stop.fromClose && <div>{t("floor.work.palletShiftOpen")}</div>}
-            </Alert>
-          )}
-          {planReached && (
-            <Alert
-              tone="ok"
-              role="presentation"
-              title={t("floor.work.planReached", {
-                quantity: formatQuantity(totals?.accepted ?? 0),
-                planned: formatQuantity(plannedQty ?? 0),
-              })}
-              action={
-                <Button
-                  size="floor"
-                  variant="secondary"
-                  onClick={() => dismiss(() => setPlanReached(false))}
-                >
-                  {t("floor.work.continue")}
-                </Button>
-              }
-            />
-          )}
-          {waitingSerials && (
-            <p className="work-screen__waiting">{t("floor.work.waitingSerials")}</p>
-          )}
-          {sending && <p className="work-screen__waiting">{t("floor.print.sending")}</p>}
-          {stop?.kind === "exceptions" && (
+        {waitingSerials && (
+          <p className="work-overlay--note work-screen__waiting">
+            {t("floor.work.waitingSerials")}
+          </p>
+        )}
+        {sending && (
+          <p className="work-overlay--note work-screen__waiting">{t("floor.print.sending")}</p>
+        )}
+        {stop?.kind === "exceptions" && (
+          <div className="work-screen__stage">
             <ExceptionFlow
               openItems={items}
               boxes={stop.boxes}
@@ -2287,8 +2346,10 @@ export function WorkScreen(props: WorkScreenProps) {
               onBack={() => setStop(null)}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
-          )}
-          {stop?.kind === "close" && (
+          </div>
+        )}
+        {stop?.kind === "close" && (
+          <div className="work-screen__stage" data-centred="true">
             <ShiftClosePanel
               number={shift.copy.number}
               productName={shift.snapshot.product.name}
@@ -2304,8 +2365,10 @@ export function WorkScreen(props: WorkScreenProps) {
               onClosePallet={confirmPalletClose}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
-          )}
-          {stop?.kind === "closed" && (
+          </div>
+        )}
+        {stop?.kind === "closed" && (
+          <div className="work-screen__stage" data-centred="true">
             <ShiftClosedPanel
               number={shift.copy.number}
               record={stop.record}
@@ -2314,11 +2377,15 @@ export function WorkScreen(props: WorkScreenProps) {
               onDone={onLeave}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
-          )}
-          {stop?.kind === "label" && closeAfterLabel && (
-            <p className="work-screen__waiting">{t("floor.close.afterLabel")}</p>
-          )}
-          {stop?.kind === "label" && (
+          </div>
+        )}
+        {stop?.kind === "label" && (
+          <div className="work-screen__stage work-screen__label-stage" data-centred="true">
+            {closeAfterLabel && (
+              <p className="work-overlay--note work-screen__waiting">
+                {t("floor.close.afterLabel")}
+              </p>
+            )}
             <LabelPanel
               // A new job, state or attempt starts the panel afresh.
               key={`${stop.job.id}:${stop.job.state}:${stop.job.attempts}`}
@@ -2336,120 +2403,80 @@ export function WorkScreen(props: WorkScreenProps) {
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
-          )}
-        </div>
-        {confirming && (
-          <div className="work-screen__confirm" ref={confirmRef}>
-            <p>
-              {t("floor.work.confirmClose", {
-                quantity: formatQuantity(items),
-                capacity: formatQuantity(capacity),
-              })}
-            </p>
-            <div className="standalone-form__actions">
-              <Button size="floor" variant="secondary" onClick={() => dismiss(() => setStop(null))}>
-                {t("floor.work.keepFilling")}
-              </Button>
-              <Button
-                size="floor"
-                aria-disabled={leaving ? true : undefined}
-                style={leaving ? WAITING_STYLE : undefined}
-                onClick={() => closeNow(false)}
-              >
-                {t("floor.work.closeBox")}
-              </Button>
-            </div>
           </div>
         )}
-        {confirmingPallet && (
-          <div className="work-screen__confirm" ref={confirmRef}>
-            <p>
-              {t("floor.work.confirmPallet", {
-                quantity: formatQuantity(palletBoxes),
-                capacity: formatQuantity(pallets?.capacity ?? 0),
-              })}
-            </p>
-            <div className="standalone-form__actions">
-              <Button
-                size="floor"
-                variant="secondary"
-                onClick={() =>
-                  dismiss(() => {
-                    palletRefocus.current = true;
-                    setStop(null);
-                  })
-                }
-              >
-                {t("floor.work.keepPallet")}
-              </Button>
-              <Button
-                size="floor"
-                aria-disabled={leaving ? true : undefined}
-                style={leaving ? WAITING_STYLE : undefined}
-                onClick={closePalletNow}
-              >
-                {t("floor.work.closePallet")}
-              </Button>
-            </div>
-          </div>
-        )}
-        <div className="standalone-form__actions" ref={actionsRef}>
-          {!confirming && (
-            <Button
-              size="floor"
-              variant="secondary"
-              data-action="close-box"
-              disabled={!canClose}
-              onClick={() => setStop({ kind: "confirm_close" })}
-            >
-              {t("floor.work.closeBox")}
-            </Button>
-          )}
-          {pallets !== null && (
-            <Button
-              size="floor"
-              variant="secondary"
-              data-action="close-pallet"
-              disabled={palletBoxes === 0 || stop !== null || leaving}
-              onClick={() => setStop({ kind: "confirm_pallet" })}
-            >
-              {t("floor.work.closePalletEarly")}
-            </Button>
-          )}
-          <Button
-            size="floor"
-            variant="secondary"
-            data-action="exceptions"
-            disabled={stop !== null || leaving}
-            onClick={openExceptions}
-          >
-            {t("floor.exceptions.open")}
-          </Button>
-          <Button
-            size="floor"
-            variant="secondary"
-            data-action="close-shift"
-            disabled={stop !== null || leaving}
-            onClick={openClose}
-          >
-            {t("floor.close.open")}
-          </Button>
-          {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
-          <Button
-            size="floor"
-            variant="secondary"
-            aria-disabled={leaving ? true : undefined}
-            style={leaving ? WAITING_STYLE : undefined}
-            onClick={leaving ? undefined : onLeave}
-          >
-            {t("floor.work.leave")}
-          </Button>
-        </div>
-        {/* Always on the screen, so that the text put into it is announced. */}
-        <p className="work-screen__leaving" aria-live="polite">
-          {leaving ? t("floor.work.leaving") : ""}
-        </p>
       </div>
+      {(confirming || confirmingPallet) && (
+        <div className="work-screen__overlays">
+          {confirming && (
+            <div ref={confirmRef}>
+              {card(
+                "warn",
+                t("floor.work.confirmClose", {
+                  quantity: formatQuantity(items),
+                  capacity: formatQuantity(capacity),
+                }),
+                null,
+                <>
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    onClick={() => dismiss(() => setStop(null))}
+                  >
+                    {t("floor.work.keepFilling")}
+                  </Button>
+                  <Button
+                    size="floor"
+                    aria-disabled={leaving ? true : undefined}
+                    style={leaving ? WAITING_STYLE : undefined}
+                    onClick={() => closeNow(false)}
+                  >
+                    {t("floor.work.closeBox")}
+                  </Button>
+                </>,
+              )}
+            </div>
+          )}
+          {confirmingPallet && (
+            <div ref={confirmRef}>
+              {card(
+                "warn",
+                t("floor.work.confirmPallet", {
+                  quantity: formatQuantity(palletBoxes),
+                  capacity: formatQuantity(pallets?.capacity ?? 0),
+                }),
+                null,
+                <>
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    onClick={() =>
+                      dismiss(() => {
+                        palletRefocus.current = true;
+                        setStop(null);
+                      })
+                    }
+                  >
+                    {t("floor.work.keepPallet")}
+                  </Button>
+                  <Button
+                    size="floor"
+                    aria-disabled={leaving ? true : undefined}
+                    style={leaving ? WAITING_STYLE : undefined}
+                    onClick={closePalletNow}
+                  >
+                    {t("floor.work.closePallet")}
+                  </Button>
+                </>,
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Always on the screen, so that the text put into it is announced. */}
+      <p className="work-screen__leaving" aria-live="polite">
+        {leaving ? t("floor.work.leaving") : ""}
+      </p>
       {flash !== null && (
         // Never in the way of a tap: the words and the tone already say it.
         <div className="work-screen__flash" style={{ pointerEvents: "none" }}>
@@ -2460,6 +2487,6 @@ export function WorkScreen(props: WorkScreenProps) {
           />
         </div>
       )}
-    </Card>
+    </main>
   );
 }

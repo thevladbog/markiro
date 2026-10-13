@@ -26,7 +26,7 @@ import {
   TSC,
   ZEBRA,
 } from "./support/printing.js";
-import { lastLine, PRESS_PAUSE_MS, renderWork } from "./support/work-screen.js";
+import { lastLine, openBoxLine, PRESS_PAUSE_MS, renderWork } from "./support/work-screen.js";
 
 type Station = Awaited<ReturnType<typeof printStation>>;
 type Work = ReturnType<typeof renderWork>;
@@ -105,9 +105,9 @@ describe("the exceptions of the work screen", () => {
     ).not.toBeNull();
     await work.press("Вернуться к работе");
     expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
-    expect(screen.getByText("2 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("2 из 12");
     await work.scan(km("A3"));
-    expect(screen.getByText("3 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("3 из 12");
   });
 
   it("clears the open box only after the operator confirms, the quantity named", async () => {
@@ -161,7 +161,7 @@ describe("the exceptions of the work screen", () => {
     await work.press("Вернуться к работе");
     // The box's codes are free again: scanned again, they are accepted.
     await work.scan(km("P1"));
-    expect(screen.getByText("1 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("1 из 12");
   });
 
   it("prints a box's label again chosen by the last digits, with the words of «Другая причина»", async () => {
@@ -779,7 +779,7 @@ describe("what the exceptions do while the screen has not yet read the shift", (
   it("does not offer «Очистить короб» before the numbers were read, and names the real quantity after", async () => {
     const { held, work } = await openBehindHeldScan();
     // The screen still shows the two codes it knew; the third is being written.
-    expect(screen.getByText("2 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("2 из 12");
     expect(screen.getByRole("button", { name: "Очистить короб" }).hasAttribute("disabled")).toBe(
       true,
     );

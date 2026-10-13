@@ -1,0 +1,123 @@
+/*
+ * The pallet strip under the open box, ported from the cloud station
+ * (apps/station/src/station.css, «.pallet-strip»): the readout and its bar on
+ * the left, the early close beside them. Tokens from @markiro/ui.
+ */
+.pallet-strip {
+  display: grid;
+  padding: var(--sp-3);
+  gap: var(--sp-2) var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.pallet-strip__summary {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+/* Spaced like the sentence it is, «Паллета 15 из 66 коробов · 23 %». */
+.pallet-strip__readout {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.pallet-strip__readout dt {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.pallet-strip__readout dd {
+  margin: 0;
+}
+
+.pallet-strip__count {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--fg-1);
+  font: 600 22px/30px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pallet-strip__count .work-of-count__word {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pallet-strip__readout dd[data-highlight="true"] .work-of-count__number {
+    animation: pallet-count-added 300ms ease-out;
+  }
+}
+
+@keyframes pallet-count-added {
+  50% {
+    color: var(--ok-fg);
+  }
+}
+
+.pallet-strip__percent {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: nowrap;
+}
+
+.pallet-strip__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--r-1);
+  background: var(--surface-panel);
+}
+
+.pallet-strip__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--fg-2);
+}
+
+.pallet-strip__meta {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 400 15px/20px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pallet-strip__actions {
+  display: grid;
+  gap: var(--sp-2);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 200px);
+}
+
+.pallet-strip__actions .mk-btn {
+  min-width: 0 !important;
+  padding-inline: var(--sp-2) !important;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+/* The full pallet that waits for its close, under the strip, across both columns. */
+.pallet-strip__warning {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--warn-fg);
+  font: var(--floor-body);
+}
+
+.pallet-strip__warning:empty {
+  display: none;
+}
+
+.pallet-strip__warning strong {
+  font: var(--floor-body-strong);
+}
