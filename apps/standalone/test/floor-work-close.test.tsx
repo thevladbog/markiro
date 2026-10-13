@@ -17,7 +17,7 @@ import {
 } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { FIRST_SSCC, printStation } from "./support/printing.js";
-import { lastLine, renderWork, type WorkHarness } from "./support/work-screen.js";
+import { lastLine, openBoxLine, renderWork, type WorkHarness } from "./support/work-screen.js";
 
 type Station = Awaited<ReturnType<typeof printStation>>;
 
@@ -196,7 +196,7 @@ describe("the close of a shift on the work screen", () => {
     expect(screen.queryByRole("button", { name: "Подтвердить закрытие" })).toBeNull();
     await work.press("Назад к работе");
     await work.scan(km("A3"));
-    expect(screen.getByText("3 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("3 из 12");
     expect(localState(at)).toBeNull();
   });
 
@@ -338,7 +338,7 @@ describe("the close of a shift on the work screen", () => {
     broken = false;
     await work.press("Назад к работе");
     await work.scan(km("A1"));
-    expect(screen.getByText("1 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("1 из 12");
   });
 
   it("can try the close again after a failed write, and is not held by the first try", async () => {
@@ -893,7 +893,7 @@ describe("the close of a shift on the work screen", () => {
     broken = false;
     await work.press("Понятно");
     await work.scan(km("A1"));
-    expect(screen.getByText("1 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("1 из 12");
   });
 });
 
@@ -939,9 +939,9 @@ describe("the close of a shift on the work screen, in its races", () => {
     held.release();
     await work.settled();
     expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
-    expect(screen.getByText("1 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("1 из 12");
     await work.scan(km("Q2"));
-    expect(screen.getByText("2 из 12")).toBeTruthy();
+    expect(openBoxLine()).toBe("2 из 12");
   });
 
   it("ignores a second tap on the summary that replaced the one pressed: the new numbers are read first", async () => {
