@@ -1331,6 +1331,35 @@ async fn a_planned_shift_changes_its_mode_and_an_active_one_keeps_it() {
         (StatusCode::OK, json!("validation"), json!(10)),
         "{more}"
     );
+    // An active shift's mode and pallets are fixed: the refusal is its status,
+    // before the rules of the mode it would have (a validation shift with
+    // pallets) are looked at.
+    let rows = audit_rows(&admin.app).await;
+    let mut body = json!({ "palletsEnabled": true, "palletTemplateId": template });
+    body["expectedRev"] = more["rev"].clone();
+    let (status, refused) = admin.call("PUT", &path(&more), Some(body)).await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::CONFLICT,
+            (json!("conflict"), status_conflict.clone())
+        ),
+        "an active validation shift takes no pallets"
+    );
+    open_directly(&admin, &back).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&back),
+            Some(json!({ "mode": "validation", "expectedRev": back["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (StatusCode::CONFLICT, (json!("conflict"), status_conflict)),
+        "an active pallet shift does not become a validation one"
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
 #[tokio::test]

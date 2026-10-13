@@ -355,6 +355,15 @@ pub async fn create_shift(
 /// edit (plan А4; the product's, its category's or the organization's sheet,
 /// `default_sheet_for_product`): a later change of a default does not reach
 /// the shift.
+///
+/// The mode (plan РЕЖ, Р1) changes only while the shift is planned, and a
+/// validation shift has no pallets (`check_mode_rules`: `validation_failed`
+/// on `palletsEnabled`, before either pallet field is checked). An active
+/// shift that sends another mode, or pallets its mode cannot have, is
+/// `conflict` on `shift_status` like any other fixed field. The pallet
+/// fields' own shape (`shifts::pallet_request`, e.g. pallets turned on with
+/// no template: `palletTemplateId`) is checked before the status, for any
+/// shift, as it was before the mode existed.
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -409,9 +418,14 @@ pub async fn update_shift(
     // edit sends neither field.
     let pallets_enabled = update.pallets_enabled.unwrap_or(current.pallets_enabled);
     // The mode the shift would have and its pallets, checked together before
-    // either pallet field is, so the refusal names the flag (plan РЕЖ).
+    // either pallet field is, so the refusal names the flag (plan РЕЖ). Only
+    // a planned shift changes them: an active or closed one that sends a
+    // change is refused on its status below, not on the rules of a mode it
+    // cannot take (and one that sends none already keeps them).
     let mode = update.mode.unwrap_or(current.mode);
-    check_mode_rules(mode, pallets_enabled)?;
+    if current.status == ShiftStatus::Planned {
+        check_mode_rules(mode, pallets_enabled)?;
+    }
     let pallet_request = if pallets_enabled {
         shifts::pallet_request(
             true,

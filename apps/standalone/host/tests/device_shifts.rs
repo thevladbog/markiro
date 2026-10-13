@@ -774,7 +774,8 @@ async fn only_a_station_that_names_validation_enters_a_validation_shift() {
         );
     }
     // The list is bounded like the webview's: at most 32 names of 1-64
-    // characters.
+    // UTF-16 code units (Zod's string length), so 33 astral characters (66
+    // units) are too long.
     let field = (
         StatusCode::BAD_REQUEST,
         json!("validation_failed"),
@@ -784,6 +785,7 @@ async fn only_a_station_that_names_validation_enters_a_validation_shift() {
     for supports in [
         json!({ "supports": ["validation-v1", ""] }),
         json!({ "supports": ["validation-v1", "я".repeat(65)] }),
+        json!({ "supports": ["validation-v1", "😀".repeat(33)] }),
         json!({ "supports": many }),
     ] {
         assert_eq!(
@@ -907,6 +909,7 @@ async fn only_a_station_that_names_validation_enters_a_validation_shift() {
         json!({}),
         json!({ "supports": ["validation-v1"] }),
         json!({ "supports": ["я".repeat(64)] }),
+        json!({ "supports": ["😀".repeat(32)] }),
     ] {
         let (status, again) = enter_with(&admin, &admin.key, &aggregation, supports.clone()).await;
         assert_eq!(status, StatusCode::OK, "{supports}: {again}");
@@ -923,6 +926,41 @@ async fn only_a_station_that_names_validation_enters_a_validation_shift() {
             .await
         ),
         field
+    );
+
+    // The shift's own refusals come first: a station without the name (no
+    // body) hears why the shift is not its own, not that it must update.
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let (_, elsewhere) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &elsewhere, &setup.other_line).await;
+    let constraint = |(status, body): (StatusCode, Value)| {
+        (status, body["error"]["details"]["constraint"].clone())
+    };
+    assert_eq!(
+        constraint(enter(&admin, &colleague, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_busy")),
+        "owned by another station"
+    );
+    assert_eq!(
+        constraint(enter(&admin, &elsewhere, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_line")),
+        "on another line"
+    );
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
+         closed_by = ? WHERE id = ?",
+    )
+    .bind(admin.app.state.timestamp())
+    .bind(&station)
+    .bind(validation["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        constraint(enter(&admin, &admin.key, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_status")),
+        "closed"
     );
 }
 

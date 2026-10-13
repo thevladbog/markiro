@@ -323,18 +323,19 @@ pub fn device_registration<'a>(
 }
 
 /// The list a station names in a shift entry (`ShiftEnter.supports`, plan
-/// РЕЖ): at most 32 names of 1-64 characters, the bounds of the webview's
-/// `shiftEnterSchema`. A name is only compared with
+/// РЕЖ): at most 32 names of 1-64 UTF-16 code units, the bounds of the
+/// webview's `shiftEnterSchema` (Zod counts a string's `length`, so an
+/// astral character is two). A name is only compared with
 /// `markiro_proto::shift_supports`, never stored, so nothing else is asked.
 pub fn shift_supports(supports: &[String]) -> Result<(), ApiError> {
     if supports.len() > 32
         || !supports
             .iter()
-            .all(|name| (1..=64).contains(&name.chars().take(65).count()))
+            .all(|name| (1..=64).contains(&name.encode_utf16().take(65).count()))
     {
         return Err(ApiError::validation(
             "supports",
-            "at most 32 names of 1-64 characters",
+            "at most 32 names of 1-64 UTF-16 code units",
         ));
     }
     Ok(())

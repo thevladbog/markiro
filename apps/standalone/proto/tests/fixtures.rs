@@ -87,6 +87,13 @@ fn hello_ignores_fields_added_by_newer_hosts() {
 #[test]
 fn envelope_decides_compatibility_before_the_rest() {
     let future: HelloEnvelope = serde_json::from_value(fixture("hello-future.json")).unwrap();
+    // The fixture stands for a later host: raising this build's protocol to
+    // it must fail here, so the fixture is raised too and never silently
+    // becomes the current host.
+    assert!(
+        future.protocol > markiro_proto::PROTOCOL_VERSION,
+        "hello-future.json must stay ahead of PROTOCOL_VERSION"
+    );
     assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(5, &future), Compatibility::Compatible);

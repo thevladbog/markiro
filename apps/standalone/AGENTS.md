@@ -1311,10 +1311,14 @@ refuses a validation shift to a station that does not name `validation-v1`:
 refusal), on the opening and on every entry again, after the shift's own
 refusals (`shift_status`, `shift_line`, `shift_busy`) and before anything is
 frozen or written; the shift stays planned. The list is bounded like
-`shiftEnterSchema` (at most 32 names of 1-64 characters, `validation_failed`
-on `supports`); an aggregation shift needs no name. The station shows the
-refusal as `floor.shifts.refused.station_update` («Обновите приложение
-станции»).
+`shiftEnterSchema` (at most 32 names of 1-64 UTF-16 code units, Zod's string
+length, `validation_failed` on `supports`); an aggregation shift needs no
+name. A station of protocol 4 or later shows the refusal as
+`floor.shifts.refused.station_update` («… Обновите приложение станции.»); an
+older one (protocol 3) has no mapping for it and shows its generic
+`floor.shifts.refused.failed` («Не удалось открыть смену. Попробуйте ещё
+раз.»), so on a site with such a station the office tells the operator to
+update the app.
 `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
 mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
@@ -2800,8 +2804,18 @@ pallets a shift takes no A4 sheet, the default one included); its box template
 and capacity stay, unprinted. A planned shift changes its mode by an edit
 (`details.changed` names `mode` with its `{ from, to }`; `shift.create` names
 `mode` only for a validation shift, as it names a sheet only for a shift with
-one); an active one keeps it (`conflict` on `shift_status`). A station's own
-shift (`DeviceShiftCreate`) is always aggregation. A shift with pallets (`palletsEnabled`, plan
+one); an active one keeps it (`conflict` on `shift_status`). The order of an
+edit's refusals (`update_shift`): the shape of each field first (the pallet
+fields' own rules of `shifts::pallet_request` included, for any status: an
+active shift sent `palletsEnabled: true` without a template is
+`validation_failed` on `palletTemplateId`, as before plan РЕЖ); the mode's
+rule (`check_mode_rules`) only for a planned shift; then the status, so an
+active shift sent another mode, or pallets its validation mode cannot have,
+is `conflict` on `shift_status`, not `validation_failed`; then, for a planned
+shift, the line, templates and counterparty that change. A station's own
+shift (`DeviceShiftCreate`) is created as aggregation, planned until a
+station enters it; while it is planned the office may still edit it like any
+planned shift, its mode included. A shift with pallets (`palletsEnabled`, plan
 ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
 product (`templates::fits` for the pallet purpose; `validation_failed` on
 `palletTemplateId` otherwise, a missing one included) and a pallet capacity of
