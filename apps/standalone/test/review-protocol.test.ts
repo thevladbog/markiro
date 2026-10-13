@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  CONFLICT_MAX_PAGE,
+  CONFLICT_PAGE_SIZE,
+  SHIFT_REVIEW_LIMIT,
   conflictsPath,
   officeConflictPageSchema,
   officeShiftExceptionsSchema,
@@ -22,6 +25,23 @@ describe.each([
 ] as const)("review fixture %s (plan КНФ)", (name, schema) => {
   it("parses without losing a field", () => {
     expect(schema.parse(fixture(name))).toEqual(fixture(name));
+  });
+});
+
+describe("officeConflictPageSchema", () => {
+  const page = officeConflictPageSchema.parse(fixture("office-conflict-page.json"));
+  const first = page.items[0];
+  it.each([
+    ["an unknown kind", { ...page, items: [{ ...first, kind: "twice" }] }],
+    ["a hash in upper case", { ...page, items: [{ ...first, codeHash: "A".repeat(64) }] }],
+    ["a short hash", { ...page, items: [{ ...first, codeHash: "0".repeat(63) }] }],
+    ["page 0", { ...page, page: 0 }],
+  ])("refuses %s", (_, value) => {
+    expect(officeConflictPageSchema.safeParse(value).success).toBe(false);
+  });
+
+  it("keeps the limits of markiro_proto::review", () => {
+    expect([CONFLICT_PAGE_SIZE, CONFLICT_MAX_PAGE, SHIFT_REVIEW_LIMIT]).toEqual([50, 200, 500]);
   });
 });
 

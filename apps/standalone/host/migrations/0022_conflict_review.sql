@@ -24,8 +24,9 @@ WHERE EXISTS (
 ALTER TABLE code_conflicts ADD COLUMN reviewed_by TEXT REFERENCES office_users (id)
   CHECK ((reviewed_by IS NULL) = (reviewed_at IS NULL));
 
--- A device asks after its own scans' conflicts, and the office filters by
--- the losing shift: both go through the loser's scan.
+-- A device asks after its own scans' conflicts by their scans (plan КНФ,
+-- task 7). The office's filter by the losing shift reads the list in its
+-- order and looks each loser's scan up by its key instead.
 CREATE INDEX code_conflicts_loser ON code_conflicts (loser_scan_id);
 -- The office's list reads newest detection first, a device's displacements
 -- oldest first after a cursor.

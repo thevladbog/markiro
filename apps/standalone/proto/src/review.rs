@@ -3,7 +3,9 @@
 //! `POST …/{id}/review`), a shift's exceptions and its refused records
 //! (`GET /v1/office/shifts/{id}/exceptions`, `…/rejections`). The full code
 //! never travels this way: a conflict names its code by hash, GTIN and serial.
-//! Answers are lenient (a field a newer host adds is tolerated);
+//! Answers are lenient (a field a newer host adds is tolerated; the webview
+//! also reads a refused record's `kind` as any text, where this crate keeps
+//! the kinds it knows — the host stores no other);
 //! `proto/fixtures/office-{conflict-page,shift-exceptions,shift-rejections}.json`
 //! hold the shapes both sides read.
 

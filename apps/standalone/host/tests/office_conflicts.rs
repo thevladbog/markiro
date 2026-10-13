@@ -41,6 +41,7 @@ async fn migration_0022_gives_old_conflicts_their_kind_and_adds_the_review() {
         ("s-winner", "r-w"),
         ("s-displaced", "r-d"),
         ("s-late", "r-l"),
+        ("s-unreceipted", "r-u"),
     ] {
         sqlx::query(
             "INSERT INTO scans (id, record_id, device_id, shift_id, verdict, raw_kind, \
@@ -71,7 +72,12 @@ async fn migration_0022_gives_old_conflicts_their_kind_and_adds_the_review() {
         .await
         .unwrap();
     }
-    for (id, loser) in [("c-displaced", "s-displaced"), ("c-late", "s-late")] {
+    // A loser without a receipt (none should exist) stays `late`.
+    for (id, loser) in [
+        ("c-displaced", "s-displaced"),
+        ("c-late", "s-late"),
+        ("c-unreceipted", "s-unreceipted"),
+    ] {
         sqlx::query(
             "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, \
              detected_at) VALUES (?, ?, 's-winner', ?, '2026-10-08T06:00:01Z')",
@@ -100,6 +106,7 @@ async fn migration_0022_gives_old_conflicts_their_kind_and_adds_the_review() {
         vec![
             ("c-displaced".into(), "displaced".into(), None, None),
             ("c-late".into(), "late".into(), None, None),
+            ("c-unreceipted".into(), "late".into(), None, None),
         ]
     );
     let indexes: Vec<String> = sqlx::query_scalar(
@@ -276,44 +283,60 @@ async fn the_list_names_both_sides_of_each_conflict_newest_first_without_the_ful
 #[tokio::test]
 async fn the_list_narrows_by_the_losing_shift_and_by_review_and_checks_its_parameters() {
     let s = scene().await;
-    let ids = |page: &Value| -> Vec<String> {
-        page["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c["kind"].as_str().unwrap().to_owned())
-            .collect()
+    let late = conflict_id(&s.admin, &record_id(12)).await;
+    let displaced = conflict_id(&s.admin, &record_id(2)).await;
+    let list = |query: String| {
+        let admin = &s.admin;
+        async move {
+            let (status, page) = admin
+                .call("GET", &format!("/v1/office/conflicts{query}"), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{query}: {page}");
+            let ids: Vec<String> = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["id"].as_str().unwrap().to_owned())
+                .collect();
+            (page["total"].as_u64().unwrap(), ids)
+        }
     };
-    let (_, of_b) = s
-        .admin
-        .call(
-            "GET",
-            &format!("/v1/office/conflicts?shift={}", s.b.shift),
-            None,
-        )
-        .await;
-    assert_eq!(ids(&of_b), vec!["late"]);
-    let (_, of_a) = s
-        .admin
-        .call(
-            "GET",
-            &format!("/v1/office/conflicts?shift={}", s.a.shift),
-            None,
-        )
-        .await;
-    assert_eq!(ids(&of_a), vec!["displaced"]);
-    let (_, open) = s
-        .admin
-        .call("GET", "/v1/office/conflicts?reviewed=false", None)
-        .await;
-    assert_eq!(open["total"], 2);
-    let (_, done) = s
-        .admin
-        .call("GET", "/v1/office/conflicts?reviewed=true", None)
-        .await;
+    // The losing shift, not the winning one.
     assert_eq!(
-        (done["total"].clone(), done["items"].clone()),
-        (json!(0), json!([]))
+        list(format!("?shift={}", s.b.shift)).await,
+        (1, vec![late.clone()])
+    );
+    assert_eq!(
+        list(format!("?shift={}", s.a.shift)).await,
+        (1, vec![displaced.clone()])
+    );
+    // A shift the host does not have lists nothing (no `not_found`).
+    assert_eq!(
+        list("?shift=5a0c9e1e-3d4f-4b8a-9c2d-1e0f9a8b7c6d".to_owned()).await,
+        (0, vec![])
+    );
+    assert_eq!(
+        list("?reviewed=false".to_owned()).await,
+        (2, vec![late.clone(), displaced.clone()])
+    );
+    assert_eq!(list("?reviewed=true".to_owned()).await, (0, vec![]));
+    // Both criteria together, after B's conflict is reviewed.
+    let (status, _) = s
+        .admin
+        .call("POST", &format!("/v1/office/conflicts/{late}/review"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        list(format!("?shift={}&reviewed=true", s.b.shift)).await,
+        (1, vec![late.clone()])
+    );
+    assert_eq!(
+        list(format!("?shift={}&reviewed=false", s.b.shift)).await,
+        (0, vec![])
+    );
+    assert_eq!(
+        list(format!("?shift={}&reviewed=false", s.a.shift)).await,
+        (1, vec![displaced.clone()])
     );
     let (_, beyond) = s
         .admin
@@ -337,11 +360,78 @@ async fn the_list_narrows_by_the_losing_shift_and_by_review_and_checks_its_param
         assert_eq!(status, StatusCode::BAD_REQUEST, "{query}: {body}");
         assert_eq!(body["error"]["details"]["field"], field, "{query}");
     }
-    let (status, _) = s
+    let (status, body) = s
         .admin
         .call("GET", "/v1/office/conflicts?other=1", None)
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["code"], "validation_failed", "{body}");
+}
+
+/// 52 conflicts: a page holds 50, the second the rest, in one order across
+/// the pages; the page count follows.
+#[tokio::test]
+async fn the_list_pages_by_fifty_in_one_order() {
+    let s = scene().await;
+    // Fifty more rows over the scene's scans, each detected later than the last.
+    let (winner, loser): (String, String) = sqlx::query_as(
+        "SELECT winner_scan_id, loser_scan_id FROM code_conflicts WHERE kind = 'late'",
+    )
+    .fetch_one(&s.admin.app.state.pool)
+    .await
+    .unwrap();
+    for n in 0..50 {
+        sqlx::query(
+            "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, kind, \
+             detected_at) VALUES (?, ?, ?, ?, 'late', ?)",
+        )
+        .bind(format!("c0000000-0000-4000-8000-{n:012}"))
+        .bind(format!("{:064x}", 8))
+        .bind(&winner)
+        .bind(&loser)
+        .bind(format!("2099-01-01T00:00:{n:02}Z"))
+        .execute(&s.admin.app.state.pool)
+        .await
+        .unwrap();
+    }
+    let read = |query: &'static str| {
+        let admin = &s.admin;
+        async move {
+            let (status, page) = admin
+                .call("GET", &format!("/v1/office/conflicts{query}"), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{page}");
+            page
+        }
+    };
+    let first = read("").await;
+    let second = read("?page=2").await;
+    assert_eq!(
+        (&first["page"], &first["pageCount"], &first["total"]),
+        (&json!(1), &json!(2), &json!(52))
+    );
+    assert_eq!(
+        (&second["page"], &second["pageCount"], &second["total"]),
+        (&json!(2), &json!(2), &json!(52))
+    );
+    let ids = |page: &Value| -> Vec<String> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let (first, second) = (ids(&first), ids(&second));
+    assert_eq!((first.len(), second.len()), (50, 2));
+    // Newest detection first: the inserted rows 49…0, then the scene's two.
+    let mut expected: Vec<String> = (0..50)
+        .rev()
+        .map(|n| format!("c0000000-0000-4000-8000-{n:012}"))
+        .collect();
+    expected.push(conflict_id(&s.admin, &record_id(12)).await);
+    expected.push(conflict_id(&s.admin, &record_id(2)).await);
+    assert_eq!([first, second].concat(), expected);
 }
 
 #[tokio::test]

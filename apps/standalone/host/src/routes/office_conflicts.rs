@@ -214,7 +214,10 @@ pub async fn list_conflicts(
     Ok(Json(OfficeConflictPage {
         items: rows.into_iter().map(conflict).collect::<Result<_, _>>()?,
         page,
-        page_count: total.div_ceil(CONFLICT_PAGE_SIZE).max(1),
+        // The list reaches `CONFLICT_MAX_PAGE` pages; `total` stays exact.
+        page_count: total
+            .div_ceil(CONFLICT_PAGE_SIZE)
+            .clamp(1, CONFLICT_MAX_PAGE),
         total,
     }))
 }
@@ -237,7 +240,7 @@ pub async fn review_conflict(
         return Ok(Json(current));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    sqlx::query(
+    let updated = sqlx::query(
         "UPDATE code_conflicts SET reviewed_at = ?, reviewed_by = ? \
          WHERE id = ? AND reviewed_at IS NULL",
     )
@@ -247,6 +250,10 @@ pub async fn review_conflict(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    // The write lock holds since the read above: no audit row without its review.
+    if updated.rows_affected() != 1 {
+        return Err(ApiError::internal("the conflict's review was not written"));
+    }
     audit::record(
         &mut tx,
         &at,
