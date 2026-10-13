@@ -987,8 +987,16 @@ async fn a_beer_product_keeps_its_trimmed_egais_code() {
         .unwrap();
     assert_eq!(stored.as_deref(), Some("0150320000001234567"));
     assert_eq!(
-        audit_trail(&admin.app, "product.create").await[0].6["egaisCode"],
-        "0150320000001234567"
+        audit_trail(&admin.app, "product.create").await,
+        vec![admin.row(
+            "product.create",
+            "product",
+            created["id"].as_str().unwrap(),
+            json!({
+                "gtin14": "04607001234560", "name": "Пиво светлое 0,5 л",
+                "egaisCode": "0150320000001234567", "defaultCounterpartyId": null
+            })
+        )]
     );
     // A blank code is none.
     let mut body = beer();
@@ -1021,6 +1029,22 @@ async fn an_egais_code_outside_group_15_is_refused() {
         );
     }
     assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+#[tokio::test]
+async fn a_code_sent_outside_group_15_is_refused_before_the_product_is_read() {
+    let admin = admin().await;
+    let mut body = milk();
+    body["egaisCode"] = json!("0150320000001234567");
+    body["archived"] = json!(false);
+    body["expectedRev"] = json!(1);
+    let unknown = format!("/v1/office/products/{}", uuid::Uuid::new_v4());
+    let (status, error) = admin.call("PUT", &unknown, Some(body)).await;
+    assert_eq!(
+        (status, error["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("egaisCode")),
+        "{error}"
+    );
 }
 
 #[tokio::test]
@@ -1137,6 +1161,18 @@ async fn the_default_counterparty_must_be_in_use() {
     body["defaultCounterpartyId"] = north["id"].clone();
     let created = create(&admin, body).await;
     assert_eq!(created["defaultCounterpartyId"], north["id"]);
+    assert_eq!(
+        audit_trail(&admin.app, "product.create").await,
+        vec![admin.row(
+            "product.create",
+            "product",
+            created["id"].as_str().unwrap(),
+            json!({
+                "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
+                "egaisCode": null, "defaultCounterpartyId": north["id"]
+            })
+        )]
+    );
     // Archiving it later keeps the product's pointer, and an update that
     // keeps it is not refused.
     let mut archive = north.clone();

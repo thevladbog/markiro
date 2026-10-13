@@ -540,9 +540,11 @@ export const productGroupSchema = z.object({
 export type ProductGroup = z.infer<typeof productGroupSchema>;
 
 /**
- * A product's EGAIS code as the host keeps it (plan ТОВ, the cloud's
+ * A product's EGAIS code as the office sends it (plan ТОВ, the cloud's
  * `egaisCode`): 1 to 64 characters after trimming; only a product of ЧЗ
- * group 15 carries one (the host's rule).
+ * group 15 carries one (the host's rule). Answers read it as any text, as
+ * every other text of an answer, so a bound counted otherwise never fails
+ * the products list or a shift's snapshot.
  */
 export const egaisCodeSchema = z.string().min(1).max(64);
 
@@ -571,7 +573,7 @@ export const officeProductSchema = z.object({
   defaultBoxTemplateId: z.uuid().nullable(),
   defaultPalletTemplateId: z.uuid().nullable(),
   defaultPalletSheetId: z.uuid().nullable().default(null),
-  egaisCode: egaisCodeSchema.nullable().default(null),
+  egaisCode: z.string().nullable().default(null),
   defaultCounterpartyId: z.uuid().nullable().default(null),
   photoChecksum: sha256HexSchema.nullable().default(null),
   archived: z.boolean(),
@@ -924,7 +926,7 @@ export const shiftSnapshotProductSchema = z.object({
   chzProductGroupCode: z.number().int().nonnegative(),
   shelfLifeDays: z.number().int().positive().nullable(),
   /** As the shift froze it (plan ТОВ); a snapshot of an older host has none. */
-  egaisCode: egaisCodeSchema.nullable().optional(),
+  egaisCode: z.string().nullable().optional(),
 });
 
 /**

@@ -199,6 +199,12 @@ impl Sent<'_> {
             .egais_code
             .map(|code| validate::egais_code("egaisCode", code))
             .transpose()?;
+        // A code sent is checked against the group sent before anything is
+        // read, so the refusal is the same for an unknown or stale product;
+        // a code left out is checked once the stored one is known.
+        if matches!(egais_code, Some(Some(_))) {
+            check_egais_group(self.chz_product_group_code)?;
+        }
         Ok(Fields {
             gtin14,
             name,
@@ -226,13 +232,22 @@ fn effective_egais_code(fields: &Fields, stored: Option<&str>) -> Result<Option<
         Some(sent) => sent.clone(),
         None => stored.map(str::to_owned),
     };
-    if code.is_some() && fields.chz_product_group_code != Some(validate::EGAIS_PRODUCT_GROUP_CODE) {
-        return Err(ApiError::validation(
-            "egaisCode",
-            "only a product of ЧЗ group 15 carries an EGAIS code",
-        ));
+    if code.is_some() {
+        check_egais_group(fields.chz_product_group_code)?;
     }
     Ok(code)
+}
+
+/// `validation_failed` on `egaisCode` unless the group is ЧЗ group 15.
+fn check_egais_group(group: Option<u32>) -> Result<(), ApiError> {
+    if group == Some(validate::EGAIS_PRODUCT_GROUP_CODE) {
+        Ok(())
+    } else {
+        Err(ApiError::validation(
+            "egaisCode",
+            "only a product of ЧЗ group 15 carries an EGAIS code",
+        ))
+    }
 }
 
 /// What the fields refer to exists: the product group, and for each default
@@ -341,11 +356,11 @@ pub async fn create_product(
 ) -> Result<Json<OfficeProduct>, ApiError> {
     context.require_catalog()?;
     let fields = Sent::from(&create).validate()?;
+    let egais_code = effective_egais_code(&fields, None)?;
+    let default_counterparty_id = fields.default_counterparty_id.clone().flatten();
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    let egais_code = effective_egais_code(&fields, None)?;
-    let default_counterparty_id = fields.default_counterparty_id.clone().flatten();
     context.require_catalog_in(&mut tx).await?;
     check_references(&mut tx, &fields).await?;
     check_default_counterparty(&mut tx, default_counterparty_id.as_deref(), None).await?;

@@ -382,23 +382,14 @@ pub const EGAIS_PRODUCT_GROUP_CODE: u32 = 15;
 /// The longest EGAIS code, the cloud's `egaisCode` bound.
 pub const MAX_EGAIS_CODE_CHARS: usize = 64;
 
-/// A product's EGAIS code (plan ТОВ, the cloud's `egaisCode`): trimmed, 1 to
-/// 64 characters, no control characters; `None` for none or a blank one.
+/// A product's EGAIS code (plan ТОВ, the cloud's `egaisCode`): free text by
+/// the rule every text field shares (`optional_text`: trimmed, 1 to 64
+/// characters, no control characters), `None` for none or a blank one.
 /// Nineteen digits are not required: the cloud's field does not require
-/// them, and a client's older products may carry another form.
+/// them, and a client's older products may carry another form (an A4 sheet
+/// refuses such a code, as the cloud's does).
 pub fn egais_code(field: &str, value: Option<&str>) -> Result<Option<String>, ApiError> {
-    let Some(value) = value else { return Ok(None) };
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    if trimmed.chars().count() > MAX_EGAIS_CODE_CHARS || trimmed.chars().any(char::is_control) {
-        return Err(ApiError::validation(
-            field,
-            "an EGAIS code is 1 to 64 characters without control characters",
-        ));
-    }
-    Ok(Some(trimmed.to_owned()))
+    optional_text(field, value, MAX_EGAIS_CODE_CHARS, "an EGAIS code")
 }
 
 /// The largest product photo the host keeps (plan ТОВ): 640 × 640, at most

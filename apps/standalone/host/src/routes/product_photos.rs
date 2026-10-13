@@ -6,7 +6,7 @@
 //! per product or none. It never parses the picture, as the organization's
 //! logo (`org_logo.rs`).
 //!
-//! A change takes no revision: the photo is not in the station feed or a
+//! The same photo sent again writes nothing. A change takes no revision: the photo is not in the station feed or a
 //! shift's snapshot — only the office's «Бланк смены» prints it — and the
 //! product's list names it by its checksum (`photoChecksum`). The audit row
 //! names the size, never the bytes. The request body is bounded by the
@@ -88,6 +88,17 @@ pub async fn put_photo(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
     check_product(&mut tx, &id).await?;
+    // The same photo again changes nothing: no write, no audit row; the
+    // answer is the stored photo, its time included.
+    if let Some(stored) = read_photo(&mut tx, &id).await? {
+        if (stored.width, stored.height, stored.checksum.as_str())
+            == (put.width, put.height, checksum.as_str())
+        {
+            return Ok(Json(ProductPhotoState {
+                photo: Some(stored),
+            }));
+        }
+    }
     sqlx::query(
         "INSERT INTO product_photos (product_id, width, height, data, checksum, updated_at) \
          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (product_id) DO UPDATE SET \

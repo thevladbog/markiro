@@ -1778,6 +1778,10 @@ describe("catalog shapes", () => {
       false,
     );
     expect(productCreateSchema.safeParse({ ...body, egaisCode: "" }).success).toBe(false);
+    // An answer reads the code as any text: a bound counted otherwise never fails the list.
+    expect(
+      officeProductSchema.parse({ ...beer, egaisCode: "1".repeat(65) }).egaisCode,
+    ).toHaveLength(65);
     expect(officeProductSchema.safeParse({ ...beer, photoChecksum: "ABC" }).success).toBe(false);
     expect(officeProductSchema.safeParse({ ...beer, defaultCounterpartyId: "x" }).success).toBe(
       false,

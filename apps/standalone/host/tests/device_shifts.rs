@@ -2747,3 +2747,32 @@ async fn a_product_without_an_egais_code_freezes_none() {
     let product = entered["snapshot"]["product"].as_object().unwrap();
     assert_eq!(product.get("egaisCode"), Some(&Value::Null));
 }
+
+/// A shift opened by a host before plan ТОВ keeps a snapshot without the
+/// EGAIS code: a re-entry after the update reads it as none.
+#[tokio::test]
+async fn a_snapshot_stored_before_plan_tov_reads_as_no_code() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    sqlx::query(
+        "UPDATE shifts SET snapshot = json_remove(snapshot, '$.product.egaisCode') WHERE id = ?",
+    )
+    .bind(shift["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let stored: String = sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert!(!stored.contains("egaisCode"), "{stored}");
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["snapshot"]["product"]["egaisCode"], Value::Null);
+    assert_eq!(again["snapshot"]["product"]["gtin14"], "04600682000013");
+}

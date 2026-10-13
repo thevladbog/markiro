@@ -8,7 +8,8 @@ use axum::http::StatusCode;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_rows, audit_trail, empty, host_revision, request, with_device, Admin,
+    admin, audit_rows, audit_trail, empty, host_revision, login, request, seed_office_user,
+    turn_the_user_off_at_the_next_activity, with_device, Admin,
 };
 
 /// `proto/fixtures/product-photo-put.json`: 13 bytes that start with the
@@ -206,12 +207,19 @@ async fn a_refused_photo_changes_nothing_and_audits_nothing() {
     crooked["dataBase64"] = json!("/9j/4AAQ*kZJRgABAQ==");
     let mut short = photo();
     short["dataBase64"] = json!(STANDARD.encode([0xFF, 0xD8, 0xFF]));
+    let mut not_jpeg = photo();
+    not_jpeg["dataBase64"] = json!(STANDARD.encode([0xFF, 0xD8, 0x00, 0x00]));
+    let mut long_text = photo();
+    // 400 001 characters of the base64 alphabet: refused before decoding.
+    long_text["dataBase64"] = json!("A".repeat(400_001));
     for (what, body, field) in [
         ("641 wide", wide, "width"),
         ("0 tall", tall, "height"),
         ("a PNG", png, "dataBase64"),
         ("crooked base64", crooked, "dataBase64"),
         ("three bytes", short, "dataBase64"),
+        ("FF D8 00 00", not_jpeg, "dataBase64"),
+        ("400 001 characters", long_text, "dataBase64"),
         ("300 001 bytes", jpeg_of(300_001), "dataBase64"),
     ] {
         let (status, error) = admin.call("PUT", &path(&id), Some(body)).await;
@@ -371,4 +379,50 @@ async fn migration_0023_keeps_the_products_of_an_older_database() {
         .await
         .unwrap();
     assert_eq!(photos, 0);
+}
+
+#[tokio::test]
+async fn the_same_photo_again_writes_nothing() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let (_, first) = admin.call("PUT", &path(&id), Some(photo())).await;
+    let rows = audit_rows(&admin.app).await;
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let (status, again) = admin.call("PUT", &path(&id), Some(photo())).await;
+    assert_eq!((status, again), (StatusCode::OK, first));
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// A user turned off after the extractor passed must not write: the routes
+/// read the role again inside their own write transaction.
+#[tokio::test]
+async fn a_technologist_turned_off_after_the_extractor_passed_writes_nothing() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    let before = stored(&admin, &id).await;
+    let mut other = jpeg_of(20);
+    other["width"] = json!(4);
+    for (method, body) in [("PUT", Some(other)), ("DELETE", None)] {
+        let login_name = format!("tech-{}", method.to_lowercase());
+        let user = seed_office_user(
+            &admin.app,
+            &login_name,
+            "technologist",
+            "technologist password",
+        )
+        .await;
+        let token = login(&admin.app, &admin.key, &login_name, "technologist password").await;
+        let rows = audit_rows(&admin.app).await;
+        turn_the_user_off_at_the_next_activity(&admin.app, &user).await;
+        admin.app.clock.advance(time::Duration::minutes(2));
+        let (status, error) = admin.call_as(&token, method, &path(&id), body).await;
+        assert_eq!(
+            (status, error["error"]["code"].clone()),
+            (StatusCode::UNAUTHORIZED, json!("unauthorized")),
+            "{method}: {error}"
+        );
+        assert_eq!(stored(&admin, &id).await, before, "{method}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{method}");
+    }
 }
