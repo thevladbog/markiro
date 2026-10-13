@@ -1297,6 +1297,10 @@ pub struct OfficeProduct {
     pub shelf_life_days: Option<u32>,
     pub default_box_template_id: Option<String>,
     pub default_pallet_template_id: Option<String>,
+    /// The A4 sheet the product's pallets print on (beta feedback): a
+    /// preference, as the two templates; not in the station feed.
+    #[serde(default)]
+    pub default_pallet_sheet_id: Option<String>,
     pub archived: bool,
     pub status: ProductStatus,
     pub rev: i64,
@@ -1323,11 +1327,16 @@ pub struct ProductCreate {
     pub default_box_template_id: Option<String>,
     #[serde(default)]
     pub default_pallet_template_id: Option<String>,
+    /// An A4 sheet (`pallet_sheet_templates`), never a label template.
+    #[serde(default)]
+    pub default_pallet_sheet_id: Option<String>,
 }
 
 /// `PUT /v1/office/products/{id}`: every field, like a counterparty, so an
 /// optional field left out or `null` is cleared (a missing `gtin14`, `name`,
-/// `archived` or `expectedRev` is refused); `archived: true` archives.
+/// `archived` or `expectedRev` is refused); `archived: true` archives. The
+/// one exception is `defaultPalletSheetId`, newer than the rest: left out it
+/// is kept, so an office from before it never clears a product's sheet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductUpdate {
@@ -1347,6 +1356,8 @@ pub struct ProductUpdate {
     pub default_box_template_id: Option<String>,
     #[serde(default)]
     pub default_pallet_template_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub default_pallet_sheet_id: Option<Option<String>>,
     pub archived: bool,
     pub expected_rev: i64,
 }
@@ -1427,9 +1438,12 @@ pub struct LabelTemplateUpdate {
 /// The templates' defaults as one document (`GET
 /// /v1/office/template-defaults`, and the answer of its `PUT`): the
 /// organization's default of each purpose and every category default, by
-/// code then purpose. `rev` is the document's revision: the newest of the
-/// organization's record, a category default and a cleared category
-/// default's tombstone.
+/// code then purpose, and the A4 sheets chosen by default beside the pallet
+/// labels: the organization's (`defaultPalletSheetId`, the column the sheets'
+/// own route sets too) and each category's, by code. `rev` is the document's
+/// revision: the newest of the organization's record, a category default and
+/// a cleared category default's tombstone (a change of the sheet defaults
+/// moves the organization's record).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateDefaults {
@@ -1437,7 +1451,21 @@ pub struct TemplateDefaults {
     pub default_pallet_template_id: Option<String>,
     pub default_duplicate_template_id: Option<String>,
     pub categories: Vec<CategoryTemplateDefault>,
+    #[serde(default)]
+    pub default_pallet_sheet_id: Option<String>,
+    #[serde(default)]
+    pub pallet_sheet_categories: Vec<CategoryPalletSheetDefault>,
     pub rev: i64,
+}
+
+/// A category's default A4 sheet: an entry of the templates' defaults. Not
+/// in the station feed (a station prints a sheet only from a shift's
+/// snapshot), so a cleared one leaves no tombstone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CategoryPalletSheetDefault {
+    pub chz_product_group_code: u32,
+    pub sheet_id: String,
 }
 
 /// A category default in `PUT /v1/office/template-defaults`.
@@ -1451,7 +1479,11 @@ pub struct CategoryTemplateDefaultInput {
 
 /// `PUT /v1/office/template-defaults`: the whole document over its `rev`.
 /// An organization default left out or `null` is none, and a category
-/// default left out of `categories` is cleared.
+/// default left out of `categories` is cleared. The sheet defaults are newer
+/// than the rest: `defaultPalletSheetId` and `palletSheetCategories` left out
+/// keep what is stored, so an office from before them clears nothing;
+/// `null` is no organization sheet, and a category left out of a sent list
+/// is cleared.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TemplateDefaultsUpdate {
@@ -1462,6 +1494,10 @@ pub struct TemplateDefaultsUpdate {
     #[serde(default)]
     pub default_duplicate_template_id: Option<String>,
     pub categories: Vec<CategoryTemplateDefaultInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub default_pallet_sheet_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_sheet_categories: Option<Vec<CategoryPalletSheetDefault>>,
     pub expected_rev: i64,
 }
 
