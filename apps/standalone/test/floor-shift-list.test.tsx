@@ -560,11 +560,13 @@ describe("the shifts of the station's line", () => {
 
     /** The polite region, there from the first render, and what sits in it. */
     function region(): HTMLElement {
-      const element = screen.getByText(
-        "Вошёл: Анна Кузнецова, табельный номер 0042.",
-      ).nextElementSibling;
-      if (!(element instanceof HTMLElement) || element.getAttribute("aria-live") !== "polite") {
-        throw new Error("no polite region after the prompt");
+      // The region stands in the screen's title row, beside the title and the operator.
+      const element = screen
+        .getByText("Вошёл: Анна Кузнецова, табельный номер 0042.")
+        .closest("header")
+        ?.querySelector('[aria-live="polite"]');
+      if (!(element instanceof HTMLElement)) {
+        throw new Error("no polite region in the title row");
       }
       return element;
     }
@@ -984,5 +986,48 @@ describe("the queue's entry (plan ОЧ)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await screen.findByText("Открываем смену…");
     expect(queue).toHaveProperty("disabled", true);
+  });
+});
+
+describe("the layout ported from the cloud station's shift selection", () => {
+  it("keeps the shift actions in one footer row and the warehouse reprint in the title row", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, { onSetup: vi.fn(), onWarehouse: vi.fn(), onQueue: vi.fn() });
+    await screen.findByRole("button", { name: "Открыть" });
+    const footer = screen.getByRole("contentinfo", { name: "Действия со сменами" });
+    for (const name of ["Новая смена", "Рабочее место", "Очередь отправки", "Сменить оператора"]) {
+      expect(within(footer).getByRole("button", { name })).toBeTruthy();
+    }
+    // The cloud station's top-right header action is where its warehouse entry stands.
+    const reprint = screen.getByRole("button", { name: "Повторная печать этикеток" });
+    expect(within(footer).queryByRole("button", { name: "Повторная печать этикеток" })).toBeNull();
+    expect(reprint.closest("header")).toBe(
+      screen.getByRole("heading", { name: "Смены линии" }).closest("header"),
+    );
+  });
+
+  it("shows two cards a page and pages through the rest, as the cloud station does", async () => {
+    const third: DeviceShift = {
+      ...PLANNED,
+      id: "5b0f9f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+      number: "OCT26-006",
+    };
+    const { executor } = await copiesOf([PLANNED, MINE, third]);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    expect(screen.getByText("OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("OCT26-006")).toBeNull();
+    const pager = screen.getByRole("navigation", { name: "Страницы смен" });
+    expect(within(pager).getByText("Страница 1 из 2")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Следующая страница" }));
+    expect(await screen.findByText("OCT26-006")).toBeTruthy();
+    expect(screen.queryByText("OCT26-004")).toBeNull();
+  });
+
+  it("offers no pager while every shift fits on one page", async () => {
+    const { executor } = await copiesOf([PLANNED, MINE]);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    expect(screen.queryByRole("navigation", { name: "Страницы смен" })).toBeNull();
   });
 });

@@ -1360,7 +1360,7 @@ describe("«Назад» from the new shift (minor 13)", () => {
       target: { value: "мол" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
-    await screen.findByText("Молоко 3,2% 0,9 л, GTIN 04600682000013");
+    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
     const again = (next: Options) =>
       view.rerender(floorOf(local, handlers, { workScreen: work.Work, ...next }));
     return { local, work, again };
@@ -1445,7 +1445,7 @@ describe("«Назад» from the new shift (minor 13)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Новая смена" }));
     await waitFor(() => expect(scanner.listening()).toBe(true));
     scanner.read("4600682000013");
-    await screen.findByText("Молоко 3,2% 0,9 л, GTIN 04600682000013");
+    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await waitFor(() =>
       expect(handlers.dispatch).toHaveBeenCalledWith({
