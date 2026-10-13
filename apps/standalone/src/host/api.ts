@@ -21,6 +21,7 @@ import {
   changesResponseSchema,
   codeCheckSchema,
   counterpartyRecordSchema,
+  employeeRecordSchema,
   deviceRecordSchema,
   deviceShiftSchema,
   deviceShiftsSchema,
@@ -62,6 +63,9 @@ import {
   type CounterpartyCreate,
   type CounterpartyRecord,
   type CounterpartyUpdate,
+  type EmployeeCreate,
+  type EmployeeRecord,
+  type EmployeeUpdate,
   type DeviceRecord,
   type DeviceShift,
   type DeviceShiftCreate,
@@ -186,6 +190,9 @@ export interface HostApi {
     id: string,
     update: CounterpartyUpdate,
   ) => Promise<CounterpartyRecord>;
+  listEmployees: (token: string) => Promise<EmployeeRecord[]>;
+  createEmployee: (token: string, create: EmployeeCreate) => Promise<EmployeeRecord>;
+  updateEmployee: (token: string, id: string, update: EmployeeUpdate) => Promise<EmployeeRecord>;
   listLines: (token: string) => Promise<OfficeLine[]>;
   createLine: (token: string, create: LineCreate) => Promise<OfficeLine>;
   updateLine: (token: string, id: string, update: LineUpdate) => Promise<OfficeLine>;
@@ -466,6 +473,23 @@ export function createHostApi(client: HostClient): HostApi {
         body: update,
         officeToken: token,
         schema: counterpartyRecordSchema,
+      }),
+    listEmployees: (token) =>
+      client.request("GET", "/v1/office/employees", {
+        officeToken: token,
+        schema: z.array(employeeRecordSchema),
+      }),
+    createEmployee: (token, create) =>
+      client.request("POST", "/v1/office/employees", {
+        body: create,
+        officeToken: token,
+        schema: employeeRecordSchema,
+      }),
+    updateEmployee: (token, id, update) =>
+      client.request("PUT", `/v1/office/employees/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: employeeRecordSchema,
       }),
     listLines: (token) =>
       client.request("GET", "/v1/office/lines", {
