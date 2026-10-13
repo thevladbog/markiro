@@ -13,6 +13,7 @@ import {
 import { errorProp } from "../../lib/form-error.js";
 import { FormDialog } from "../FormDialog.js";
 import { templateOptions } from "../template-options.js";
+import { searchableSelect } from "../select-search.js";
 import { freePurposes } from "./defaults-form.js";
 
 /** Group names in Russian order, with numbers by value. */
@@ -85,7 +86,7 @@ export function CategoryDefaultDialog({
       onClose={onClose}
     >
       <Select
-        native
+        {...searchableSelect(t)}
         label={t("office.templateDefaults.fields.category")}
         options={[
           { value: "", label: t("office.templateDefaults.noCategory") },
@@ -103,7 +104,6 @@ export function CategoryDefaultDialog({
         {...errorProp(codeError === null ? undefined : t(codeError))}
       />
       <Select
-        native
         label={t("office.templateDefaults.fields.purpose")}
         options={[
           { value: "", label: t("office.templateDefaults.noPurpose") },
@@ -124,7 +124,7 @@ export function CategoryDefaultDialog({
         {...errorProp(purposeError === null ? undefined : t(purposeError))}
       />
       <Select
-        native
+        {...searchableSelect(t)}
         label={t("office.templateDefaults.fields.template")}
         options={choices}
         value={templateId}

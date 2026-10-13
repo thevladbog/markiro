@@ -9,6 +9,7 @@ import type { OfficeProduct } from "../../host/protocol.js";
 import { productCreate, productUpdate, type ProductInput } from "../../host/requests.js";
 import { gtinRule, toGroupCode, toGtin14 } from "../../lib/rules.js";
 import { useProductGroups, useTemplates } from "../catalog-queries.js";
+import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -198,7 +199,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
         name="chzProductGroupCode"
         render={({ field }) => (
           <Select
-            native
+            {...searchableSelect(t)}
             label={t("office.products.fields.group")}
             options={groupOptions}
             value={field.value}
@@ -248,7 +249,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           name={name}
           render={({ field }) => (
             <Select
-              native
+              {...searchableSelect(t)}
               label={t(label)}
               hint={templatesHint}
               options={templateOptions(

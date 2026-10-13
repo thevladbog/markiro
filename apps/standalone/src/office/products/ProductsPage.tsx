@@ -159,7 +159,7 @@ export function ProductsPage() {
         >
           <Input
             label={t("office.products.search")}
-            hint={t("office.products.searchHint")}
+            placeholder={t("office.products.searchHint")}
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -167,7 +167,6 @@ export function ProductsPage() {
             }}
           />
           <Select
-            native
             label={t("office.products.stateFilter")}
             options={FILTERS.map((value) => ({
               value,

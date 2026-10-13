@@ -23,6 +23,13 @@ import {
   stockSheets,
   WATER,
 } from "./support/shifts.js";
+import {
+  chooseValueOn,
+  isSelectTrigger,
+  optionTextsOn,
+  shownOn,
+  valueOn,
+} from "./support/select.js";
 
 const TOKEN = "office-session-token";
 
@@ -50,21 +57,20 @@ function field(label: string): HTMLElement {
 }
 
 function set(label: string, value: string): void {
-  fireEvent.change(field(label), { target: { value } });
+  const control = field(label);
+  if (isSelectTrigger(control)) chooseValueOn(control, value);
+  else fireEvent.change(control, { target: { value } });
 }
 
 /** The texts of the options of the select labelled `label`. */
 function options(label: string): string[] {
-  return within(field(label))
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+  return optionTextsOn(field(label));
 }
 
 function valueOf(label: string): string {
   const control = field(label);
-  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
-    throw new Error(`${label} holds no value`);
-  }
+  if (isSelectTrigger(control)) return valueOn(control);
+  if (!(control instanceof HTMLInputElement)) throw new Error(`${label} holds no value`);
   return control.value;
 }
 
@@ -142,11 +148,10 @@ describe("office shifts: planning a shift", () => {
   it("offers the products in use by name with their GTINs, the active lines and the counterparties in use", async () => {
     await openCreate(shiftsSession());
     expect(options("Товар")).toEqual([
-      "Выберите товар",
       "Вода 0,5 л — 04601234000017",
       "Молоко 3,2% 0,9 л — 04600682000013",
     ]);
-    expect(options("Линия")).toEqual(["Выберите линию", "Линия 2", "Линия 10"]);
+    expect(options("Линия")).toEqual(["Линия 2", "Линия 10"]);
     expect(options("Контрагент")).toEqual(["Не выбран", "ООО «Северный берег»"]);
     expect(options("Шаблон этикетки короба")).toEqual(["Сначала выберите товар"]);
     expect((field("Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(true);
@@ -158,7 +163,6 @@ describe("office shifts: planning a shift", () => {
     expect(valueOf("Вместимость короба, шт")).toBe("12");
     expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
     expect(options("Шаблон этикетки короба")).toEqual([
-      "Выберите шаблон",
       "Коробка 58×40",
       "Молоко 100×72",
     ]);
@@ -167,7 +171,7 @@ describe("office shifts: planning a shift", () => {
     set("Товар", WATER.id);
     expect(valueOf("Вместимость короба, шт")).toBe("24");
     expect(valueOf("Шаблон этикетки короба")).toBe(BOX_58.id);
-    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40"]);
   });
 
   it("lets the product be chosen only once the templates and the defaults are read, so the template follows it", async () => {
@@ -201,7 +205,7 @@ describe("office shifts: planning a shift", () => {
     await openCreate(session);
     set("Товар", WATER.id);
     expect(valueOf("Шаблон этикетки короба")).toBe("");
-    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40"]);
   });
 
   it("plans the shift with the body built field by field, then closes, says so and reads the list again", async () => {
@@ -268,7 +272,7 @@ describe("office shifts: planning a shift", () => {
     expect(valueOf("Коробов на паллете")).toBe("40");
     // Milk has no pallet preference and its group no pallet default: the organization's.
     expect(valueOf("Шаблон этикетки паллеты")).toBe(PALLET.id);
-    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150"]);
     set("Коробов на паллете", " 32 ");
     submit();
     await screen.findByText("Смена OCT26-006 запланирована.");
@@ -350,7 +354,6 @@ describe("office shifts: planning a shift", () => {
     );
     await waitFor(() =>
       expect(options("Шаблон этикетки паллеты")).toEqual([
-        "Выберите шаблон",
         "Паллета 100×150 — не подходит",
       ]),
     );
@@ -418,13 +421,12 @@ describe("office shifts: planning a shift", () => {
     set("Товар", MILK.id);
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     expect(options("Шаблон этикетки паллеты")).toEqual([
-      "Выберите шаблон",
       "Паллета 100×150",
       "Паллета молочная",
     ]);
     set("Товар", WATER.id);
     // Water is not of group 8; the template of the organization still fits.
-    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150"]);
   });
 
   it("holds the pallet controls too while the write is on its way", async () => {
@@ -516,7 +518,6 @@ describe("office shifts: planning a shift", () => {
     );
     await waitFor(() =>
       expect(options("Шаблон этикетки короба")).toEqual([
-        "Выберите шаблон",
         "Коробка 58×40",
         "Молоко 100×72 — не подходит",
       ]),
@@ -845,7 +846,6 @@ describe("office shifts: planning a shift", () => {
     session.api.listProducts.mockResolvedValue([hostile]);
     await openCreate(session);
     expect(options("Товар")).toEqual([
-      "Выберите товар",
       `<img src="x" onerror="window.pwned = 1"> Сок — 04600682000013`,
     ]);
     expect(dialog().querySelector("img")).toBeNull();
@@ -963,9 +963,9 @@ describe("office shifts: planning a shift", () => {
       // so the select shows it - marked - rather than another record or «Не выбран».
       await waitFor(() => expect(options(label)).toContain(marked));
       expect(options(label).filter((text) => text.startsWith(name))).toEqual([marked]);
-      const control = field(label) as HTMLSelectElement;
-      expect(control.value).toBe(id);
-      expect(control.selectedOptions[0]?.textContent).toBe(marked);
+      const control = field(label);
+      expect(valueOn(control)).toBe(id);
+      expect(shownOn(control)).toBe(marked);
       // The refusal stays under the field, and the person picks another record.
       expect(messageOf(label)).not.toBeUndefined();
     },

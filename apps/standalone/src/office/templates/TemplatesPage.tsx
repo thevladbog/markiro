@@ -234,12 +234,11 @@ export function TemplatesPage() {
         >
           <Input
             label={t("office.templates.search")}
-            hint={t("office.templates.searchHint")}
+            placeholder={t("office.templates.searchHint")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <Select
-            native
             label={t("office.templates.purposeFilter")}
             options={PURPOSE_FILTERS.map((value) => ({
               value,
@@ -249,7 +248,6 @@ export function TemplatesPage() {
             onValueChange={setPurpose}
           />
           <Select
-            native
             label={t("office.templates.stateFilter")}
             options={STATE_FILTERS.map((value) => ({
               value,

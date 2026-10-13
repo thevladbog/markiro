@@ -24,6 +24,7 @@ import {
 
 import type { OfficeShift, ShiftMode, ShiftStatus } from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
@@ -436,7 +437,6 @@ export function ShiftsPage() {
               })
             : ""
         }
-        {...(filtersOn ? { resetLabel: t("office.shifts.reset"), onReset: resetFilters } : {})}
       >
         <Input
           label={t("office.shifts.search")}
@@ -447,7 +447,6 @@ export function ShiftsPage() {
           }}
         />
         <Select
-          native
           label={t("office.shifts.statusFilter")}
           options={STATUS_FILTERS.map((value) => ({
             value,
@@ -460,7 +459,7 @@ export function ShiftsPage() {
           }}
         />
         <Select
-          native
+          {...searchableSelect(t)}
           label={t("office.shifts.lineFilter")}
           options={[
             { value: "", label: t("office.shifts.allLines") },
@@ -496,6 +495,12 @@ export function ShiftsPage() {
             setPage(1);
           }}
         />
+        {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}
+        {filtersOn && (
+          <Button variant="secondary" onClick={resetFilters}>
+            {t("office.shifts.reset")}
+          </Button>
+        )}
       </FilterBar>
       <p className="office-note" aria-live="polite">
         {period.kind === "partial"

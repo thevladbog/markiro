@@ -10,6 +10,7 @@ import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
+import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -367,7 +368,7 @@ function ShiftForm({
           name="productId"
           render={({ field }) => (
             <Select
-              native
+              {...searchableSelect(t)}
               label={t("office.shifts.fields.product")}
               placeholder={t("office.shifts.fields.productPlaceholder")}
               options={productOptions}
@@ -387,7 +388,7 @@ function ShiftForm({
         name="lineId"
         render={({ field }) => (
           <Select
-            native
+            {...searchableSelect(t)}
             label={t("office.shifts.fields.line")}
             placeholder={t("office.shifts.fields.linePlaceholder")}
             options={lineOptions}
@@ -447,7 +448,7 @@ function ShiftForm({
         name="boxTemplateId"
         render={({ field }) => (
           <Select
-            native
+            {...searchableSelect(t)}
             label={t("office.shifts.fields.boxTemplate")}
             placeholder={t(
               product === undefined && shift === null
@@ -519,7 +520,7 @@ function ShiftForm({
             name="palletTemplateId"
             render={({ field }) => (
               <Select
-                native
+                {...searchableSelect(t)}
                 label={t("office.shifts.fields.palletTemplate")}
                 placeholder={t("office.shifts.fields.templatePlaceholder")}
                 options={templateOptions(
@@ -545,7 +546,7 @@ function ShiftForm({
             name="palletSheetTemplateId"
             render={({ field }) => (
               <Select
-                native
+                {...searchableSelect(t)}
                 label={t("office.shifts.fields.palletSheet")}
                 options={sheetOptions(
                   palletSheets.data,
@@ -573,7 +574,7 @@ function ShiftForm({
         name="counterpartyId"
         render={({ field }) => (
           <Select
-            native
+            {...searchableSelect(t)}
             label={t("office.shifts.fields.counterparty")}
             hint={t(
               counterparties.isError

@@ -145,6 +145,7 @@
 
 .standalone-form p {
   margin: 0;
+  font: var(--text-body);
 }
 
 .standalone-form__actions {
@@ -158,11 +159,20 @@
   color: var(--fg-2);
 }
 
+/*
+ * A line's name and its remove button: the button stays level with the field
+ * even when an error or a hint grows under the field, which `align-items: end`
+ * would follow. 22px is the field's label (16px) and the gap under it (6px).
+ */
 .standalone-wizard__line {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: end;
+  align-items: start;
   gap: 8px;
+}
+
+.standalone-wizard__line > .mk-icon-button {
+  margin-top: 22px;
 }
 
 .standalone-wizard__review {
@@ -244,6 +254,54 @@
 .office-note {
   margin: 0;
   color: var(--fg-2);
+  font: var(--text-body);
+}
+
+/*
+ * The rhythm of the office page. The page's own parts (header, notices, filter
+ * bar, cards) sit one sp-4 apart (`.office-shell__content`); the parts of a card
+ * sit the same distance apart, so a note above a table, the table, its pager
+ * and the note under it never touch, and every card reads alike.
+ */
+.office-shell__content .mk-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+/*
+ * The buttons of a table row start where their column's heading starts (the
+ * columns are left-aligned), instead of hugging the card's right edge while
+ * the heading stays on the left.
+ */
+.office-shell__content .mk-table .mk-row-actions {
+  justify-content: flex-start;
+}
+
+/* A paragraph of a card has no browser margin on top of the card's gap. */
+.office-shell__content .mk-card__body > p {
+  margin: 0;
+  font: var(--text-body);
+}
+
+/* A table in a card: the card's own gap is the space around it. */
+.office-shell__content .mk-card__body > .mk-table {
+  min-width: 0;
+}
+
+/*
+ * A filter bar: one row of controls of one height on one line, bottom edges
+ * together (a hint would push its field up, so a filter has none: its hint is
+ * the placeholder). A select or a date has the width of its content otherwise.
+ */
+.office-shell__content .mk-filter-bar__controls > .mk-field {
+  min-width: 168px;
+}
+
+/* The search field, the one text input of a bar, gets the room its placeholder needs. */
+.office-shell__content .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  flex: 1 1 200px;
+  max-width: 420px;
 }
 
 /* A product's name, and its print name on a quieter second line when it differs. */
@@ -296,12 +354,12 @@
   font: var(--text-h3);
 }
 
+/* Apart from the table by its container's gap, not by a margin of its own. */
 .office-pager {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  padding: 12px 0 0;
 }
 
 /* A template's name, and the «Типовой» tag of a stock template beside it. */

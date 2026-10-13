@@ -23,6 +23,7 @@ import type {
 import { templateDefaultsUpdate } from "../../host/requests.js";
 import { errorProp } from "../../lib/form-error.js";
 import { useCan } from "../access.js";
+import { searchableSelect } from "../select-search.js";
 import { useProductGroups, useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import type { AlertFailure } from "../form-errors.js";
 import { officeKeys, useOfficeMutation } from "../office-query.js";
@@ -290,7 +291,7 @@ function TemplateDefaultsForm({
       title: t("office.templateDefaults.table.template"),
       render: (entry) => (
         <Select
-          native
+          {...searchableSelect(t)}
           id={rowId(slotKey(entry))}
           aria-label={t("office.templateDefaults.templateNamed", named(entry))}
           // A category default always has a template: «Убрать» clears it, not «Не выбран».
@@ -342,8 +343,8 @@ function TemplateDefaultsForm({
           <div className="standalone-form">
             {ORG_DEFAULTS.map(({ field, purpose }) => (
               <Select
+                {...searchableSelect(t)}
                 key={field}
-                native
                 id={orgId(field)}
                 label={t(`office.templateDefaults.fields.${field}`)}
                 hint={t("office.templateDefaults.orgHint")}

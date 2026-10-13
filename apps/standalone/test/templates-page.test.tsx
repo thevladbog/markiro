@@ -15,6 +15,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -289,13 +290,11 @@ describe("office label templates", () => {
 
   it("keeps one purpose or one state with the filters, and both together", async () => {
     await openTemplates(session());
-    const purpose = screen.getByLabelText("Назначение");
-    const state = screen.getByLabelText("Состояние");
-    fireEvent.change(purpose, { target: { value: "pallet" } });
+    chooseText("Назначение", "Паллета");
     expect(names()).toEqual(["Паллета 100×150"]);
-    fireEvent.change(purpose, { target: { value: "product_duplicate" } });
+    chooseText("Назначение", "Дубликат товара");
     expect(names()).toEqual(["Дубликат Data Matrix 58×40 [Полное наименование]"]);
-    fireEvent.change(purpose, { target: { value: "box" } });
+    chooseText("Назначение", "Короб");
     expect(names()).toEqual([
       "Вода и молоко",
       "Импорт без размера",
@@ -303,17 +302,17 @@ describe("office label templates", () => {
       "Коробка 100×100",
       "Молоко 58×40",
     ]);
-    fireEvent.change(state, { target: { value: "disabled" } });
+    chooseText("Состояние", "Выключенные");
     expect(names()).toEqual(["Вода и молоко"]);
-    fireEvent.change(state, { target: { value: "enabled" } });
+    chooseText("Состояние", "Включённые");
     expect(names()).toEqual([
       "Импорт без размера",
       "Коробка 58×40",
       "Коробка 100×100",
       "Молоко 58×40",
     ]);
-    fireEvent.change(purpose, { target: { value: "all" } });
-    fireEvent.change(state, { target: { value: "all" } });
+    chooseText("Назначение", "Все");
+    chooseText("Состояние", "Все");
     expect(names()).toHaveLength(7);
   });
 
@@ -408,22 +407,10 @@ describe("office label templates", () => {
     await openTemplates(session());
     expect(screen.getByRole("region", { name: "Шаблоны этикеток" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Поиск и отбор шаблонов" })).toBeTruthy();
-    expect(screen.getByText("Название шаблона")).toBeTruthy();
-    const options = (label: string) =>
-      within(screen.getByLabelText(label))
-        .getAllByRole("option")
-        .map((option) => [option.getAttribute("value"), option.textContent]);
-    expect(options("Назначение")).toEqual([
-      ["all", "Все"],
-      ["box", "Короб"],
-      ["pallet", "Паллета"],
-      ["product_duplicate", "Дубликат товара"],
-    ]);
-    expect(options("Состояние")).toEqual([
-      ["all", "Все"],
-      ["enabled", "Включённые"],
-      ["disabled", "Выключенные"],
-    ]);
+    // The search's hint is its placeholder: a hint under the field would lift it off the bar's line.
+    expect(screen.getByPlaceholderText("Название шаблона")).toBeTruthy();
+    expect(optionTexts("Назначение")).toEqual(["Все", "Короб", "Паллета", "Дубликат товара"]);
+    expect(optionTexts("Состояние")).toEqual(["Все", "Включённые", "Выключенные"]);
   });
 
   it("opens for the administrator too", async () => {
@@ -512,9 +499,9 @@ describe("office label templates", () => {
       const states = () =>
         rows().map((row) => within(row).getByText(/^(Включён|Выключен)$/).textContent);
       expect(states()).toEqual(["Включён", "Выключен"]);
-      fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "disabled" } });
+      chooseText("Состояние", "Выключенные");
       expect(states()).toEqual(["Выключен"]);
-      fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "all" } });
+      chooseText("Состояние", "Все");
       expect(states()).toEqual(["Включён", "Выключен"]);
       expect(error).not.toHaveBeenCalled();
     } finally {
@@ -781,8 +768,8 @@ describe("office label templates: switching on and off", () => {
     fake.api.updateTemplate.mockRejectedValue(hostError("stale_revision", 409, { currentRev: 61 }));
     await openTemplates(fake);
     fireEvent.change(screen.getByLabelText("Поиск"), { target: { value: "58×40" } });
-    fireEvent.change(screen.getByLabelText("Назначение"), { target: { value: "box" } });
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "enabled" } });
+    chooseText("Назначение", "Короб");
+    chooseText("Состояние", "Включённые");
     expect(names()).toEqual(["Коробка 58×40", "Молоко 58×40"]);
     fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
@@ -798,8 +785,8 @@ describe("office label templates: switching on and off", () => {
     await waitFor(() => expect(screen.queryByText(UNREACHABLE)).toBeNull());
     await waitFor(() => expect(names()).toEqual(["Коробка 58×40", "Молоко 58×40"]));
     expect(screen.getByLabelText("Поиск")).toHaveProperty("value", "58×40");
-    expect(screen.getByLabelText("Назначение")).toHaveProperty("value", "box");
-    expect(screen.getByLabelText("Состояние")).toHaveProperty("value", "enabled");
+    expect(shownIn("Назначение")).toBe("Короб");
+    expect(shownIn("Состояние")).toBe("Включённые");
     expect(screen.getByText("Найдено: 2 из 7")).toBeTruthy();
   });
 

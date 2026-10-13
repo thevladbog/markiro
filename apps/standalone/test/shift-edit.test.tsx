@@ -27,6 +27,13 @@ import {
   stockSheets,
   WATER,
 } from "./support/shifts.js";
+import {
+  chooseValueOn,
+  isSelectTrigger,
+  optionTextsOn,
+  shownOn,
+  valueOn,
+} from "./support/select.js";
 
 const TOKEN = "office-session-token";
 
@@ -43,16 +50,20 @@ function field(name: string, label: string): HTMLElement {
 }
 
 function options(name: string, label: string): string[] {
-  return within(field(name, label))
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+  return optionTextsOn(field(name, label));
+}
+
+/** Types into an input, or picks the option holding `value` in a select. */
+function setField(name: string, label: string, value: string): void {
+  const control = field(name, label);
+  if (isSelectTrigger(control)) chooseValueOn(control, value);
+  else fireEvent.change(control, { target: { value } });
 }
 
 function valueOf(name: string, label: string): string {
   const control = field(name, label);
-  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
-    throw new Error(`${label} holds no value`);
-  }
+  if (isSelectTrigger(control)) return valueOn(control);
+  if (!(control instanceof HTMLInputElement)) throw new Error(`${label} holds no value`);
   return control.value;
 }
 
@@ -152,7 +163,7 @@ describe("office shifts: changing a shift", () => {
     const session = shiftsSession();
     session.api.updateShift.mockResolvedValue({ ...PLANNED, lineId: LINE_2.id, rev: 90 });
     const name = await openEdit(session, PLANNED);
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    setField(name, "Линия", LINE_2.id);
     fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
     pickDate("Дата производства", "10 октября 2026");
     fireEvent.click(save(name));
@@ -177,7 +188,6 @@ describe("office shifts: changing a shift", () => {
     session.api.updateShift.mockResolvedValue({ ...shift, boxCapacity: 30, rev: 91 });
     const name = await openEdit(session, shift);
     expect(options(name, "Линия")).toEqual([
-      "Выберите линию",
       "Линия 2",
       "Линия 10",
       "Линия 1 (в архиве)",
@@ -188,7 +198,6 @@ describe("office shifts: changing a shift", () => {
       "ООО «Юг» (в архиве)",
     ]);
     expect(options(name, "Шаблон этикетки короба")).toEqual([
-      "Выберите шаблон",
       "Коробка 58×40",
       "Старая коробка — не подходит",
     ]);
@@ -207,26 +216,22 @@ describe("office shifts: changing a shift", () => {
       .mockRejectedValueOnce(api("validation_failed", { field: "lineId" }))
       .mockRejectedValueOnce(api("validation_failed", { field: "counterpartyId" }));
     const name = await openEdit(session, PLANNED);
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    setField(name, "Линия", LINE_2.id);
     session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
     fireEvent.click(save(name));
     await waitFor(() => expect(options(name, "Линия")).toContain("Линия 2 (в архиве)"));
-    expect((field(name, "Линия") as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
-      "Линия 2 (в архиве)",
-    );
+    expect(shownOn(field(name, "Линия"))).toBe("Линия 2 (в архиве)");
     expect(valueOf(name, "Линия")).toBe(LINE_2.id);
     // Back to the shift's own line, and a counterparty the host then refuses.
     await waitFor(() => expect(isDisabled(field(name, "Линия"))).toBe(false));
-    fireEvent.change(field(name, "Линия"), { target: { value: PLANNED.lineId } });
-    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
+    setField(name, "Линия", PLANNED.lineId);
+    setField(name, "Контрагент", NORTH.id);
     session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(options(name, "Контрагент")).toContain("ООО «Северный берег» (в архиве)"),
     );
-    expect((field(name, "Контрагент") as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
-      "ООО «Северный берег» (в архиве)",
-    );
+    expect(shownOn(field(name, "Контрагент"))).toBe("ООО «Северный берег» (в архиве)");
     expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
   });
 
@@ -250,7 +255,7 @@ describe("office shifts: changing a shift", () => {
     session.api.updateShift.mockResolvedValue({ ...shift, plannedQty: null, counterpartyId: null });
     const name = await openEdit(session, shift);
     fireEvent.change(field(name, "План, шт"), { target: { value: " " } });
-    fireEvent.change(field(name, "Контрагент"), { target: { value: "" } });
+    setField(name, "Контрагент", "");
     fireEvent.click(save(name));
     await screen.findByText("Изменения сохранены.");
     expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
@@ -393,12 +398,12 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.listTemplates.mockResolvedValue([BOX_58, BOX_70]);
     session.api.updateShift.mockResolvedValue({ ...PLANNED, rev: 90 });
     const name = await openEdit(session, PLANNED);
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    setField(name, "Линия", LINE_2.id);
     pickDate("Дата производства", "10 октября 2026");
     fireEvent.change(field(name, "План, шт"), { target: { value: " 900 " } });
     fireEvent.change(field(name, "Вместимость короба, шт"), { target: { value: " 20 " } });
-    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_70.id } });
-    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
+    setField(name, "Шаблон этикетки короба", BOX_70.id);
+    setField(name, "Контрагент", NORTH.id);
     fireEvent.click(save(name));
     await screen.findByText("Изменения сохранены.");
     expect(session.api.updateShift).toHaveBeenCalledTimes(1);
@@ -572,15 +577,15 @@ describe("office shifts: changing a shift, the edges", () => {
     const session = shiftsSession([shift]);
     session.api.updateShift.mockResolvedValue({ ...shift, rev: 91 });
     const name = await openEdit(session, shift);
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
-    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
-    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_58.id } });
+    setField(name, "Линия", LINE_2.id);
+    setField(name, "Контрагент", NORTH.id);
+    setField(name, "Шаблон этикетки короба", BOX_58.id);
     expect(options(name, "Линия")).toContain("Линия 1 (в архиве)");
     expect(options(name, "Контрагент")).toContain("ООО «Юг» (в архиве)");
     expect(options(name, "Шаблон этикетки короба")).toContain("Старая коробка — не подходит");
-    fireEvent.change(field(name, "Линия"), { target: { value: OLD_LINE.id } });
-    fireEvent.change(field(name, "Контрагент"), { target: { value: SOUTH_ARCHIVED.id } });
-    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: OLD_BOX.id } });
+    setField(name, "Линия", OLD_LINE.id);
+    setField(name, "Контрагент", SOUTH_ARCHIVED.id);
+    setField(name, "Шаблон этикетки короба", OLD_BOX.id);
     // Back where it began: nothing to save.
     await waitFor(() => expect(save(name).disabled).toBe(true));
   });
@@ -609,7 +614,7 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.updateShift.mockRejectedValue(api("conflict", { constraint: "product_inactive" }));
     const name = await openEdit(session, shift);
     const productsRead = session.api.listProducts.mock.calls.length;
-    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_70.id } });
+    setField(name, "Шаблон этикетки короба", BOX_70.id);
     fireEvent.click(save(name));
     expect(
       await within(dialog(name)).findByText(
@@ -654,7 +659,6 @@ describe("office shifts: changing a shift, the edges", () => {
     const session = shiftsSession([shift]);
     const name = await openEdit(session, shift);
     expect(options(name, "Линия")).toEqual([
-      "Выберите линию",
       "Линия 2",
       "Линия 10",
       "Линия 11111111…",
@@ -665,7 +669,6 @@ describe("office shifts: changing a shift, the edges", () => {
       "Контрагент 22222222…",
     ]);
     expect(options(name, "Шаблон этикетки короба")).toEqual([
-      "Выберите шаблон",
       "Коробка 58×40",
       "Шаблон 33333333… — нет в списке",
     ]);
@@ -702,12 +705,12 @@ describe("office shifts: changing a shift, the edges", () => {
     expect(
       within(dialog(name)).getByText("Товар: Товар 2b3c4d5e…. Товар смены не меняется."),
     ).toBeTruthy();
-    expect(options(name, "Линия")).toEqual(["Выберите линию", "Линия 0b7e7dcb…"]);
+    expect(options(name, "Линия")).toEqual(["Линия 0b7e7dcb…"]);
     expect(options(name, "Контрагент")).toEqual(["Не выбран", "Контрагент d2b7c9e1…"]);
-    expect(options(name, "Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    expect(options(name, "Шаблон этикетки короба")).toEqual(["Коробка 58×40"]);
     for (const label of ["Линия", "Шаблон этикетки короба", "Контрагент"]) {
       expect(isDisabled(field(name, label))).toBe(true);
-      expect((field(name, label) as HTMLSelectElement).value).not.toBe("");
+      expect(valueOf(name, label)).not.toBe("");
     }
     expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
   });
@@ -730,7 +733,7 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.updateShift.mockRejectedValue(api("validation_failed", { field: "lineId" }));
     const name = await openEdit(session, PLANNED);
     const linesRead = session.api.listLines.mock.calls.length;
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    setField(name, "Линия", LINE_2.id);
     fireEvent.click(save(name));
     await waitFor(() => expect(messageOf(name, "Линия")).toBe("Линия в архиве. Выберите другую."));
     await waitFor(() => expect(document.activeElement).toBe(field(name, "Линия")));
@@ -859,8 +862,8 @@ describe("office shifts: changing a shift, the edges", () => {
     const name = "Новая смена";
     await screen.findByRole("dialog", { name });
     await waitFor(() => expect(isDisabled(field(name, "Товар"))).toBe(false));
-    fireEvent.change(field(name, "Товар"), { target: { value: WATER.id } });
-    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    setField(name, "Товар", WATER.id);
+    setField(name, "Линия", LINE_2.id);
     fireEvent.click(within(dialog(name)).getByRole("button", { name: "Запланировать" }));
     expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
     expect(within(dialog(name)).queryByText(/Этой смены больше нет/)).toBeNull();
@@ -1084,7 +1087,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
     await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
-    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_SHEET.id, {
@@ -1126,7 +1129,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     );
     expect(valueOf(name, "Лист А4")).toBe("");
     expect(save(name).disabled).toBe(true);
-    fireEvent.change(field(name, "Лист А4"), { target: { value: PORTRAIT.id } });
+    setField(name, "Лист А4", PORTRAIT.id);
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_PALLETS.id, {
@@ -1141,7 +1144,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const name = await openEdit(session, PLANNED);
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
     await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
-    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
@@ -1175,7 +1178,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const session = sessionWith(WITH_SHEET);
     const name = await openEdit(session, WITH_SHEET);
     await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
-    fireEvent.change(field(name, "Лист А4"), { target: { value: "" } });
+    setField(name, "Лист А4", "");
     expect(valueOf(name, "Лист А4")).toBe("");
     fireEvent.click(save(name));
     await waitFor(() =>
@@ -1208,7 +1211,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     );
     const name = await openEdit(session, WITH_SHEET);
     await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
-    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    setField(name, "Лист А4", TWO_A5.id);
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(messageOf(name, "Лист А4")).toBe(
