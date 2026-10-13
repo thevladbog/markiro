@@ -2202,7 +2202,7 @@ describe("the operator on the floor", () => {
       ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
       ...(signInSyncGapMs === undefined ? {} : { signInSyncGapMs }),
     });
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     return { link, host };
   }
 
@@ -2215,7 +2215,7 @@ describe("the operator on the floor", () => {
     const bar = await screen.findByRole("region", { name: "Строка состояния цеха" });
     expect(await within(bar).findByText("Линия розлива 2")).toBeTruthy();
     expect(within(bar).getByText("Никто не вошёл")).toBeTruthy();
-    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    await screen.findByText("Отсканируйте бейдж для входа");
     scan("MRK-000742");
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
     expect(
@@ -2233,9 +2233,7 @@ describe("the operator on the floor", () => {
     expect(host.getChanges).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Офис" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
-    expect(
-      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
     expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
   });
 
@@ -2307,12 +2305,10 @@ describe("the operator on the floor", () => {
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(
-      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
   });
 
-  const PROMPT = "Приложите бейдж к сканеру или войдите по табельному номеру.";
+  const PROMPT = "Отсканируйте бейдж для входа";
   const WRONG_BADGE =
     "Бейдж не найден. Если бейдж новый, дождитесь синхронизации или обратитесь к администратору.";
 
@@ -2741,15 +2737,15 @@ describe("the operator on the floor", () => {
       connection: link.connection,
     });
     await screen.findByText(PROMPT);
-    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
-    expect(await screen.findByText("Наберите табельный номер.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
+    expect(await screen.findByText("Введите табельный номер")).toBeTruthy();
     device.refresh.mockResolvedValueOnce({
       ...DEVICE_STATUS,
       lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
     });
     await link.revision(43);
     expect(await screen.findByText(PROMPT)).toBeTruthy();
-    expect(screen.queryByText("Наберите табельный номер.")).toBeNull();
+    expect(screen.queryByText("Введите табельный номер")).toBeNull();
   });
 
   it("does not sign an operator in on the new line when the answer lands in the batch of the line change", async () => {

@@ -474,7 +474,7 @@
   }
 
   /*
-   * «Стереть» and «Очистить» on a 64 px key: the PinPad writes its 18 px
+   * «Стереть» and «Сброс» on a 64 px key: the PinPad writes its 18 px
    * caption inline, so the smaller caption needs `!important`.
    */
   .operator-login__keypad-zone [role="group"] > button:nth-child(10),
