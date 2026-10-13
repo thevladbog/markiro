@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import {
+  withoutTraceReadinessOwner,
+  withoutTraceReadinessOwnerBytes,
+} from "./trace-readiness-owner.mjs";
 
 export const segmentStrategy = {
   "fail-fast": false,
@@ -52,8 +56,8 @@ export function hasExactParallelSegments(workflow) {
 // Historical command/byte pins remain authoritative. Remove only the exact
 // complete partition; missing segments, misplaced guards or extra steps stay visible.
 export function withoutParallelSegments(workflow) {
-  const result = structuredClone(workflow);
-  if (!hasExactParallelSegments(result)) return result;
+  if (!hasExactParallelSegments(workflow)) return structuredClone(workflow);
+  const result = withoutTraceReadinessOwner(workflow);
   delete result.jobs.isolation.strategy;
   for (const step of result.jobs.isolation.steps) delete step.if;
   return result;
@@ -61,6 +65,7 @@ export function withoutParallelSegments(workflow) {
 
 export function withoutParallelSegmentsBytes(source) {
   if (!hasExactParallelSegments(load(source))) return source;
+  source = withoutTraceReadinessOwnerBytes(source);
   const block =
     "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, office, requests, browser, persistence]\n";
   if (source.split(block).length !== 2) return source;

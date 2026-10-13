@@ -2588,3 +2588,97 @@ A deterministic response-invalidation regression failed with the old ordering;
 all five response-ownership tests then passed. The complete real
 MFA/cabinet/HTTP/separate-worker/download scenario passed five consecutive runs
 on independent owned databases, without retries or skipped checks.
+
+### US-11 read-only unit Trace/Readiness proof (2026-10-13)
+
+The internal `UsDatasetTraceReadinessStore` verifies one regular index (0–259),
+the corrected chain, or both retained orphan lots against checked native stage
+evidence and `UsTraceStore`. It authorizes the original trusted dataset owner and
+actual database target before selector validation. It initializes no missing
+stage and returns an owned, deeply frozen bounded summary with
+`datasetComplete: false`.
+
+The graph proof requires exact owned lots/current revisions, event-line
+quantities/UOMs, complete traversal and Transformation event nodes. Readiness uses
+the pinned April–September 2026 period. Its native lot-filter expands selected
+events to all their lot lines: chain 0 input-lot assessments check 2 events,
+3 lots and 2 dependencies; its output assessment checks 3 events, 3 lots and
+4 dependencies. These counts are validated from checked event lines. The amended
+Receiving predecessor is excluded history; each orphan has a singleton graph,
+retained void history and the actual `origin_gap` readiness finding.
+
+Focused native acceptance passed 9/9 tests without skips using only
+`US_TEST_DATABASE_URL`, an unset `DATABASE_URL` and randomized disposable children
+of the reserved synthetic local fixture. Coverage includes chain 0 partial stock,
+chain 1 full shipment, Scenario A index 259, correction/orphan, hostile selectors,
+missing stages, wrong tenant/owner/database/role, native Shipping void drift and
+full-table no-write snapshots. Digests preserve all semantic readiness fields and
+history pagination; only live `assessedAt` is excluded. Fixture work drains before
+disposal and child absence is verified. API typecheck, complete API ESLint, Nest
+build, changed-file formatting and diff-check passed. Full API tests, independent
+review and CI ownership remain separate controller gates. Durable Trace/Readiness receipts,
+whole-dataset orchestration, Plan/Requests integration and hosted acceptance are
+subsequent slices; this checkpoint makes no complete-demo claim.
+
+Independent review round 1 tightened the unit verifier's complete Readiness
+semantics: clean severity counts/groups are zero/empty, and each orphan's single
+error finding includes the actual checked void revision and exact provenance,
+metadata, links and aggregates. Thirty-six mutations of passing native baselines
+failed before the fix and rejected after it. Full native acceptance passed 9/9,
+without skips; regular/corrected returned lot/event ID ordering is independently
+pinned to native results. API types/lint/build and changed-file checks passed.
+Independent re-review remains a separate gate; the existing Vite native-config
+warning remains visible and deferred outside this slice.
+
+### Durable unit Trace/Readiness progress checkpoint (2026-10-13)
+
+The internal stage now persists actual checked per-unit proof in the existing
+dataset journal, bound to the exact completed Shipping or void-Receiving
+predecessor. Pending initialize preserves the original operation key, compatible
+concurrent calls retain one persisted operation identity, and completed verify or
+initialize rechecks native/read-model evidence without rewriting receipts. The
+separate coordinator processes the unchanged full native dataset and all 262
+Trace/Readiness units sequentially; its result retains separate native evidence
+and literal `datasetComplete: false`. No runtime, route, schema, dependency, CI or
+release capability changed.
+
+Focused native lifecycle acceptance passed 13/13, without skips, in 122.71 seconds.
+Coverage includes actual pending SQL failure/resume, concurrent calls, mismatched
+intent/predecessor/receipt, correction/orphan, tenant/owner/target/role denial,
+native Shipping void drift and full-table no-write replay. API typecheck, complete
+API lint, Nest build, formatting and diff-check passed. Independent source review
+approved this scope; complete runtime acceptance remains outstanding.
+
+The full composition command unexpectedly received SIGTERM (exit 143) before its
+unchanged 900000ms test budget. Fresh, references-only and first-chain refusal
+checks passed individually, but no whole-file GREEN or full-phase timing was
+emitted. It stopped after 111 regular native chains through `chain_0110`: 444
+roots/current finalized events, 333 lots and 6640 boxes, with zero Trace/Readiness
+stages, Plans or Requests. The 260+2/262-stage census and full no-write
+verification/replay were not reached; their assertions and budget remain intact.
+Neither implementer nor controller sent a signal. The exact owned child had no
+remaining backends and was normally disposed without FORCE; absence was verified.
+Launcher diagnosis, bounded generation profiling, adjacent regressions and later
+full acceptance remain controller gates. No shared base, environment, hosting or
+production resource was changed.
+
+#### Controller validation and additive native CI ownership
+
+The earlier ordinary invocation-owned API run passed4761 cases, with3430 explicit
+opt-in skips; its child was disposed and zero new databases remained. It predates
+durable progress, whose separate native13/13 result complements the read-only9/9
+proof. Ordinary skips never establish full native or complete-demo acceptance.
+Three bounded current attribution probes passed and all their owned children
+were independently absent. The SIGTERM cause remains unknown, not a proven
+900000ms timeout or a repaired runtime bug.
+
+One exact `dataset_trace_readiness` job now waits for the unchanged six-segment
+isolation matrix. It uses its own synthetic PostgreSQL runner, builds contracts
+before Node tooling and API dependencies before the three serial native suites.
+All original82 steps/guards/pins/max-parallel3/30-minute budgets remain unchanged;
+the new job is also30 minutes and the full test remains900000ms. No retries,
+failure bypass, shorter range, primary DB or release capability was introduced.
+Independent review approved;117/117 tooling tests and188 ownership mutation checks
+passed without skips, as did fresh API typecheck, full formatting and diff checks.
+The exact pushed SHA's full CI result is still required, with Plan/Requests,
+visitor access and non-RF hosting separate. No complete-demo claim is made.

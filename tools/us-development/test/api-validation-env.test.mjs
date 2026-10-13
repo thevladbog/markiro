@@ -40,8 +40,14 @@ for (const phase of ["create", "migrate", "drop"]) {
         const runner = await import(${JSON.stringify(runnerModule)});
         const withSignals = runner.withDeferredSignals ?? (async (operation) => operation({stopping: false}));
         const rendezvous = async () => {
+          // Observe actual OS delivery only; the runner still owns the exit code.
+          process.once(${JSON.stringify(signal)}, () => process.send(${JSON.stringify(signal)}));
+          const continued = new Promise((resolve, reject) => process.once('message', (message) => {
+            if (message === 'continue') resolve();
+            else reject(new Error('Unexpected rendezvous message'));
+          }));
           process.send('ready');
-          await new Promise((resolve) => process.once('message', resolve));
+          await continued;
         };
         process.exitCode = await withSignals(async () => {
           try {
@@ -62,16 +68,30 @@ for (const phase of ["create", "migrate", "drop"]) {
       child.stdout.on("data", (chunk) => {
         output += chunk;
       });
-      child.on("message", () => {
-        child.kill(signal);
-        setTimeout(() => {
-          if (child.connected) child.send("continue", () => {});
-        }, 30);
-      });
+      const messages = [];
       const result = await new Promise((resolve, reject) => {
         child.once("error", reject);
+        child.on("message", (message) => {
+          try {
+            if (messages.length === 0) {
+              assert.equal(message, "ready");
+              assert.equal(child.kill(signal), true);
+            } else {
+              assert.equal(messages.length, 1);
+              assert.equal(message, signal);
+              child.send("continue", (error) => {
+                if (error) reject(error);
+              });
+            }
+            messages.push(message);
+          } catch (error) {
+            child.kill("SIGKILL");
+            reject(error);
+          }
+        });
         child.once("close", (code, killedBy) => resolve({ code, killedBy }));
       });
+      assert.deepEqual(messages, ["ready", signal]);
       assert.match(output, /owned cleanup completed/);
       assert.deepEqual(result, { code: signal === "SIGINT" ? 130 : 143, killedBy: null });
     });

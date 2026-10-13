@@ -2573,3 +2573,116 @@ final scoped review approved the optimization with no code blockers. Whole API
 without infrastructure remains not green:3368 passed,4805 skipped,8 failed files
 from missing runtime settings, including three secondary teardown failures.
 This does not waive the wider infrastructure gate or imply remote CI acceptance.
+
+### US-11 unit Trace/Readiness verification checkpoint (2026-10-13)
+
+Added internal read-only `UsDatasetTraceReadinessStore` and a deterministic evidence
+validator. Strict selectors follow actual target/original-owner authorization.
+Only native Receiving, Transformation, Shipping and special lifecycle `verify`
+paths establish prerequisites. The result remains `datasetComplete: false` and
+contains dataset identity, ordered owned lot/current-event IDs and immutable
+per-lot trace, readiness and history digests.
+
+Native graph checks pin exact event revision metadata and edge endpoints,
+quantities/UOMs, three owned chain lots and a Transformation event node. Regular
+chain 0 is 300/400 lb → 55 cases → 22/23 shipped with 10 retained; chain 1 is
+325.5/425 lb → 65 cases → 26/39 shipped; Scenario A remains 500/500 lb → 100 cases
+→ 100 shipped. Correction uses its current amended Receiving and real excluded
+predecessor. Both void orphans preserve their lots, singleton origin-gap traces,
+void history and explicit missing-origin Readiness findings.
+
+Readiness is assessed live over the pinned 2026-04-01–2026-09-30 business period.
+Event selection by lot expands the native selected-lot closure through event
+lines; exact event/lot/dependency counts are validated accordingly. No readiness
+rule or finding is suppressed. Digests include scopes, counts, findings, groups,
+draft work and history pagination; only `assessedAt` is omitted for stable replay.
+
+TDD established a completed-chain behavioral RED against an unavailable verifier
+and a separate exact-dependency-count RED against actual native evidence. The
+complete focused file then passed 9/9, without skips, in 60.36 seconds. Existing
+immutable Shipping evidence triggers remain intact; drift uses the public native
+Shipping void lifecycle. Full-table hashes stay equal after successful proofs,
+replays, target denials and drift rejection. Disposable fixture ownership drains
+work and verifies child-database absence. API typecheck, complete API ESLint, Nest
+build, changed-file formatting and diff-check passed. Ordinary full API tests and
+independent review remain separate controller gates at this checkpoint. The new
+opt-in test still needs explicit later CI ownership. Durable trace receipts,
+all-unit composition, Plan/Request artifacts and the complete initializer remain
+pending; no commit, push, CI, release or external acceptance is implied.
+
+Review fix round 1 established a separate native RED for 36 mismatched Readiness
+semantics on unmodified passing baselines, then passed the complete 9/9 file in
+95.23 seconds without skips or larger budgets. The verifier now pins the entire
+orphan missing-origin finding to checked void revision metadata and requires
+exact clean/orphan severity counts, groups and draft preview. Regular/corrected
+lot/current-event ID arrays and ordering are independently compared to existing
+native verifiers. Final API typecheck/lint/build, formatting and diff-check passed;
+the final explicit never-return guard spelling was a type-only narrowing fix.
+R1/R2 are addressed for independent re-review. The pre-existing Vite warning is
+deferred; no Readiness rule, native service, CI or public contract changed.
+
+### US-11 durable Trace/Readiness progress checkpoint (2026-10-13)
+
+Added internal `UsDatasetTraceReadinessStageStore` and
+`UsDatasetTraceReadinessSeedStore`, plus their two native test files. The stage
+obtains accepted actual native/read-model proof before journal capture, binds
+checked dataset/selector identity and the completed predecessor's exact
+operation/input/result/revision, and records unique owned lot/current-event IDs
+with the complete stable proof result. Pending resume retains its original key;
+compatible concurrent calls converge on one persisted identity. Existing
+receipts are compared against fresh canonical proof and never repair drift.
+Verify captures or fills no stage. Independent snapshots remain independent.
+
+The full coordinator invokes unchanged native initialize/verify first, then
+regular units 0–259, correction and orphan in order, and retains the native result
+separately. Its bounded frozen summary keeps `datasetComplete: false`; Plan,
+Requests and complete-demo acceptance remain later work. No caller-supplied
+partial range, retry loop, public registration or new business transaction was
+added.
+
+TDD observed actual missing durable progress after a completed native chain:
+revision 2 was expected but the stage was absent. Initial GREEN passed, followed
+by 13/13 native lifecycle tests without skips in 122.71 seconds. Exact
+receipt/predecessor bindings, owned IDs/digests, pending SQL-failure resume,
+concurrent initialization, incompatible intent/receipt, correction/orphan,
+target/tenant/owner/role denial, Shipping void drift and no-write snapshots passed.
+API typecheck, complete ESLint, Nest build, formatting and diff-check passed;
+independent source review approved with the full runtime gate pending.
+
+Actual full composition was interrupted by unexpected SIGTERM (exit 143) before
+the original 900000ms budget; it did not report a Vitest timeout or whole-file
+GREEN. Three fresh/partial native refusal cases passed individually. Native
+generation reached 111 regular chains, 444 roots and current finalized events,
+333 lots and 6640 boxes; Trace/Readiness, Plans and Requests were still zero.
+No full generation/resume/verify/replay timing or 262-stage acceptance was
+produced. Every full assertion and timeout remains unchanged. No signal was sent
+by the implementer or controller. The exact invocation-owned child was checked
+for zero backends, disposed normally without FORCE, and verified absent. Root
+owns launcher diagnosis and bounded native-generation profiling before a retry;
+adjacent regressions, ordinary full API and CI ownership remain unrun gates for
+this checkpoint. No commit, push, release or hosted/browser/hardware acceptance
+is implied.
+
+### Controller validation and native CI ownership checkpoint (2026-10-13)
+
+The invocation-owned ordinary API validation completed before the durable progress
+addition: 330 files passed, 167 explicitly skipped; 4761 cases passed and 3430
+opt-in cases skipped, exit 0 in 1431.15 seconds. Its child was normally disposed
+with zero new databases remaining. This is not coverage of skipped native suites;
+separate actual read-only9/9 and durable13/13 native results supply focused proof.
+
+Three subsequent bounded native diagnostic probes passed without larger budgets;
+all three owned children were independently confirmed absent. Regular SQL counts
+matched prior measurements, while the new unit proof used906 SQL dispatches.
+Repeated native dependency checks are an optimization candidate, not permission
+to remove current proof. The unexpected SIGTERM's cause remains unknown.
+
+Added one dedicated `dataset_trace_readiness` CI job after the existing isolation
+matrix. The six segments, original82-step bytes, historical pins, max-parallel3
+and30-minute limits remain intact; the new job also has30 minutes and runs the
+three native suites serially, including unchanged full900000ms260+2 acceptance.
+Independent source review approved the code and exact additive ownership; all117
+Node tooling tests passed with zero skips, including188 ownership mutations.
+Fresh API typecheck, repository-wide formatting and diff checks passed. Actual
+full runtime/precise-SHA GitHub success, Plan/Request integration, visitor and
+hosted acceptance remain outstanding; no release or deployment is implied.
