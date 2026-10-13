@@ -3182,7 +3182,7 @@ describe("the operator on the floor", () => {
     await screen.findByLabelText("Название товара");
     await flush();
     scan("4600682000013");
-    expect(await screen.findByText("Молоко 3,2% 0,9 л, GTIN 04600682000013")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
     expect(host.createDeviceShift).toHaveBeenCalledTimes(1);
