@@ -854,7 +854,41 @@ async function cloudFootprint(tenantId: string) {
     .select({ id: schema.member.id })
     .from(schema.member)
     .where(eq(schema.member.organizationId, tenantId));
-  return { cabinetAccess: tenant?.cabinetAccess, subscriptions, members };
+  const invitations = await db
+    .select({ id: schema.invitation.id })
+    .from(schema.invitation)
+    .where(eq(schema.invitation.organizationId, tenantId));
+  const addons = await db
+    .select({ id: schema.subscriptionAddons.id })
+    .from(schema.subscriptionAddons)
+    .where(eq(schema.subscriptionAddons.tenantId, tenantId));
+  const sources = await db
+    .select({ id: schema.entitlementSources.id })
+    .from(schema.entitlementSources)
+    .where(eq(schema.entitlementSources.tenantId, tenantId));
+  const revisions = await db
+    .select({ tenantId: schema.entitlementRevisions.tenantId })
+    .from(schema.entitlementRevisions)
+    .where(eq(schema.entitlementRevisions.tenantId, tenantId));
+  const devices = await db
+    .select({ id: schema.stationDevices.id })
+    .from(schema.stationDevices)
+    .where(eq(schema.stationDevices.tenantId, tenantId));
+  const assignments = await db
+    .select({ id: schema.workingDeviceAssignments.id })
+    .from(schema.workingDeviceAssignments)
+    .where(eq(schema.workingDeviceAssignments.tenantId, tenantId));
+  return {
+    cabinetAccess: tenant?.cabinetAccess,
+    subscriptions,
+    members,
+    invitations,
+    addons,
+    sources,
+    revisions,
+    devices,
+    assignments,
+  };
 }
 
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -958,6 +992,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
         cabinetAccess: "none",
         subscriptions: [],
         members: [],
+        invitations: [],
+        addons: [],
+        sources: [],
+        revisions: [],
+        devices: [],
+        assignments: [],
       });
 
       // The same request replays the file; other terms under the same request id conflict.
@@ -1057,6 +1097,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }),
         ),
       ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+    });
+
+    it("refuses the offline file when the tenant got a cabinet between preview and confirmation", async () => {
+      const f = await offlineSiteFor();
+      const offline = { planVersionId: f.planVersionId, termDays: 30 };
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline,
+      });
+      await db
+        .update(schema.organization)
+        .set({ cabinetAccess: "enabled" })
+        .where(eq(schema.organization.id, f.tenantId));
+      expect(
+        await httpRefusal(
+          issuance.confirm(f.admin, f.tenantId, f.site.id, {
+            requestId: randomUUID(),
+            graceDays: null,
+            offline,
+            expected: preview.expected,
+          }),
+        ),
+      ).toEqual({ status: 409, body: { code: "standalone_license_offline_not_allowed" } });
+      expect(await issuedRows(f.tenantId)).toEqual([]);
     });
 
     it("refuses offline terms or a sequence other than the preview's", async () => {

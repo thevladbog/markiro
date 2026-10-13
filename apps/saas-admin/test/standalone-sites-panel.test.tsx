@@ -88,7 +88,7 @@ describe("standalone sites panel (plan ЛЦ-0)", () => {
     expect(screen.getByText(/Лицензия площадки «Цех розлива» заканчивается/u)).toBeDefined();
 
     const user = userEvent.setup();
-    await user.click(within(row).getByRole("button", { name: "История выпусков" }));
+    await user.click(within(row).getByRole("button", { name: "История выпусков: Цех розлива" }));
     const dialog = await screen.findByRole("dialog", { name: "История выпусков: Цех розлива" });
     await user.click(await within(dialog).findByRole("button", { name: "Скачать файл № 1" }));
     await vi.waitFor(() =>

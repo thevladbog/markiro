@@ -1,7 +1,7 @@
 import {
   platformStandaloneLicenseContracts as contracts,
-  platformTenantIdSchema,
   platformUuidSchema,
+  standaloneOpaqueIdSchema,
   standaloneSiteInspectRequestSchema,
   type StandaloneIssuanceConfirm,
   type StandaloneIssuanceList,
@@ -38,7 +38,7 @@ function platformPath(template: string, params: Record<string, string>): string 
 }
 
 function tenant(tenantId: string) {
-  return { tenantId: platformTenantIdSchema.parse(tenantId) };
+  return { tenantId: standaloneOpaqueIdSchema.parse(tenantId) };
 }
 
 function site(tenantId: string, siteId: string) {

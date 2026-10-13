@@ -69,11 +69,17 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
           <Button
             size="compact"
             disabled={!query.data?.signingConfigured}
+            aria-label={t("tenants.detail.standalone.issue.openLabel", { name: site.name })}
             onClick={() => setIssuingFor(site)}
           >
             {t("tenants.detail.standalone.issue.open")}
           </Button>{" "}
-          <Button variant="secondary" size="compact" onClick={() => setHistoryFor(site)}>
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={t("tenants.detail.standalone.history.openLabel", { name: site.name })}
+            onClick={() => setHistoryFor(site)}
+          >
             {t("tenants.detail.standalone.history.open")}
           </Button>
         </span>

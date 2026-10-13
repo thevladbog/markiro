@@ -407,6 +407,20 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone sites (plan ЛЦ-0)", () 
     expect([...(await siteRows(tenantA)), ...(await siteRows(tenantB))]).toHaveLength(1);
   });
 
+  it("shows no request date for an activation request whose createdAt is not a calendar instant", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    await setTenantInns(db, tenantId, { org: "7707083893" });
+    const site = await sites.register(admin, tenantId, {
+      intent: "create",
+      requestId: randomUUID(),
+      name: "Цех",
+      request: { ...activationRequest({ inn: "7707083893" }), createdAt: "2026-13-45T09:00:00Z" },
+      acknowledgedWarnings: [],
+    });
+    expect(site.requestCreatedAt).toBeNull();
+  });
+
   it("denies a suspended administrator and one whose two-factor flag is off", async () => {
     const tenantId = await createOrganization(db);
     await setTenantInns(db, tenantId, { org: "7707083893" });

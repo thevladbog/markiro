@@ -4,6 +4,7 @@ import {
   standaloneLicensePayloadV1Schema,
 } from "@markiro/domain";
 import {
+  platformTimestampSchema,
   standaloneIssuanceSummarySchema,
   standaloneLicenseFileSchema,
   standaloneSiteSchema,
@@ -79,7 +80,11 @@ export function siteView(
     requestInn: site.requestInn,
     hostVersion: request.success ? request.data.hostVersion : null,
     usage: siteUsage(site),
-    requestCreatedAt: request.success ? request.data.createdAt : null,
+    // The request's instant is checked for shape only; a non-calendar one shows no date.
+    requestCreatedAt:
+      request.success && platformTimestampSchema.safeParse(request.data.createdAt).success
+        ? request.data.createdAt
+        : null,
     hostHistory: site.hostHistory,
     lastIssuedSequence: site.lastIssuedSequence,
     latestIssuance: latest ? issuanceSummary(latest) : null,

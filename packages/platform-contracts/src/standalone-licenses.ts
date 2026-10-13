@@ -3,15 +3,12 @@ import {
   STANDALONE_FEATURE_KEYS,
   STANDALONE_QUOTA_KEYS,
   standaloneActivationRequestSchema,
+  standaloneOpaqueIdSchema,
 } from "@markiro/domain";
 
 import { entitlementRevisionSchema } from "./entitlements.js";
 import { grantPublicKeySchema } from "./offline-grants.js";
-import {
-  platformTenantIdSchema,
-  platformTimestampSchema,
-  platformUuidSchema,
-} from "./primitives.js";
+import { platformTimestampSchema, platformUuidSchema } from "./primitives.js";
 
 /** Plan ЛЦ-0: the SaaS admin issues signed offline licenses for «Markiro Автоном» sites. */
 const innSchema = z.string().regex(/^\d{10}(\d{2})?$/);
@@ -187,7 +184,7 @@ const siteUsageSchema = z
 export const standaloneSiteSchema = z
   .object({
     id: platformUuidSchema,
-    tenantId: platformTenantIdSchema,
+    tenantId: standaloneOpaqueIdSchema,
     hostId: platformUuidSchema,
     name: z.string().min(1).max(200),
     requestInn: innSchema.nullable(),
@@ -205,7 +202,7 @@ export type StandaloneSite = z.infer<typeof standaloneSiteSchema>;
 
 export const standaloneSiteListSchema = z
   .object({
-    tenantId: platformTenantIdSchema,
+    tenantId: standaloneOpaqueIdSchema,
     signingConfigured: z.boolean(),
     /** Which path this tenant's files take: `offline` for a tenant without a cabinet. */
     issuanceSource: standaloneIssuanceSourceSchema,

@@ -230,7 +230,9 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     renderPanel();
     const user = userEvent.setup();
     await user.click(
-      within(await siteRow()).getByRole("button", { name: "Выпустить офлайн-лицензию" }),
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Выпуск офлайн-лицензии: Цех розлива",
@@ -290,7 +292,9 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     renderPanel();
     const user = userEvent.setup();
     await user.click(
-      within(await siteRow()).getByRole("button", { name: "Выпустить офлайн-лицензию" }),
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Выпуск офлайн-лицензии: Цех розлива",
@@ -359,7 +363,9 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     renderPanel();
     const user = userEvent.setup();
     await user.click(
-      within(await siteRow()).getByRole("button", { name: "Выпустить офлайн-лицензию" }),
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Выпуск офлайн-лицензии: Цех розлива",
@@ -416,7 +422,9 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     renderPanel();
     const user = userEvent.setup();
     await user.click(
-      within(await siteRow()).getByRole("button", { name: "Выпустить офлайн-лицензию" }),
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Выпуск офлайн-лицензии: Цех розлива",
@@ -425,7 +433,7 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
     expect(
       await within(dialog).findByText(
-        "Подписка без даты окончания: файл действует год с выпуска. Когда срок выйдет, клиент бесплатно запрашивает у нас новый файл.",
+        "Файл действует не дольше года с выпуска (так бывает у подписки без даты окончания или длиннее года). Когда срок выйдет, клиент бесплатно запрашивает у нас новый файл.",
       ),
     ).toBeDefined();
   });
@@ -438,7 +446,9 @@ describe("offline license issuance (plan ЛЦ-0)", () => {
     });
     renderPanel();
     expect(
-      within(await siteRow()).getByRole("button", { name: "Выпустить офлайн-лицензию" }),
+      within(await siteRow()).getByRole("button", {
+        name: "Выпустить офлайн-лицензию: Цех розлива",
+      }),
     ).toHaveProperty("disabled", true);
   });
 });

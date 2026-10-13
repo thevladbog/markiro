@@ -39,6 +39,11 @@ export function StandaloneIssuanceHistory({
       render: (row) => t(`tenants.detail.standalone.plan.${row.plan}`),
     },
     {
+      key: "source",
+      title: t("tenants.detail.standalone.issue.row.source"),
+      render: (row) => t(`tenants.detail.standalone.source.${row.source}`),
+    },
+    {
       key: "validUntil",
       title: t("tenants.detail.standalone.history.validUntil"),
       render: (row) => formatDate(row.validUntil),
