@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, FileDropZone } from "@markiro/ui";
@@ -44,13 +44,26 @@ export function ProductPhotoField({
   const { t } = useTranslation();
   if (productId === null) {
     return (
-      <section className="product-photo-field" aria-label={t("office.products.photo.title")}>
-        <h3 className="product-photo-field__title">{t("office.products.photo.title")}</h3>
+      <PhotoSection>
         <p className="product-photo-field__hint">{t("office.products.photo.saveFirst")}</p>
-      </section>
+      </PhotoSection>
     );
   }
   return <SavedProductPhoto productId={productId} productName={productName} encode={encode} />;
+}
+
+/** The section «Фото», named by its heading. */
+function PhotoSection({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
+  const titleId = useId();
+  return (
+    <section className="product-photo-field" aria-labelledby={titleId}>
+      <h3 id={titleId} className="product-photo-field__title">
+        {t("office.products.photo.title")}
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 type Problem = { kind: "picture"; message: string } | { kind: "write"; failure: AlertFailure };
@@ -121,8 +134,7 @@ function SavedProductPhoto({
   };
 
   return (
-    <section className="product-photo-field" aria-label={t("office.products.photo.title")}>
-      <h3 className="product-photo-field__title">{t("office.products.photo.title")}</h3>
+    <PhotoSection>
       {problem?.kind === "picture" && <Alert tone="error">{problem.message}</Alert>}
       <WriteFailureAlert failure={problem?.kind === "write" ? problem.failure : null} />
       {photo !== null && (
@@ -160,6 +172,6 @@ function SavedProductPhoto({
         </>
       )}
       {state.isError && <p className="office-note">{t("office.products.photo.unavailable")}</p>}
-    </section>
+    </PhotoSection>
   );
 }

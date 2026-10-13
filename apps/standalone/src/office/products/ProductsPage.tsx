@@ -88,7 +88,7 @@ export function ProductsPage() {
           )}
           {/* In words, not a colour or an icon alone (plan ТОВ). */}
           {product.photoChecksum !== null && (
-            <span className="product-name__print">{t("office.products.table.hasPhoto")}</span>
+            <span className="product-name__photo">{t("office.products.table.hasPhoto")}</span>
           )}
         </span>
       ),

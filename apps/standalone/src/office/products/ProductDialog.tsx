@@ -24,6 +24,7 @@ import {
   PRODUCT_FIELDS,
   PRODUCT_STALE_FIELDS,
   productFields,
+  egaisPrintsOnSheet,
   productFieldsSchema,
   showsEgais,
   staysDraft,
@@ -96,11 +97,12 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     resolver: zodResolver(productFieldsSchema),
     defaultValues: productFields(product),
   });
-  const [typedGtin, group, boxCapacity, palletBoxCapacity] = watch([
+  const [typedGtin, group, boxCapacity, palletBoxCapacity, egaisCode] = watch([
     "gtin14",
     "chzProductGroupCode",
     "boxCapacity",
     "palletBoxCapacity",
+    "egaisCode",
   ]);
 
   const gtin = gtinRule.safeParse(typedGtin);
@@ -245,14 +247,21 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
         )}
       />
       {showsEgais(group) && (
-        <Input
-          label={t("office.products.fields.egaisCode")}
-          hint={t("office.products.fields.egaisHint")}
-          inputMode="numeric"
-          mono
-          {...fieldError(errors.egaisCode?.message)}
-          {...register("egaisCode")}
-        />
+        <div className="product-gtin">
+          <Input
+            label={t("office.products.fields.egaisCode")}
+            hint={t("office.products.fields.egaisHint")}
+            inputMode="numeric"
+            mono
+            {...fieldError(errors.egaisCode?.message)}
+            {...register("egaisCode")}
+          />
+          <div className="product-gtin__notes" aria-live="polite">
+            {!egaisPrintsOnSheet(egaisCode) && (
+              <p className="office-note">{t("office.products.fields.egaisNotOnSheet")}</p>
+            )}
+          </div>
+        </div>
       )}
       <Input
         label={t("office.products.fields.boxCapacity")}

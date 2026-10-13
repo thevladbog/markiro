@@ -266,7 +266,8 @@
   display: grid;
 }
 
-.product-name__print {
+.product-name__print,
+.product-name__photo {
   color: var(--fg-2);
 }
 

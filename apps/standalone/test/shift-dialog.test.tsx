@@ -1298,6 +1298,28 @@ describe("office shifts: the product's default counterparty (plan ТОВ)", () =
     expect(valueOf("Контрагент")).toBe(NORTH.id);
   });
 
+  it("waits for the counterparties before a product can be chosen", async () => {
+    const fake = session();
+    let answer: (list: (typeof NORTH)[]) => void = () => undefined;
+    fake.api.listCounterparties.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await openShifts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalled());
+    expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
+    await act(async () => {
+      answer([NORTH, EAST]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
   it("is sent with the plan", async () => {
     const fake = session();
     fake.api.createShift.mockResolvedValue(CREATED);

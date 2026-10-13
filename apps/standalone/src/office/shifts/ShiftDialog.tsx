@@ -391,9 +391,16 @@ function ShiftForm({
               options={productOptions}
               value={field.value}
               onValueChange={(id) => chooseProduct(id, field.onChange)}
-              // The template follows the product, so the product waits for the templates and the defaults.
+              // The template follows the product, so the product waits for the templates and the
+              // defaults; and so does its default counterparty (plan ТОВ), for the counterparties.
               id={fieldId("productId")}
-              disabled={locked || !products.isSuccess || templates.isPending || defaults.isPending}
+              disabled={
+                locked ||
+                !products.isSuccess ||
+                templates.isPending ||
+                defaults.isPending ||
+                counterparties.isPending
+              }
               {...(products.isError ? { hint: t("office.shifts.fields.productsUnavailable") } : {})}
               {...fieldError(errors.productId?.message)}
             />

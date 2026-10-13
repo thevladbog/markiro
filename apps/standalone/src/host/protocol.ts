@@ -551,6 +551,12 @@ export const egaisCodeSchema = z.string().min(1).max(64);
 /** SHA-256 in lower-case hex. */
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
+/** Standard base64 with padding (a photo's JPEG, plan ТОВ). */
+const base64Schema = z
+  .string()
+  .min(4)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/u);
+
 /**
  * `GET /v1/office/products`: a product as the office sees it, archived ones
  * included. `gtin14` is the 14 digits the office saved; the two templates are
@@ -590,7 +596,7 @@ export type OfficeProduct = z.infer<typeof officeProductSchema>;
 export const productPhotoSchema = z.object({
   width: z.number().int().min(1).max(640),
   height: z.number().int().min(1).max(640),
-  dataBase64: z.string().min(4),
+  dataBase64: base64Schema,
   checksum: sha256HexSchema,
   updatedAt: z.string(),
 });
@@ -605,7 +611,7 @@ export const productPhotoPutSchema = z
   .object({
     width: z.number().int().min(1).max(640),
     height: z.number().int().min(1).max(640),
-    dataBase64: z.string().min(4),
+    dataBase64: base64Schema,
   })
   .strict();
 export type ProductPhotoPut = z.infer<typeof productPhotoPutSchema>;

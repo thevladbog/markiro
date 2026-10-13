@@ -322,6 +322,31 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     expect(print.mock.calls[1]?.[0]).toContain('class="product product--no-photo"');
   });
 
+  it("offers «Бланк смены» when the photo does not read on opening, and prints it without the photo (plan ТОВ)", async () => {
+    const pictured = { ...WATER, photoChecksum: "a".repeat(64) };
+    const session = formSession(PLANNED);
+    session.api.listProducts.mockResolvedValue([pictured]);
+    session.api.getProductPhoto.mockRejectedValue(new Error("offline"));
+    const print = vi.fn<PrintForm>();
+    await openCard(session, PLANNED, print, fakeOfficeFiles());
+    fireEvent.click(await screen.findByRole("button", { name: "Бланк смены" }));
+    const dialog = await readyDialog("Бланк смены OCT26-005");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(print.mock.calls[0]?.[0]).toContain('class="product product--no-photo"');
+  });
+
+  it("reads no photo for a product without one (plan ТОВ)", async () => {
+    const session = formSession(PLANNED);
+    const print = vi.fn<PrintForm>();
+    await openCard(session, PLANNED, print, fakeOfficeFiles());
+    fireEvent.click(await screen.findByRole("button", { name: "Бланк смены" }));
+    const dialog = await readyDialog("Бланк смены OCT26-005");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(session.api.getProductPhoto).not.toHaveBeenCalled();
+  });
+
   it("has no blank for a closed shift", async () => {
     const closed: OfficeShift = { ...SHIFT, status: "closed", closedAt: "2026-10-08T14:00:07Z" };
     await openCard(formSession(closed), closed, vi.fn<PrintForm>(), fakeOfficeFiles());

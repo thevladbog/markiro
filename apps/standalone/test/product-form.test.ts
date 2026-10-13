@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { OfficeProduct } from "../src/host/protocol.js";
-import { productFields, showsEgais, toProductInput } from "../src/office/products/product-form.js";
+import {
+  egaisPrintsOnSheet,
+  productFields,
+  productFieldsSchema,
+  showsEgais,
+  toProductInput,
+} from "../src/office/products/product-form.js";
 
 const BEER: OfficeProduct = {
   id: "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f",
@@ -28,6 +34,25 @@ describe("the product form's EGAIS code and default counterparty (plan ТОВ)",
     expect(showsEgais("15")).toBe(true);
     expect(showsEgais("8")).toBe(false);
     expect(showsEgais("")).toBe(false);
+  });
+
+  it("checks the code only while it shows: a hidden overlong code never blocks a save", () => {
+    const values = productFields(BEER);
+    const long = "1".repeat(65);
+    expect(productFieldsSchema.safeParse({ ...values, egaisCode: long }).success).toBe(false);
+    expect(
+      productFieldsSchema.safeParse({ ...values, egaisCode: long, chzProductGroupCode: "8" })
+        .success,
+    ).toBe(true);
+    expect(productFieldsSchema.safeParse({ ...values, egaisCode: "01\u0007" }).success).toBe(false);
+  });
+
+  it("says whether a code prints on an A4 pallet sheet: 19 digits or none", () => {
+    expect(egaisPrintsOnSheet("0150320000001234567")).toBe(true);
+    expect(egaisPrintsOnSheet(" 0150320000001234567 ")).toBe(true);
+    expect(egaisPrintsOnSheet("")).toBe(true);
+    expect(egaisPrintsOnSheet("015032000000123456")).toBe(false);
+    expect(egaisPrintsOnSheet("EG-0150320000001234")).toBe(false);
   });
 
   it("carries both fields of a product, and blanks for a new one", () => {

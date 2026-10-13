@@ -964,6 +964,31 @@ describe("office product dialog: EGAIS code and default counterparty (plan ТО�
     });
   });
 
+  it("saves after a group change with an overlong code left in the hidden field, sending none", async () => {
+    const fake = beerSession();
+    fake.api.updateProduct.mockResolvedValue({ ...BEER, chzProductGroupCode: 8, egaisCode: null });
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    type("Код ЕГАИС", "1".repeat(65));
+    type("Товарная группа", "8");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      chzProductGroupCode: 8,
+      egaisCode: null,
+    });
+  });
+
+  it("says when a code is not 19 digits that the A4 sheet goes without it", async () => {
+    const fake = beerSession();
+    await openEdit(fake, "Пиво светлое 0,5 л");
+    const note = "Код не из 19 цифр: на этикетках он напечатается, а на листе А4 паллеты — нет.";
+    expect(screen.queryByText(note)).toBeNull();
+    type("Код ЕГАИС", "EG-01503");
+    expect(screen.getByText(note)).toBeTruthy();
+    type("Код ЕГАИС", EGAIS);
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
   it("keeps the code and the counterparty of an edit that changes something else", async () => {
     const fake = beerSession();
     fake.api.updateProduct.mockResolvedValue({ ...BEER, name: "Пиво", rev: 71 });

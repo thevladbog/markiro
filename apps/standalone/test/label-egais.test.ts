@@ -12,7 +12,7 @@ import {
 
 import type { EnteredShift } from "../src/host/protocol.js";
 import { boxLabelData, palletLabelData, renderLabel } from "../src/floor/print/label-render.js";
-import { renderShiftSheet } from "../src/floor/print/shift-render.js";
+import { EGAIS_NOT_ON_SHEET_LINE, renderShiftSheet } from "../src/floor/print/shift-render.js";
 import { sourceFields } from "../src/floor/warehouse/warehouse-work.js";
 import { renderSheetBytes } from "../src/labels/sheet-render.js";
 import { sheetLogoOf } from "../src/labels/logo.js";
@@ -205,5 +205,40 @@ describe("the EGAIS code on the station's labels (plan ТОВ)", () => {
       logo: sheetLogoOf(logo, "organization"),
     };
     expect(bytes).toStrictEqual(await renderSheetBytes(sheet.spec, context, spelling));
+  });
+
+  it("an A4 sheet prints without a frozen code that is not 19 digits, and says so", async () => {
+    const [sheet] = buildPalletSheetPresets();
+    if (sheet === undefined) throw new Error("no stock sheet");
+    const logo: MonoBitmap = { width: 8, height: 8, stride: 1, pixels: new Uint8Array(8).fill(1) };
+    const base = await stored(frozen({ chzProductGroupCode: 15, egaisCode: "EG-0150320000001" }));
+    const shift = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        organization: { name: "ООО «Пивоварня»", inn: "7701234567", logo },
+        palletSheet: {
+          id: "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+          name: sheet.name,
+          revision: 1,
+          spec: sheet.spec,
+        },
+      },
+    };
+    const fields = palletLabelData(shift, PALLET, "Иванов");
+    // The thermal label still prints it as the shift froze it.
+    expect(fields["product.egais"]).toBe("EG-0150320000001");
+    const lines: string[] = [];
+    const texts: string[] = [];
+    const bytes = await renderShiftSheet(shift, fields, {
+      sheetRasterize: async (value, options) => {
+        texts.push(value);
+        return spelling(value, options);
+      },
+      report: (line) => lines.push(line),
+    });
+    expect(bytes.length).toBeGreaterThan(0);
+    expect(texts).not.toContain("EG-0150320000001");
+    expect(lines).toEqual([EGAIS_NOT_ON_SHEET_LINE]);
   });
 });

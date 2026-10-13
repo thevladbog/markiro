@@ -73,7 +73,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     expect(choose.tabIndex).toBe(0);
     expect(
       screen.getByText(
-        "JPEG, PNG или WebP. Фото уменьшается до 640 точек по большей стороне и печатается на бланке смены.",
+        "JPEG, PNG или WebP. Фото уменьшается до 640 точек по большей стороне, сохраняется сразу, без кнопки «Сохранить», и печатается на бланке смены.",
       ),
     ).toBeTruthy();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -89,6 +89,39 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     // The list's `photoChecksum` changes with it.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: officeKeys.products, exact: true });
     expect(screen.getByRole("button", { name: /Заменить/u })).toBeTruthy();
+  });
+
+  it("writes only the latest picked picture when an earlier encode ends later", async () => {
+    const fake = session();
+    fake.api.putProductPhoto.mockResolvedValue({ photo: PHOTO });
+    let finishFirst: (photo: typeof ENCODED) => void = () => undefined;
+    const second = { ...ENCODED, width: 1 };
+    const encode = vi
+      .fn<PhotoEncoder>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(async () => second);
+    show(fake, PRODUCT_ID, encode);
+    await screen.findByRole("button", { name: /Выбрать фото/u });
+    pick(JPEG);
+    pick(JPEG);
+    await waitFor(() => expect(fake.api.putProductPhoto).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      finishFirst(ENCODED);
+      await Promise.resolve();
+    });
+    expect(fake.api.putProductPhoto.mock.calls).toEqual([
+      ["office-session-token", PRODUCT_ID, second],
+    ]);
+  });
+
+  it("names its section by its heading", async () => {
+    show(session(), PRODUCT_ID, vi.fn<PhotoEncoder>());
+    expect(await screen.findByRole("region", { name: "Фото" })).toBeTruthy();
   });
 
   it("removes the photo and offers to choose one again", async () => {

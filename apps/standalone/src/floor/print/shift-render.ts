@@ -14,6 +14,18 @@ import type { RenderLabel } from "./print-jobs.js";
  */
 export const LOGO_UNAVAILABLE_LINE = "station: label logo unavailable, printing without it";
 
+/**
+ * The diagnostic line of an A4 sheet printed without the shift's EGAIS code
+ * (plan ТОВ): the sheet's renderer takes only 19 digits, while a product may
+ * carry 1 to 64 characters (as in the cloud), and a frozen code can no longer
+ * be fixed for the running shift.
+ */
+export const EGAIS_NOT_ON_SHEET_LINE =
+  "station: the EGAIS code is not 19 digits, the A4 sheet prints without it";
+
+/** The sheet renderer's form of an EGAIS code (`pallet-sheet-render.ts`). */
+const SHEET_EGAIS_CODE = /^\d{19}$/u;
+
 /** What a shift's render may be given instead of the app's own; tests give their own. */
 export interface ShiftRenderDeps {
   /**
@@ -60,14 +72,21 @@ export async function renderShiftSheet(
   }
   const own = organization.logo;
   const bitmap = own ?? (await (deps.loadMarkiro ?? loadBundledMarkiroLogo)());
+  // A frozen code of another form never stops the pallet's sheet: the sheet
+  // prints without it and one diagnostic line says so; the thermal label,
+  // whose renderer takes any text, still prints it.
+  const frozen = product.egaisCode ?? null;
+  const egaisCode = frozen !== null && SHEET_EGAIS_CODE.test(frozen) ? frozen : null;
+  if (frozen !== null && egaisCode === null) {
+    (deps.report ?? ((line: string) => console.error(line)))(EGAIS_NOT_ON_SHEET_LINE);
+  }
   return renderSheetBytes(
     palletSheet.spec,
     {
       sscc: fields.sscc,
       productPrintName: fields["product.printName"],
       gtin14: product.gtin14,
-      // As the shift froze it (plan ТОВ); a sheet refuses a code of another form than 19 digits.
-      egaisCode: product.egaisCode ?? null,
+      egaisCode,
       productionDate: shift.copy.productionDate,
       shelfLifeDays: product.shelfLifeDays,
       boxCount: count(fields["qty.boxes"]),
