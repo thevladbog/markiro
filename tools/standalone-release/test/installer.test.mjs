@@ -33,6 +33,13 @@ test("only the installer build bundles the host: cargo and the debug build need 
   });
 });
 
+test("an older installer never goes over a newer one: a rollback is an uninstall and the older installer (plan ОБН-1)", () => {
+  // Tauri's default is `true` (config.schema.json of @tauri-apps/cli 2.11.4).
+  assert.equal(overlay.bundle.windows.allowDowngrades, false);
+  // The base config never turns it back on for another build.
+  assert.equal(base.bundle.windows?.allowDowngrades, undefined);
+});
+
 test("the hooks file is UTF-8 with a byte order mark, or NSIS garbles the Russian text", () => {
   assert.deepEqual([...hooksBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
   assert.match(hooks, /[а-я]/);

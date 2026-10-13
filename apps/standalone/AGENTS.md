@@ -98,7 +98,8 @@ never the picture) and `product.photo.clear` (only when there was one); `product
 Backups (plan РК) write `backup.create` (the host or the office user who asked;
 `failed` when a folder did not get the copy), `backup.settings.update`,
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
-(the station).
+(the station). The copy before an upgrade (plan ОБН-1) writes `host.upgrade`
+(the host; see «Backups and restore»).
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
 SHA-256 of a copy's file in `backup.create` and `host.restore` is a checksum to
 compare with the manifest, not a credential hash), and
@@ -408,6 +409,22 @@ a build with `0011` already opened cannot be opened by a binary
 without that file. That is a hazard of developing on unmerged branches
 (use a fresh database), not a field procedure; the runbook names it for
 developers only.
+
+Before this build's pending migrations (plan ОБН-1) `LocalDb::open` copies the
+database: `VACUUM INTO standalone-station.pre-<app version>.db.partial`,
+`integrity_check` on it read-only, flushed, renamed over a copy of that name,
+and every older `standalone-station.pre-*.db` goes with its side files, so one
+stays. A copy of that name that is sound and older than the database (an
+earlier open of this version whose first migration committed before a later
+one failed) stays as it is: it holds the state before all of them, which the
+previous app can open. A new file, a failed or an unknown migration take no
+copy (sqlx decides as before). A copy that fails runs no migration: the open
+fails as `OpenFailure::Other` (the file stays, the app starts without its
+local database), except damage the copy met in the database, which stays
+`Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
+file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
+it, with the PIN and badge hashes it held at the upgrade, and only the next
+upgrade that brings migrations replaces it (carried to the owner, Д9).
 
 ## Writes
 
@@ -1426,6 +1443,21 @@ observes a fingerprint without trusting it (`FingerprintPolicy::Observe`)
 and exists only to discover a host before loopback, a person or a pairing
 code confirms it.
 
+Every request of `host_client` (both clients, through `pinned_builder`'s
+default headers) carries `x-markiro-app-version`
+(`markiro_proto::APP_VERSION_HEADER`, the shell's `CARGO_PKG_VERSION`; plan
+ОБН-1). `auth::authenticate` (`AuthDevice`, never `AskingDevice`) writes
+`devices.app_version`, `protocol` and `version_seen_at` when the reported
+version or protocol differs from the stored one or nothing was reported since
+pairing, and takes no write lock otherwise: no revision, no audit row, like
+`last_seen_at`. A header that is not plain text of 1–50 characters is ignored;
+the protocol is the guard's `ClientProtocol` or, outside the guard, the
+header's whole number 1–1000. `GET /v1/office/devices` answers `protocol` and
+`versionSeenAt` (optional in Zod: a host of the same protocol before ОБН-1
+sends neither; `proto/fixtures/device-record-legacy.json` pins that for Zod
+only, the Rust `DeviceRecord` requires `protocol` because only the host writes
+it), and «Устройства» shows «0.3.0, протокол 3» or «0.1.0 (при подключении)».
+
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//` or
 a `.` segment, and only the routes `/v1/device[/…]` except `/v1/device/line`,
@@ -2147,7 +2179,14 @@ pins the overlay, the hooks, the job's step order and the smoke test's checks.
 The installer is not signed (owner question П12); `sign-overlay.mjs` builds
 the Tauri overlay for a certificate in the build machine's store, and no
 signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
-`.nsh` hooks.
+`.nsh` hooks. The overlay sets `bundle.windows.allowDowngrades: false` (plan
+ОБН-1; Tauri's default is `true`), and the release contract pins it: an older
+installer over a newer one refuses, so a rollback is an uninstall, the older
+installer and `markiro-host restore` of the copy before the upgrade
+(`docs/runbooks/standalone-install.md`, «Откат хоста к прежней версии»). How
+the NSIS template refuses, with and without `/S`, has not been seen on
+Windows. A copy before the migrations that fails is one more cause of
+`install`'s exit code 4.
 
 ## Office pages
 
@@ -4963,6 +5002,43 @@ The same loss hits, on ANY restore (the same PC included), every station
 paired after the copy; its SSCC is safe only when the previous database was
 read (runbook check 4). The checks that make up for all of this are the
 runbook's, done by a person before the resume.
+
+Plan ОБН-1 adds the copy before an upgrade. `crate::start` opens the master
+database through `db::open_upgrading`: the pool opens without migrations,
+`upgrade::pending` compares `_sqlx_migrations` with the build's migrations,
+and when the build brings any the database lacks (on top of at least one it
+has; a new file, a failed or an unknown migration are left to sqlx as before;
+checksums are not compared) `upgrade::prepare` makes a verified copy through
+`backup::copy` (`VACUUM INTO`, `integrity_check`, the manifest, the host
+identity when it names this host) into the local folder, named
+`markiro-host-<UTC time>-pre-upgrade-<from>-<to>.db` (`from` the newest
+migration the database has, `to` the build's newest), and only then do the
+migrations run. One `host.upgrade` row: the host as the actor, target `backup`
+and the copy's name, details `from`, `to`, `migrations`, `file`, `reused`,
+`code`, `appVersion`. A copy that fails runs no migration and the host does not
+start (`upgrade::OpenError::Copy`, whose text gives the advice its code calls
+for; the service exits, `install` answers 4, Windows retries every 60 s); its
+`failed` row is written once while the same failure repeats. A migration that
+fails after a good copy writes `failed` with `code: "migration_failed"` and the
+copy's name. The next start uses that copy again (`reused: true`, and the row
+names the copy's own `from` and `migrations`) when the newest audit row is
+that failed row towards the same `to` with a `from` no newer than the
+database's (a migration that committed before a later one failed moves the
+database on, the copy still holds the state before all of them), and the
+copy's manifest reads with the same schema, host and size; so a crash loop
+does not fill the disk. The proof that nothing wrote in between rests on every
+start writing rows at once (the worker's first `backup.create`) and a restore
+writing `host.restore`: a change there must keep it. The manifest says
+`trigger: "scheduled"` on purpose: an older build's `read_manifest` and an
+older office's `backupTriggerSchema` refuse an unknown trigger, and the
+rollback needs the older `restore` to read this copy; the name is the mark
+(`upgrade::is_pre_upgrade`, the copy's UTC time and `-pre-upgrade-`).
+`retention::keep_anchored` keeps such a copy while it is no more than 14 days
+older than the copy the run just made (`rotate`'s `keep_also`; the folder's
+newest without one), whatever the other rules say, so a copy dated ahead by a
+clock once set forward does not void it; it is not replicated to the second
+folder. `db::open` (no copy) stays for a new database and the restore's own
+staging.
 
 Migration `0011` may be applied after `0012` on a database that already had
 it (sqlx accepts a lower version not yet applied; the test builds a
