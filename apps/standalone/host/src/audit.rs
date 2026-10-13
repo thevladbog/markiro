@@ -78,6 +78,15 @@ pub mod actions {
     pub const BACKUP_CREATE: &str = "backup.create";
     /// An administrator set or cleared the second folder of copies.
     pub const BACKUP_SETTINGS_UPDATE: &str = "backup.settings.update";
+    /// An administrator loaded a license file (plan ЛЦ-2); `denied` for a
+    /// file the host refused, with its reason: unlike other refused office
+    /// writes, a foreign or forged file is an event for the log.
+    pub const LICENSE_LOAD: &str = "license.load";
+    /// The license state changed (the host is the actor): a phase that ended
+    /// by time, a file, the organization's INN.
+    pub const LICENSE_STATE: &str = "license.state";
+    /// An administrator opened new shifts for 72 hours more (spec §3.5).
+    pub const LICENSE_EMERGENCY: &str = "license.emergency";
 }
 
 /// `details.reason` of a denied row: every denial names one.
@@ -96,6 +105,14 @@ pub mod reasons {
     pub const CODE_USED: &str = "code_used";
     pub const TOO_MANY_ATTEMPTS: &str = "too_many_attempts";
     pub const CODE_EXPIRED: &str = "code_expired";
+    /// A refused license file (plan ЛЦ-2, spec §4.3), as the answer names it.
+    pub const LICENSE_MALFORMED: &str = markiro_proto::license::refusals::MALFORMED;
+    pub const LICENSE_UNKNOWN_KEY: &str = markiro_proto::license::refusals::UNKNOWN_KEY;
+    pub const LICENSE_SIGNATURE: &str = markiro_proto::license::refusals::SIGNATURE;
+    pub const LICENSE_WRONG_HOST: &str = markiro_proto::license::refusals::WRONG_HOST;
+    pub const LICENSE_INN_MISMATCH: &str = markiro_proto::license::refusals::INN_MISMATCH;
+    pub const LICENSE_INN_MISSING: &str = markiro_proto::license::refusals::INN_MISSING;
+    pub const LICENSE_OLDER: &str = markiro_proto::license::refusals::OLDER;
 }
 
 /// `details` of an update row: `changed` names the changed fields in order,
