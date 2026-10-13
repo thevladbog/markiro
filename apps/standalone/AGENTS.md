@@ -116,12 +116,29 @@ the office saved an export's files and then wrote it (`POST
 shift as its target and the record's fields as its details. The host cannot
 check those counts against the files, which it never sees: the row says what
 the office session reported it wrote, and it is no evidence of the bytes.
+`conflict.review` (plan КНФ) is the office user who marked a code conflict
+reviewed, target `code_conflict`/`{id}`, details `{ kind, loserShiftId,
+loserDeviceId, winnerShiftId }` — never the code nor its hash; both office
+roles may, a conflict reviewed already answers as it is and writes no row,
+and a review takes a host revision (no feed item) so the stations' streams
+wake and ask after their conflicts.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
 
 DDL lives only in `host/migrations` and `src-tauri/migrations`. An applied
 migration is never edited — add a new one; sqlx verifies checksums at start.
+
+Host migration `0022_conflict_review.sql` (plan КНФ) adds to `code_conflicts`
+its `kind` (`late` | `displaced`; a row written before it takes its kind from
+the loser's receipt, which the host keeps for good: `accepted` means it was
+displaced, `conflict` that it came late) and `reviewed_by` (an office user,
+`CHECK` both or neither with `reviewed_at`), and five indexes:
+`code_conflicts_loser`, `code_conflicts_detected (detected_at, id)` (the
+office's list and a device's cursor), the partial `fact_receipts_rejected`
+and `box_exceptions_shift`/`pallet_exceptions_shift`. None is on `scans` or
+`code_owners`: plan РЕЖ rebuilds both tables and recreates only its own and
+the code search's indexes.
 
 ## Local database
 
@@ -430,6 +447,24 @@ without that file. That is a hazard of developing on unmerged branches
 (use a fresh database), not a field procedure; the runbook names it for
 developers only.
 
+Migration `0016_conflict_notices.sql` (plan КНФ; `0014`–`0015` are plan
+РЕЖ's) adds `outbox.office_reviewed_at` — the host's instant of the office's
+review of a record's conflict, NULL for every record before it — and
+`floor_displacements` (`DeviceData`): the scans of this station an earlier
+scan elsewhere took the code from, one row per conflict and pairing and one
+per record (`floor_displacements_record`, so a conflict a restored host
+writes again under a new id stays one row), the winner by its shift's number
+and whether it is this station's own (never a device's name), `learned_at`
+and `resolved_at` on this computer's clock, `detected_at` and
+`office_reviewed_at` the host's, `resolved_by` the operator or NULL for the
+office's review (`CHECK`s: a person or the office resolves only with the
+instant). It has a `shift_id` but no retention on purpose (rows are few, and
+the newest is the cursor of the next read, which must never go back;
+`test/retention.test.ts` names that exception). Indexes:
+`floor_displacements_cursor` and the partial `floor_displacements_open`; the
+statements' plans are pinned on both SQLite builds
+(`the_conflict_notices_search_an_index`).
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a
@@ -437,10 +472,12 @@ developers only.
   hit `SQLITE_BUSY` on a stale WAL snapshot before `busy_timeout` gets a
   chance to help.
 - One `next_revision` per changing transaction, stamped on every row that
-  transaction changes. A device's line change is the one revision with no
-  row to stamp: devices have no `rev` column and are not feed data, so
+  transaction changes. Two revisions have no row to stamp: a device's line
+  change (devices have no `rev` column and are not feed data, so
   `PUT /v1/office/devices/{id}` takes a revision only to wake the streams,
-  and only when the line really changes.
+  and only when the line really changes) and a conflict's review (plan КНФ:
+  `code_conflicts` is no feed data; the revision wakes the stations, which
+  then ask after their own conflicts).
 - A transaction that called `next_revision` commits through
   `db::commit_with_revision`, which wakes change-stream subscribers only
   after the commit: a device that reacts at once already reads the new rows.
@@ -3308,8 +3345,13 @@ conflict loser (re-electing the earliest remaining claim is plan 2b). A
 scan earlier than the owner takes the code, and the owner's item leaves its
 box (`box_items.displaced_at`); a later one, or one at the same instant, is
 `conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
-is the sender's own scan). Both write a `code_conflicts` row; telling the
-displaced device and the office's review come with plan 2b.
+is the sender's own scan). Both write a `code_conflicts` row, which says how
+its loser lost (`kind`, plan КНФ); the office reviews it («Конфликты»), and a
+device learns of the review and of its own displaced scans by asking
+(`POST /v1/device/conflicts/status`, `GET /v1/device/displacements`, see
+«Conflicts and the review of a shift»). A displacement takes no revision
+(the facts are not changed for it): a station hears of it at the next
+revision or reconnect.
 
 A `box_closed` (`facts/box_closed.rs`) closes a box of this device in this
 shift (`box_unknown` otherwise) with an SSCC of 18 digits whose first 17 are
@@ -3451,8 +3493,9 @@ batch being written — a station asks within 300 ms (plan 2a6) — and it
 writes nothing: it authenticates through `AskingDevice`, the read-only twin of
 `AuthDevice` (same key, revocation and kind checks, no `last_seen_at` update),
 so it never waits for a writer, the first request after an idle minute and a
-busy station's once-a-minute touch included. This is the ONLY writer-free
-device route. Every other device route authenticates through `AuthDevice`,
+busy station's once-a-minute touch included. With the two reads of a
+station's conflicts (`routes/device_conflicts.rs`, plan КНФ) these are the
+only writer-free device routes. Every other device route authenticates through `AuthDevice`,
 which touches `last_seen_at` at most once a minute per device (even an
 `UPDATE` that matches no row takes SQLite's write lock, so it runs only when a
 minute is up): the first request after each full minute, a scanning station's
@@ -4172,6 +4215,29 @@ refused close, is not reopened by a restore's reconciliation (`REOPEN_SQL`),
 and no longer holds its shift from the retention. A scan sent again under a new
 id leaves the floor's marks of the original as they were.
 
+What the host tells the station of its conflicts (plan КНФ,
+`src/local/conflict-notices.ts`) is read by the link's own scheduler
+(`noticeReader`, `src/app/host-link.ts`) at the link's first watch, at every
+revision and on reconnect, retried like the other reads; a host without the
+routes (`not_found`) is no failure. First the displacements after the newest
+kept (`GET /v1/device/displacements`, a page at a time, each kept once; one
+the office reviewed already comes resolved); then, of every record whose
+conflict or displacement nobody resolved, in parts of 200, the ones the
+office reviewed (`POST /v1/device/conflicts/status`): the record is resolved
+by the station itself (`dismissed`, `resolved_at` its clock, `resolved_by`
+NULL — no operator of this station did it, the three identities stay apart,
+and `office_reviewed_at` the host's instant), so the status bar, the queue
+screen and the retention stop counting it. The queue screen lists the open
+displacements under «Вытесненные коды» (the box's SSCC and when the host saw
+it, the winning shift's number), at most 100, each settled by «Разобрано»
+after the same confirmation and 400 ms guard (`dismissDisplacement`), and
+the status bar counts them («Вытеснено кодов»). The floor's own marks
+(`floor_codes`, `floor_scans.conflict`, `floor_boxes.needs_fix`) are left as
+they were, and a station's «Разобрано» never reaches the host (as in the
+cloud). Known limits: a displacement is heard at the next revision or
+reconnect, not at once; a restored host no longer knows the conflicts after
+its copy, so those rows can only be settled on the station.
+
 The status bar also warns of the serials left (`readShiftStock`): the boxes'
 and, in a shift with pallets, the pallets', at a quarter and a tenth of the
 newest block of that prefix and extension — inclusive, so the words say
@@ -4542,8 +4608,10 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   pallets), each with what its source would refuse now, the line limit
   (2–1 000 000, 2000 by default), the warnings (late data, boxes on a pallet
   still open, pallets taken apart in the document, a pallet's count that
-  differs from its boxes) and a ЧЗ document for each closed pallet, also of an
-  active shift. A late box and a taken-apart pallet are shown as two facts:
+  differs from its boxes, and the shift's unreviewed code conflicts —
+  `unreviewed_conflicts`, plan КНФ, every shift format, never a refusal, left
+  out when their list does not load) and a ЧЗ document for each closed
+  pallet, also of an active shift. A late box and a taken-apart pallet are shown as two facts:
   `late_boxes` also counts a box on a taken-apart pallet, which is still
   written as a pallet. Forming reads the rows
   again, saves the parts and only then records the export; a record the host
@@ -4671,6 +4739,49 @@ mapping; the bytes are the acceptance rule.
   product that has one (`officeKeys.productPhoto`), a press reads it again, and
   a photo that does not read leaves the form without it — a photo never stops
   the form.
+
+## Conflicts and the review of a shift
+
+Plan КНФ (parity spec §5.2, pilot spec §7).
+
+- Host: `GET /v1/office/conflicts?shift=&reviewed=&page=` and `POST
+/v1/office/conflicts/{id}/review` (`routes/office_conflicts.rs`); `GET
+/v1/office/shifts/{id}/exceptions` and `…/rejections`
+  (`routes/office_shift_review.rs`); every office role reads, both roles
+  review (`auth::reviews_conflicts`, no wildcard arm). The list is newest
+  detection first, 50 a page, at most 200 pages (`pageCount` is capped,
+  `total` exact). The shift filter is the LOSING shift's, as the cloud's: the
+  winner's box on the host matches what was packed. A conflict names its code
+  by `codeHash`, GTIN and serial only: the canonical text with its crypto tail
+  never leaves the host this way (a test looks for the fixture's tail). Both
+  sides carry shift (number), station (name), operator, the device's instant
+  and the box (SSCC, `null` while open, no box at all for a validation shift).
+  A review is kept once with its reviewer, an audit row and a revision; a
+  repeat answers the conflict as it is.
+- A shift's exceptions and refused records each answer at most 500 rows,
+  newest first, with `total`. An undo's serial is its code's (any scan of the
+  hash). Refusals the host could not tie to a shift (`unknown_shift`,
+  `not_entered`, an unreadable record) are in no shift's list, and a refused
+  record the station sent again under a new id stays (the host does not link
+  the two); the section's hint says both.
+- Device: `POST /v1/device/conflicts/status` (1–200 record ids, the device's
+  own scans only, answers the reviewed ones with `reviewedAt`) and `GET
+/v1/device/displacements?afterAt=&afterId=` (its displaced scans after the
+  cursor, oldest first, 100 a page with `more`; the cursor is the host's own
+  spelling of an instant and a conflict id, both or neither). Both are
+  writer-free (`AskingDevice`) and not held by a restore. No
+  `PROTOCOL_VERSION` bump: new routes are no new fact kind or `data` field.
+- Office: «Конфликты» in «Производство» (`src/office/conflicts`), its
+  filters in the address (`?shift=&state=&page=`), «Отметить разобранным»
+  (one press, the notice takes the focus, every list of conflicts reads
+  again). The loser's box links to its shift's card with `?box=<SSCC>`, which
+  fills the boxes' SSCC filter, until plan КРТ gives a box a card of its own
+  (`loserBoxLink`, one line). The shift card adds «Исключения», «Отклонённые
+  записи станции» and «Конфликты» (the losing shift's, «Не разобрано: N из M»
+  and «Все конфликты смены») after the boxes and pallets, each loading on its
+  own, paged by 50, with «Показаны последние N из M» past 500. The export
+  dialog warns of the shift's unreviewed conflicts (ПР-12: a warning only).
+- The station's part is in «Outbox recovery» and «Local database».
 
 ## Backups and restore
 
@@ -5127,6 +5238,12 @@ either; a file log is stage 5.
   row, `host_revision` reads the revision. Add a helper there before copying
   one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
+- Plan КНФ (conflicts and the review of a shift): the host's routes ran only
+  against `TestApp` (and the loopback walk of `no_secrets_in_logs`), the
+  office's page, card sections and warning only in jsdom, and the station's
+  notices and queue section only on node:sqlite with a fake `HostApi`. Not
+  run: Windows, WebView2, two stations over a LAN with one offline, a real
+  restore of the host, the keyboard order in a real browser.
 - Plan ТОВ by hand, on the client's printers and Windows 10/11: a beer label (ЧЗ group 15
   with an EGAIS code) in ZPL and TSPL at 203 and 300 dpi — the «ЕГАИС» row whole and
   legible on the box and pallet labels and on the A4 pallet sheet (a long code on a
