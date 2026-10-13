@@ -12,7 +12,7 @@ import {
   type OfficeShiftException,
 } from "../src/host/review.js";
 import type { FakeOfficeSession } from "./support/office.js";
-import { ACTIVE, CLOSED, openShifts, PLANNED, shiftsSession } from "./support/shifts.js";
+import { ACTIVE, CLOSED, openShifts, PALLET, PLANNED, shiftsSession } from "./support/shifts.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
 const testModuleUrl = import.meta.url;
@@ -67,6 +67,24 @@ describe("a shift's review on its card (plan КНФ)", () => {
     expect(headings).toEqual(["Короба", "Исключения", "Отклонённые записи станции", "Конфликты"]);
     expect(session.api.listShiftExceptions).toHaveBeenCalledWith(TOKEN, ACTIVE.id);
     expect(session.api.listShiftRejections).toHaveBeenCalledWith(TOKEN, ACTIVE.id);
+  });
+
+  it("puts the review after the pallets of a shift with pallets", async () => {
+    const withPallets: OfficeShift = {
+      ...ACTIVE,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    await openCard(cardSession(withPallets), ACTIVE.number);
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual([
+      "Короба",
+      "Паллеты",
+      "Исключения",
+      "Отклонённые записи станции",
+      "Конфликты",
+    ]);
   });
 
   it("has no review on a planned shift, which got nothing yet", async () => {
@@ -156,6 +174,11 @@ describe("a shift's review on its card (plan КНФ)", () => {
     expect(rows[1]?.[1]).toMatch(/^Поздний скан: /);
     // The review itself stays on «Конфликты».
     expect(within(conflicts).queryByRole("button")).toBeNull();
+    // One page: the unreviewed are counted on it, with no second read.
+    expect(session.api.listConflicts).not.toHaveBeenCalledWith(
+      TOKEN,
+      expect.objectContaining({ reviewed: false }),
+    );
   });
 
   it("counts the unreviewed apart when the shift lost more than one page", async () => {
@@ -198,7 +221,13 @@ describe("a shift's review on its card (plan КНФ)", () => {
     );
     await openCard(session, ACTIVE.number);
     const rejections = section("Отклонённые записи станции");
-    fireEvent.click(await within(rejections).findByRole("button", { name: "Повторить" }));
+    const retry = await within(rejections).findByRole("button", { name: "Повторить" });
+    // Only that section says so; the others show their lists meanwhile.
+    expect(within(rejections).getByText(/^Нет связи с хостом/)).toBeTruthy();
+    expect(await within(section("Исключения")).findByRole("table")).toBeTruthy();
+    expect(await within(section("Конфликты")).findByRole("table")).toBeTruthy();
+    expect(within(section("Исключения")).queryByRole("button", { name: "Повторить" })).toBeNull();
+    fireEvent.click(retry);
     await waitFor(() => expect(session.api.listShiftRejections).toHaveBeenCalledTimes(2));
     expect(await within(rejections).findByRole("table")).toBeTruthy();
     expect(within(section("Исключения")).getByRole("table")).toBeTruthy();

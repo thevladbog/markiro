@@ -6,7 +6,7 @@ import { Link } from "react-router";
 
 import { Card, StatusChip, Table, type TableColumn } from "@markiro/ui";
 
-import { FACT_RECEIPT_CODES, type OfficeShift } from "../../host/protocol.js";
+import { FACT_KINDS, FACT_RECEIPT_CODES, type OfficeShift } from "../../host/protocol.js";
 import type {
   ConflictQuery,
   OfficeConflict,
@@ -32,16 +32,10 @@ export interface ReviewSectionProps {
 }
 
 const RECEIPT_CODES: ReadonlySet<string> = new Set(FACT_RECEIPT_CODES);
-const RECORD_KINDS: ReadonlySet<string> = new Set([
-  "scan",
-  "box_closed",
-  "box_label",
-  "box_exception",
-  "shift_closed",
-  "pallet_closed",
-  "pallet_label",
-  "pallet_exception",
-]);
+const RECORD_KINDS: ReadonlySet<string> = new Set(FACT_KINDS);
+
+/** Counts with the thousands apart by a no-break space: «1 200». */
+const COUNT = new Intl.NumberFormat("ru");
 
 /** A refusal's code in the station's words (`floor.queue.code.*`); a code a newer host adds, as itself. */
 function refusalText(code: string, t: TFunction): string {
@@ -115,7 +109,10 @@ function ReviewSection<T>({
       <>
         {total > items.length && (
           <p className="office-note">
-            {t("office.shiftCard.review.limited", { shown: items.length, total })}
+            {t("office.shiftCard.review.limited", {
+              shown: COUNT.format(items.length),
+              total: COUNT.format(total),
+            })}
           </p>
         )}
         <Table
@@ -180,10 +177,16 @@ export function ShiftExceptions({ shift, at }: ReviewSectionProps) {
       key: "subject",
       title: t("office.shiftCard.review.exceptions.subject"),
       mono: true,
-      render: (item) =>
-        item.sscc === null
+      render: (item) => {
+        if (item.sscc !== null) {
+          return t(`office.shiftCard.review.exceptions.${item.subject}`, {
+            sscc: ssccText(item.sscc),
+          });
+        }
+        return item.subject === "box"
           ? t("office.shiftCard.review.exceptions.openBox")
-          : t(`office.shiftCard.review.exceptions.${item.subject}`, { sscc: ssccText(item.sscc) }),
+          : t("office.shiftCard.noSscc");
+      },
     },
     {
       key: "reason",
@@ -343,8 +346,8 @@ export function ShiftConflicts({ shift }: ReviewSectionProps) {
       {list.data !== undefined && list.data.total > 0 && counted !== null && (
         <span>
           {t("office.shiftCard.review.conflicts.summary", {
-            unreviewed: counted,
-            total: list.data.total,
+            unreviewed: COUNT.format(counted),
+            total: COUNT.format(list.data.total),
           })}
         </span>
       )}
