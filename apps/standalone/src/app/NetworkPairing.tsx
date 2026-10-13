@@ -415,7 +415,11 @@ export function NetworkPairing({
   };
 
   return (
-    <Card className="standalone-card" title={t("shell.networkPairing.title")} titleAs="h2">
+    <Card
+      className="standalone-card standalone-card--wide"
+      title={t("shell.networkPairing.title")}
+      titleAs="h2"
+    >
       <div className="standalone-form">
         <p>{t("shell.networkPairing.intro")}</p>
         {notice && <Alert tone="error">{t(notice.key, notice.values ?? {})}</Alert>}

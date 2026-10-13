@@ -13,6 +13,11 @@
   width: min(560px, 100%);
 }
 
+/* A card whose row of floor buttons needs the room of three labels (the network pairing). */
+.standalone-card--wide {
+  width: min(800px, 100%);
+}
+
 .standalone-card p {
   margin: 0 0 16px;
 }
@@ -148,10 +153,19 @@
   font: var(--text-body);
 }
 
+/*
+ * A row of buttons: each label stays on one line (a 64px floor button with two
+ * lines of text looks broken), and a row that does not fit wraps by whole buttons.
+ */
 .standalone-form__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.standalone-form__actions > button {
+  white-space: nowrap;
 }
 
 .standalone-wizard__step,
