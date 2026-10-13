@@ -9,7 +9,7 @@
 //! path: a path names the Windows user.
 
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use markiro_proto::trust::{self, Keyset, TrustError, UpdateManifestV1};
@@ -198,10 +198,112 @@ impl Manifest {
 /// A package that holds: its manifest and its installer, open and held.
 pub struct Checked {
     pub manifest: Manifest,
+    /// The installer beside the manifest, as the search named it (shown to
+    /// the person for a manual install).
     pub installer_path: PathBuf,
+    /// The path the installer is started by: on Windows the final path of
+    /// the held handle (`GetFinalPathNameByHandleW`), so a junction among the
+    /// folders above it, retargeted after the hash, cannot send the start to
+    /// another file; every folder of a final path holds an open file and
+    /// cannot be renamed. Elsewhere `installer_path`.
+    pub launch_path: PathBuf,
     /// Keep it until the installer runs: on Windows nobody can change the
     /// file while this handle is open (`open_installer`).
     pub installer: File,
+}
+
+/// `\\?\C:\…` as `C:\…` and `\\?\UNC\server\…` as `\\server\…` when the
+/// result is shorter than `MAX_PATH` (260), which the shell's start takes
+/// as it is; a longer path keeps its verbatim prefix.
+pub fn unverbatim(path: &str) -> String {
+    let plain = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        return path.to_owned();
+    };
+    if plain.encode_utf16().count() < 260 {
+        plain
+    } else {
+        path.to_owned()
+    }
+}
+
+/// The final path of the file behind `file` (Windows).
+#[cfg(windows)]
+fn final_path(file: &File) -> Result<PathBuf, PackageError> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
+    };
+
+    let mut buffer = vec![0u16; 512];
+    loop {
+        let capacity = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
+        // SAFETY: the handle is open for the call; `buffer` holds `capacity`
+        // UTF-16 units, and the call writes at most that many.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                capacity,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        };
+        let written = usize::try_from(written).unwrap_or(usize::MAX);
+        if written == 0 {
+            return Err(storage(&io::Error::last_os_error()));
+        }
+        if written < buffer.len() {
+            buffer.truncate(written);
+            break;
+        }
+        // Too small: `written` is the size it needs, its NUL included.
+        if written > 32_768 {
+            return Err(PackageError::Storage);
+        }
+        buffer.resize(written, 0);
+    }
+    let text = OsString::from_wide(&buffer);
+    Ok(PathBuf::from(unverbatim(&text.to_string_lossy())))
+}
+
+/// Opens `path` to read it, never through a link: on Windows a link is
+/// opened as itself (`FILE_FLAG_OPEN_REPARSE_POINT`, and `share_read_only`
+/// lets others only read while the handle lives); elsewhere a link or
+/// another file put in its place between the look and the open is refused
+/// by comparing the two. `None` when the path holds no regular file.
+fn open_regular(path: &Path, share_read_only: bool) -> io::Result<Option<File>> {
+    let before = fs::symlink_metadata(path)?;
+    if !before.file_type().is_file() {
+        return Ok(None);
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        if share_read_only {
+            options.share_mode(FILE_SHARE_READ);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = share_read_only;
+    let file = options.open(path)?;
+    let after = file.metadata()?;
+    #[cfg(unix)]
+    let same = {
+        use std::os::unix::fs::MetadataExt;
+        before.dev() == after.dev() && before.ino() == after.ino()
+    };
+    #[cfg(not(unix))]
+    let same = true;
+    Ok((after.is_file() && same).then_some(file))
 }
 
 /// Reads and verifies the manifest at `path`: a regular file (not a link) of
@@ -209,17 +311,20 @@ pub struct Checked {
 /// product, naming the installer of its own version and a `minUpgradeFrom`
 /// no newer than it.
 pub fn read_manifest(path: &Path, keyset: &Keyset) -> Result<Manifest, PackageError> {
-    let meta = fs::symlink_metadata(path).map_err(|error| storage(&error))?;
-    if !meta.file_type().is_file() || meta.len() > MAX_MANIFEST_BYTES {
+    let file = open_regular(path, false)
+        .map_err(|error| storage(&error))?
+        .ok_or(PackageError::ManifestMalformed)?;
+    // Read through the handle checked above, never more than the bound: a
+    // file swapped or grown after the look is read no further.
+    let mut bytes = Vec::new();
+    (&file)
+        .take(MAX_MANIFEST_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| storage(&error))?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
         return Err(PackageError::ManifestMalformed);
     }
-    let text = fs::read_to_string(path).map_err(|error| {
-        if error.kind() == io::ErrorKind::InvalidData {
-            PackageError::ManifestMalformed
-        } else {
-            storage(&error)
-        }
-    })?;
+    let text = String::from_utf8(bytes).map_err(|_| PackageError::ManifestMalformed)?;
     let (manifest, kid) =
         trust::verify_update_manifest(text.trim(), keyset).map_err(|error| match error {
             TrustError::Malformed => PackageError::ManifestMalformed,
@@ -251,6 +356,7 @@ pub fn read_manifest(path: &Path, keyset: &Keyset) -> Result<Manifest, PackageEr
 /// The packages in `places`, at most [`MAX_FOUND`], each folder's by name. A
 /// folder that is missing or unreadable is skipped.
 pub fn scan(places: &[Place], keyset: &Keyset) -> Vec<FoundPackage> {
+    let _quiet = CriticalErrorsQuiet::new();
     let mut found = Vec::new();
     for place in places {
         let Ok(entries) = fs::read_dir(&place.dir) else {
@@ -290,52 +396,60 @@ pub fn scan(places: &[Place], keyset: &Keyset) -> Vec<FoundPackage> {
     found
 }
 
-/// Opens the installer for reading, never through a link. On Windows the
-/// handle shares reading only (`FILE_SHARE_READ`): while it is open nobody
-/// can write, rename or delete the file, and the installer Windows starts
-/// under the administrator prompt can still open it to read and run it; a
-/// link is opened as itself (`FILE_FLAG_OPEN_REPARSE_POINT`) and refused.
-/// Elsewhere (development) a link or another file put in its place between
-/// the look and the open is refused by comparing the two.
+/// Opens the installer for reading, never through a link ([`open_regular`]).
+/// On Windows the handle shares reading only (`FILE_SHARE_READ`): while it
+/// is open nobody can write, rename or delete the file, and the installer
+/// Windows starts under the administrator prompt can still open it to read
+/// and run it.
 pub fn open_installer(path: &Path) -> Result<File, PackageError> {
-    let before = match fs::symlink_metadata(path) {
-        Ok(meta) => meta,
+    match open_regular(path, true) {
+        Ok(Some(file)) => Ok(file),
+        Ok(None) => Err(PackageError::InstallerMismatch),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(PackageError::InstallerMissing)
+            Err(PackageError::InstallerMissing)
         }
-        Err(error) => return Err(storage(&error)),
-    };
-    if !before.file_type().is_file() {
-        return Err(PackageError::InstallerMismatch);
+        Err(error) => Err(storage(&error)),
     }
-    let mut options = OpenOptions::new();
-    options.read(true);
+}
+
+/// While a search reads the drives, Windows shows no «there is no disk in
+/// the drive» window of its own for an empty card reader (it would stand
+/// over the kiosk): the read fails and the drive is skipped. Restored when
+/// the search ends.
+struct CriticalErrorsQuiet {
     #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options
-            .share_mode(FILE_SHARE_READ)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    let file = options.open(path).map_err(|error| {
-        if error.kind() == io::ErrorKind::NotFound {
-            PackageError::InstallerMissing
-        } else {
-            storage(&error)
+    previous: Option<u32>,
+}
+
+impl CriticalErrorsQuiet {
+    #[cfg(windows)]
+    fn new() -> Self {
+        use windows_sys::Win32::System::Diagnostics::Debug::{
+            SetThreadErrorMode, SEM_FAILCRITICALERRORS,
+        };
+        let mut previous = 0u32;
+        // SAFETY: plain call; `previous` lives for it.
+        let set = unsafe { SetThreadErrorMode(SEM_FAILCRITICALERRORS, &mut previous) };
+        Self {
+            previous: (set != 0).then_some(previous),
         }
-    })?;
-    let after = file.metadata().map_err(|error| storage(&error))?;
-    #[cfg(unix)]
-    let same = {
-        use std::os::unix::fs::MetadataExt;
-        before.dev() == after.dev() && before.ino() == after.ino()
-    };
-    #[cfg(not(unix))]
-    let same = true;
-    if !after.is_file() || !same {
-        return Err(PackageError::InstallerMismatch);
     }
-    Ok(file)
+
+    #[cfg(not(windows))]
+    fn new() -> Self {
+        Self {}
+    }
+}
+
+#[cfg(windows)]
+impl Drop for CriticalErrorsQuiet {
+    fn drop(&mut self) {
+        use windows_sys::Win32::System::Diagnostics::Debug::SetThreadErrorMode;
+        if let Some(previous) = self.previous {
+            // SAFETY: plain call; the old mode is not asked for.
+            unsafe { SetThreadErrorMode(previous, std::ptr::null_mut()) };
+        }
+    }
 }
 
 /// The package of the manifest at `manifest_path`: the manifest verified
@@ -360,9 +474,14 @@ pub fn verify(manifest_path: &Path, keyset: &Keyset) -> Result<Checked, PackageE
     if !hash.eq_ignore_ascii_case(&manifest.manifest.installer.sha256) {
         return Err(PackageError::InstallerMismatch);
     }
+    #[cfg(windows)]
+    let launch_path = final_path(&installer)?;
+    #[cfg(not(windows))]
+    let launch_path = installer_path.clone();
     Ok(Checked {
         manifest,
         installer_path,
+        launch_path,
         installer,
     })
 }
@@ -420,8 +539,9 @@ mod tests {
     fn removable_roots_are_the_removable_letters_from_c() {
         // A, C, E and F in use; A and E removable.
         let mask = 1 | (1 << 2) | (1 << 4) | (1 << 5);
+        // `GetDriveTypeW`'s numbers: 2 removable, 3 fixed.
         let kind = |root: &str| match root {
-            "A:\\" | "E:\\" => DRIVE_REMOVABLE,
+            "A:\\" | "E:\\" => 2,
             _ => 3,
         };
         assert_eq!(removable_roots(mask, kind), vec![PathBuf::from("E:\\")]);
@@ -642,6 +762,72 @@ mod tests {
     }
 
     #[test]
+    fn a_search_lists_at_most_max_found_packages() {
+        let dir = tempfile::tempdir().unwrap();
+        for index in 0..=MAX_FOUND {
+            fs::write(dir.path().join(format!("{index:03}.update.jws")), "x").unwrap();
+        }
+        let found = scan(&places(Some(dir.path()), &[]), &keyset());
+        assert_eq!(found.len(), MAX_FOUND);
+        assert_eq!(found[0].file_name, "000.update.jws");
+    }
+
+    #[test]
+    fn a_manifest_is_read_to_its_bound_and_no_further() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.update.jws");
+        // Within the bound the signature decides; past it the size does.
+        let within = vec![b'a'; usize::try_from(MAX_MANIFEST_BYTES).unwrap()];
+        fs::write(&path, &within).unwrap();
+        assert_eq!(
+            read_manifest(&path, &keyset()).err(),
+            Some(PackageError::ManifestMalformed)
+        );
+        // Not text at all.
+        fs::write(&path, [0xff, 0xfe, 0x00]).unwrap();
+        assert_eq!(
+            read_manifest(&path, &keyset()).err(),
+            Some(PackageError::ManifestMalformed)
+        );
+        // A folder in a manifest's place.
+        let folder = dir.path().join("folder.update.jws");
+        fs::create_dir(&folder).unwrap();
+        assert_eq!(
+            read_manifest(&folder, &keyset()).err(),
+            Some(PackageError::ManifestMalformed)
+        );
+    }
+
+    #[test]
+    fn a_verbatim_final_path_is_started_as_a_plain_one() {
+        assert_eq!(
+            unverbatim(r"\\?\C:\Users\Анна\setup.exe"),
+            r"C:\Users\Анна\setup.exe"
+        );
+        assert_eq!(
+            unverbatim(r"\\?\UNC\server\share\setup.exe"),
+            r"\\server\share\setup.exe"
+        );
+        assert_eq!(unverbatim(r"C:\plain\setup.exe"), r"C:\plain\setup.exe");
+        let long = format!(r"\\?\C:\{}\setup.exe", "п".repeat(300));
+        assert_eq!(
+            unverbatim(&long),
+            long,
+            "too long for the shell without its prefix"
+        );
+    }
+
+    #[test]
+    fn the_installer_is_started_by_the_path_it_was_checked_at_outside_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = put_package(dir.path(), "0.2.0");
+        let checked = verify(&manifest, &keyset()).unwrap();
+        if cfg!(not(windows)) {
+            assert_eq!(checked.launch_path, checked.installer_path);
+        }
+    }
+
+    #[test]
     fn every_refusal_has_its_own_code() {
         let codes = [
             PackageError::ManifestMalformed,
@@ -691,5 +877,44 @@ mod windows_tests {
         assert_eq!(fs::read(&path).unwrap(), b"markiro test installer 0.2.0\n");
         drop(held);
         fs::remove_file(&path).unwrap();
+    }
+
+    /// The claim the update path rests on: Windows starts a process from a
+    /// file this handle holds (the loader opens it to execute, which a
+    /// read-only share allows).
+    #[test]
+    fn a_held_installer_can_still_be_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = std::env::var_os("SystemRoot").expect("SystemRoot");
+        let path = dir.path().join("held-whoami.exe");
+        fs::copy(
+            std::path::Path::new(&system)
+                .join("System32")
+                .join("whoami.exe"),
+            &path,
+        )
+        .unwrap();
+        let held = open_installer(&path).unwrap();
+        let status = std::process::Command::new(&path)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        drop(held);
+    }
+
+    #[test]
+    fn the_final_path_of_a_held_file_is_its_real_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("markiro-standalone-0.2.0-windows-x86_64-setup.exe");
+        fs::write(&path, b"x").unwrap();
+        let held = open_installer(&path).unwrap();
+        let real = fs::canonicalize(&path).unwrap();
+        assert_eq!(
+            final_path(&held).unwrap().to_string_lossy().to_lowercase(),
+            unverbatim(&real.to_string_lossy()).to_lowercase()
+        );
     }
 }

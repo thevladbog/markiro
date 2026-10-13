@@ -306,7 +306,7 @@ impl UpdateState {
         // The handle opened for the hash goes along and is held until the
         // app leaves: nothing changes the file between the hash and the start.
         let joined = blocking(move || {
-            let launched = launcher.launch(&checked.installer_path, INSTALLER_ARGUMENTS);
+            let launched = launcher.launch(&checked.launch_path, INSTALLER_ARGUMENTS);
             (launched, checked)
         })
         .await;
