@@ -539,8 +539,9 @@
   background: var(--surface-page);
 }
 
+/* Centred while it fits; a taller card starts at the top and scrolls, never cut off above. */
 .work-screen__overlays > .work-screen__stage[data-centred="true"] {
-  align-content: center;
+  align-content: safe center;
   justify-items: center;
 }
 
