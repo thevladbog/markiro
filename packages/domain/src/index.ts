@@ -519,3 +519,4 @@ export {
 } from "./labels/pallet-sheet-model.js";
 
 export { isValidInn, normalizeInn } from "./inn.js";
+export * from "./signed-documents/compact-jws.js";
