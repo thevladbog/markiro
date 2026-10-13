@@ -5,6 +5,7 @@
 pub mod connection;
 pub mod device;
 pub mod device_config;
+pub mod external_link;
 pub mod host_client;
 pub mod host_probe;
 pub mod installation;
@@ -303,7 +304,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         scanner::close_scanners,
         office_files::save_office_files,
         office_files::open_office_folder,
-        office_files::open_office_file
+        office_files::open_office_file,
+        external_link::open_external_link
     ]
 }
 

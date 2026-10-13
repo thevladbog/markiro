@@ -472,10 +472,10 @@ pub fn existing_form(
 /// the one argument and the directory it starts in.
 #[cfg(any(windows, test))]
 #[derive(Debug, PartialEq, Eq)]
-struct ExplorerLaunch {
-    program: PathBuf,
-    argument: OsString,
-    current_dir: PathBuf,
+pub(crate) struct ExplorerLaunch {
+    pub(crate) program: PathBuf,
+    pub(crate) argument: OsString,
+    pub(crate) current_dir: PathBuf,
 }
 
 /// The launch of Windows Explorer for `folder`, a folder to show or a file to
@@ -489,7 +489,10 @@ struct ExplorerLaunch {
 /// what the webview wrote. A path with a double quote (no Windows path has)
 /// is no launch.
 #[cfg(any(windows, test))]
-fn explorer_launch(target: &Path, system_root: Option<&OsStr>) -> Option<ExplorerLaunch> {
+pub(crate) fn explorer_launch(
+    target: &Path,
+    system_root: Option<&OsStr>,
+) -> Option<ExplorerLaunch> {
     if target.as_os_str().to_string_lossy().contains('"') {
         return None;
     }
