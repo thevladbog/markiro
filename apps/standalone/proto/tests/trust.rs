@@ -349,8 +349,41 @@ fn a_keyset_document_takes_public_p256_keys_alone() {
             "unknown field",
             json!({ "license": license(json!([])), "update": empty_update, "comment": "x" }),
         ),
-    ] {
+    ]
+    .into_iter()
+    .chain(
+        [
+            "",
+            "http://license.invalid",
+            "https://",
+            "https://license.invalid/",
+            "https://license.invalid/path",
+            "https://License.invalid",
+            "https://license invalid",
+            "https://user@license.invalid",
+            "https://license.invalid:0443",
+            "https://license.invalid:65536",
+            "https://license.invalid:",
+            "https://.invalid",
+        ]
+        .map(|origin| {
+            (
+                "a malformed origin",
+                document(
+                    json!({ "origin": origin, "keys": [{ "kid": "a", "jwk": jwk }], "retiredKids": [] }),
+                    empty_update.clone(),
+                ),
+            )
+        }),
+    ) {
         assert!(parse_keysets(&text.to_string()).is_err(), "{name}");
+    }
+    for origin in ["https://license.markiro.app", "https://localhost:8443"] {
+        let text = document(
+            json!({ "origin": origin, "keys": [{ "kid": "a", "jwk": jwk }], "retiredKids": [] }),
+            empty_update.clone(),
+        );
+        assert!(parse_keysets(&text.to_string()).is_ok(), "{origin}");
     }
     let fine = document(license(json!([{ "kid": "a", "jwk": jwk }])), empty_update);
     let keysets = parse_keysets(&fine.to_string()).unwrap();
@@ -453,9 +486,17 @@ fn the_signed_fixtures_verify_as_the_domain_says() {
     for expectation in &expectations {
         let file = expectation["file"].as_str().unwrap();
         let compact = signed(file);
+        // An expectation may retire kids of the test keyset.
+        let retire = |keyset: &Keyset| match expectation.get("retiredKids") {
+            Some(kids) => Keyset {
+                retired_kids: serde_json::from_value(kids.clone()).unwrap(),
+                ..keyset.clone()
+            },
+            None => keyset.clone(),
+        };
         let outcome = match expectation["as"].as_str().unwrap() {
-            "license" => verify_license(&compact, &keysets.license).map(|_| ()),
-            "update" => verify_update_manifest(&compact, &keysets.update).map(|_| ()),
+            "license" => verify_license(&compact, &retire(&keysets.license)).map(|_| ()),
+            "update" => verify_update_manifest(&compact, &retire(&keysets.update)).map(|_| ()),
             other => panic!("{other}"),
         };
         assert_eq!(

@@ -495,6 +495,62 @@
         "set": {
           "features": [true, false, true, true, false, false, true]
         }
+      },
+      {
+        "name": "a customer name of 150 astral characters, 300 UTF-16 units",
+        "valid": true,
+        "set": {
+          "customer.name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      },
+      {
+        "name": "a customer name of 151 astral characters, 302 UTF-16 units",
+        "valid": false,
+        "set": {
+          "customer.name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        }
+      },
+      {
+        "name": "a customer name with DEL",
+        "valid": false,
+        "set": {
+          "customer.name": "ОООТест"
+        }
+      },
+      {
+        "name": "a customer name with a C1 control (NEL)",
+        "valid": false,
+        "set": {
+          "customer.name": "ОООТест"
+        }
+      },
+      {
+        "name": "a customer name with a right-to-left override",
+        "valid": false,
+        "set": {
+          "customer.name": "ООО ‮тсеТ"
+        }
+      },
+      {
+        "name": "a customer name with a bidi isolate",
+        "valid": false,
+        "set": {
+          "customer.name": "ООО ⁦Тест⁩"
+        }
+      },
+      {
+        "name": "a customer name with a line separator",
+        "valid": false,
+        "set": {
+          "customer.name": "ООО Тест"
+        }
+      },
+      {
+        "name": "a customer name with a non-breaking space",
+        "valid": true,
+        "set": {
+          "customer.name": "ООО «Тест»"
+        }
       }
     ]
   },
@@ -813,6 +869,27 @@
             61234567
           ]
         }
+      },
+      {
+        "name": "a note with a paragraph separator",
+        "valid": false,
+        "set": {
+          "notes": ["Первая вторая"]
+        }
+      },
+      {
+        "name": "a note with a left-to-right embedding",
+        "valid": false,
+        "set": {
+          "notes": ["‪Обновление"]
+        }
+      },
+      {
+        "name": "a note with a C1 control",
+        "valid": false,
+        "set": {
+          "notes": ["Обновление"]
+        }
       }
     ]
   },
@@ -959,6 +1036,13 @@
         "valid": false,
         "set": {
           "usage": [4, 2, 2]
+        }
+      },
+      {
+        "name": "an organization name with a right-to-left override",
+        "valid": false,
+        "set": {
+          "organization.name": "‮ООО"
         }
       }
     ]

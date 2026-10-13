@@ -48,7 +48,11 @@ const keyset = {
 
 const b64 = (text) => Buffer.from(text).toString("base64url");
 function jws(typ, role, payload, kid = keys[role].kid) {
-  const input = `${b64(JSON.stringify({ typ, alg: "ES256", kid }))}.${b64(JSON.stringify(payload))}`;
+  return jwsText(role, JSON.stringify({ typ, alg: "ES256", kid }), JSON.stringify(payload));
+}
+/** Signs the exact header and payload texts: what a JSON.stringify of an object never writes. */
+function jwsText(role, headerText, payloadText) {
+  const input = `${b64(headerText)}.${b64(payloadText)}`;
   const signature = sign("sha256", Buffer.from(input), {
     key: privateKey(role),
     dsaEncoding: "ieee-p1363",
@@ -143,6 +147,78 @@ files["update-manifest.jws"] = jws(UPDATE_TYP, "update", {
   minUpgradeFrom: "0.2.0",
   notes: ["Лицензия площадки и страница «Информация»", "Обновление из файла"],
 });
+// Adversarial files both suites must refuse alike (review of plan ЛЦ-1).
+const licenseHeader = (extra) =>
+  `{"typ":"${LICENSE_TYP}","alg":"ES256","kid":"${keys.license.kid}"${extra}}`;
+const subscriptionText = JSON.stringify(subscription);
+files["license-header-extra.jws"] = jwsText(
+  "license",
+  licenseHeader(',"cty":"json"'),
+  subscriptionText,
+);
+files["license-header-proto.jws"] = jwsText(
+  "license",
+  licenseHeader(',"__proto__":{}'),
+  subscriptionText,
+);
+files["license-header-bom.jws"] = jwsText(
+  "license",
+  `\ufeff${licenseHeader("")}`,
+  subscriptionText,
+);
+files["license-kid-lone-surrogate.jws"] = jwsText(
+  "license",
+  `{"typ":"${LICENSE_TYP}","alg":"ES256","kid":"\\ud800"}`,
+  subscriptionText,
+);
+files["license-payload-proto.jws"] = jwsText(
+  "license",
+  licenseHeader(""),
+  `{"__proto__":{},${subscriptionText.slice(1)}`,
+);
+files["license-payload-lone-surrogate.jws"] = jwsText(
+  "license",
+  licenseHeader(""),
+  subscriptionText.replace('"ООО «Тестовая площадка»"', '"ООО \\ud800"'),
+);
+files["license-payload-extra.jws"] = jws(LICENSE_TYP, "license", { ...subscription, limits: {} });
+files["license-other-issuer.jws"] = jws(LICENSE_TYP, "license", {
+  ...subscription,
+  issuer: "https://other.invalid",
+});
+// The last signature character with its unused low bits set: canonical
+// base64url only, so the same bytes in another spelling are malformed.
+{
+  const compact = files["license-subscription.jws"];
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const last = alphabet[alphabet.indexOf(compact.slice(-1)) + 1];
+  files["license-noncanonical.jws"] = compact.slice(0, -1) + last;
+}
+// The same signature with s replaced by n - s (high S): ECDSA verifies both;
+// both suites pin that they agree.
+{
+  const N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+  const [head, body, signature] = files["license-subscription.jws"].split(".");
+  const bytes = Buffer.from(signature, "base64url");
+  const s = BigInt(`0x${bytes.subarray(32).toString("hex")}`);
+  const high = Buffer.from((N - s).toString(16).padStart(64, "0"), "hex");
+  files["license-high-s.jws"] =
+    `${head}.${body}.${Buffer.concat([bytes.subarray(0, 32), high]).toString("base64url")}`;
+}
+// Over the size limits but well formed, under a kid no keyset holds: without
+// the size check the answer would be unknown_key, not malformed.
+files["license-oversized.jws"] = jws(
+  LICENSE_TYP,
+  "license",
+  { ...subscription, pad: "x".repeat(16 * 1024) },
+  "test-lic-unknown",
+);
+files["update-manifest-oversized.jws"] = jws(
+  UPDATE_TYP,
+  "update",
+  { pad: "x".repeat(64 * 1024) },
+  "test-upd-unknown",
+);
 const activation = {
   format: "markiro-activation-request-v1",
   hostId: HOST_ID,
@@ -161,6 +237,24 @@ const expectations = [
   { file: "update-manifest.jws", as: "update", result: "ok" },
   { file: "update-manifest.jws", as: "license", result: "malformed" },
   { file: "license-subscription.jws", as: "update", result: "malformed" },
+  {
+    file: "license-subscription.jws",
+    as: "license",
+    retiredKids: [keys.license.kid],
+    result: "unknown_key",
+  },
+  { file: "license-header-extra.jws", as: "license", result: "malformed" },
+  { file: "license-header-proto.jws", as: "license", result: "malformed" },
+  { file: "license-header-bom.jws", as: "license", result: "malformed" },
+  { file: "license-kid-lone-surrogate.jws", as: "license", result: "malformed" },
+  { file: "license-payload-proto.jws", as: "license", result: "malformed" },
+  { file: "license-payload-lone-surrogate.jws", as: "license", result: "malformed" },
+  { file: "license-payload-extra.jws", as: "license", result: "malformed" },
+  { file: "license-other-issuer.jws", as: "license", result: "malformed" },
+  { file: "license-noncanonical.jws", as: "license", result: "malformed" },
+  { file: "license-high-s.jws", as: "license", result: "ok" },
+  { file: "license-oversized.jws", as: "license", result: "malformed" },
+  { file: "update-manifest-oversized.jws", as: "update", result: "malformed" },
 ];
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;

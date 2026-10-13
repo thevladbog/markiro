@@ -40,6 +40,9 @@ windows-service = "=0.8.1"
 
 [dev-dependencies]
 http-body-util = "0.1"
+# The domain's test keys join the built-in keysets in the host's tests (plan
+# ЛЦ-1); a release build, which has no dev-dependency, never trusts them.
+markiro-proto = { path = "../proto", features = ["test-keys"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

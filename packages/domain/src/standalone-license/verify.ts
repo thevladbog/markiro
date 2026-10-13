@@ -2,6 +2,7 @@ import type { z } from "zod";
 
 import {
   decodeUtf8Strict,
+  parseJsonStrict,
   verifyCompactJws,
   type CompactJwsFailure,
   type TrustedKey,
@@ -41,7 +42,7 @@ function utf8Length(text: string): number {
 
 function readPayload<T>(bytes: Uint8Array, schema: z.ZodType<T>): T | null {
   try {
-    const parsed = schema.safeParse(JSON.parse(decodeUtf8Strict(bytes)));
+    const parsed = schema.safeParse(parseJsonStrict(decodeUtf8Strict(bytes)));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

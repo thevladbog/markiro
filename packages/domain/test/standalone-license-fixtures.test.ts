@@ -22,11 +22,18 @@ function signed(name: string): string {
   ).trim();
 }
 
-async function outcome(file: string, as: string): Promise<string> {
+/** An expectation may retire kids of the test keyset (`retiredKids`). */
+async function outcome(file: string, as: string, retiredKids?: string[]): Promise<string> {
   const result =
     as === "license"
-      ? await verifyStandaloneLicense(signed(file), keyset.license)
-      : await verifyStandaloneUpdateManifest(signed(file), keyset.update);
+      ? await verifyStandaloneLicense(signed(file), {
+          ...keyset.license,
+          retiredKids: retiredKids ?? keyset.license.retiredKids,
+        })
+      : await verifyStandaloneUpdateManifest(signed(file), {
+          ...keyset.update,
+          retiredKids: retiredKids ?? keyset.update.retiredKids,
+        });
   return result.ok ? "ok" : result.reason;
 }
 
@@ -37,8 +44,25 @@ async function license(file: string) {
 }
 
 describe("the signed standalone fixtures (shared with markiro_proto::trust)", () => {
-  it.each(expectations)("$file as $as: $result", async ({ file, as, result }) => {
-    expect(await outcome(file, as)).toBe(result);
+  it.each(expectations)("$file as $as: $result", async (expectation) => {
+    const retiredKids = "retiredKids" in expectation ? expectation.retiredKids : undefined;
+    expect(await outcome(expectation.file, expectation.as, retiredKids)).toBe(expectation.result);
+  });
+
+  it("hold the adversarial files both suites must answer alike", () => {
+    const files = new Set(expectations.map((expectation) => expectation.file));
+    for (const file of [
+      "license-header-proto.jws",
+      "license-payload-proto.jws",
+      "license-kid-lone-surrogate.jws",
+      "license-payload-lone-surrogate.jws",
+      "license-high-s.jws",
+      "license-oversized.jws",
+      "update-manifest-oversized.jws",
+    ]) {
+      expect(files.has(file)).toBe(true);
+    }
+    expect(expectations.some((expectation) => "retiredKids" in expectation)).toBe(true);
   });
 
   it("hold a subscription, a demo, its upgrade and the files the host must refuse", async () => {

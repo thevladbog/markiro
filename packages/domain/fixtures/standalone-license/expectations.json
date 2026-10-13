@@ -53,5 +53,71 @@
     "file": "license-subscription.jws",
     "as": "update",
     "result": "malformed"
+  },
+  {
+    "file": "license-subscription.jws",
+    "as": "license",
+    "retiredKids": ["test-lic-1"],
+    "result": "unknown_key"
+  },
+  {
+    "file": "license-header-extra.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-header-proto.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-header-bom.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-kid-lone-surrogate.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-payload-proto.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-payload-lone-surrogate.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-payload-extra.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-other-issuer.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-noncanonical.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "license-high-s.jws",
+    "as": "license",
+    "result": "ok"
+  },
+  {
+    "file": "license-oversized.jws",
+    "as": "license",
+    "result": "malformed"
+  },
+  {
+    "file": "update-manifest-oversized.jws",
+    "as": "update",
+    "result": "malformed"
   }
 ]
