@@ -12,12 +12,15 @@ use markiro_host::backup::copy::{
     make_copy, make_copy_with_identity, manifest_path, sha256_file, Manifest,
 };
 use markiro_host::backup::identity::{identity_path, platform_guard, HostIdentity};
+use markiro_host::clock::ManualClock;
 use markiro_host::config::HostPaths;
+use markiro_host::license::state::Phase;
 use markiro_host::restore::{
     restore, restore_crashing, restore_with, summary, verify_copy, Carried, CopyIdentity,
     CrashPoint, Current, IdentityChoice, IdentityOutcome, Interrupted, RestoreOptions,
     RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
 };
+use markiro_host::server::AppState;
 use markiro_host::StartOptions;
 use markiro_proto::backup::BackupTrigger;
 use serde_json::{json, Value};
@@ -298,6 +301,7 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
                 { "monthKey": "SEP26", "from": null, "to": 10 },
             ],
             "carried": { "devices": 0, "operators": 0, "badges": 0, "officeUsers": 0 },
+            "licensesCarried": 0,
             "sessionsEnded": 1,
             "identity": "kept",
         })
@@ -323,6 +327,7 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
             format!("data folder: {}", paths.data_dir.display()),
             format!("the previous database is in {}", aside.display()),
             "revocations carried over from the previous database: 0 devices, 0 operators, 0 badges, 0 office users".to_owned(),
+            "license files carried over from the previous database: 0".to_owned(),
             "every office session was ended: everyone signs in to the office again".to_owned(),
             format!("SSCC {PREFIX}/0: 3500 -> 9500"),
             format!("SSCC {PREFIX}/1: 40 -> 440"),
@@ -446,7 +451,18 @@ async fn an_unreadable_current_database_leaves_the_margins_over_the_copy() {
         .await
         .unwrap();
     assert_eq!(sessions, 0, "no office session survives a restore");
-    assert_eq!((report.carried, report.sessions_ended), (None, 1));
+    assert_eq!(
+        (
+            report.carried,
+            report.licenses_carried,
+            report.sessions_ended
+        ),
+        (None, None, 1)
+    );
+    assert!(lines.contains(&format!(
+        "license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
+        report.copy_made
+    )), "{lines:#?}");
     // The revision is the copy's next one; the audit ids, which are never
     // issued twice, jump far above the copy's (what the dead database
     // issued is unknown).
@@ -1686,8 +1702,12 @@ async fn assert_unread_margins(paths: &HostPaths, report: &RestoreReport, copy_a
             (PREFIX.to_owned(), 1, 110_000)
         ]
     );
-    assert_eq!(report.carried, None);
+    assert_eq!((report.carried, report.licenses_carried), (None, None));
     let lines = summary(report);
+    assert!(lines.contains(&format!(
+        "license files loaded after {} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)",
+        report.copy_made
+    )), "{lines:#?}");
     assert!(lines.contains(&NOT_THE_HISTORY.to_owned()), "{lines:#?}");
     assert!(lines.contains(&format!(
         "the previous database was not read: devices, operators, badges and office users revoked after {} are active again: check them in the office",
@@ -1712,6 +1732,7 @@ async fn assert_unread_margins(paths: &HostPaths, report: &RestoreReport, copy_a
             .unwrap();
     let details: Value = serde_json::from_str(&details).unwrap();
     assert_eq!(details["carried"], Value::Null);
+    assert_eq!(details["licensesCarried"], Value::Null);
 }
 
 /// The runbook's new computer: the installer started the service once, so
@@ -2732,4 +2753,219 @@ async fn the_restore_command_takes_the_copys_identity_only_when_told() {
     for text in [&out, &err] {
         assert!(!text.contains(&key_text[..24]) && !text.contains(&own_key[..24]));
     }
+}
+
+/// `license_clock` as stored: `(max_seen_at, trial_started_at, trial_inn,
+/// emergency_used_for, emergency_until, wrong_host_since)`.
+type LicenseClockColumns = (
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+);
+
+async fn license_clock(pool: &SqlitePool) -> LicenseClockColumns {
+    sqlx::query_as(
+        "SELECT max_seen_at, trial_started_at, trial_inn, emergency_used_for, emergency_until, \
+         wrong_host_since FROM license_clock WHERE id = 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn restore_details(pool: &SqlitePool) -> Value {
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    serde_json::from_str(&details).unwrap()
+}
+
+/// A license loaded after the copy (plan ЛЦ-2, spec §4.4) is carried into
+/// the restored database with the license clock: the later mark, the trial
+/// as it was. The summary and the audit row count it.
+#[tokio::test]
+async fn a_license_loaded_after_the_copy_is_carried_over_with_the_clock() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let host = admin.app.state.host_id.clone();
+    support::license::load_ok(&admin, &support::license::file(&host, |_| {})).await;
+    admin.app.clock.advance(time::Duration::days(3));
+    support::license::refresh(&admin.app).await;
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.licenses_carried, Some(1));
+    assert!(summary(&report)
+        .contains(&"license files carried over from the previous database: 1".to_owned()));
+    let pool = reopen(&paths).await;
+    let file: (String, i64, Option<String>) =
+        sqlx::query_as("SELECT license_id, sequence, loaded_by FROM licenses")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        file,
+        (support::license::license_id(1), 1, Some(admin.id.clone()))
+    );
+    assert_eq!(
+        license_clock(&pool).await,
+        (
+            Some(support::license::START_MS + 3 * support::license::DAY_MS),
+            Some(support::license::START_MS),
+            Some(support::license::INN.to_owned()),
+            None,
+            None,
+            None
+        )
+    );
+    assert_eq!(restore_details(&pool).await["licensesCarried"], 1);
+}
+
+/// What the restored database holds decides the state when the host starts
+/// (spec §4.6, §4.9): another organization's INN is `inn_mismatch`, and the
+/// same files under another host identity are `wrong_host`.
+#[tokio::test]
+async fn a_restored_database_is_judged_by_its_own_inn_and_this_hosts_identity() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    support::license::load_ok(&admin, &support::license::file(&host, |_| {})).await;
+    support::license::set_org_inn(&admin, json!(support::license::OTHER_INN)).await;
+    let (copy_path, _) = copy(&admin.app).await;
+    support::license::set_org_inn(&admin, json!(support::license::INN)).await;
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    // The file was in the copy: nothing to carry.
+    assert_eq!(report.licenses_carried, Some(0));
+    let pool = reopen(&paths).await;
+    let clock = Arc::new(ManualClock::new(
+        time::OffsetDateTime::from_unix_timestamp(support::app::START).unwrap(),
+    ));
+    let mut conn = pool.acquire().await.unwrap();
+    let state = AppState::new(pool.clone(), host, clock.clone());
+    let snapshot = state.license.snapshot(&state, &mut conn).await.unwrap();
+    assert_eq!(snapshot.evaluation.phase, Phase::InnMismatch);
+    let other = AppState::new(
+        pool.clone(),
+        "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f".to_owned(),
+        clock,
+    );
+    let snapshot = other.license.snapshot(&other, &mut conn).await.unwrap();
+    assert_eq!(snapshot.evaluation.phase, Phase::WrongHost);
+}
+
+/// An emergency extension the current database took after the copy stays
+/// taken (plan ЛЦ-2 Д12): a restore never gives a spent extension back.
+#[tokio::test]
+async fn an_emergency_taken_after_the_copy_stays_taken() {
+    let admin = admin().await;
+    let host = admin.app.state.host_id.clone();
+    support::license::load_ok(&admin, &support::license::expired_file(&host)).await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let (status, body) = admin
+        .call("POST", "/v1/office/license/emergency", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.licenses_carried, Some(0));
+    let pool = reopen(&paths).await;
+    let (_, _, _, used_for, until, _) = license_clock(&pool).await;
+    assert_eq!(
+        (used_for, until),
+        (
+            Some(support::license::license_id(1)),
+            Some(support::license::START_MS + 72 * 3_600_000)
+        )
+    );
+    let clock = Arc::new(ManualClock::new(
+        time::OffsetDateTime::from_unix_timestamp(support::app::START).unwrap(),
+    ));
+    let state = AppState::new(pool.clone(), host, clock);
+    let mut conn = pool.acquire().await.unwrap();
+    let snapshot = state.license.snapshot(&state, &mut conn).await.unwrap();
+    assert!(
+        snapshot.evaluation.emergency_used && !snapshot.evaluation.emergency_available,
+        "{:?}",
+        snapshot.evaluation
+    );
+}
+
+/// A copy made before the build with the license holds no trial: the
+/// current database's start comes with its INN, or the next start of the
+/// host would begin a fresh trial (plan ЛЦ-2 Д12).
+#[tokio::test]
+async fn a_copy_without_a_trial_gets_the_current_trial_and_its_inn() {
+    let admin = admin().await;
+    let pool = admin.app.state.pool.clone();
+    sqlx::query(
+        "UPDATE license_clock SET max_seen_at = NULL, trial_started_at = NULL, trial_inn = NULL",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (copy_path, _) = copy(&admin.app).await;
+    let started = support::license::START_MS - 5 * support::license::DAY_MS;
+    sqlx::query("UPDATE license_clock SET trial_started_at = ?, trial_inn = ?")
+        .bind(started)
+        .bind(support::license::OTHER_INN)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.licenses_carried, Some(0));
+    let pool = reopen(&paths).await;
+    let (_, trial_started_at, trial_inn, _, _, _) = license_clock(&pool).await;
+    assert_eq!(
+        (trial_started_at, trial_inn),
+        (Some(started), Some(support::license::OTHER_INN.to_owned()))
+    );
+}
+
+/// The current database of another host says nothing of the copy's license
+/// (plan ЛЦ-2 Д12, like the revocations): its files and its clock stay out.
+#[tokio::test]
+async fn another_hosts_license_is_not_carried() {
+    let a = admin().await;
+    let (copy_path, _) = copy(&a.app).await;
+    let copied = license_clock(&a.app.state.pool).await;
+    let b = admin().await;
+    let host = b.app.state.host_id.clone();
+    support::license::load_ok(&b, &support::license::file(&host, |_| {})).await;
+    sqlx::query(
+        "UPDATE license_clock SET max_seen_at = ?1 + 9 * 86400000, \
+         trial_started_at = ?1 - 9 * 86400000, trial_inn = ?2, \
+         emergency_used_for = 'trial', emergency_until = ?1, wrong_host_since = ?1",
+    )
+    .bind(support::license::START_MS)
+    .bind(support::license::OTHER_INN)
+    .execute(&b.app.state.pool)
+    .await
+    .unwrap();
+    let paths = stop(&b.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert!(!report.history_known);
+    assert_eq!(report.licenses_carried, None);
+    let pool = reopen(&paths).await;
+    let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM licenses")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(files, 0);
+    assert_eq!(license_clock(&pool).await, copied);
+    assert_eq!(restore_details(&pool).await["licensesCarried"], Value::Null);
 }
