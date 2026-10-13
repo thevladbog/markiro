@@ -16,6 +16,7 @@ pub mod printer;
 pub mod scanner;
 pub mod secret_store;
 pub mod tls;
+pub mod window_policy;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -291,6 +292,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         connection_status,
         lockdown::enter_lockdown,
         lockdown::exit_lockdown,
+        window_policy::kiosk_permitted_now,
         power::set_system_awake,
         printer::print_bytes,
         printer::list_usb_printers,
@@ -311,18 +313,26 @@ pub fn invoke_handler<R: tauri::Runtime>(
 /// (opened here, before the window shows; when it cannot open, the app still
 /// starts and the local commands say so), the connection status, the scanner
 /// manager (it needs the app's handle for its events), kiosk mode, the
-/// awake lease and the office's folder under the documents folder (plan ЧЗ).
-/// `role` is the installer's role for this computer
-/// (`installation::read_beside_executable` in `run`). Returns the device's
-/// link, which the connection task watches.
+/// awake lease, the office's folder under the documents folder (plan ЧЗ) and
+/// what the installation and the launch permit of kiosk mode
+/// (`window_policy`). `installation` is the installer's file for this
+/// computer (`installation::read_file_beside_executable` in `run`), and
+/// `args` the launch's arguments (`--windowed`). Returns the device's link,
+/// which the connection task watches.
 /// `run`'s `setup` calls it, and `tests/ipc.rs` calls it on a mock app (the
 /// mock builder does not run `setup`), so a state a command reads cannot go
 /// missing here with only a compile to notice.
-pub fn manage_state<R: Runtime>(
+pub fn manage_state<R: Runtime, I, S>(
     app: &tauri::AppHandle<R>,
     dir: &Path,
-    role: Option<InstallRole>,
-) -> watch::Receiver<Option<Arc<HostLink>>> {
+    installation: Option<installation::InstallationFile>,
+    args: I,
+) -> watch::Receiver<Option<Arc<HostLink>>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let role: Option<InstallRole> = installation.map(|file| file.role);
     let device = DeviceState::load(dir.to_path_buf()).with_install_role(role);
     let link = device.watch_link();
     app.manage(device);
@@ -330,6 +340,10 @@ pub fn manage_state<R: Runtime>(
     app.manage(ConnectionState::default());
     app.manage(scanner::manager(app.clone()));
     app.manage(lockdown::LockdownState::default());
+    app.manage(window_policy::KioskPolicyState::from_launch(
+        installation,
+        args,
+    ));
     app.manage(power::SystemAwakeState::default());
     app.manage(office_files::OfficeFilesState::from_documents(
         app.path().document_dir().ok(),
@@ -340,7 +354,11 @@ pub fn manage_state<R: Runtime>(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        // A second launch brings the running window back, and with
+        // `--windowed` unlocks it (`window_policy::on_second_launch`).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            window_policy::on_second_launch(app, &argv);
+        }))
         .setup(|app| {
             // The local data directory, not the (roaming, on Windows)
             // config directory: the device identity must stay on this
@@ -352,7 +370,12 @@ pub fn run() {
             if let Some(window) = app.get_webview_window(lockdown::MAIN_WINDOW) {
                 lockdown::settle_ordinary_window(&window);
             }
-            let link = manage_state(app.handle(), &dir, installation::read_beside_executable());
+            let link = manage_state(
+                app.handle(),
+                &dir,
+                installation::read_file_beside_executable(),
+                std::env::args(),
+            );
             let status = app.state::<ConnectionState>().inner().clone();
             tauri::async_runtime::spawn(connection::supervise(
                 link,

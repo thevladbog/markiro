@@ -110,17 +110,32 @@ export function createLockdownLifecycle({
   };
 }
 
+/** An office session as the window-mode table reads it. */
+export type OfficeSessionKind = "none" | "administrator" | "other";
+
 /**
- * Whether an office session opens the window ordinary by itself (owner
- * feedback of the first beta: the office is not a touch app and must not fill
- * the screen). Only where the build locks the window at all, and only for an
- * administrator, the one role that may leave kiosk mode. An office PC is never
- * locked, so there is nothing to leave.
+ * Whether the role permits kiosk mode, before the shell's own answer
+ * (`kiosk_permitted_now`) is combined with it: a host PC and an office PC are
+ * ordinary PCs and never lock (owner decision 2026-10-13); a station, and a PC
+ * whose role the shell could not give (the floor's safe side), may.
  */
-export function shouldOpenOfficeWindowed(options: {
-  enabled: boolean;
-  officePc: boolean;
-  officeAdmin: boolean;
+export function rolePermitsKiosk(role: "host" | "station" | "office" | null): boolean {
+  return role === "station" || role === null;
+}
+
+/**
+ * The window-mode table (owner decision 2026-10-13), the webview's half of
+ * `src-tauri/src/window_policy.rs` `kiosk_due`; both sides' tests read
+ * `src-tauri/tests/fixtures/window-policy.json`. `permitted` is what the
+ * shell and the role permit; `configured` is a station paired as a station
+ * with a line. A station locks once configured, except while an
+ * administrator's office session is open (the office is a mouse-and-keyboard
+ * app); a technologist's session stays locked.
+ */
+export function kioskDue(options: {
+  permitted: boolean;
+  configured: boolean;
+  office: OfficeSessionKind;
 }): boolean {
-  return options.enabled && !options.officePc && options.officeAdmin;
+  return options.permitted && options.configured && options.office !== "administrator";
 }
