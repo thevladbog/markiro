@@ -151,6 +151,26 @@ Rejections are bare codes: `local_db_unavailable` (the database did not
 open; the app starts anyway), `invalid_statement`, `unsupported_value`,
 `statement_failed`, `changes_mismatch`.
 
+Before this build's pending migrations (plan ОБН-1) `LocalDb::open` copies the
+database: `VACUUM INTO standalone-station.pre-<app version>.db.partial`,
+`integrity_check` on it read-only, flushed, renamed over a copy of that name,
+and every older `standalone-station.pre-*.db` goes with its side files, so one
+stays. Between the copy and the end of the migrations the database carries
+`PRAGMA user_version` «OBN1» (`UPGRADE_UNFINISHED`); while it does, a copy of
+that name that is sound and older than the database (an earlier open of this
+version whose first migration committed before a later one failed) stays as
+it is: it holds the state before all of them, which the previous app can
+open. A copy of that name left by an upgrade that finished (two builds can
+share a version: `CARGO_PKG_VERSION` is not yet tied to the release version,
+plan ОБН-3) is replaced. A new file, a failed or an unknown migration take no
+copy (sqlx decides as before). A copy that fails runs no migration: the open
+fails as `OpenFailure::Other` (the file stays, the app starts without its
+local database), except damage the copy met in the database, which stays
+`Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
+file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
+it, with the PIN and badge hashes it held at the upgrade, and only the next
+upgrade that brings migrations replaces it (carried to the owner, Д9).
+
 A forget (`clear_copies`) empties every disposable table (see below),
 `floor_sign_in_failures` included, so it resets every lockout counter of the
 station and of its operators, and a station on the host's PC re-pairs itself.
@@ -409,26 +429,6 @@ a build with `0011` already opened cannot be opened by a binary
 without that file. That is a hazard of developing on unmerged branches
 (use a fresh database), not a field procedure; the runbook names it for
 developers only.
-
-Before this build's pending migrations (plan ОБН-1) `LocalDb::open` copies the
-database: `VACUUM INTO standalone-station.pre-<app version>.db.partial`,
-`integrity_check` on it read-only, flushed, renamed over a copy of that name,
-and every older `standalone-station.pre-*.db` goes with its side files, so one
-stays. Between the copy and the end of the migrations the database carries
-`PRAGMA user_version` «OBN1» (`UPGRADE_UNFINISHED`); while it does, a copy of
-that name that is sound and older than the database (an earlier open of this
-version whose first migration committed before a later one failed) stays as
-it is: it holds the state before all of them, which the previous app can
-open. A copy of that name left by an upgrade that finished (two builds can
-share a version: `CARGO_PKG_VERSION` is not yet tied to the release version,
-plan ОБН-3) is replaced. A new file, a failed or an unknown migration take no
-copy (sqlx decides as before). A copy that fails runs no migration: the open
-fails as `OpenFailure::Other` (the file stays, the app starts without its
-local database), except damage the copy met in the database, which stays
-`Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
-file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
-it, with the PIN and badge hashes it held at the upgrade, and only the next
-upgrade that brings migrations replaces it (carried to the owner, Д9).
 
 ## Writes
 
