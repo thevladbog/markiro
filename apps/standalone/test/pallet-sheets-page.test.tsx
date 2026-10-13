@@ -78,6 +78,7 @@ function session(list: PalletSheets, user?: FakeOfficeSession["user"]): FakeOffi
 
 async function openSheets(fake: FakeOfficeSession): Promise<void> {
   renderOffice(fake);
+  fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
   fireEvent.click(await screen.findByRole("link", { name: "Листы А4" }));
   await screen.findByRole("heading", { name: "Листы паллет А4" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
@@ -162,10 +163,10 @@ describe("the A4 sheets page: reading", () => {
     expect(fake.api.listPalletSheets).toHaveBeenCalledWith(TOKEN);
   });
 
-  it("lists the sheets by name with their layout, state and the main one marked", async () => {
+  it("lists the sheets by name with their layout, state and the organization's default marked", async () => {
     await openSheets(session(withSheets([TWO_A5, PORTRAIT, LANDSCAPE], PORTRAIT.id)));
     expect(names()).toEqual([
-      "Палета А4 · вертикальная Основной Готовый",
+      "Палета А4 · вертикальная По умолчанию Готовый",
       "Палета А4 · горизонтальная Готовый",
       "Палета А4 · две одинаковые А5 Готовый",
     ]);
@@ -180,8 +181,8 @@ describe("the A4 sheets page: reading", () => {
     expect(within(rowOf("две одинаковые")).getAllByRole("cell")[1]?.textContent).toBe(
       "А4 горизонтальный · две А5",
     );
-    expect(within(rowOf("вертикальная")).getByText("Основной")).toBeTruthy();
-    expect(within(rowOf("горизонтальная")).queryByText("Основной")).toBeNull();
+    expect(within(rowOf("вертикальная")).getByText("По умолчанию")).toBeTruthy();
+    expect(within(rowOf("горизонтальная")).queryByText("По умолчанию")).toBeNull();
   });
 
   it("says there are no sheets and offers the stock ones", async () => {
@@ -196,6 +197,7 @@ describe("the A4 sheets page: reading", () => {
     const fake = session(STOCK);
     fake.api.listPalletSheets.mockRejectedValueOnce(down()).mockResolvedValueOnce(STOCK);
     renderOffice(fake);
+    fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
     fireEvent.click(await screen.findByRole("link", { name: "Листы А4" }));
     await screen.findByText(
       "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
@@ -297,32 +299,12 @@ describe("the A4 sheets page: stock sheets", () => {
 });
 
 describe("the A4 sheets page: the main sheet and the state", () => {
-  it("offers «Сделать основным» only for an enabled sheet that is not the main one", async () => {
-    const off = { ...TWO_A5, enabled: false };
-    await openSheets(session(withSheets([PORTRAIT, LANDSCAPE, off], PORTRAIT.id)));
-    expect(
-      screen.queryByRole("button", { name: `Сделать «${PORTRAIT.name}» основным` }),
-    ).toBeNull();
-    expect(screen.queryByRole("button", { name: `Сделать «${off.name}» основным` })).toBeNull();
-    expect(
-      screen.getByRole("button", { name: `Сделать «${LANDSCAPE.name}» основным` }),
-    ).toBeTruthy();
-  });
-
-  it("makes a sheet the main one and moves the mark, keeping the answer without reading again", async () => {
+  it("offers no «Сделать основным»: the default is chosen on the «По умолчанию» tab beside the pallet labels", async () => {
     const fake = session(withSheets([PORTRAIT, LANDSCAPE], PORTRAIT.id));
-    fake.api.setDefaultPalletSheet.mockResolvedValue(
-      withSheets([PORTRAIT, LANDSCAPE], LANDSCAPE.id),
-    );
     await openSheets(fake);
-    click(`Сделать «${LANDSCAPE.name}» основным`);
-    expect(await screen.findByText(`Основной лист — «${LANDSCAPE.name}».`)).toBeTruthy();
-    expect(fake.api.setDefaultPalletSheet).toHaveBeenCalledWith(TOKEN, {
-      templateId: LANDSCAPE.id,
-    });
-    expect(within(rowOf("горизонтальная")).getByText("Основной")).toBeTruthy();
-    expect(within(rowOf("вертикальная")).queryByText("Основной")).toBeNull();
-    expect(fake.api.listPalletSheets).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /основным/ })).toBeNull();
+    expect(screen.getByText(/выбирается на вкладке «По умолчанию»/)).toBeTruthy();
+    expect(fake.api.setDefaultPalletSheet).not.toHaveBeenCalled();
   });
 
   it("switches a sheet off with its revision, then on with the revision the answer gave", async () => {
@@ -360,7 +342,9 @@ describe("the A4 sheets page: the main sheet and the state", () => {
     await openSheets(fake);
     click(`Выключить «${PORTRAIT.name}»`);
     expect(
-      await screen.findByText("Это основной лист: сначала сделайте основным другой."),
+      await screen.findByText(
+        "Лист выбран по умолчанию (для организации или категории): сначала выберите другой на вкладке «По умолчанию».",
+      ),
     ).toBeTruthy();
     await waitFor(() => expect(fake.api.listPalletSheets).toHaveBeenCalledTimes(2));
     expect(within(rowOf("вертикальная")).getByText("Включён")).toBeTruthy();
@@ -398,9 +382,10 @@ describe("the A4 sheets page: the main sheet and the state", () => {
       "disabled",
       true,
     );
-    expect(
-      screen.getByRole("button", { name: `Сделать «${TWO_A5.name}» основным` }),
-    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: `Удалить «${TWO_A5.name}»` })).toHaveProperty(
+      "disabled",
+      true,
+    );
     await act(async () => {
       slow.resolve({ ...LANDSCAPE, enabled: false, revision: 2 });
       await slow.promise;
@@ -608,7 +593,9 @@ describe("the A4 sheets page: deleting", () => {
     const box = await openDelete(fake, PORTRAIT);
     fireEvent.click(within(box).getByRole("button", { name: "Удалить" }));
     expect(
-      await within(box).findByText("Это основной лист: сначала сделайте основным другой."),
+      await within(box).findByText(
+        "Лист выбран по умолчанию (для организации или категории): сначала выберите другой на вкладке «По умолчанию».",
+      ),
     ).toBeTruthy();
     expect(rows()).toHaveLength(3);
   });

@@ -1,4 +1,4 @@
-import type { RouteObject } from "react-router";
+import { Navigate, type RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
 import { CodeSearchPage } from "./codes/CodeSearchPage.js";
@@ -25,6 +25,7 @@ import {
   NewTemplatePage,
 } from "./templates/TemplateEditorPage.js";
 import { TemplatesPage } from "./templates/TemplatesPage.js";
+import { TemplatesSection } from "./templates/TemplatesSection.js";
 import { OfficeUsersPage } from "./users/OfficeUsersPage.js";
 
 /** Office routes; paths match `OFFICE_NAV`. */
@@ -66,12 +67,22 @@ export const officeRoutes: RouteObject[] = [
         ),
       },
       { path: "products", element: <ProductsPage /> },
-      { path: "templates", element: <TemplatesPage /> },
+      // «Шаблоны» is one section: labels, A4 sheets and the defaults of both.
+      {
+        path: "templates",
+        element: <TemplatesSection />,
+        children: [
+          { index: true, element: <TemplatesPage /> },
+          { path: "a4", element: <PalletSheetsPage /> },
+          { path: "defaults", element: <TemplateDefaultsPage /> },
+        ],
+      },
       { path: "templates/new", element: <NewTemplatePage /> },
       { path: "templates/:id", element: <EditTemplatePage /> },
       { path: "templates/:id/copy", element: <CopyTemplatePage /> },
-      { path: "template-defaults", element: <TemplateDefaultsPage /> },
-      { path: "pallet-sheets", element: <PalletSheetsPage /> },
+      // The sheets and the defaults had menu items of their own before.
+      { path: "template-defaults", element: <Navigate to="/templates/defaults" replace /> },
+      { path: "pallet-sheets", element: <Navigate to="/templates/a4" replace /> },
       {
         path: "users",
         element: (

@@ -1256,6 +1256,7 @@ const PRODUCT: OfficeProduct = {
   shelfLifeDays: 10,
   defaultBoxTemplateId: MILK_ID,
   defaultPalletTemplateId: null,
+  defaultPalletSheetId: null,
   archived: false,
   status: "active",
   rev: 65,
@@ -1396,7 +1397,7 @@ describe("changing a label template", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+      "✕Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
   });
 
@@ -1721,11 +1722,11 @@ describe("changing a label template", () => {
     expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко (со склада)");
   });
 
-  it("marks «Шаблоны» in the menu on the editor's pages, never «Умолчания шаблонов» or «Обзор»", async () => {
+  it("marks «Шаблоны» in the menu on the editor's pages and on every tab of the section, never «Обзор»", async () => {
     const fake = editSession();
     await openTemplates(fake);
     const current = () =>
-      ["Обзор", "Шаблоны", "Умолчания шаблонов"].filter(
+      ["Обзор", "Шаблоны"].filter(
         (name) => screen.getByRole("link", { name }).getAttribute("aria-current") === "page",
       );
     expect(current()).toEqual(["Шаблоны"]);
@@ -1741,9 +1742,10 @@ describe("changing a label template", () => {
     fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
     expect(current()).toEqual(["Шаблоны"]);
-    fireEvent.click(screen.getByRole("link", { name: "Умолчания шаблонов" }));
-    await screen.findByRole("heading", { name: "Умолчания шаблонов" });
-    expect(current()).toEqual(["Умолчания шаблонов"]);
+    fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
+    fireEvent.click(await screen.findByRole("link", { name: "По умолчанию" }));
+    await screen.findByRole("heading", { name: "Шаблоны по умолчанию" });
+    expect(current()).toEqual(["Шаблоны"]);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
     await waitFor(() => expect(current()).toEqual(["Обзор"]));
   });
@@ -1908,7 +1910,7 @@ describe("copying and deleting a label template", () => {
       return within(deleteDialog()).getByRole("alert").textContent;
     };
     expect(await confirm()).toBe(
-      "✕Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+      "✕Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
     expect(await confirm()).toBe("✕Типовой шаблон не удаляется: его можно выключить.");
     expect(await confirm()).toBe(
@@ -2108,7 +2110,7 @@ describe("copying and deleting a label template", () => {
       fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
     });
     expect(within(deleteDialog()).getByRole("alert").textContent).toBe(
-      "✕Шаблон выбран по умолчанию для категорий: Упакованная вода, Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+      "✕Шаблон выбран по умолчанию для категорий: Упакованная вода, Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
     await act(async () => {
       fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));

@@ -542,7 +542,10 @@ export type ProductGroup = z.infer<typeof productGroupSchema>;
 /**
  * `GET /v1/office/products`: a product as the office sees it, archived ones
  * included. `gtin14` is the 14 digits the office saved; the two templates are
- * preferences, which the host checks only for their purpose.
+ * preferences, which the host checks only for their purpose, and so is the
+ * A4 sheet its pallets print on (`defaultPalletSheetId`, a sheet of
+ * `GET /v1/office/pallet-sheets`, never a label template; absent from a host
+ * before it, read as none).
  */
 export const officeProductSchema = z.object({
   id: z.uuid(),
@@ -555,6 +558,7 @@ export const officeProductSchema = z.object({
   shelfLifeDays: countSchema,
   defaultBoxTemplateId: z.uuid().nullable(),
   defaultPalletTemplateId: z.uuid().nullable(),
+  defaultPalletSheetId: z.uuid().nullable().default(null),
   archived: z.boolean(),
   status: productStatusSchema,
   rev: z.number().int(),
@@ -607,15 +611,32 @@ export const categoryTemplateDefaultSchema = z.object({
 export type CategoryTemplateDefault = z.infer<typeof categoryTemplateDefaultSchema>;
 
 /**
+ * A category's default A4 sheet (`markiro_proto::CategoryPalletSheetDefault`):
+ * an entry of the template defaults, by code; a sheet, never a label template.
+ * Not in the station feed.
+ */
+export const categoryPalletSheetDefaultSchema = z
+  .object({
+    chzProductGroupCode: groupCodeSchema,
+    sheetId: z.uuid(),
+  })
+  .strict();
+export type CategoryPalletSheetDefault = z.infer<typeof categoryPalletSheetDefaultSchema>;
+
+/**
  * `GET /v1/office/template-defaults`: the organization's default of each
- * purpose and every category's, by code then purpose, as one document with its
- * revision.
+ * purpose and every category's, by code then purpose, and the A4 sheets chosen
+ * by default beside the pallet labels (the organization's and each
+ * category's, by code; absent from a host before them, read as none), as one
+ * document with its revision.
  */
 export const templateDefaultsSchema = z.object({
   defaultBoxTemplateId: z.uuid().nullable(),
   defaultPalletTemplateId: z.uuid().nullable(),
   defaultDuplicateTemplateId: z.uuid().nullable(),
   categories: z.array(categoryTemplateDefaultSchema),
+  defaultPalletSheetId: z.uuid().nullable().default(null),
+  palletSheetCategories: z.array(categoryPalletSheetDefaultSchema).default([]),
   rev: z.number().int(),
 });
 export type TemplateDefaults = z.infer<typeof templateDefaultsSchema>;
@@ -1340,13 +1361,16 @@ export const productCreateSchema = z
     shelfLifeDays: countSchema,
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
+    defaultPalletSheetId: z.uuid().nullable(),
   })
   .strict();
 export type ProductCreate = z.infer<typeof productCreateSchema>;
 
 /**
  * `PUT /v1/office/products/{id}`: the whole record with `archived` and the
- * loaded revision, as a counterparty's; `null` clears a field.
+ * loaded revision, as a counterparty's; `null` clears a field. The office
+ * always sends `defaultPalletSheetId` (the host keeps it when an older office
+ * leaves it out).
  */
 export const productUpdateSchema = z
   .object({
@@ -1359,6 +1383,7 @@ export const productUpdateSchema = z
     shelfLifeDays: countSchema,
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
+    defaultPalletSheetId: z.uuid().nullable(),
     archived: z.boolean(),
     expectedRev: z.number().int(),
   })
@@ -1408,7 +1433,9 @@ export const categoryTemplateDefaultInputSchema = z
 /**
  * `PUT /v1/office/template-defaults`: the whole document over the loaded
  * revision. An organization default `null` is none; a category default left
- * out of `categories` is cleared.
+ * out of `categories` (or of `palletSheetCategories`) is cleared. The office
+ * always sends the sheet defaults (the host keeps them when an older office
+ * leaves them out).
  */
 export const templateDefaultsUpdateSchema = z
   .object({
@@ -1416,6 +1443,8 @@ export const templateDefaultsUpdateSchema = z
     defaultPalletTemplateId: z.uuid().nullable(),
     defaultDuplicateTemplateId: z.uuid().nullable(),
     categories: z.array(categoryTemplateDefaultInputSchema),
+    defaultPalletSheetId: z.uuid().nullable(),
+    palletSheetCategories: z.array(categoryPalletSheetDefaultSchema),
     expectedRev: z.number().int(),
   })
   .strict();

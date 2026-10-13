@@ -1013,6 +1013,29 @@ planned shift names cannot be deleted. Sheets are not in the station's feed: the
 sheet only from a shift's snapshot. Preview and print draw through one function,
 `renderSheetRaster` (`src/labels/sheet-render.ts`), at A4's nominal geometry.
 
+A4 sheets chosen by default (beta feedback, migration `0019`). A sheet is chosen by default on a
+par with the pallet label, at the same three levels: the organization's (`org_profile`'s column of
+`0016`), each category's (`category_pallet_sheet_defaults`, one per category) and a product's
+preference (`products.default_pallet_sheet_id`). The organization's and the categories' sheets are
+part of the templates' defaults document (`defaultPalletSheetId`, `palletSheetCategories` of
+`{ chzProductGroupCode, sheetId }`); each must be an enabled sheet (`validation_failed` on
+`defaultPalletSheetId`, `palletSheetCategories.{i}.sheetId`, `.chzProductGroupCode`, or
+`palletSheetCategories.{i}` for a category given twice). Left out of a `PUT` they are kept (an office
+from before them), and a change moves the organization's record, which carries the document's
+revision for them (they are not in the feed, so a cleared one leaves no tombstone). A product's
+`defaultPalletSheetId` names a sheet, enabled or not, and is the office's only (the feed's product
+record does not carry it); left out of a `PUT` it is kept. A pallet document is a thermal label or
+an A4 sheet, each in its own slot: every label slot reads `label_templates` and every sheet slot
+`pallet_sheet_templates`, so an id of the one is refused where the other is required
+(`tests/pallet_sheet_defaults.rs`). Which of the two the station prints stays the pallet printer's
+paper (spec §29); the office asks for both and says so. A category's default sheet is held like the
+organization's: neither switched off nor deleted (`template_is_default` with `organizationDefault`
+and `categoryDefaults`, as a label template's); deleting a sheet clears the products that prefer
+it at the delete's revision (`productsCleared` in the audit row, named only when non-zero). A shift
+with pallets that names no sheet — an office plan, a station's shift, or an edit's `null` — takes
+`default_sheet_for_product` (`PRODUCT_SHEET_SQL`): the product's sheet while enabled, else its
+category's, else the organization's, else none; the frozen-snapshot rules are unchanged.
+
 ## Cloud import
 
 Plan IMP moves a cloud tenant into a new site (pilot spec §8, §31). Three parts,
@@ -2515,7 +2538,20 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   and WKWebView, fetching the `.woff` files and the on-demand chunks over
   Tauri's protocol, `IntersectionObserver` there, `<a download>` for all three
   downloads, and printing a downloaded file on a real Zebra or TSC printer.
-- «Умолчания шаблонов» (section «Каталог») edits the one defaults document
+- «Шаблоны» is one section since the beta feedback (`TemplatesSection`, one menu item): tabs
+  «Этикетки» (`/templates`, below), «Листы А4» (`/templates/a4`, `PalletSheetsPage`, which no
+  longer sets the default: its list marks the organization's sheet «По умолчанию») and «По
+  умолчанию» (`/templates/defaults`, the page below, titled «Шаблоны по умолчанию»). The tabs are
+  links drawn with `@markiro/ui`'s data-tab classes; the old addresses `/pallet-sheets` and
+  `/template-defaults` redirect. The defaults page offers the organization's «Лист А4 паллеты»
+  right after its pallet template, and a category's sheet as a row of its own (tag «Лист А4
+  паллеты») added through the same dialog (kind «Лист А4 паллеты», offered once a usable sheet
+  exists); the product dialog offers «Лист А4 паллеты» right after «Шаблон паллеты». The choices
+  are `sheetChoices` (`src/office/sheet-choice.ts`): enabled readable sheets by name, a held one
+  that is off, unreadable or gone kept as a marked choice. The shift dialog's first sheet choice is
+  «По умолчанию для товара (…)», named by `defaultSheetFor` as the host resolves it. `Office`
+  takes `initialPath` (tests open a page directly).
+- «Шаблоны по умолчанию» (formerly «Умолчания шаблонов», tab of «Шаблоны») edits the one defaults document
   (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
   (`useTemplateDefaults`, `staleTime` 0), with the template list, which it reads
   once per visit, and the product groups, a static lookup read once while cached

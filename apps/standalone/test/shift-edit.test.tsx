@@ -1061,7 +1061,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const name = await openEdit(session, WITH_SHEET);
     await waitFor(() =>
       expect(options(name, "Лист А4")).toEqual([
-        "Основной лист организации (Палета А4 · вертикальная)",
+        "По умолчанию для товара (Палета А4 · вертикальная)",
         "Палета А4 · вертикальная",
         "Палета А4 · горизонтальная",
         "Палета А4 · две одинаковые А5",
@@ -1121,7 +1121,7 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const name = await openEdit(session, WITH_PALLETS);
     await waitFor(() =>
       expect(options(name, "Лист А4")[0]).toBe(
-        "Основной лист организации (Палета А4 · вертикальная)",
+        "По умолчанию для товара (Палета А4 · вертикальная)",
       ),
     );
     expect(valueOf(name, "Лист А4")).toBe("");

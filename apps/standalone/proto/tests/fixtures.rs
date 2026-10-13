@@ -619,6 +619,36 @@ fn product_fixtures_round_trip_and_requests_reject_unknown_fields() {
     let mut value = fixture("product-update.json");
     value["status"] = Value::String("active".into());
     assert!(serde_json::from_value::<ProductUpdate>(value).is_err());
+    // The preferred A4 sheet: left out of an update it is kept (an office
+    // from before it), `null` clears it; the office's record names it.
+    assert_eq!(
+        product.default_pallet_sheet_id.as_deref(),
+        Some("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b")
+    );
+    assert_eq!(create.default_pallet_sheet_id, None);
+    assert_eq!(
+        update.default_pallet_sheet_id,
+        Some(product.default_pallet_sheet_id.clone())
+    );
+    let mut value = fixture("product-update.json");
+    value
+        .as_object_mut()
+        .unwrap()
+        .remove("defaultPalletSheetId");
+    let keep: ProductUpdate = serde_json::from_value(value).unwrap();
+    assert_eq!(keep.default_pallet_sheet_id, None);
+    let mut value = fixture("product-update.json");
+    value["defaultPalletSheetId"] = Value::Null;
+    let clear: ProductUpdate = serde_json::from_value(value).unwrap();
+    assert_eq!(clear.default_pallet_sheet_id, Some(None));
+    // A record from before the field reads as no sheet.
+    let mut value = fixture("office-product.json");
+    value
+        .as_object_mut()
+        .unwrap()
+        .remove("defaultPalletSheetId");
+    let older: OfficeProduct = serde_json::from_value(value).unwrap();
+    assert_eq!(older.default_pallet_sheet_id, None);
 }
 
 #[test]
@@ -698,6 +728,43 @@ fn template_defaults_fixtures_round_trip_as_one_document() {
         serde_json::json!({ "expectedRev": 1 })
     )
     .is_err());
+    // The A4 sheets chosen by default: the organization's and each
+    // category's, a sheet and no purpose. Left out of an update they are
+    // kept; `null` is no organization sheet.
+    assert_eq!(
+        document.default_pallet_sheet_id.as_deref(),
+        Some("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b")
+    );
+    assert_eq!(
+        update.pallet_sheet_categories.as_deref(),
+        Some(document.pallet_sheet_categories.as_slice())
+    );
+    assert_eq!(
+        update.default_pallet_sheet_id,
+        Some(document.default_pallet_sheet_id.clone())
+    );
+    assert_eq!(
+        (bare.default_pallet_sheet_id, bare.pallet_sheet_categories),
+        (None, None)
+    );
+    let none: TemplateDefaultsUpdate = serde_json::from_value(
+        serde_json::json!({ "categories": [], "defaultPalletSheetId": null, "expectedRev": 1 }),
+    )
+    .unwrap();
+    assert_eq!(none.default_pallet_sheet_id, Some(None));
+    let mut value = fixture("template-defaults-update.json");
+    value["palletSheetCategories"][0]["purpose"] = Value::String("pallet".into());
+    assert!(serde_json::from_value::<TemplateDefaultsUpdate>(value).is_err());
+    // A document from before them reads as none.
+    let older: TemplateDefaults = serde_json::from_value(serde_json::json!({
+        "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
+        "defaultDuplicateTemplateId": null, "categories": [], "rev": 1
+    }))
+    .unwrap();
+    assert_eq!(
+        (older.default_pallet_sheet_id, older.pallet_sheet_categories),
+        (None, vec![])
+    );
 }
 
 #[test]

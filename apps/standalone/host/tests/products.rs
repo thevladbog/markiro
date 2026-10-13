@@ -27,6 +27,7 @@ fn milk_record(id: &str, rev: i64) -> Value {
         "id": id, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л", "printName": "Молоко 3,2%",
         "chzProductGroupCode": 8, "boxCapacity": 12, "palletBoxCapacity": 40, "shelfLifeDays": 10,
         "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
+        "defaultPalletSheetId": null,
         "archived": false, "status": "active", "rev": rev
     })
 }
@@ -106,6 +107,8 @@ async fn an_administrator_creates_lists_and_updates_products() {
     // Stations get the product without the office's id and revision fields.
     let mut data = full(&created, 0);
     data.as_object_mut().unwrap().remove("expectedRev");
+    // The preferred A4 sheet is the office's only: no station prints from it.
+    data.as_object_mut().unwrap().remove("defaultPalletSheetId");
     data["status"] = json!("active");
     assert_eq!(
         admin.feed(1).await,
@@ -833,6 +836,7 @@ async fn an_update_writes_every_field_to_its_own_column() {
         "printName": "Молоко 2,5%", "chzProductGroupCode": 15,
         "boxCapacity": 24, "palletBoxCapacity": 48, "shelfLifeDays": 14,
         "defaultBoxTemplateId": box_template, "defaultPalletTemplateId": pallet_template,
+        "defaultPalletSheetId": null,
         "archived": true, "status": "active", "rev": rev + 1
     });
     assert_eq!(updated, expected);
@@ -936,6 +940,7 @@ async fn an_update_needs_the_whole_record_and_is_checked_like_a_create() {
             "printName": null, "chzProductGroupCode": null, "boxCapacity": null,
             "palletBoxCapacity": null, "shelfLifeDays": null,
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
+            "defaultPalletSheetId": null,
             "archived": false, "status": "draft", "rev": rev + 1
         })
     );

@@ -48,3 +48,16 @@ export function useTemplateDefaults() {
     api.getTemplateDefaults(token),
   );
 }
+
+/**
+ * The A4 pallet sheets and the organization's default (`GET
+ * /v1/office/pallet-sheets`): read again whenever a page or a dialog that
+ * offers a sheet opens, since a sheet may have been switched off or deleted.
+ */
+export function usePalletSheets(options: { enabled?: boolean } = {}) {
+  return useOfficeQuery(
+    officeKeys.palletSheets,
+    (api, token) => api.listPalletSheets(token),
+    options.enabled === undefined ? {} : { enabled: options.enabled },
+  );
+}
