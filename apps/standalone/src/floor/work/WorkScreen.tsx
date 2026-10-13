@@ -539,6 +539,9 @@ function blockContextOf(live: LiveRef, extension: number): BlockContext {
     get issuerPrefix() {
       return live.current.shift.snapshot.issuerPrefix;
     },
+    get mode() {
+      return live.current.shift.copy.mode;
+    },
     online: () => live.current.online,
     requestBlock: (request) => live.current.requestBlock(request),
     onHostError: (error) => live.current.onHostError(error),
@@ -1310,7 +1313,7 @@ export function WorkScreen(props: WorkScreenProps) {
         outcomeId.current += 1;
         const said: ValidationOutcome = {
           id: outcomeId.current,
-          time: scanTime(new Date().toISOString()),
+          time: scanTime(outcome.scannedAt),
           text,
           tone: lastTone(outcome),
         };
@@ -2418,7 +2421,7 @@ export function WorkScreen(props: WorkScreenProps) {
                   style={leaving || stop !== null ? WAITING_STYLE : undefined}
                   onClick={openClose}
                 >
-                  {t("floor.validation.closeShift")}
+                  {t("floor.close.open")}
                 </Button>
               )}
               <Button

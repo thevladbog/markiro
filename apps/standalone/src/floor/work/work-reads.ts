@@ -36,7 +36,7 @@ export async function readOpenBox(
 /** What the work screen shows of the shift, from this station's own records. */
 export interface WorkTotals {
   openBox: OpenBox | null;
-  /** Codes this station holds in the shift's boxes: the shift's actual quantity. */
+  /** Codes this station holds in the shift, in its boxes or in none (a validation shift's): its actual quantity. */
   accepted: number;
   /** Boxes of the shift closed and not taken apart. */
   closedBoxes: number;

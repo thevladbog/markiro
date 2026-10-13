@@ -406,6 +406,7 @@ describe("«Очистить короб»", () => {
       kind: "accepted",
       boxId: box?.["id"],
       itemCount: 1,
+      scannedAt: "2026-10-08T06:15:04.000Z",
     });
   });
 

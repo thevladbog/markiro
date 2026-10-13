@@ -2,7 +2,7 @@ import { ssccSerialCapacity } from "@markiro/domain";
 import { z } from "zod";
 
 import { HostError } from "../../host/client.js";
-import type { SsccBlock, SsccBlockRequest } from "../../host/protocol.js";
+import type { ShiftMode, SsccBlock, SsccBlockRequest } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { BOX_EXTENSION } from "./box-close.js";
@@ -12,6 +12,11 @@ export interface BlockContext {
   pairing: Pairing;
   /** The shift's snapshot's issuer prefix: the blocks of a box are of it. */
   issuerPrefix: string;
+  /**
+   * The shift's mode as its live copy has it, read at each top-up: a validation shift's codes
+   * go in no box (plan РЕЖ), so its supply asks for nothing, though its snapshot has a prefix.
+   */
+  mode: ShiftMode;
   /** The extension the blocks are of: 0, a box's (the default); 1, a pallet's (plan ПЛ-Ц). */
   extension?: number;
   /** The link is `online` right now: only then is the host asked. */
@@ -296,9 +301,13 @@ async function storeBlock(
  * its request is dropped too, and the result is `failed`, with no report
  * through `onHostError`: the block goes to `floor_block_drops`, and the floor's
  * status bar says how many (plan ОЧ). A failed write of this computer rejects.
+ * A validation shift (plan РЕЖ) numbers no box and no pallet: its top-up is
+ * `enough` before anything is read, asked or kept, and a request that waits
+ * stays as it is.
  */
 export function createBlockSupply(context: BlockContext): { topUp: () => Promise<SupplyResult> } {
   const attempt = async (fresh: boolean): Promise<SupplyResult> => {
+    if (context.mode === "validation") return { kind: "enough" };
     const waiting = await waitingRequest(context);
     if (waiting === null && !(await blockWanted(context))) return { kind: "enough" };
     if (!context.online()) return { kind: "offline" };

@@ -477,15 +477,30 @@
  */
 .work-validation {
   display: grid;
+  /* The head, the figures and one outcome stay readable on the smallest screen. */
+  min-height: 320px;
   padding: var(--sp-3);
-  overflow: auto;
   gap: var(--sp-2);
-  align-content: start;
-  /* Sized by its row alone: a long list scrolls inside the panel, never pushes the footer. */
-  contain: size;
+  /* Only the list of outcomes scrolls: its row takes what the rest leaves, never more. */
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
-/* «12 из 1 200 шт.»: the numbers in the counter's face, the words in the interface's (the box's). */
+/* The panel's head, as the box's: its name, then the count on its baseline. */
+.work-validation__head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: baseline;
+}
+
+.work-validation__head h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+/* «Принято 12 из плана 1 200»: the numbers in the counter's face, the words in the interface's. */
 .work-validation__count {
   font: var(--floor-body);
   font-variant-numeric: tabular-nums;
@@ -532,7 +547,8 @@
 
 .work-validation__figures dd {
   margin: 0;
-  font: 600 24px/1.2 var(--font-mono);
+  font: var(--floor-lg);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -543,10 +559,25 @@
 
 .work-validation__recent {
   display: grid;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow: auto;
   gap: var(--sp-1);
+  align-content: start;
+  border-radius: var(--r-2);
   list-style: none;
+  /*
+   * Sized by its row alone: its items never make the panel (and the screen) taller, so a long
+   * list scrolls here and the rest of the panel stays in view.
+   */
+  contain: size;
+}
+
+/* A scroll region on the keyboard: its focus is seen. */
+.work-validation__recent:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .work-validation__recent > li {
@@ -573,7 +604,8 @@
 
 .work-validation__time {
   flex: 0 0 auto;
-  font: 500 16px/1.2 var(--font-mono);
+  font: var(--floor-body);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -613,7 +645,15 @@
   justify-self: end;
 }
 
-/* A validation shift has no exceptions: the leave on the left, the close on the right. */
+/*
+ * A validation shift has no exceptions: its two actions keep the columns they have in an
+ * aggregation shift (the operators' habit), the leave in the middle, the close on the right.
+ */
+.work-footer--two .work-footer__action:nth-child(1) {
+  grid-column: 2;
+  justify-self: center;
+}
+
 .work-footer--two .work-footer__action:nth-child(2) {
   grid-column: 3;
   justify-self: end;

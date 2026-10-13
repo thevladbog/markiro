@@ -294,15 +294,16 @@
     },
     "validation": {
       "title": "Проверка",
+      "acceptedLead": "Принято",
+      "ofPlan": "из плана",
       "unit": "шт.",
       "hint": "Каждый код проверяется и принимается без короба и паллеты.",
-      "duplicates": "Повторы",
+      "duplicates": "Дубли",
       "errors": "Ошибки",
       "recent": "Последние сканы",
       "recentEmpty": "Сканов после входа в смену ещё не было.",
       "accepted": "Принят: в смене {{quantity}} шт.",
       "actions": "Выход из смены, закрытие смены",
-      "closeShift": "Закрыть смену",
       "closedNumbers": "Принято: {{quantity}} шт."
     },
     "print": {

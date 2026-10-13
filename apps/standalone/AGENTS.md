@@ -3657,10 +3657,16 @@ plus one). The screen shows `ValidationPanel` where the box stands: the accepted
 codes against the plan, the refused scans by kind (`VALIDATION_COUNTS_SQL` over
 `floor_scans_shift`, pinned in both query-plan lists) and this entry's last five
 outcomes in words, in the aggregation path's texts but the accept's own
-(«Принят: в смене N шт.»). It has no box, pallet, label or exceptions (Р9), asks
-for no SSCC block (neither supply is asked; the status bar's `readShiftStock`
-answers `null` for it), and recovers no label on entry. The plan notice offers
-«Закрыть смену» beside «Продолжить», as the cloud station does. The close is the
+(«Принят: в смене N шт.»), each at its scan's journalled time (every
+`ScanOutcome` carries `scannedAt`). Only that list scrolls (it is size-contained
+and keyboard-focusable); the panel keeps a min-height. It has no box, pallet,
+label or exceptions (Р9), asks for no SSCC block (the screen asks neither supply,
+and `createBlockSupply` itself answers `enough` while `BlockContext.mode`, read
+from the live copy, is `validation`; the status bar's `readShiftStock` answers
+`null` for it), and recovers no label on entry. Its footer keeps «Выйти из смены»
+in the middle column and «Закрыть смену» on the right, where an aggregation shift
+has them (`work-footer--two`). The plan notice offers «Закрыть смену» beside
+«Продолжить», as the cloud station does. The close is the
 aggregation close: `actualQty` is the shift's codes, `closedBoxCount` 0, no open
 box can block it, and the domain asks a reason when the fact differs from the
 plan; the summary and the closed panel name no box (`boxless`). Entering a

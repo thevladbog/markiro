@@ -57,23 +57,25 @@ export interface ScanContext {
 }
 
 /**
- * What became of a scan; every outcome is in `floor_scans` and the outbox. An accepted code of
- * an aggregation shift is in its open box (`itemCount`: the box's codes now); one of a
- * validation shift is in no box (`boxId: null`, plan РЕЖ), and `acceptedCount` is the codes this
- * station holds in the shift now.
+ * What became of a scan; every outcome is in `floor_scans` and the outbox, and `scannedAt` is
+ * the moment journalled with it (`floor_scans.scanned_at`), what the screen says it at. An
+ * accepted code of an aggregation shift is in its open box (`itemCount`: the box's codes now);
+ * one of a validation shift is in no box (`boxId: null`, plan РЕЖ), and `acceptedCount` is the
+ * codes this station holds in the shift now.
  */
-export type ScanOutcome =
+export type ScanOutcome = { scannedAt: string } & (
   | { kind: "accepted"; boxId: string; itemCount: number }
   | { kind: "accepted"; boxId: null; acceptedCount: number }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
   | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
   | { kind: "wrong_gtin"; gtin14: string }
-  | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> };
+  | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> }
+);
 
 const localOwnerRow = z.object({ scanned_at: z.string() });
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
-/** When this station accepted the code, if it holds it in a box of this pairing. */
+/** When this station accepted the code, if it holds it in this pairing (in a box or not). */
 async function readLocalOwner(
   context: ScanContext,
   codeHash: string,
@@ -179,18 +181,18 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       code: null,
       boxId: null,
     });
-    return { kind: "invalid", rawKind: reading.kind };
+    return { kind: "invalid", rawKind: reading.kind, scannedAt };
   }
   const code = scannedCode(reading.km);
   const refused = { ...base, rawKind: "km" as const, code, boxId: null };
   if (code.gtin14 !== shift.snapshot.product.gtin14) {
     await journal({ ...refused, verdict: "wrong_gtin", duplicateSource: null });
-    return { kind: "wrong_gtin", gtin14: code.gtin14 };
+    return { kind: "wrong_gtin", gtin14: code.gtin14, scannedAt };
   }
   const mine = await readLocalOwner(context, code.codeHash);
   if (mine !== null) {
     await journal({ ...refused, verdict: "duplicate", duplicateSource: "local" });
-    return { kind: "duplicate", source: "local", firstScannedAt: mine.scannedAt };
+    return { kind: "duplicate", source: "local", firstScannedAt: mine.scannedAt, scannedAt };
   }
   const owner = await hostOwner(context, code.codeHash);
   if (owner !== null) {
@@ -200,6 +202,7 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       source: "host",
       firstScannedAt: owner.scannedAt,
       shiftNumber: owner.shiftNumber,
+      scannedAt,
     };
   }
   const claim = (boxId: string | null): LocalStatement => ({
@@ -227,7 +230,7 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       countRow,
     );
     await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId: null }, [claim(null)]);
-    return { kind: "accepted", boxId: null, acceptedCount: (held?.n ?? 0) + 1 };
+    return { kind: "accepted", boxId: null, acceptedCount: (held?.n ?? 0) + 1, scannedAt };
   }
   const box = await readOpenBox(local, pairing, shift.copy.id);
   const boxId = box?.id ?? context.newId();
@@ -251,5 +254,5 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
     intoBox,
     claim(boxId),
   ]);
-  return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1 };
+  return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1, scannedAt };
 }

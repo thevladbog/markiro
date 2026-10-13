@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { buildSscc } from "@markiro/domain";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider, type SignalTone } from "@markiro/ui";
@@ -574,6 +574,14 @@ describe("the work screen of a shift", () => {
     expect(screen.queryByText(/План выполнен/)).toBeNull();
     await screenWork.scan(km("L2"));
     heardOnce("План выполнен: принято 2 из 2.");
+    // An aggregation shift's card only lets the work go on: its close is the footer's alone.
+    const reached = screen.getByText("План выполнен: принято 2 из 2.").closest(".work-overlay");
+    if (!(reached instanceof HTMLElement)) throw new Error("the plan's card is not on the screen");
+    expect(
+      within(reached)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Продолжить"]);
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
     await screenWork.scan(km("L3"));
     expect(screen.queryByText(/План выполнен/)).toBeNull();

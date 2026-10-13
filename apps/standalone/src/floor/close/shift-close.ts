@@ -33,7 +33,7 @@ export type CloseBlocker =
 export interface CloseSummary {
   /** The plan as this station's copy has it now: the record carries it as the plan it saw. */
   plannedQty: number | null;
-  /** Codes this station holds in the shift's boxes: the shift's actual quantity. */
+  /** Codes this station holds in the shift, in its boxes or in none (a validation shift's): its actual quantity. */
   actualQty: number;
   /** The shift's closed boxes not taken apart. */
   closedBoxes: number;

@@ -1,13 +1,13 @@
 import { useTranslation } from "react-i18next";
 
 import { formatQuantity } from "../shifts/shift-text.js";
-import { OfCount, type LastTone } from "./WorkInstruments.js";
+import type { LastTone } from "./WorkInstruments.js";
 
 /** One outcome of the panel's list: when, in words, and its tone. */
 export interface ValidationOutcome {
   /** Unique within the screen's life: the list's key. */
   id: number;
-  /** The time it was said, on this computer's clock («06:15:02»). */
+  /** The time its scan was journalled (`floor_scans.scanned_at`), on this computer's clock («06:15:02»). */
   time: string;
   text: string;
   tone: LastTone;
@@ -40,24 +40,26 @@ export function ValidationPanel({
   outcomes,
 }: ValidationPanelProps) {
   const { t } = useTranslation();
-  const unit = t("floor.validation.unit");
   return (
     <section className="work-instrument work-validation" aria-labelledby="work-validation-title">
-      <div className="work-box-fill__head">
+      <div className="work-validation__head">
         <h2 id="work-validation-title">{t("floor.validation.title")}</h2>
-        {plannedQty === null ? (
-          <strong className="work-validation__count">
-            <span className="work-of-count__number">{formatQuantity(accepted)}</span>{" "}
-            <span className="work-of-count__word">{unit}</span>
-          </strong>
-        ) : (
-          <OfCount
-            className="work-validation__count"
-            quantity={accepted}
-            capacity={plannedQty}
-            unit={unit}
-          />
-        )}
+        {/*
+          «Принято 12 из плана 1 200», or «Принято 12 шт.» with no plan: the numbers in the
+          counter's face, the words in the interface's, as the box's «5 из 12» (`OfCount`).
+        */}
+        <strong className="work-of-count work-validation__count">
+          <span className="work-of-count__word">{t("floor.validation.acceptedLead")}</span>{" "}
+          <span className="work-of-count__number">{formatQuantity(accepted)}</span>{" "}
+          {plannedQty === null ? (
+            <span className="work-of-count__word">{t("floor.validation.unit")}</span>
+          ) : (
+            <>
+              <span className="work-of-count__word">{t("floor.validation.ofPlan")}</span>{" "}
+              <span className="work-of-count__number">{formatQuantity(plannedQty)}</span>
+            </>
+          )}
+        </strong>
       </div>
       <p className="work-validation__hint">{t("floor.validation.hint")}</p>
       <dl className="work-validation__figures">
@@ -74,7 +76,12 @@ export function ValidationPanel({
       {outcomes.length === 0 ? (
         <p className="work-validation__empty">{t("floor.validation.recentEmpty")}</p>
       ) : (
-        <ol className="work-validation__recent" aria-labelledby="work-validation-recent">
+        // The one part of the panel that scrolls: on the keyboard too, named by its heading.
+        <ol
+          className="work-validation__recent"
+          aria-labelledby="work-validation-recent"
+          tabIndex={0}
+        >
           {outcomes.map((outcome) => (
             <li key={outcome.id} data-verdict={outcome.tone}>
               <span className="work-validation__time">{outcome.time}</span>

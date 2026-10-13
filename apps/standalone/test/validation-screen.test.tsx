@@ -1,11 +1,21 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { scanTime } from "../src/floor/work/WorkScreen.js";
 import type { CodeCheck } from "../src/host/protocol.js";
-import { enteredShift, km, OTHER_GTIN, rows, VALIDATION_ENTERED } from "./support/floor-work.js";
+import type { LocalExecutor } from "../src/local/executor.js";
+import {
+  enteredShift,
+  km,
+  OPERATOR_ID,
+  OTHER_GTIN,
+  PAIRING,
+  rows,
+  VALIDATION_ENTERED,
+} from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
-import { setUpPrinting } from "./support/printing.js";
+import { palletStation } from "./support/pallets.js";
+import { FIRST_SSCC, jobRows, setUpPrinting } from "./support/printing.js";
 import { lastLine, renderWork, type WorkHarness } from "./support/work-screen.js";
 
 /*
@@ -75,13 +85,17 @@ function fact(name: string): string | null {
   return term?.nextElementSibling?.textContent ?? null;
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("the work screen of a validation shift", () => {
   it("shows the validation panel in place of the box, its pallet, its label and the exceptions", async () => {
     const at = await station();
     const work = renderWork(at);
     await ready(work);
-    expect(acceptedLine()).toBe("0 из 1\u00a0200 шт.");
-    expect(figure("Повторы")).toBe("0");
+    expect(acceptedLine()).toBe("Принято 0 из плана 1\u00a0200");
+    expect(figure("Дубли")).toBe("0");
     expect(figure("Ошибки")).toBe("0");
     expect(panel().getByText("Сканов после входа в смену ещё не было.")).toBeTruthy();
     expect(lastLine()).toBe("Отсканируйте код маркировки.");
@@ -114,7 +128,7 @@ describe("the work screen of a validation shift", () => {
     expect(lastLine()).toBe("Принят: в смене 1 шт.");
     expect(work.props.signal).toHaveBeenLastCalledWith("ok");
     await work.scan(km("A2"));
-    expect(acceptedLine()).toBe("2 из 1\u00a0200 шт.");
+    expect(acceptedLine()).toBe("Принято 2 из плана 1\u00a0200");
     await work.scan(km("A1"));
     expect(lastLine()).toMatch(/^Дубль: этот код уже принят в \d\d:\d\d:\d\d\.$/);
     expect(work.props.signal).toHaveBeenLastCalledWith("duplicate");
@@ -123,9 +137,9 @@ describe("the work screen of a validation shift", () => {
     await work.scan("MRK-000742");
     expect(lastLine()).toBe("Это не код маркировки.");
     expect(work.props.signal).toHaveBeenLastCalledWith("error");
-    expect(figure("Повторы")).toBe("1");
+    expect(figure("Дубли")).toBe("1");
     expect(figure("Ошибки")).toBe("2");
-    expect(acceptedLine()).toBe("2 из 1\u00a0200 шт.");
+    expect(acceptedLine()).toBe("Принято 2 из плана 1\u00a0200");
     expect(recent()).toEqual([
       "Это не код маркировки.",
       `Чужой товар: GTIN ${OTHER_GTIN}.`,
@@ -139,9 +153,18 @@ describe("the work screen of a validation shift", () => {
         .getAllByRole("listitem")
         .map((item) => item.getAttribute("data-verdict")),
     ).toEqual(["error", "error", "error", "ok", "ok"]);
+    // A sixth outcome pushes the oldest out: the list keeps five.
+    await work.scan(km("A3"));
+    expect(recent()).toEqual([
+      "Принят: в смене 3 шт.",
+      "Это не код маркировки.",
+      `Чужой товар: GTIN ${OTHER_GTIN}.`,
+      expect.stringMatching(/^Дубль: этот код уже принят в /),
+      "Принят: в смене 2 шт.",
+    ]);
     // The codes are the shift's, in no box; nothing else of a box or a label was written.
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes WHERE box_id IS NULL")).toEqual([
-      { n: 2 },
+      { n: 3 },
     ]);
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_boxes")).toEqual([{ n: 0 }]);
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_print_jobs")).toEqual([{ n: 0 }]);
@@ -160,8 +183,8 @@ describe("the work screen of a validation shift", () => {
     expect(lastLine()).toBe(
       `Дубль: код принят в смене OCT26-003 в ${scanTime(TAKEN.owner.scannedAt)}.`,
     );
-    expect(figure("Повторы")).toBe("1");
-    expect(acceptedLine()).toBe("0 из 1\u00a0200 шт.");
+    expect(figure("Дубли")).toBe("1");
+    expect(acceptedLine()).toBe("Принято 0 из плана 1\u00a0200");
   });
 
   it("asks the host for no SSCC serials, on entry or when the link comes back", async () => {
@@ -191,9 +214,12 @@ describe("the work screen of a validation shift", () => {
     const again = renderWork(at);
     await ready(again);
     // The entry's read may land outside the harness's turn: its render is waited for.
-    await waitFor(() => expect(acceptedLine()).toBe("1 из 1\u00a0200 шт."));
-    expect(figure("Повторы")).toBe("1");
+    await waitFor(() => expect(acceptedLine()).toBe("Принято 1 из плана 1\u00a0200"));
+    expect(figure("Дубли")).toBe("1");
     expect(figure("Ошибки")).toBe("1");
+    // The outcomes are this entry's: the list starts empty again.
+    expect(panel().queryAllByRole("listitem")).toEqual([]);
+    expect(panel().getByText("Сканов после входа в смену ещё не было.")).toBeTruthy();
   });
 
   it("says the accepted codes alone for a shift without a plan", async () => {
@@ -201,7 +227,11 @@ describe("the work screen of a validation shift", () => {
     const work = renderWork(at);
     await ready(work);
     await work.scan(km("N1"));
-    expect(acceptedLine()).toBe("1 шт.");
+    expect(acceptedLine()).toBe("Принято 1 шт.");
+    // The same counter's face as with a plan: the numbers mono, the words the interface's.
+    const count = document.querySelector(".work-validation__count");
+    expect(count?.classList.contains("work-of-count")).toBe(true);
+    expect(count?.querySelector(".work-of-count__number")?.textContent).toBe("1");
   });
 
   it("offers to close the shift once the plan is reached, as the cloud does", async () => {
@@ -269,5 +299,100 @@ describe("the work screen of a validation shift", () => {
         }),
       }),
     ]);
+  });
+  it("lists the outcomes in a region the keyboard can scroll, named by its heading", async () => {
+    const at = await station();
+    const work = renderWork(at);
+    await ready(work);
+    await work.scan(km("F1"));
+    const list = panel().getByRole("list", { name: "Последние сканы" });
+    expect(list.tabIndex).toBe(0);
+    expect(list.classList.contains("work-validation__recent")).toBe(true);
+  });
+
+  it("says each outcome at the time its scan was journalled, not when the panel drew it", async () => {
+    const at = await station();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-08T06:15:02.000Z"));
+    // The station's clock moves on an hour once the scan is written, before the screen speaks.
+    const local: LocalExecutor = {
+      query: (sql, params, row) => at.local.query(sql, params, row),
+      transaction: async (statements) => {
+        const changed = await at.local.transaction(statements);
+        if (statements.some((statement) => statement.sql.startsWith("INSERT INTO floor_scans"))) {
+          vi.setSystemTime(Date.now() + 3_600_000);
+        }
+        return changed;
+      },
+    };
+    const work = renderWork({ ...at, local });
+    await ready(work);
+    await work.scan(km("T1"));
+    await work.scan("MRK-000742");
+    const journalled = rows(at.db, "SELECT scanned_at FROM floor_scans ORDER BY scanned_at DESC");
+    expect(journalled).toEqual([
+      { scanned_at: "2026-10-08T07:15:02.000Z" },
+      { scanned_at: "2026-10-08T06:15:02.000Z" },
+    ]);
+    expect(
+      panel()
+        .getAllByRole("listitem")
+        .map((item) => item.querySelector(".work-validation__time")?.textContent),
+    ).toEqual(journalled.map((row) => scanTime(String(row["scanned_at"]))));
+  });
+
+  it("recovers no label on entry: a send another shift's stop cut stays as it was", async () => {
+    const at = await station();
+    // A box label of an aggregation shift whose send a stop of the station cut.
+    at.db
+      .prepare(
+        "INSERT INTO floor_print_jobs (id, host_id, device_id, shift_id, purpose, subject_id, " +
+          "sscc, state, verify, template_id, template_rev, fields, printer, bytes_base64, " +
+          "error_code, attempts, operator_id, created_at, updated_at) VALUES " +
+          "('job-1', ?, ?, 'aggregation-shift', 'box', 'box-1', ?, 'sending', 0, 'tpl', 1, " +
+          "'{}', '{}', 'AA==', NULL, 1, ?, '2026-10-08T05:00:00.000Z', '2026-10-08T05:00:00.000Z')",
+      )
+      .run(PAIRING.hostId, PAIRING.deviceId, FIRST_SSCC, OPERATOR_ID);
+    const work = renderWork(at);
+    await ready(work);
+    await work.scan(km("J1"));
+    expect(jobRows(at.db)).toEqual([
+      expect.objectContaining({ id: "job-1", state: "sending", error_code: null, attempts: 1 }),
+    ]);
+    expect(screen.queryByText("Неизвестно, напечаталась ли этикетка")).toBeNull();
+    expect(work.shell.sends).toEqual([]);
+  });
+
+  it("shows no pallet and no stop for missing pallets, whatever its copy says of pallets", async () => {
+    // A copy that names pallets (no office makes one so; the screen must not trust it): with
+    // a capacity and a layout, and without them.
+    const pallets = await palletStation();
+    for (const named of [
+      {
+        palletsEnabled: true,
+        palletBoxCapacity: pallets.shift.copy.palletBoxCapacity,
+        palletTemplate: pallets.shift.snapshot.palletTemplate,
+      },
+      { palletsEnabled: true, palletBoxCapacity: null, palletTemplate: null },
+    ]) {
+      const at = await station();
+      const shift = {
+        ...at.shift,
+        copy: {
+          ...at.shift.copy,
+          palletsEnabled: named.palletsEnabled,
+          palletBoxCapacity: named.palletBoxCapacity,
+        },
+        snapshot: { ...at.shift.snapshot, palletTemplate: named.palletTemplate },
+      };
+      const work = renderWork({ ...at, shift });
+      await ready(work);
+      await work.scan(km("Q1"));
+      expect(screen.queryByRole("region", { name: "Паллета" })).toBeNull();
+      expect(screen.queryByText("Паллеты смены не настроены на этой станции")).toBeNull();
+      expect(lastLine()).toBe("Принят: в смене 1 шт.");
+      expect(rows(at.db, "SELECT count(*) AS n FROM floor_pallets")).toEqual([{ n: 0 }]);
+      work.view.unmount();
+    }
   });
 });
