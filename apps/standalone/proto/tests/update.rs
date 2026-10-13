@@ -95,6 +95,47 @@ fn the_hash_covers_exactly_the_size_the_manifest_names() {
         hash_exact(Broken, 1),
         Err(HashError::Io(io::ErrorKind::PermissionDenied))
     );
+    // An endless source is refused as soon as it passes the size.
+    assert_eq!(hash_exact(io::repeat(0), 10), Err(HashError::TooLong));
+    // An interrupted read is retried, and short reads add up.
+    let expected: String = Sha256::digest(b"abcdef")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        hash_exact(Stuttering::new(b"abcdef"), 6),
+        Ok(expected.clone())
+    );
+}
+
+/// Gives one byte per read, after an `Interrupted` before each.
+struct Stuttering {
+    bytes: Vec<u8>,
+    interrupt: bool,
+}
+
+impl Stuttering {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            bytes: bytes.to_vec(),
+            interrupt: true,
+        }
+    }
+}
+
+impl Read for Stuttering {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.interrupt {
+            self.interrupt = false;
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        self.interrupt = true;
+        if self.bytes.is_empty() || buffer.is_empty() {
+            return Ok(0);
+        }
+        buffer[0] = self.bytes.remove(0);
+        Ok(1)
+    }
 }
 
 #[test]

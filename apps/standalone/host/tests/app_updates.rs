@@ -97,9 +97,17 @@ async fn only_an_administrators_session_records_and_a_refusal_writes_nothing() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "unknown token {answer}");
     let technologist = admin.technologist().await;
+    let rows = audit_rows(&admin.app).await;
     let (status, answer) = admin.call_as(&technologist, "POST", PATH, Some(body)).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
+    // The role is checked before the body: a technologist's malformed report
+    // is refused for the role, not for its fields.
+    let (status, answer) = admin
+        .call_as(&technologist, "POST", PATH, Some(started("0.1", "0.2.0")))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
     assert_eq!(audit_trail(&admin.app, "app.update.start").await, vec![]);
+    assert_eq!(audit_rows(&admin.app).await, rows, "no row of any kind");
 }
 
 #[tokio::test]

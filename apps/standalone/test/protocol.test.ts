@@ -3268,6 +3268,8 @@ describe("the report of a started update (plan ОБН-2)", () => {
       { to: "v0.2.0" },
       { to: "0.2.0-beta.1" },
       { from: "01.1.0" },
+      { to: "4294967296.0.0" },
+      { from: "1.2.3\n" },
       { installerSha256: String(record.installerSha256).toUpperCase() },
       { installerSha256: "ab" },
       { source: "usb" },
