@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "validation_failed",
+    "message": "the license file was refused",
+    "details": {
+      "field": "file",
+      "reason": "license_wrong_host",
+      "fileHostId": "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f"
+    }
+  }
+}

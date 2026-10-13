@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "the site's license does not include this feature",
+    "details": { "constraint": "feature_disabled", "feature": "handheld" }
+  }
+}

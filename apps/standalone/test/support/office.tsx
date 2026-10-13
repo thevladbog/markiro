@@ -141,6 +141,15 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
+    getLicense: vi.fn<HostApi["getLicense"]>(() => unexpected("getLicense")),
+    previewLicense: vi.fn<HostApi["previewLicense"]>(() => unexpected("previewLicense")),
+    loadLicense: vi.fn<HostApi["loadLicense"]>(() => unexpected("loadLicense")),
+    getActivationRequest: vi.fn<HostApi["getActivationRequest"]>(() =>
+      unexpected("getActivationRequest"),
+    ),
+    enableLicenseEmergency: vi.fn<HostApi["enableLicenseEmergency"]>(() =>
+      unexpected("enableLicenseEmergency"),
+    ),
     ...overrides,
   };
 }

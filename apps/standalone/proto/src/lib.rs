@@ -191,6 +191,7 @@ pub mod shift_close_reasons {
 pub mod backup;
 pub mod cloud_import;
 pub mod code_search;
+pub mod license;
 pub mod pairing;
 pub mod trust;
 
@@ -481,7 +482,9 @@ pub struct PairingCodeRequest {
     pub replaces: Option<String>,
 }
 
-/// `GET /v1/device`.
+/// `GET /v1/device`. `license` (plan ЛЦ-2) is the site's license state as
+/// the host computed it: a host before ЛЦ-2 sends none, and `PUT
+/// /v1/device/line` answers without it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
@@ -490,6 +493,8 @@ pub struct DeviceInfo {
     pub name: String,
     pub line_id: Option<String>,
     pub paired_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<license::DeviceLicense>,
 }
 
 /// `PUT /v1/device/line`: a station chooses the line it works on.

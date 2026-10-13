@@ -161,13 +161,166 @@ export const hostRevisionSchema = z.object({ rev: z.number().int().nonnegative()
 // of their copy); see the note at the top. The policy is plan 5's, and the
 // block sizes' coupling to a fail-closed record is plan 2a's and the owner's.
 
-/** `GET /v1/device`. */
+// --- The site's license (plan ЛЦ-2, `proto/src/license.rs`) ---
+// Answers are lenient like every host response; the state is a word, not an
+// enum, so a state a newer host adds does not fail the page.
+
+/** `state` of a license answer (spec §3.2). */
+export const LICENSE_STATES = [
+  "trial",
+  "active",
+  "expiring",
+  "grace",
+  "restricted",
+  "wrong_host",
+  "inn_mismatch",
+  "trial_expired",
+] as const;
+/** `details.reason` of a refused file, in the host's order of checks (§4.3). */
+export const LICENSE_REFUSALS = [
+  "license_malformed",
+  "license_unknown_key",
+  "license_signature",
+  "license_wrong_host",
+  "license_inn_mismatch",
+  "license_inn_missing",
+  "license_older",
+] as const;
+export const LICENSE_WARNINGS = ["expired", "not_yet_valid", "over_limit"] as const;
+/** `details.constraint` of a `conflict` the license causes. */
+export const LICENSE_CONSTRAINTS = [
+  "license_restricted",
+  "seat_limit",
+  "feature_disabled",
+  "emergency_used",
+  "emergency_not_needed",
+] as const;
+export const LICENSE_QUOTA_KEYS = ["lines", "stations", "kiosks", "cabinetUsers"] as const;
+export const LICENSE_FEATURE_KEYS = [
+  "labelEditor",
+  "publicApi",
+  "pallets",
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
+] as const;
+/** The most a license file may hold (`verify::MAX_FILE_BYTES`). */
+export const MAX_LICENSE_FILE_BYTES = 16 * 1024;
+
+const quotaUseSchema = z.object({
+  limit: z.number().int().nonnegative().nullable(),
+  used: z.number().int().nonnegative(),
+  over: z.boolean(),
+});
+export const licenseQuotasSchema = z.object({
+  lines: quotaUseSchema,
+  stations: quotaUseSchema,
+  kiosks: quotaUseSchema,
+  cabinetUsers: quotaUseSchema,
+});
+export const licenseFeaturesSchema = z.object({
+  labelEditor: z.boolean(),
+  publicApi: z.boolean(),
+  pallets: z.boolean(),
+  chzIntegration: z.boolean(),
+  inventory: z.boolean(),
+  commerceMl: z.boolean(),
+  handheld: z.boolean(),
+});
+
+/** `GET /v1/office/license`, and the answers of a load and of the emergency extension. */
+export const officeLicenseSchema = z.object({
+  state: z.string(),
+  since: z.iso.datetime(),
+  flags: z.object({
+    clockBehindDays: z.number().int().positive().nullable(),
+    clockAhead: z.boolean(),
+  }),
+  effectiveAt: z.iso.datetime(),
+  phaseEndsAt: z.iso.datetime().nullable(),
+  daysLeft: z.number().int().nonnegative().nullable(),
+  warnDays: z.number().int().nonnegative(),
+  opensNewShifts: z.boolean(),
+  license: z
+    .object({
+      licenseId: z.uuid(),
+      sequence: z.number().int().positive(),
+      kid: z.string(),
+      customer: z.object({ name: z.string(), inn: z.string() }),
+      plan: z.string(),
+      planVersionId: z.string(),
+      issuedAt: z.iso.datetime(),
+      validFrom: z.iso.datetime(),
+      validUntil: z.iso.datetime(),
+      graceDays: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  trial: z
+    .object({
+      startedAt: z.iso.datetime(),
+      endsAt: z.iso.datetime(),
+      inn: z.string().nullable(),
+    })
+    .nullable(),
+  binding: z.object({
+    hostId: z.uuid(),
+    fingerprint: z.string(),
+    orgInn: z.string().nullable(),
+    innMatches: z.boolean().nullable(),
+  }),
+  quotas: licenseQuotasSchema,
+  features: licenseFeaturesSchema,
+  emergency: z.object({ available: z.boolean(), until: z.iso.datetime().nullable() }),
+  warnings: z.array(z.string()).optional(),
+});
+export type OfficeLicense = z.infer<typeof officeLicenseSchema>;
+
+/** One column of the preview's «было → станет». */
+export const licenseTermsSchema = z.object({
+  licenseId: z.uuid().nullable(),
+  sequence: z.number().int().positive().nullable(),
+  plan: z.string(),
+  validFrom: z.iso.datetime().nullable(),
+  validUntil: z.iso.datetime().nullable(),
+  graceDays: z.number().int().nonnegative(),
+  quotas: licenseQuotasSchema,
+  features: licenseFeaturesSchema,
+});
+export type LicenseTerms = z.infer<typeof licenseTermsSchema>;
+
+/** `POST /v1/office/license/preview`. */
+export const licensePreviewSchema = z.object({
+  before: licenseTermsSchema,
+  after: licenseTermsSchema,
+  changes: z.array(z.string()),
+  warnings: z.array(z.string()),
+});
+export type LicensePreview = z.infer<typeof licensePreviewSchema>;
+
+/** The license line of `GET /v1/device`. */
+export const deviceLicenseSchema = z.object({
+  state: z.string(),
+  since: z.iso.datetime(),
+  phaseEndsAt: z.iso.datetime().nullable(),
+  emergencyUntil: z.iso.datetime().nullable(),
+});
+export type DeviceLicense = z.infer<typeof deviceLicenseSchema>;
+
+/** `POST /v1/office/license/preview` and `PUT /v1/office/license` (strict, `licenseLoad`). */
+export const licenseLoadRequestSchema = z
+  .object({ file: z.string().min(1).max(MAX_LICENSE_FILE_BYTES) })
+  .strict();
+export type LicenseLoadRequest = z.infer<typeof licenseLoadRequestSchema>;
+
+/** `GET /v1/device`; `license` since plan ЛЦ-2. */
 export const deviceInfoSchema = z.object({
   id: z.uuid(),
   kind: deviceKindSchema,
   name: z.string(),
   lineId: z.uuid().nullable(),
   pairedAt: z.iso.datetime(),
+  license: deviceLicenseSchema.optional(),
 });
 export type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 

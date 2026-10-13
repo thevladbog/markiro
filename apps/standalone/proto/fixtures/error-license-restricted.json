@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "new shifts do not open under the site's license",
+    "details": {
+      "constraint": "license_restricted",
+      "state": "restricted",
+      "since": "2027-11-03T09:00:00Z"
+    }
+  }
+}

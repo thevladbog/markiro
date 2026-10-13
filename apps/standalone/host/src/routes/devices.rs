@@ -36,6 +36,8 @@ async fn read_info(
         name,
         line_id,
         paired_at,
+        // `GET /v1/device` adds the license (plan ЛЦ-2); the line's answer has none.
+        license: None,
     })
 }
 

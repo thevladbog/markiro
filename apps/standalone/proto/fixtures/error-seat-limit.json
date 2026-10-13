@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "every seat of the license is taken",
+    "details": { "constraint": "seat_limit", "quota": "stations", "used": 3, "limit": 3 }
+  }
+}
