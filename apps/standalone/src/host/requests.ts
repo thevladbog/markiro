@@ -30,6 +30,7 @@ import type {
   TemplatePurpose,
   TemplateSpec,
   TemplateUpdate,
+  UpdateStarted,
 } from "./protocol.js";
 
 // The office's request bodies, each built field by field and never spread
@@ -626,5 +627,29 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
           palletBoxCapacity: shift.pallets.boxCapacity,
           palletTemplateId: shift.pallets.templateId,
         }),
+  };
+}
+
+/** What a started update reports: this PC's version, the new one and the installer's SHA-256. */
+export interface UpdateStartedInput {
+  from: string;
+  to: string;
+  installerSha256: string;
+}
+
+/**
+ * `POST /v1/office/updates/started` (`update-started.json`, plan ОБН-2):
+ * every field named, the source given. The device is never a field: the host
+ * takes the office session's.
+ */
+export function updateStarted(
+  input: UpdateStartedInput,
+  source: UpdateStarted["source"],
+): UpdateStarted {
+  return {
+    from: input.from,
+    to: input.to,
+    installerSha256: input.installerSha256,
+    source,
   };
 }

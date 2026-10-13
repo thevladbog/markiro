@@ -1605,6 +1605,28 @@ export const shiftExportRecordSchema = z
   .strict();
 export type ShiftExportRecord = z.infer<typeof shiftExportRecordSchema>;
 
+/** `MAJOR.MINOR.PATCH` as `markiro_proto::update::AppVersion` reads it: no leading zeros, nothing around it. */
+export const appVersionSchema = z
+  .string()
+  .regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/)
+  // Each part is a `u32` on the Rust side.
+  .refine((text) => text.split(".").every((part) => Number(part) <= 4_294_967_295));
+
+/**
+ * Mirrors `markiro_proto::update::UpdateStarted`: `POST /v1/office/updates/started`
+ * (plan ОБН-2), the office starts an installer on its PC. No device: the host
+ * takes the session's.
+ */
+export const updateStartedSchema = z
+  .object({
+    from: appVersionSchema,
+    to: appVersionSchema,
+    installerSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    source: z.enum(["file", "host"]),
+  })
+  .strict();
+export type UpdateStarted = z.infer<typeof updateStartedSchema>;
+
 /**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's
  * planned shift on its own line. `requestId`, a UUID the station made up,

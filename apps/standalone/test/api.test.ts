@@ -43,6 +43,7 @@ import {
   templateCreateSchema,
   templateDefaultsUpdateSchema,
   templateUpdateSchema,
+  updateStartedSchema,
 } from "../src/host/protocol.js";
 import { fakeHostApi } from "./support/office.js";
 
@@ -122,6 +123,7 @@ const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
 const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
+const UPDATE_STARTED = updateStartedSchema.parse(fixture("update-started.json"));
 
 type Case = [
   name: string,
@@ -551,6 +553,12 @@ const CASES: Case[] = [
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
   ],
   [
+    "recordUpdateStarted",
+    null,
+    (api) => api.recordUpdateStarted(TOKEN, UPDATE_STARTED),
+    { method: "POST", path: "/v1/office/updates/started", body: UPDATE_STARTED },
+  ],
+  [
     "getBoxReportRows",
     fixture("box-report-rows.json"),
     (api) => api.getBoxReportRows(TOKEN, BOX_ID),
@@ -699,6 +707,13 @@ describe("HostApi shifts", () => {
     await expect(
       recording(shift).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
     ).rejects.toThrow();
+  });
+
+  it("resolves a recorded update start with nothing, and rejects an answer that carries a body", async () => {
+    await expect(
+      recording(null).api.recordUpdateStarted(TOKEN, UPDATE_STARTED),
+    ).resolves.toBeUndefined();
+    await expect(recording(shift).api.recordUpdateStarted(TOKEN, UPDATE_STARTED)).rejects.toThrow();
   });
 
   it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {

@@ -171,6 +171,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
+    recordUpdateStarted: vi.fn<HostApi["recordUpdateStarted"]>(() =>
+      unexpected("recordUpdateStarted"),
+    ),
     ...overrides,
   };
 }

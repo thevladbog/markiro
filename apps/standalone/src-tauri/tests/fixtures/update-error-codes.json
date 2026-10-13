@@ -1,0 +1,15 @@
+[
+  "invalid_request",
+  "documents_unavailable",
+  "storage",
+  "unsupported",
+  "manifest_malformed",
+  "manifest_unknown_key",
+  "manifest_signature",
+  "installer_missing",
+  "installer_mismatch",
+  "update_refused",
+  "confirmation_required",
+  "uac_cancelled",
+  "launch_failed"
+]
