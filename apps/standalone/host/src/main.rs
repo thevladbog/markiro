@@ -9,6 +9,7 @@
 //!   uninstall                                 stop and remove it; the data stays (Windows, administrator)
 //!   stop-service                              stop it and wait (Windows, administrator)
 //!   network-check [--make-private]            list networks; exit 3 while one is public
+//!   trust-keys                                print the kids of the keys this build trusts
 //!
 //! The installer's exit codes (`src-tauri/windows/installer-hooks.nsh`):
 //! `install` 0 = running, 1 = failed, 4 = installed but not staying up (see
@@ -50,6 +51,7 @@ enum Command {
     NetworkCheck {
         make_private: bool,
     },
+    TrustKeys,
 }
 
 const USAGE: &str = "usage: markiro-host run [--data-dir <path>] [--port <port>]
@@ -58,7 +60,8 @@ const USAGE: &str = "usage: markiro-host run [--data-dir <path>] [--port <port>]
        markiro-host restore <copy> [--data-dir <path>] [--without-manifest] [--keep-identity | --take-identity]
        markiro-host verify-copy <copy> [--without-manifest]
        markiro-host install | uninstall | stop-service
-       markiro-host network-check [--make-private]";
+       markiro-host network-check [--make-private]
+       markiro-host trust-keys";
 
 fn parse(args: &[String]) -> Result<Command, String> {
     let (command, rest) = args.split_first().ok_or_else(|| USAGE.to_owned())?;
@@ -74,7 +77,8 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ("network-check", [flag]) if flag == "--make-private" => {
             return Ok(Command::NetworkCheck { make_private: true })
         }
-        ("install" | "uninstall" | "stop-service" | "network-check", _) => {
+        ("trust-keys", []) => return Ok(Command::TrustKeys),
+        ("install" | "uninstall" | "stop-service" | "network-check" | "trust-keys", _) => {
             return Err(USAGE.to_owned())
         }
         _ => {}
@@ -184,6 +188,12 @@ fn main() -> ExitCode {
         Command::Install => install_service(),
         Command::Uninstall => uninstall_service(),
         Command::StopService => stop_service(),
+        Command::TrustKeys => {
+            for kid in trust_keys() {
+                println!("{kid}");
+            }
+            Ok(())
+        }
         Command::NetworkCheck { make_private } => {
             let result = network_check(make_private);
             match &result {
@@ -234,6 +244,20 @@ fn network_check_code(result: &Result<bool, BoxError>) -> u8 {
         Ok(true) => PUBLIC_REMAINS,
         Err(_) => 1,
     }
+}
+
+/// `trust-keys`: the kids of the license keyset, then of the release keyset,
+/// one per line (spec 2026-10-13 §5.2). A release build lists no `test-` kid;
+/// the Windows CI job checks the installer's host.
+fn trust_keys() -> Vec<String> {
+    let license = markiro_proto::trust::license_keyset();
+    let update = markiro_proto::trust::update_keyset();
+    license
+        .keys
+        .into_iter()
+        .chain(update.keys)
+        .map(|key| key.kid)
+        .collect()
 }
 
 fn run_foreground(data_dir: PathBuf, port: Option<u16>) -> Result<(), BoxError> {
@@ -521,6 +545,31 @@ mod tests {
         .is_err());
         assert!(parse(&args(&["verify-copy", "a.db", "--take-identity"])).is_err());
         assert!(parse(&args(&["run", "--keep-identity"])).is_err());
+    }
+
+    #[test]
+    fn trust_keys_takes_no_argument() {
+        assert_eq!(parse(&args(&["trust-keys"])), Ok(Command::TrustKeys));
+        assert!(parse(&args(&["trust-keys", "--data-dir", "/tmp/h"])).is_err());
+        assert!(parse(&args(&["trust-keys", "license"])).is_err());
+    }
+
+    /// A test build trusts the domain's test keys (the `test-keys` feature of
+    /// the host's dev-dependency): the license kids first, then the release's.
+    #[test]
+    fn trust_keys_lists_the_license_kids_then_the_release_kids() {
+        let kids = trust_keys();
+        let license: Vec<String> = markiro_proto::trust::license_keyset()
+            .keys
+            .into_iter()
+            .map(|key| key.kid)
+            .collect();
+        assert!(license.contains(&"test-lic-1".to_owned()), "{license:?}");
+        assert_eq!(kids[..license.len()], license[..]);
+        assert!(
+            kids[license.len()..].contains(&"test-upd-1".to_owned()),
+            "{kids:?}"
+        );
     }
 
     #[test]

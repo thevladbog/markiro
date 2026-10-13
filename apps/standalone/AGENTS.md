@@ -1373,6 +1373,43 @@ and the owner. The `product`, `protocol` and `minProtocol` fields of `hello`
 never change shape: read `HelloEnvelope` first and decide compatibility
 (`host_too_old`, `app_too_old`) before parsing the rest.
 
+## Signed documents and trust keys
+
+The license file and the update manifest (spec 2026-10-13, plan ЛЦ-1) are
+compact JWS with ES256, checked by `markiro_proto::trust` here and by
+`@markiro/domain` (`verifyCompactJws`, `verifyStandaloneLicense`,
+`verifyStandaloneUpdateManifest`) in TypeScript. The order is size, form,
+`kid`, signature, then the payload, read strictly; both sides refuse a struct
+given as a JSON array and an enum given as a one-key object (serde alone would take both; Rust reads through a `Value` and reads `plan` and `channel` from strings only), a byte order mark, a `__proto__` key and a lone surrogate (the
+domain's `parseJsonStrict` reads JSON as serde_json does), and keep a
+repeated key's last value. Zod still takes `1.0`, `-0`, `1e0` and over-precise forms of an integer that serde refuses; no signer writes them. The license's `tenantId` and `siteId` are opaque
+ids the counterparty chooses (`STANDALONE_OPAQUE_ID_PATTERN`,
+`trust::is_opaque_id`: 1-64 of `A-Za-z0-9._:-`, compared byte for byte);
+`licenseId`, `planVersionId`, `replaces` and `hostId` are lower-case UUIDs.
+`packages/domain/fixtures/standalone-license/` holds the shared fixtures: the
+signed files with `expectations.json` (the outcome of each, adversarial files
+included; an entry may retire kids) and `schema-cases.json` (the field rules),
+which `proto/tests/trust.rs` and the domain's Vitest both walk.
+`packages/domain/scripts/generate-standalone-fixtures.mjs` makes them with the
+TEST keys and never runs in CI: its signatures are random, so a rerun rewrites
+every `.jws`. `packages/domain/fixtures/inn-cases.json` holds `normalizeInn`
+and the host's `inn::normalize` to the same answers (the JavaScript
+whitespace set, not Rust's `trim`).
+
+The keysets a build trusts are `proto/fixtures/trust-keys.json`: public JWKs
+only, the license keyset with its issuer's origin (`https://host[:port]`).
+Until the owner adds the production keys both keysets are empty and a release
+build trusts no license and no manifest. The test keys join them only under
+`cfg(test)` or the `test-keys` feature of `markiro-proto`, which only the
+host's dev-dependency enables; in a test build the license issuer is the test
+one. A unit test of `trust` fails when a production keyset holds a test key's
+point under any kid, or the test issuer. `markiro-host trust-keys` prints the
+kids of both keysets, and the Windows CI job fails when the release host
+prints a `test-…` kid. No tracked file holds a private key but the two test
+keys `tools/standalone-release/test/no-private-keys.test.mjs` names; the
+production license key lives in the API's environment (plan ЛЦ-0) and the
+release key on the owner's machine.
+
 ## Network and TLS
 
 The webview never performs HTTP: every call to the host is a shell command.
