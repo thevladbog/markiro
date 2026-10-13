@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { createDb } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -69,7 +70,15 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
         connectionTimeoutMillis: 5000,
         statement_timeout: 8000,
       });
-      own(name, () => pool.pool.end());
+      const closed: Promise<void>[] = [];
+      pool.pool.on("connect", (client) => {
+        closed.push(new Promise<void>((resolve) => client.once("end", resolve)));
+      });
+      own(name, async () => {
+        await pool.pool.end();
+        // pg-pool can finish its bookkeeping before idle-client sockets close.
+        await Promise.all(closed);
+      });
       return pool;
     };
     return { first: take("first pool"), second: take("second pool"), gate: take("gate pool") };
@@ -80,6 +89,89 @@ describe.skipIf(!base)("Dataset Cases durable executor", () => {
     if (!value) throw new Error("Missing owned PID");
     return value;
   }
+
+  it("waits for actual client closure after pool bookkeeping completes", async (test) => {
+    const requested = barrier(),
+      release = barrier(),
+      bookkeeping = barrier();
+    let finished = false,
+      ended = false,
+      ownedPid = 0;
+    const work = withOwnedWork(async (own) => {
+      const pool = connections(own).first;
+      const client = await pool.pool.connect();
+      let checkedOut = true;
+      ownClient(
+        own,
+        client,
+        "regression client",
+        async () => {},
+        () => {
+          if (checkedOut) {
+            client.release(true);
+            checkedOut = false;
+          }
+        },
+      );
+      ownedPid =
+        (await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid ?? 0;
+      client.once("end", () => {
+        ended = true;
+      });
+      const originalClientEnd = client.end.bind(client);
+      vi.spyOn(client, "end").mockImplementation((callback) => {
+        requested.release();
+        return release.promise.then(() => originalClientEnd(callback));
+      });
+      const originalPoolEnd = pool.pool.end.bind(pool.pool);
+      vi.spyOn(pool.pool, "end").mockImplementation(async () => {
+        await originalPoolEnd();
+        bookkeeping.release();
+      });
+      client.release();
+      checkedOut = false;
+    }).then(() => {
+      finished = true;
+    });
+    const settled = outcome(work);
+    const cleanup = async () => {
+      release.release();
+      await settled;
+      vi.restoreAllMocks();
+    };
+    test.onTestFinished(cleanup);
+    const wait = (ready: Promise<void>) =>
+      abortable(
+        Promise.race([
+          ready,
+          work.then(() => {
+            throw new Error("client_closed_before_regression_gate");
+          }),
+        ]),
+        test.signal,
+      );
+    try {
+      await wait(requested.promise);
+      await wait(bookkeeping.promise);
+      await nextTurn();
+      expect(finished).toBe(false);
+      expect(ended).toBe(false);
+      release.release();
+      await work;
+      expect(ended).toBe(true);
+      expect(ownedPid).toBeGreaterThan(0);
+      expect(
+        (
+          await f.pool.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND pid=$1",
+            [ownedPid],
+          )
+        ).rows[0]?.n,
+      ).toBe(0);
+    } finally {
+      await cleanup();
+    }
+  });
 
   // A missing native application or a recipe-index substitution must fail these literals.
   it.each([

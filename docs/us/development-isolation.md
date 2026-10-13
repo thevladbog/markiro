@@ -2567,3 +2567,13 @@ the same common shared/API builds and its own PostgreSQL service. Browser keeps
 its existing worker entry build. All 82 predecessor steps, commands and byte/AST
 pins remain unchanged, each specialized verification still has exactly one
 owner, maximum concurrency remains three, and each job retains 30 minutes.
+
+A later run exposed a real Cases cleanup observation race: `pg-pool.end()` can
+resolve after removing its client bookkeeping but before the clients' sockets
+close. The Cases fixture now tracks each acquired client's `end` event and drains
+those events after pool shutdown. Exact signal phases, primary cancellation
+reason, full rollback and owned-backend absence assertions remain unchanged.
+A deliberately gated real client close reproduced premature cleanup completion
+before the fix. The complete six-file Cases stage then passed locally: 294 passed
+and four intentional expected failures, with no skips or unexpected failures.
+No sleeps or new timeout budgets were added.
