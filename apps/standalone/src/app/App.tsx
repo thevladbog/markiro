@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { FloorApp } from "../floor/FloorApp.js";
