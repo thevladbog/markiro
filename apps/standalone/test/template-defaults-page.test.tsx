@@ -1,8 +1,17 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { buildPalletSheetPresets } from "@markiro/domain";
+
 import { HostError } from "../src/host/client.js";
-import type { LabelTemplateSummary, ProductGroup, TemplateDefaults } from "../src/host/protocol.js";
+import type {
+  LabelTemplateSummary,
+  PalletSheet,
+  PalletSheets,
+  ProductGroup,
+  TemplateDefaults,
+} from "../src/host/protocol.js";
+import { SESSION } from "./support/fixtures.js";
 import {
   fakeOfficeSession,
   renderOffice,
@@ -61,6 +70,8 @@ const DEFAULTS: TemplateDefaults = {
   defaultPalletTemplateId: PALLET.id,
   defaultDuplicateTemplateId: null,
   categories: [{ chzProductGroupCode: 8, purpose: "box", templateId: MILK.id }],
+  defaultPalletSheetId: null,
+  palletSheetCategories: [],
   rev: 64,
 };
 
@@ -69,12 +80,15 @@ function session(document: TemplateDefaults = DEFAULTS, user = TECHNOLOGIST): Fa
   fake.api.getTemplateDefaults.mockResolvedValue(document);
   fake.api.listTemplates.mockResolvedValue(TEMPLATES);
   fake.api.listProductGroups.mockResolvedValue(GROUPS);
+  fake.api.listPalletSheets.mockResolvedValue({ sheets: [], defaultId: null });
   return fake;
 }
 
+/** The «По умолчанию» tab of «Шаблоны». */
+const DEFAULTS_PATH = "/templates/defaults";
+
 async function openDefaults(fake: FakeOfficeSession): Promise<void> {
-  renderOffice(fake);
-  fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+  renderOffice(fake, { initialPath: DEFAULTS_PATH });
   await screen.findByRole("heading", { name: "Для организации" });
   await waitFor(() =>
     expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
@@ -108,27 +122,37 @@ describe("office template defaults: the organization's", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("is in the menu under «Каталог» right after «Шаблоны», for both roles", async () => {
+  it("is the «По умолчанию» tab of «Шаблоны», the only catalog item after «Товары», for both roles", async () => {
     for (const user of [undefined, TECHNOLOGIST]) {
-      const view = renderOffice(fakeOfficeSession(user === undefined ? {} : { user }));
+      const fake = session(DEFAULTS, user ?? SESSION.user);
+      const view = renderOffice(fake);
       const menu = await screen.findByRole("navigation", { name: "Разделы офиса" });
       const items = within(menu)
         .getAllByRole("listitem")
         .map((item) => item.textContent);
       const catalog = items.indexOf("Каталог");
-      expect(items.slice(catalog, catalog + 4)).toEqual([
-        "Каталог",
-        "Товары",
-        "Шаблоны",
-        "Умолчания шаблонов",
-      ]);
+      expect(items.slice(catalog, catalog + 3)).toEqual(["Каталог", "Товары", "Шаблоны"]);
+      // The next is another section's heading: no catalog item of its own for the defaults.
+      expect(items[catalog + 3]).toBe(user === undefined ? "Доступ" : "Сервис");
+      fireEvent.click(within(menu).getByRole("link", { name: "Шаблоны" }));
+      const tabs = await screen.findByRole("navigation", { name: "Разделы шаблонов" });
+      expect(
+        within(tabs)
+          .getAllByRole("link")
+          .map((link) => link.textContent),
+      ).toEqual(["Этикетки", "Листы А4", "По умолчанию"]);
+      fireEvent.click(within(tabs).getByRole("link", { name: "По умолчанию" }));
+      await screen.findByRole("heading", { name: "Шаблоны по умолчанию" });
+      expect(
+        within(tabs).getByRole("link", { name: "По умолчанию" }).getAttribute("aria-current"),
+      ).toBe("page");
       view.unmount();
     }
   });
 
   it("offers for each purpose «Не выбран» and the enabled templates of that purpose for every category, by name, and holds the document's choice", async () => {
     await openDefaults(session());
-    expect(screen.getByRole("heading", { name: "Умолчания шаблонов" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Шаблоны по умолчанию" })).toBeTruthy();
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Коробка 100×100"]);
     expect(choices("Шаблон паллеты")).toEqual(["Не выбран", "Паллета 58×40", "Паллета 100×150"]);
     expect(choices("Шаблон дубликата товара")).toEqual(["Не выбран", "Дубликат [Полное]"]);
@@ -181,6 +205,8 @@ describe("office template defaults: the organization's", () => {
           defaultPalletTemplateId: null,
           defaultDuplicateTemplateId: null,
           categories: [{ chzProductGroupCode: 8, purpose: "box", templateId: MILK.id }],
+          defaultPalletSheetId: null,
+          palletSheetCategories: [],
           expectedRev: 64,
         },
       ],
@@ -329,8 +355,7 @@ describe("office template defaults: the organization's", () => {
 
   it("lets both office roles change the defaults", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
-      const view = renderOffice(session(DEFAULTS, user));
-      fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+      const view = renderOffice(session(DEFAULTS, user), { initialPath: DEFAULTS_PATH });
       expect(await screen.findByRole("button", { name: "Сохранить" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Отменить изменения" })).toBeTruthy();
       await waitFor(() =>
@@ -344,14 +369,16 @@ describe("office template defaults: the organization's", () => {
     const fake = session();
     await openDefaults(fake);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+    fireEvent.click(await screen.findByRole("link", { name: "По умолчанию" }));
+    // The way back passes the «Этикетки» tab, which reads the templates once more.
     await waitFor(() => expect(fake.api.getTemplateDefaults).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(3));
     await screen.findByRole("heading", { name: "Для организации" });
     // Once per visit: the form, which a new revision remounts, reads nothing itself.
     await settle();
     expect(fake.api.getTemplateDefaults).toHaveBeenCalledTimes(2);
-    expect(fake.api.listTemplates).toHaveBeenCalledTimes(2);
+    expect(fake.api.listTemplates).toHaveBeenCalledTimes(3);
   });
 
   it("explains a failed load of the document and loads it again", async () => {
@@ -359,8 +386,7 @@ describe("office template defaults: the organization's", () => {
     fake.api.getTemplateDefaults.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "down" }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     expect(
       await screen.findByText(
         "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
@@ -376,8 +402,7 @@ describe("office template defaults: the organization's", () => {
     fake.api.listTemplates.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "down" }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     expect(
       await screen.findByText("Список шаблонов не загрузился: умолчания сейчас не изменить."),
     ).toBeTruthy();
@@ -673,8 +698,7 @@ describe("office template defaults: the categories'", () => {
     fake.api.listTemplates.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "down" }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     await screen.findByText("Список шаблонов не загрузился: умолчания сейчас не изменить.");
     const add = screen.getByRole("button", { name: "Добавить умолчание категории" });
     expect(add).toHaveProperty("disabled", true);
@@ -706,8 +730,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
         release = resolve;
       }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Для организации" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
@@ -826,8 +849,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
         release = resolve;
       }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     await screen.findByRole("heading", { name: "Для организации" });
     for (const label of ["Шаблон короба", "Шаблон паллеты", "Шаблон дубликата товара"]) {
       expect(screen.getByLabelText(label), label).toHaveProperty("disabled", true);
@@ -920,8 +942,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
       defaultBoxTemplateId: BOX_100.id,
       rev: 65,
     });
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     const warning = await screen.findByText(
       "Список шаблонов не загрузился: умолчания сейчас не изменить.",
     );
@@ -1069,8 +1090,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
 
   it("shows both office roles the enabled add button, row choice and «Убрать» of the category defaults", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
-      const view = renderOffice(session(DEFAULTS, user));
-      fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+      const view = renderOffice(session(DEFAULTS, user), { initialPath: DEFAULTS_PATH });
       const add = await screen.findByRole("button", { name: ADD });
       await waitFor(() => expect(add).toHaveProperty("disabled", false));
       expect(
@@ -1095,8 +1115,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
         releaseGroups = resolve;
       }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    renderOffice(fake, { initialPath: DEFAULTS_PATH });
     await screen.findByRole("heading", { name: "Для категорий" });
     const add = screen.getByRole("button", { name: ADD });
     expect(add).toHaveProperty("disabled", true);
@@ -1240,6 +1259,8 @@ describe("office template defaults: the categories', beyond the plan", () => {
           defaultPalletTemplateId: PALLET.id,
           defaultDuplicateTemplateId: null,
           categories: [],
+          defaultPalletSheetId: null,
+          palletSheetCategories: [],
           expectedRev: 64,
         },
       ],
@@ -1383,6 +1404,8 @@ describe("office template defaults: the categories', beyond the plan", () => {
             { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
             { chzProductGroupCode: 3, purpose: "box", templateId: BOX_100.id },
           ],
+          defaultPalletSheetId: null,
+          palletSheetCategories: [],
           expectedRev: 64,
         },
       ],
@@ -1563,5 +1586,161 @@ describe("office template defaults: the final fixes", () => {
     choose("Назначение", "");
     fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
     expect(await within(add).findByText("Выберите шаблон")).toBeTruthy();
+  });
+});
+
+describe("office template defaults: the A4 sheets beside the pallet labels", () => {
+  const [PRESET] = buildPalletSheetPresets();
+  function sheet(id: string, name: string, extra: Partial<PalletSheet> = {}): PalletSheet {
+    if (PRESET === undefined) throw new Error("no stock sheet");
+    return { id, name, enabled: true, presetKey: null, revision: 1, spec: PRESET.spec, ...extra };
+  }
+  const PORTRAIT = sheet("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b", "Палета А4 · вертикальная");
+  const TWO_A5 = sheet("7b4a1d6f-2c3e-4f9a-8b8c-1d2e3f4a5b6c", "Палета · две А5");
+  const OFF = sheet("8c5b2e7a-3d4f-4a0b-9c9d-2e3f4a5b6c7d", "Старый лист", { enabled: false });
+  const SHEETS: PalletSheets = { sheets: [OFF, TWO_A5, PORTRAIT], defaultId: PORTRAIT.id };
+
+  function sheetSession(document: TemplateDefaults): FakeOfficeSession {
+    const fake = session(document);
+    fake.api.listPalletSheets.mockResolvedValue(SHEETS);
+    return fake;
+  }
+
+  async function ready(): Promise<void> {
+    await waitFor(() =>
+      expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", false),
+    );
+  }
+
+  it("offers the organization's A4 sheet right after its pallet label: the enabled sheets by name, the document's choice held, and saves it as a sheet", async () => {
+    const fake = sheetSession({ ...DEFAULTS, defaultPalletSheetId: PORTRAIT.id });
+    fake.api.updateTemplateDefaults.mockImplementation(async (_token, body) => ({
+      ...DEFAULTS,
+      defaultPalletSheetId: body.defaultPalletSheetId,
+      rev: 65,
+    }));
+    await openDefaults(fake);
+    await ready();
+    // The organization's selects are the labelled ones; the rows' carry an aria-label.
+    const labels = [...document.querySelectorAll("select")]
+      .map((select) => select.labels?.[0]?.textContent ?? "")
+      .filter((label) => label !== "");
+    expect(labels).toEqual([
+      "Шаблон короба",
+      "Шаблон паллеты",
+      "Лист А4 паллеты",
+      "Шаблон дубликата товара",
+    ]);
+    expect(choices("Лист А4 паллеты")).toEqual([
+      "Не выбран",
+      "Палета · две А5",
+      "Палета А4 · вертикальная",
+    ]);
+    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("value", PORTRAIT.id);
+    // Neither list offers the other's: a pallet label is no sheet.
+    expect(choices("Шаблон паллеты")).not.toContain("Палета · две А5");
+    expect(choices("Лист А4 паллеты")).not.toContain("Паллета 100×150");
+    expect(screen.getByText(/Паллета печатается термоэтикеткой или листом А4/)).toBeTruthy();
+    choose("Лист А4 паллеты", TWO_A5.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1]).toMatchObject({
+      defaultPalletTemplateId: PALLET.id,
+      defaultPalletSheetId: TWO_A5.id,
+      palletSheetCategories: [],
+    });
+  });
+
+  it("lists a category's sheet as a row of its own after the pallet label, and adds one through the dialog as a sheet", async () => {
+    const fake = sheetSession({
+      ...DEFAULTS,
+      categories: [
+        { chzProductGroupCode: 8, purpose: "box", templateId: MILK.id },
+        { chzProductGroupCode: 8, purpose: "pallet", templateId: PALLET_58.id },
+      ],
+      palletSheetCategories: [{ chzProductGroupCode: 8, sheetId: OFF.id }],
+    });
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...DEFAULTS, rev: 65 });
+    await openDefaults(fake);
+    await ready();
+    const table = screen.getByRole("table");
+    const rows = within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[1]?.textContent);
+    expect(rows).toEqual(["Короб", "Паллета", "Лист А4 паллеты"]);
+    const select = screen.getByLabelText("Шаблон: Молочная продукция, Лист А4 паллеты");
+    // A held sheet that is off stays a marked choice, and «Убрать» clears it.
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Палета · две А5", "Палета А4 · вертикальная", "Старый лист — выключен"]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Лист А4 паллеты" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Добавить умолчание категории" }));
+    const add = await screen.findByRole("dialog", { name: "Умолчание категории" });
+    fireEvent.change(within(add).getByLabelText("Категория"), { target: { value: "13" } });
+    const kinds = within(within(add).getByLabelText("Назначение"))
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(kinds).toEqual(["Не выбрано", "Короб", "Паллета", "Лист А4 паллеты", "Дубликат товара"]);
+    fireEvent.change(within(add).getByLabelText("Назначение"), {
+      target: { value: "pallet_sheet" },
+    });
+    // The last field asks for a sheet, in those words.
+    expect(within(add).queryByLabelText("Шаблон")).toBeNull();
+    fireEvent.change(within(add).getByLabelText("Лист А4"), { target: { value: PORTRAIT.id } });
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateTemplateDefaults).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1]).toMatchObject({
+      categories: [
+        { chzProductGroupCode: 8, purpose: "box", templateId: MILK.id },
+        { chzProductGroupCode: 8, purpose: "pallet", templateId: PALLET_58.id },
+      ],
+      palletSheetCategories: [{ chzProductGroupCode: 13, sheetId: PORTRAIT.id }],
+    });
+  });
+
+  it("puts a refused organization sheet under its select and reads the sheets again", async () => {
+    const fake = sheetSession({ ...DEFAULTS, defaultPalletSheetId: PORTRAIT.id });
+    fake.api.updateTemplateDefaults.mockRejectedValue(
+      hostError("validation_failed", 400, { field: "defaultPalletSheetId" }),
+    );
+    await openDefaults(fake);
+    await ready();
+    choose("Лист А4 паллеты", TWO_A5.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(
+      await screen.findByText(
+        "Лист больше не подходит: его выключили или удалили. Выберите другой.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Лист А4 паллеты")),
+    );
+    await waitFor(() => expect(fake.api.listPalletSheets).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the sheets off while they do not load, says so, and saves the rest as stored", async () => {
+    const fake = session({ ...DEFAULTS, defaultPalletSheetId: PORTRAIT.id });
+    fake.api.listPalletSheets.mockRejectedValue(new Error("offline"));
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...DEFAULTS, rev: 65 });
+    await openDefaults(fake);
+    expect(
+      await screen.findByText(
+        "Список листов А4 не загрузился: листы по умолчанию сейчас не изменить.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Лист А4 паллеты")).toHaveProperty("disabled", true);
+    choose("Шаблон короба", BOX_100.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fake.api.updateTemplateDefaults).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1]).toMatchObject({
+      defaultPalletSheetId: PORTRAIT.id,
+    });
   });
 });

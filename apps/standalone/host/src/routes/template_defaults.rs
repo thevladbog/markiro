@@ -7,14 +7,23 @@
 //! The organization's defaults ride its feed record; a category default
 //! rides the feed as `<code>:<purpose>`, and clearing one writes its
 //! tombstone.
+//!
+//! The A4 sheets chosen by default beside the pallet labels (beta feedback)
+//! are part of the document: the organization's default sheet and each
+//! category's (`category_pallet_sheet_defaults`). Each must be an enabled
+//! sheet (`pallet_sheets::check_sheet`), so a label template's id is refused
+//! there, as a sheet's id is in a label slot (`templates::check_slot` reads
+//! only `label_templates`). They are not in the feed: a change of them moves
+//! the organization's record, which carries the document's revision. Left
+//! out of a request they are kept (an office from before them).
 
 use std::collections::{BTreeMap, HashSet};
 
 use axum::extract::State;
 use axum::Json;
 use markiro_proto::{
-    category_default_id, entities, CategoryTemplateDefault, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose,
+    category_default_id, entities, CategoryPalletSheetDefault, CategoryTemplateDefault,
+    TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -24,6 +33,7 @@ use crate::auth::OfficeContext;
 use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson};
 use crate::feed;
+use crate::routes::pallet_sheets;
 use crate::server::AppState;
 use crate::templates;
 
@@ -37,15 +47,26 @@ const DOCUMENT_REV: &str = "SELECT MAX(rev) FROM (\
 
 /// The document; `not_found` before the wizard created the organization.
 async fn read(conn: &mut SqliteConnection) -> Result<TemplateDefaults, ApiError> {
-    let row: Option<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+    type OrgRow = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let row: Option<OrgRow> = sqlx::query_as(
         "SELECT default_box_template_id, default_pallet_template_id, \
-         default_duplicate_template_id FROM org_profile WHERE id = 1",
+         default_duplicate_template_id, default_pallet_sheet_template_id \
+         FROM org_profile WHERE id = 1",
     )
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (default_box_template_id, default_pallet_template_id, default_duplicate_template_id) =
-        row.ok_or_else(|| ApiError::not_found("the host is not initialized"))?;
+    let (
+        default_box_template_id,
+        default_pallet_template_id,
+        default_duplicate_template_id,
+        default_pallet_sheet_id,
+    ) = row.ok_or_else(|| ApiError::not_found("the host is not initialized"))?;
     let rows: Vec<(u32, String, String)> = sqlx::query_as(
         "SELECT chz_group_code, purpose, template_id FROM category_template_defaults \
          ORDER BY chz_group_code, purpose",
@@ -63,6 +84,13 @@ async fn read(conn: &mut SqliteConnection) -> Result<TemplateDefaults, ApiError>
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
+    let sheets: Vec<(u32, String)> = sqlx::query_as(
+        "SELECT chz_group_code, sheet_id FROM category_pallet_sheet_defaults \
+         ORDER BY chz_group_code",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
     let rev: i64 = sqlx::query_scalar(DOCUMENT_REV)
         .fetch_one(&mut *conn)
         .await
@@ -72,6 +100,14 @@ async fn read(conn: &mut SqliteConnection) -> Result<TemplateDefaults, ApiError>
         default_pallet_template_id,
         default_duplicate_template_id,
         categories,
+        default_pallet_sheet_id,
+        pallet_sheet_categories: sheets
+            .into_iter()
+            .map(|(code, sheet_id)| CategoryPalletSheetDefault {
+                chz_product_group_code: code,
+                sheet_id,
+            })
+            .collect(),
         rev,
     })
 }
@@ -99,6 +135,15 @@ pub async fn put_template_defaults(
             return Err(ApiError::validation(
                 &format!("categories.{index}"),
                 "this category's default of this purpose is given twice",
+            ));
+        }
+    }
+    let mut sheet_codes = HashSet::new();
+    for (index, entry) in update.pallet_sheet_categories.iter().flatten().enumerate() {
+        if !sheet_codes.insert(entry.chz_product_group_code) {
+            return Err(ApiError::validation(
+                &format!("palletSheetCategories.{index}"),
+                "this category's default sheet is given twice",
             ));
         }
     }
@@ -143,10 +188,39 @@ pub async fn put_template_defaults(
         )
         .await?;
     }
+    if let Some(Some(id)) = &update.default_pallet_sheet_id {
+        pallet_sheets::check_sheet(&mut tx, "defaultPalletSheetId", id).await?;
+    }
+    for (index, entry) in update.pallet_sheet_categories.iter().flatten().enumerate() {
+        templates::check_groups(
+            &mut tx,
+            &format!("palletSheetCategories.{index}.chzProductGroupCode"),
+            Some(&[entry.chz_product_group_code]),
+        )
+        .await?;
+        pallet_sheets::check_sheet(
+            &mut tx,
+            &format!("palletSheetCategories.{index}.sheetId"),
+            &entry.sheet_id,
+        )
+        .await?;
+    }
     let current = read(&mut tx).await?;
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
+    // Left out, the sheet defaults stay as stored.
+    let default_pallet_sheet_id = update
+        .default_pallet_sheet_id
+        .clone()
+        .unwrap_or_else(|| current.default_pallet_sheet_id.clone());
+    let mut pallet_sheet_categories = update
+        .pallet_sheet_categories
+        .clone()
+        .unwrap_or_else(|| current.pallet_sheet_categories.clone());
+    pallet_sheet_categories.sort_by_key(|entry| entry.chz_product_group_code);
+    let sheets_changed = default_pallet_sheet_id != current.default_pallet_sheet_id
+        || pallet_sheet_categories != current.pallet_sheet_categories;
     let mut categories: Vec<CategoryTemplateDefault> = update
         .categories
         .iter()
@@ -174,6 +248,16 @@ pub async fn put_template_defaults(
             json!(update.default_duplicate_template_id),
         ),
         ("categories", json!(current.categories), json!(categories)),
+        (
+            "defaultPalletSheetId",
+            json!(current.default_pallet_sheet_id),
+            json!(default_pallet_sheet_id),
+        ),
+        (
+            "palletSheetCategories",
+            json!(current.pallet_sheet_categories),
+            json!(pallet_sheet_categories),
+        ),
     ]) else {
         // Nothing actually changed: report the document as-is without
         // bumping the revision, writing a row nobody changed, or auditing a
@@ -186,25 +270,46 @@ pub async fn put_template_defaults(
         &update.default_pallet_template_id,
         &update.default_duplicate_template_id,
     );
-    if organization
-        != (
-            &current.default_box_template_id,
-            &current.default_pallet_template_id,
-            &current.default_duplicate_template_id,
-        )
+    // A change of the sheet defaults moves the organization's record too: it
+    // carries the document's revision for them, which never moves back.
+    if sheets_changed
+        || organization
+            != (
+                &current.default_box_template_id,
+                &current.default_pallet_template_id,
+                &current.default_duplicate_template_id,
+            )
     {
         sqlx::query(
             "UPDATE org_profile SET default_box_template_id = ?, \
-             default_pallet_template_id = ?, default_duplicate_template_id = ?, rev = ? \
-             WHERE id = 1",
+             default_pallet_template_id = ?, default_duplicate_template_id = ?, \
+             default_pallet_sheet_template_id = ?, rev = ? WHERE id = 1",
         )
         .bind(organization.0)
         .bind(organization.1)
         .bind(organization.2)
+        .bind(&default_pallet_sheet_id)
         .bind(rev)
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    }
+    if pallet_sheet_categories != current.pallet_sheet_categories {
+        sqlx::query("DELETE FROM category_pallet_sheet_defaults")
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        for entry in &pallet_sheet_categories {
+            sqlx::query(
+                "INSERT INTO category_pallet_sheet_defaults (chz_group_code, sheet_id) \
+                 VALUES (?, ?)",
+            )
+            .bind(entry.chz_product_group_code)
+            .bind(&entry.sheet_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        }
     }
     let was: BTreeMap<(u32, TemplatePurpose), String> = current
         .categories

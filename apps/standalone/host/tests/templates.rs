@@ -564,7 +564,7 @@ async fn deleting_a_template_clears_the_products_that_name_it() {
     let (_, products) = admin.call("GET", "/v1/office/products", None).await;
     assert_eq!(products, json!([other, cleared]));
     let mut data = cleared.clone();
-    for office_only in ["id", "rev"] {
+    for office_only in ["id", "rev", "defaultPalletSheetId"] {
         data.as_object_mut().unwrap().remove(office_only);
     }
     assert_eq!(

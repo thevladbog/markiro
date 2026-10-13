@@ -685,7 +685,7 @@ describe("office label templates: switching on and off", () => {
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     expect(
       await within(dialog()).findByText(
-        "Шаблон выбран по умолчанию для организации. Шаблон выбран по умолчанию для категорий: Молочная продукция, Код 99. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+        "Шаблон выбран по умолчанию для организации. Шаблон выбран по умолчанию для категорий: Молочная продукция, Код 99. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Выключить шаблон?" })).toBeTruthy();
@@ -858,7 +858,7 @@ describe("office label templates: switching on and off", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Коробка 58×40»" }));
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     const refusal = await within(dialog()).findByText(
-      "Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+      "Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
     );
     expect(refusal.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
@@ -897,7 +897,7 @@ describe("office label templates: switching on and off", () => {
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     expect(
       await within(dialog()).findByText(
-        `Шаблон выбран по умолчанию для категорий: ${group}. Сначала выберите другой шаблон на странице «Умолчания шаблонов».`,
+        `Шаблон выбран по умолчанию для категорий: ${group}. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».`,
       ),
     ).toBeTruthy();
     expect(dialog().querySelector("b, i")).toBeNull();
@@ -1036,7 +1036,7 @@ describe("office label templates: categories", () => {
     fireEvent.click(save());
     expect(
       await within(dialog()).findByText(
-        "Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+        "Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
       ),
     ).toBeTruthy();
     expect(within(rowOf("Коробка 58×40")).getByText("Все категории")).toBeTruthy();

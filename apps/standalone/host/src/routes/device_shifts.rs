@@ -214,6 +214,7 @@ pub async fn create_device_shift(
     let pallets = shifts::pallets(
         &mut tx,
         pallet_request,
+        &create.product_id,
         &product,
         create.pallet_sheet_template_id.as_deref(),
     )

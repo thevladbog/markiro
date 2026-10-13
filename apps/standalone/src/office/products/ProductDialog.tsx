@@ -8,12 +8,13 @@ import { Checkbox, Input, Select } from "@markiro/ui";
 import type { OfficeProduct } from "../../host/protocol.js";
 import { productCreate, productUpdate, type ProductInput } from "../../host/requests.js";
 import { gtinRule, toGroupCode, toGtin14 } from "../../lib/rules.js";
-import { useProductGroups, useTemplates } from "../catalog-queries.js";
+import { usePalletSheets, useProductGroups, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import { sheetChoices } from "../sheet-choice.js";
 import { templateOptions } from "../template-options.js";
 import {
   gtinOwner,
@@ -56,7 +57,10 @@ export interface ProductDialogProps {
  * as and whose GS1 prefix it has; neither blocks a save. The two default
  * templates offer what fits the product's group, keep a preference that no
  * longer fits as a marked choice, and are left as they are, never cleared,
- * while the template list does not load.
+ * while the template list does not load. The pallet's A4 sheet sits beside
+ * the pallet template, on a par with it (a pallet prints one or the other, by
+ * the station printer's paper): the enabled sheets, a held one that is off or
+ * gone kept as a marked choice, and left as it is while the sheets do not load.
  */
 export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDialogProps) {
   const { t } = useTranslation();
@@ -64,6 +68,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   const groups = useProductGroups();
   const templates = useTemplates();
+  const sheets = usePalletSheets();
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>
     api.listCounterparties(token),
@@ -135,6 +140,12 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     : templates.isError
       ? t("office.products.templatesUnavailable")
       : t("office.products.templatesLoading");
+
+  const sheetsHint = sheets.isSuccess
+    ? t("office.products.fields.palletSheetHint")
+    : sheets.isError
+      ? t("office.products.sheetsUnavailable")
+      : t("office.products.sheetsLoading");
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
@@ -266,6 +277,26 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           )}
         />
       ))}
+      <Controller
+        control={control}
+        name="defaultPalletSheetId"
+        render={({ field }) => (
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.products.fields.palletSheet")}
+            hint={sheetsHint}
+            options={sheetChoices(
+              sheets.data,
+              [product?.defaultPalletSheetId ?? "", field.value],
+              t("office.sheetChoice.none"),
+              t,
+            )}
+            value={field.value}
+            onValueChange={field.onChange}
+            disabled={!sheets.isSuccess}
+          />
+        )}
+      />
       {product !== null && (
         <Controller
           control={control}

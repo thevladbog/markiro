@@ -655,6 +655,7 @@ describe("request builders produce their fixtures exactly", () => {
       shelfLifeDays: 10,
       defaultBoxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
       defaultPalletTemplateId: null,
+      defaultPalletSheetId: null,
       gtin: "4600682000013",
     };
     expect(productCreate(typed)).toStrictEqual(fixture("product-create.json"));
@@ -809,6 +810,9 @@ describe("request builders produce their fixtures exactly", () => {
     expect(deviceShiftCreate({ ...plain, pallets })).toStrictEqual(
       fixture("device-shift-create-pallets.json"),
     );
+    // The station names no A4 sheet: the host gives a station's shift the sheet
+    // by the product, its category, the organization, as an office plan's.
+    expect(deviceShiftCreate({ ...plain, pallets })).not.toHaveProperty("palletSheetTemplateId");
     // Without pallets, none of their fields: the host's rule for a shift without them.
     const body = deviceShiftCreate(plain);
     for (const field of ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"]) {
@@ -894,6 +898,9 @@ describe("request builders produce their fixtures exactly", () => {
     ] as const;
     // A table row holds more than the entry names: its caption must not go.
     const rows = categories.map((entry) => ({ ...entry, caption: "Молочная продукция" }));
+    const sheet = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+    // A sheet row holds more too; a sheet goes as a sheet, never as a template.
+    const sheetRows = [{ chzProductGroupCode: 8, sheetId: sheet, caption: "Молочная продукция" }];
     expect(
       templateDefaultsUpdate(
         {
@@ -901,6 +908,8 @@ describe("request builders produce their fixtures exactly", () => {
           defaultPalletTemplateId: pallet,
           defaultDuplicateTemplateId: duplicate,
           categories: rows,
+          defaultPalletSheetId: sheet,
+          palletSheetCategories: sheetRows,
         },
         9,
       ),
@@ -912,6 +921,8 @@ describe("request builders produce their fixtures exactly", () => {
         { chzProductGroupCode: 8, purpose: "pallet", templateId: pallet },
         { chzProductGroupCode: 15, purpose: "product_duplicate", templateId: duplicate },
       ],
+      defaultPalletSheetId: sheet,
+      palletSheetCategories: [{ chzProductGroupCode: 8, sheetId: sheet }],
       expectedRev: 9,
     });
     // No default at all: `null` for each slot and an empty list.
@@ -922,6 +933,8 @@ describe("request builders produce their fixtures exactly", () => {
           defaultPalletTemplateId: null,
           defaultDuplicateTemplateId: null,
           categories: [],
+          defaultPalletSheetId: null,
+          palletSheetCategories: [],
         },
         9,
       ),
@@ -930,6 +943,8 @@ describe("request builders produce their fixtures exactly", () => {
       defaultPalletTemplateId: null,
       defaultDuplicateTemplateId: null,
       categories: [],
+      defaultPalletSheetId: null,
+      palletSheetCategories: [],
       expectedRev: 9,
     });
   });
@@ -1700,6 +1715,26 @@ describe("catalog shapes", () => {
     const [entry] = defaults.categories;
     const withExtra = { ...defaults, categories: [{ ...entry, addedLater: true }] };
     expect(templateDefaultsUpdateSchema.safeParse(withExtra).success).toBe(false);
+    // A category's sheet is a code and a sheet: no purpose, nothing more.
+    const [sheet] = defaults.palletSheetCategories;
+    for (const bad of [{ purpose: "pallet" }, { sheetId: "42" }, { chzProductGroupCode: -8 }]) {
+      const result = templateDefaultsUpdateSchema.safeParse({
+        ...defaults,
+        palletSheetCategories: [{ ...sheet, ...bad }],
+      });
+      expect(result.success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("read a document and a product from a host before the sheet defaults as having none", () => {
+    const older = { ...(fixture("template-defaults.json") as Record<string, unknown>) };
+    delete older["defaultPalletSheetId"];
+    delete older["palletSheetCategories"];
+    const read = templateDefaultsSchema.parse(older);
+    expect([read.defaultPalletSheetId, read.palletSheetCategories]).toStrictEqual([null, []]);
+    const product = { ...(fixture("office-product.json") as Record<string, unknown>) };
+    delete product["defaultPalletSheetId"];
+    expect(officeProductSchema.parse(product).defaultPalletSheetId).toBeNull();
   });
 
   it("whole bodies name every field: leave one out and the schema refuses", () => {

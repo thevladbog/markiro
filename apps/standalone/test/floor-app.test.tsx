@@ -169,6 +169,7 @@ function floorOf(
         {...(options.workScreen === undefined ? {} : { workScreen: options.workScreen })}
         dispatch={handlers.dispatch}
         onSignOut={handlers.onSignOut}
+        onSignOutReady={handlers.onSignOutReady}
       />
     </ThemeProvider>
   );
@@ -180,6 +181,7 @@ function handlersOf(
     create?: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   } = {},
 ) {
+  const switchOperator: { current: (() => void) | null } = { current: null };
   return {
     enter: vi.fn(answers.enter ?? (async () => OPENED)),
     create: vi.fn(answers.create ?? (async () => PLANNED)),
@@ -197,6 +199,11 @@ function handlersOf(
     awake: createSystemAwake(vi.fn(async () => undefined)),
     dispatch: vi.fn<(action: ShellAction) => void>(),
     onSignOut: vi.fn<(notice: FloorNotice | null) => void>(),
+    /** The status bar's «Сменить оператора», as the floor hands it to the shell. */
+    switchOperator,
+    onSignOutReady: (signOut: (() => void) | null) => {
+      switchOperator.current = signOut;
+    },
   };
 }
 
@@ -310,7 +317,8 @@ describe("the floor after an operator signed in", () => {
     view.unmount();
   });
 
-  const SIGNED_IN = "Вошёл: Анна Кузнецова, табельный номер 0042.";
+  /** The list's title takes the focus; the operator is named in the status bar. */
+  const LIST_TITLE = { name: "Смены линии" } as const;
 
   it("gives the focus to the list once the operator is back on it from a shift, held work or not", async () => {
     const handlers = handlersOf();
@@ -323,9 +331,9 @@ describe("the floor after an operator signed in", () => {
     fireEvent.click(leave);
     await settle();
     // The work is not over: the screen of the shift is still there.
-    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+    expect(screen.queryByRole("heading", LIST_TITLE)).toBeNull();
     await work.release();
-    const prompt = await screen.findByText(SIGNED_IN);
+    const prompt = await screen.findByRole("heading", LIST_TITLE);
     expect(document.activeElement).toBe(prompt);
   });
 
@@ -336,7 +344,7 @@ describe("the floor after an operator signed in", () => {
     back.focus();
     expect(document.activeElement).toBe(back);
     fireEvent.click(back);
-    const prompt = await screen.findByText(SIGNED_IN);
+    const prompt = await screen.findByRole("heading", LIST_TITLE);
     expect(document.activeElement).toBe(prompt);
   });
 
@@ -602,11 +610,40 @@ describe("the floor after an operator signed in", () => {
     expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
   });
 
-  it("signs the operator out on «Сменить оператора»", async () => {
+  it("signs the operator out on the status bar's «Сменить оператора», and keeps no copy of its own", async () => {
     const handlers = handlersOf();
-    render(floorOf(await floorCopies(), handlers));
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить оператора" }));
+    const view = render(floorOf(await floorCopies(), handlers));
+    await screen.findByRole("button", { name: "Открыть" });
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
+    act(() => handlers.switchOperator.current?.());
     expect(handlers.onSignOut).toHaveBeenCalledWith(null);
+    view.unmount();
+    // Gone with the floor: the bar has nothing to call once the floor is off screen.
+    expect(handlers.switchOperator.current).toBeNull();
+  });
+
+  it("signs out on the status bar's switch while an entry hangs: leaving is never held by one", async () => {
+    const handlers = handlersOf({ enter: () => new Promise<EnteredShift>(() => undefined) });
+    render(floorOf(await floorCopies(), handlers));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    await screen.findByText("Открываем смену…");
+    act(() => handlers.switchOperator.current?.());
+    expect(handlers.onSignOut).toHaveBeenCalledWith(null);
+  });
+
+  it("from a shift, the status bar's switch leaves the work once it has settled, then signs out", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    render(floorOf(await floorCopies(), handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    act(() => handlers.switchOperator.current?.());
+    await settle();
+    expect(handlers.onSignOut).not.toHaveBeenCalled();
+    await work.release();
+    await waitFor(() => expect(handlers.onSignOut).toHaveBeenCalledWith(null));
+    expect(handlers.dispatch).toHaveBeenCalledWith({ type: "work_left", sessionId: 1 });
   });
 });
 
@@ -1076,6 +1113,8 @@ describe("the level the setup's own sound controls give the tones", () => {
     await settle();
     await enterPlanned();
     fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    // The sound is the setup's own tab (the cloud station's layout).
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Тише" }));
     fireEvent.click(screen.getByRole("button", { name: "Тише" }));
     await act(async () => {
@@ -1086,6 +1125,7 @@ describe("the level the setup's own sound controls give the tones", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.6]);
     fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -1103,6 +1143,7 @@ describe("the level the setup's own sound controls give the tones", () => {
     await settle();
     await enterPlanned();
     fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
     fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад без сохранения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
@@ -1356,6 +1397,15 @@ describe("an entry whose answer comes late (the work gate, minors 6 and 10)", ()
   });
 });
 
+/** Through the new shift's steps (details, then its templates) to the one that creates. */
+function toTheLastStep(): void {
+  for (let step = 0; step < 2; step += 1) {
+    const forward = screen.queryByRole("button", { name: "Далее" });
+    if (forward === null) return;
+    fireEvent.click(forward);
+  }
+}
+
 describe("«Назад» from the new shift (minor 13)", () => {
   async function toTheForm(handlers: ReturnType<typeof handlersOf>) {
     const local = await floorCopies([OPERATOR, ...CATALOG]);
@@ -1367,6 +1417,7 @@ describe("«Назад» from the new shift (minor 13)", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
     await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    toTheLastStep();
     const again = (next: Options) =>
       view.rerender(floorOf(local, handlers, { workScreen: work.Work, ...next }));
     return { local, work, again };
@@ -1452,6 +1503,7 @@ describe("«Назад» from the new shift (minor 13)", () => {
     await waitFor(() => expect(scanner.listening()).toBe(true));
     scanner.read("4600682000013");
     await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    toTheLastStep();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await waitFor(() =>
       expect(handlers.dispatch).toHaveBeenCalledWith({
@@ -1870,38 +1922,6 @@ describe("the operator the copies hold, read after every sync", () => {
     view.rerender(floorOf(flaky, handlers, { sync: { ...SYNCED, synced: 2 } }));
     await waitFor(() => expect(handlers.onSignOut).toHaveBeenCalledWith("removed"));
     for (const spy of quiet) expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("shows the operator's name as text, whatever characters it holds", async () => {
-    const name = '<img src="x" alt="boom"> Анна & <b>Кузнецова</b>';
-    const handlers = handlersOf();
-    const view = render(
-      <ThemeProvider>
-        <FloorApp
-          operator={{ ...SESSION, name }}
-          local={await floorCopies()}
-          device={DEVICE_STATUS}
-          link={ONLINE}
-          sync={{ ...SYNCED, synced: 0 }}
-          shiftReads={{ done: 1, failed: false }}
-          lineChangePending={false}
-          rejectionPending={false}
-          enter={handlers.enter}
-          create={handlers.create}
-          checkCode={handlers.checkCode}
-          requestBlock={handlers.requestBlock}
-          requestFacts={handlers.requestFacts}
-          source={SILENT_SOURCE}
-          printing={handlers.printing}
-          hardware={handlers.hardware}
-          awake={handlers.awake}
-          dispatch={handlers.dispatch}
-          onSignOut={handlers.onSignOut}
-        />
-      </ThemeProvider>,
-    );
-    expect(await screen.findByText(`Вошёл: ${name}, табельный номер 0042.`)).toBeTruthy();
-    expect(view.container.querySelector("img, b")).toBeNull();
   });
 });
 

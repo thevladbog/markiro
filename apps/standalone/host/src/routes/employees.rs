@@ -5,7 +5,10 @@
 //! one employee (`operatorId`). Office data: never in the station feed and
 //! never a credential, so the link grants nothing — the operator keeps its
 //! own personnel number, PIN and badges, and the station's copies do not
-//! change. An archived employee is linked to no operator.
+//! change. An archived employee is linked to no operator, and archiving one
+//! that was linked turns that operator off in the same write
+//! (`operators::turn_off_in`, owner decision В1), which the stations get as
+//! the tombstone of any turn-off.
 
 use axum::extract::State;
 use axum::Json;
@@ -234,6 +237,14 @@ pub async fn update_employee(
     )
     .await
     .map_err(ApiError::internal)?;
+    // Archiving turns the linked operator off in the same write (owner
+    // decision В1): an archived employee no longer signs in on a station.
+    if update.archived && !current.archived {
+        if let Some(operator_id) = current.operator_id.as_deref() {
+            crate::routes::operators::turn_off_in(&mut tx, context.actor(), &at, operator_id, rev)
+                .await?;
+        }
+    }
     let updated = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("employee vanished"))?;

@@ -19,8 +19,8 @@ import {
 import { activeFirstByName } from "../records.js";
 
 /**
- * A product as the form holds it: text as typed, and the group and the two
- * templates as their selects hold them (`""` for none).
+ * A product as the form holds it: text as typed, and the group, the two
+ * templates and the A4 sheet as their selects hold them (`""` for none).
  */
 export const productFieldsSchema = z.object({
   gtin14: gtinRule,
@@ -32,6 +32,7 @@ export const productFieldsSchema = z.object({
   shelfLifeDays: shelfLifeDaysRule,
   defaultBoxTemplateId: z.string(),
   defaultPalletTemplateId: z.string(),
+  defaultPalletSheetId: z.string(),
   archived: z.boolean(),
 });
 export type ProductFields = z.input<typeof productFieldsSchema>;
@@ -53,11 +54,16 @@ export const PRODUCT_CONFLICTS = {
 } as const;
 
 /**
- * The template preferences: the host checks them before the revision, so a
- * form opened before its template was deleted is refused on one of them, not
- * as `stale_revision`. The dialog treats that as a stale write (`writeFailure`).
+ * The template and sheet preferences: the host checks them before the
+ * revision, so a form opened before its template or sheet was deleted is
+ * refused on one of them, not as `stale_revision`. The dialog treats that as a
+ * stale write (`writeFailure`).
  */
-export const PRODUCT_STALE_FIELDS = ["defaultBoxTemplateId", "defaultPalletTemplateId"] as const;
+export const PRODUCT_STALE_FIELDS = [
+  "defaultBoxTemplateId",
+  "defaultPalletTemplateId",
+  "defaultPalletSheetId",
+] as const;
 
 /** A number as the form holds it: blank for none. */
 function numberText(value: number | null): string {
@@ -76,6 +82,7 @@ export function productFields(product: OfficeProduct | null): ProductFields {
     shelfLifeDays: numberText(product?.shelfLifeDays ?? null),
     defaultBoxTemplateId: product?.defaultBoxTemplateId ?? "",
     defaultPalletTemplateId: product?.defaultPalletTemplateId ?? "",
+    defaultPalletSheetId: product?.defaultPalletSheetId ?? "",
     archived: product?.archived ?? false,
   };
 }
@@ -96,6 +103,7 @@ export function toProductInput(values: ProductFields): ProductInput {
     defaultBoxTemplateId: values.defaultBoxTemplateId === "" ? null : values.defaultBoxTemplateId,
     defaultPalletTemplateId:
       values.defaultPalletTemplateId === "" ? null : values.defaultPalletTemplateId,
+    defaultPalletSheetId: values.defaultPalletSheetId === "" ? null : values.defaultPalletSheetId,
   };
 }
 

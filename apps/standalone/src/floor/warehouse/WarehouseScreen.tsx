@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Input, type AlertTone } from "@markiro/ui";
+import { Alert, Button, Input, VisuallyHidden, type AlertTone } from "@markiro/ui";
 
 import type { FloorSession } from "../../app/shell.js";
 import {
@@ -26,6 +26,8 @@ import type { PrintRuntime } from "../print/print-runtime.js";
 import type { ScanSource } from "../scan-source.js";
 import { createWorkQueue } from "../work/work-queue.js";
 import { TemplatePicker } from "./TemplatePicker.js";
+import { WarehousePanel } from "./WarehousePanel.js";
+import "./warehouse.css";
 import { realClock, useViewGuard } from "./view-guard.js";
 import {
   countSent,
@@ -116,6 +118,20 @@ interface Said {
 
 /** A button that waits for the work in hand: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+
+/** A reason as the cloud's radio tile (its style is inline, as the kit's button's is). */
+const TILE_STYLE: CSSProperties = {
+  justifyContent: "flex-start",
+  width: "100%",
+  minHeight: 72,
+  height: "auto",
+  padding: "0 16px",
+  textAlign: "left",
+};
+const CHOSEN_TILE_STYLE: CSSProperties = {
+  border: "1px solid var(--ok-solid)",
+  background: "var(--ok-bg)",
+};
 
 /** The job states of a job that waits for the printer or the operator; no other work goes beside it. */
 const UNRESOLVED = ["prepared", "sending", "failed", "unknown"] as const;
@@ -465,7 +481,7 @@ export function WarehouseScreen({
     job === null ? "" : `${job.id}:${job.state}:${job.attempts}`,
     verifying ? "verifying" : "",
   ].join("|");
-  const { viewRef, settled } = useViewGuard<HTMLDivElement>(view, clock);
+  const { viewRef, settled } = useViewGuard<HTMLElement>(view, clock);
   /** Props of a button: while work is in hand, or just after the view changed, a press does nothing. */
   const press = (action: () => void) => ({
     "aria-disabled": busy > 0 ? true : undefined,
@@ -496,7 +512,7 @@ export function WarehouseScreen({
     });
 
   const templateLines = (chosen: WarehouseTemplates) => (
-    <ul className="warehouse__templates">
+    <ul className="warehouse-templates">
       {WAREHOUSE_SUBJECT_KINDS.map((kind) => (
         <li key={kind}>
           {t("floor.warehouse.templateLine", {
@@ -510,45 +526,83 @@ export function WarehouseScreen({
     </ul>
   );
 
+  /** A reason as the cloud's radio tile: its dot, then its words; the chosen one is outlined. */
   const reasonChoices = (
     picked: WarehouseReason | null,
     pick: (reason: WarehouseReason) => void,
   ) => (
-    <>
-      <fieldset className="warehouse__choices">
-        <legend>{t("floor.warehouse.reason")}</legend>
-        {WAREHOUSE_REASONS.map((reason) => (
-          <Button
-            key={reason}
-            size="floor"
-            variant={picked === reason ? "primary" : "secondary"}
-            aria-pressed={picked === reason}
-            {...press(() => pick(reason))}
-          >
-            {t(`floor.warehouse.reasons.${reason}`)}
-          </Button>
-        ))}
-      </fieldset>
-      {picked !== null && (
-        <p>
-          {t("floor.warehouse.sessionReason", { reason: t(`floor.warehouse.reasons.${picked}`) })}
-        </p>
-      )}
-    </>
-  );
-
-  const card = (children: ReactNode) => (
-    <Card className="standalone-card warehouse" title={t("floor.warehouse.title")} titleAs="h2">
-      <div className="standalone-form" tabIndex={-1} ref={viewRef}>
-        {children}
+    <fieldset className="warehouse-reasons">
+      <legend>{t("floor.warehouse.reason")}</legend>
+      <div className="warehouse-reasons__options">
+        {WAREHOUSE_REASONS.map((reason) => {
+          const chosen = picked === reason;
+          const props = press(() => pick(reason));
+          return (
+            <Button
+              key={reason}
+              size="floor"
+              variant="secondary"
+              aria-pressed={chosen}
+              className="warehouse-reason"
+              {...props}
+              style={{
+                ...TILE_STYLE,
+                ...(chosen ? CHOSEN_TILE_STYLE : {}),
+                ...(busy > 0 ? WAITING_STYLE : {}),
+              }}
+            >
+              <span className="warehouse-reason__dot" aria-hidden="true" />
+              {t(`floor.warehouse.reasons.${reason}`)}
+            </Button>
+          );
+        })}
       </div>
-    </Card>
+    </fieldset>
   );
 
-  if (phase.kind === "loading") return card(<p>{t("floor.warehouse.loading")}</p>);
+  /** The screen's frame: the cloud's heading, the work and the session side by side, the footer. */
+  const frame = (heading: ReactNode, body: ReactNode, footer: ReactNode = null) => (
+    <section
+      className="warehouse-reprint"
+      aria-labelledby="warehouse-title"
+      tabIndex={-1}
+      ref={viewRef}
+    >
+      <header className="warehouse-heading">
+        <div>
+          <p>{t("floor.warehouse.eyebrow")}</p>
+          <h2 id="warehouse-title">{t("floor.warehouse.title")}</h2>
+        </div>
+        <div className="warehouse-heading-actions">{heading}</div>
+      </header>
+      {body}
+      {footer === null ? null : <footer className="warehouse-footer">{footer}</footer>}
+    </section>
+  );
+  /** A question in the cloud's full-screen dialog layout, inside the same frame. */
+  const question = (node: ReactNode) => (
+    <section className="warehouse-reprint warehouse-reprint--question" tabIndex={-1} ref={viewRef}>
+      {node}
+    </section>
+  );
+  const pauseButton = (
+    <Button size="floor" variant="secondary" {...leave(onLeave)}>
+      {t("floor.warehouse.pause")}
+    </Button>
+  );
+
+  if (phase.kind === "loading") {
+    return frame(
+      null,
+      <section className="warehouse-status" aria-live="polite">
+        <p>{t("floor.warehouse.loading")}</p>
+      </section>,
+    );
+  }
   if (phase.kind === "read_failed") {
-    return card(
-      <>
+    return frame(
+      pauseButton,
+      <section className="warehouse-status warehouse-status--failed">
         <Alert
           tone="error"
           action={
@@ -563,12 +617,7 @@ export function WarehouseScreen({
         >
           {t("floor.warehouse.readFailed")}
         </Alert>
-        <div className="standalone-form__actions">
-          <Button size="floor" variant="secondary" {...leave(onLeave)}>
-            {t("floor.warehouse.pause")}
-          </Button>
-        </div>
-      </>,
+      </section>,
     );
   }
 
@@ -586,7 +635,7 @@ export function WarehouseScreen({
   };
 
   if (panel.kind === "templates") {
-    return card(
+    return question(
       <TemplatePicker
         templates={templates}
         chosen={phase.kind === "setup" ? phase.templates : phase.session.templates}
@@ -598,53 +647,79 @@ export function WarehouseScreen({
     );
   }
 
+  /** «Этот сеанс»: the reason, the count, the templates — the cloud's side panel. */
+  const sessionPanel = (
+    reason: WarehouseReason | null,
+    chosen: WarehouseTemplates,
+    templatesButton: Record<string, unknown>,
+  ) => (
+    <aside className="warehouse-session-panel" aria-labelledby="warehouse-session-title">
+      <h2 id="warehouse-session-title">{t("floor.warehouse.session")}</h2>
+      {reason !== null && (
+        <p>
+          {t("floor.warehouse.sessionReason", { reason: t(`floor.warehouse.reasons.${reason}`) })}
+        </p>
+      )}
+      <strong className="warehouse-sent-count" aria-hidden="true">
+        {counts.sent}
+      </strong>
+      <p>
+        <VisuallyHidden>{t("floor.warehouse.sentCount", { sent: counts.sent })}</VisuallyHidden>
+        <span aria-hidden="true">{t("floor.warehouse.sentLabel")}</span>
+      </p>
+      {counts.waiting > 0 && <p>{t("floor.warehouse.waiting", { waiting: counts.waiting })}</p>}
+      {templateLines(chosen)}
+      <Button size="floor" variant="secondary" {...templatesButton}>
+        {t("floor.warehouse.chooseTemplates")}
+      </Button>
+      <p className="warehouse-session-note">{t("floor.warehouse.scope")}</p>
+    </aside>
+  );
+
   if (phase.kind === "setup") {
     const { reason } = phase;
-    return card(
-      <>
-        <p>{t("floor.warehouse.scope")}</p>
-        {reasonChoices(reason, (picked) => setPhase({ ...phase, reason: picked }))}
-        <h3>{t("floor.warehouse.templatesTitle")}</h3>
-        {templateLines(phase.templates)}
-        <div className="standalone-form__actions">
-          <Button
-            size="floor"
-            disabled={reason === null}
-            {...press(() => {
-              if (reason === null) return;
-              run(async () => {
-                const started = await startSession(
-                  local,
-                  { hostId, deviceId },
-                  {
-                    id: newId(),
-                    reason,
-                    templates: phase.templates,
-                    operatorId: operator.id,
-                    at: now().toISOString(),
-                  },
-                );
-                if (!alive.current) return;
-                setPhase({ kind: "working", session: started });
-                setSaid(null);
-                await recount(started.id);
-              });
-            })}
-          >
-            {t("floor.warehouse.start")}
-          </Button>
-          <Button
-            size="floor"
-            variant="secondary"
-            {...press(() => setPanel({ kind: "templates" }))}
-          >
-            {t("floor.warehouse.chooseTemplates")}
-          </Button>
-          <Button size="floor" variant="secondary" {...leave(onLeave)}>
-            {t("floor.warehouse.pause")}
-          </Button>
+    return frame(
+      pauseButton,
+      <div className="warehouse-work-grid">
+        <div className="warehouse-main">
+          <section className="warehouse-session-setup" aria-labelledby="warehouse-setup-title">
+            <h2 id="warehouse-setup-title">{t("floor.warehouse.sessionSetup")}</h2>
+            <p>{t("floor.warehouse.sessionScope")}</p>
+            {reasonChoices(reason, (picked) => setPhase({ ...phase, reason: picked }))}
+            <Button
+              size="floor"
+              disabled={reason === null}
+              {...press(() => {
+                if (reason === null) return;
+                run(async () => {
+                  const started = await startSession(
+                    local,
+                    { hostId, deviceId },
+                    {
+                      id: newId(),
+                      reason,
+                      templates: phase.templates,
+                      operatorId: operator.id,
+                      at: now().toISOString(),
+                    },
+                  );
+                  if (!alive.current) return;
+                  setPhase({ kind: "working", session: started });
+                  setSaid(null);
+                  await recount(started.id);
+                });
+              })}
+            >
+              {t("floor.warehouse.start")}
+            </Button>
+          </section>
         </div>
-      </>,
+        {sessionPanel(
+          reason,
+          phase.templates,
+          press(() => setPanel({ kind: "templates" })),
+        )}
+      </div>,
     );
   }
 
@@ -652,14 +727,13 @@ export function WarehouseScreen({
 
   if (panel.kind === "reason" || panel.kind === "again") {
     const again = panel.kind === "again";
-    return card(
-      <section aria-labelledby="warehouse-reason-title" className="standalone-form">
-        <h3 id="warehouse-reason-title">
-          {t(again ? "floor.warehouse.againTitle" : "floor.warehouse.changeReason")}
-        </h3>
-        {again && <p>{t("floor.warehouse.againText")}</p>}
-        {reasonChoices(panel.picked, (picked) => setPanel({ ...panel, picked }))}
-        <div className="standalone-form__actions">
+    return question(
+      <WarehousePanel
+        titleId="warehouse-reason-title"
+        title={t(again ? "floor.warehouse.againTitle" : "floor.warehouse.changeReason")}
+        backLabel={t("floor.warehouse.cancel")}
+        back={press(() => setPanel({ kind: "none" }))}
+        footer={
           <Button
             size="floor"
             disabled={panel.picked === null}
@@ -680,20 +754,31 @@ export function WarehouseScreen({
           >
             {t(again ? "floor.warehouse.againConfirm" : "floor.warehouse.applyReason")}
           </Button>
-          <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "none" }))}>
-            {t("floor.warehouse.cancel")}
-          </Button>
+        }
+      >
+        <div className="warehouse-confirm-body">
+          {again && <p>{t("floor.warehouse.againText")}</p>}
+          {reasonChoices(panel.picked, (picked) => setPanel({ ...panel, picked }))}
+          {panel.picked !== null && (
+            <p>
+              {t("floor.warehouse.sessionReason", {
+                reason: t(`floor.warehouse.reasons.${panel.picked}`),
+              })}
+            </p>
+          )}
         </div>
-      </section>,
+      </WarehousePanel>,
     );
   }
 
   if (panel.kind === "finish") {
-    return card(
-      <section aria-labelledby="warehouse-finish-title" className="standalone-form">
-        <h3 id="warehouse-finish-title">{t("floor.warehouse.finishTitle")}</h3>
-        <p>{t("floor.warehouse.finishText", { sent: counts.sent })}</p>
-        <div className="standalone-form__actions">
+    return question(
+      <WarehousePanel
+        titleId="warehouse-finish-title"
+        title={t("floor.warehouse.finishTitle")}
+        backLabel={t("floor.warehouse.cancel")}
+        back={press(() => setPanel({ kind: "none" }))}
+        footer={
           <Button
             size="floor"
             {...press(() =>
@@ -718,11 +803,63 @@ export function WarehouseScreen({
           >
             {t("floor.warehouse.finishConfirm")}
           </Button>
-          <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "none" }))}>
-            {t("floor.warehouse.cancel")}
-          </Button>
+        }
+      >
+        <div className="warehouse-confirm-body">
+          <p>{t("floor.warehouse.finishText", { sent: counts.sent })}</p>
         </div>
-      </section>,
+      </WarehousePanel>,
+    );
+  }
+
+  if (panel.kind === "manual") {
+    return question(
+      <WarehousePanel
+        titleId="warehouse-manual-title"
+        title={t("floor.warehouse.manual")}
+        backLabel={t("floor.warehouse.cancel")}
+        back={press(() => setPanel({ kind: "none" }))}
+        footer={
+          <Button
+            size="floor"
+            type="submit"
+            form="warehouse-manual-form"
+            disabled={manual.trim() === ""}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              // The press is the form's submit; one just after the view changed is stopped here.
+              if (!settled()) event.preventDefault();
+            }}
+          >
+            {t("floor.warehouse.manualSubmit")}
+          </Button>
+        }
+      >
+        <form
+          id="warehouse-manual-form"
+          className="warehouse-manual-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const typed = manual;
+            if (typed.trim() === "") return;
+            setManual("");
+            setPanel({ kind: "none" });
+            run(() => reprint(session, typed));
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setPanel({ kind: "none" });
+          }}
+        >
+          <Input
+            size="floor"
+            mono
+            label={t("floor.warehouse.manualLabel")}
+            value={manual}
+            autoFocus
+            spellCheck={false}
+            onChange={(event) => setManual(event.target.value)}
+          />
+        </form>
+      </WarehousePanel>,
     );
   }
 
@@ -806,120 +943,93 @@ export function WarehouseScreen({
         ? t("floor.warehouse.subject.unit")
         : t(`floor.warehouse.subject.${job.kind}`, { sscc: job.identity });
   const unresolved = job !== null && (UNRESOLVED as readonly string[]).includes(job.state);
+  const statusKey = verifying ? "verify" : (job?.state ?? "ready");
+  const actions = job === null ? null : jobActions(job);
 
-  return card(
+  return frame(
     <>
-      <p>
-        {t("floor.warehouse.sessionReason", {
-          reason: t(`floor.warehouse.reasons.${session.reason}`),
-        })}
-      </p>
-      {templateLines(session.templates)}
-      <div className="floor-sign-in__message floor-sign-in__message--stack" aria-live="polite">
-        {!online && (
-          <Alert tone="warn" role="presentation">
-            {t("floor.warehouse.offlineNotice")}
-          </Alert>
-        )}
-        {said !== null && (
-          <Alert tone={said.tone} role="presentation">
-            {said.text}
-          </Alert>
-        )}
-        {verifying && (
-          <p>{`${t("floor.warehouse.status.verify")}. ${t("floor.warehouse.hint.verify")}`}</p>
-        )}
-      </div>
-      {job !== null && (
+      <Button size="floor" {...press(() => setPanel({ kind: "manual" }))}>
+        {t("floor.warehouse.manual")}
+      </Button>
+      {/* Never held by work: the floor's leave waits for it (N9). */}
+      {pauseButton}
+    </>,
+    <div className="warehouse-work-grid">
+      <div className="warehouse-main">
         <section
-          className="standalone-form"
+          className={`warehouse-status warehouse-status--${statusKey}`}
           {...(subject === null ? {} : { "aria-label": subject })}
         >
-          <p>{subject}</p>
-          <p>
-            {t("floor.warehouse.jobLine", { state: t(`floor.warehouse.jobState.${job.state}`) })}
-          </p>
-          <div className="standalone-form__actions">{jobActions(job)}</div>
-        </section>
-      )}
-      {panel.kind === "manual" ? (
-        <form
-          className="standalone-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const typed = manual;
-            if (typed.trim() === "") return;
-            setManual("");
-            setPanel({ kind: "none" });
-            run(() => reprint(session, typed));
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setPanel({ kind: "none" });
-          }}
-        >
-          <Input
-            size="floor"
-            label={t("floor.warehouse.manualLabel")}
-            value={manual}
-            autoFocus
-            onChange={(event) => setManual(event.target.value)}
-          />
-          <div className="standalone-form__actions">
-            <Button
-              size="floor"
-              type="submit"
-              disabled={manual.trim() === ""}
-              onClick={(event: MouseEvent<HTMLButtonElement>) => {
-                // The press is the form's submit; one just after the view changed is stopped here.
-                if (!settled()) event.preventDefault();
-              }}
-            >
-              {t("floor.warehouse.manualSubmit")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              type="button"
-              {...press(() => setPanel({ kind: "none" }))}
-            >
-              {t("floor.warehouse.cancel")}
-            </Button>
+          <ScanMark className="warehouse-scan-mark" />
+          {job === null ? (
+            <>
+              <h2>{t("floor.warehouse.prompt")}</h2>
+              <p>{t("floor.warehouse.hint.ready")}</p>
+            </>
+          ) : (
+            <div className="warehouse-result">
+              <h2>{subject}</h2>
+              <p>
+                {t("floor.warehouse.jobLine", {
+                  state: t(`floor.warehouse.jobState.${job.state}`),
+                })}
+              </p>
+            </div>
+          )}
+          <div className="warehouse-status__said" aria-live="polite">
+            {!online && (
+              <Alert tone="warn" role="presentation">
+                {t("floor.warehouse.offlineNotice")}
+              </Alert>
+            )}
+            {said !== null && (
+              <Alert tone={said.tone} role="presentation">
+                {said.text}
+              </Alert>
+            )}
+            {verifying && (
+              <p>{`${t("floor.warehouse.status.verify")}. ${t("floor.warehouse.hint.verify")}`}</p>
+            )}
           </div>
-        </form>
-      ) : (
-        <p className="work-screen__waiting">{t("floor.warehouse.prompt")}</p>
-      )}
-      <p>{t("floor.warehouse.sentCount", { sent: counts.sent })}</p>
-      {counts.waiting > 0 && <p>{t("floor.warehouse.waiting", { waiting: counts.waiting })}</p>}
-      <div className="standalone-form__actions">
-        <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "manual" }))}>
-          {t("floor.warehouse.manual")}
-        </Button>
-        <Button
-          size="floor"
-          variant="secondary"
-          {...press(() => {
-            if (!unresolved) setPanel({ kind: "templates" });
-          })}
-          {...(unresolved ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
-        >
-          {t("floor.warehouse.chooseTemplates")}
-        </Button>
-        <Button
-          size="floor"
-          variant="secondary"
-          {...press(() => setPanel({ kind: "reason", picked: session.reason }))}
-        >
-          {t("floor.warehouse.changeReason")}
-        </Button>
-        <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "finish" }))}>
-          {t("floor.warehouse.finish")}
-        </Button>
-        {/* Never held by work: the floor's leave waits for it (N9). */}
-        <Button size="floor" variant="secondary" {...leave(onLeave)}>
-          {t("floor.warehouse.pause")}
-        </Button>
+        </section>
+        {actions !== null && <div className="warehouse-recovery-actions">{actions}</div>}
       </div>
+      {sessionPanel(session.reason, session.templates, {
+        ...press(() => {
+          if (!unresolved) setPanel({ kind: "templates" });
+        }),
+        ...(unresolved ? { "aria-disabled": true, style: WAITING_STYLE } : {}),
+      })}
+    </div>,
+    <>
+      <Button
+        size="floor"
+        variant="secondary"
+        {...press(() => setPanel({ kind: "reason", picked: session.reason }))}
+      >
+        {t("floor.warehouse.changeReason")}
+      </Button>
+      <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "finish" }))}>
+        {t("floor.warehouse.finish")}
+      </Button>
     </>,
+  );
+}
+
+/** The cloud's scan mark (apps/station/src/ui/BarcodeIcon.tsx), bundled: the station is offline-first. */
+function ScanMark({ className }: { className: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 32 32"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M5 7v18M9 7v18M14 7v18M18 7v18M24 7v18M27 7v18" />
+      <path d="M2 10V4h6m16 0h6v6M2 22v6h6m16 0h6v-6" />
+    </svg>
   );
 }

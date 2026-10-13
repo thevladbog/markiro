@@ -65,7 +65,8 @@ async fn the_defaults_are_one_document_and_stations_get_them() {
         document(&admin).await,
         json!({
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
-            "defaultDuplicateTemplateId": null, "categories": [], "rev": 1
+            "defaultDuplicateTemplateId": null, "categories": [], "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": 1
         })
     );
     let before = host_revision(&admin.app).await;
@@ -91,7 +92,8 @@ async fn the_defaults_are_one_document_and_stations_get_them() {
         set,
         json!({
             "defaultBoxTemplateId": t.universal, "defaultPalletTemplateId": t.pallet,
-            "defaultDuplicateTemplateId": null, "categories": categories, "rev": rev
+            "defaultDuplicateTemplateId": null, "categories": categories, "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": rev
         })
     );
     assert_eq!(
@@ -569,7 +571,8 @@ async fn an_edit_of_the_organization_profile_raises_the_documents_revision() {
         json!({
             "defaultBoxTemplateId": t.universal, "defaultPalletTemplateId": null,
             "defaultDuplicateTemplateId": null,
-            "categories": [slot(8, "box", &t.milk)], "rev": raised
+            "categories": [slot(8, "box", &t.milk)], "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": raised
         })
     );
 
@@ -698,7 +701,8 @@ async fn the_duplicate_default_takes_a_duplicate_template() {
         set,
         json!({
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
-            "defaultDuplicateTemplateId": duplicate, "categories": categories, "rev": rev
+            "defaultDuplicateTemplateId": duplicate, "categories": categories, "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": rev
         })
     );
     assert_eq!(
@@ -820,7 +824,8 @@ async fn an_organization_default_left_out_or_null_is_cleared() {
         partly,
         json!({
             "defaultBoxTemplateId": t.universal, "defaultPalletTemplateId": null,
-            "defaultDuplicateTemplateId": null, "categories": [], "rev": partly_rev
+            "defaultDuplicateTemplateId": null, "categories": [], "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": partly_rev
         })
     );
     assert_eq!(
@@ -846,7 +851,8 @@ async fn an_organization_default_left_out_or_null_is_cleared() {
         none,
         json!({
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
-            "defaultDuplicateTemplateId": null, "categories": [], "rev": none_rev
+            "defaultDuplicateTemplateId": null, "categories": [], "defaultPalletSheetId": null, "palletSheetCategories": [],
+            "rev": none_rev
         })
     );
     assert_eq!(document(&admin).await, none);
@@ -976,6 +982,7 @@ async fn a_category_default_changes_in_place_and_only_that_one_rides_the_feed() 
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null,
             "defaultDuplicateTemplateId": null,
             "categories": [slot(8, "box", &t.universal), slot(15, "box", &t.universal)],
+            "defaultPalletSheetId": null, "palletSheetCategories": [],
             "rev": changed_rev
         })
     );

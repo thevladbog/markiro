@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card } from "@markiro/ui";
+import { Alert, Button, StatusChip } from "@markiro/ui";
 
 import { HostStatusLine } from "../../app/HostStatusLine.js";
 import type { FloorSession } from "../../app/shell.js";
@@ -11,6 +11,7 @@ import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { waitUnits } from "../outbox-status.js";
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
+import { FloorFooter, FloorScreen } from "../shifts/FloorScreen.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import {
   dismissRecord,
@@ -23,6 +24,7 @@ import {
   type SettledRecord,
   type SettledTally,
 } from "./outbox-recovery.js";
+import "./queue.css";
 
 export interface QueueScreenProps {
   local: LocalExecutor;
@@ -375,233 +377,279 @@ export function QueueScreen({
     if (event.key === "Escape" && !busy) cancel();
   };
 
+  const confirmation =
+    pending !== null && (resending !== null || clearing !== null || dismissing !== null) ? (
+      <div
+        ref={confirmRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={t("floor.queue.confirmLabel")}
+        className="floor-queue__confirm"
+        onKeyDown={press}
+      >
+        <div className="floor-queue__confirm-text">
+          {resending !== null ? (
+            <>
+              <p>{t("floor.queue.confirmResend", { n: formatQuantity(resending.total) })}</p>
+              <p>
+                {t("floor.queue.confirmResendWhat", {
+                  number: resending.shiftNumber ?? "—",
+                  kinds: kindsText(t, resending.kinds),
+                })}
+              </p>
+            </>
+          ) : clearing !== null ? (
+            <>
+              <p>
+                {t("floor.queue.confirmDismissShift", {
+                  number: clearing.shiftNumber ?? "—",
+                  n: formatQuantity(clearing.dismissible),
+                })}
+              </p>
+              <p>
+                {t("floor.queue.confirmResendWhat", {
+                  number: clearing.shiftNumber ?? "—",
+                  kinds: kindsText(
+                    t,
+                    clearing.kinds.filter((tally) => tally.kind !== "shift_closed"),
+                  ),
+                })}
+              </p>
+              {clearing.closeRefused && <p>{t("floor.queue.confirmDismissShiftClose")}</p>}
+            </>
+          ) : dismissing !== null ? (
+            <>
+              <p>
+                {t("floor.queue.confirmRecord", {
+                  record: recordText(t, dismissing),
+                  reason: reasonText(t, dismissing),
+                })}
+              </p>
+              <p>
+                {t(
+                  dismissing.outcome === "conflict"
+                    ? "floor.queue.confirmSettle"
+                    : "floor.queue.confirmDismiss",
+                )}
+              </p>
+            </>
+          ) : null}
+        </div>
+        <div className="floor-queue__confirm-actions">
+          <Button size="floor" variant="secondary" disabled={busy} onClick={cancel}>
+            {t("floor.queue.cancel")}
+          </Button>
+          <Button
+            size="floor"
+            variant={
+              clearing !== null || (dismissing !== null && dismissing.outcome === "rejected")
+                ? "destructive"
+                : "primary"
+            }
+            disabled={busy}
+            onClick={() => void decide(pending)}
+          >
+            {resending !== null
+              ? t("floor.queue.resendConfirm")
+              : clearing !== null
+                ? t("floor.queue.dismissShiftConfirm", {
+                    n: formatQuantity(clearing.dismissible),
+                  })
+                : dismissing?.outcome === "conflict"
+                  ? t("floor.queue.settleConfirm")
+                  : t("floor.queue.dismissConfirm")}
+          </Button>
+        </div>
+      </div>
+    ) : null;
+
   return (
-    <Card className="standalone-card shift-list" title={t("floor.queue.title")} titleAs="h2">
-      <div className="standalone-form">
-        <HostStatusLine status={link} sync={null} />
-        <div className="floor-sign-in__message floor-sign-in__message--stack" aria-live="polite">
+    <FloorScreen
+      className="floor-queue"
+      title={t("floor.queue.title")}
+      header={<HostStatusLine status={link} sync={null} />}
+      actions={
+        <FloorFooter ariaLabel={t("floor.queue.actions")}>
+          <div ref={backRef}>
+            <Button size="floor" variant="secondary" onClick={onBack}>
+              {t("floor.queue.back")}
+            </Button>
+          </div>
+        </FloorFooter>
+      }
+    >
+      <div className="floor-queue__body">
+        <div className="floor-queue__message" aria-live="polite">
           {notice !== null && (
             <p ref={noticeRef} tabIndex={-1}>
               {t(`floor.queue.notice.${notice.kind}`)}
             </p>
           )}
         </div>
-        {queue === "loading" && <p>{t("floor.queue.loading")}</p>}
-        {queue === "failed" && (
-          <>
-            <p>{t("floor.queue.readFailed")}</p>
-            <Button size="floor" variant="secondary" onClick={() => setReads((count) => count + 1)}>
-              {t("floor.queue.retry")}
-            </Button>
-          </>
-        )}
-        {view !== null && (
-          <>
-            <section aria-labelledby="floor-queue-unsent">
-              <h3 id="floor-queue-unsent">{t("floor.queue.unsentTitle")}</h3>
-              {view.unsent.length === 0 ? (
-                <p>{t("floor.queue.unsentNone")}</p>
-              ) : (
-                <dl>
-                  {view.unsent.map((group) => (
-                    <div key={group.kind} className="floor-status__item">
-                      <dt>{kindText(t, group.kind)}</dt>
-                      <dd>
-                        {t("floor.queue.unsentValue", {
-                          n: formatQuantity(group.count),
-                          age: waitText(t, Math.max(0, now().getTime() - Date.parse(group.oldest))),
-                        })}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </section>
-            {view.stranded > 0 && (
-              <Alert tone="warn">
-                {t("floor.queue.stranded", { n: formatQuantity(view.stranded) })}
-              </Alert>
-            )}
-            <section aria-labelledby="floor-queue-refused">
-              <h3 id="floor-queue-refused">{t("floor.queue.refusedTitle")}</h3>
-              {groups.length === 0 ? (
-                <p>{t("floor.queue.refusedNone")}</p>
-              ) : (
-                groups.map((group) => (
-                  <section key={group.shiftId} className="shift-card">
-                    <h4>{t("floor.queue.shift", { number: group.shiftNumber ?? "—" })}</h4>
-                    <ul>
-                      {group.records.map((record) => (
-                        <li key={record.id}>
-                          <p>{recordText(t, record)}</p>
-                          <p>{reasonText(t, record)}</p>
-                          {record.kind !== "shift_closed" && (
-                            <Button
-                              size="floor"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={(event) =>
-                                ask({ kind: "dismiss", recordId: record.id }, event.currentTarget)
-                              }
-                            >
-                              {t("floor.queue.dismiss")}
-                            </Button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    {group.total > group.records.length && (
-                      <p>
-                        {t("floor.queue.more", {
-                          n: formatQuantity(group.total - group.records.length),
-                        })}
-                      </p>
-                    )}
-                    <Button
-                      size="floor"
-                      disabled={busy}
-                      onClick={(event) =>
-                        ask({ kind: "resend", shiftId: group.shiftId }, event.currentTarget)
-                      }
-                    >
-                      {t("floor.queue.resend")}
-                    </Button>
-                    {group.dismissible > 0 && (
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={(event) =>
-                          ask({ kind: "dismissShift", shiftId: group.shiftId }, event.currentTarget)
-                        }
-                      >
-                        {t("floor.queue.dismissShift")}
-                      </Button>
-                    )}
-                  </section>
-                ))
-              )}
-            </section>
-            <section aria-labelledby="floor-queue-conflicts">
-              <h3 id="floor-queue-conflicts">{t("floor.queue.conflictsTitle")}</h3>
-              {conflicts.length === 0 ? (
-                <p>{t("floor.queue.conflictsNone")}</p>
-              ) : (
-                <ul>
-                  {conflicts.map((record) => (
-                    <li key={record.id}>
-                      <p>
-                        {t("floor.queue.shift", { number: record.shiftNumber ?? "—" })} ·{" "}
-                        {recordText(t, record)}
-                      </p>
-                      <p>{reasonText(t, record)}</p>
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        disabled={busy}
-                        onClick={(event) =>
-                          ask({ kind: "dismiss", recordId: record.id }, event.currentTarget)
-                        }
-                      >
-                        {t("floor.queue.settle")}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {conflictsHidden > 0 && (
-                <p>{t("floor.queue.more", { n: formatQuantity(conflictsHidden) })}</p>
-              )}
-            </section>
-          </>
-        )}
-        {pending !== null && (resending !== null || clearing !== null || dismissing !== null) && (
-          <div
-            ref={confirmRef}
-            tabIndex={-1}
-            role="group"
-            aria-label={t("floor.queue.confirmLabel")}
-            onKeyDown={press}
-          >
-            {resending !== null ? (
-              <>
-                <p>{t("floor.queue.confirmResend", { n: formatQuantity(resending.total) })}</p>
-                <p>
-                  {t("floor.queue.confirmResendWhat", {
-                    number: resending.shiftNumber ?? "—",
-                    kinds: kindsText(t, resending.kinds),
-                  })}
-                </p>
-              </>
-            ) : clearing !== null ? (
-              <>
-                <p>
-                  {t("floor.queue.confirmDismissShift", {
-                    number: clearing.shiftNumber ?? "—",
-                    n: formatQuantity(clearing.dismissible),
-                  })}
-                </p>
-                <p>
-                  {t("floor.queue.confirmResendWhat", {
-                    number: clearing.shiftNumber ?? "—",
-                    kinds: kindsText(
-                      t,
-                      clearing.kinds.filter((tally) => tally.kind !== "shift_closed"),
-                    ),
-                  })}
-                </p>
-                {clearing.closeRefused && <p>{t("floor.queue.confirmDismissShiftClose")}</p>}
-              </>
-            ) : dismissing !== null ? (
-              <>
-                <p>
-                  {t("floor.queue.confirmRecord", {
-                    record: recordText(t, dismissing),
-                    reason: reasonText(t, dismissing),
-                  })}
-                </p>
-                <p>
-                  {t(
-                    dismissing.outcome === "conflict"
-                      ? "floor.queue.confirmSettle"
-                      : "floor.queue.confirmDismiss",
-                  )}
-                </p>
-              </>
-            ) : null}
-            <div className="standalone-form__actions">
+        <div className="floor-queue__scroll">
+          {queue === "loading" && <p className="floor-queue__quiet">{t("floor.queue.loading")}</p>}
+          {queue === "failed" && (
+            <div className="floor-queue__failed">
+              <p>{t("floor.queue.readFailed")}</p>
               <Button
                 size="floor"
-                variant={
-                  clearing !== null || (dismissing !== null && dismissing.outcome === "rejected")
-                    ? "destructive"
-                    : "primary"
-                }
-                disabled={busy}
-                onClick={() => void decide(pending)}
+                variant="secondary"
+                onClick={() => setReads((count) => count + 1)}
               >
-                {resending !== null
-                  ? t("floor.queue.resendConfirm")
-                  : clearing !== null
-                    ? t("floor.queue.dismissShiftConfirm", {
-                        n: formatQuantity(clearing.dismissible),
-                      })
-                    : dismissing?.outcome === "conflict"
-                      ? t("floor.queue.settleConfirm")
-                      : t("floor.queue.dismissConfirm")}
-              </Button>
-              <Button size="floor" variant="secondary" disabled={busy} onClick={cancel}>
-                {t("floor.queue.cancel")}
+                {t("floor.queue.retry")}
               </Button>
             </div>
-          </div>
-        )}
-        <div ref={backRef} className="standalone-form__actions">
-          <Button size="floor" variant="secondary" onClick={onBack}>
-            {t("floor.queue.back")}
-          </Button>
+          )}
+          {view !== null && (
+            <>
+              <section className="floor-queue__section" aria-labelledby="floor-queue-unsent">
+                <h3 id="floor-queue-unsent">{t("floor.queue.unsentTitle")}</h3>
+                {view.unsent.length === 0 ? (
+                  <p className="floor-queue__quiet">{t("floor.queue.unsentNone")}</p>
+                ) : (
+                  <dl className="floor-queue__card floor-queue__unsent">
+                    {view.unsent.map((group) => (
+                      <div key={group.kind} className="floor-queue__row">
+                        <dt>{kindText(t, group.kind)}</dt>
+                        <dd>
+                          {t("floor.queue.unsentValue", {
+                            n: formatQuantity(group.count),
+                            age: waitText(
+                              t,
+                              Math.max(0, now().getTime() - Date.parse(group.oldest)),
+                            ),
+                          })}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </section>
+              {view.stranded > 0 && (
+                <Alert tone="warn">
+                  {t("floor.queue.stranded", { n: formatQuantity(view.stranded) })}
+                </Alert>
+              )}
+              <section className="floor-queue__section" aria-labelledby="floor-queue-refused">
+                <h3 id="floor-queue-refused">{t("floor.queue.refusedTitle")}</h3>
+                {groups.length === 0 ? (
+                  <p className="floor-queue__quiet">{t("floor.queue.refusedNone")}</p>
+                ) : (
+                  groups.map((group) => (
+                    <section
+                      key={group.shiftId}
+                      className="floor-queue__card"
+                      aria-label={t("floor.queue.shift", { number: group.shiftNumber ?? "—" })}
+                    >
+                      <div className="floor-queue__card-head">
+                        <h4>{t("floor.queue.shift", { number: group.shiftNumber ?? "—" })}</h4>
+                        <StatusChip
+                          size="floor"
+                          phase="failed"
+                          label={t("floor.queue.chip.refused", {
+                            n: formatQuantity(group.total),
+                          })}
+                        />
+                      </div>
+                      <ul className="floor-queue__records">
+                        {group.records.map((record) => (
+                          <li key={record.id} className="floor-queue__record">
+                            <div className="floor-queue__record-text">
+                              <p className="floor-queue__identity">{recordText(t, record)}</p>
+                              <p className="floor-queue__reason">{reasonText(t, record)}</p>
+                            </div>
+                            {record.kind !== "shift_closed" && (
+                              <Button
+                                size="floor"
+                                variant="secondary"
+                                disabled={busy}
+                                onClick={(event) =>
+                                  ask({ kind: "dismiss", recordId: record.id }, event.currentTarget)
+                                }
+                              >
+                                {t("floor.queue.dismiss")}
+                              </Button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                      {group.total > group.records.length && (
+                        <p className="floor-queue__quiet">
+                          {t("floor.queue.more", {
+                            n: formatQuantity(group.total - group.records.length),
+                          })}
+                        </p>
+                      )}
+                      <div className="floor-queue__card-actions">
+                        {group.dismissible > 0 && (
+                          <Button
+                            size="floor"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={(event) =>
+                              ask(
+                                { kind: "dismissShift", shiftId: group.shiftId },
+                                event.currentTarget,
+                              )
+                            }
+                          >
+                            {t("floor.queue.dismissShift")}
+                          </Button>
+                        )}
+                        <Button
+                          size="floor"
+                          disabled={busy}
+                          onClick={(event) =>
+                            ask({ kind: "resend", shiftId: group.shiftId }, event.currentTarget)
+                          }
+                        >
+                          {t("floor.queue.resend")}
+                        </Button>
+                      </div>
+                    </section>
+                  ))
+                )}
+              </section>
+              <section className="floor-queue__section" aria-labelledby="floor-queue-conflicts">
+                <h3 id="floor-queue-conflicts">{t("floor.queue.conflictsTitle")}</h3>
+                {conflicts.length === 0 ? (
+                  <p className="floor-queue__quiet">{t("floor.queue.conflictsNone")}</p>
+                ) : (
+                  <ul className="floor-queue__card floor-queue__records">
+                    {conflicts.map((record) => (
+                      <li key={record.id} className="floor-queue__record">
+                        <div className="floor-queue__record-text">
+                          <p className="floor-queue__identity">
+                            {t("floor.queue.shift", { number: record.shiftNumber ?? "—" })} ·{" "}
+                            {recordText(t, record)}
+                          </p>
+                          <p className="floor-queue__reason">{reasonText(t, record)}</p>
+                        </div>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={(event) =>
+                            ask({ kind: "dismiss", recordId: record.id }, event.currentTarget)
+                          }
+                        >
+                          {t("floor.queue.settle")}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {conflictsHidden > 0 && (
+                  <p className="floor-queue__quiet">
+                    {t("floor.queue.more", { n: formatQuantity(conflictsHidden) })}
+                  </p>
+                )}
+              </section>
+            </>
+          )}
         </div>
+        {confirmation}
       </div>
-    </Card>
+    </FloorScreen>
   );
 }

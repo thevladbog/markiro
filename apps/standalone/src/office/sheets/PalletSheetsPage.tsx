@@ -101,8 +101,11 @@ function FailureAlert({ failure }: { failure: Failure | null }) {
 }
 
 /**
- * A4 pallet sheets (plan А4, pilot spec §29): the stock sheets, a sheet from a
- * JSON file, rename, on and off, the default, a JSON copy and a preview. The
+ * A4 pallet sheets (plan А4, pilot spec §29), the «Листы А4» tab of
+ * «Шаблоны»: the stock sheets, a sheet from a JSON file, rename, on and off, a
+ * JSON copy and a preview. Which sheet is the default — the organization's, a
+ * category's, a product's — is chosen on the «По умолчанию» tab beside the
+ * pallet labels (beta feedback); the list marks the organization's. The
  * layout itself is edited as JSON outside (decision А4-11): «Скачать JSON»,
  * change, «Загрузить JSON» — always a new sheet. Both office roles change
  * sheets (`editCatalog`); every write's answer goes into the cached list. The
@@ -138,9 +141,6 @@ export function PalletSheetsPage() {
       }),
   );
   const remove = useOfficeMutation((api, token, id: string) => api.deletePalletSheet(token, id));
-  const setDefault = useOfficeMutation((api, token, templateId: string | null) =>
-    api.setDefaultPalletSheet(token, { templateId }),
-  );
 
   // After a delete the row (and the button that opened its dialog) is gone: the
   // notice takes the focus, once the dialog has returned it.
@@ -306,25 +306,6 @@ export function PalletSheetsPage() {
             </Button>
             {canEdit && (
               <>
-                {list.defaultId !== sheet.id && sheet.enabled && (
-                  <Button
-                    variant="secondary"
-                    size="compact"
-                    aria-label={t("office.palletSheets.makeDefaultNamed", { name: sheet.name })}
-                    disabled={busy}
-                    onClick={() =>
-                      void run(
-                        async () => {
-                          const next = await setDefault.mutateAsync(sheet.id);
-                          change(() => next);
-                        },
-                        t("office.palletSheets.defaultSet", { name: sheet.name }),
-                      )
-                    }
-                  >
-                    {t("office.palletSheets.makeDefault")}
-                  </Button>
-                )}
                 <Button
                   variant="secondary"
                   size="compact"

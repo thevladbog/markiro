@@ -199,6 +199,8 @@ describe("office shifts: planning a shift", () => {
       defaultPalletTemplateId: null,
       defaultDuplicateTemplateId: null,
       categories: [],
+      defaultPalletSheetId: null,
+      palletSheetCategories: [],
       rev: 80,
     });
     await openCreate(session);
@@ -559,7 +561,7 @@ describe("office shifts: planning a shift", () => {
     session.api.getTemplateDefaults.mockRejectedValue(api("internal"));
     await openCreate(session);
     const words =
-      "Умолчания шаблонов не загрузились: шаблон берётся только из товара — проверьте выбор.";
+      "Шаблоны по умолчанию не загрузились: шаблон берётся только из товара — проверьте выбор.";
     // Water has no preference of its own and its group's default is out of reach: no template.
     set("Товар", WATER.id);
     expect(valueOf("Шаблон этикетки короба")).toBe("");
@@ -1032,7 +1034,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     (typeof SHEETS.sheets)[number],
     (typeof SHEETS.sheets)[number],
   ];
-  const MAIN = "Основной лист организации (Палета А4 · вертикальная)";
+  const MAIN = "По умолчанию для товара (Палета А4 · вертикальная)";
 
   beforeEach(() => {
     localStorage.removeItem("markiro.theme");
@@ -1070,7 +1072,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     expect(session.api.listPalletSheets).toHaveBeenCalledTimes(1);
     expect(
       within(dialog()).getByText(
-        "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
+        "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Лист по умолчанию (товара, категории или организации) берётся на момент сохранения смены: его последующая замена смену не меняет.",
       ),
     ).toBeTruthy();
     // Off again: the field goes.
@@ -1130,7 +1132,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     await waitFor(() =>
       expect(options("Лист А4")).toEqual([
-        "Основной лист организации (Палета А4 · две одинаковые А5)",
+        "По умолчанию для товара (Палета А4 · две одинаковые А5)",
         "Палета А4 · вертикальная",
         "Палета А4 · две одинаковые А5",
       ]),
@@ -1149,11 +1151,11 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await waitFor(() =>
       expect(
         within(dialog()).getByText(
-          "Список листов не загрузился: лист смены не меняется, новая смена получит основной.",
+          "Список листов не загрузился: лист смены не меняется, новая смена получит лист по умолчанию для товара.",
         ),
       ).toBeTruthy(),
     );
-    expect(options("Лист А4")).toEqual(["Основной лист организации (не выбран)"]);
+    expect(options("Лист А4")).toEqual(["По умолчанию для товара (не выбран)"]);
     submit();
     await screen.findByText("Смена OCT26-006 запланирована.");
     expect(session.api.createShift.mock.calls[0]?.[1]).not.toHaveProperty("palletSheetTemplateId");
@@ -1192,7 +1194,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     // The select shows its hint again, not the refusal.
     expect(messageOf("Лист А4")).toBe(
-      "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
+      "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Лист по умолчанию (товара, категории или организации) берётся на момент сохранения смены: его последующая замена смену не меняет.",
     );
   });
 

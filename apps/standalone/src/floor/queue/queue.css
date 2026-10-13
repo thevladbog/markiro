@@ -1,0 +1,255 @@
+/*
+  «Очередь отправки» in the cloud station's visual language. It has no cloud twin: the
+  layout is the cloud's StationScreen with FloorFooter (as ConflictList), its cards and rows
+  follow `.conflict-list__card` and `.setup-printer-row`, and its tags are the kit's
+  StatusChip. Scoped to `.station-screen.floor-queue`; tokens only.
+*/
+.station-screen.floor-queue {
+  display: grid;
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-4);
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* A fixed station screen, as the shift hub's: only its list scrolls. */
+  contain: size;
+}
+
+.floor-queue .station-screen__header,
+.floor-queue .station-screen__content,
+.floor-queue .station-screen__actions {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.floor-queue .station-screen__header {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.floor-queue .station-screen__title h2 {
+  margin: 0;
+  font: var(--floor-title);
+  white-space: nowrap;
+}
+
+.floor-queue .station-floor-footer {
+  display: flex;
+  width: 100%;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.floor-queue__body {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.floor-queue__message p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.floor-queue__message {
+  grid-row: 1;
+}
+
+.floor-queue__confirm {
+  grid-row: 3;
+}
+
+.floor-queue__scroll {
+  grid-row: 2;
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-5);
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.floor-queue__section {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.floor-queue__section > h3 {
+  margin: 0;
+  font: 700 19px/24px var(--font-ui);
+}
+
+.floor-queue__quiet {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.floor-queue__failed {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.floor-queue__failed p {
+  margin: 0;
+}
+
+/* A card as the cloud's conflict card: identity strong, then what follows in a quiet voice. */
+.floor-queue__card {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  list-style: none;
+}
+
+.floor-queue__card-head {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.floor-queue__card-head h4 {
+  margin: 0;
+  font: var(--floor-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.floor-queue__row {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+}
+
+.floor-queue__row:first-child {
+  border-top: 0;
+}
+
+.floor-queue__row dt {
+  font: var(--floor-body-strong);
+}
+
+.floor-queue__row dd {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.floor-queue__records {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.floor-queue__record {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+}
+
+.floor-queue__record:first-child {
+  border-top: 0;
+}
+
+.floor-queue__record-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.floor-queue__record-text p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.floor-queue__identity {
+  font: var(--floor-body-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.floor-queue__reason {
+  padding-top: var(--sp-1);
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.floor-queue__record > button {
+  flex-shrink: 0;
+}
+
+.floor-queue__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+}
+
+/* The question: fixed above the footer, outlined as the cloud's warning card. */
+.floor-queue__confirm {
+  display: grid;
+  min-width: 0;
+  max-height: 45vh;
+  padding: var(--sp-3) var(--sp-4);
+  overflow-y: auto;
+  gap: var(--sp-3);
+  border: 1px solid var(--warn-solid);
+  border-radius: var(--r-3);
+  background: var(--warn-bg);
+  outline: none;
+}
+
+.floor-queue__confirm:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.floor-queue__confirm-text {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.floor-queue__confirm-text p {
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.floor-queue__confirm-actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+}

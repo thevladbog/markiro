@@ -1,5 +1,6 @@
 import type {
   BadgeCreate,
+  CategoryPalletSheetDefault,
   CategoryTemplateDefault,
   CounterpartyCreate,
   CounterpartyUpdate,
@@ -248,6 +249,8 @@ export interface ProductInput {
   shelfLifeDays: number | null;
   defaultBoxTemplateId: string | null;
   defaultPalletTemplateId: string | null;
+  /** The A4 sheet the pallets print on: a sheet's id, never a label template's. */
+  defaultPalletSheetId: string | null;
 }
 
 /** `POST /v1/office/products` (`product-create.json`): every field, `null` for none. */
@@ -262,6 +265,7 @@ export function productCreate(product: ProductInput): ProductCreate {
     shelfLifeDays: product.shelfLifeDays,
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
+    defaultPalletSheetId: product.defaultPalletSheetId,
   };
 }
 
@@ -284,6 +288,7 @@ export function productUpdate(
     shelfLifeDays: product.shelfLifeDays,
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
+    defaultPalletSheetId: product.defaultPalletSheetId,
     archived,
     expectedRev,
   };
@@ -358,12 +363,17 @@ export function templateUpdate(
   return update;
 }
 
-/** The template defaults as they are to become: each organization default (`null` for none) and every category default. */
+/**
+ * The template defaults as they are to become: each organization default
+ * (`null` for none) and every category default, labels and A4 sheets.
+ */
 export interface TemplateDefaultsInput {
   defaultBoxTemplateId: string | null;
   defaultPalletTemplateId: string | null;
   defaultDuplicateTemplateId: string | null;
   categories: readonly CategoryTemplateDefault[];
+  defaultPalletSheetId: string | null;
+  palletSheetCategories: readonly CategoryPalletSheetDefault[];
 }
 
 /**
@@ -383,6 +393,11 @@ export function templateDefaultsUpdate(
       chzProductGroupCode: entry.chzProductGroupCode,
       purpose: entry.purpose,
       templateId: entry.templateId,
+    })),
+    defaultPalletSheetId: defaults.defaultPalletSheetId,
+    palletSheetCategories: defaults.palletSheetCategories.map((entry) => ({
+      chzProductGroupCode: entry.chzProductGroupCode,
+      sheetId: entry.sheetId,
     })),
     expectedRev,
   };

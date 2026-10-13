@@ -1,0 +1,442 @@
+/*
+  «Повторная печать этикеток», ported from the cloud station (apps/station/src/station.css:
+  .warehouse-reprint, .warehouse-heading, .warehouse-work-grid, .warehouse-status,
+  .warehouse-session-panel, .warehouse-reasons, the template dialog's .warehouse-template-* and
+  .label-template-*). The cloud's full-screen dialogs are laid out in-frame as .warehouse-panel.
+*/
+section.warehouse-reprint {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow: hidden;
+  /* A fixed, non-scrolling station screen (as the shift hub's): it never grows the page. */
+  contain: size;
+  gap: var(--sp-5);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: var(--fg-1);
+  outline: none;
+}
+
+section.warehouse-reprint--question {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.warehouse-heading {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.warehouse-heading > div:first-child {
+  min-width: 0;
+}
+
+.warehouse-heading h2 {
+  margin: 0;
+  font: var(--floor-title);
+  font-size: 2rem;
+}
+
+.warehouse-heading p {
+  margin: 0 0 var(--sp-1);
+  color: var(--fg-3);
+}
+
+.warehouse-heading-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.warehouse-work-grid {
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-5);
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.warehouse-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* The work: one card that says where the reprint stands, its colour by the state of the job. */
+.warehouse-status {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-6);
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  text-align: center;
+}
+
+.warehouse-status h2 {
+  max-width: 30ch;
+  margin: var(--sp-2) 0 0;
+  font-size: 2rem;
+  overflow-wrap: anywhere;
+}
+
+.warehouse-status p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.warehouse-scan-mark {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  color: var(--fg-3);
+}
+
+.warehouse-result {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.warehouse-result h2 {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+}
+
+.warehouse-status__said {
+  display: grid;
+  width: min(100%, 640px);
+  gap: var(--sp-2);
+  text-align: left;
+}
+
+.warehouse-status__said:empty {
+  display: none;
+}
+
+.warehouse-status--sent,
+.warehouse-status--verified {
+  border-color: var(--ok-solid);
+  background: var(--ok-bg);
+}
+
+.warehouse-status--unknown,
+.warehouse-status--verify {
+  border-color: var(--warn-solid);
+  background: var(--warn-bg);
+}
+
+.warehouse-status--failed {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+}
+
+.warehouse-status--sent .warehouse-scan-mark,
+.warehouse-status--verified .warehouse-scan-mark {
+  color: var(--ok-solid);
+}
+
+.warehouse-recovery-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+/* «Подготовьте сеанс перепечатки»: the reason as three tiles, then the start. */
+.warehouse-session-setup {
+  display: grid;
+  gap: var(--sp-4);
+  justify-items: start;
+  padding: var(--sp-6);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.warehouse-session-setup h2,
+.warehouse-session-setup p {
+  margin: 0;
+}
+
+.warehouse-reasons {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.warehouse-reasons legend {
+  margin-bottom: var(--sp-2);
+  padding: 0;
+}
+
+.warehouse-reasons__options {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.warehouse-reason__dot {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-page);
+}
+
+.warehouse-reason[aria-pressed="true"] .warehouse-reason__dot {
+  border: 7px solid var(--ok-solid);
+  background: var(--surface-inverse);
+}
+
+/* «Этот сеанс»: the cloud's side panel with its big count. */
+.warehouse-session-panel {
+  display: flex;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  overflow-wrap: anywhere;
+}
+
+.warehouse-session-panel h2,
+.warehouse-session-panel p {
+  margin: 0;
+}
+
+.warehouse-sent-count {
+  display: block;
+  font-size: 4rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.warehouse-templates {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.warehouse-session-note {
+  color: var(--fg-3);
+}
+
+.warehouse-footer {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--sp-3);
+  justify-content: space-between;
+}
+
+/* A question, in the cloud's full-screen dialog layout: title and «Отмена», the body, the answer. */
+.warehouse-picker {
+  min-height: 0;
+  height: 100%;
+  outline: none;
+}
+
+.warehouse-panel {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-page);
+}
+
+.warehouse-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.warehouse-panel__header h2 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.warehouse-panel__body {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow-y: auto;
+}
+
+.warehouse-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.warehouse-confirm-body {
+  display: grid;
+  max-width: 800px;
+  gap: var(--sp-4);
+  margin-inline: auto;
+  padding-block: var(--sp-6);
+}
+
+.warehouse-confirm-body p {
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.warehouse-manual-form {
+  display: flex;
+  max-width: 760px;
+  height: 100%;
+  margin-inline: auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-5);
+}
+
+/* The templates: the kinds of label as tabs, the list beside the preview. */
+.warehouse-template-body {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.warehouse-template-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.warehouse-template-grid {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.label-template-choices {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--sp-3);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.label-template-list {
+  display: flex;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-1);
+  overflow-y: auto;
+  flex-direction: column;
+  gap: var(--sp-3);
+  list-style: none;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.label-template-list > * {
+  flex-shrink: 0;
+}
+
+.label-template-empty {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.label-template-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.warehouse-label-preview {
+  display: grid;
+  margin: 0;
+  padding: var(--sp-5);
+  justify-items: center;
+  gap: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.warehouse-label-preview canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 2px solid var(--fg-3);
+  background: #ffffff;
+}
+
+.warehouse-label-preview figcaption {
+  color: var(--fg-3);
+  text-align: center;
+}
+
+.warehouse-picker__summary {
+  min-width: 0;
+  margin: 0 auto 0 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1050px) {
+  .warehouse-work-grid {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: var(--sp-4);
+  }
+
+  section.warehouse-reprint {
+    padding: var(--sp-4);
+    gap: var(--sp-4);
+  }
+
+  .warehouse-status h2 {
+    font-size: 1.75rem;
+  }
+
+  .warehouse-session-panel {
+    padding: var(--sp-4);
+  }
+
+  .warehouse-sent-count {
+    font-size: 3rem;
+  }
+}
