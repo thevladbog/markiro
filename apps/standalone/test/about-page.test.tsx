@@ -10,7 +10,6 @@ import { ExternalLinkError, type AboutApi } from "../src/office/info/about-api.j
 import { AboutProvider } from "../src/office/info/about-context.js";
 import { AboutPage } from "../src/office/info/AboutPage.js";
 import { ABOUT_SECTIONS } from "../src/office/info/sections.js";
-import { SUPPORT_CONTACTS } from "../src/office/info/contacts.js";
 import { OfficeFilesProvider } from "../src/office/exports/office-files-context.js";
 import { OfficeLinkProvider } from "../src/office/office-link.js";
 import { createOfficeQueryClient } from "../src/office/office-query.js";
@@ -143,34 +142,40 @@ describe("Информация", () => {
     expect(within(license).queryAllByRole("textbox")).toHaveLength(0);
   });
 
-  it("shows exactly the public contacts and opens links through the shell, never the webview", async () => {
+  it("shows exactly the two support addresses and nothing else, and opens mail through the shell", async () => {
     const about = fakeAbout();
     renderAbout(about);
     const contacts = card("Контакты и поддержка");
-    expect(described(contacts, "Разработчик")).toBe(SUPPORT_CONTACTS.companyName);
-    expect(described(contacts, "Реквизиты")).toBe(SUPPORT_CONTACTS.requisites);
-    // Nothing else is promised: no phone, no working hours.
-    expect(within(contacts).queryByText(/телефон|режим работы|часы работы|\+7/i)).toBeNull();
+    expect(described(contacts, "Почта поддержки")).toBe("hello@v-b.tech");
+    expect(described(contacts, "Запасной адрес")).toBe("vladislav.bogatyrev@gmail.com");
+    // Nothing else is rendered: two rows, two buttons, no links, no vendor, requisites, phone, hours or site.
+    expect(contacts.querySelectorAll("dt")).toHaveLength(2);
+    expect(within(contacts).getAllByRole("button")).toHaveLength(2);
     expect(within(contacts).queryAllByRole("link")).toHaveLength(0);
-    fireEvent.click(
-      within(contacts).getByRole("button", { name: `Написать на ${SUPPORT_CONTACTS.email}` }),
+    expect(contacts.textContent).not.toMatch(
+      /ИП |ИНН|ОГРНИП|телефон|режим работы|часы работы|\+7|markiro\.app|сайт/i,
     );
-    expect(about.openLink).toHaveBeenLastCalledWith(`mailto:${SUPPORT_CONTACTS.email}`);
-    fireEvent.click(within(contacts).getByRole("button", { name: "Открыть сайт markiro.app" }));
-    expect(about.openLink).toHaveBeenLastCalledWith("https://markiro.app");
+    fireEvent.click(within(contacts).getByRole("button", { name: "Написать на hello@v-b.tech" }));
+    expect(about.openLink).toHaveBeenLastCalledWith("mailto:hello@v-b.tech");
+    fireEvent.click(
+      within(contacts).getByRole("button", {
+        name: "Написать на vladislav.bogatyrev@gmail.com",
+      }),
+    );
+    expect(about.openLink).toHaveBeenLastCalledWith("mailto:vladislav.bogatyrev@gmail.com");
   });
 
-  it("tells the person to write by hand when the shell cannot open a link", async () => {
+  it("tells the person to write by hand to either address when the shell cannot open a link", async () => {
     const about = fakeAbout({
       openLink: vi.fn<AboutApi["openLink"]>(async () => {
         throw new ExternalLinkError("launch", "x");
       }),
     });
     renderAbout(about);
-    fireEvent.click(screen.getByRole("button", { name: `Написать на ${SUPPORT_CONTACTS.email}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Написать на hello@v-b.tech" }));
     expect(
       await screen.findByText(
-        `Не удалось открыть программу для ссылки. Напишите вручную на ${SUPPORT_CONTACTS.email}.`,
+        "Не удалось открыть почтовую программу. Напишите вручную на hello@v-b.tech или на vladislav.bogatyrev@gmail.com.",
       ),
     ).toBeTruthy();
   });
@@ -238,7 +243,7 @@ describe("Информация", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Сформировать и скопировать" }));
     await screen.findByText("Сведения скопированы в буфер обмена.");
     fireEvent.click(screen.getByRole("button", { name: "Написать в поддержку" }));
-    expect(about.openLink).toHaveBeenCalledWith(`mailto:${SUPPORT_CONTACTS.email}`);
+    expect(about.openLink).toHaveBeenCalledWith("mailto:hello@v-b.tech");
   });
 
   it("has a table of contents of links to the sections' anchors, in the order of the registry", async () => {

@@ -12,7 +12,7 @@ import { ABOUT_KEY, loadAboutData } from "./about-data.js";
 import { useAbout } from "./about-context.js";
 import { BUILD_INFO } from "./build-info.js";
 import { copyText } from "./clipboard.js";
-import { SUPPORT_CONTACTS, supportMailLink } from "./contacts.js";
+import { ALTERNATIVE_SUPPORT_EMAIL, PRIMARY_SUPPORT_EMAIL, supportMailLink } from "./contacts.js";
 import { buildSupportReport, type SupportFacts } from "./support-report.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "./support-blocks.js";
 
@@ -136,7 +136,10 @@ export function SupportSection() {
           )}
           {mailFailed && (
             <Alert tone="warn" role="presentation">
-              {t("office.about.contacts.openFailed", { email: SUPPORT_CONTACTS.email })}
+              {t("office.about.contacts.openFailed", {
+                email: PRIMARY_SUPPORT_EMAIL,
+                other: ALTERNATIVE_SUPPORT_EMAIL,
+              })}
             </Alert>
           )}
         </div>

@@ -5,7 +5,12 @@ import {
   ExternalLinkError,
   readSystem,
 } from "../src/office/info/about-api.js";
-import { SUPPORT_CONTACTS, supportMailLink } from "../src/office/info/contacts.js";
+import {
+  ALTERNATIVE_SUPPORT_EMAIL,
+  PRIMARY_SUPPORT_EMAIL,
+  SUPPORT_EMAILS,
+  supportMailLink,
+} from "../src/office/info/contacts.js";
 
 const WIN_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.2849.80";
@@ -73,16 +78,20 @@ describe("createTauriAboutApi", () => {
   });
 });
 
-describe("SUPPORT_CONTACTS", () => {
-  it("holds the public contacts and nothing more: no phone, no hours", () => {
-    expect(Object.keys(SUPPORT_CONTACTS).sort()).toEqual([
-      "companyName",
-      "email",
-      "requisites",
-      "site",
+describe("contacts", () => {
+  it("exports exactly the two support addresses the owner chose, in order, and nothing else", async () => {
+    expect(SUPPORT_EMAILS).toEqual(["hello@v-b.tech", "vladislav.bogatyrev@gmail.com"]);
+    expect(PRIMARY_SUPPORT_EMAIL).toBe("hello@v-b.tech");
+    expect(ALTERNATIVE_SUPPORT_EMAIL).toBe("vladislav.bogatyrev@gmail.com");
+    expect(Object.keys(await import("../src/office/info/contacts.js")).sort()).toEqual([
+      "ALTERNATIVE_SUPPORT_EMAIL",
+      "PRIMARY_SUPPORT_EMAIL",
+      "SUPPORT_EMAILS",
+      "supportMailLink",
     ]);
-    expect(SUPPORT_CONTACTS.email).toBe("hello@markiro.app");
-    expect(SUPPORT_CONTACTS.site).toEqual({ url: "https://markiro.app", label: "markiro.app" });
-    expect(supportMailLink()).toBe("mailto:hello@markiro.app");
+    expect(supportMailLink()).toBe("mailto:hello@v-b.tech");
+    expect(supportMailLink("vladislav.bogatyrev@gmail.com")).toBe(
+      "mailto:vladislav.bogatyrev@gmail.com",
+    );
   });
 });
