@@ -20,6 +20,7 @@ import {
   renderOffice,
   TECHNOLOGIST,
 } from "./support/office.js";
+import { chooseValue } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [{ code: 8, alias: "milk", name: "Молочная продукция" }];
 
@@ -175,9 +176,7 @@ describe("the template editor's code downloads", () => {
 
   it("keeps both code downloads off while a product duplicate breaks its rule, and the JSON on", async () => {
     await openNew(quietLabelRendering());
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     expect(screen.getByRole("button", { name: "Скачать ZPL" })).toHaveProperty("disabled", false);
     await importZpl();
     expect(screen.getByRole("button", { name: "Скачать ZPL" })).toHaveProperty("disabled", true);
@@ -225,9 +224,7 @@ describe("the template editor's code downloads, beyond the plan's cases", () => 
     async (purpose) => {
       const saved = recordDownloads();
       await openNew({ ...quietLabelRendering(), rasterizeText: bitmaps() });
-      fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-        target: { value: purpose },
-      });
+      chooseValue("Назначение", purpose);
       fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
       await waitFor(() => expect(saved.names).toEqual(["label.zpl"]));
       const spec = startingSpec(purpose);
@@ -326,9 +323,7 @@ describe("the template editor's code downloads, beyond the plan's cases", () => 
     await importZpl();
     fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
     await screen.findByText(CODE_FAILED);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     await importZpl();
     expect(screen.getByRole("button", { name: "Скачать ZPL" })).toHaveProperty("disabled", true);
     expect(screen.queryByText(CODE_FAILED)).toBeNull();

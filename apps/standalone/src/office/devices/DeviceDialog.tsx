@@ -10,6 +10,7 @@ import type { DeviceRecord, OfficeLine } from "../../host/protocol.js";
 import { deviceUpdate } from "../../host/requests.js";
 import { deviceNameRule } from "../../lib/rules.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { searchableSelect } from "../select-search.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
@@ -123,7 +124,7 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
           name="lineId"
           render={({ field }) => (
             <Select
-              native
+              {...searchableSelect(t)}
               label={t("office.devices.fields.line")}
               hint={t("office.devices.fields.lineHint")}
               options={options}

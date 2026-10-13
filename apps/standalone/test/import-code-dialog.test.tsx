@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { chooseValue, valueOf } from "./support/select.js";
 import type { ImportAnalysis } from "../src/office/templates/import-analysis.js";
 import {
   ImportCodeDialog,
@@ -63,11 +64,8 @@ afterEach(() => {
 describe("the template import dialog", () => {
   it("opens on the layout's format and resolution, wide, with both buttons off until there is code", () => {
     const { dialog } = open({ initialFormat: "tspl", initialDpi: 300 });
-    expect(screen.getByRole("combobox", { name: "Формат кода" })).toHaveProperty("value", "tspl");
-    expect(screen.getByRole("combobox", { name: "Разрешение кода" })).toHaveProperty(
-      "value",
-      "300",
-    );
+    expect(valueOf("Формат кода")).toBe("tspl");
+    expect(valueOf("Разрешение кода")).toBe("300");
     expect(screen.getByLabelText("Код TSPL (TSC)")).toHaveProperty("value", "");
     expect(button("Проверить код")).toHaveProperty("disabled", true);
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
@@ -121,16 +119,12 @@ describe("the template import dialog", () => {
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
 
     fireEvent.click(button("Проверить код"));
-    fireEvent.change(screen.getByRole("combobox", { name: "Разрешение кода" }), {
-      target: { value: "300" },
-    });
+    chooseValue("Разрешение кода", "300");
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
 
     fireEvent.click(button("Проверить код"));
     expect(screen.getByText("Распознано элементов: 2 · размер 39,29 × 27,09 мм")).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "tspl" },
-    });
+    chooseValue("Формат кода", "tspl");
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
   });
 
@@ -150,9 +144,7 @@ describe("the template import dialog", () => {
 
   it("takes JSON without a resolution, passes a wrapper's name and warns about another purpose", async () => {
     const { onReplace } = open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     expect(screen.queryByRole("combobox", { name: "Разрешение кода" })).toBeNull();
     paste(
       "JSON шаблона",
@@ -174,9 +166,7 @@ describe("the template import dialog", () => {
 
   it("says why code cannot replace the layout: the parser's message, the schema's issues, a too large element", () => {
     open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     paste("JSON шаблона", "{");
     fireEvent.click(button("Проверить код"));
     expect(screen.getByRole("alert").textContent).toMatch(/^.Код не разобран: invalid JSON: /);
@@ -214,9 +204,7 @@ describe("the template import dialog", () => {
     expect(within(fields).getByText("Название товара")).toBeTruthy();
     expect(within(fields).getByText("{{product.name}}")).toBeTruthy();
     expect(within(fields).getAllByRole("button", { name: /^Копировать / })).toHaveLength(13);
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     expect(within(fields).getByText("qty.boxes")).toBeTruthy();
     expect(within(fields).queryByText("{{qty.boxes}}")).toBeNull();
   });
@@ -259,9 +247,7 @@ describe("the template import dialog", () => {
     );
     expect(dialog.querySelector("img, script, b")).toBeNull();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
 
     const twin = {
       kind: "line",
@@ -290,9 +276,7 @@ describe("the template import dialog", () => {
 
   it("names a property the model does not have and counts it as a warning", () => {
     open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     paste("JSON шаблона", JSON.stringify({ ...JSON_SPEC, foo: 1 }));
     fireEvent.click(button("Проверить код"));
     expect(screen.getByText("Предупреждения: 1")).toBeTruthy();
@@ -308,9 +292,7 @@ describe("the template import dialog", () => {
     expect(screen.getByText(/^Распознано элементов/)).toBeTruthy();
     expect(screen.queryByText(/Прижато к границам/)).toBeNull();
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     const hanging = {
       kind: "box",
       id: "frame",
@@ -387,9 +369,7 @@ describe("the template import dialog", () => {
     open();
     const fields = screen.getByRole("region", { name: "Поля шаблона" });
     expect(within(fields).getByText("Вставьте поле целиком в текст или штрихкод.")).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     expect(
       within(fields).getByText("Подставьте поле значением field у текста или data у штрихкода."),
     ).toBeTruthy();
@@ -416,9 +396,7 @@ describe("the template import dialog", () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     open();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     await act(async () => {
       fireEvent.click(button("Копировать qty.boxes"));
     });
@@ -451,13 +429,9 @@ describe("the template import dialog", () => {
   it("names the code field after the chosen format", () => {
     open();
     expect(screen.getByLabelText("Код ZPL")).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "tspl" },
-    });
+    chooseValue("Формат кода", "tspl");
     expect(screen.getByLabelText("Код TSPL (TSC)")).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
-      target: { value: "json" },
-    });
+    chooseValue("Формат кода", "json");
     expect(screen.getByLabelText("JSON шаблона")).toBeTruthy();
   });
 });

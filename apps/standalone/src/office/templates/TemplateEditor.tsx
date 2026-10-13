@@ -352,7 +352,6 @@ export function TemplateEditor({
                 {...errorOf("name")}
               />
               <Select
-                native
                 label={t("office.templateEditor.purpose")}
                 // The host has no way to change a purpose.
                 disabled={template !== null}

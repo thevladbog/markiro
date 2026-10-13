@@ -244,6 +244,7 @@ export function PalletSheetsPage() {
       key: "name",
       title: t("office.palletSheets.table.name"),
       wrap: true,
+      minWidth: 200,
       render: (sheet) => (
         <>
           {sheet.name}{" "}

@@ -14,6 +14,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { chooseText, optionTexts } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -201,14 +202,13 @@ describe("office products", () => {
 
   it("keeps only the drafts, the active or the archived products with the state filter", async () => {
     await openProducts(session());
-    const filter = screen.getByLabelText("Состояние");
-    fireEvent.change(filter, { target: { value: "draft" } });
+    chooseText("Состояние", "Черновик");
     expect(names()).toEqual(["Вода 2"]);
-    fireEvent.change(filter, { target: { value: "active" } });
+    chooseText("Состояние", "Активен");
     expect(names()).toEqual(["Вода 10", "Молоко 3,2% 0,9 л"]);
-    fireEvent.change(filter, { target: { value: "archived" } });
+    chooseText("Состояние", "В архиве");
     expect(names()).toEqual(["Айран"]);
-    fireEvent.change(filter, { target: { value: "all" } });
+    chooseText("Состояние", "Все");
     expect(names()).toHaveLength(4);
   });
 
@@ -249,7 +249,7 @@ describe("office products", () => {
     expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
     // So does a new state filter.
     fireEvent.click(next());
-    fireEvent.change(screen.getByLabelText("Состояние"), { target: { value: "active" } });
+    chooseText("Состояние", "Активен");
     expect(names()[0]).toBe("Товар 1");
     expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
     // A search that leaves one page shows it without the pager.
@@ -378,14 +378,9 @@ describe("office products", () => {
     await openProducts(session());
     expect(screen.getByRole("region", { name: "Товары" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "Поиск и отбор товаров" })).toBeTruthy();
-    expect(screen.getByText("Название, название для печати или GTIN")).toBeTruthy();
-    const options = within(screen.getByLabelText("Состояние")).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "Все",
-      "Черновик",
-      "Активен",
-      "В архиве",
-    ]);
+    // The search's hint is its placeholder: a hint under the field would lift it off the bar's line.
+    expect(screen.getByPlaceholderText("Название, название для печати или GTIN")).toBeTruthy();
+    expect(optionTexts("Состояние")).toEqual(["Все", "Черновик", "Активен", "В архиве"]);
   });
 
   it("ignores spaces around a search", () => {

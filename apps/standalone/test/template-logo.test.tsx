@@ -21,6 +21,7 @@ import {
   renderOffice,
   TECHNOLOGIST,
 } from "./support/office.js";
+import { chooseValue } from "./support/select.js";
 
 // What the label logo is, is tested with the hook (use-label-logo.test.tsx): here the
 // consumers' wiring is, with the logo given.
@@ -152,9 +153,7 @@ async function openNewPallet(): Promise<void> {
   await openList();
   fireEvent.click(screen.getByRole("button", { name: "Создать шаблон" }));
   await screen.findByRole("heading", { name: "Новый шаблон" });
-  fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-    target: { value: "pallet" },
-  });
+  chooseValue("Назначение", "pallet");
 }
 
 /** Rows come on screen as soon as the page asks. */

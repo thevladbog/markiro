@@ -30,6 +30,7 @@ import {
   renderOffice,
   TECHNOLOGIST,
 } from "./support/office.js";
+import { chooseValue } from "./support/select.js";
 
 type Op = (string | number)[];
 
@@ -603,13 +604,9 @@ describe("the template editor's preview", () => {
     if (!(layout instanceof HTMLElement)) throw new Error("no layout card");
     const sample = "Образец с синтетическим кодом. На линии печатается код со сканера.";
     expect(within(layout).queryByText(sample)).toBeNull();
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     expect(within(layout).getByText(sample)).toBeTruthy();
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "pallet" },
-    });
+    chooseValue("Назначение", "pallet");
     expect(
       within(layout).getByRole("img", { name: "Предпросмотр этикетки 100 × 150 мм" }),
     ).toBeTruthy();

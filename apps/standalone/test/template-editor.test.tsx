@@ -40,6 +40,7 @@ import {
   type FakeOfficeSession,
 } from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
+import { chooseValue, chooseValueOn, optionPairsOn, valueOf, valueOn } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -190,13 +191,9 @@ async function importCode(
 ): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
   const dialog = await screen.findByRole("dialog", { name: "Импорт кода этикетки" });
-  fireEvent.change(within(dialog).getByRole("combobox", { name: "Формат кода" }), {
-    target: { value: format },
-  });
+  chooseValueOn(within(dialog).getByRole("combobox", { name: "Формат кода" }), format);
   if (dpi !== undefined) {
-    fireEvent.change(within(dialog).getByRole("combobox", { name: "Разрешение кода" }), {
-      target: { value: String(dpi) },
-    });
+    chooseValueOn(within(dialog).getByRole("combobox", { name: "Разрешение кода" }), String(dpi));
   }
   fireEvent.change(within(dialog).getByLabelText(CODE_LABELS[format]), {
     target: { value: source },
@@ -243,7 +240,7 @@ describe("a new label template", () => {
     async ({ user }) => {
       await openNew(session(user));
       expect(screen.getByLabelText("Название")).toHaveProperty("value", "");
-      expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("value", "box");
+      expect(valueOf("Назначение")).toBe("box");
       expect(screen.getByRole("checkbox", { name: "Включён" }).getAttribute("aria-checked")).toBe(
         "true",
       );
@@ -303,9 +300,7 @@ describe("a new label template", () => {
     fake.api.createTemplate.mockResolvedValue(created("Паллета", { purpose: "pallet" }));
     await openNew(fake);
     type("Название", "Паллета");
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "pallet" },
-    });
+    chooseValue("Назначение", "pallet");
     expect(screen.getByText("Размер: 100 × 150 мм · 203 dpi")).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
@@ -322,9 +317,7 @@ describe("a new label template", () => {
     const fake = session();
     await openNew(fake);
     await importCode(ZPL);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "pallet" },
-    });
+    chooseValue("Назначение", "pallet");
     expect(screen.getByText("Размер: 58,06 × 40,04 мм · 203 dpi")).toBeTruthy();
     expect(screen.getByText("Элементов в макете: 2")).toBeTruthy();
   });
@@ -422,9 +415,7 @@ describe("a new label template", () => {
   it("holds a product duplicate to the duplicate rule and offers the domain's duplicate layout back", async () => {
     const fake = session();
     await openNew(fake);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     expect(screen.queryByRole("alert")).toBeNull();
     await importCode(ZPL);
     expect(screen.getByRole("alert").textContent).toContain(
@@ -442,9 +433,7 @@ describe("a new label template", () => {
   it("sends nothing for a product duplicate that breaks the duplicate rule, even when the form is submitted without its button", async () => {
     const fake = session();
     await openNew(fake);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     type("Название", "Дубликат");
     await importCode(ZPL);
     expect(saveButton()).toHaveProperty("disabled", true);
@@ -582,11 +571,11 @@ describe("a new label template", () => {
     await openNew(session());
     const purpose = () => screen.getByRole("combobox", { name: "Назначение" });
     const elements = (n: number) => screen.getByText(`Элементов в макете: ${n}`);
-    fireEvent.change(purpose(), { target: { value: "product_duplicate" } });
+    chooseValueOn(purpose(), "product_duplicate");
     expect(elements(buildDuplicateLabelTemplate().elements.length)).toBeTruthy();
-    fireEvent.change(purpose(), { target: { value: "pallet" } });
+    chooseValueOn(purpose(), "pallet");
     expect(elements(buildPalletLabelTemplates()[0]?.spec.elements.length ?? -1)).toBeTruthy();
-    fireEvent.change(purpose(), { target: { value: "box" } });
+    chooseValueOn(purpose(), "box");
     expect(
       screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeTruthy();
@@ -663,9 +652,7 @@ describe("a new label template", () => {
       clicked.push(this.download);
     });
     await openNew(session());
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "pallet" },
-    });
+    chooseValue("Назначение", "pallet");
     fireEvent.click(screen.getByRole("button", { name: "Скачать JSON" }));
     expect(JSON.parse(await (urls.blobs[0]?.text() ?? Promise.resolve("")))).toStrictEqual({
       name: "",
@@ -718,14 +705,8 @@ describe("a new label template", () => {
     await importCode(tspl, "tspl", 300);
     fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
     const dialog = await screen.findByRole("dialog", { name: "Импорт кода этикетки" });
-    expect(within(dialog).getByRole("combobox", { name: "Формат кода" })).toHaveProperty(
-      "value",
-      "tspl",
-    );
-    expect(within(dialog).getByRole("combobox", { name: "Разрешение кода" })).toHaveProperty(
-      "value",
-      "300",
-    );
+    expect(valueOn(within(dialog).getByRole("combobox", { name: "Формат кода" }))).toBe("tspl");
+    expect(valueOn(within(dialog).getByRole("combobox", { name: "Разрешение кода" }))).toBe("300");
     fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByText("Элементов в макете: 1")).toBeTruthy();
@@ -783,19 +764,13 @@ describe("the label's size", () => {
     await openNew(fake);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     const dialog = sizeDialog();
-    expect(within(dialog).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "58x40",
-    );
+    expect(valueOn(within(dialog).getByRole("combobox", { name: "Размер" }))).toBe("58x40");
     expect(within(dialog).getByLabelText("Ширина, мм")).toHaveProperty("value", "58");
     expect(within(dialog).getByLabelText("Высота, мм")).toHaveProperty("value", "40");
-    expect(within(dialog).getByRole("combobox", { name: "Разрешение макета" })).toHaveProperty(
-      "value",
+    expect(valueOn(within(dialog).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
       "203",
     );
-    fireEvent.change(within(dialog).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "100x150" },
-    });
+    chooseValueOn(within(dialog).getByRole("combobox", { name: "Размер" }), "100x150");
     expect(within(dialog).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
     expect(within(dialog).getByLabelText("Высота, мм")).toHaveProperty("value", "150");
     await applySize();
@@ -815,13 +790,8 @@ describe("the label's size", () => {
     await openNew(fake);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     type("Ширина, мм", "58,5");
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "custom",
-    );
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), {
-      target: { value: "300" },
-    });
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     await applySize();
     expect(screen.getByText("Размер: 58,5 × 40 мм · 300 dpi")).toBeTruthy();
   });
@@ -854,9 +824,7 @@ describe("the label's size", () => {
         "Элемент макета больше этой этикетки. Увеличьте размер или импортируйте код заново.",
       ),
     ).toBeTruthy();
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "58x40" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "58x40");
     expect(within(sizeDialog()).queryByRole("alert")).toBeNull();
     await applySize();
     expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
@@ -899,9 +867,9 @@ describe("the label's size", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     const preset = () => within(sizeDialog()).getByRole("combobox", { name: "Размер" });
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "58");
-    expect(preset()).toHaveProperty("value", "custom");
-    fireEvent.change(preset(), { target: { value: "58x40" } });
-    expect(preset()).toHaveProperty("value", "58x40");
+    expect(valueOn(preset())).toBe("custom");
+    chooseValueOn(preset(), "58x40");
+    expect(valueOn(preset())).toBe("58x40");
     await applySize();
     expect(screen.getByText("Размер: 58 × 40 мм · 300 dpi")).toBeTruthy();
     expect(await savedSpec(fake)).toStrictEqual({ ...imported, widthMm: 58, heightMm: 40 });
@@ -915,10 +883,7 @@ describe("the label's size", () => {
     const imported = importedSpec(ZPL_300_DPI, 300);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     type("Высота, мм", "40");
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "custom",
-    );
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
     await applySize();
     expect(await savedSpec(fake)).toStrictEqual({ ...imported, heightMm: 40 });
   });
@@ -932,10 +897,7 @@ describe("the label's size", () => {
     type("Ширина, мм", "57");
     type("Ширина, мм", "58");
     type("Высота, мм", "40");
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "58x40",
-    );
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("58x40");
     await applySize();
     expect(await savedSpec(fake)).toStrictEqual({
       ...importedSpec(ZPL_300_DPI, 300),
@@ -1023,10 +985,7 @@ describe("the label's size", () => {
     expect(sizeFieldError("Высота, мм")).toBe("Размер — от 10 до 300 мм");
     expect(sizeFieldError("Ширина, мм")).toBeUndefined();
     expect(within(sizeDialog()).queryByRole("alert")).toBeNull();
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "custom",
-    );
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
     type("Высота, мм", "40");
     expect(sizeFieldError("Высота, мм")).toBeUndefined();
     type("Ширина, мм", "301");
@@ -1036,17 +995,13 @@ describe("the label's size", () => {
     type("Высота, мм", "40");
     expect(sizeFieldError("Высота, мм")).toBeUndefined();
     expect(sizeFieldError("Ширина, мм")).toBe("Размер — от 10 до 300 мм");
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "60x40" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "60x40");
     expect(sizeFieldError("Ширина, мм")).toBeUndefined();
     type("Ширина, мм", "9");
     type("Высота, мм", "9");
     await applySize();
     expect(within(sizeDialog()).getAllByText("Размер — от 10 до 300 мм")).toHaveLength(2);
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "100x100" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "100x100");
     expect(within(sizeDialog()).queryByText("Размер — от 10 до 300 мм")).toBeNull();
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
   });
@@ -1057,9 +1012,7 @@ describe("the label's size", () => {
     await openNew(fake);
     await importCode(WIDE_ZPL);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), {
-      target: { value: "300" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     type("Ширина, мм", "10");
     await applySize();
     expect(within(sizeDialog()).getByRole("alert")).toBeTruthy();
@@ -1084,13 +1037,8 @@ describe("the label's size", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "58,06");
     expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", "41,29");
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "custom",
-    );
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), {
-      target: { value: "300" },
-    });
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     await applySize();
     expect(screen.getByText("Размер: 58,06 × 41,29 мм · 300 dpi")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
@@ -1105,26 +1053,19 @@ describe("the label's size", () => {
     await openNew(fake);
     await importCode(ZPL, "zpl", 300);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    expect(
-      within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }),
-    ).toHaveProperty("value", "300");
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "100x150" },
-    });
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), {
-      target: { value: "203" },
-    });
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
+      "300",
+    );
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "100x150");
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "203");
     await applySize();
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
-      "value",
-      "100x150",
-    );
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("100x150");
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
     expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", "150");
-    expect(
-      within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }),
-    ).toHaveProperty("value", "203");
+    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
+      "203",
+    );
   });
 
   it("offers the presets and «Свой размер», fills both fields from each preset, and leaves typed fields alone on «Свой размер»", async () => {
@@ -1137,11 +1078,7 @@ describe("the label's size", () => {
         "Станция печатает в разрешении своего принтера; это значение — для импорта кода и предпросмотра.",
       ),
     ).toBeTruthy();
-    expect(
-      within(preset())
-        .getAllByRole("option")
-        .map((option) => [option.getAttribute("value"), option.textContent]),
-    ).toStrictEqual([
+    expect(optionPairsOn(preset())).toStrictEqual([
       ["58x40", "58 × 40 мм"],
       ["60x40", "60 × 40 мм"],
       ["75x120", "75 × 120 мм"],
@@ -1150,9 +1087,7 @@ describe("the label's size", () => {
       ["custom", "Свой размер"],
     ]);
     expect(
-      within(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }))
-        .getAllByRole("option")
-        .map((option) => [option.getAttribute("value"), option.textContent]),
+      optionPairsOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" })),
     ).toStrictEqual([
       ["203", "203 dpi"],
       ["300", "300 dpi"],
@@ -1163,20 +1098,20 @@ describe("the label's size", () => {
       ["100x100", "100", "100"],
       ["58x40", "58", "40"],
     ] as const) {
-      fireEvent.change(preset(), { target: { value: key } });
+      chooseValueOn(preset(), key);
       expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", width);
       expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", height);
-      expect(preset()).toHaveProperty("value", key);
+      expect(valueOn(preset())).toBe(key);
     }
     type("Ширина, мм", "70");
     type("Высота, мм", "45,5");
-    fireEvent.change(preset(), { target: { value: "custom" } });
+    chooseValueOn(preset(), "custom");
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "70");
     expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", "45,5");
-    expect(preset()).toHaveProperty("value", "custom");
+    expect(valueOn(preset())).toBe("custom");
     type("Ширина, мм", "58");
     type("Высота, мм", "40");
-    expect(preset()).toHaveProperty("value", "58x40");
+    expect(valueOn(preset())).toBe("58x40");
   });
 
   it("closes without a change on «Отмена» and forgets what was typed, and marks the draft changed once a size is applied", async () => {
@@ -1214,14 +1149,10 @@ describe("the label's size", () => {
       created("Дубликат", { purpose: "product_duplicate" }),
     );
     await openNew(fake);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "product_duplicate" },
-    });
+    chooseValue("Назначение", "product_duplicate");
     const duplicate = buildDuplicateLabelTemplate();
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "100x100" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "100x100");
     await applySize();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await savedSpec(fake)).toStrictEqual(
@@ -1539,7 +1470,7 @@ describe("changing a label template", () => {
     fake.api.updateTemplate.mockResolvedValue(milk({ purpose: "pallet", rev: 62 }));
     await openEdit(fake);
     const purpose = screen.getByRole("combobox", { name: "Назначение" });
-    expect(purpose).toHaveProperty("value", "pallet");
+    expect(valueOn(purpose)).toBe("pallet");
     expect(purpose).toHaveProperty("disabled", true);
     expect(screen.getByRole("checkbox", { name: "Включён" }).getAttribute("aria-checked")).toBe(
       "false",
@@ -1565,9 +1496,7 @@ describe("changing a label template", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: "Упакованная вода" }));
     expect(saveButton()).toHaveProperty("disabled", false);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
-      target: { value: "100x150" },
-    });
+    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "100x150");
     await applySize();
     let answer: (rows: LabelTemplateSummary[]) => void = () => undefined;
     fake.api.listTemplates.mockReturnValueOnce(
@@ -1851,9 +1780,7 @@ describe("copying and deleting a label template", () => {
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
     await settle();
     expect(fake.api.getTemplate).toHaveBeenCalledTimes(2);
-    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
-      target: { value: "pallet" },
-    });
+    chooseValue("Назначение", "pallet");
     expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
     await save();
     expect(fake.api.createTemplate.mock.calls[0]?.[1]).toMatchObject({
@@ -1935,7 +1862,7 @@ describe("copying and deleting a label template", () => {
     fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
     await settle();
-    expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("value", "pallet");
+    expect(valueOf("Назначение")).toBe("pallet");
     expect(screen.getByRole("radio", { name: "Все категории" }).getAttribute("aria-checked")).toBe(
       "true",
     );
