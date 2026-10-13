@@ -4,7 +4,7 @@ import { load } from "js-yaml";
 export const segmentStrategy = {
   "fail-fast": false,
   "max-parallel": 3,
-  matrix: { segment: ["foundation", "dataset", "office", "requests", "browser"] },
+  matrix: { segment: ["foundation", "dataset", "office", "requests", "browser", "persistence"] },
 };
 const anchors = new Map([
   [12, "Verify corrected dataset Cases on disposable databases"],
@@ -20,6 +20,7 @@ const anchors = new Map([
   [81, "Verify US profile, session and master-data persistence on disposable databases"],
 ]);
 export function segmentForStep(index) {
+  if (index === 81) return "persistence";
   return index < 12
     ? undefined
     : index < 19
@@ -61,12 +62,12 @@ export function withoutParallelSegments(workflow) {
 export function withoutParallelSegmentsBytes(source) {
   if (!hasExactParallelSegments(load(source))) return source;
   const block =
-    "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, office, requests, browser]\n";
+    "    strategy:\n      fail-fast: false\n      max-parallel: 3\n      matrix:\n        segment: [foundation, dataset, office, requests, browser, persistence]\n";
   if (source.split(block).length !== 2) return source;
   return source
     .replace(block, "")
     .replace(
-      /^ {8}if: matrix\.segment == '(foundation|dataset|office|requests|browser)'(?: \|\| matrix\.segment == 'browser')?\n/gm,
+      /^ {8}if: matrix\.segment == '(foundation|dataset|office|requests|browser|persistence)'(?: \|\| matrix\.segment == 'browser')?\n/gm,
       "",
     );
 }

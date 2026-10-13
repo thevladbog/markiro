@@ -2558,3 +2558,12 @@ parity, concurrent-commit isolation and actual driver/cleanup failure assertions
 Only its old per-table-cursor shape assertions were replaced with exact single
 cursor coverage, total row count and tail-batch checks. No test or job timeout
 was increased, and no runtime product behavior changed.
+
+The next remote run passed foundations, dataset, office and Requests, including
+the corrected 5-second Transformation test. Browser reached the unchanged
+30-minute job limit during the final persistence block; completed assertions
+were green. That entire block now has a sixth isolated `persistence` owner with
+the same common shared/API builds and its own PostgreSQL service. Browser keeps
+its existing worker entry build. All 82 predecessor steps, commands and byte/AST
+pins remain unchanged, each specialized verification still has exactly one
+owner, maximum concurrency remains three, and each job retains 30 minutes.

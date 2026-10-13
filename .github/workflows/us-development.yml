@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       max-parallel: 3
       matrix:
-        segment: [foundation, dataset, office, requests, browser]
+        segment: [foundation, dataset, office, requests, browser, persistence]
     services:
       us-postgres:
         image: postgres:17-alpine
@@ -357,7 +357,7 @@ jobs:
         run: |
           pnpm --filter @markiro/api exec vitest run test/us-shipping-balance.e2e.test.ts test/us-shipping-balance-read.e2e.test.ts test/us-shipping-draft.e2e.test.ts test/us-shipping-readiness.e2e.test.ts test/us-shipping-status-effects.e2e.test.ts test/us-shipping-finalization.e2e.test.ts test/us-shipping-finalization-concurrency.e2e.test.ts test/us-shipping-http.e2e.test.ts
       - name: Verify US profile, session and master-data persistence on disposable databases
-        if: matrix.segment == 'browser'
+        if: matrix.segment == 'persistence'
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
