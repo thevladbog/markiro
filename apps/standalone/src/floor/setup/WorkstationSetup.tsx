@@ -52,7 +52,6 @@ import {
   type PrintPurpose,
   type WorkstationSettings,
 } from "./workstation-settings.js";
-import "../floor-fit.css";
 import "./workstation-setup.css";
 
 /** The steps of the tones' level: 0, 10, … 100. */
@@ -347,9 +346,9 @@ export function WorkstationSetup({
 
   if (readFailed || draft === null || stored === null) {
     return (
-      <main className="workstation-setup floor-fit" aria-labelledby="workstation-setup-title">
+      <section className="workstation-setup" aria-labelledby="workstation-setup-title">
         <header className="workstation-setup__header">
-          <h1 id="workstation-setup-title">{t("floor.setup.title")}</h1>
+          <h2 id="workstation-setup-title">{t("floor.setup.title")}</h2>
         </header>
         <div className="workstation-setup__loading" aria-live="polite">
           {readFailed ? (
@@ -365,7 +364,7 @@ export function WorkstationSetup({
             {t("floor.setup.back")}
           </Button>
         </footer>
-      </main>
+      </section>
     );
   }
 
@@ -1164,9 +1163,9 @@ export function WorkstationSetup({
         : t("floor.setup.hint.sound");
 
   return (
-    <main className="workstation-setup floor-fit" aria-labelledby="workstation-setup-title">
+    <section className="workstation-setup" aria-labelledby="workstation-setup-title">
       <header className="workstation-setup__header">
-        <h1 id="workstation-setup-title">{t("floor.setup.title")}</h1>
+        <h2 id="workstation-setup-title">{t("floor.setup.title")}</h2>
       </header>
 
       <SetupTabs
@@ -1236,6 +1235,6 @@ export function WorkstationSetup({
           {t("floor.setup.save")}
         </Button>
       </footer>
-    </main>
+    </section>
   );
 }

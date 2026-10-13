@@ -25,7 +25,6 @@ import type { Pairing } from "../../local/reference-sync.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
 import type { ScanSource } from "../scan-source.js";
 import { createWorkQueue } from "../work/work-queue.js";
-import "../floor-fit.css";
 import { TemplatePicker } from "./TemplatePicker.js";
 import { WarehousePanel } from "./WarehousePanel.js";
 import "./warehouse.css";
@@ -563,8 +562,8 @@ export function WarehouseScreen({
 
   /** The screen's frame: the cloud's heading, the work and the session side by side, the footer. */
   const frame = (heading: ReactNode, body: ReactNode, footer: ReactNode = null) => (
-    <main
-      className="warehouse-reprint floor-fit"
+    <section
+      className="warehouse-reprint"
       aria-labelledby="warehouse-title"
       tabIndex={-1}
       ref={viewRef}
@@ -572,23 +571,19 @@ export function WarehouseScreen({
       <header className="warehouse-heading">
         <div>
           <p>{t("floor.warehouse.eyebrow")}</p>
-          <h1 id="warehouse-title">{t("floor.warehouse.title")}</h1>
+          <h2 id="warehouse-title">{t("floor.warehouse.title")}</h2>
         </div>
         <div className="warehouse-heading-actions">{heading}</div>
       </header>
       {body}
       {footer === null ? null : <footer className="warehouse-footer">{footer}</footer>}
-    </main>
+    </section>
   );
   /** A question in the cloud's full-screen dialog layout, inside the same frame. */
   const question = (node: ReactNode) => (
-    <main
-      className="warehouse-reprint warehouse-reprint--question floor-fit"
-      tabIndex={-1}
-      ref={viewRef}
-    >
+    <section className="warehouse-reprint warehouse-reprint--question" tabIndex={-1} ref={viewRef}>
       {node}
-    </main>
+    </section>
   );
   const pauseButton = (
     <Button size="floor" variant="secondary" {...leave(onLeave)}>
@@ -967,7 +962,10 @@ export function WarehouseScreen({
         >
           <ScanMark className="warehouse-scan-mark" />
           {job === null ? (
-            <h2>{t("floor.warehouse.prompt")}</h2>
+            <>
+              <h2>{t("floor.warehouse.prompt")}</h2>
+              <p>{t("floor.warehouse.hint.ready")}</p>
+            </>
           ) : (
             <div className="warehouse-result">
               <h2>{subject}</h2>

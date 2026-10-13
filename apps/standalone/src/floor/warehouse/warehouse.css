@@ -4,20 +4,23 @@
   .warehouse-session-panel, .warehouse-reasons, the template dialog's .warehouse-template-* and
   .label-template-*). The cloud's full-screen dialogs are laid out in-frame as .warehouse-panel.
 */
-main.warehouse-reprint {
+section.warehouse-reprint {
   display: grid;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
+  padding: var(--sp-5);
   overflow: hidden;
+  /* A fixed, non-scrolling station screen (as the shift hub's): it never grows the page. */
+  contain: size;
   gap: var(--sp-5);
   grid-template-rows: auto minmax(0, 1fr) auto;
   color: var(--fg-1);
   outline: none;
 }
 
-main.warehouse-reprint--question {
+section.warehouse-reprint--question {
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -33,7 +36,7 @@ main.warehouse-reprint--question {
   min-width: 0;
 }
 
-.warehouse-heading h1 {
+.warehouse-heading h2 {
   margin: 0;
   font: var(--floor-title);
   font-size: 2rem;
@@ -308,6 +311,7 @@ main.warehouse-reprint--question {
 
 .warehouse-confirm-body p {
   margin: 0;
+  font: var(--floor-body);
 }
 
 .warehouse-manual-form {
@@ -419,7 +423,8 @@ main.warehouse-reprint--question {
     gap: var(--sp-4);
   }
 
-  main.warehouse-reprint {
+  section.warehouse-reprint {
+    padding: var(--sp-4);
     gap: var(--sp-4);
   }
 
