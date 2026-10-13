@@ -494,16 +494,17 @@ pub async fn snapshot(
         Option<u32>,
         String,
         bool,
+        Option<String>,
     );
     let product: Option<ProductRow> = sqlx::query_as(
-        "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived \
-         FROM products WHERE id = ?",
+        "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived, \
+         egais_code FROM products WHERE id = ?",
     )
     .bind(product_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (gtin14, name, print_name, group, shelf_life_days, status, archived) =
+    let (gtin14, name, print_name, group, shelf_life_days, status, archived, egais_code) =
         product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
     let group = match (status.parse::<ProductStatus>(), archived, group) {
         (Ok(ProductStatus::Active), false, Some(group)) => group,
@@ -580,7 +581,9 @@ pub async fn snapshot(
             print_name,
             chz_product_group_code: group,
             shelf_life_days,
-            egais_code: None,
+            // Frozen with the rest (plan ТОВ): a catalog change never reaches
+            // an open shift, and a reprint prints the first label's code.
+            egais_code,
         },
         box_template,
         issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),

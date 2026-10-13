@@ -1906,3 +1906,90 @@ async fn a_database_without_0013_and_0014_takes_0015_and_the_others_late() {
         .unwrap();
     assert_eq!(rows, 0);
 }
+
+/// Plan ТОВ: the lookup answers the EGAIS code the record's shift froze, so a
+/// warehouse reprint prints what the first label printed even after the
+/// office changed the product's code.
+#[tokio::test]
+async fn a_lookup_answers_the_egais_code_the_shift_froze() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    // The product becomes beer (ЧЗ group 15) with a code before the shift.
+    sqlx::query("UPDATE products SET chz_group_code = 15, egais_code = '0150320000001234567'")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let key = admin.key.clone();
+    let (status, moved) = admin
+        .app
+        .send(json_request(
+            with_device(request("PUT", "/v1/device/line"), &key),
+            json!({ "lineId": setup.line }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, created) = admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/shifts"), &key),
+            json!({
+                "requestId": BLOCK_REQUEST, "productId": setup.product,
+                "boxTemplateId": setup.template, "productionDate": "2026-10-09"
+            }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let shift = created["id"].as_str().unwrap().to_owned();
+    let (status, entered) = admin
+        .app
+        .send(support::app::empty(with_device(
+            request("POST", &format!("/v1/device/shifts/{shift}/enter")),
+            &key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let block = issue_block(&admin.app, &key, PALLET_REQUEST).await;
+    let records = [
+        fact(
+            &record_id(1),
+            "scan",
+            &shift,
+            ok_scan(1, &box_id(1), &instant(1, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "box_closed",
+            &shift,
+            box_closed(
+                &box_id(1),
+                &block,
+                1500,
+                &[1],
+                &instant(1, 0),
+                &instant(2, 0),
+            ),
+        ),
+    ];
+    let answered = receipts(&admin.app, &key, &records).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    sqlx::query("UPDATE products SET egais_code = '0150320000007654321'")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    for body in [
+        json!({ "codeHash": code_hash(1) }),
+        json!({ "sscc": sscc(1500) }),
+    ] {
+        let (status, answer) = lookup(&admin, &key, body.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{body}: {answer}");
+        assert_eq!(
+            answer["source"]["product"]["egaisCode"], "0150320000001234567",
+            "{body}"
+        );
+    }
+}
