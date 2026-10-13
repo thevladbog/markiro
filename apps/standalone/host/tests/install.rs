@@ -870,7 +870,10 @@ impl Commands for IcaclsSeesTheDirectory {
 fn install_host_in(
     paths: &HostPaths,
     log: &Log,
-) -> (Result<(), markiro_host::BoxError>, IcaclsSeesTheDirectory) {
+) -> (
+    Result<Vec<&'static str>, markiro_host::BoxError>,
+    IcaclsSeesTheDirectory,
+) {
     let mut services = FakeServices::new(log, &[None, Some(ServiceState::Running)]);
     let mut commands = IcaclsSeesTheDirectory {
         inner: FakeCommands::new(log),
@@ -893,7 +896,8 @@ fn install_creates_the_data_directory_before_icacls_reads_it_and_opens_the_defau
     assert!(!paths.data_dir.exists());
     let log = Log::default();
     let (result, commands) = install_host_in(&paths, &log);
-    result.unwrap();
+    // Nothing to warn about when every step worked.
+    assert_eq!(result.unwrap(), Vec::<&str>::new());
     assert_eq!(commands.directory_existed, [true, true, true]);
     assert!(paths.logs_dir().is_dir() && paths.tls_dir().is_dir());
     // The trial's key first (plan ЛЦ-2), then the data folder and the service.
@@ -925,8 +929,8 @@ fn install_opens_the_port_the_host_was_configured_with() {
 }
 
 /// The trial's key is a second mark of the trial, not a condition of the
-/// host: a refusal, or a PowerShell that does not start, is reported and the
-/// install goes on, every step of it.
+/// host: a refusal, or a PowerShell that does not start, is returned as a
+/// warning and the install goes on, every step of it.
 #[test]
 fn a_trial_key_the_installer_cannot_make_does_not_stop_the_install() {
     struct TrialKeyFails {
@@ -960,7 +964,7 @@ fn a_trial_key_the_installer_cannot_make_does_not_stop_the_install() {
             inner: FakeCommands::new(&log),
             spawn,
         };
-        install::install_host(
+        let warnings = install::install_host(
             &paths,
             Path::new(EXE),
             &mut services,
@@ -968,6 +972,9 @@ fn a_trial_key_the_installer_cannot_make_does_not_stop_the_install() {
             &mut |_| (),
         )
         .unwrap();
+        // The installer's console says so (the `install` command has no
+        // log), in a text that names no value of the failure.
+        assert_eq!(warnings, [install::TRIAL_KEY_WARNING], "{spawn}");
         let runs = &commands.inner.runs;
         assert_eq!(script_of(&runs[0].1), trial_key_script(), "{spawn}");
         assert_eq!(

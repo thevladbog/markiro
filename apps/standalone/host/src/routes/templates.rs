@@ -263,8 +263,16 @@ pub async fn update_template(
         .spec
         .as_ref()
         .is_some_and(|spec| *spec != current.spec);
+    if current.stock && (name != current.name || spec_changed) {
+        return Err(ApiError::conflict(
+            "stock_template",
+            "a stock template keeps its name and layout: copy it to change them",
+        ));
+    }
     // A new name or layout is an edit of the label editor (plan ЛЦ-2 Д8);
     // the flag, the categories and a delete are not, and printing never asks.
+    // After the stock rule: a stock template's edit is refused whatever the
+    // license says, and still before any write.
     if spec_changed || name != current.name {
         crate::license::seats::require_feature(
             &state,
@@ -272,12 +280,6 @@ pub async fn update_template(
             crate::license::seats::Feature::LabelEditor,
         )
         .await?;
-    }
-    if current.stock && (name != current.name || spec_changed) {
-        return Err(ApiError::conflict(
-            "stock_template",
-            "a stock template keeps its name and layout: copy it to change them",
-        ));
     }
     if enabled != current.enabled || codes != current.chz_product_group_codes {
         // A default stays a template that fits its slot.

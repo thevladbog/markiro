@@ -222,17 +222,25 @@ pub fn install(
     wait_until_running(services, sleep)
 }
 
+/// The warning of an install whose trial key (plan ЛЦ-2, spec §3.4) was not
+/// prepared. It names no value of the failure: the console shows it as is.
+pub const TRIAL_KEY_WARNING: &str =
+    "the trial mark's registry key was not prepared; the trial is kept in the database only";
+
 /// The `install` subcommand: creates the data directory (and the folders in
 /// it), which `icacls` needs to exist, then [`install`] with the port the host
-/// is configured for (`host.json`, else the default).
+/// is configured for (`host.json`, else the default). Returns the warnings of
+/// steps that failed without stopping the install, for the installer's
+/// console (the command keeps no log).
 pub fn install_host(
     paths: &HostPaths,
     executable: &Path,
     services: &mut dyn Services,
     commands: &mut dyn Commands,
     sleep: &mut dyn FnMut(Duration),
-) -> Result<(), crate::BoxError> {
+) -> Result<Vec<&'static str>, crate::BoxError> {
     paths.ensure()?;
+    let mut warnings = Vec::new();
     // The trial's mark (plan ЛЦ-2, spec §3.4): a key the service may set
     // values in. A refusal does not stop the install: the database keeps the
     // trial too.
@@ -242,6 +250,7 @@ pub fn install_host(
         &powershell_args(&trial_key_script()),
     ) {
         tracing::warn!(%error, "the trial mark's registry key was not prepared");
+        warnings.push(TRIAL_KEY_WARNING);
     }
     install(
         &paths.data_dir,
@@ -251,7 +260,7 @@ pub fn install_host(
         commands,
         sleep,
     )?;
-    Ok(())
+    Ok(warnings)
 }
 
 /// The host's port for the firewall: `host.json`'s when the host has started

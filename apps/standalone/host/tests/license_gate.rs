@@ -558,7 +558,9 @@ async fn an_extension_kept_answers_from_what_it_knew_when_the_read_after_fails()
             json!(license_id(1))
         )
     );
-    // The extension was committed with its row and its revision.
+    // The extension was committed: its audit row and its revision are there.
+    // Its columns cannot be read back — the trigger deleted the clock's row
+    // — so the answer above is the proof of the fallback.
     assert_eq!(host_revision(&admin.app).await, rev + 1);
     assert_eq!(
         audit_trail(&admin.app, actions::LICENSE_EMERGENCY).await,

@@ -8,14 +8,17 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_rows, device_shift_body, empty, host_revision, json as json_request,
-    office_template, pair_device, pallet_shift_body, pallet_template, plan_shift, request,
-    sheet_spec, shift_body, shift_setup, with_device, Admin,
+    accepted, admin, audit_rows, box_closed, box_id, device_shift_body, empty, fact, host_revision,
+    instant, issue_block, issue_pallet_block, json as json_request, office_template, ok_scan,
+    pair_device, pallet_closed, pallet_id, pallet_shift_body, pallet_template, plan_shift,
+    receipts, record_id, request, sheet_spec, shift_body, shift_setup, with_device, Admin,
 };
 use support::license::{claim_device, file, load_ok, pairing_code};
 
 const REQUEST: &str = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
 const OTHER_REQUEST: &str = "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9";
+const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
+const PALLET_REQUEST: &str = "5e4d3c2b-1a09-4f8e-9d7c-6b5a4f3e2d1c";
 
 fn without(host: &str, feature: &str) -> String {
     file(host, |terms| terms["features"][feature] = json!(false))
@@ -133,6 +136,10 @@ async fn a_handheld_pairs_only_with_the_feature_and_keeps_the_code() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, device) = device_call(&admin, &handheld_key, "GET", "/v1/device", None).await;
     assert_eq!(status, StatusCode::OK, "{device}");
+    // Only a handheld asks: an office PC pairs by code without the feature.
+    let code = pairing_code(&admin).await;
+    let (status, body) = claim_device(&admin, &code, "office").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -187,6 +194,22 @@ async fn pallets_are_refused_to_new_plans_and_kept_by_the_plans_that_have_them()
             .await
             .0,
         StatusCode::OK
+    );
+    // A plan without pallets keeps them off and is edited as before.
+    let (status, edited) = admin
+        .call(
+            "PUT",
+            &plain_path,
+            Some(json!({ "plannedQty": 90, "expectedRev": plain["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        (
+            edited["plannedQty"].clone(),
+            edited["palletsEnabled"].clone()
+        ),
+        (json!(90), json!(false))
     );
     let planned_path = format!("/v1/office/shifts/{}", planned["id"].as_str().unwrap());
     let (status, edited) = admin
@@ -272,6 +295,44 @@ async fn pallets_are_refused_to_new_plans_and_kept_by_the_plans_that_have_them()
     let (status, entered) = device_call(&admin, &admin.key, "POST", &enter, None).await;
     assert_eq!(status, StatusCode::OK, "{entered}");
     assert_eq!(entered["palletsEnabled"], true);
+    // An open shift with pallets goes on (spec §4.7): its boxes open a
+    // pallet and the pallet closes.
+    let shift = planned["id"].as_str().unwrap();
+    let block = issue_block(&admin.app, &admin.key, BLOCK_REQUEST).await;
+    let pallets = issue_pallet_block(&admin.app, &admin.key, PALLET_REQUEST).await;
+    let pallet = pallet_id(1);
+    let mut closed = box_closed(
+        &box_id(1),
+        &block,
+        1500,
+        &[1],
+        &instant(1, 0),
+        &instant(2, 0),
+    );
+    closed["palletId"] = json!(pallet);
+    let records = [
+        fact(
+            &record_id(1),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(1, 0)),
+        ),
+        fact(&record_id(2), "box_closed", shift, closed),
+        fact(
+            &record_id(3),
+            "pallet_closed",
+            shift,
+            pallet_closed(&pallet, &pallets, 40, 1, &instant(2, 0), &instant(3, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &admin.key, &records).await,
+        vec![
+            accepted(&record_id(1)),
+            accepted(&record_id(2)),
+            accepted(&record_id(3))
+        ]
+    );
 }
 
 #[tokio::test]
@@ -353,6 +414,44 @@ async fn templates_are_made_and_edited_only_with_the_label_editor() {
         .call("DELETE", &format!("/v1/office/templates/{doomed}"), None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    // A stock template keeps its name and layout whatever the license says:
+    // its refusal is the stock rule's, not the feature's.
+    let stock = uuid::Uuid::new_v4().to_string();
+    let rev: i64 = {
+        let mut tx = markiro_host::db::begin_write(&admin.app.state.pool)
+            .await
+            .unwrap();
+        let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, spec, stock, rev) \
+             VALUES (?, 'Коробка 58×40', 'box', 1, ?, 1, ?)",
+        )
+        .bind(&stock)
+        .bind(layout.to_string())
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        rev
+    };
+    let stock_path = format!("/v1/office/templates/{stock}");
+    let before = marks(&admin).await;
+    for edit in [
+        json!({ "name": "Моя коробка", "expectedRev": rev }),
+        json!({ "spec": other_layout, "expectedRev": rev }),
+    ] {
+        let (status, body) = admin.call("PUT", &stock_path, Some(edit.clone())).await;
+        assert_eq!(
+            (status, body["error"]["details"].clone()),
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "stock_template" })
+            ),
+            "{edit} {body}"
+        );
+    }
+    assert_eq!(marks(&admin).await, before);
     // An A4 sheet is no label template (Д8): the library takes it.
     let (status, sheet) = admin
         .call(
