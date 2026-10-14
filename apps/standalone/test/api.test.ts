@@ -5,6 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/api.js";
 import { knownBlocksRequestSchema } from "../src/host/backups.js";
 import {
+  disaggregationCreateSchema,
+  disaggregationLinesAddSchema,
+  disaggregationReasonCreateSchema,
+  disaggregationReasonUpdateSchema,
+  disaggregationUpdateSchema,
+} from "../src/host/disaggregation.js";
+import {
   createTauriHostClient,
   HostError,
   type HostClient,
@@ -125,6 +132,18 @@ const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
 const UPDATE_STARTED = updateStartedSchema.parse(fixture("update-started.json"));
+const DOCUMENT_ID = "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c";
+const REASON_ID = "d15a0000-0000-4000-8000-000000000003";
+const DOCUMENT_LINE_ID = "c0000000-0000-4000-8000-000000000004";
+const REASON_CREATE = disaggregationReasonCreateSchema.parse(
+  fixture("disaggregation-reason-create.json"),
+);
+const REASON_UPDATE = disaggregationReasonUpdateSchema.parse(
+  fixture("disaggregation-reason-update.json"),
+);
+const DOCUMENT_CREATE = disaggregationCreateSchema.parse(fixture("disaggregation-create.json"));
+const DOCUMENT_UPDATE = disaggregationUpdateSchema.parse(fixture("disaggregation-update.json"));
+const LINES_ADD = disaggregationLinesAddSchema.parse(fixture("disaggregation-lines-add.json"));
 
 type Case = [
   name: string,
@@ -583,6 +602,102 @@ const CASES: Case[] = [
       method: "PUT",
       path: `/v1/office/users/${USER_ID}/password`,
       body: { password: "a new long password" },
+    },
+  ],
+  [
+    "listDisaggregationReasons",
+    [fixture("disaggregation-reason.json")],
+    (api) => api.listDisaggregationReasons(TOKEN),
+    { method: "GET", path: "/v1/office/disaggregation-reasons", body: undefined },
+  ],
+  [
+    "createDisaggregationReason",
+    fixture("disaggregation-reason.json"),
+    (api) => api.createDisaggregationReason(TOKEN, REASON_CREATE),
+    { method: "POST", path: "/v1/office/disaggregation-reasons", body: REASON_CREATE },
+  ],
+  [
+    "updateDisaggregationReason",
+    fixture("disaggregation-reason.json"),
+    (api) => api.updateDisaggregationReason(TOKEN, REASON_ID, REASON_UPDATE),
+    {
+      method: "PUT",
+      path: `/v1/office/disaggregation-reasons/${REASON_ID}`,
+      body: REASON_UPDATE,
+    },
+  ],
+  [
+    "listDisaggregations",
+    [fixture("disaggregation-document.json")],
+    (api) => api.listDisaggregations(TOKEN),
+    { method: "GET", path: "/v1/office/disaggregation", body: undefined },
+  ],
+  [
+    "listDisaggregations with filters",
+    [fixture("disaggregation-document.json")],
+    (api) => api.listDisaggregations(TOKEN, { status: "applied", q: "DSG-26" }),
+    { method: "GET", path: "/v1/office/disaggregation?status=applied&q=DSG-26", body: undefined },
+  ],
+  [
+    "getDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.getDisaggregation(TOKEN, DOCUMENT_ID),
+    { method: "GET", path: `/v1/office/disaggregation/${DOCUMENT_ID}`, body: undefined },
+  ],
+  [
+    "createDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.createDisaggregation(TOKEN, DOCUMENT_CREATE),
+    { method: "POST", path: "/v1/office/disaggregation", body: DOCUMENT_CREATE },
+  ],
+  [
+    "updateDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.updateDisaggregation(TOKEN, DOCUMENT_ID, DOCUMENT_UPDATE),
+    {
+      method: "PUT",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}`,
+      body: DOCUMENT_UPDATE,
+    },
+  ],
+  [
+    "addDisaggregationLines",
+    fixture("disaggregation-detail.json"),
+    (api) => api.addDisaggregationLines(TOKEN, DOCUMENT_ID, LINES_ADD),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/lines`,
+      body: LINES_ADD,
+    },
+  ],
+  [
+    "deleteDisaggregationLine",
+    fixture("disaggregation-detail.json"),
+    (api) => api.deleteDisaggregationLine(TOKEN, DOCUMENT_ID, DOCUMENT_LINE_ID),
+    {
+      method: "DELETE",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/lines/${DOCUMENT_LINE_ID}`,
+      body: undefined,
+    },
+  ],
+  [
+    "applyDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.applyDisaggregation(TOKEN, DOCUMENT_ID, { expectedRev: 41 }),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/apply`,
+      body: { expectedRev: 41 },
+    },
+  ],
+  [
+    "cancelDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.cancelDisaggregation(TOKEN, DOCUMENT_ID, { expectedRev: 41 }),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/cancel`,
+      body: { expectedRev: 41 },
     },
   ],
 ];
