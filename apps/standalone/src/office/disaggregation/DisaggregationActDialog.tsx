@@ -6,11 +6,14 @@ import { Alert, Button, Modal, RadioGroup } from "@markiro/ui";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DisaggregationReportVariant } from "../../host/disaggregation.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
+import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
 import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
 import { usePrintForm } from "../forms/form-printer-context.js";
 import { actFolder, openInBrowser, paint } from "../forms/print-form.js";
+import { storeForm } from "../forms/store-form.js";
 import { prepareForm } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 
 export interface DisaggregationActDialogProps {
@@ -50,6 +53,9 @@ export function DisaggregationActDialog({
   const { t } = useTranslation();
   const files = useOfficeFiles();
   const print = usePrintForm();
+  const session = useOfficeSession();
+  const refreshFiles = useRefreshStoredFiles();
+  const [hostCopy, setHostCopy] = useState<string | null>(null);
   const [variant, setVariant] = useState<DisaggregationReportVariant>("boxes");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [stage, setStage] = useState<Stage | null>(null);
@@ -83,6 +89,7 @@ export function DisaggregationActDialog({
     let at: Stage = "reading";
     setStage(at);
     setOutcome(null);
+    setHostCopy(null);
     try {
       const answer = await rows.refetch();
       if (answer.isError || answer.data === undefined) return;
@@ -94,6 +101,14 @@ export function DisaggregationActDialog({
       const form = prepareForm({ kind: "act", rows: answer.data, timeZone });
       if (form === null) return;
       const html = form.draw();
+      // The host keeps the exact HTML first, printed or opened; a host that cannot never stops the act.
+      const kept = await storeForm(
+        session,
+        { kind: form.kind, html, fileName: form.fileName },
+        { type: "disaggregation_document", id: documentId },
+      );
+      refreshFiles();
+      if (alive.current) setHostCopy(kept === null ? null : t(kept));
       if (how === "print") {
         try {
           print(html);
@@ -196,6 +211,11 @@ export function DisaggregationActDialog({
             }
           >
             {t("office.forms.opened", { path: outcome.saved.path })}
+          </Alert>
+        )}
+        {hostCopy !== null && (
+          <Alert tone="warn" role="presentation">
+            {t("office.storedFiles.hostCopyFailed", { reason: hostCopy })}
           </Alert>
         )}
         {outcome?.kind === "failed" && (

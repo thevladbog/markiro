@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/api.js";
 import { knownBlocksRequestSchema } from "../src/host/backups.js";
 import {
+  exportFileBeginSchema,
+  exportFileChunkPutSchema,
+  exportSettingsUpdateSchema,
+} from "../src/host/export-files.js";
+import {
   disaggregationCreateSchema,
   disaggregationExportRecordSchema,
   disaggregationLinesAddSchema,
@@ -138,6 +143,12 @@ const DOCUMENT_ID = "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c";
 const DISAGGREGATION_EXPORT_RECORD = disaggregationExportRecordSchema.parse(
   fixture("disaggregation-export-record.json"),
 );
+const EXPORT_FILE_BEGIN = exportFileBeginSchema.parse(fixture("export-file-begin.json"));
+const EXPORT_FILE_CHUNK_PUT = exportFileChunkPutSchema.parse(fixture("export-file-chunk-put.json"));
+const EXPORT_SETTINGS_UPDATE = exportSettingsUpdateSchema.parse(
+  fixture("export-settings-update.json"),
+);
+const EXPORT_FILE_ID = "7a1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8";
 const REASON_ID = "d15a0000-0000-4000-8000-000000000003";
 const DOCUMENT_LINE_ID = "c0000000-0000-4000-8000-000000000004";
 const REASON_CREATE = disaggregationReasonCreateSchema.parse(
@@ -576,6 +587,84 @@ const CASES: Case[] = [
     null,
     (api) => api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
+  ],
+  [
+    "beginExportFile",
+    fixture("export-file-progress.json"),
+    (api) => api.beginExportFile(TOKEN, EXPORT_FILE_BEGIN),
+    { method: "POST", path: "/v1/office/export-files", body: EXPORT_FILE_BEGIN },
+  ],
+  [
+    "putExportFileChunk",
+    fixture("export-file-progress.json"),
+    (api) => api.putExportFileChunk(TOKEN, EXPORT_FILE_ID, 2, EXPORT_FILE_CHUNK_PUT.contentBase64),
+    {
+      method: "PUT",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/chunks/2`,
+      body: EXPORT_FILE_CHUNK_PUT,
+    },
+  ],
+  [
+    "completeExportFile",
+    fixture("export-file-progress.json"),
+    (api) => api.completeExportFile(TOKEN, EXPORT_FILE_ID),
+    {
+      method: "POST",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/complete`,
+      body: undefined,
+    },
+  ],
+  [
+    "listExportFiles of a shift",
+    fixture("export-file-list.json"),
+    (api) => api.listExportFiles(TOKEN, { shiftId: SHIFT_ID, kind: "form" }),
+    {
+      method: "GET",
+      path: `/v1/office/export-files?shiftId=${SHIFT_ID}&kind=form`,
+      body: undefined,
+    },
+  ],
+  [
+    "listExportFiles of a card",
+    fixture("export-file-list.json"),
+    (api) => api.listExportFiles(TOKEN, { targetType: "box", targetId: BOX_ID }),
+    {
+      method: "GET",
+      path: `/v1/office/export-files?targetType=box&targetId=${BOX_ID}`,
+      body: undefined,
+    },
+  ],
+  [
+    "openExportFileDownload",
+    fixture("export-file-opened.json"),
+    (api) => api.openExportFileDownload(TOKEN, EXPORT_FILE_ID),
+    {
+      method: "POST",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/download`,
+      body: undefined,
+    },
+  ],
+  [
+    "getExportFileChunk",
+    fixture("export-file-chunk.json"),
+    (api) => api.getExportFileChunk(TOKEN, EXPORT_FILE_ID, 0),
+    {
+      method: "GET",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/chunks/0`,
+      body: undefined,
+    },
+  ],
+  [
+    "getExportSettings",
+    fixture("export-settings.json"),
+    (api) => api.getExportSettings(TOKEN),
+    { method: "GET", path: "/v1/office/export-files/settings", body: undefined },
+  ],
+  [
+    "putExportSettings",
+    fixture("export-settings.json"),
+    (api) => api.putExportSettings(TOKEN, EXPORT_SETTINGS_UPDATE),
+    { method: "PUT", path: "/v1/office/export-files/settings", body: EXPORT_SETTINGS_UPDATE },
   ],
   [
     "recordUpdateStarted",

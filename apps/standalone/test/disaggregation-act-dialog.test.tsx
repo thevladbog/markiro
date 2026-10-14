@@ -176,6 +176,33 @@ describe("«Акт дезагрегации» of a document (plan ДЗГ-О)", (
     await waitFor(() => expect(files.open).toHaveBeenCalledWith(folder));
   });
 
+  it("keeps the act's exact HTML on the host as a file of its document, printed or not, and still prints without the host", async () => {
+    const session = withHost();
+    const print = vi.fn<PrintForm>();
+    const dialog = await openAct(session, print);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    const [, begin] = session.api.beginExportFile.mock.calls[0] ?? [];
+    expect(begin).toMatchObject({
+      kind: "form",
+      targetType: "disaggregation_document",
+      targetId: DOC.id,
+      formatId: "form_act",
+      formatVersion: 1,
+      fileName: "Акт дезагрегации DSG-26-0007.html",
+    });
+    const bytes = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (c) => c.charCodeAt(0));
+    expect(new TextDecoder().decode(bytes)).toBe(expectedHtml(BOXES));
+    // A host that cannot keep it never stops the print.
+    session.api.beginExportFile.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    await afterPaint();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+    await within(dialog).findByText(/^Копия на хосте не сохранена: /);
+  });
+
   it("says why the act was not saved, and opens nothing", async () => {
     const files = fakeOfficeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("documents_unavailable", "no folder"));

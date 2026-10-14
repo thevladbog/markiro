@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { exportFileSchema } from "./export-files.js";
 import { codeOwnerSchema } from "./protocol.js";
 
 // The office's review of production (plan КНФ): mirrors `markiro_proto::review`.
@@ -125,6 +126,8 @@ export const officeShiftExportSchema = z.object({
   boxCount: z.number().int(),
   palletCount: z.number().int(),
   openPalletSuppressedBoxCount: z.number().int(),
+  /** The files the export stored on the host (migration `0029`), by part; none before they were stored. */
+  files: z.array(exportFileSchema),
 });
 export type OfficeShiftExport = z.infer<typeof officeShiftExportSchema>;
 

@@ -106,6 +106,14 @@ export const officeKeys = {
   shiftRejections: (id: string) => ["office", "shift-rejections", id],
   /** A shift's saved exports (`GET /v1/office/shifts/{id}/exports`), for the drawer's history. */
   shiftExports: (id: string) => ["office", "shift-exports", id],
+  /** Every list of stored files (host migration `0029`): a new export or form reads them all again. */
+  exportFiles: ["office", "export-files"],
+  /** A shift's printed forms kept on the host. */
+  shiftForms: (id: string) => ["office", "export-files", "shift-forms", id],
+  /** The files kept for one card: a box's, a pallet's or a disaggregation document's. */
+  cardFiles: (targetType: string, id: string) => ["office", "export-files", targetType, id],
+  /** The retention of stored files and what the store holds. */
+  exportSettings: ["office", "export-settings"],
   /** A box's card (`GET /v1/office/boxes/{id}`, plan КРТ). */
   boxCard: (id: string) => ["office", "box-card", id],
   /** A pallet's card (`GET /v1/office/pallets/{id}`, plan КРТ). */

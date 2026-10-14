@@ -623,18 +623,18 @@ describe("the card of a shift (plan О-Ф)", () => {
     await waitFor(() =>
       expect(within(section("Выгрузки смены")).getAllByRole("row")).toHaveLength(3),
     );
-    expect(rowsOf("Выгрузки смены")).toEqual([
-      [
-        "08.10.2026, 10:30",
-        "[XML][ГИСМТ] Паллетная агрегацияНе больше 2 строк в части",
-        "3",
-        "2",
-        "1",
-        "3",
-        "Иван Петров",
-      ],
-      ["08.10.2026, 10:10", "[XML][ГИСМТ] Агрегация паллетыПаллеты", "0", "1", "1", "1", "—"],
+    const rows = rowsOf("Выгрузки смены");
+    // The export's own cells; the format's holds, under its name, the files the host kept.
+    expect(rows.map((cells) => [cells[0], ...cells.slice(2)])).toEqual([
+      ["08.10.2026, 10:30", "3", "2", "1", "3", "Иван Петров"],
+      ["08.10.2026, 10:10", "0", "1", "1", "1", "—"],
     ]);
+    expect(rows[0]?.[1]).toContain("[XML][ГИСМТ] Паллетная агрегацияНе больше 2 строк в части");
+    expect(rows[0]?.[1]).toContain("Скачать все (2)");
+    // An export from before files were kept says so.
+    expect(rows[1]?.[1]).toBe(
+      "[XML][ГИСМТ] Агрегация паллетыПаллетыФайл не сохранён: сформируйте выгрузку заново",
+    );
     expect(session.api.listShiftExports).toHaveBeenCalledWith("office-session-token", CLOSED.id);
   });
 

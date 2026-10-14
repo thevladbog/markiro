@@ -197,6 +197,9 @@ pub struct OfficeShiftExport {
     pub box_count: u32,
     pub pallet_count: u32,
     pub open_pallet_suppressed_box_count: u32,
+    /// The files the export stored on the host (migration `0029`), by part;
+    /// none for an export made before files were stored.
+    pub files: Vec<crate::export_files::ExportFile>,
 }
 
 /// The shift's saved exports, newest first, at most `SHIFT_EXPORT_HISTORY_LIMIT`.

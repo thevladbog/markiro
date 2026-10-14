@@ -11,8 +11,11 @@ import {
 import { errorMessageKey } from "../../host/errors.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
+import { storeExportFiles } from "../exports/stored-files.js";
+import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
 import { paint } from "../forms/print-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { disaggregationXmlFolder, formDisaggregationXml } from "./disaggregation-xml.js";
 
@@ -27,8 +30,18 @@ export interface DisaggregationXmlDialogProps {
 /** Where a press is. */
 type Phase = "idle" | "reading" | "forming" | "saving" | "recording";
 
+/** What became of the host's own copy of the file (host migration `0029`). */
+type HostCopy = { kind: "stored" } | { kind: "failed"; message: string };
+
 type Outcome =
-  | { kind: "saved"; saved: SavedFolder; unrecorded: DisaggregationExportRecord | null }
+  | {
+      kind: "saved";
+      /** The folder the shell wrote, or `null` when it could not and only the host holds the file. */
+      saved: SavedFolder | null;
+      folderFailure: string | null;
+      hostCopy: HostCopy;
+      unrecorded: DisaggregationExportRecord | null;
+    }
   | { kind: "failed"; message: string };
 
 /**
@@ -50,6 +63,8 @@ export function DisaggregationXmlDialog({
 }: DisaggregationXmlDialogProps) {
   const { t } = useTranslation();
   const files = useOfficeFiles();
+  const session = useOfficeSession();
+  const refreshFiles = useRefreshStoredFiles();
   const [phase, setPhase] = useState<Phase>("idle");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const inFlight = useRef(false);
@@ -81,13 +96,16 @@ export function DisaggregationXmlDialog({
   }
 
   /** Writes the journal's row of a file already saved; a refusal leaves the same row to write again. */
-  async function writeRecord(saved: SavedFolder, body: DisaggregationExportRecord): Promise<void> {
+  async function writeRecord(
+    done: Pick<Extract<Outcome, { kind: "saved" }>, "saved" | "folderFailure" | "hostCopy">,
+    body: DisaggregationExportRecord,
+  ): Promise<void> {
     setPhase("recording");
     try {
       await record.mutateAsync(body);
-      if (alive.current) setOutcome({ kind: "saved", saved, unrecorded: null });
+      if (alive.current) setOutcome({ kind: "saved", ...done, unrecorded: null });
     } catch {
-      if (alive.current) setOutcome({ kind: "saved", saved, unrecorded: body });
+      if (alive.current) setOutcome({ kind: "saved", ...done, unrecorded: body });
     }
   }
 
@@ -116,21 +134,44 @@ export function DisaggregationXmlDialog({
         return;
       }
       setPhase("saving");
-      let saved: SavedFolder;
+      // The host keeps the exact bytes first; a host that cannot never stops the folder copy.
+      const stored = await storeExportFiles(session, {
+        kind: "disaggregation_xml",
+        targetType: "disaggregation_document",
+        targetId: documentId,
+        batchId: crypto.randomUUID(),
+        formatId: DISAGGREGATION_XML_FORMAT_ID,
+        formatVersion: DISAGGREGATION_XML_FORMAT_VERSION,
+        parts: [{ partNo: 1, name: result.file.name, bytes: result.file.bytes }],
+      });
+      refreshFiles();
+      const hostCopy: HostCopy = stored.ok
+        ? { kind: "stored" }
+        : { kind: "failed", message: t(stored.messageKey) };
+      let saved: SavedFolder | null = null;
+      let folderFailure: string | null = null;
       try {
         saved = await files.save(
           disaggregationXmlFolder(docNo, new Date().toISOString(), timeZone),
           [{ name: result.file.name, bytes: result.file.bytes }],
         );
       } catch (error) {
-        if (alive.current) setOutcome({ kind: "failed", message: failureText(error) });
+        folderFailure = failureText(error);
+      }
+      if (saved === null && !stored.ok) {
+        if (alive.current) {
+          setOutcome({ kind: "failed", message: folderFailure ?? failureText(null) });
+        }
         return;
       }
-      await writeRecord(saved, {
-        formatId: DISAGGREGATION_XML_FORMAT_ID,
-        formatVersion: DISAGGREGATION_XML_FORMAT_VERSION,
-        packingCount: result.file.packingCount,
-      });
+      await writeRecord(
+        { saved, folderFailure, hostCopy },
+        {
+          formatId: DISAGGREGATION_XML_FORMAT_ID,
+          formatVersion: DISAGGREGATION_XML_FORMAT_VERSION,
+          packingCount: result.file.packingCount,
+        },
+      );
     } catch {
       if (alive.current) {
         setOutcome({ kind: "failed", message: t("office.exports.failures.GENERATION_FAILED") });
@@ -141,11 +182,14 @@ export function DisaggregationXmlDialog({
     }
   }
 
-  async function recordAgain(saved: SavedFolder, body: DisaggregationExportRecord): Promise<void> {
+  async function recordAgain(
+    done: Extract<Outcome, { kind: "saved" }>,
+    body: DisaggregationExportRecord,
+  ): Promise<void> {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      await writeRecord(saved, body);
+      await writeRecord(done, body);
     } finally {
       inFlight.current = false;
       if (alive.current) setPhase("idle");
@@ -227,21 +271,32 @@ export function DisaggregationXmlDialog({
         )}
         {outcome?.kind === "saved" && (
           <>
-            <Alert
-              tone="ok"
-              role="presentation"
-              action={
-                <Button
-                  variant="secondary"
-                  size="compact"
-                  onClick={() => void openFolder(outcome.saved)}
-                >
-                  {t("office.disaggregation.xml.showFolder")}
-                </Button>
-              }
-            >
-              {t("office.disaggregation.xml.saved", { path: outcome.saved.path })}
-            </Alert>
+            {outcome.saved !== null ? (
+              <Alert
+                tone="ok"
+                role="presentation"
+                action={
+                  <Button
+                    variant="secondary"
+                    size="compact"
+                    onClick={() => outcome.saved !== null && void openFolder(outcome.saved)}
+                  >
+                    {t("office.disaggregation.xml.showFolder")}
+                  </Button>
+                }
+              >
+                {t("office.disaggregation.xml.saved", { path: outcome.saved.path })}
+              </Alert>
+            ) : (
+              <Alert tone="warn" role="presentation">
+                {outcome.folderFailure} {t("office.disaggregation.xml.heldByHost")}
+              </Alert>
+            )}
+            {outcome.hostCopy.kind === "failed" && (
+              <Alert tone="warn" role="presentation">
+                {t("office.storedFiles.hostCopyFailed", { reason: outcome.hostCopy.message })}
+              </Alert>
+            )}
             {outcome.unrecorded !== null && (
               <Alert
                 tone="warn"
@@ -252,7 +307,7 @@ export function DisaggregationXmlDialog({
                     disabled={busy}
                     onClick={() => {
                       if (outcome.unrecorded !== null) {
-                        void recordAgain(outcome.saved, outcome.unrecorded);
+                        void recordAgain(outcome, outcome.unrecorded);
                       }
                     }}
                   >

@@ -22,6 +22,8 @@ import {
 } from "./export-checks.js";
 import { useExportPlan, yieldToUi } from "./export-plan.js";
 import { OfficeFilesError, type SavedFolder } from "./office-files.js";
+import { storeExportFiles } from "./stored-files.js";
+import { useRefreshStoredFiles } from "./use-refresh-files.js";
 import { useOfficeFiles } from "./office-files-context.js";
 import { runExport } from "./run-export.js";
 
@@ -42,12 +44,19 @@ const formatKey = (format: { id: string; version: number }) => `${format.id}@${f
 /** Where an export is: the first two can still be called off, the rest cannot. */
 type Phase = "idle" | "reading" | "forming" | "saving" | "recording";
 
+/** What became of the host's own copy of the files (host migration `0029`). */
+type HostCopy = { kind: "stored" } | { kind: "failed"; message: string };
+
 type Outcome =
   | { kind: "failed"; message: string; reason?: string }
   | { kind: "cancelled" }
   | {
       kind: "saved";
-      saved: SavedFolder;
+      /** The folder the shell wrote, or `null` when it could not and only the host holds the files. */
+      saved: SavedFolder | null;
+      /** Why the folder has no files (the words), when `saved` is `null`. */
+      folderFailure: string | null;
+      hostCopy: HostCopy;
       /** The record the host has not taken, with why; `null` once it is written. */
       unrecorded: { record: ShiftExportRecord; message: string } | null;
     };
@@ -89,6 +98,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const files = useOfficeFiles();
   const session = useOfficeSession();
   const queryClient = useQueryClient();
+  const refreshFiles = useRefreshStoredFiles();
   const source = useOfficeQuery(officeKeys.shiftExportSource(shift.id), (api, token) =>
     api.getShiftExportSource(token, shift.id),
   );
@@ -238,7 +248,28 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
         return;
       }
       setPhase("saving");
-      let saved: SavedFolder;
+      // The host keeps the exact bytes first: whatever happens to the folder on this PC, the
+      // file stays downloadable from the shift's drawer. A host that cannot keep them (its store
+      // is full, it does not answer) never stops the export: the folder copy is made all the same.
+      const stored = await storeExportFiles(session, {
+        kind: palletId === null ? "shift_export" : "pallet_export",
+        targetType: palletId === null ? "shift" : "pallet",
+        targetId: palletId ?? shift.id,
+        batchId: documentId,
+        formatId: format.id,
+        formatVersion: format.version,
+        parts: result.parts.map((part, index) => ({
+          partNo: index + 1,
+          name: part.filename,
+          bytes: part.bytes,
+        })),
+      });
+      refreshFiles();
+      const hostCopy: HostCopy = stored.ok
+        ? { kind: "stored" }
+        : { kind: "failed", message: t(stored.messageKey) };
+      let saved: SavedFolder | null = null;
+      let folderFailure: string | null = null;
       try {
         saved = await files.save(
           exportFolder(fresh.shift.number, format.id, formedAt, timeZone),
@@ -246,7 +277,11 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
         );
       } catch (error) {
         const code = error instanceof OfficeFilesError ? error.code : "storage";
-        setOutcome({ kind: "failed", message: t(`office.exports.files.${code}`) });
+        folderFailure = t(`office.exports.files.${code}`);
+      }
+      if (saved === null && !stored.ok) {
+        // Neither the host nor the folder has the files: nothing is recorded.
+        setOutcome({ kind: "failed", message: folderFailure ?? t("office.exports.files.storage") });
         return;
       }
       const body = shiftExportRecord({
@@ -258,7 +293,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
         parts: result.parts,
         openPalletSuppressedBoxCount: result.openPalletSuppressedBoxCount,
       });
-      await writeRecord(saved, body);
+      await writeRecord(saved, folderFailure, hostCopy, body);
     } catch (error) {
       // Nothing above is meant to throw; if it does, the dialog says so instead of going quiet.
       setOutcome({
@@ -273,26 +308,36 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   }
 
   /** Writes the journal's row of files already saved; a refusal leaves the same row to write again. */
-  async function writeRecord(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+  async function writeRecord(
+    saved: SavedFolder | null,
+    folderFailure: string | null,
+    hostCopy: HostCopy,
+    body: ShiftExportRecord,
+  ): Promise<void> {
     setPhase("recording");
     try {
       await record.mutateAsync(body);
-      setOutcome({ kind: "saved", saved, unrecorded: null });
+      setOutcome({ kind: "saved", saved, folderFailure, hostCopy, unrecorded: null });
     } catch (error) {
       setOutcome({
         kind: "saved",
         saved,
+        folderFailure,
+        hostCopy,
         unrecorded: { record: body, message: t(errorMessageKey(error)) },
       });
     }
   }
 
-  async function recordAgain(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+  async function recordAgain(
+    done: Extract<Outcome, { kind: "saved" }>,
+    body: ShiftExportRecord,
+  ): Promise<void> {
     if (inFlight.current) return;
     inFlight.current = true;
     document.getElementById(progressId)?.focus();
     try {
-      await writeRecord(saved, body);
+      await writeRecord(done.saved, done.folderFailure, done.hostCopy, body);
     } finally {
       inFlight.current = false;
       setPhase("idle");
@@ -374,27 +419,39 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
       );
     }
     const unrecorded = outcome.unrecorded;
+    const folder = outcome.saved;
     return (
       <>
-        <Alert
-          tone="ok"
-          role="status"
-          {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
-          action={
-            <Button
-              variant="secondary"
-              size="compact"
-              onClick={() => void openFolder(outcome.saved)}
-            >
-              {t("office.exports.openFolder")}
-            </Button>
-          }
-        >
-          {t("office.exports.saved", {
-            count: outcome.saved.files.length,
-            path: outcome.saved.path,
-          })}
-        </Alert>
+        {folder !== null ? (
+          <Alert
+            tone="ok"
+            role="status"
+            {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
+            action={
+              <Button variant="secondary" size="compact" onClick={() => void openFolder(folder)}>
+                {t("office.exports.openFolder")}
+              </Button>
+            }
+          >
+            {t("office.exports.saved", {
+              count: folder.files.length,
+              path: folder.path,
+            })}
+          </Alert>
+        ) : (
+          <Alert
+            tone="warn"
+            role="status"
+            {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
+          >
+            {outcome.folderFailure} {t("office.exports.heldByHost")}
+          </Alert>
+        )}
+        {outcome.hostCopy.kind === "failed" && (
+          <Alert tone="warn" role="status">
+            {t("office.storedFiles.hostCopyFailed", { reason: outcome.hostCopy.message })}
+          </Alert>
+        )}
         {unrecorded !== null && (
           <Alert
             tone="warn"
@@ -405,7 +462,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
                 variant="secondary"
                 size="compact"
                 disabled={busy}
-                onClick={() => void recordAgain(outcome.saved, unrecorded.record)}
+                onClick={() => void recordAgain(outcome, unrecorded.record)}
               >
                 {t("office.exports.recordAgain")}
               </Button>

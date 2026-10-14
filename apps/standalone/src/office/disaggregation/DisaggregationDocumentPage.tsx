@@ -33,6 +33,7 @@ import type {
 import { optionalTextRule, toOptionalText } from "../../lib/rules.js";
 import { useCan } from "../access.js";
 import { alertFailure, writeFailure } from "../form-errors.js";
+import { CardFiles } from "../exports/CardFiles.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading, StaleAlert } from "../page-state.js";
@@ -773,6 +774,13 @@ export function DisaggregationDocumentPage() {
           />
         </>
       )}
+      <CardFiles
+        targetType="disaggregation_document"
+        targetId={header.id}
+        label={header.docNo}
+        at={at}
+        timeZone={zone}
+      />
       {dialog === "act" && (
         <DisaggregationActDialog
           documentId={header.id}

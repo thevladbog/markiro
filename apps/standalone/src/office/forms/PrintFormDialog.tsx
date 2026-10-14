@@ -23,6 +23,8 @@ import { LoadError, PageLoading } from "../page-state.js";
 import type { TaskFormInputs } from "./form-data.js";
 import { usePrintForm } from "./form-printer-context.js";
 import { formFolder, openInBrowser, paint } from "./print-form.js";
+import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
+import { storeForm, type FormTarget as StoredFormTarget } from "./store-form.js";
 import { prepareForm, type FormRequest } from "./render-form.js";
 import { taskFormInputs } from "./task-inputs.js";
 
@@ -45,6 +47,20 @@ export interface PrintFormDialogProps {
   format: PlacardFormat;
   onFormat: (format: PlacardFormat) => void;
   onClose: () => void;
+}
+
+/** What a form belongs to on the host: the card it is printed from. */
+function formTarget(target: FormTarget, shiftId: string): StoredFormTarget {
+  switch (target.kind) {
+    case "box":
+      return { type: "box", id: target.boxId };
+    case "pallet":
+    case "placard":
+      return { type: "pallet", id: target.palletId };
+    case "placards":
+    case "task":
+      return { type: "shift", id: shiftId };
+  }
 }
 
 /** Where a press is: the data is read again, the form is drawn, the file is saved. */
@@ -116,8 +132,12 @@ export function PrintFormDialog({
   const files = useOfficeFiles();
   const print = usePrintForm();
   const queryClient = useQueryClient();
-  const { api, call } = useOfficeSession();
+  const session = useOfficeSession();
+  const refreshFiles = useRefreshStoredFiles();
+  const { api, call } = session;
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // The words for why the host kept no copy of the last form, or `null`.
+  const [hostCopy, setHostCopy] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage | null>(null);
   const inFlight = useRef(false);
   const alive = useRef(true);
@@ -239,6 +259,7 @@ export function PrintFormDialog({
     let at: Stage = "reading";
     setStage(at);
     setOutcome(null);
+    setHostCopy(null);
     try {
       const fresh = await readAgain();
       // A dialog closed while the rows were read is found out after the paint, before any draw.
@@ -253,6 +274,15 @@ export function PrintFormDialog({
       // Nothing to draw: the rows just read were also the dialog's own, which now says why.
       if (form === null) return;
       const html = form.draw();
+      // The host keeps the exact HTML first, printed or opened: a form can then be had again from
+      // the card. A host that cannot never stops the form.
+      const kept = await storeForm(
+        session,
+        { kind: form.kind, html, fileName: form.fileName },
+        formTarget(target, shift.id),
+      );
+      refreshFiles();
+      if (alive.current) setHostCopy(kept === null ? null : t(kept));
       if (how === "print") {
         try {
           print(html);
@@ -371,6 +401,11 @@ export function PrintFormDialog({
             }
           >
             {t("office.forms.opened", { path: outcome.saved.path })}
+          </Alert>
+        )}
+        {hostCopy !== null && (
+          <Alert tone="warn" role="presentation">
+            {t("office.storedFiles.hostCopyFailed", { reason: hostCopy })}
           </Alert>
         )}
         {outcome?.kind === "failed" && (

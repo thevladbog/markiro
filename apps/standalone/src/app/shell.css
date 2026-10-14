@@ -438,6 +438,50 @@
   color: var(--fg-2);
 }
 
+/* The files an export, a form or a card kept on the host, with «Скачать» for each. */
+.stored-files {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.stored-files__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stored-files__name {
+  overflow-wrap: anywhere;
+}
+
+.stored-files__parts {
+  display: grid;
+  gap: 6px;
+}
+
+.stored-files__result {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+/* What a download ended with: a sentence that wraps by words, never a banner in a narrow cell. */
+.stored-files__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  overflow-wrap: anywhere;
+}
+
+.stored-files__note--ok {
+  color: var(--ok-fg);
+}
+
+.stored-files__note--error {
+  color: var(--err-fg);
+}
+
 /* A warning of a cell: a sentence that wraps by words, with its mark; never a tall chip. */
 .shift-cell__warn {
   display: flex;
