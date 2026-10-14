@@ -1154,7 +1154,7 @@ read again inside the write transaction), an unknown product is
 `photoChecksum` (SHA-256 of the bytes) without the bytes. A change takes one
 host revision (beta 3: the station shows the photo) but not the product's
 `rev`, which is the office's `expectedRev` (the dialog uploads a photo and
-saves the product after it): host migration `0027` adds `products.photo_rev`,
+saves the product after it): host migration `0032` adds `products.photo_rev`,
 the feed re-sends the product at that revision (`FEED_KEYS`: `photo_rev > ?1
 AND photo_rev <> rev`) with `photoChecksum` in its record (`ProductRecord`, a
 record from an older host reads as none), and a station fetches the bytes
