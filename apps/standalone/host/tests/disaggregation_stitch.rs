@@ -7,7 +7,8 @@ mod support;
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use support::app::{admin, code_hash, pallet_sscc, sscc, Admin};
+use support::app::{admin, close_from_office, code_hash, pallet_sscc, sscc, Admin};
+use support::conflicts::{conflict_id, conflict_scene};
 use support::disaggregation::{
     add, applied, create, day, line, pallet_day, station_disassembles, REASON,
 };
@@ -194,4 +195,60 @@ async fn a_station_disassembly_has_no_document() {
     assert_eq!(event["documentNo"], Value::Null);
     assert_eq!(event["officeUserName"], Value::Null);
     assert_eq!(event["reasonCode"], "damaged_package");
+}
+
+/// Plan ДЗГ-О, «Расформировать короб» on the conflicts page: each side says
+/// whether its shift is closed and its box taken apart, so the office offers
+/// the action only where the host will take the line.
+#[tokio::test]
+async fn a_conflicts_side_says_whether_its_shift_is_closed_and_its_box_taken_apart() {
+    let s = conflict_scene().await;
+    let displaced = conflict_id(&s.admin, &support::app::record_id(2)).await;
+    let sides = |page: &Value, id: &str| {
+        let item = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == json!(id))
+            .unwrap()
+            .clone();
+        (
+            (
+                item["loser"]["shiftClosed"].clone(),
+                item["loser"]["boxDisassembled"].clone(),
+            ),
+            (
+                item["winner"]["shiftClosed"].clone(),
+                item["winner"]["boxDisassembled"].clone(),
+            ),
+        )
+    };
+    let list = || async {
+        let (status, page) = s.admin.call("GET", "/v1/office/conflicts", None).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        page
+    };
+    // Both shifts are open.
+    assert_eq!(
+        sides(&list().await, &displaced),
+        ((json!(false), json!(false)), (json!(false), json!(false)))
+    );
+    // A's shift (the loser's, box 1 SSCC 1500) closes: its closed box can be taken apart.
+    close_from_office(&s.admin, &s.a.shift, "Конец смены").await;
+    assert_eq!(
+        sides(&list().await, &displaced),
+        ((json!(true), json!(false)), (json!(false), json!(false)))
+    );
+    // A document takes the loser's box apart.
+    applied(&s.admin, &[sscc(1500)]).await;
+    assert_eq!(
+        sides(&list().await, &displaced),
+        ((json!(true), json!(true)), (json!(false), json!(false)))
+    );
+    // The winner's open box 2 (no SSCC) and the late conflict's loser have no box taken apart.
+    let late = conflict_id(&s.admin, &support::app::record_id(12)).await;
+    assert_eq!(
+        sides(&list().await, &late),
+        ((json!(false), json!(false)), (json!(true), json!(true)))
+    );
 }

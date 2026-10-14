@@ -27,6 +27,10 @@ export const officeConflictScanSchema = z.object({
   scannedAt: instant,
   boxId: z.string().nullable(),
   boxSscc: z.string().nullable(),
+  /** The scan's shift is closed: only a closed shift's box is taken apart (plan ДЗГ-О). */
+  shiftClosed: z.boolean(),
+  /** The scan's box was taken apart, by a station or a document. */
+  boxDisassembled: z.boolean(),
 });
 export type OfficeConflictScan = z.infer<typeof officeConflictScanSchema>;
 

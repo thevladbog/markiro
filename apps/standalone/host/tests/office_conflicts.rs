@@ -140,7 +140,9 @@ fn side(floor: &Floor, name: &str, operator: Value, at: String, n: u32, sscc: Va
     json!({
         "shiftId": floor.shift, "shiftNumber": floor.number, "deviceId": floor.station,
         "deviceName": name, "operatorName": operator, "scannedAt": at,
-        "boxId": box_id(n), "boxSscc": sscc
+        "boxId": box_id(n), "boxSscc": sscc,
+        // The scene's shifts are open and no box is taken apart (plan ДЗГ-О).
+        "shiftClosed": false, "boxDisassembled": false
     })
 }
 

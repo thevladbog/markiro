@@ -68,6 +68,12 @@ pub struct OfficeConflictScan {
     pub scanned_at: String,
     pub box_id: Option<String>,
     pub box_sscc: Option<String>,
+    /// The scan's shift is closed: only a closed shift's box is taken apart
+    /// (owner decision ПР-1; plan ДЗГ-О's «Расформировать короб»).
+    pub shift_closed: bool,
+    /// The scan's box was taken apart (by a station or a document); `false`
+    /// without a box.
+    pub box_disassembled: bool,
 }
 
 /// One conflict: two accepted scans of one code; the earlier won it.
