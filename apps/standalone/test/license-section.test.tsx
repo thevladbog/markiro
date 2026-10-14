@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { standaloneActivationRequestSchema } from "@markiro/domain";
+
 import { HostError } from "../src/host/client.js";
 import type { LicensePreview, LicenseTerms, OfficeLicense } from "../src/host/protocol.js";
+import { OfficeFilesError } from "../src/office/exports/office-files.js";
 import { HOST_ID } from "./support/fixtures.js";
 import {
   ACTIVE_LICENSE,
@@ -501,5 +506,181 @@ describe("loading a license file", () => {
       ),
     );
     expect(within(card).getByTestId("file-drop-input")).toHaveProperty("disabled", true);
+  });
+});
+
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+const ACTIVATION_REQUEST = standaloneActivationRequestSchema.parse(
+  JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../packages/domain/fixtures/standalone-license/activation-request.json",
+        testModuleUrl,
+      ),
+      "utf8",
+    ),
+  ),
+);
+
+describe("the activation request and the emergency extension", () => {
+  it("saves the host's activation request as JSON under «Лицензия» and shows the folder", async () => {
+    const session = sessionWith(WRONG_HOST);
+    session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+    const files = fakeOfficeFiles();
+    const card = await openLicense(session, files);
+    fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
+    expect(await within(card).findByText(/^Запрос сохранён в папке /)).toBeTruthy();
+    expect(files.save).toHaveBeenCalledTimes(1);
+    const [segments, saved] = files.save.mock.calls[0]!;
+    expect(segments[0]).toBe("Лицензия");
+    expect(segments[1]).toMatch(/^Запрос на активацию \d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/);
+    expect(saved.map((file) => file.name)).toEqual(["markiro-activation-request.json"]);
+    expect(JSON.parse(new TextDecoder().decode(saved[0]!.bytes))).toEqual(ACTIVATION_REQUEST);
+    expect(
+      within(card).getByText(
+        `Запрос сохранён в папке C:\\Users\\Оператор\\Documents\\Markiro\\${segments.join("\\")}. Отправьте файл в Маркиро.`,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Показать папку" }));
+    expect(files.open).toHaveBeenCalledWith(segments);
+  });
+
+  it("says when the request could not be saved", async () => {
+    const session = sessionWith();
+    session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+    const files = fakeOfficeFiles();
+    files.save.mockRejectedValue(new OfficeFilesError("storage", "disk full"));
+    const card = await openLicense(session, files);
+    fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
+    expect(await within(card).findByText(/Не удалось сохранить запрос/)).toBeTruthy();
+  });
+
+  it("opens new shifts for 3 more days once, after asking, till the host's time plus 72 hours", async () => {
+    const session = sessionWith(RESTRICTED);
+    session.api.enableLicenseEmergency.mockResolvedValue({
+      ...RESTRICTED,
+      emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+    });
+    const card = await openLicense(session);
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "Открывать новые смены ещё 3 дня, до 23.11 09:00? Это можно сделать один раз для каждой лицензии.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Открыть на 3 дня" }));
+    expect(await within(card).findByText("Новые смены открываются до 23.11 09:00.")).toBeTruthy();
+    expect(session.api.enableLicenseEmergency).toHaveBeenCalledTimes(1);
+    expect(
+      within(card).getByText("Аварийное продление: новые смены открываются до 23.11 09:00."),
+    ).toBeTruthy();
+    expect(
+      within(card).queryByRole("button", { name: "Открыть новые смены ещё 3 дня" }),
+    ).toBeNull();
+  });
+
+  it("says the extension was already used for this license", async () => {
+    const session = sessionWith(TRIAL_EXPIRED);
+    session.api.enableLicenseEmergency.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "used",
+        details: { constraint: "emergency_used" },
+      }),
+    );
+    const card = await openLicense(session);
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Открыть на 3 дня" }));
+    expect(
+      await within(dialog).findByText("Аварийное продление для этой лицензии уже использовано."),
+    ).toBeTruthy();
+  });
+
+  it.each([
+    ["a valid license", ACTIVE_LICENSE],
+    ["the grace", GRACE],
+    [
+      "a restriction whose extension the host no longer allows",
+      licenseOf({ ...RESTRICTED, emergency: { available: false, until: null } }),
+    ],
+  ] as const)("does not offer the extension for %s", async (_, license) => {
+    const card = await openLicense(sessionWith(license));
+    expect(
+      within(card).queryByRole("button", { name: "Открыть новые смены ещё 3 дня" }),
+    ).toBeNull();
+  });
+
+  it("sends a double click on «Сохранить запрос на активацию» once", async () => {
+    const session = sessionWith();
+    let answer: (request: typeof ACTIVATION_REQUEST) => void = () => undefined;
+    session.api.getActivationRequest.mockImplementation(
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+    const files = fakeOfficeFiles();
+    const card = await openLicense(session, files);
+    const button = within(card).getByRole("button", { name: "Сохранить запрос на активацию" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(session.api.getActivationRequest).toHaveBeenCalled());
+    fireEvent.click(button);
+    answer(ACTIVATION_REQUEST);
+    expect(await within(card).findByText(/^Запрос сохранён в папке /)).toBeTruthy();
+    expect(session.api.getActivationRequest).toHaveBeenCalledTimes(1);
+    expect(files.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the saved request's message with the next action", async () => {
+    const session = sessionWith(RESTRICTED);
+    session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+    const card = await openLicense(session);
+    fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
+    expect(await within(card).findByText(/^Запрос сохранён в папке /)).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    await screen.findByRole("dialog");
+    expect(within(card).queryByText(/^Запрос сохранён в папке /)).toBeNull();
+  });
+
+  it("offers the extension under an INN mismatch when the host allows it (spec §19)", async () => {
+    const card = await openLicense(sessionWith(INN_MISMATCH));
+    expect(
+      within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }),
+    ).toBeTruthy();
+  });
+
+  it("says the extension is not needed when new shifts open anyway", async () => {
+    const session = sessionWith(RESTRICTED);
+    session.api.enableLicenseEmergency.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "not needed",
+        details: { constraint: "emergency_not_needed" },
+      }),
+    );
+    const card = await openLicense(session);
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Открыть на 3 дня" }));
+    expect(
+      await within(dialog).findByText(
+        "Аварийное продление не нужно: новые смены и так открываются.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("offers the technologist neither the extension nor the request", async () => {
+    const tech = await openLicense(sessionWith(RESTRICTED, { technologist: true }));
+    expect(
+      within(tech).queryByRole("button", { name: "Открыть новые смены ещё 3 дня" }),
+    ).toBeNull();
+    expect(
+      within(tech).queryByRole("button", { name: "Сохранить запрос на активацию" }),
+    ).toBeNull();
   });
 });
