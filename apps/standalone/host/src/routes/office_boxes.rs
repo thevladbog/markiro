@@ -111,6 +111,8 @@ pub async fn list_boxes(
                 digest_matches: row.digest_matches,
                 print_verified_at: row.print_verified_at,
                 print_skipped_at: row.print_skipped_at,
+                // Task 2 of plan КРТ reads the operator.
+                operator_name: None,
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()

@@ -1,0 +1,87 @@
+{
+  "id": "b0000000-0000-4000-8000-000000000001",
+  "sscc": "046006820000015000",
+  "shift": {
+    "id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "number": "OCT26-003",
+    "status": "closed",
+    "productionDate": "2026-10-08",
+    "productName": "Молоко 3,2% 0,9 л",
+    "lineName": "Линия 1"
+  },
+  "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "deviceName": "Станция на линии 1",
+  "operatorName": "Анна Кузнецова",
+  "openedAt": "2026-10-08T06:00:10.000Z",
+  "closedAt": "2026-10-08T06:00:20.000Z",
+  "disassembledAt": null,
+  "units": 1,
+  "itemCountReported": 2,
+  "digestMatches": true,
+  "printVerifiedAt": "2026-10-08T06:00:22.000Z",
+  "printSkippedAt": null,
+  "pallet": {
+    "id": "a0000000-0000-4000-8000-000000000001",
+    "sscc": "146006820000000402",
+    "closedAt": "2026-10-08T06:00:41.000Z",
+    "disassembledAt": null
+  },
+  "items": [
+    {
+      "scanId": "5d1e2f3a-4b5c-4d6e-8f70-81920a1b2c3d",
+      "codeHash": "0000000000000000000000000000000000000000000000000000000000000003",
+      "gtin14": "04600682000013",
+      "serial": "S000003",
+      "addedAt": "2026-10-08T06:00:12.000Z",
+      "state": "removed",
+      "leftAt": "2026-10-08T06:00:13.000Z",
+      "operatorName": null
+    },
+    {
+      "scanId": "4c0d1e2f-3a4b-4c5d-9e6f-708192a3b4c5",
+      "codeHash": "0000000000000000000000000000000000000000000000000000000000000002",
+      "gtin14": "04600682000013",
+      "serial": "S000002",
+      "addedAt": "2026-10-08T06:00:11.000Z",
+      "state": "displaced",
+      "leftAt": "2026-10-25T09:00:00Z",
+      "operatorName": "Анна Кузнецова"
+    },
+    {
+      "scanId": "3b9c0d1e-2f3a-4b4c-8d5e-6f708192a3b4",
+      "codeHash": "0000000000000000000000000000000000000000000000000000000000000001",
+      "gtin14": "04600682000013",
+      "serial": "S000001",
+      "addedAt": "2026-10-08T06:00:10.000Z",
+      "state": "packed",
+      "leftAt": null,
+      "operatorName": null
+    }
+  ],
+  "itemsCapped": false,
+  "exceptions": [
+    {
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "kind": "undo",
+      "codeHash": "0000000000000000000000000000000000000000000000000000000000000003",
+      "reasonCode": null,
+      "reasonText": null,
+      "occurredAt": "2026-10-08T06:00:13.000Z",
+      "receivedAt": "2026-10-08T06:01:00Z",
+      "deviceName": "Станция на линии 1",
+      "operatorName": null
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000002",
+      "kind": "reprint",
+      "codeHash": null,
+      "reasonCode": "other",
+      "reasonText": "Смазалась при укладке",
+      "occurredAt": "2026-10-08T06:00:25.000Z",
+      "receivedAt": "2026-10-08T06:01:00Z",
+      "deviceName": "Станция на линии 1",
+      "operatorName": "Анна Кузнецова"
+    }
+  ],
+  "documents": []
+}
