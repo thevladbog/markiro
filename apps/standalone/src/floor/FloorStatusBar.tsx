@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { Alert } from "@markiro/ui";
+import { Alert, Button } from "@markiro/ui";
 
 import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FactsFailure, SyncState } from "../app/shell.js";
@@ -12,7 +12,10 @@ import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import { FloorWindowControl, type FloorWindowMode } from "./FloorWindowControl.js";
 import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
+import type { ScanSource } from "./scan-source.js";
+import { SyncPanel } from "./SyncPanel.js";
 import "./floor-status-bar.css";
 import { readStrandedRecords } from "./queue/outbox-recovery.js";
 import { useScannerIndicator, type ScannerIndicator } from "./scanner-indicator.js";
@@ -30,6 +33,24 @@ import {
 import { readShiftCopy } from "./shifts/shift-copies.js";
 import { formatQuantity } from "./shifts/shift-text.js";
 import type { FloorOperator } from "./sign-in.js";
+
+/**
+ * What the rail offers besides «Сменить оператора» (beta 3): the sync panel,
+ * and the window mode where this PC can be locked. The scan source and its
+ * mute are the badge scan of the identity re-confirmation (`Reconfirm`).
+ */
+export interface FloorBarTools {
+  /** «Повторить сейчас» of the sync panel: asks for a sync and for the outbox to go. */
+  retry: () => void;
+  /** When the reference sync last finished since the app started. */
+  lastSyncedAt: Date | null;
+  /** `null` where this PC cannot be locked (a host, an office, a station not configured, development). */
+  windowMode: FloorWindowMode | null;
+  /** The unmuted scan source. */
+  source: ScanSource;
+  /** Mutes the floor's screens while a dialog reads a badge. */
+  onMute: (muted: boolean) => void;
+}
 
 export interface FloorStatusBarProps {
   local: LocalExecutor;
@@ -80,6 +101,8 @@ export interface FloorStatusBarProps {
    * is pressed; in a shift the control asks first.
    */
   onSwitchOperator?: () => void;
+  /** The sync panel and the window mode in the rail; without them the rail holds «Сменить оператора» only. */
+  tools?: FloorBarTools;
 }
 
 const SCANNER_TONE: Readonly<Record<ScannerIndicator, PillTone>> = {
@@ -212,6 +235,7 @@ export function FloorStatusBar({
   now = systemClock,
   watchScanners,
   onSwitchOperator,
+  tools,
 }: FloorStatusBarProps) {
   const { t } = useTranslation();
   const scanner = useScannerIndicator(watchScanners);
@@ -377,10 +401,16 @@ export function FloorStatusBar({
     };
   }, [local, hostId, deviceId, lineId, sync.synced]);
 
-  const operatorValue =
-    operator === null
-      ? t("floor.status.nobody")
-      : t("floor.status.operatorValue", { name: operator.name, login: operator.login });
+  const [syncOpen, setSyncOpen] = useState(false);
+  // Something the panel could explain: not the link being down alone, which the
+  // line beside it says and an offline factory lives with.
+  const syncProblem =
+    failing ||
+    stranded > 0 ||
+    sync.failure !== null ||
+    sync.quarantined > 0 ||
+    (outbox !== null && (outbox.rejected > 0 || outbox.conflicts > 0 || outbox.displaced > 0));
+  const operatorValue = operator === null ? t("floor.status.nobody") : operator.name;
   return (
     <section className="station-status-bar floor-status" aria-label={t("floor.status.label")}>
       {/*
@@ -474,10 +504,57 @@ export function FloorStatusBar({
           />
         </dl>
       </div>
-      {operator !== null && onSwitchOperator !== undefined && (
+      {(tools !== undefined || (operator !== null && onSwitchOperator !== undefined)) && (
         <div className="station-status-actions" role="group" aria-label={t("floor.status.actions")}>
-          <OperatorSwitchControl activeShift={shiftId !== null} onSwitch={onSwitchOperator} />
+          {tools !== undefined && (
+            <Button
+              type="button"
+              size="floor"
+              variant="secondary"
+              className="station-rail-button station-rail-button--icon floor-sync-button"
+              aria-label={t(syncProblem ? "floor.sync.openProblems" : "floor.sync.open")}
+              title={t("floor.sync.open")}
+              data-problem={syncProblem ? "true" : "false"}
+              onClick={() => setSyncOpen(true)}
+              icon={
+                <span aria-hidden="true" className="floor-sync-button__glyph">
+                  ↻
+                </span>
+              }
+            >
+              {syncProblem && <span className="floor-sync-button__dot" aria-hidden="true" />}
+            </Button>
+          )}
+          {tools?.windowMode != null && (
+            <FloorWindowControl
+              windowMode={tools.windowMode}
+              local={local}
+              pairing={pairing}
+              source={tools.source}
+              onMute={tools.onMute}
+              operatorId={operator === null ? null : operator.id}
+            />
+          )}
+          {operator !== null && onSwitchOperator !== undefined && (
+            <OperatorSwitchControl activeShift={shiftId !== null} onSwitch={onSwitchOperator} />
+          )}
         </div>
+      )}
+      {tools !== undefined && (
+        <SyncPanel
+          open={syncOpen}
+          onClose={() => setSyncOpen(false)}
+          local={local}
+          pairing={pairing}
+          link={link}
+          sync={sync}
+          factsFailure={factsFailure}
+          refusalHeld={refusalHeld}
+          outboxVersion={outboxVersion}
+          lastSyncedAt={tools.lastSyncedAt}
+          onRetry={tools.retry}
+          now={now}
+        />
       )}
       {/*
         Its own polite region, there before the warnings so that they are

@@ -128,6 +128,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
+    getDeviceProductPhoto: vi.fn<HostApi["getDeviceProductPhoto"]>(async () => ({ photo: null })),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
     warehouseLookup: vi.fn<HostApi["warehouseLookup"]>(() => unexpected("warehouseLookup")),
     sendWarehouseRecords: vi.fn<HostApi["sendWarehouseRecords"]>(() =>
@@ -241,6 +242,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
     getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
+    getUsageStats: vi.fn<HostApi["getUsageStats"]>(() => unexpected("getUsageStats")),
     startBackup: vi.fn<HostApi["startBackup"]>(() => unexpected("startBackup")),
     updateBackupSettings: vi.fn<HostApi["updateBackupSettings"]>(() =>
       unexpected("updateBackupSettings"),

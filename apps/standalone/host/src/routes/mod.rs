@@ -40,4 +40,5 @@ pub mod sscc;
 pub mod sscc_blocks;
 pub mod template_defaults;
 pub mod templates;
+pub mod usage_stats;
 pub mod warehouse;

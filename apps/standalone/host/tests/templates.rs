@@ -570,8 +570,8 @@ async fn deleting_a_template_clears_the_products_that_name_it() {
         "defaultPalletSheetId",
         "egaisCode",
         "defaultCounterpartyId",
-        "photoChecksum",
     ] {
+        // The record names the photo too since beta 3 (`photoChecksum`, none here).
         data.as_object_mut().unwrap().remove(office_only);
     }
     assert_eq!(

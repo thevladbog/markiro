@@ -6,9 +6,13 @@
 //! per product or none. It never parses the picture, as the organization's
 //! logo (`org_logo.rs`).
 //!
-//! The same photo sent again writes nothing. A change takes no revision: the photo is not in the station feed or a
-//! shift's snapshot — only the office's «Бланк смены» prints it — and the
-//! product's list names it by its checksum (`photoChecksum`). The audit row
+//! The same photo sent again writes nothing. A change takes a revision (beta
+//! 3: the station shows the photo on its shift cards) but not the product's
+//! `rev`, which is the office's `expectedRev`: it stamps `products.photo_rev`,
+//! and the feed re-sends the product with the photo's checksum
+//! (`routes/changes.rs`). A shift's snapshot never holds it; the station
+//! fetches the bytes with `GET /v1/device/products/{id}/photo` ([`device_photo`]).
+//! The product's list names it by its checksum (`photoChecksum`). The audit row
 //! names the size, never the bytes. The request body is bounded by the
 //! router's default JSON limit (2 MiB), far above the largest photo (400 000
 //! characters of base64), so no route-specific limit is needed.
@@ -20,8 +24,8 @@ use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
-use crate::auth::OfficeContext;
-use crate::db::begin_write;
+use crate::auth::{AskingDevice, OfficeContext};
+use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::validate;
@@ -114,6 +118,7 @@ pub async fn put_photo(
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
+    let rev = stamp_photo_rev(&mut tx, &id).await?;
     audit::record(
         &mut tx,
         &at,
@@ -128,7 +133,9 @@ pub async fn put_photo(
     )
     .await
     .map_err(ApiError::internal)?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(ProductPhotoState {
         photo: Some(ProductPhoto {
             width: put.width,
@@ -157,7 +164,9 @@ pub async fn delete_photo(
         .await
         .map_err(ApiError::internal)?
         .rows_affected();
+    let mut stamped = None;
     if removed > 0 {
+        stamped = Some(stamp_photo_rev(&mut tx, &id).await?);
         audit::record(
             &mut tx,
             &at,
@@ -173,6 +182,39 @@ pub async fn delete_photo(
         .await
         .map_err(ApiError::internal)?;
     }
-    tx.commit().await.map_err(ApiError::internal)?;
+    match stamped {
+        Some(rev) => commit_with_revision(tx, &state.revisions, rev)
+            .await
+            .map_err(ApiError::internal)?,
+        None => tx.commit().await.map_err(ApiError::internal)?,
+    }
     Ok(Json(ProductPhotoState { photo: None }))
+}
+
+/// A device's read of a product's photo (`GET /v1/device/products/{id}/photo`),
+/// for the copy a station keeps; the answer is the office's, `photo: null`
+/// without one. A read through `AskingDevice`, which waits for no writer.
+pub async fn device_photo(
+    State(state): State<AppState>,
+    AskingDevice(_device): AskingDevice,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<ProductPhotoState>, ApiError> {
+    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    check_product(&mut conn, &id).await?;
+    Ok(Json(ProductPhotoState {
+        photo: read_photo(&mut conn, &id).await?,
+    }))
+}
+
+/// Takes the revision of a photo change and stamps it on the product
+/// (`photo_rev`, not `rev`: that one is the office's `expectedRev`).
+async fn stamp_photo_rev(conn: &mut SqliteConnection, id: &str) -> Result<i64, ApiError> {
+    let rev = next_revision(conn).await.map_err(ApiError::internal)?;
+    sqlx::query("UPDATE products SET photo_rev = ? WHERE id = ?")
+        .bind(rev)
+        .bind(id)
+        .execute(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(rev)
 }

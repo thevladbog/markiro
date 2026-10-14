@@ -245,6 +245,7 @@ const COPY_TABLES = [
   "ref_operators",
   "ref_operator_badges",
   "ref_products",
+  "ref_product_photos",
   "ref_templates",
   "ref_template_defaults",
   "sync_quarantine",
@@ -376,7 +377,7 @@ describe("ENTITY_SET", () => {
     // build cannot change one and forget the other.
     expect(ENTITY_SET).toBe(
       "org_profile,site,lines,operators,operator_badges,products,label_templates," +
-        "category_template_defaults,code_releases;v4",
+        "category_template_defaults,code_releases;v5",
     );
   });
 });

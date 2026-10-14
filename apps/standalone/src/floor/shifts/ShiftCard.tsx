@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 
+import type { LocalExecutor } from "../../local/executor.js";
+import { ProductPhoto } from "./ProductPhoto.js";
 import type { ShiftCopy } from "./shift-copies.js";
 import { hueFromGtin, productMonogram } from "./product-accent.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
@@ -52,19 +54,22 @@ export interface ShiftCardProps {
   /** Another entry runs, or this one: every card waits. */
   busy: boolean;
   onAction: () => void;
+  /** The station's database, for the product's photo; without it the monogram stands. */
+  local?: LocalExecutor;
 }
 
 /**
  * One shift of the line, laid out as the cloud station's `ShiftCard`
  * (apps/station/src/ui/ShiftCard.tsx, redesign 2026-09-20, PR #615/#619):
- * the product's panel on its GTIN-derived gradient with the monogram (the
- * standalone keeps no product photos), then the number and the status, the
+ * the product's panel on its GTIN-derived gradient with the product's photo
+ * (beta 3: the station keeps it, `ProductPhoto`) or, without one, the
+ * monogram, then the number and the status, the
  * product, the date, the mode and plan as facts, the counterparty, and the
  * 72 px action pinned to the card's last row. What the standalone adds — a
  * shift that needs the host, one the office closed, a close the host
  * refused — is said in the free row above the action.
  */
-export function ShiftCard({ copy, refusal = null, action, busy, onAction }: ShiftCardProps) {
+export function ShiftCard({ copy, refusal = null, action, busy, onAction, local }: ShiftCardProps) {
   const { t } = useTranslation();
   const phase =
     copy.localState === "closing"
@@ -83,9 +88,18 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction }: Shif
     <Card className="shift-card" padding="var(--sp-1)">
       <div className="shift-card__body">
         <div className="shift-card__photo" data-accent="true" style={photoStyle}>
-          <span className="shift-card__photo-monogram" aria-hidden="true">
-            {productMonogram(copy.productName)}
-          </span>
+          {(() => {
+            const monogram = (
+              <span className="shift-card__photo-monogram" aria-hidden="true">
+                {productMonogram(copy.productName)}
+              </span>
+            );
+            return local === undefined ? (
+              monogram
+            ) : (
+              <ProductPhoto local={local} productId={copy.productId} fallback={monogram} />
+            );
+          })()}
         </div>
         <div className="shift-card__details">
           <div className="shift-card__heading">

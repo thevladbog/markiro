@@ -7,6 +7,7 @@ import { Alert, Button, Card, Textarea } from "@markiro/ui";
 import { PROTOCOL_VERSION } from "../../host/protocol.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { useOfficeLink } from "../office-link.js";
 import { ABOUT_KEY, loadAboutData } from "./about-data.js";
 import { useAbout } from "./about-context.js";
@@ -15,6 +16,7 @@ import { copyText } from "./clipboard.js";
 import { ALTERNATIVE_SUPPORT_EMAIL, PRIMARY_SUPPORT_EMAIL, supportMailLink } from "./contacts.js";
 import { buildSupportReport, type SupportFacts } from "./support-report.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "./support-blocks.js";
+import { usageLoadOf } from "./support-usage.js";
 
 /** The folder under `Документы\Markiro\Выгрузки` the support text is saved into. */
 const SAVE_SEGMENTS = ["Выгрузки", "Сведения для поддержки"] as const;
@@ -30,7 +32,8 @@ function stamp(when: Date): string {
 /**
  * «Сведения для поддержки»: one click builds the text (versions, role, link,
  * the last copy, the license state: `buildSupportReport`'s allowlist, no
- * secrets) and copies it. The text stays on screen to copy by hand when the
+ * secrets, and the usage statistics as one encrypted token only the maker
+ * can open) and copies it. The text stays on screen to copy by hand when the
  * clipboard refuses, to save into a file, and «Написать в поддержку» opens a
  * letter with no body: the text is pasted, never put into the link.
  */
@@ -40,6 +43,7 @@ export function SupportSection() {
   const files = useOfficeFiles();
   const link = useOfficeLink();
   const queryClient = useQueryClient();
+  const session = useOfficeSession();
   const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token));
   const [text, setText] = useState<string | null>(null);
   const [copied, setCopied] = useState<Copied | null>(null);
@@ -73,7 +77,16 @@ export function SupportSection() {
       hostId: fresh.hostId,
       lastBackupAt: backupState?.local.copies[0]?.createdAt ?? null,
     };
-    const blocks = await collectSupportBlocks(SUPPORT_CONTRIBUTORS, { t, facts, about: fresh });
+    // The counts by month, as of this click: an administrator's, else the block says why not.
+    const [usageResult] = await Promise.allSettled([
+      session.call((token) => session.api.getUsageStats(token)),
+    ]);
+    const blocks = await collectSupportBlocks(SUPPORT_CONTRIBUTORS, {
+      t,
+      facts,
+      about: fresh,
+      ...(usageResult === undefined ? {} : { usage: usageLoadOf(usageResult) }),
+    });
     const report = buildSupportReport(facts, t, blocks);
     setText(report);
     setCopied((await copyText(report)) ? "copied" : "failed");
@@ -148,7 +161,7 @@ export function SupportSection() {
             <Textarea
               label={t("office.about.support.textLabel")}
               readOnly
-              rows={14}
+              rows={18}
               value={text}
               onFocus={(event) => event.currentTarget.select()}
               style={{ fontFamily: "var(--font-mono)" }}

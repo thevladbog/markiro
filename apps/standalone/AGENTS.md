@@ -253,9 +253,14 @@ copy (sqlx decides as before). A copy that fails runs no migration: the open
 fails as `OpenFailure::Other` (the file stays, the app starts without its
 local database), except damage the copy met in the database, which stays
 `Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
-file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
-it, with the PIN and badge hashes it held at the upgrade, and only the next
-upgrade that brings migrations replaces it (carried to the owner, Д9).
+file stays `Corrupt`. A forget removes the copy (beta 3, the owner accepted
+the open question Д9): `device_forget` deletes every `standalone-station.pre-*.db`
+and `.db.partial` with their `-wal`, `-shm` and `-journal` files
+(`LocalDbState::remove_pre_upgrade_copies`) once the database itself is
+cleared, since the copy holds the PIN and badge hashes the database held at the
+upgrade. A file that cannot go makes the forget answer `storage` and keeps
+`device.json`, so it can be tried again; nothing else reads or removes the copy,
+and the next upgrade that brings migrations makes a new one.
 
 A forget (`clear_copies`) empties every disposable table (see below),
 `floor_sign_in_failures` included, so it resets every lockout counter of the
@@ -1146,9 +1151,26 @@ length and the JPEG signature `FF D8 FF` (`validate::product_photo`) and
 parses no picture, as the logo. `GET/PUT/DELETE /v1/office/products/{id}/photo`:
 every office role reads, administrators and technologists write (the roles
 read again inside the write transaction), an unknown product is
-`not_found`; the photo takes no revision and rides no feed, the same photo
-again writes nothing, and the list names it by `photoChecksum` (SHA-256 of
-the bytes) without the bytes. The dialog writes it at once by its own
+`not_found`; the same photo again writes nothing, and the list names it by
+`photoChecksum` (SHA-256 of the bytes) without the bytes. A change takes one
+host revision (beta 3: the station shows the photo) but not the product's
+`rev`, which is the office's `expectedRev` (the dialog uploads a photo and
+saves the product after it): host migration `0032` adds `products.photo_rev`,
+the feed re-sends the product at that revision (`FEED_KEYS`: `photo_rev > ?1
+AND photo_rev <> rev`) with `photoChecksum` in its record (`ProductRecord`, a
+record from an older host reads as none), and a station fetches the bytes
+with `GET /v1/device/products/{id}/photo` (a device key, `photo: null`
+without one; in the license gate's `NEVER`). The station keeps them as
+base64 text in `ref_product_photos` (shell migration `0017`, `Disposable`:
+a forget empties it; at most 400 000 characters a row), beside
+`ref_products.photo_checksum`: `syncProductPhotos` (`src/local/product-photos.ts`)
+runs after every successful reference sync, fetches up to 25 photos whose
+stored checksum differs from the record's, drops those of products that have
+none and never fails the sync (a failed pass is tried again with the sync's
+backoff). `ProductPhoto` shows it on the shift card and the new-shift product
+card, and falls back to the colour panel's monogram while there is none, on a
+failed read and when the picture does not decode. `SYNC_SCHEMA_VERSION` is 5
+since then. The dialog writes it at once by its own
 buttons, not by «Сохранить». A backup copies the whole database file, so it
 holds the photos (a thousand products — up to 300 MB).
 
@@ -1494,7 +1516,7 @@ nothing new. An unreadable release is quarantined like any record (the code
 stays a local duplicate, fail closed). Its statement is pinned on the shell's
 SQLite in `tests/local_db.rs`.
 `ENTITY_SET` names the kept entities, the acted-on ones and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v4"`):
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v5"`):
 raise the version whenever a record schema or the meaning of a copy table
 changes, so every device syncs from zero once and gets back what an older
 build quarantined or kept differently.
@@ -2311,6 +2333,36 @@ hears the shell's COM scanners (`comScans`, `createComScanSource`; only on the
 scan form and while nothing is being sent): before, a COM scanner's frame went
 nowhere there, since only the focused field took a scan. Its controls are the
 floor's 64 px.
+
+The floor's own window control (beta 3, owner decisions): the status bar's rail
+holds «Оконный режим» / «Полноэкранный режим» (`FloorWindowControl`, a 64 px icon
+button, as on the cloud station) wherever the table locks this PC (`due`, so
+never on a host or office PC, in development or on an unconfigured station).
+This supersedes «an operator cannot leave kiosk mode» of plan 1f2: an operator
+may, but only after a fresh proof of identity (`Reconfirm`), the sign-in's own —
+the badge scanned, or the personnel number and the PIN on the keypad
+(`signInWithBadge`, `signInWithPin`), so a wrong attempt counts against the same
+lockouts and a locked operator or station is refused here too. With an operator
+signed in, only their own proof counts; on the sign-in screen any operator's
+does. The proof signs nobody in. While the dialog is open the floor's screens are
+muted (`createGatedScanSource`: the dialog reads the unmuted source), so a badge is
+never taken for a product's code. The way back to full screen needs no proof. An
+office administrator's sign-in on this PC opens an ordinary window by itself, as
+before, and the office's «Оконный режим» stays. The control sends the same
+`enter_lockdown` / `exit_lockdown` as the table's effect; `due` does not change
+by it, so the window stays as the person set it until the table decides again.
+The same proof guards «Отвязать станцию» in the footer of «Рабочее место»
+(`UnpairStation`, mounted there through `UnpairContext`): no shift open, the
+dialog says what is lost — the copies with the operators' PIN and badge hashes,
+the records not yet sent (they stay on the disk, `keepUnsent`, and never reach
+the host) and the blocks a restored host is still owed — and only then the
+shell's `device_forget` runs, which now also removes the upgrade's copy of the
+database. «Синхронизация» in the same rail (`SyncPanel`) is the cloud's sync
+details: the link, when the catalog last arrived since the app started, the
+records waiting, the refused, conflicting and displaced ones with the host's
+reason in words (the queue screen's own reads and texts), «Повторить сейчас»
+(only `requestSync` and `requestFacts`, no protocol of its own) and the same
+as plain text to copy.
 
 The trust boundary of the exit is the webview's: the administrator check lives
 in `App` and `WindowModeButton`, and `exit_lockdown` itself has no guard in
@@ -6907,3 +6959,71 @@ either; a file log is stage 5.
   reasons; (8) «Расформировать короб» on «Конфликты» for a closed box of a closed shift;
   (9) an apply during a restore's hold is refused with the hold's message, and works after
   «Возобновить».
+
+## Shift date (beta 3)
+
+A shift has its own date beside the production date: `shifts.planned_date`
+(host migration `0028`), the cloud's `plannedDate`, labelled «Дата смены» — the
+working day the shift takes place. A civil date `YYYY-MM-DD`, not an instant.
+The shift's NUMBER (`MONYY-NNN`) is still drawn from the production date. The
+migration gives every shift already there its production date and a trigger
+(`shifts_planned_date_default`) gives the same to an insert that names none; the
+column is nullable only for that reason, the answers read
+`COALESCE(planned_date, production_date)`. `OfficeShift.plannedDate` is always
+present; `DeviceShift.plannedDate` is optional (a host before beta 3 sends none);
+`ShiftCreate`, `ShiftUpdate` and `DeviceShiftCreate` take it as an optional field,
+so a body of an earlier build reads as before (`proto/fixtures/*-planned-date.json`
+beside the older fixtures, which stay). `PROTOCOL_VERSION` is not raised: a station
+sends `plannedDate` only to a host updated before it, as the installer's order
+already requires. A planned shift's date is edited in the office (`ShiftDialog`);
+an open or closed shift's is fixed like the production date. The create audit row
+names `plannedDate` only when it differs from the production date, the update row
+as any changed field. The office list has a «Дата смены» column and a shift-date
+period (`plannedFrom`/`plannedTo`, both ends, narrowing the production-date period)
+served by `shifts_planned_date`; the card shows it and the task form prints it. The
+station (`NewShift`) sends today in the organization's zone (`civilToday`); it keeps
+no copy of the date yet (no `floor_shifts` column, no shell migration), so its shift
+card still shows the production date alone.
+
+## Usage statistics in the support text (beta 3)
+
+`GET /v1/office/usage-stats` (`routes/usage_stats.rs`, administrators only,
+read-only, in `license::gate::NEVER`) answers `markiro_proto::usage_stats::UsageStats`:
+counts by calendar month for the last twelve months — shifts by mode, origin,
+print policy and pallets; scans by verdict; boxes (and the codes their stations
+reported, so the average per box), pallets, exceptions by kind, conflicts by kind and
+review, warehouse and duplicate-label reprints, applied disaggregation documents,
+refused records — and the paired devices by kind. Counts and month keys only; the
+types deny a field beyond the allowlist. A shift's rows belong to the month of the
+shift's own date, the host's instants to the UTC month of the instant. Every query is
+a grouped aggregate driven by an index (`tests/usage_stats.rs` reads each plan and
+fails on a scan of a table of facts), so no migration was needed for `scans`;
+`warehouse_reprints` and `disaggregation_documents` are read whole (a handful of rows).
+
+The webview asks for it at the click of «Сформировать и скопировать»
+(`SupportSection`) and puts it into the support text only ENCRYPTED
+(`office/info/support-usage.ts`, `support-crypto.ts`): the payload is copied field by
+field from the answer (`usagePayload`), deflated when the webview can, and sealed for
+the maker's public key — ephemeral ECDH P-256, HKDF-SHA256, AES-256-GCM — into
+`MKS1.<kid>.<base64url>`. The text shows a neutral label and that one token; a build
+whose keyset is empty (`proto/fixtures/support-keys.json`, public JWKs only, in the
+shape of `trust-keys.json`; the production keyset is EMPTY until the owner adds one)
+says «недоступна в этой сборке» instead of printing counts, and so does a role that is
+not an administrator or a host that did not answer. `tools/standalone-support/decrypt.mjs`
+opens a token with the private key (`--key support-private.pem`, a whole support text on
+stdin or a file) and prints the JSON and a table; its Node contract
+(`pnpm test:standalone-support:contract`) uses an independent writer, and
+`test/support-crypto.test.ts` opens the webview's own token with the tool, with tamper
+tests on the key id, flag, ephemeral key, nonce and ciphertext. The test keys are made
+when the tests run; no private key is committed (`no-private-keys.test.mjs`).
+
+Owner's steps, once (the private key stays on the owner's machine):
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out support-private.pem
+node tools/standalone-support/decrypt.mjs --public-jwk --key support-private.pem
+```
+
+then put the printed `{ kid, jwk }` into `keys` of `proto/fixtures/support-keys.json`
+and build. A key that must stop being used goes into `retiredKids` (an old text still
+opens with its file); the newest key that is not retired is the one the build uses.

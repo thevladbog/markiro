@@ -42,7 +42,14 @@ function read(name: string): unknown {
 // missing sheet as `null` before it reads the shift rather than by `.extend`.
 const parityShiftSchema = z.preprocess(
   (value) =>
-    typeof value === "object" && value !== null ? { palletSheetTemplateId: null, ...value } : value,
+    typeof value === "object" && value !== null
+      ? {
+          palletSheetTemplateId: null,
+          // The cloud's cases have one date for a shift's day, its production date.
+          plannedDate: (value as { productionDate?: unknown }).productionDate,
+          ...value,
+        }
+      : value,
   officeShiftSchema,
 );
 

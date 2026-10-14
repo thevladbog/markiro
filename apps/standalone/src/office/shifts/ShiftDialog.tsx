@@ -609,6 +609,24 @@ function ShiftForm({
           </div>
         )}
       />
+      <Controller
+        control={control}
+        name="plannedDate"
+        render={({ field }) => (
+          <div onKeyDown={keepCalendarEscape}>
+            <DatePicker
+              label={t("office.shifts.fields.plannedDate")}
+              {...datePickerTexts(t)}
+              {...(field.value === "" ? {} : { value: field.value })}
+              onValueChange={(value) => field.onChange(value ?? "")}
+              id={fieldId("plannedDate")}
+              disabled={locked}
+              hint={t("office.shifts.fields.plannedDateHint")}
+              {...fieldError(errors.plannedDate?.message)}
+            />
+          </div>
+        )}
+      />
       <Input
         label={t("office.shifts.fields.plannedQty")}
         hint={t("office.shifts.fields.optional")}

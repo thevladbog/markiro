@@ -216,6 +216,7 @@ export function ShiftList({
           <ShiftCard
             key={copy.id}
             copy={copy}
+            local={local}
             refusal={
               copies.refused.has(copy.id) && copy.localState === "closing"
                 ? { code: copies.refused.get(copy.id) ?? null }

@@ -278,6 +278,15 @@ describe("the card of a shift (plan О-Ф)", () => {
     );
   });
 
+  it("says the shift's working day in the header of every tab, and the production date in the summary", async () => {
+    const session = cardSession({ ...ACTIVE, plannedDate: "2026-10-12" });
+    await openCard(session, "OCT26-004");
+    // Beside the status, whatever tab is open.
+    expect(screen.getByText("Дата смены: 12.10.2026")).toBeTruthy();
+    openTab("Короба");
+    expect(screen.getByText("Дата смены: 12.10.2026")).toBeTruthy();
+  });
+
   it("shows the boxes fifty to a page", async () => {
     const many = Array.from({ length: 51 }, (_, index) => box(index + 1));
     await openCard(cardSession(ACTIVE, many), "OCT26-004", "Короба");
@@ -337,6 +346,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     await waitFor(() => expect(facts()["Открыта"]).toBe("08.10.2026, 18:02"));
     expect(facts()).toEqual({
       Товар: "Молоко 3,2% 0,9 л",
+      "Дата смены": "08.10.2026",
       "Дата производства": "08.10.2026",
       Линия: "Линия 2",
       Контрагент: "ООО «Северный берег»",

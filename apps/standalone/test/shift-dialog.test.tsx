@@ -223,6 +223,8 @@ describe("office shifts: planning a shift", () => {
       productId: MILK.id,
       lineId: LINE_2.id,
       productionDate: "2026-10-12",
+      // The working day starts as today (the test clock) and is its own field.
+      plannedDate: "2026-10-09",
       boxTemplateId: MILK_BOX.id,
       boxCapacity: 12,
       plannedQty: 1200,
@@ -234,6 +236,36 @@ describe("office shifts: planning a shift", () => {
     });
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("plans the shift for its own working day, apart from the production date, and numbers it by the production date", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    // Both start as today, the organization's day.
+    expect(within(dialog()).getByRole("button", { name: "Дата смены" }).textContent).toBe(
+      "9 октября 2026",
+    );
+    fillMilk();
+    pickDate("Дата смены", "13 октября 2026");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(
+      TOKEN,
+      expect.objectContaining({ productionDate: "2026-10-09", plannedDate: "2026-10-13" }),
+    );
+  });
+
+  it("refuses a shift without its date before asking the host", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Очистить дату: Дата смены" }));
+    submit();
+    await waitFor(() =>
+      expect(screen.getAllByText("Укажите дату смены").length).toBeGreaterThan(0),
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
   });
 
   it("moves the focus to the notice once the shift is planned", async () => {
@@ -258,6 +290,7 @@ describe("office shifts: planning a shift", () => {
       productId: WATER.id,
       lineId: LINE_10.id,
       productionDate: "2026-10-09",
+      plannedDate: "2026-10-09",
       boxTemplateId: BOX_58.id,
       boxCapacity: 20,
       plannedQty: null,
@@ -287,6 +320,7 @@ describe("office shifts: planning a shift", () => {
       productId: MILK.id,
       lineId: LINE_2.id,
       productionDate: "2026-10-09",
+      plannedDate: "2026-10-09",
       boxTemplateId: MILK_BOX.id,
       boxCapacity: 12,
       plannedQty: 1200,

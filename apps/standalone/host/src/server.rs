@@ -252,6 +252,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::device_conflicts::list_displacements),
         )
         .route(
+            "/v1/device/products/{id}/photo",
+            get(crate::routes::product_photos::device_photo),
+        )
+        .route(
             "/v1/device/warehouse/lookup",
             post(crate::routes::warehouse::lookup),
         )
@@ -264,6 +268,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/devices",
             get(crate::routes::devices::list_devices),
+        )
+        .route(
+            "/v1/office/usage-stats",
+            get(crate::routes::usage_stats::usage_stats),
         )
         .route(
             "/v1/office/devices/{id}",

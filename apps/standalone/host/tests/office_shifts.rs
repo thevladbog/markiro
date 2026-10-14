@@ -16,6 +16,7 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "id": id, "number": number, "status": "planned", "mode": "aggregation",
         "palletsEnabled": false, "createdFrom": "office", "productId": setup.product,
         "lineId": setup.line, "counterpartyId": null, "productionDate": "2026-10-08",
+        "plannedDate": "2026-10-08",
         "plannedQty": null, "boxCapacity": 12, "boxTemplateId": setup.template,
         "palletBoxCapacity": null, "palletTemplateId": null, "palletSheetTemplateId": null,
         "ownerDeviceId": null, "openedAt": null, "closedAt": null, "closeReasonCode": null,

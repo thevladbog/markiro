@@ -97,10 +97,123 @@ async fn the_photo_is_kept_with_its_checksum_and_named_in_the_list() {
     let (status, list) = admin.call("GET", "/v1/office/products", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list[0]["photoChecksum"], CHECKSUM);
-    // A photo is not in the station feed: no revision is taken, and the
-    // product's own revision stays.
-    assert_eq!(host_revision(&admin.app).await, revision);
+    // A photo takes one host revision (the station shows it, beta 3) but
+    // never the product's own `rev`: that is the office's `expectedRev`, and
+    // the product dialog saves after it uploaded the photo.
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
     assert_eq!(list[0]["rev"], json!(revision));
+}
+
+#[tokio::test]
+async fn a_photo_change_reaches_the_station_feed_with_its_checksum() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let created = host_revision(&admin.app).await;
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    let set = host_revision(&admin.app).await;
+    assert_eq!(set, created + 1);
+    // The product comes again, at the photo's revision, with the checksum.
+    let items = admin.feed(created).await;
+    let items: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["entity"] == "products")
+        .collect();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(
+        (items[0]["id"].as_str(), items[0]["rev"].clone()),
+        (Some(id.as_str()), json!(set))
+    );
+    assert_eq!(items[0]["data"]["photoChecksum"], CHECKSUM);
+    // The same photo again takes no revision.
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    assert_eq!(host_revision(&admin.app).await, set);
+    // Clearing takes one and the record says none; clearing none takes none.
+    admin.call("DELETE", &path(&id), None).await;
+    let cleared = host_revision(&admin.app).await;
+    assert_eq!(cleared, set + 1);
+    let items = admin.feed(set).await;
+    assert_eq!(items[0]["rev"], json!(cleared));
+    assert_eq!(items[0]["data"]["photoChecksum"], Value::Null);
+    admin.call("DELETE", &path(&id), None).await;
+    assert_eq!(host_revision(&admin.app).await, cleared);
+}
+
+#[tokio::test]
+async fn the_product_dialog_can_save_after_it_uploaded_a_photo() {
+    let admin = admin().await;
+    let (_, created) = admin
+        .call(
+            "POST",
+            "/v1/office/products",
+            Some(json!({ "gtin14": "04600682000020", "name": "Кефир" })),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_owned();
+    let rev = created["rev"].clone();
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{id}"),
+            Some(json!({
+                "gtin14": "04600682000020", "name": "Кефир 1%", "archived": false, "expectedRev": rev
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The edit's own revision is above the photo's: the feed sends it once more.
+    let items = admin.feed(0).await;
+    let record = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["entity"] == "products")
+        .last()
+        .unwrap();
+    assert_eq!(record["data"]["name"], "Кефир 1%");
+    assert_eq!(record["data"]["photoChecksum"], CHECKSUM);
+}
+
+#[tokio::test]
+async fn a_station_reads_the_photo_with_its_device_key_only() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let device_path = format!("/v1/device/products/{id}/photo");
+    let (status, none) = admin
+        .app
+        .send(empty(with_device(request("GET", &device_path), &admin.key)))
+        .await;
+    assert_eq!((status, none), (StatusCode::OK, json!({ "photo": null })));
+    admin.call("PUT", &path(&id), Some(photo())).await;
+    let (status, read) = admin
+        .app
+        .send(empty(with_device(request("GET", &device_path), &admin.key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["photo"]["checksum"], CHECKSUM);
+    assert_eq!(read["photo"]["dataBase64"], "/9j/4AAQSkZJRgABAQ==");
+    // No key: refused; an unknown product: not found.
+    let (status, error) = admin.app.send(empty(request("GET", &device_path))).await;
+    assert_eq!(
+        (status, error["error"]["code"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("unauthorized"))
+    );
+    let (status, error) = admin
+        .app
+        .send(empty(with_device(
+            request(
+                "GET",
+                "/v1/device/products/00000000-0000-4000-8000-000000000000/photo",
+            ),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(
+        (status, error["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
 }
 
 #[tokio::test]

@@ -1,0 +1,100 @@
+/*
+ * The «Синхронизация» panel (beta 3): sections of plain statements, a list of
+ * the refused records with their reasons, and the copyable text. Long reasons
+ * wrap; nothing in the panel scrolls sideways.
+ */
+.sync-panel {
+  display: grid;
+  width: min(900px, 100%);
+  min-width: 0;
+  max-height: 100%;
+  margin-inline: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: var(--sp-3);
+  align-content: start;
+}
+
+.sync-panel__notes {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.sync-panel__section {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+
+.sync-panel__section h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.sync-panel__section p {
+  margin: 0;
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}
+
+.sync-panel__fact {
+  color: var(--fg-2);
+}
+
+.sync-panel__reason {
+  color: var(--warn-fg);
+}
+
+.sync-panel__records {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: var(--sp-2);
+  list-style: none;
+}
+
+.sync-panel__records li {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.sync-panel__record {
+  font: var(--floor-body-strong);
+  overflow-wrap: anywhere;
+}
+
+.sync-panel__why {
+  color: var(--fg-2);
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}
+
+.sync-panel__text {
+  min-width: 0;
+  margin: 0;
+  padding: var(--sp-2);
+  overflow-wrap: anywhere;
+  border-radius: var(--r-1);
+  background: var(--surface-sunken, var(--surface-panel));
+  font: 400 14px/20px var(--font-mono);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.sync-panel__footer {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.sync-panel__footer > * {
+  flex: 1 1 0;
+  min-width: 0;
+}

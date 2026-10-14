@@ -216,12 +216,13 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       upsert:
         "INSERT INTO ref_products (id, gtin14, name, print_name, chz_group_code, box_capacity, " +
         "pallet_box_capacity, shelf_life_days, default_box_template_id, " +
-        "default_pallet_template_id, archived, status, rev) " +
+        "default_pallet_template_id, archived, status, photo_checksum, rev) " +
         "SELECT r.value ->> 'id', r.value ->> 'gtin14', r.value ->> 'name', " +
         "r.value ->> 'printName', r.value ->> 'chzProductGroupCode', r.value ->> 'boxCapacity', " +
         "r.value ->> 'palletBoxCapacity', r.value ->> 'shelfLifeDays', " +
         "r.value ->> 'defaultBoxTemplateId', r.value ->> 'defaultPalletTemplateId', " +
-        "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'rev' " +
+        "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'photoChecksum', " +
+        "r.value ->> 'rev' " +
         "FROM json_each(?) AS r " +
         notQuarantinedNewer("products") +
         " ON CONFLICT (id) DO UPDATE SET gtin14 = excluded.gtin14, name = excluded.name, " +
@@ -231,7 +232,8 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "shelf_life_days = excluded.shelf_life_days, " +
         "default_box_template_id = excluded.default_box_template_id, " +
         "default_pallet_template_id = excluded.default_pallet_template_id, " +
-        "archived = excluded.archived, status = excluded.status, rev = excluded.rev " +
+        "archived = excluded.archived, status = excluded.status, " +
+        "photo_checksum = excluded.photo_checksum, rev = excluded.rev " +
         "WHERE excluded.rev > ref_products.rev",
     },
   ],
@@ -280,7 +282,7 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
  * matches, every device syncs from zero, and records an older build
  * quarantined or kept differently come again.
  */
-const SYNC_SCHEMA_VERSION = 4;
+const SYNC_SCHEMA_VERSION = 5;
 
 /**
  * The feed entities this build acts on but keeps no copy of (plan ДЗГ):
@@ -298,7 +300,7 @@ const releaseBoxId = z.uuid();
  * This build's copies and actions, in `sync_state.entity_set`: the feed
  * entities it keeps (derived from `ENTITIES`, so a new entity cannot update
  * that map and forget this value, or the reverse), the ones it only acts on
- * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v4`
+ * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v5`
  * today (`test/reference-sync.test.ts` pins the text). A build that keeps
  * other entities, or reads them differently, finds another value there and
  * syncs from zero: records the old build skipped or quarantined would never

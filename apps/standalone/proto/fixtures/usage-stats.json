@@ -1,0 +1,537 @@
+{
+  "months": [
+    {
+      "month": "2025-10",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2025-11",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2025-12",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-01",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-02",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-03",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-04",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-05",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-06",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-07",
+      "shifts": {
+        "aggregation": 0,
+        "validation": 0,
+        "validationPrint": 0,
+        "fromOffice": 0,
+        "fromStation": 0,
+        "withPallets": 0
+      },
+      "scans": {
+        "accepted": 0,
+        "duplicates": 0,
+        "rejected": 0
+      },
+      "boxes": {
+        "closed": 0,
+        "disassembled": 0,
+        "codes": 0
+      },
+      "pallets": {
+        "closed": 0,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 0,
+        "boxClear": 0,
+        "boxReprint": 0,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 0,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    },
+    {
+      "month": "2026-08",
+      "shifts": {
+        "aggregation": 18,
+        "validation": 4,
+        "validationPrint": 2,
+        "fromOffice": 15,
+        "fromStation": 7,
+        "withPallets": 6
+      },
+      "scans": {
+        "accepted": 21640,
+        "duplicates": 212,
+        "rejected": 37
+      },
+      "boxes": {
+        "closed": 1802,
+        "disassembled": 3,
+        "codes": 21640
+      },
+      "pallets": {
+        "closed": 41,
+        "disassembled": 1
+      },
+      "exceptions": {
+        "boxUndo": 14,
+        "boxClear": 2,
+        "boxReprint": 9,
+        "boxDisassemble": 3,
+        "palletReprint": 1,
+        "palletDisassemble": 1
+      },
+      "conflicts": {
+        "late": 2,
+        "displaced": 1,
+        "reviewed": 2
+      },
+      "reprints": {
+        "warehouse": 5,
+        "unitLabel": 11
+      },
+      "disaggregationApplied": 2,
+      "syncRejected": 3
+    },
+    {
+      "month": "2026-09",
+      "shifts": {
+        "aggregation": 6,
+        "validation": 1,
+        "validationPrint": 0,
+        "fromOffice": 5,
+        "fromStation": 2,
+        "withPallets": 2
+      },
+      "scans": {
+        "accepted": 7020,
+        "duplicates": 64,
+        "rejected": 9
+      },
+      "boxes": {
+        "closed": 585,
+        "disassembled": 0,
+        "codes": 7020
+      },
+      "pallets": {
+        "closed": 13,
+        "disassembled": 0
+      },
+      "exceptions": {
+        "boxUndo": 4,
+        "boxClear": 0,
+        "boxReprint": 2,
+        "boxDisassemble": 0,
+        "palletReprint": 0,
+        "palletDisassemble": 0
+      },
+      "conflicts": {
+        "late": 1,
+        "displaced": 0,
+        "reviewed": 0
+      },
+      "reprints": {
+        "warehouse": 0,
+        "unitLabel": 0
+      },
+      "disaggregationApplied": 0,
+      "syncRejected": 0
+    }
+  ],
+  "devices": {
+    "station": 3,
+    "office": 2,
+    "handheld": 1
+  }
+}

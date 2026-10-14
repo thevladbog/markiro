@@ -10,6 +10,7 @@ import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "..
 import { readConflictNotices } from "../local/conflict-notices.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { sendFactBatch } from "../local/facts-sender.js";
+import { syncProductPhotos } from "../local/product-photos.js";
 import { sendWarehouseBatch } from "../local/warehouse-sender.js";
 import {
   createSyncScheduler,
@@ -110,6 +111,11 @@ export interface HostLinkOptions {
    */
   conflictStatus?: HostApi["conflictStatus"];
   listDisplacements?: HostApi["listDisplacements"];
+  /**
+   * `HostApi.getDeviceProductPhoto` (beta 3): the photos the feed's product
+   * records name are fetched after every successful sync; without it none is.
+   */
+  deviceProductPhoto?: HostApi["getDeviceProductPhoto"];
   dispatch: (action: ShellAction) => void;
 }
 
@@ -173,6 +179,7 @@ export function useHostLink({
   sendWarehouseRecords,
   conflictStatus,
   listDisplacements,
+  deviceProductPhoto,
   dispatch,
 }: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
@@ -294,12 +301,49 @@ export function useHostLink({
       reconciler.stop();
       noticeReader.stop();
       cancelRetry();
+      if (photoRetry !== null) {
+        clearTimeout(photoRetry);
+        photoRetry = null;
+      }
       cancelRefreshRetry();
       cancelShiftRetry();
       cancelFactRetry();
       cancelWarehouseRetry();
       cancelReconcileRetry();
       cancelNoticeRetry();
+    };
+    // The products' photos (beta 3), fetched after a sync: best effort, never
+    // a sync failure. A failed pass is tried again after `nextSyncRetryMs`
+    // while the link is online; a pass in flight is not started twice.
+    let photoFailures = 0;
+    let photoRetry: ReturnType<typeof setTimeout> | null = null;
+    let photoRunning = false;
+    const photoPass = (): void => {
+      if (deviceProductPhoto === undefined || photoRunning) return;
+      if (photoRetry !== null) {
+        clearTimeout(photoRetry);
+        photoRetry = null;
+      }
+      photoRunning = true;
+      void syncProductPhotos({ local, fetchPhoto: deviceProductPhoto }).then(
+        () => {
+          photoRunning = false;
+          photoFailures = 0;
+        },
+        (error: unknown) => {
+          photoRunning = false;
+          if (!active) return;
+          // A refused key or another certificate is the sync's to route, not ours.
+          if (shellActionFor(error, null) !== null) return;
+          photoFailures += 1;
+          if (online) {
+            photoRetry = setTimeout(() => {
+              photoRetry = null;
+              photoPass();
+            }, nextSyncRetryMs(photoFailures));
+          }
+        },
+      );
     };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
@@ -320,6 +364,7 @@ export function useHostLink({
           stopAll();
         }
         dispatch({ type: "sync_finished", result });
+        if (result.kind === "synced") photoPass();
       } catch (error) {
         if (!active) return;
         // A rejected key or a changed certificate needs a new pairing.
@@ -706,6 +751,7 @@ export function useHostLink({
     sendWarehouseRecords,
     conflictStatus,
     listDisplacements,
+    deviceProductPhoto,
     dispatch,
   ]);
   const requestSync = useCallback(() => syncNow.current(), []);

@@ -23,6 +23,7 @@ import {
   type TagPhase,
 } from "@markiro/ui";
 
+import type { ShiftPeriod } from "../../host/api.js";
 import type { OfficeShift, ShiftMode, ShiftStatus } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
@@ -40,6 +41,7 @@ import {
   SHIFT_PAGE_SIZE,
   sortShifts,
   totalShifts,
+  type PeriodState,
   type ShiftSortDir,
   type ShiftSortKey,
   type ShiftStatusFilter,
@@ -110,19 +112,36 @@ export function ShiftsPage() {
   const noticeId = useId();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  // The period of shift dates («Дата смены», beta 3): asked of the host beside the production one.
+  const [plannedFrom, setPlannedFrom] = useState("");
+  const [plannedTo, setPlannedTo] = useState("");
   const [status, setStatus] = useState<ShiftStatusFilter>("all");
   const [lineId, setLineId] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const period = periodState(from, to);
-  // The period last asked for changes only to a ready period or back to none
-  // (set while rendering, React's way to follow a value from an earlier render),
-  // so while the period is incomplete or wrong the list stays the one it was.
-  const [asked, setAsked] = useState<{ from: string; to: string } | null>(null);
-  if (period.kind === "ready" && (asked?.from !== period.from || asked.to !== period.to)) {
-    setAsked({ from: period.from, to: period.to });
-  } else if (period.kind === "none" && asked !== null) {
-    setAsked(null);
+  const plannedPeriod = periodState(plannedFrom, plannedTo);
+  // The periods last asked for change only to ready ones or back to none (set while
+  // rendering, React's way to follow a value from an earlier render), so while either
+  // period is incomplete or wrong the list stays the one it was.
+  const [asked, setAsked] = useState<ShiftPeriod | null>(null);
+  const usable = (state: PeriodState) => state.kind === "ready" || state.kind === "none";
+  if (usable(period) && usable(plannedPeriod)) {
+    const wanted: ShiftPeriod = {
+      ...(period.kind === "ready" ? { from: period.from, to: period.to } : {}),
+      ...(plannedPeriod.kind === "ready"
+        ? { plannedFrom: plannedPeriod.from, plannedTo: plannedPeriod.to }
+        : {}),
+    };
+    const none = Object.keys(wanted).length === 0;
+    const same =
+      asked === null
+        ? none
+        : asked.from === wanted.from &&
+          asked.to === wanted.to &&
+          asked.plannedFrom === wanted.plannedFrom &&
+          asked.plannedTo === wanted.plannedTo;
+    if (!same) setAsked(none ? null : wanted);
   }
   const shifts = useOfficeQuery(officeKeys.shiftList(asked), (api, token) =>
     asked === null ? api.listShifts(token) : api.listShifts(token, asked),
@@ -164,21 +183,31 @@ export function ShiftsPage() {
   const searchName = (shift: OfficeShift) =>
     products.data?.find((each) => each.id === shift.productId)?.name ?? "";
   const filtersOn =
-    from !== "" || to !== "" || status !== "all" || lineId !== "" || search.trim() !== "";
+    from !== "" ||
+    to !== "" ||
+    plannedFrom !== "" ||
+    plannedTo !== "" ||
+    status !== "all" ||
+    lineId !== "" ||
+    search.trim() !== "";
   const resetFilters = () => {
     setFrom("");
     setTo("");
+    setPlannedFrom("");
+    setPlannedTo("");
     setStatus("all");
     setLineId("");
     setSearch("");
     setPage(1);
   };
-  const periodError =
-    period.kind === "reversed"
+  const periodMessage = (state: PeriodState) =>
+    state.kind === "reversed"
       ? t("office.shifts.period.reversed")
-      : period.kind === "too_long"
+      : state.kind === "too_long"
         ? t("office.shifts.period.tooLong")
         : undefined;
+  const periodError = periodMessage(period);
+  const plannedPeriodError = periodMessage(plannedPeriod);
   // The shifts the filters keep, in the host's order; none while the list is not loaded.
   const filtered = shifts.isSuccess
     ? findShifts(shifts.data, { status, lineId, search }, searchName)
@@ -232,6 +261,14 @@ export function ShiftsPage() {
       title: t("office.shifts.table.productionDate"),
       mono: true,
       render: (shift) => civilDateLabel(shift.productionDate),
+    },
+    {
+      // The shift's own date (beta 3), the working day, beside the production date.
+      key: "plannedDate",
+      sortable: true,
+      title: t("office.shifts.table.plannedDate"),
+      mono: true,
+      render: (shift) => civilDateLabel(shift.plannedDate),
     },
     {
       key: "line",
@@ -562,6 +599,25 @@ export function ShiftsPage() {
             setPage(1);
           }}
         />
+        <DatePicker
+          label={t("office.shifts.period.plannedFrom")}
+          {...datePickerTexts(t)}
+          {...(plannedFrom === "" ? {} : { value: plannedFrom })}
+          onValueChange={(value) => {
+            setPlannedFrom(value ?? "");
+            setPage(1);
+          }}
+        />
+        <DatePicker
+          label={t("office.shifts.period.plannedTo")}
+          {...datePickerTexts(t)}
+          {...(plannedTo === "" ? {} : { value: plannedTo })}
+          {...(plannedPeriodError === undefined ? {} : { error: plannedPeriodError })}
+          onValueChange={(value) => {
+            setPlannedTo(value ?? "");
+            setPage(1);
+          }}
+        />
         {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}
         {filtersOn && (
           <Button variant="secondary" onClick={resetFilters}>
@@ -570,14 +626,26 @@ export function ShiftsPage() {
         )}
       </FilterBar>
       <p className="office-note" aria-live="polite">
-        {period.kind === "partial"
+        {period.kind === "partial" || plannedPeriod.kind === "partial"
           ? t("office.shifts.period.partial")
           : asked === null
             ? t("office.shifts.period.recent")
-            : t("office.shifts.period.shown", {
-                from: civilDateLabel(asked.from),
-                to: civilDateLabel(asked.to),
-              })}
+            : asked.from !== undefined && asked.plannedFrom !== undefined
+              ? t("office.shifts.period.shownBoth", {
+                  from: civilDateLabel(asked.from),
+                  to: civilDateLabel(asked.to ?? asked.from),
+                  plannedFrom: civilDateLabel(asked.plannedFrom),
+                  plannedTo: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
+                })
+              : asked.plannedFrom !== undefined
+                ? t("office.shifts.period.shownPlanned", {
+                    from: civilDateLabel(asked.plannedFrom),
+                    to: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
+                  })
+                : t("office.shifts.period.shown", {
+                    from: civilDateLabel(asked.from ?? ""),
+                    to: civilDateLabel(asked.to ?? ""),
+                  })}
       </p>
       {content()}
       {openShiftId !== null && openShiftId !== "" && (

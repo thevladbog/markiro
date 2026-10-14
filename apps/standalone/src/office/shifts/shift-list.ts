@@ -159,7 +159,14 @@ export function periodState(from: string, to: string): PeriodState {
 
 /** The columns of the list the office sorts by; the others (mode, marks, actions) have no order worth keeping. */
 export type ShiftSortKey =
-  "number" | "productionDate" | "line" | "product" | "plannedQty" | "status" | "output";
+  | "number"
+  | "productionDate"
+  | "plannedDate"
+  | "line"
+  | "product"
+  | "plannedQty"
+  | "status"
+  | "output";
 export type ShiftSortDir = "asc" | "desc";
 
 const STATUS_ORDER: Record<ShiftStatus, number> = { planned: 0, active: 1, closed: 2 };
@@ -189,6 +196,8 @@ export function sortShifts(
         return sign * text(a.number, b.number);
       case "productionDate":
         return sign * text(a.productionDate, b.productionDate);
+      case "plannedDate":
+        return sign * text(a.plannedDate, b.plannedDate);
       case "line":
         return sign * text(names.line(a), names.line(b));
       case "product":

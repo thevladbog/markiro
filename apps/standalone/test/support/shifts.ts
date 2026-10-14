@@ -207,6 +207,7 @@ export const ACTIVE: OfficeShift = {
   lineId: LINE_2.id,
   counterpartyId: NORTH.id,
   productionDate: "2026-10-08",
+  plannedDate: "2026-10-08",
   plannedQty: 1200,
   boxCapacity: 12,
   boxTemplateId: MILK_BOX.id,
@@ -243,6 +244,8 @@ export const PLANNED: OfficeShift = {
   lineId: LINE_10.id,
   counterpartyId: null,
   productionDate: "2026-10-09",
+  // The working day differs from the production date, so a screen that shows the wrong one fails.
+  plannedDate: "2026-10-10",
   plannedQty: null,
   boxCapacity: 24,
   boxTemplateId: BOX_58.id,

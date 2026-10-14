@@ -383,6 +383,9 @@ pub struct NewShift<'a> {
     pub line_id: &'a str,
     pub counterparty_id: Option<&'a str>,
     pub production_date: time::Date,
+    /// The shift's own date (beta 3); the number is still drawn from the
+    /// production date.
+    pub planned_date: time::Date,
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: &'a str,
@@ -418,11 +421,11 @@ pub async fn insert(
     sqlx::query(
         "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
          created_by, create_request_id, status, mode, pallets_enabled, product_id, line_id, \
-         counterparty_id, production_date, planned_qty, box_capacity, box_template_id, \
-         pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, \
+         counterparty_id, production_date, planned_date, planned_qty, box_capacity, \
+         box_template_id, pallet_box_capacity, pallet_template_id, pallet_sheet_template_id, \
          validation_print_mode, validation_print_verification, validation_print_template_id, \
          created_at, rev) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
@@ -438,6 +441,7 @@ pub async fn insert(
     .bind(shift.line_id)
     .bind(shift.counterparty_id)
     .bind(civil_text(shift.production_date))
+    .bind(civil_text(shift.planned_date))
     .bind(shift.planned_qty)
     .bind(shift.box_capacity)
     .bind(shift.box_template_id)

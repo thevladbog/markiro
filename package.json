@@ -22,6 +22,7 @@
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "test:signer-release:contract": "node --test tools/signer-release/test/*.test.mjs",
     "test:standalone-release:contract": "node --test tools/standalone-release/test/*.test.mjs",
+    "test:standalone-support:contract": "node --test tools/standalone-support/test/*.test.mjs",
     "test:handheld-release:contract": "node --test tools/handheld-release/test/*.test.mjs",
     "verify:station-production-cors": "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
     "test:yandex-runbooks:contract": "node --test infra/yandex/test/runbook-contract.test.mjs",

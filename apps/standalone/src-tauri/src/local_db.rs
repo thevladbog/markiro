@@ -105,6 +105,8 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("ref_operator_badges", TableClass::Disposable),
     ("ref_operators", TableClass::Disposable),
     ("ref_org", TableClass::Disposable),
+    // A product's photo as the host sent it (beta 3, migration `0017`): derived from the copies.
+    ("ref_product_photos", TableClass::Disposable),
     ("ref_products", TableClass::Disposable),
     ("ref_site", TableClass::Disposable),
     ("ref_template_defaults", TableClass::Disposable),
@@ -689,6 +691,38 @@ impl LocalDbState {
             .map(|elapsed| elapsed.as_millis())
             .unwrap_or(0);
         self.set_aside_unopened_at(stamp).await
+    }
+
+    /// Deletes the copies an upgrade made (`standalone-station.pre-<version>.db`,
+    /// its `.partial` and the `-wal`, `-shm` and `-journal` files of each): they
+    /// hold the PIN and badge hashes the database had at that upgrade, which a
+    /// forget has just cleared from the database itself (beta 3, owner-accepted
+    /// from plan ОБН-1's open question). Answers how many files went. A shell with
+    /// no directory has none. A file that cannot be removed is an error: the
+    /// forget then answers `storage` and keeps the pairing, so it can be
+    /// tried again.
+    pub fn remove_pre_upgrade_copies(&self) -> std::io::Result<usize> {
+        let Some(dir) = &self.dir else {
+            return Ok(0);
+        };
+        let mut removed = 0;
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let base = FILE_SUFFIXES[1..]
+                .iter()
+                .find_map(|suffix| name.strip_suffix(suffix))
+                .unwrap_or(&name);
+            if base.starts_with(PRE_UPGRADE_PREFIX)
+                && (base.ends_with(".db") || base.ends_with(".db.partial"))
+            {
+                std::fs::remove_file(entry.path())?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 
     /// [`Self::set_aside_unopened`] with the time stamp given, for tests.

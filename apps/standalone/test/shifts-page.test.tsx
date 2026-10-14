@@ -33,11 +33,23 @@ import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const SESSION_TOKEN = "office-session-token";
 
-/** The text of the cells of the shift numbered `number`, left to right. */
-function cells(number: string): (string | null)[] {
+/** Where «Дата смены» (beta 3) stands among the cells: right after the production date. */
+const SHIFT_DATE_AT = 2;
+
+/** The text of every cell of the shift numbered `number`, left to right. */
+function allCells(number: string): (string | null)[] {
   return within(shiftRow(number))
     .getAllByRole("cell")
     .map((cell) => cell.textContent);
+}
+
+/**
+ * The text of the cells of the shift numbered `number`, left to right, but the
+ * shift date's: the other columns keep the places these tests name them by, and
+ * the shift date has a test of its own (`allCells`).
+ */
+function cells(number: string): (string | null)[] {
+  return allCells(number).filter((_, at) => at !== SHIFT_DATE_AT);
 }
 
 /** `count` planned shifts numbered OCT26-001… on line 2. */
@@ -380,6 +392,47 @@ describe("office shifts: the list", () => {
     await screen.findByText(/Показаны запланированные и активные смены/);
     // The host's own list is cached: shown again at once and read again in the background.
     await waitFor(() => expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN));
+  });
+
+  it("lists the shift date beside the production date, and asks the host for a period of shift dates", async () => {
+    const session = shiftsSession();
+    await openShifts(session);
+    // The planned shift works on 10 October and is produced on 9 October.
+    const row = shiftRow(PLANNED.number);
+    expect(allCells(PLANNED.number).slice(1, 3)).toEqual(["09.10.2026", "10.10.2026"]);
+    expect(within(row).getByText("10.10.2026")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Дата смены" })).toBeTruthy();
+    pickDate("Дата смены с", "8 октября 2026");
+    expect(screen.getByText("Укажите обе даты периода. Пока показан прежний список.")).toBeTruthy();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+    pickDate("Дата смены по", "12 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText("Показаны смены с датой смены с 08.10.2026 по 12.10.2026."),
+    ).toBeTruthy();
+    // Both periods together narrow each other.
+    pickDate("Дата производства с", "1 октября 2026");
+    pickDate("Дата производства по", "9 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        from: "2026-10-01",
+        to: "2026-10-09",
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Показаны смены с датой производства с 01.10.2026 по 09.10.2026 и датой смены с 08.10.2026 по 12.10.2026.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    await screen.findByText(/Показаны запланированные и активные смены/);
   });
 
   it("refuses a period that ends before it starts or is longer than 366 days, and asks nothing", async () => {

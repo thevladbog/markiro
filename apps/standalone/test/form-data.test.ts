@@ -130,7 +130,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     expect(bare).not.toContain("<img");
   });
 
-  it("draws the blank of a planned or an active shift, with its one date as both dates, and none of a closed one", () => {
+  it("draws the blank of a planned or an active shift, with its own date and its production date, and none of a closed one", () => {
     const inputs = {
       shift: PLANNED,
       product: MILK,
@@ -143,7 +143,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     const blank = taskFormData(inputs, at);
     expect(blank).toMatchObject({
       status: "planned",
-      plannedDate: PLANNED.productionDate,
+      plannedDate: PLANNED.plannedDate,
       productionDate: PLANNED.productionDate,
       lineName: LINE_2.name,
       counterpartyName: NORTH.name,

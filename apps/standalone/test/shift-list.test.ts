@@ -262,6 +262,34 @@ describe("the shifts list's order and totals", () => {
     expect(sortShifts([b, a], "status", "asc", names)).toEqual([b, a]);
   });
 
+  it("sorts by the shift date («Дата смены», beta 3) apart from the production date", () => {
+    const early = {
+      ...ACTIVE,
+      number: "E",
+      productionDate: "2026-10-20",
+      plannedDate: "2026-10-01",
+    };
+    const late = {
+      ...ACTIVE,
+      number: "L",
+      productionDate: "2026-10-01",
+      plannedDate: "2026-10-20",
+    };
+    expect(sortShifts([late, early], "plannedDate", "asc", names).map((s) => s.number)).toEqual([
+      "E",
+      "L",
+    ]);
+    expect(sortShifts([early, late], "plannedDate", "desc", names).map((s) => s.number)).toEqual([
+      "L",
+      "E",
+    ]);
+    // The production date orders the other way round for the same two shifts.
+    expect(sortShifts([early, late], "productionDate", "asc", names).map((s) => s.number)).toEqual([
+      "L",
+      "E",
+    ]);
+  });
+
   it("puts a shift without a plan last whichever way the plan runs, and sorts by the line's name", () => {
     expect(sortShifts([ten, two], "plannedQty", "asc", names)[1]).toBe(ten);
     expect(sortShifts([ten, two], "plannedQty", "desc", names)[1]).toBe(ten);
