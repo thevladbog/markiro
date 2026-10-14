@@ -458,6 +458,29 @@ describe("what the host tells the station of its conflicts (plan КНФ)", () =>
     );
   });
 
+  // A validation shift's scan names no box (plan РЕЖ): the host sends `boxId: null`, and the row
+  // keeps no box and no SSCC rather than inventing one (the queue words it without a box).
+  it("keeps the displacement of a scan without a box with no box and no SSCC", async () => {
+    const { db, executor } = openLocalDb();
+    const unboxed = displacement(1, { boxId: null, boxSscc: null });
+    await readConflictNotices(
+      context(
+        executor,
+        noStatus(),
+        vi.fn(async () => ({ items: [unboxed], more: false })),
+      ),
+    );
+    expect(
+      rows(
+        db,
+        "SELECT box_id, box_sscc, shift_number, resolved_at FROM floor_displacements WHERE record_id = ?",
+        unboxed.recordId,
+      ),
+    ).toEqual([
+      { box_id: null, box_sscc: null, shift_number: FIRST.shiftNumber, resolved_at: null },
+    ]);
+  });
+
   it("keeps the box's SSCC this station closed it with when the host has it open, and never takes the snapshot again", async () => {
     const { db, executor } = openLocalDb();
     db.prepare(

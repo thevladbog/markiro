@@ -336,7 +336,10 @@ export function ShiftCardPage() {
       )}
       {current.status !== "planned" && (
         <>
-          <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
+          {/* Box and pallet exceptions only: a validation shift can have none. */}
+          {!validation && (
+            <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
+          )}
           <ShiftRejections key={`rejections-${current.id}`} shift={current} at={at} />
           <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
         </>

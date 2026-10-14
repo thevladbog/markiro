@@ -109,6 +109,7 @@ function recordText(t: TFunction, record: SettledRecord): string {
 /** A displaced code's box and when the host saw it, on this computer's clock. */
 function displacedText(t: TFunction, record: DisplacedRecord): string {
   const time = MOMENT.format(new Date(record.detectedAt));
+  if (!record.boxed) return t("floor.queue.displacedRecordUnboxed", { time });
   return record.sscc === null
     ? t("floor.queue.displacedRecordOpen", { time })
     : t("floor.queue.displacedRecord", { sscc: `(00)${record.sscc}`, time });
@@ -116,10 +117,10 @@ function displacedText(t: TFunction, record: DisplacedRecord): string {
 
 /** What happened to the code and what to check: the winner's shift by its number. */
 function displacedReason(t: TFunction, record: DisplacedRecord): string {
-  return t(
-    record.winnerSameDevice ? "floor.queue.displacedReasonSame" : "floor.queue.displacedReason",
-    { number: record.winnerShiftNumber },
-  );
+  const key = record.boxed ? "displacedReason" : "displacedReasonUnboxed";
+  return t(record.winnerSameDevice ? `floor.queue.${key}Same` : `floor.queue.${key}`, {
+    number: record.winnerShiftNumber,
+  });
 }
 
 interface ShiftGroup {

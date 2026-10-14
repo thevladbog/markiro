@@ -1001,7 +1001,8 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
     const { db, local } = await station();
     closedBox(db);
     displaced(db, "c-1", { boxId: "box-1" });
-    displaced(db, "c-2", { sameDevice: true });
+    // A box the host still had open: its id is known, its SSCC is not.
+    displaced(db, "c-2", { boxId: "box-open", sameDevice: true });
     view(local);
     const section = await screen.findByRole("region", { name: "Вытесненные коды" });
     // 07:12 UTC on this computer's clock as the screen writes every record's time.
@@ -1026,6 +1027,28 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
       within(section).getByText(/раньше отсканирован этой станцией в смене OCT26-005\/S/),
     ).toBeTruthy();
     expect(within(section).getAllByRole("button", { name: "Разобрано" })).toHaveLength(2);
+  });
+
+  // A validation shift's scan names no box (plan РЕЖ): the words speak of the product, never of a
+  // box the person has nowhere to look for.
+  it("words the displaced code of a validation shift without a box", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    displaced(db, "c-2", { sameDevice: true });
+    view(local);
+    const section = await screen.findByRole("region", { name: "Вытесненные коды" });
+    expect(within(section).getAllByText(/^Смена .+ · Без короба · /)).toHaveLength(2);
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован этой станцией в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(within(section).queryByText(/проверьте короб/)).toBeNull();
   });
 
   it("settles a displaced code on confirmation, guarded the same 400 ms, and tells the status bar", async () => {

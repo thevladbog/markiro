@@ -87,6 +87,23 @@ describe("a shift's review on its card (plan КНФ)", () => {
     ]);
   });
 
+  // A validation shift has no boxes and no pallets (plan РЕЖ): nothing of it can be a box or a
+  // pallet exception, so that section is not offered; its rejected records and the conflicts of
+  // its codes (it owns codes and loses them like any shift) are.
+  it("shows a validation shift's rejections and conflicts, and no exceptions", async () => {
+    const validation: OfficeShift = { ...ACTIVE, mode: "validation" };
+    const session = cardSession(validation);
+    await openCard(session, validation.number);
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Отклонённые записи станции", "Конфликты"]);
+    expect(session.api.listShiftExceptions).not.toHaveBeenCalled();
+    expect(session.api.listShiftRejections).toHaveBeenCalledWith(TOKEN, validation.id);
+    expect(session.api.listConflicts).toHaveBeenCalledWith(TOKEN, {
+      shiftId: validation.id,
+      page: 1,
+    });
+  });
+
   it("has no review on a planned shift, which got nothing yet", async () => {
     const planned = cardSession(PLANNED);
     await openCard(planned, PLANNED.number);

@@ -89,6 +89,26 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(screen.queryByRole("navigation", { name: "Страницы конфликтов" })).toBeNull();
   });
 
+  // A validation shift's scan names no box (plan РЕЖ): a displacement of one does not say the code
+  // "left a box", and the row shows no box link.
+  it("words the displacement of a scan without a box, which left no box", async () => {
+    const [first, ...rest] = PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no conflicts");
+    const unboxed: OfficeConflictPage = {
+      ...PAGE,
+      items: [
+        { ...first, kind: "displaced", loser: { ...first.loser, boxId: null, boxSscc: null } },
+        ...rest,
+      ],
+    };
+    await openConflicts(session(unboxed));
+    const kind = cell(0, "Что произошло").textContent ?? "";
+    expect(kind).toMatch(/^Вытеснение: /);
+    expect(kind).not.toContain("из короба");
+    expect(cell(0, "Проигравший скан").textContent).toContain("Без короба");
+    expect(within(cell(0, "Проигравший скан")).queryByRole("link", { name: /Короб/ })).toBeNull();
+  });
+
   it("names the code by GTIN and serial and both scans with shift, station, operator, instant and box", async () => {
     await openConflicts(session());
     expect(cell(0, "Код").textContent).toBe("GTIN 04600682000013 · серийный S000007");
@@ -124,10 +144,28 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(named.getAttribute("href")).toBe(
       "/shifts/5a0c9e1e-3d4f-4b8a-9c2d-1e0f9a8b7c6d?box=046006820000015001",
     );
-    const bare = within(cell(1, "Проигравший скан")).getByRole("link", {
-      name: "Короб проигравшего с кодом S000008 в карточке смены OCT26-005/S",
+    // A scan with no box (a validation shift's, plan РЕЖ) has no box to link: the shift's own
+    // link in the scan's cell is the way to its card, and the cell says «Без короба».
+    const bare = within(cell(1, "Проигравший скан"));
+    expect(bare.queryByRole("link", { name: /Короб проигравшего/ })).toBeNull();
+    expect(bare.getByText("Без короба")).toBeTruthy();
+    expect(bare.getByRole("link", { name: "Смена OCT26-005/S" }).getAttribute("href")).toBe(
+      "/shifts/6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e",
+    );
+  });
+
+  it("links the loser's still open box to its shift's card without an SSCC", async () => {
+    const [first, ...rest] = PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no conflicts");
+    const open: OfficeConflictPage = {
+      ...PAGE,
+      items: [{ ...first, loser: { ...first.loser, boxSscc: null } }, ...rest],
+    };
+    await openConflicts(session(open));
+    const link = within(cell(0, "Проигравший скан")).getByRole("link", {
+      name: /Короб проигравшего/,
     });
-    expect(bare.getAttribute("href")).toBe("/shifts/6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e");
+    expect(link.getAttribute("href")).toBe(`/shifts/${first.loser.shiftId}`);
   });
 
   it("says who reviewed a conflict and when, and offers the review only for an unreviewed one", async () => {

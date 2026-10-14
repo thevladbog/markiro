@@ -26,6 +26,7 @@ import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
 import { ssccText } from "../shifts/shift-card.js";
 import {
+  conflictKindKey,
   conflictQuery,
   loserBoxLink,
   readPage,
@@ -128,7 +129,7 @@ export function ConflictsPage() {
       key: "kind",
       title: t("office.conflicts.table.kind"),
       wrap: true,
-      render: (row) => t(`office.conflicts.kinds.${row.kind}`),
+      render: (row) => t(conflictKindKey(row)),
     },
     {
       key: "loser",
@@ -137,15 +138,18 @@ export function ConflictsPage() {
       render: (row) => (
         <span className="shift-cell">
           <ScanCell scan={row.loser} at={at} />
-          <Link
-            to={loserBoxLink(row.loser)}
-            aria-label={t("office.conflicts.loserBoxNamed", {
-              serial: row.serial,
-              number: row.loser.shiftNumber,
-            })}
-          >
-            {t("office.conflicts.loserBox")}
-          </Link>
+          {/* A validation shift's scan has no box (plan РЕЖ): the shift's link above is all. */}
+          {row.loser.boxId !== null && (
+            <Link
+              to={loserBoxLink(row.loser)}
+              aria-label={t("office.conflicts.loserBoxNamed", {
+                serial: row.serial,
+                number: row.loser.shiftNumber,
+              })}
+            >
+              {t("office.conflicts.loserBox")}
+            </Link>
+          )}
         </span>
       ),
     },

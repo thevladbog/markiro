@@ -1069,7 +1069,8 @@ describe("displaced scans on the queue screen (plan КНФ)", () => {
         "block_id, serial, item_count, closed_by) VALUES ('box-1', ?, ?, ?, ?, ?, " +
         "'046006820000015001', 'block-1', 1500, 1, NULL)",
     ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID, AT, AT);
-    displaced(db, "c-2", { detectedAt: "2026-10-08T08:00:00Z" });
+    // A box the host still had open: its id is known, its SSCC is not.
+    displaced(db, "c-2", { boxId: "box-open", detectedAt: "2026-10-08T08:00:00Z" });
     displaced(db, "c-1", { boxId: "box-1" });
     displaced(db, "c-3", { resolved: true });
     displaced(db, "c-4", { pairing: OTHER_PAIRING });
@@ -1080,6 +1081,7 @@ describe("displaced scans on the queue screen (plan КНФ)", () => {
         shiftId: SHIFT_ID,
         shiftNumber: ENTERED.number,
         sscc: "046006820000015001",
+        boxed: true,
         detectedAt: "2026-10-08T07:12:03Z",
         winnerShiftNumber: "OCT26-005/S",
         winnerSameDevice: false,
@@ -1089,10 +1091,20 @@ describe("displaced scans on the queue screen (plan КНФ)", () => {
         shiftId: SHIFT_ID,
         shiftNumber: ENTERED.number,
         sscc: null,
+        boxed: true,
         detectedAt: "2026-10-08T08:00:00Z",
         winnerShiftNumber: "OCT26-005/S",
         winnerSameDevice: false,
       },
+    ]);
+  });
+
+  it("marks the displaced scan of a validation shift, which has no box, as unboxed", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    const view = await readQueue(local, PAIRING);
+    expect(view.displaced).toEqual([
+      expect.objectContaining({ conflictId: "c-1", sscc: null, boxed: false }),
     ]);
   });
 

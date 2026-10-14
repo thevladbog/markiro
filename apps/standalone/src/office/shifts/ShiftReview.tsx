@@ -13,6 +13,7 @@ import type {
   OfficeShiftException,
   OfficeShiftRejection,
 } from "../../host/review.js";
+import { conflictKindKey } from "../conflicts/conflict-list.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -309,7 +310,7 @@ export function ShiftConflicts({ shift }: ReviewSectionProps) {
       key: "kind",
       title: t("office.conflicts.table.kind"),
       wrap: true,
-      render: (row) => t(`office.conflicts.kinds.${row.kind}`),
+      render: (row) => t(conflictKindKey(row)),
     },
     {
       key: "winner",
