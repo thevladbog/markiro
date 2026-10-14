@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use super::app::{
     box_closed, box_exception, box_id, close_from_office, fact, instant, issue_block,
     issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pair_device, pallet_closed,
-    pallet_id, receipts, record_id, shift_setup, Admin, Floor,
+    pallet_id, receipts, record_id, shift_setup, Admin, Floor, ShiftSetup,
 };
 
 pub const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
@@ -22,6 +22,11 @@ pub const OTHER_REASON: &str = "d15a0000-0000-4000-8000-000000000005";
 /// (code 4, serial 1501) closed, box 3 open with code 5; `close` closes the
 /// shift from the office. The station is a new one, not the administrator's.
 pub async fn day(admin: &Admin, close: bool) -> Floor {
+    day_with_setup(admin, close).await.1
+}
+
+/// [`day`] and the setup it planned the shift from, for a colleague's shift.
+pub async fn day_with_setup(admin: &Admin, close: bool) -> (ShiftSetup, Floor) {
     let setup = shift_setup(admin).await;
     let (_, key) = pair_device(&admin.app, "station").await;
     let floor = open_floor(admin, &setup, &key, &setup.line).await;
@@ -69,7 +74,7 @@ pub async fn day(admin: &Admin, close: bool) -> Floor {
     if close {
         close_from_office(admin, &floor.shift, "Конец смены").await;
     }
-    floor
+    (setup, floor)
 }
 
 /// A new document of `body` as the administrator; the card.

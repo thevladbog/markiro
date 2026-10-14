@@ -52,6 +52,93 @@ pub fn classify(closed: bool, shift_closed: bool, disassembled: bool) -> LineSta
     }
 }
 
+/// What an apply took apart.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Applied {
+    pub boxes: usize,
+    pub pallets: usize,
+    pub codes: usize,
+}
+
+/// Take apart the `ok` lines' boxes and pallets of document `document_id`
+/// at `instant` (a device-form instant), inside the caller's write
+/// transaction, and write each box's `code_releases` row with `rev`.
+pub async fn apply_targets(
+    conn: &mut SqliteConnection,
+    document_id: &str,
+    targets: &[Target],
+    instant: &str,
+    rev: i64,
+) -> Result<Applied, ApiError> {
+    let mut applied = Applied::default();
+    for target in targets {
+        if let Some(box_id) = &target.box_id {
+            // As a station's `disassemble` (facts/exception.rs): every live
+            // item leaves at the one instant the box is taken apart, and the
+            // code its scan owns is free (`registry::release`).
+            let live: Vec<String> = sqlx::query_scalar(
+                "SELECT scan_id FROM box_items WHERE box_id = ? \
+                 AND removed_at IS NULL AND displaced_at IS NULL",
+            )
+            .bind(box_id)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            for scan_id in &live {
+                sqlx::query("UPDATE box_items SET removed_at = ? WHERE scan_id = ?")
+                    .bind(instant)
+                    .bind(scan_id)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(ApiError::internal)?;
+                crate::facts::registry::release(&mut *conn, scan_id).await?;
+            }
+            // A box taken apart already is an error here, not a skip: under
+            // the lock the lines were checked a moment ago, and the whole
+            // apply rolls back.
+            let shift_id: String = sqlx::query_scalar(
+                "UPDATE boxes SET disassembled_at = ? WHERE id = ? AND disassembled_at IS NULL \
+                 RETURNING shift_id",
+            )
+            .bind(instant)
+            .bind(box_id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            sqlx::query(
+                "INSERT INTO code_releases (box_id, shift_id, document_id, code_count, \
+                 released_at, rev) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(box_id)
+            .bind(&shift_id)
+            .bind(document_id)
+            .bind(i64::try_from(live.len()).map_err(ApiError::internal)?)
+            .bind(instant)
+            .bind(rev)
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            applied.boxes += 1;
+            applied.codes += live.len();
+        } else if let Some(pallet_id) = &target.pallet_id {
+            // As a station's pallet `disassemble`: its boxes stay as they are.
+            let updated = sqlx::query(
+                "UPDATE pallets SET disassembled_at = ? WHERE id = ? AND disassembled_at IS NULL",
+            )
+            .bind(instant)
+            .bind(pallet_id)
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            if updated.rows_affected() != 1 {
+                return Err(ApiError::internal("a pallet taken apart twice"));
+            }
+            applied.pallets += 1;
+        }
+    }
+    Ok(applied)
+}
+
 /// A box by its SSCC (`boxes_sscc`) with its live codes.
 const BOX_SQL: &str = "SELECT b.id, b.closed_at IS NOT NULL, s.status = 'closed', \
      b.disassembled_at IS NOT NULL, s.product_id, \
@@ -111,6 +198,18 @@ mod tests {
         assert_eq!(format_doc_no(9999, 2026), "DSG-26-9999");
         assert_eq!(format_doc_no(12345, 2031), "DSG-31-12345");
         assert_eq!(format_doc_no(7, 2100), "DSG-00-0007");
+    }
+
+    #[test]
+    fn an_office_instant_reads_as_a_devices() {
+        let at =
+            time::OffsetDateTime::from_unix_timestamp_nanos(1_790_000_000_123_456_789).unwrap();
+        let text = crate::facts::rules::device_text(at);
+        assert_eq!(text, "2026-09-21T14:13:20.123Z");
+        assert_eq!(
+            crate::facts::rules::device_instant(&text),
+            Some(at.replace_nanosecond(123_000_000).unwrap())
+        );
     }
 
     #[test]

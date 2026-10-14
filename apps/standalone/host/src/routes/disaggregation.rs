@@ -38,6 +38,7 @@ use crate::clock::{format_timestamp, parse_timestamp};
 use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::disaggregation::{self, Target};
 use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
+use crate::facts::rules;
 use crate::server::AppState;
 use crate::shifts;
 use crate::validate;
@@ -801,13 +802,147 @@ pub async fn cancel_document(
     Ok(Json(answer))
 }
 
-/// Replaced by the apply of plan ДЗГ task 5.
+/// Write what line `line_id` names now: the status, the target and the
+/// codes, and the moment it was checked. `None` is nothing (`not_found`).
+async fn revalidate_line(
+    conn: &mut SqliteConnection,
+    line_id: &str,
+    target: Option<&Target>,
+    at: &str,
+) -> Result<(), ApiError> {
+    let status = target.map_or(LineStatus::NotFound, |target| target.status);
+    sqlx::query(
+        "UPDATE disaggregation_document_lines SET status = ?, box_id = ?, pallet_id = ?, \
+         product_id = ?, code_count = ?, validated_at = ? WHERE id = ?",
+    )
+    .bind(status.as_str())
+    .bind(target.and_then(|t| t.box_id.as_deref()))
+    .bind(target.and_then(|t| t.pallet_id.as_deref()))
+    .bind(target.map(|t| t.product_id.as_str()))
+    .bind(target.map_or(0, |t| t.code_count))
+    .bind(at)
+    .bind(line_id)
+    .execute(conn)
+    .await
+    .map_err(ApiError::internal)?;
+    Ok(())
+}
+
+/// Apply a draft: one transaction under the facts' lock (`routes/facts.rs`),
+/// so no station batch runs between the checks below and the writes. Every
+/// line is checked again from the live tables; when one is not `ok` the
+/// fresh statuses are saved, the document stays a draft and the answer is
+/// `conflict` `invalid_lines`. Otherwise each box is taken apart as a
+/// station's `disassemble` takes it, each pallet as a station's pallet
+/// `disassemble`, under one revision.
 pub async fn apply_document(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     context: OfficeContext,
-    ApiPath(_id): ApiPath<String>,
-    ApiJson(_transition): ApiJson<DisaggregationTransition>,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(transition): ApiJson<DisaggregationTransition>,
 ) -> Result<Json<DisaggregationDetail>, ApiError> {
     context.require_disaggregation()?;
-    Err(ApiError::method_not_allowed("plan ДЗГ task 5"))
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_disaggregation_in(&mut tx).await?;
+    let now = state.now();
+    let at = format_timestamp(now);
+    let doc = draft(&mut tx, &id).await?;
+    if doc.rev != transition.expected_rev {
+        return Err(ApiError::stale_revision(doc.rev));
+    }
+    if doc.reason_id.is_none() {
+        return Err(ApiError::conflict(
+            constraints::REASON_REQUIRED,
+            "the document has no reason",
+        ));
+    }
+    let lines: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT id, sscc FROM disaggregation_document_lines WHERE document_id = ? \
+         ORDER BY position",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if lines.is_empty() {
+        return Err(ApiError::conflict(
+            constraints::NO_LINES,
+            "the document has no lines",
+        ));
+    }
+    // Every line again, from the live tables; a line without an SSCC (not
+    // read, or a repeat) keeps its status and is never `ok`.
+    let mut targets = Vec::with_capacity(lines.len());
+    let mut invalid = 0usize;
+    for (line_id, sscc) in &lines {
+        let Some(sscc) = sscc else {
+            invalid += 1;
+            continue;
+        };
+        let target = disaggregation::resolve(&mut tx, sscc).await?;
+        revalidate_line(&mut tx, line_id, target.as_ref(), &at).await?;
+        match target {
+            Some(target) if target.status == LineStatus::Ok => targets.push(target),
+            _ => invalid += 1,
+        }
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    if invalid > 0 {
+        // The fresh statuses stay and the document stays a draft (the cloud
+        // commits them before it answers `invalid_lines`).
+        touch(&mut tx, &id, &at, rev).await?;
+        audit::record(
+            &mut tx,
+            &at,
+            Entry {
+                actor: context.actor(),
+                action: actions::DISAGGREGATION_APPLY,
+                target_type: Some(TARGET_TYPE),
+                target_id: Some(&id),
+                outcome: Outcome::Failed,
+                details: json!({ "docNo": doc.doc_no, "invalidLines": invalid }),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+        commit_with_revision(tx, &state.revisions, rev)
+            .await
+            .map_err(ApiError::internal)?;
+        return Err(ApiError::conflict(
+            constraints::INVALID_LINES,
+            "some lines of the document are not ok",
+        )
+        .with_details(
+            json!({ "constraint": constraints::INVALID_LINES, "invalidLines": invalid }),
+        ));
+    }
+    let instant = rules::device_text(now);
+    let done = disaggregation::apply_targets(&mut tx, &id, &targets, &instant, rev).await?;
+    sqlx::query(
+        "UPDATE disaggregation_documents SET status = 'applied', applied_at = ?, \
+         applied_by = ?, updated_at = ?, rev = ? WHERE id = ?",
+    )
+    .bind(&at)
+    .bind(&context.user.id)
+    .bind(&at)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audited(
+        &mut tx,
+        &context,
+        &at,
+        actions::DISAGGREGATION_APPLY,
+        &id,
+        json!({ "docNo": doc.doc_no, "boxes": done.boxes, "pallets": done.pallets,
+            "codes": done.codes }),
+    )
+    .await?;
+    let answer = card(&mut tx, &id).await?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(answer))
 }
