@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 
 import type { HostApi } from "../host/api.js";
+import type { ConflictQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
 
 /** Query keys of office data, one per host resource. */
@@ -41,6 +42,16 @@ export const officeKeys = {
     period?.from ?? null,
     period?.to ?? null,
   ],
+  /** Every list of conflicts, whatever its filter: a review reads them all again (plan КНФ). */
+  conflicts: ["office", "conflicts"],
+  /** One page of conflicts as `GET /v1/office/conflicts` narrows it. */
+  conflictList: (query: ConflictQuery) => [
+    "office",
+    "conflicts",
+    query.shiftId ?? null,
+    query.reviewed ?? null,
+    query.page ?? 1,
+  ],
   /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],
   /** What a shift's exports are built from (`GET /v1/office/shifts/{id}/export-source`, plan ЧЗ). */
@@ -49,6 +60,10 @@ export const officeKeys = {
   shiftPallets: (id: string) => ["office", "shift-pallets", id],
   /** A shift's boxes for its card (`GET /v1/office/shifts/{id}/boxes`, plan О-Ф); the pallets are `shiftPallets`. */
   shiftBoxes: (id: string) => ["office", "shift-boxes", id],
+  /** A shift's box and pallet exceptions (`GET /v1/office/shifts/{id}/exceptions`, plan КНФ). */
+  shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
+  /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
+  shiftRejections: (id: string) => ["office", "shift-rejections", id],
   /** What a box's and a shift's pallets' forms print (`…/report-data`, plan О-Ф). */
   boxReport: (id: string) => ["office", "box-report", id],
   shiftPalletReport: (id: string) => ["office", "shift-pallet-report", id],

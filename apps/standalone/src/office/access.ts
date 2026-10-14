@@ -14,6 +14,8 @@ const CAPABILITIES = {
   editCatalog: ["admin", "technologist"],
   /** Shifts: plan, change, delete a planned one, close an active one (stage 2a spec §4.9). */
   planShifts: ["admin", "technologist"],
+  /** «Отметить разобранным» on a code conflict (plan КНФ); every role reads the conflicts. */
+  reviewConflicts: ["admin", "technologist"],
   /** «Сделать копию сейчас», the second folder of copies and resuming the stations' facts (plan РК); every role reads them. */
   manageBackups: ["admin"],
 } as const satisfies Record<string, readonly OfficeRole[]>;

@@ -9,6 +9,8 @@ import { boxLabelStep, readPrintJob, sendLabelJob } from "../src/floor/print/pri
 import { closeOpenBox } from "../src/floor/work/box-close.js";
 import { processScan } from "../src/floor/work/scan-pipeline.js";
 import type { EnteredShift } from "../src/host/protocol.js";
+import { readQueue } from "../src/floor/queue/outbox-recovery.js";
+import { readConflictNotices } from "../src/local/conflict-notices.js";
 import { LocalDbError } from "../src/local/executor.js";
 import {
   noteRestoreEpoch,
@@ -223,6 +225,50 @@ describe("the retention of a shift's records on the station", () => {
       1,
     );
     expect(kept(at, SECOND.id)).toEqual(NONE);
+  });
+
+  // A displaced scan of a shift the retention deletes keeps its shift's number and its box's
+  // SSCC in its own row (plan КНФ, the owner's decision): the queue screen still names them.
+  it("leaves a displacement readable after its shift is deleted", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    const [box] = rows(at.db, "SELECT id, sscc FROM floor_boxes WHERE shift_id = ?", ENTERED.id);
+    const boxId = String(box?.["id"]);
+    const sscc = String(box?.["sscc"]);
+    // The host still had the box open when it saw the displacement: the station's SSCC is kept.
+    await readConflictNotices({
+      local: at.local,
+      pairing: PAIRING,
+      conflictStatus: async () => ({ reviewed: [] }),
+      listDisplacements: async () => ({
+        items: [
+          {
+            conflictId: "c0000000-0000-4000-8000-000000000001",
+            recordId: "00000000-0000-4000-8000-0000000000d1",
+            shiftId: ENTERED.id,
+            shiftNumber: ENTERED.number,
+            codeHash: "0".repeat(63) + "7",
+            boxId,
+            boxSscc: null,
+            detectedAt: "2026-10-08T07:12:03Z",
+            winner: {
+              shiftId: SECOND.id,
+              shiftNumber: SECOND.number,
+              deviceId: "8d0f7780-8536-41ef-a55c-f18a2c3d4e5f",
+              scannedAt: "2026-10-08T06:00:50.000Z",
+              sameDevice: false,
+            },
+            reviewedAt: null,
+          },
+        ],
+        more: false,
+      }),
+      now: () => NOW,
+    });
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    const [record] = (await readQueue(at.local, PAIRING)).displaced;
+    expect(record).toMatchObject({ shiftNumber: ENTERED.number, sscc });
   });
 
   // A shift the office closed and this station then finished: its close is
@@ -528,7 +574,11 @@ describe("the retention of a shift's records on the station", () => {
       "SELECT m.name AS name FROM sqlite_master m WHERE m.type = 'table' AND EXISTS " +
         "(SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name = 'shift_id') ORDER BY m.name",
     ).map((row) => row["name"]);
-    expect(withShift).toEqual([...RETAINED_TABLES].sort());
+    // Kept on purpose (plan КНФ, migration `0016`): the displaced scans are few, and the
+    // newest one is the cursor of the next read from the host, which must never go back — a
+    // deleted cursor would bring every displacement back as new.
+    const notRetained = ["floor_displacements"];
+    expect(withShift).toEqual([...RETAINED_TABLES, ...notRetained].sort());
   });
 
   // The pallets of a shift (plan ПЛ-Ц) go with it: the pallet, its exception, one pairing's,

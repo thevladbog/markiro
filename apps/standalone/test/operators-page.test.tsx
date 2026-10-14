@@ -179,6 +179,8 @@ describe("office operators", () => {
     expect(links.slice(links.indexOf("Линии"), links.indexOf("Устройства") + 1)).toEqual([
       "Линии",
       "Смены",
+      // «Конфликты» (plan КНФ) follows «Смены».
+      "Конфликты",
       // «Сотрудники» (owner feedback on the first beta) sits right before «Операторы».
       "Сотрудники",
       "Операторы",

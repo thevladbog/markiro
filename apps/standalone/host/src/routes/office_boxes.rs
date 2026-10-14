@@ -66,7 +66,8 @@ struct PalletRow {
     print_skipped_at: Option<String>,
 }
 
-async fn require_shift(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
+/// `not_found` for a shift the host does not have (also plan КНФ's review).
+pub(crate) async fn require_shift(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
     let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM shifts WHERE id = ?")
         .bind(id)
         .fetch_optional(conn)

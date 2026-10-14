@@ -87,6 +87,8 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_block_requests", TableClass::DeviceData),
     ("floor_boxes", TableClass::DeviceData),
     ("floor_codes", TableClass::DeviceData),
+    // What the host told this station of its displaced scans (plan КНФ, migration `0016`).
+    ("floor_displacements", TableClass::DeviceData),
     ("floor_exceptions", TableClass::DeviceData),
     ("floor_pallet_exceptions", TableClass::DeviceData),
     ("floor_pallets", TableClass::DeviceData),

@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "recordId": "00000000-0000-4000-8000-000000000022",
+      "kind": "box_closed",
+      "code": "box_unknown",
+      "details": null,
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "receivedAt": "2026-10-08T06:41:00Z"
+    },
+    {
+      "recordId": "00000000-0000-4000-8000-000000000021",
+      "kind": "scan",
+      "code": "invalid_record",
+      "details": { "field": "data.boxId" },
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "receivedAt": "2026-10-08T06:40:00Z"
+    }
+  ],
+  "total": 2
+}

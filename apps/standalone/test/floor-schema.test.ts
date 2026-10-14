@@ -22,6 +22,7 @@ import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
 import {
   BLOCK_DROPS_COUNT_SQL,
   CONFLICT_COUNT_SQL,
+  DISPLACED_COUNT_SQL,
   HEAD_RECORD_SQL,
   RECONCILED_AT_SQL,
   REJECTED_COUNT_SQL,
@@ -40,8 +41,10 @@ import {
 } from "../src/floor/pallets/pallets.js";
 import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
 import {
+  DISMISS_DISPLACEMENT_SQL,
   DISMISS_SHIFT_SQL,
   DISMISS_SQL,
+  QUEUE_DISPLACED_SQL,
   QUEUE_SETTLED_SQL,
   QUEUE_TALLY_SQL,
   QUEUE_UNSENT_SQL,
@@ -54,6 +57,13 @@ import { BLOCKS_WITH_ROOM_SQL, NEWEST_BLOCK_SQL } from "../src/floor/work/block-
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
+import {
+  APPLY_REVIEWED_DISPLACEMENTS_SQL,
+  APPLY_REVIEWED_OUTBOX_SQL,
+  DISPLACEMENT_CURSOR_SQL,
+  INSERT_DISPLACEMENTS_SQL,
+  OPEN_NOTICE_IDS_SQL,
+} from "../src/local/conflict-notices.js";
 import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
 import {
   BLOCKS_SQL,
@@ -105,6 +115,8 @@ const DEVICE_TABLES = [
   "floor_block_requests",
   "floor_boxes",
   "floor_codes",
+  // What the host told this station of its displaced scans (migration `0016`, plan КНФ).
+  "floor_displacements",
   "floor_exceptions",
   "floor_pallet_exceptions",
   "floor_pallets",
@@ -603,6 +615,27 @@ const COLUMNS: Record<string, string[]> = {
     "scan_id TEXT NOT NULL",
     "scanned_at TEXT NOT NULL",
   ],
+  // A displaced scan the host told of (plan КНФ): the winner by its shift's number only.
+  floor_displacements: [
+    "host_id TEXT NOT NULL PK1",
+    "device_id TEXT NOT NULL PK2",
+    "conflict_id TEXT NOT NULL PK3",
+    "record_id TEXT NOT NULL",
+    "shift_id TEXT NOT NULL",
+    "code_hash TEXT NOT NULL",
+    "box_id TEXT",
+    "detected_at TEXT NOT NULL",
+    "winner_shift_number TEXT NOT NULL",
+    "winner_same_device INTEGER NOT NULL",
+    "winner_scanned_at TEXT NOT NULL",
+    "learned_at TEXT NOT NULL",
+    "resolved_at TEXT",
+    "resolved_by TEXT",
+    "office_reviewed_at TEXT",
+    // Kept when the row is first written, never taken again (the owner's decision).
+    "shift_number TEXT",
+    "box_sscc TEXT",
+  ],
   // No column holds the text of a scan: the `invalid` ones keep a length and a class.
   floor_scans: [
     "id TEXT NOT NULL PK1",
@@ -676,6 +709,8 @@ const COLUMNS: Record<string, string[]> = {
     "resent_as TEXT",
     "resolved_at TEXT",
     "resolved_by TEXT",
+    // The office's review of the record's conflict (migration `0016`, plan КНФ).
+    "office_reviewed_at TEXT",
   ],
 };
 
@@ -728,6 +763,24 @@ describe("the shape of the production tables (migration 0006)", () => {
       { tableName: "floor_boxes", name: "floor_boxes_sscc", isUnique: 1, isPartial: 1 },
       { tableName: "floor_codes", name: "floor_codes_box", isUnique: 0, isPartial: 0 },
       { tableName: "floor_codes", name: "floor_codes_shift", isUnique: 0, isPartial: 0 },
+      {
+        tableName: "floor_displacements",
+        name: "floor_displacements_cursor",
+        isUnique: 0,
+        isPartial: 0,
+      },
+      {
+        tableName: "floor_displacements",
+        name: "floor_displacements_open",
+        isUnique: 0,
+        isPartial: 1,
+      },
+      {
+        tableName: "floor_displacements",
+        name: "floor_displacements_record",
+        isUnique: 1,
+        isPartial: 0,
+      },
       {
         tableName: "floor_exceptions",
         name: "floor_exceptions_shift",
@@ -2011,5 +2064,62 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     for (const [sql] of STATEMENTS.filter(([sql]) => !sql.startsWith(columns))) {
       expect(source, sql).toContain(`"${sql}"`);
     }
+  });
+});
+
+// Plan КНФ: what the host tells the station of its conflicts, and the queue screen's displaced
+// codes. Pinned on the shell's SQLite too (`the_conflict_notices_search_an_index` in
+// `tests/local_db.rs`), with the same texts.
+describe("the conflict notices' statements (migration 0016, plan КНФ)", () => {
+  const STATEMENTS: readonly (readonly [string, string])[] = [
+    // The open records: the conflicts from the settled records' index, the displacements by
+    // the pairing's key (the planner takes the record's index or the open one).
+    [OPEN_NOTICE_IDS_SQL, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"],
+    [OPEN_NOTICE_IDS_SQL, "SEARCH floor_displacements USING INDEX floor_displacements_"],
+    [DISPLACEMENT_CURSOR_SQL, "floor_displacements_cursor (host_id=? AND device_id=?)"],
+    [APPLY_REVIEWED_OUTBOX_SQL, "sqlite_autoindex_outbox_1 (id=?)"],
+    [APPLY_REVIEWED_DISPLACEMENTS_SQL, "floor_displacements_open (host_id=? AND device_id=?)"],
+    // The insert reads only its own list.
+    [INSERT_DISPLACEMENTS_SQL, "SCAN j VIRTUAL TABLE"],
+    [DISPLACED_COUNT_SQL, "floor_displacements_open (host_id=? AND device_id=?)"],
+    [QUEUE_DISPLACED_SQL, "floor_displacements_cursor (host_id=? AND device_id=?)"],
+    [
+      DISMISS_DISPLACEMENT_SQL,
+      "sqlite_autoindex_floor_displacements_1 (host_id=? AND device_id=? AND conflict_id=?)",
+    ],
+  ];
+
+  it("search an index, never a whole table", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    for (const [sql, index] of STATEMENTS) {
+      expect(
+        plan(sql).some((step) => step.includes(index)),
+        `${sql}\n${plan(sql).join("\n")}`,
+      ).toBe(true);
+      // `json_each` (alias `r`, `j`) is the statement's own list.
+      expect(
+        plan(sql).filter(
+          (step) =>
+            step.startsWith("SCAN ") && !step.startsWith("SCAN r ") && !step.startsWith("SCAN j "),
+        ),
+        sql,
+      ).toEqual([]);
+    }
+    // The queue's list is read in its order, with no sort of its own.
+    expect(plan(QUEUE_DISPLACED_SQL).filter((step) => step.includes("TEMP"))).toEqual([]);
+  });
+
+  it("are pinned on the shell's SQLite with the same texts", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [...new Set(STATEMENTS.map(([sql]) => sql))];
+    expect(statements).toHaveLength(8);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

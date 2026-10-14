@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": "e0000000-0000-4000-8000-000000000003",
+      "subject": "pallet",
+      "kind": "disassemble",
+      "subjectId": "a0000000-0000-4000-8000-000000000001",
+      "sscc": "146006820000000409",
+      "serial": null,
+      "reasonCode": "other",
+      "reasonText": "Паллета упала",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "operatorName": "Анна Кузнецова",
+      "occurredAt": "2026-10-08T06:30:00.000Z",
+      "receivedAt": "2026-10-08T06:30:02Z"
+    },
+    {
+      "id": "e0000000-0000-4000-8000-000000000002",
+      "subject": "box",
+      "kind": "undo",
+      "subjectId": "b0000000-0000-4000-8000-000000000003",
+      "sscc": null,
+      "serial": "S000004",
+      "reasonCode": null,
+      "reasonText": null,
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "operatorName": null,
+      "occurredAt": "2026-10-08T06:20:00.000Z",
+      "receivedAt": "2026-10-08T06:20:01Z"
+    }
+  ],
+  "total": 2
+}

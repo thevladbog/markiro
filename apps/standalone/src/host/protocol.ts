@@ -1228,6 +1228,18 @@ export const ssccBlockSchema = z.object({
 });
 export type SsccBlock = z.infer<typeof ssccBlockSchema>;
 
+/** What a fact records (`markiro_proto::FactKind`), as the queue and the office name them. */
+export const FACT_KINDS = [
+  "scan",
+  "box_closed",
+  "box_label",
+  "box_exception",
+  "shift_closed",
+  "pallet_closed",
+  "pallet_label",
+  "pallet_exception",
+] as const;
+
 /** How the host answered a fact (`markiro_proto::FactOutcome`). */
 export const FACT_OUTCOMES = ["accepted", "conflict", "rejected"] as const;
 export type FactOutcome = (typeof FACT_OUTCOMES)[number];

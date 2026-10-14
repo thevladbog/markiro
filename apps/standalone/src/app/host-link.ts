@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import type { HostApi } from "../host/api.js";
 import type { KnownBlocksRequest, KnownBlocksResponse } from "../host/backups.js";
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import { replaceShiftCopies } from "../floor/shifts/shift-copies.js";
 import { DeviceError } from "../host/device.js";
 import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "../host/protocol.js";
+import { readConflictNotices } from "../local/conflict-notices.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { sendFactBatch } from "../local/facts-sender.js";
 import { sendWarehouseBatch } from "../local/warehouse-sender.js";
@@ -102,6 +104,12 @@ export interface HostLinkOptions {
    * after the facts, by the same delivery; none — they wait.
    */
   sendWarehouseRecords?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /**
+   * `HostApi.conflictStatus` and `HostApi.listDisplacements` (plan КНФ): what
+   * the host tells this station of its conflicts; without both, nothing is read.
+   */
+  conflictStatus?: HostApi["conflictStatus"];
+  listDisplacements?: HostApi["listDisplacements"];
   dispatch: (action: ShellAction) => void;
 }
 
@@ -147,7 +155,10 @@ export interface HostLinkControls {
  * outbox go without one). While the host holds the facts (`restore_pending`) a send
  * waits `RESTORE_HOLD_RETRY_MS` — no other trigger (a local write, a
  * revision) asks the host again before that — and the floor goes on offline.
- * Returns the requests for a sync and for the delivery.
+ * What the host tells this station of its conflicts (plan КНФ: the office's
+ * reviews, its displaced scans) is read at the same moments and retried the
+ * same way, with a count of its own; what it keeps refreshes the outbox's
+ * counts. Returns the requests for a sync and for the delivery.
  */
 export function useHostLink({
   hostId,
@@ -160,6 +171,8 @@ export function useHostLink({
   sendFacts,
   registerKnownBlocks,
   sendWarehouseRecords,
+  conflictStatus,
+  listDisplacements,
   dispatch,
 }: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
@@ -231,6 +244,14 @@ export function useHostLink({
       clearTimeout(warehouseRetry);
       warehouseRetry = null;
     };
+    // And for what the host tells this station of its conflicts (plan КНФ).
+    let noticeFailures = 0;
+    let noticeRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelNoticeRetry = () => {
+      if (noticeRetry === null) return;
+      clearTimeout(noticeRetry);
+      noticeRetry = null;
+    };
     // And for settling a restore of the host.
     let reconcileFailures = 0;
     let reconcileRetry: ReturnType<typeof setTimeout> | null = null;
@@ -271,12 +292,14 @@ export function useHostLink({
       shiftReader.stop();
       factSender.stop();
       reconciler.stop();
+      noticeReader.stop();
       cancelRetry();
       cancelRefreshRetry();
       cancelShiftRetry();
       cancelFactRetry();
       cancelWarehouseRetry();
       cancelReconcileRetry();
+      cancelNoticeRetry();
     };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
@@ -402,6 +425,44 @@ export function useHostLink({
             shiftRetry = null;
             shiftReader.trigger();
           }, nextSyncRetryMs(shiftFailures));
+        }
+      }
+    });
+    // One read of the conflict notices at a time, retried like the reads above
+    // (plan КНФ): the office's review takes a revision, so a station online
+    // hears of it at once; a displacement takes none (the facts are not
+    // changed for it) and is heard at the next revision or reconnect. A
+    // refused key ends the link as everywhere; anything else keeps what the
+    // station has. A host without the routes is no failure (`readConflictNotices`).
+    const noticeReader = createSyncScheduler(async () => {
+      if (!active || conflictStatus === undefined || listDisplacements === undefined) return;
+      cancelNoticeRetry();
+      try {
+        const { changed } = await readConflictNotices({
+          local,
+          pairing,
+          conflictStatus,
+          listDisplacements,
+          now: () => new Date(),
+        });
+        if (!active) return;
+        noticeFailures = 0;
+        if (changed) dispatch({ type: "outbox_changed" });
+      } catch (error) {
+        if (!active) return;
+        const action = shellActionFor(error, null);
+        if (action) {
+          stopAll();
+          dispatch(action);
+          return;
+        }
+        if (error instanceof HostError && error.code === "not_paired") return;
+        noticeFailures += 1;
+        if (online) {
+          noticeRetry = setTimeout(() => {
+            noticeRetry = null;
+            noticeReader.trigger();
+          }, nextSyncRetryMs(noticeFailures));
         }
       }
     });
@@ -546,6 +607,7 @@ export function useHostLink({
       shiftReader.trigger();
       factSender.trigger();
       reconciler.trigger();
+      noticeReader.trigger();
     };
     syncNow.current = everything;
     // A screen's request after a local write sends at once, unless a failed
@@ -573,6 +635,7 @@ export function useHostLink({
             cancelFactRetry();
             cancelWarehouseRetry();
             cancelReconcileRetry();
+            cancelNoticeRetry();
             return;
           }
           if (status.restoreEpoch !== undefined && status.restoreEpoch !== epochSeen) {
@@ -592,6 +655,7 @@ export function useHostLink({
             factSender.trigger();
           }
           if (reconcileFailures > 0 && reconcileRetry === null) reconciler.trigger();
+          if (noticeFailures > 0 && noticeRetry === null) noticeReader.trigger();
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -640,6 +704,8 @@ export function useHostLink({
     sendFacts,
     registerKnownBlocks,
     sendWarehouseRecords,
+    conflictStatus,
+    listDisplacements,
     dispatch,
   ]);
   const requestSync = useCallback(() => syncNow.current(), []);

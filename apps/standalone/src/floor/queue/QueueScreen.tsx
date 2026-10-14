@@ -6,7 +6,7 @@ import { Alert, Button, StatusChip } from "@markiro/ui";
 
 import { HostStatusLine } from "../../app/HostStatusLine.js";
 import type { FloorSession } from "../../app/shell.js";
-import { FACT_RECEIPT_CODES, type HostStatus } from "../../host/protocol.js";
+import { FACT_KINDS, FACT_RECEIPT_CODES, type HostStatus } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { waitUnits } from "../outbox-status.js";
@@ -14,12 +14,14 @@ import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { FloorFooter, FloorScreen } from "../shifts/FloorScreen.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import {
+  dismissDisplacement,
   dismissRecord,
   dismissShiftRefusals,
   readQueue,
   resendRefused,
   StaleQueueError,
   UnreadableRecordError,
+  type DisplacedRecord,
   type QueueView,
   type SettledRecord,
   type SettledTally,
@@ -50,26 +52,25 @@ export interface QueueScreenProps {
 type Pending =
   | { kind: "resend"; shiftId: string }
   | { kind: "dismissShift"; shiftId: string }
-  | { kind: "dismiss"; recordId: string };
+  | { kind: "dismiss"; recordId: string }
+  | { kind: "settleDisplaced"; conflictId: string };
 
 type NoticeKind =
-  "resent" | "dismissed" | "dismissedShift" | "settled" | "stale" | "unreadable" | "local";
+  | "resent"
+  | "dismissed"
+  | "dismissedShift"
+  | "settled"
+  | "settledDisplaced"
+  | "stale"
+  | "unreadable"
+  | "local";
 /** `id` tells two notices of one kind apart: each takes the focus. */
 interface Notice {
   kind: NoticeKind;
   id: number;
 }
 
-const KINDS: ReadonlySet<string> = new Set([
-  "scan",
-  "box_closed",
-  "box_label",
-  "box_exception",
-  "shift_closed",
-  "pallet_closed",
-  "pallet_label",
-  "pallet_exception",
-]);
+const KINDS: ReadonlySet<string> = new Set(FACT_KINDS);
 const CODES: ReadonlySet<string> = new Set(FACT_RECEIPT_CODES);
 /** Day, month, hours and minutes on this computer's clock. */
 const MOMENT = new Intl.DateTimeFormat("ru-RU", {
@@ -103,6 +104,22 @@ function recordText(t: TFunction, record: SettledRecord): string {
   return record.sscc === null
     ? t("floor.queue.record", { kind, time })
     : t("floor.queue.recordSscc", { kind, sscc: record.sscc, time });
+}
+
+/** A displaced code's box and when the host saw it, on this computer's clock. */
+function displacedText(t: TFunction, record: DisplacedRecord): string {
+  const time = MOMENT.format(new Date(record.detectedAt));
+  return record.sscc === null
+    ? t("floor.queue.displacedRecordOpen", { time })
+    : t("floor.queue.displacedRecord", { sscc: `(00)${record.sscc}`, time });
+}
+
+/** What happened to the code and what to check: the winner's shift by its number. */
+function displacedReason(t: TFunction, record: DisplacedRecord): string {
+  return t(
+    record.winnerSameDevice ? "floor.queue.displacedReasonSame" : "floor.queue.displacedReason",
+    { number: record.winnerShiftNumber },
+  );
 }
 
 interface ShiftGroup {
@@ -206,7 +223,10 @@ function conflictsBeyond(
  * again, «Снять с очереди» takes a refused record off (never a close),
  * «Снять с очереди все отказы смены» takes off every refused record of the
  * shift but its close in one decision that names how many, and
- * «Разобрано» settles a conflict — each only after a confirmation that says
+ * «Разобрано» settles a conflict, or a displaced code the host told of (plan
+ * КНФ: an earlier scan elsewhere took the code from this station's box; a
+ * conflict or a displacement the office reviewed leaves the screen on its own)
+ * — each only after a confirmation that says
  * what is done to what and what follows, which takes the focus (Escape and
  * «Отмена» leave it, giving the focus back) and ignores a press for
  * `VIEW_GUARD_MS` after it opens, since the second tap of a double tap would
@@ -291,12 +311,17 @@ export function QueueScreen({
     pending?.kind === "dismiss"
       ? (view?.settled.find((record) => record.id === pending.recordId) ?? null)
       : null;
+  const settlingDisplaced =
+    pending?.kind === "settleDisplaced"
+      ? (view?.displaced.find((record) => record.conflictId === pending.conflictId) ?? null)
+      : null;
   const targetGone =
     pending !== null &&
     queue !== "loading" &&
     resending === null &&
     clearing === null &&
-    dismissing === null;
+    dismissing === null &&
+    settlingDisplaced === null;
   const unreadable = queue === "failed";
 
   const say = useCallback((kind: NoticeKind) => {
@@ -350,6 +375,9 @@ export function QueueScreen({
         // The number the confirmation names: any other number now writes nothing.
         await dismissShiftRefusals(context, step.shiftId, clearing?.dismissible ?? 0);
         outcome = "dismissedShift";
+      } else if (step.kind === "settleDisplaced") {
+        await dismissDisplacement(context, step.conflictId);
+        outcome = "settledDisplaced";
       } else {
         await dismissRecord(context, step.recordId);
         outcome = dismissing?.outcome === "conflict" ? "settled" : "dismissed";
@@ -378,7 +406,11 @@ export function QueueScreen({
   };
 
   const confirmation =
-    pending !== null && (resending !== null || clearing !== null || dismissing !== null) ? (
+    pending !== null &&
+    (resending !== null ||
+      clearing !== null ||
+      dismissing !== null ||
+      settlingDisplaced !== null) ? (
       <div
         ref={confirmRef}
         tabIndex={-1}
@@ -433,6 +465,16 @@ export function QueueScreen({
                 )}
               </p>
             </>
+          ) : settlingDisplaced !== null ? (
+            <>
+              <p>
+                {t("floor.queue.confirmRecord", {
+                  record: displacedText(t, settlingDisplaced),
+                  reason: displacedReason(t, settlingDisplaced),
+                })}
+              </p>
+              <p>{t("floor.queue.confirmSettleDisplaced")}</p>
+            </>
           ) : null}
         </div>
         <div className="floor-queue__confirm-actions">
@@ -455,7 +497,7 @@ export function QueueScreen({
                 ? t("floor.queue.dismissShiftConfirm", {
                     n: formatQuantity(clearing.dismissible),
                   })
-                : dismissing?.outcome === "conflict"
+                : dismissing?.outcome === "conflict" || settlingDisplaced !== null
                   ? t("floor.queue.settleConfirm")
                   : t("floor.queue.dismissConfirm")}
           </Button>
@@ -643,6 +685,39 @@ export function QueueScreen({
                   <p className="floor-queue__quiet">
                     {t("floor.queue.more", { n: formatQuantity(conflictsHidden) })}
                   </p>
+                )}
+              </section>
+              <section className="floor-queue__section" aria-labelledby="floor-queue-displaced">
+                <h3 id="floor-queue-displaced">{t("floor.queue.displacedTitle")}</h3>
+                {view.displaced.length === 0 ? (
+                  <p className="floor-queue__quiet">{t("floor.queue.displacedNone")}</p>
+                ) : (
+                  <ul className="floor-queue__card floor-queue__records">
+                    {view.displaced.map((record) => (
+                      <li key={record.conflictId} className="floor-queue__record">
+                        <div className="floor-queue__record-text">
+                          <p className="floor-queue__identity">
+                            {t("floor.queue.shift", { number: record.shiftNumber ?? "—" })} ·{" "}
+                            {displacedText(t, record)}
+                          </p>
+                          <p className="floor-queue__reason">{displacedReason(t, record)}</p>
+                        </div>
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={(event) =>
+                            ask(
+                              { kind: "settleDisplaced", conflictId: record.conflictId },
+                              event.currentTarget,
+                            )
+                          }
+                        >
+                          {t("floor.queue.settle")}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </section>
             </>

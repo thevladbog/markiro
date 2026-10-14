@@ -12,6 +12,7 @@ import {
   shiftClosedRecord,
 } from "../src/floor/facts.js";
 import {
+  dismissDisplacement,
   dismissRecord,
   dismissShiftRefusals,
   QUEUE_LISTED_PER_SHIFT,
@@ -1026,3 +1027,103 @@ function counting2(): () => string {
     return `00000000-0000-4000-8000-f${String(n).padStart(11, "0")}`;
   };
 }
+
+describe("displaced scans on the queue screen (plan КНФ)", () => {
+  const HASH = "0".repeat(63) + "7";
+
+  function displaced(
+    db: DatabaseSync,
+    conflictId: string,
+    fields: {
+      pairing?: typeof PAIRING;
+      boxId?: string | null;
+      detectedAt?: string;
+      resolved?: boolean;
+    } = {},
+  ): void {
+    const pairing = fields.pairing ?? PAIRING;
+    db.prepare(
+      "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
+        "code_hash, box_id, detected_at, winner_shift_number, winner_same_device, " +
+        "winner_scanned_at, learned_at, resolved_at, resolved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, " +
+        "'OCT26-005/S', 0, '2026-10-08T06:00:50.000Z', ?, ?, ?)",
+    ).run(
+      pairing.hostId,
+      pairing.deviceId,
+      conflictId,
+      `r-${conflictId}`,
+      SHIFT_ID,
+      HASH,
+      fields.boxId ?? null,
+      fields.detectedAt ?? "2026-10-08T07:12:03Z",
+      AT,
+      fields.resolved === true ? AT : null,
+      fields.resolved === true ? OPERATOR_ID : null,
+    );
+  }
+
+  it("lists the pairing's open displacements oldest first, with their shift's number and their box's SSCC", async () => {
+    const { db, local } = await station();
+    db.prepare(
+      "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, closed_at, sscc, " +
+        "block_id, serial, item_count, closed_by) VALUES ('box-1', ?, ?, ?, ?, ?, " +
+        "'046006820000015001', 'block-1', 1500, 1, NULL)",
+    ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID, AT, AT);
+    displaced(db, "c-2", { detectedAt: "2026-10-08T08:00:00Z" });
+    displaced(db, "c-1", { boxId: "box-1" });
+    displaced(db, "c-3", { resolved: true });
+    displaced(db, "c-4", { pairing: OTHER_PAIRING });
+    const view = await readQueue(local, PAIRING);
+    expect(view.displaced).toEqual([
+      {
+        conflictId: "c-1",
+        shiftId: SHIFT_ID,
+        shiftNumber: ENTERED.number,
+        sscc: "046006820000015001",
+        detectedAt: "2026-10-08T07:12:03Z",
+        winnerShiftNumber: "OCT26-005/S",
+        winnerSameDevice: false,
+      },
+      {
+        conflictId: "c-2",
+        shiftId: SHIFT_ID,
+        shiftNumber: ENTERED.number,
+        sscc: null,
+        detectedAt: "2026-10-08T08:00:00Z",
+        winnerShiftNumber: "OCT26-005/S",
+        winnerSameDevice: false,
+      },
+    ]);
+  });
+
+  it("settles a displacement with who and when, once", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    await dismissDisplacement(context(local), "c-1");
+    expect(
+      rows(db, "SELECT resolved_at, resolved_by, office_reviewed_at FROM floor_displacements"),
+    ).toEqual([
+      { resolved_at: NOW.toISOString(), resolved_by: OPERATOR_ID, office_reviewed_at: null },
+    ]);
+    await expect(dismissDisplacement(context(local), "c-1")).rejects.toBeInstanceOf(
+      StaleQueueError,
+    );
+    // Another pairing's displacement of the same id is not this pairing's to settle.
+    displaced(db, "c-9", { pairing: OTHER_PAIRING });
+    await expect(dismissDisplacement(context(local), "c-9")).rejects.toBeInstanceOf(
+      StaleQueueError,
+    );
+    expect((await readQueue(local, PAIRING)).displaced).toEqual([]);
+  });
+
+  it("shows a displacement's shift number and box SSCC from the row once the shift's copy is gone", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1", { boxId: "box-gone" });
+    db.prepare(
+      "UPDATE floor_displacements SET shift_number = 'OCT26-004', box_sscc = '046006820000015001'",
+    ).run();
+    db.prepare("DELETE FROM floor_shifts").run();
+    const [record] = (await readQueue(local, PAIRING)).displaced;
+    expect(record).toMatchObject({ shiftNumber: "OCT26-004", sscc: "046006820000015001" });
+  });
+});
