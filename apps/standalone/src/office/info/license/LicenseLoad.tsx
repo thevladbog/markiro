@@ -34,7 +34,9 @@ export interface LicenseLoadProps {
  * (`PUT /v1/office/license`), «Отмена» drops it. The latest picked file
  * wins; a second press while a load runs sends nothing. A refusal is said
  * in its own words and takes the focus. The text of the file stays in this
- * component only and is never logged. Without the organization's INN there
+ * component's state, and in the mutation cache only while its check or load
+ * runs (each write is reset once settled, `gcTime: 0`); it is never logged
+ * nor put in the query cache. Without the organization's INN there
  * is nothing to bind a file to: the picker is off (the section links to
  * «Профиль организации»).
  */
@@ -42,11 +44,15 @@ export function LicenseLoad({ license, zone }: LicenseLoadProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const queryClient = useQueryClient();
-  const preview = useOfficeMutation((api, token, file: string) =>
-    api.previewLicense(token, licenseLoad(file)),
+  // The file's text is these writes' variables: each is reset once settled,
+  // and `gcTime: 0` drops it from the mutation cache at once.
+  const preview = useOfficeMutation(
+    (api, token, file: string) => api.previewLicense(token, licenseLoad(file)),
+    { gcTime: 0 },
   );
-  const load = useOfficeMutation((api, token, file: string) =>
-    api.loadLicense(token, licenseLoad(file)),
+  const load = useOfficeMutation(
+    (api, token, file: string) => api.loadLicense(token, licenseLoad(file)),
+    { gcTime: 0 },
   );
   // The latest picked file wins: a slow read or check of an earlier one is dropped.
   const pick = useRef(0);
@@ -75,11 +81,16 @@ export function LicenseLoad({ license, zone }: LicenseLoadProps) {
       checked = await preview.mutateAsync(read.text);
     } catch (error) {
       if (mine === pick.current) {
+        // A later pick's check may be running on this hook: only the latest resets it.
+        preview.reset();
         setMessage({ tone: "error", text: loadFailureText(error, license) });
       }
       return;
     }
-    if (mine === pick.current) setStaged({ file: read.text, preview: checked });
+    if (mine === pick.current) {
+      preview.reset();
+      setStaged({ file: read.text, preview: checked });
+    }
   };
 
   const submit = async () => {
@@ -90,10 +101,12 @@ export function LicenseLoad({ license, zone }: LicenseLoadProps) {
     try {
       next = await load.mutateAsync(staged.file);
     } catch (error) {
+      load.reset();
       loading.current = false;
       setMessage({ tone: "error", text: loadFailureText(error, license) });
       return;
     }
+    load.reset();
     loading.current = false;
     queryClient.setQueryData(officeKeys.license, next);
     setStaged(null);

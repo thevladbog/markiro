@@ -37,7 +37,11 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
   const titleId = useId();
   const files = useOfficeFiles();
   const queryClient = useQueryClient();
-  const request = useOfficeMutation((api, token, _: null) => api.getActivationRequest(token));
+  // The answer names the organization and its INN: reset once saved, and
+  // `gcTime: 0` drops it from the mutation cache at once.
+  const request = useOfficeMutation((api, token, _: null) => api.getActivationRequest(token), {
+    gcTime: 0,
+  });
   const saving = useRef(false);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [asking, setAsking] = useState(false);
@@ -65,7 +69,7 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
             : { key: errorMessageKey(error) },
       });
     } finally {
-      // The request names the organization and its INN: once saved, the page keeps no copy.
+      // The request names the organization and its INN: once saved (or not), no copy stays.
       request.reset();
       saving.current = false;
     }

@@ -154,4 +154,36 @@ describe("useOfficeMutation", () => {
       expect.objectContaining({ expectedRev: 4 }),
     );
   });
+
+  it("forgets a write with `gcTime: 0` once reset, and keeps others for react-query's default", async () => {
+    const session = fakeOfficeSession();
+    const client = createOfficeQueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <OfficeSessionProvider value={session}>{children}</OfficeSessionProvider>
+      </QueryClientProvider>
+    );
+    const write = (_api: unknown, _token: string, text: string) => Promise.resolve(text.length);
+    const { result } = renderHook(
+      () => ({
+        secret: useOfficeMutation(write, { gcTime: 0 }),
+        plain: useOfficeMutation(write),
+      }),
+      { wrapper },
+    );
+    await act(async () => {
+      await result.current.secret.mutateAsync("secret-text");
+      await result.current.plain.mutateAsync("plain-text");
+    });
+    act(() => {
+      result.current.secret.reset();
+      result.current.plain.reset();
+    });
+    const held = () =>
+      client
+        .getMutationCache()
+        .getAll()
+        .map((mutation) => mutation.state.variables);
+    await waitFor(() => expect(held()).toEqual(["plain-text"]));
+  });
 });

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import type { QueryClient } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +37,31 @@ import {
 } from "./support/office.js";
 
 const writeText = vi.fn<(text: string) => Promise<void>>();
+
+// The office's query client, to look into its mutation cache: the license's
+// text and the activation request must not stay there (spec §9.7).
+const clients = vi.hoisted(() => ({ last: null as QueryClient | null }));
+vi.mock("../src/office/office-query.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/office/office-query.js")>();
+  return {
+    ...actual,
+    createOfficeQueryClient: () => {
+      const client = actual.createOfficeQueryClient();
+      clients.last = client;
+      return client;
+    },
+  };
+});
+
+/** The variables and answers of the writes the office's cache still holds that carry `secret`. */
+function heldWith(secret: string): unknown[] {
+  const cache = clients.last?.getMutationCache();
+  if (cache === undefined) throw new Error("no office query client");
+  return cache
+    .getAll()
+    .map((mutation) => [mutation.state.variables, mutation.state.data])
+    .filter((held) => JSON.stringify(held).includes(secret));
+}
 
 const FREE_RENEWAL = "Новый файл по истечении срока бесплатно запрашивается у нас.";
 
@@ -535,6 +561,42 @@ describe("loading a license file", () => {
     expect(session.api.loadLicense).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps no copy of the file's text in the office's cache once it is loaded", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    session.api.loadLicense.mockResolvedValue(UPGRADED);
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(preview).getByRole("button", { name: "Загрузить" }));
+    await within(card).findByText(/Лицензия загружена/);
+    await waitFor(() => expect(heldWith(FILE_TEXT)).toEqual([]));
+  });
+
+  it("keeps no copy of the file's text in the office's cache after «Отмена»", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(preview).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(heldWith(FILE_TEXT)).toEqual([]));
+  });
+
+  it("keeps no copy of the file's text in the office's cache after a refusal", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    session.api.loadLicense.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(preview).getByRole("button", { name: "Загрузить" }));
+    await waitFor(() => expect(session.api.loadLicense).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(heldWith(FILE_TEXT)).toEqual([]));
+  });
+
   it("offers no file to the technologist", async () => {
     const card = await openLicense(sessionWith(ACTIVE_LICENSE, { technologist: true }));
     expect(within(card).queryByTestId("file-drop-input")).toBeNull();
@@ -586,6 +648,23 @@ describe("the activation request and the emergency extension", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Показать папку" }));
     expect(files.open).toHaveBeenCalledWith(segments);
   });
+
+  it.each([
+    ["saved", null],
+    ["not saved", new OfficeFilesError("storage", "disk full")],
+  ] as const)(
+    "keeps no copy of the activation request in the office's cache once it is %s",
+    async (_, failure) => {
+      const session = sessionWith();
+      session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+      const files = fakeOfficeFiles();
+      if (failure !== null) files.save.mockRejectedValue(failure);
+      const card = await openLicense(session, files);
+      fireEvent.click(within(card).getByRole("button", { name: "Сохранить запрос на активацию" }));
+      await within(card).findByText(failure === null ? /^Запрос сохранён/ : /Не удалось сохранить/);
+      await waitFor(() => expect(heldWith(ACTIVATION_REQUEST.organization.name)).toEqual([]));
+    },
+  );
 
   it("says when the request could not be saved", async () => {
     const session = sessionWith();
