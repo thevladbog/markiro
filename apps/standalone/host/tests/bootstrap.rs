@@ -44,7 +44,7 @@ async fn the_wizard_initializes_the_host_and_signs_the_admin_in() {
         org,
         (
             "ООО «Атолл»".into(),
-            Some("7701234567".into()),
+            Some("7707083893".into()),
             "4600682000010".into(),
             r#"["4600682"]"#.into(),
             "Europe/Moscow".into(),
@@ -200,12 +200,17 @@ async fn concurrent_wizards_initialize_exactly_once() {
 async fn invalid_wizard_input_names_the_field() {
     let app = TestApp::new().await;
     let (_, key) = pair_device(&app, "station").await;
-    let cases: [(&str, Value, &str); 12] = [
+    let cases: [(&str, Value, &str); 15] = [
         ("/admin/login", json!("ад"), "admin.login"),
         ("/admin/name", json!("  "), "admin.name"),
         ("/admin/password", json!("short"), "admin.password"),
         ("/org/name", json!(""), "org.name"),
         ("/org/inn", json!("12345"), "org.inn"),
+        // A license is issued to the INN (plan ЛЦ-2): the wizard takes only
+        // one whose check digit holds, and none at all is refused.
+        ("/org/inn", json!("7707083894"), "org.inn"),
+        ("/org/inn", json!(""), "org.inn"),
+        ("/org/inn", json!(null), "org.inn"),
         ("/org/gln", json!("460068200001"), "org.gln"),
         ("/org/gs1Prefixes", json!(["12"]), "org.gs1Prefixes"),
         ("/sscc/boxNextSerial", json!(0), "sscc.boxNextSerial"),
@@ -233,6 +238,7 @@ async fn invalid_wizard_input_names_the_field() {
     }
     let (_, hello) = app.send(empty(request("GET", "/v1/hello"))).await;
     assert_eq!(hello["initialized"], false);
+    assert_eq!(trial_of(&app).await, (None, None));
 }
 
 /// A NUL first passes `trim` but fails the tables' CHECKs (SQLite's `length()`
@@ -398,7 +404,7 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         json!({
             "changed": ["name", "inn", "gln", "gs1Prefixes", "timeZone"],
             "name": { "from": "ООО «Атолл»", "to": "ООО «Атолл-Юг»" },
-            "inn": { "from": "7701234567", "to": null },
+            "inn": { "from": "7707083893", "to": null },
             "gln": { "from": "4600682000010", "to": "4607091000017" },
             "gs1Prefixes": { "from": ["4600682"], "to": ["4600682", "4607091"] },
             "timeZone": { "from": "Europe/Moscow", "to": "Europe/Samara" }
@@ -425,6 +431,7 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         ))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let back_rev = body["rev"].as_i64().unwrap();
 
     let counters_after_switch_back: Vec<(String, i64, i64, i64)> = sqlx::query_as(
         "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters ORDER BY issuer_prefix, extension",
@@ -457,6 +464,25 @@ async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(sscc["currentIssuerPrefix"], "460068200");
+
+    // Plan ЛЦ-2, Д10 (ЛО27): only the wizard requires an INN whose check
+    // digit holds; the office's profile keeps the plain 10-or-12-digit rule,
+    // so 7701234567 (check digit 0, not 7) is taken and stored as is.
+    let mut unchecked_inn = update(back_rev, "4600682000010");
+    unchecked_inn["inn"] = json!("7701234567");
+    let (status, body) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/org"), &key, &admin_token),
+            unchecked_inn,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["inn"], "7701234567");
+    let stored_inn: Option<String> = sqlx::query_scalar("SELECT inn FROM org_profile WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_inn.as_deref(), Some("7701234567"));
 }
 
 #[tokio::test]
@@ -487,7 +513,7 @@ async fn putting_the_org_profile_unchanged_is_a_no_op() {
     // Exactly the org fields `bootstrap_body()` set, unchanged.
     let unchanged = json!({
         "name": "ООО «Атолл»",
-        "inn": "7701234567",
+        "inn": "7707083893",
         "gln": "4600682000010",
         "gs1Prefixes": ["4600682"],
         "timeZone": "Europe/Moscow",
@@ -624,10 +650,27 @@ async fn rows_the_wizard_writes(app: &TestApp) -> Vec<(&'static str, i64)> {
     counts
 }
 
+/// The trial's start and its INN in the license clock (plan ЛЦ-2).
+async fn trial_of(app: &TestApp) -> (Option<i64>, Option<String>) {
+    sqlx::query_as("SELECT trial_started_at, trial_inn FROM license_clock WHERE id = 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
 /// A refused or failed wizard leaves the host as it found it: nothing in any
-/// table the wizard fills, the host not initialized, no revision taken and no
-/// audit row written. `revision` and `audit` are the host's before the wizard.
+/// table the wizard fills, the host not initialized, no revision taken, no
+/// audit row written and no trial started (a trial written outside the
+/// wizard's transaction would survive its failure). `revision` and `audit`
+/// are the host's before the wizard.
 async fn assert_untouched(app: &TestApp, revision: i64, audit: i64, case: &str) {
+    assert_nothing_written(app, revision, audit, case).await;
+    assert_eq!(trial_of(app).await, (None, None), "{case}");
+}
+
+/// [`assert_untouched`] without the license clock, for a host whose clock row
+/// a test removed.
+async fn assert_nothing_written(app: &TestApp, revision: i64, audit: i64, case: &str) {
     assert_eq!(
         rows_the_wizard_writes(app).await,
         [
@@ -1052,4 +1095,86 @@ async fn a_wizard_that_fails_after_writing_the_templates_leaves_nothing() {
             ("label_templates", 3)
         ]
     );
+}
+
+/// The trial starts with the wizard (plan ЛЦ-2, spec §3.4): once, with the
+/// INN the wizard took, normalized.
+#[tokio::test]
+async fn the_wizard_starts_the_trial_with_its_inn() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let mut body = bootstrap_body();
+    body["org"]["inn"] = json!(" 7707083893 ");
+    let (status, answer) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/bootstrap"), &key),
+            body,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    let clock: (Option<i64>, Option<String>) =
+        sqlx::query_as("SELECT trial_started_at, trial_inn FROM license_clock WHERE id = 1")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        clock,
+        (
+            Some(support::app::START * 1000),
+            Some("7707083893".to_owned())
+        )
+    );
+}
+
+/// The trial starts once (plan ЛЦ-2, spec §3.4): a start already in the
+/// clock — the registry's earlier one, or a copy's — is kept with its INN,
+/// the wizard does not move it.
+#[tokio::test]
+async fn the_wizard_keeps_a_trial_already_started() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let earlier = (support::app::START - 86_400) * 1000;
+    sqlx::query("UPDATE license_clock SET trial_started_at = ?, trial_inn = ? WHERE id = 1")
+        .bind(earlier)
+        .bind("500100732259")
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    bootstrap(&app, &key).await;
+    assert_eq!(
+        trial_of(&app).await,
+        (Some(earlier), Some("500100732259".to_owned()))
+    );
+}
+
+/// Migration 0030 seeds the one license clock row; a host without it must
+/// not come up initialized with no trial at all. The wizard answers an
+/// internal error and writes nothing.
+#[tokio::test]
+async fn a_wizard_without_the_license_clock_row_fails_and_writes_nothing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let revision = host_revision(&app).await;
+    let audit = audit_rows(&app).await;
+    sqlx::query("DELETE FROM license_clock")
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let (status, failed) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/bootstrap"), &key),
+            bootstrap_body(),
+        ))
+        .await;
+    assert_eq!(
+        (status, failed["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{failed}"
+    );
+    assert_nothing_written(&app, revision, audit, "no license clock row").await;
+    let clock_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM license_clock")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(clock_rows, 0);
 }

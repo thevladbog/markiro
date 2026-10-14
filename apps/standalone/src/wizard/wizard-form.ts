@@ -3,6 +3,7 @@ import {
   buildDuplicateLabelTemplates,
   buildPalletLabelTemplates,
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  isValidInn,
   PALLET_LABEL_TEMPLATE_NAME,
   ssccSerialCapacity,
   type LabelTemplateSpec,
@@ -160,8 +161,21 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
       }
       return issues;
     }
-    case "org":
-      return issuesOf(orgFieldsSchema.safeParse(values).error);
+    case "org": {
+      const issues = issuesOf(orgFieldsSchema.safeParse(values).error);
+      // A license is issued to the INN (plan ЛЦ-2): the wizard needs one, and
+      // its check digit must hold, as the host checks (`crate::inn`). The
+      // office's profile keeps the form's plain rule.
+      if (!issues.some((issue) => issue.field === "inn")) {
+        const inn = values.inn.trim();
+        if (inn === "") {
+          issues.push({ field: "inn", message: "wizard.errors.innRequired" });
+        } else if (!isValidInn(inn)) {
+          issues.push({ field: "inn", message: "wizard.errors.innChecksum" });
+        }
+      }
+      return issues;
+    }
     case "sscc":
       return ssccIssues(values);
     case "lines":

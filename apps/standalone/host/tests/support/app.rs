@@ -37,6 +37,12 @@ pub struct TestApp {
 
 impl TestApp {
     pub async fn new() -> Self {
+        Self::with_host_id(&uuid::Uuid::new_v4().to_string()).await
+    }
+
+    /// A host whose `hostId` is `host_id`: the license fixtures of plan
+    /// ЛЦ-1 are issued to one.
+    pub async fn with_host_id(host_id: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let pool = markiro_host::db::open(&dir.path().join("host.db"))
             .await
@@ -44,7 +50,7 @@ impl TestApp {
         let clock = Arc::new(ManualClock::new(
             time::OffsetDateTime::from_unix_timestamp(START).unwrap(),
         ));
-        let state = AppState::new(pool, uuid::Uuid::new_v4().to_string(), clock.clone())
+        let state = AppState::new(pool, host_id.to_owned(), clock.clone())
             .with_endpoint(test_fingerprint(), 45710)
             .with_addresses(|| TEST_ADDRESSES.to_vec());
         Self {
@@ -174,7 +180,7 @@ pub fn bootstrap_body() -> Value {
         "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
         "org": {
             "name": "ООО «Атолл»",
-            "inn": "7701234567",
+            "inn": "7707083893",
             "gln": "4600682000010",
             "gs1Prefixes": ["4600682"],
             "timeZone": "Europe/Moscow"
@@ -208,7 +214,16 @@ pub struct Admin {
 /// A new host: a paired station runs the wizard, and the administrator's
 /// session stays open on it.
 pub async fn admin() -> Admin {
-    let app = TestApp::new().await;
+    admin_of(TestApp::new().await).await
+}
+
+/// `admin()` on a host whose `hostId` is `host_id`.
+pub async fn admin_on(host_id: &str) -> Admin {
+    admin_of(TestApp::with_host_id(host_id).await).await
+}
+
+/// `admin()` on `app`: a station pairs, runs the wizard and stays signed in.
+pub async fn admin_of(app: TestApp) -> Admin {
     let (_, key) = pair_device(&app, "station").await;
     let token = bootstrap(&app, &key).await;
     let (status, me) = app
@@ -504,6 +519,16 @@ pub fn shift_body(setup: &ShiftSetup) -> Value {
         "lineId": setup.line,
         "productionDate": "2026-10-08",
         "boxTemplateId": setup.template
+    })
+}
+
+/// The smallest shift a station creates on its own line with `request_id`.
+pub fn device_shift_body(setup: &ShiftSetup, request_id: &str) -> Value {
+    serde_json::json!({
+        "requestId": request_id,
+        "productId": setup.product,
+        "boxTemplateId": setup.template,
+        "productionDate": "2026-10-09"
     })
 }
 

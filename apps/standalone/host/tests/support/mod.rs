@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod backup;
+pub mod license;
 
 use std::sync::Arc;
 

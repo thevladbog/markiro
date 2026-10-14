@@ -299,13 +299,16 @@ fn install_service() -> Result<(), BoxError> {
     let executable = std::env::current_exe()?;
     let mut services = markiro_host::install_windows::WindowsServices::connect()?;
     let mut sleep = std::thread::sleep;
-    markiro_host::install::install_host(
+    let warnings = markiro_host::install::install_host(
         &paths,
         &executable,
         &mut services,
         &mut SystemCommands,
         &mut sleep,
     )?;
+    for warning in warnings {
+        eprintln!("markiro-host: {warning}");
+    }
     println!(
         "{} is running; its data is in {}",
         markiro_host::install::SERVICE_NAME,

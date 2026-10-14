@@ -43,6 +43,12 @@
 //!    * the revocations of the current database carried over (a device, a
 //!      badge stays revoked, an operator, an office user stays turned off;
 //!      nothing the copy lacks comes back), every office session ended,
+//!    * the license files the current database loaded after the copy (a
+//!      higher `sequence` than any row of the copy) carried over with its
+//!      license clock: the later mark, the earlier trial with its INN, the
+//!      emergency extension and a wrong host's first sighting it took after
+//!      the copy (plan ЛЦ-2) — never a fresh trial or a spent extension back;
+//!      a license that does not read is not carried, and fails nothing else,
 //!    * a new `site.restore_epoch`, which `hello` reports, the stations'
 //!      facts held (`site.facts_held_since`) until an administrator resumes
 //!      them, and one `host.restore` audit row;
@@ -425,6 +431,9 @@ pub struct RestoreReport {
     /// `None` when the current database was not read or is not this copy's
     /// history.
     pub carried: Option<Carried>,
+    /// How many license files the current database loaded after the copy
+    /// were carried over (plan ЛЦ-2); `None` like `carried`.
+    pub licenses_carried: Option<u64>,
     pub sessions_ended: u64,
     pub interrupted: Option<Interrupted>,
     /// When the copy was made: its manifest's time or, without one, its
@@ -632,7 +641,8 @@ impl Floors {
     }
 }
 
-/// What the current database revoked or turned off.
+/// What the current database revoked or turned off, and its license (plan
+/// ЛЦ-2): carried over like a revocation, only toward what it knew later.
 #[derive(Debug, Default, Clone)]
 struct Revoked {
     /// `(id, revoked_at)`.
@@ -641,6 +651,98 @@ struct Revoked {
     /// `(id, revoked_at)`.
     badges: Vec<(String, String)>,
     office_users: Vec<String>,
+    /// Its license; `None` when it could not be read (a value edited by
+    /// hand, such as text in an INTEGER column): nothing of it is carried,
+    /// and the rest of the database counts all the same.
+    license: Option<CurrentLicense>,
+}
+
+/// The license of the current database, as stored.
+#[derive(Debug, Default, Clone)]
+struct CurrentLicense {
+    /// Every row of `licenses`, as stored (decoded or not: the restored
+    /// host reads it as this one did).
+    files: Vec<LicenseRow>,
+    /// `license_clock`'s row; `None` without the table or the row.
+    clock: Option<LicenseClock>,
+}
+
+/// A license file of the current database, as `licenses` keeps it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct LicenseRow {
+    license_id: String,
+    sequence: i64,
+    compact: String,
+    kid: String,
+    host_id: String,
+    issued_at: i64,
+    valid_from: i64,
+    valid_until: i64,
+    grace_days: i64,
+    plan: String,
+    plan_version_id: String,
+    customer_name: String,
+    customer_inn: String,
+    quotas: String,
+    features: String,
+    loaded_at: String,
+    loaded_by: Option<String>,
+}
+
+/// The columns of `license_clock` a restore carries, as stored (times in
+/// ms UTC, out of range or not). The last state and its time stay the
+/// copy's: the restored audit log lacks the `license.state` rows written
+/// after the copy, so the first look names the change since then.
+#[derive(Debug, Clone, Default, PartialEq, Eq, sqlx::FromRow)]
+struct LicenseClock {
+    max_seen_at: Option<i64>,
+    trial_started_at: Option<i64>,
+    trial_inn: Option<String>,
+    emergency_used_for: Option<String>,
+    emergency_until: Option<i64>,
+    wrong_host_since: Option<i64>,
+}
+
+const LICENSE_CLOCK_COLUMNS: &str = "max_seen_at, trial_started_at, trial_inn, \
+     emergency_used_for, emergency_until, wrong_host_since";
+
+/// The license clock of the restored database from the copy's and the
+/// current one's (plan ЛЦ-2 Д12), the current database being the copy's
+/// history:
+///
+/// * the later mark, a mark out of range counting as none (as
+///   `store::RAISED_MARK` reads it): the time never goes back;
+/// * the earlier trial's start with ITS INN, a start out of range counting as
+///   a trial that is over (as `store::clock_row` reads it), a copy's tie
+///   kept: never a fresh trial, from a copy made before the license build
+///   (no start yet) or before a start was set back;
+/// * the current database's emergency extension, when it took one: it is
+///   the later history, so its key and end are what was spent last;
+///   comparing the ends instead would give a spent extension back after a
+///   clock set back;
+/// * the current database's first sighting of a wrong host, when it has one:
+///   the window goes on instead of starting again.
+fn carried_clock(copy: &LicenseClock, current: &LicenseClock) -> LicenseClock {
+    let mut clock = copy.clone();
+    let mark = |ms: Option<i64>| ms.and_then(crate::license::bounded_ms);
+    if mark(current.max_seen_at) > mark(copy.max_seen_at) {
+        clock.max_seen_at = current.max_seen_at;
+    }
+    let start = |ms: Option<i64>| ms.map(|ms| crate::license::bounded_ms(ms).unwrap_or(0));
+    if let Some(current_start) = start(current.trial_started_at) {
+        if start(copy.trial_started_at).is_none_or(|copy_start| current_start < copy_start) {
+            clock.trial_started_at = current.trial_started_at;
+            clock.trial_inn = current.trial_inn.clone();
+        }
+    }
+    if current.emergency_used_for.is_some() {
+        clock.emergency_used_for = current.emergency_used_for.clone();
+        clock.emergency_until = current.emergency_until;
+    }
+    if current.wrong_host_since.is_some() {
+        clock.wrong_host_since = current.wrong_host_since;
+    }
+    clock
 }
 
 fn raise_to<K: Ord>(map: &mut BTreeMap<K, i64>, key: K, value: i64) {
@@ -764,6 +866,31 @@ async fn read_revoked(conn: &mut SqliteConnection) -> Result<Revoked, sqlx::Erro
     Ok(revoked)
 }
 
+/// The license files and the license clock of the database on `conn`, read
+/// apart from the rest: a row that does not read (columns read typed) fails
+/// only this.
+async fn read_license(conn: &mut SqliteConnection) -> Result<CurrentLicense, sqlx::Error> {
+    let tables = table_names(&mut *conn).await?;
+    let mut license = CurrentLicense::default();
+    if tables.contains("licenses") {
+        license.files = sqlx::query_as(
+            "SELECT license_id, sequence, compact, kid, host_id, issued_at, valid_from, \
+             valid_until, grace_days, plan, plan_version_id, customer_name, customer_inn, \
+             quotas, features, loaded_at, loaded_by FROM licenses ORDER BY sequence",
+        )
+        .fetch_all(&mut *conn)
+        .await?;
+    }
+    if tables.contains("license_clock") {
+        license.clock = sqlx::query_as(&format!(
+            "SELECT {LICENSE_CLOCK_COLUMNS} FROM license_clock WHERE id = 1"
+        ))
+        .fetch_optional(&mut *conn)
+        .await?;
+    }
+    Ok(license)
+}
+
 /// A look at a database by a read-only connection that is not immutable: a
 /// stopped host may leave its WAL behind, with the last commits in it, and
 /// such a connection reads them. The `-wal` and `-shm` files the connection
@@ -818,16 +945,29 @@ async fn read_initialized(conn: &mut SqliteConnection) -> Result<bool, sqlx::Err
     Ok(initialized.is_some())
 }
 
-/// The numbers, the revocations and the wizard's state of the database at
-/// `path`, read once.
+/// The numbers, the revocations, the license and the wizard's state of the
+/// database at `path`, read once. A license that does not read leaves
+/// `revoked.license` empty instead of failing the rest (another program
+/// holding the database still fails it: it is tried again).
 async fn read_live(path: &Path) -> Result<Live, sqlx::Error> {
     let visit = Visit::begin(path);
     let read = async {
         let mut conn = open_read_only(path, false).connect().await?;
         let read = async {
             let floors = read_floors(&mut conn).await?;
-            let revoked = read_revoked(&mut conn).await?;
+            let mut revoked = read_revoked(&mut conn).await?;
             let initialized = read_initialized(&mut conn).await?;
+            revoked.license = match read_license(&mut conn).await {
+                Ok(license) => Some(license),
+                Err(error) if is_busy(&error) => return Err(error),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "the current database's license could not be read: its license files and clock are not carried"
+                    );
+                    None
+                }
+            };
             Ok::<_, sqlx::Error>(Live {
                 floors,
                 revoked,
@@ -837,6 +977,21 @@ async fn read_live(path: &Path) -> Result<Live, sqlx::Error> {
         .await;
         let _ = conn.close().await;
         read
+    }
+    .await;
+    visit.end();
+    read
+}
+
+/// The numbers of the database at `path` alone, read once (a database set
+/// aside counts with its numbers only: nothing else of it may fail them).
+async fn read_floors_at(path: &Path) -> Result<Floors, sqlx::Error> {
+    let visit = Visit::begin(path);
+    let read = async {
+        let mut conn = open_read_only(path, false).connect().await?;
+        let floors = read_floors(&mut conn).await;
+        let _ = conn.close().await;
+        floors
     }
     .await;
     visit.end();
@@ -924,8 +1079,8 @@ async fn aside_floors(data_dir: &Path) -> Floors {
         .collect();
     asides.sort();
     for db in asides {
-        match read_live(&db).await {
-            Ok(found) => floors.merge(found.floors),
+        match read_floors_at(&db).await {
+            Ok(found) => floors.merge(found),
             Err(error) => {
                 tracing::warn!(%error, path = %db.display(), "a database set aside could not be read");
             }
@@ -1942,6 +2097,7 @@ async fn restore_until(
         new_identity,
         revision: raised.revision,
         carried: raised.carried,
+        licenses_carried: raised.licenses_carried,
         sessions_ended: raised.sessions_ended,
         interrupted: made.interrupted,
         copy_made: raised.copy_made,
@@ -2036,6 +2192,7 @@ struct Raised {
     counters: Vec<CounterRaise>,
     shift_numbers: Vec<ShiftNumberRaise>,
     carried: Option<Carried>,
+    licenses_carried: Option<u64>,
     sessions_ended: u64,
     copy_made: String,
 }
@@ -2139,6 +2296,82 @@ async fn carry_revocations(
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    }
+    Ok(carried)
+}
+
+/// Carry the license files the current database loaded after the copy and
+/// its license clock (plan ЛЦ-2 Д12, spec §4.4). A file is after the copy
+/// when its `sequence` is above every row of the copy, decoded or not (the
+/// raw `max`, as `store::files` takes its newest): a duplicate would be
+/// swallowed by `INSERT OR IGNORE` anyway, the filter only spares the
+/// writes. Returns how many files were carried.
+async fn carry_licenses(
+    tx: &mut SqliteConnection,
+    license: &CurrentLicense,
+) -> Result<u64, sqlx::Error> {
+    let newest: Option<i64> = sqlx::query_scalar("SELECT max(sequence) FROM licenses")
+        .fetch_one(&mut *tx)
+        .await?;
+    let mut carried = 0;
+    for row in license
+        .files
+        .iter()
+        .filter(|row| newest.is_none_or(|newest| row.sequence > newest))
+    {
+        carried += sqlx::query(
+            "INSERT OR IGNORE INTO licenses (license_id, sequence, compact, kid, host_id, \
+             issued_at, valid_from, valid_until, grace_days, plan, plan_version_id, \
+             customer_name, customer_inn, quotas, features, loaded_at, loaded_by) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&row.license_id)
+        .bind(row.sequence)
+        .bind(&row.compact)
+        .bind(&row.kid)
+        .bind(&row.host_id)
+        .bind(row.issued_at)
+        .bind(row.valid_from)
+        .bind(row.valid_until)
+        .bind(row.grace_days)
+        .bind(&row.plan)
+        .bind(&row.plan_version_id)
+        .bind(&row.customer_name)
+        .bind(&row.customer_inn)
+        .bind(&row.quotas)
+        .bind(&row.features)
+        .bind(&row.loaded_at)
+        .bind(&row.loaded_by)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    }
+    if let Some(current) = &license.clock {
+        // The copy's row, or none (migration `0030` seeds it, but a copy
+        // edited by hand may lack it).
+        let copy: LicenseClock = sqlx::query_as(&format!(
+            "SELECT {LICENSE_CLOCK_COLUMNS} FROM license_clock WHERE id = 1"
+        ))
+        .fetch_optional(&mut *tx)
+        .await?
+        .unwrap_or_default();
+        let clock = carried_clock(&copy, current);
+        sqlx::query(
+            "INSERT INTO license_clock (id, max_seen_at, trial_started_at, trial_inn, \
+             emergency_used_for, emergency_until, wrong_host_since) \
+             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT (id) DO UPDATE SET max_seen_at = ?1, trial_started_at = ?2, \
+             trial_inn = ?3, emergency_used_for = ?4, emergency_until = ?5, \
+             wrong_host_since = ?6",
+        )
+        .bind(clock.max_seen_at)
+        .bind(clock.trial_started_at)
+        .bind(&clock.trial_inn)
+        .bind(&clock.emergency_used_for)
+        .bind(clock.emergency_until)
+        .bind(clock.wrong_host_since)
+        .execute(&mut *tx)
+        .await?;
     }
     Ok(carried)
 }
@@ -2297,6 +2530,12 @@ async fn raise_in(
         Some(revoked) => Some(carry_revocations(&mut *tx, revoked, revision).await?),
         None => None,
     };
+    // Not carried (`None`) when the current database is not the copy's
+    // history, or its license did not read.
+    let licenses_carried = match revoked.and_then(|revoked| revoked.license.as_ref()) {
+        Some(license) => Some(carry_licenses(&mut *tx, license).await?),
+        None => None,
+    };
     // A session logged out after the copy would be valid again: everyone
     // signs in again.
     let sessions_ended = sqlx::query("DELETE FROM office_sessions")
@@ -2346,6 +2585,7 @@ async fn raise_in(
                     "badges": carried.badges,
                     "officeUsers": carried.office_users,
                 })),
+                "licensesCarried": licenses_carried,
                 "sessionsEnded": sessions_ended,
                 "identity": identity,
             }),
@@ -2358,9 +2598,35 @@ async fn raise_in(
         counters,
         shift_numbers,
         carried,
+        licenses_carried,
         sessions_ended,
         copy_made: format_timestamp(copy_made),
     })
+}
+
+/// The summary's line about the license files (plan ЛЦ-2).
+fn license_line(report: &RestoreReport) -> String {
+    let made = &report.copy_made;
+    match report.licenses_carried {
+        Some(count) => format!("license files carried over from the previous database: {count}"),
+        // The copy's files name its host, not this one.
+        None if report.other_host => "the copy's license files, if any, are bound to the host that made it: this host needs a license file of its own (Информация → Лицензия, the activation request)".to_owned(),
+        // No database of the copy's host was here: nothing was left out of
+        // it, the copy holds what it holds.
+        None if report.current == Current::Absent
+            || matches!(report.identity, IdentityOutcome::Restored { .. }) =>
+        {
+            format!(
+                "the copy holds the license files loaded up to {made}: a license file loaded later on the copy's host is loaded again in the office (Информация → Лицензия)"
+            )
+        }
+        None if report.current == Current::Read && report.history_known => format!(
+            "the previous database's license files could not be read: license files loaded after {made} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)"
+        ),
+        None => format!(
+            "license files loaded after {made} are not in the restored database: load the newest license file again in the office (Информация → Лицензия)"
+        ),
+    }
 }
 
 /// The lines `markiro-host restore` prints.
@@ -2460,6 +2726,7 @@ pub fn summary(report: &RestoreReport) -> Vec<String> {
             report.copy_made
         ),
     });
+    lines.push(license_line(report));
     lines.push("every office session was ended: everyone signs in to the office again".to_owned());
     let or_dash = |value: Option<i64>| value.map_or("-".to_owned(), |value| value.to_string());
     for raise in &report.counters {
@@ -2609,6 +2876,9 @@ mod tests {
         );
         assert!(revoked.operators.is_empty() && revoked.badges.is_empty());
         assert!(revoked.office_users.is_empty());
+        assert!(revoked.license.is_none(), "read apart: read_license");
+        let license = read_license(&mut conn).await.unwrap();
+        assert!(license.files.is_empty() && license.clock.is_none());
     }
 
     #[test]
@@ -2989,6 +3259,7 @@ mod tests {
             revision: 2,
             history_known: false,
             carried: None,
+            licenses_carried: None,
             sessions_ended: 0,
             interrupted: None,
             copy_made: "2026-10-09T14:00:00Z".to_owned(),
@@ -3120,6 +3391,7 @@ mod tests {
             counters: Vec::new(),
             shift_numbers: Vec::new(),
             carried: None,
+            licenses_carried: None,
             sessions_ended: 0,
             copy_made: String::new(),
         };
@@ -3160,6 +3432,123 @@ mod tests {
         held.close().await.unwrap();
         settle(&staging).await.unwrap();
         assert!(!wal.exists());
+    }
+
+    /// A license clock with only the trial's start and INN.
+    fn trial(started_at: Option<i64>, inn: Option<&str>) -> LicenseClock {
+        LicenseClock {
+            trial_started_at: started_at,
+            trial_inn: inn.map(str::to_owned),
+            ..LicenseClock::default()
+        }
+    }
+
+    const OUT_OF_RANGE: i64 = crate::license::MAX_MS + 1;
+
+    #[test]
+    fn the_later_mark_is_carried_and_one_out_of_range_never_is() {
+        let mark = |ms: Option<i64>| LicenseClock {
+            max_seen_at: ms,
+            ..LicenseClock::default()
+        };
+        for (copy, current, kept) in [
+            (Some(10), Some(20), Some(20)),
+            (Some(20), Some(10), Some(20)),
+            (Some(20), Some(20), Some(20)),
+            (None, Some(10), Some(10)),
+            (Some(10), None, Some(10)),
+            // Out of range is no mark (`store::RAISED_MARK`): it never wins,
+            // and a real one replaces it.
+            (Some(10), Some(OUT_OF_RANGE), Some(10)),
+            (Some(OUT_OF_RANGE), Some(10), Some(10)),
+            (Some(-1), Some(10), Some(10)),
+        ] {
+            assert_eq!(
+                carried_clock(&mark(copy), &mark(current)).max_seen_at,
+                kept,
+                "{copy:?} {current:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_earlier_trial_is_carried_with_its_inn_and_never_a_fresh_one() {
+        let a = Some("7707083893");
+        let b = Some("7701234560");
+        for (copy, current, kept) in [
+            // The earlier start wins, with its own INN.
+            (trial(Some(20), a), trial(Some(10), b), trial(Some(10), b)),
+            (trial(Some(10), a), trial(Some(20), b), trial(Some(10), a)),
+            // On a tie the copy's stays.
+            (trial(Some(10), a), trial(Some(10), b), trial(Some(10), a)),
+            // A copy from before the license build has no trial yet.
+            (trial(None, None), trial(Some(10), b), trial(Some(10), b)),
+            (trial(Some(10), a), trial(None, None), trial(Some(10), a)),
+            // A start out of range reads as a trial that is over
+            // (`store::clock_row`): it is carried, or the copy's would
+            // begin again.
+            (
+                trial(Some(10), a),
+                trial(Some(OUT_OF_RANGE), b),
+                trial(Some(OUT_OF_RANGE), b),
+            ),
+            (
+                trial(Some(OUT_OF_RANGE), a),
+                trial(Some(10), b),
+                trial(Some(OUT_OF_RANGE), a),
+            ),
+        ] {
+            assert_eq!(carried_clock(&copy, &current), kept, "{copy:?} {current:?}");
+        }
+    }
+
+    #[test]
+    fn an_emergency_the_current_database_took_is_never_given_back() {
+        let emergency = |key: Option<&str>, until: Option<i64>| LicenseClock {
+            emergency_used_for: key.map(str::to_owned),
+            emergency_until: until,
+            ..LicenseClock::default()
+        };
+        for (copy, current, kept) in [
+            (
+                emergency(None, None),
+                emergency(Some("L1"), Some(10)),
+                emergency(Some("L1"), Some(10)),
+            ),
+            // The current one is the later history, whatever the clock said
+            // of its end: comparing the ends would give `L1`'s back.
+            (
+                emergency(Some("trial"), Some(50)),
+                emergency(Some("L1"), Some(10)),
+                emergency(Some("L1"), Some(10)),
+            ),
+            (
+                emergency(Some("trial"), Some(50)),
+                emergency(None, None),
+                emergency(Some("trial"), Some(50)),
+            ),
+        ] {
+            assert_eq!(carried_clock(&copy, &current), kept, "{copy:?} {current:?}");
+        }
+    }
+
+    #[test]
+    fn a_wrong_hosts_window_goes_on_from_its_first_sighting() {
+        let since = |ms: Option<i64>| LicenseClock {
+            wrong_host_since: ms,
+            ..LicenseClock::default()
+        };
+        for (copy, current, kept) in [
+            (None, Some(10), Some(10)),
+            (Some(5), Some(10), Some(10)),
+            (Some(5), None, Some(5)),
+        ] {
+            assert_eq!(
+                carried_clock(&since(copy), &since(current)).wrong_host_since,
+                kept,
+                "{copy:?} {current:?}"
+            );
+        }
     }
 }
 

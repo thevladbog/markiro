@@ -222,17 +222,36 @@ pub fn install(
     wait_until_running(services, sleep)
 }
 
+/// The warning of an install whose trial key (plan ЛЦ-2, spec §3.4) was not
+/// prepared. It names no value of the failure: the console shows it as is.
+pub const TRIAL_KEY_WARNING: &str =
+    "the trial mark's registry key was not prepared; the trial is kept in the database only";
+
 /// The `install` subcommand: creates the data directory (and the folders in
 /// it), which `icacls` needs to exist, then [`install`] with the port the host
-/// is configured for (`host.json`, else the default).
+/// is configured for (`host.json`, else the default). Returns the warnings of
+/// steps that failed without stopping the install, for the installer's
+/// console (the command keeps no log).
 pub fn install_host(
     paths: &HostPaths,
     executable: &Path,
     services: &mut dyn Services,
     commands: &mut dyn Commands,
     sleep: &mut dyn FnMut(Duration),
-) -> Result<(), crate::BoxError> {
+) -> Result<Vec<&'static str>, crate::BoxError> {
     paths.ensure()?;
+    let mut warnings = Vec::new();
+    // The trial's mark (plan ЛЦ-2, spec §3.4): a key the service may set
+    // values in. A refusal does not stop the install: the database keeps the
+    // trial too.
+    if let Err(error) = run_checked(
+        commands,
+        "powershell.exe",
+        &powershell_args(&trial_key_script()),
+    ) {
+        tracing::warn!(%error, "the trial mark's registry key was not prepared");
+        warnings.push(TRIAL_KEY_WARNING);
+    }
     install(
         &paths.data_dir,
         executable,
@@ -241,7 +260,7 @@ pub fn install_host(
         commands,
         sleep,
     )?;
-    Ok(())
+    Ok(warnings)
 }
 
 /// The host's port for the firewall: `host.json`'s when the host has started
@@ -448,6 +467,27 @@ New-NetFirewallRule -Name '{FIREWALL_RULE}' -DisplayName 'Markiro Хост (TCP 
     )
 }
 
+/// The key of the trial's mark (plan ЛЦ-2, spec §3.4), made with the
+/// installer's administrator rights; LocalService (`*S-1-5-19`) may read it
+/// and set values in this key only (no inheritance to subkeys). The rights
+/// include `CreateSubKey`: `reg add` opens the key it writes to with
+/// `KEY_WRITE`, which asks for it. The key is made in the 64-bit view of the
+/// registry, where the service's `reg.exe /reg:64` reads it: a 32-bit
+/// PowerShell, which would make it under `WOW6432Node`, refuses. An existing
+/// key keeps its values, and an uninstall leaves it.
+pub fn trial_key_script() -> String {
+    "$ErrorActionPreference = 'Stop'; \
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { throw 'a 32-bit PowerShell sees the 32-bit registry' }; \
+$path = 'HKLM:\\SOFTWARE\\Markiro\\Standalone\\Trial'; \
+if (-not (Test-Path -LiteralPath $path)) { New-Item -Path $path -Force | Out-Null }; \
+$acl = Get-Acl -LiteralPath $path; \
+$sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-19'); \
+$rule = New-Object System.Security.AccessControl.RegistryAccessRule($sid, 'ReadKey, SetValue, CreateSubKey', 'None', 'None', 'Allow'); \
+$acl.SetAccessRule($rule); \
+Set-Acl -LiteralPath $path -AclObject $acl"
+        .to_owned()
+}
+
 /// Removes the rule; a rule that is already gone is no error.
 pub fn firewall_close_script() -> String {
     format!("Remove-NetFirewallRule -Name '{FIREWALL_RULE}' -ErrorAction SilentlyContinue; exit 0")
@@ -523,7 +563,8 @@ pub fn trusted_system_root(value: Option<&str>) -> String {
 }
 
 /// The absolute path of the Windows program the installer means by `program`
-/// (`icacls`, `powershell.exe`), under `system_root`; `None` for any other
+/// (`icacls`, `powershell.exe`, and the service's `reg.exe`), under
+/// `system_root`; `None` for any other
 /// name, which is then run as given.
 pub fn system_program(program: &str, system_root: &str) -> Option<String> {
     match program {
@@ -531,6 +572,8 @@ pub fn system_program(program: &str, system_root: &str) -> Option<String> {
         "powershell.exe" => Some(format!(
             r"{system_root}\System32\WindowsPowerShell\v1.0\powershell.exe"
         )),
+        // The trial's mark (plan ЛЦ-2, `license::trial_mark`).
+        "reg.exe" => Some(format!(r"{system_root}\System32\reg.exe")),
         _ => None,
     }
 }

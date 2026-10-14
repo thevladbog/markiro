@@ -174,6 +174,14 @@ pub async fn create_template(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_catalog_in(&mut tx).await?;
+    // A new template (the editor's import and copy too) is the label
+    // editor's, a feature of the license (plan ЛЦ-2 Д8).
+    crate::license::seats::require_feature(
+        &state,
+        &mut tx,
+        crate::license::seats::Feature::LabelEditor,
+    )
+    .await?;
     templates::check_groups(&mut tx, "chzProductGroupCodes", codes).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
@@ -260,6 +268,18 @@ pub async fn update_template(
             "stock_template",
             "a stock template keeps its name and layout: copy it to change them",
         ));
+    }
+    // A new name or layout is an edit of the label editor (plan ЛЦ-2 Д8);
+    // the flag, the categories and a delete are not, and printing never asks.
+    // After the stock rule: a stock template's edit is refused whatever the
+    // license says, and still before any write.
+    if spec_changed || name != current.name {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::LabelEditor,
+        )
+        .await?;
     }
     if enabled != current.enabled || codes != current.chz_product_group_codes {
         // A default stays a template that fits its slot.

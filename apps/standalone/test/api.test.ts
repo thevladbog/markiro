@@ -45,6 +45,7 @@ import {
   templateUpdateSchema,
   updateStartedSchema,
 } from "../src/host/protocol.js";
+import { licenseLoad } from "../src/host/requests.js";
 import { fakeHostApi } from "./support/office.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -1048,5 +1049,49 @@ describe("HostApi floor work", () => {
     await expect(recording({ id: "x" }).api.requestSsccBlock(BLOCK_REQUEST)).rejects.toThrow();
     await expect(recording({ status: "maybe" }).api.checkCode(CODE_HASH)).rejects.toThrow();
     await expect(recording({ receipts: [{ id: null }] }).api.sendFacts(RECORDS)).rejects.toThrow();
+  });
+});
+
+describe("the license (plan ЛЦ-2)", () => {
+  it("reads, previews and loads a file, asks for the activation request and the emergency, with the session", async () => {
+    const office = fixture("office-license.json");
+    const load = licenseLoad("eyJ0eXAiOiJ4In0.e30.c2ln");
+    const activation = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../packages/domain/fixtures/standalone-license/activation-request.json",
+          testModuleUrl,
+        ),
+        "utf8",
+      ),
+    ) as unknown;
+    const read = recording(office);
+    await expect(read.api.getLicense(TOKEN)).resolves.toEqual(office);
+    const previewed = recording(fixture("office-license-preview.json"));
+    await previewed.api.previewLicense(TOKEN, load);
+    const loaded = recording(office);
+    await loaded.api.loadLicense(TOKEN, load);
+    const asked = recording(activation);
+    await expect(asked.api.getActivationRequest(TOKEN)).resolves.toEqual(activation);
+    const extended = recording(office);
+    await extended.api.enableLicenseEmergency(TOKEN);
+    expect([
+      ...read.sent,
+      ...previewed.sent,
+      ...loaded.sent,
+      ...asked.sent,
+      ...extended.sent,
+    ]).toEqual([
+      { method: "GET", path: "/v1/office/license", body: undefined, officeToken: TOKEN },
+      { method: "POST", path: "/v1/office/license/preview", body: load, officeToken: TOKEN },
+      { method: "PUT", path: "/v1/office/license", body: load, officeToken: TOKEN },
+      {
+        method: "GET",
+        path: "/v1/office/license/activation-request",
+        body: undefined,
+        officeToken: TOKEN,
+      },
+      { method: "POST", path: "/v1/office/license/emergency", body: undefined, officeToken: TOKEN },
+    ]);
   });
 });

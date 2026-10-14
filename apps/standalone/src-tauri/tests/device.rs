@@ -134,7 +134,7 @@ async fn requests_carry_the_device_key_and_the_office_token() {
 
     let wizard = json!({
         "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
-        "org": { "name": "ООО «Атолл»", "gln": "4600682000013", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
+        "org": { "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000013", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
         "sscc": { "boxNextSerial": 1, "palletNextSerial": 0 },
         "lines": ["Линия 1"]
     });

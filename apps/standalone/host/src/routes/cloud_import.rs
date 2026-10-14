@@ -444,6 +444,15 @@ pub async fn import(
     require_groups(&mut tx, &valid).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let summary = write(&mut tx, &valid, rev, &at).await?;
+    // The lines it added take seats of the license (plan ЛЦ-2): beyond the
+    // file the import (and its dry run) is refused whole, without a row.
+    crate::license::seats::require_added_seats(
+        &state,
+        &mut tx,
+        crate::license::seats::Quota::Lines,
+        u64::from(summary.lines_created),
+    )
+    .await?;
     if request.dry_run {
         tx.rollback().await.map_err(ApiError::internal)?;
         return Ok(Json(CloudImportSummary {
@@ -474,5 +483,8 @@ pub async fn import(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // The import never writes the organization's INN; the license is looked
+    // at again all the same (plan ЛЦ-2, spec §4.9).
+    state.license.refresh_after_write(&state).await;
     Ok(Json(summary))
 }

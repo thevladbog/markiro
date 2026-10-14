@@ -100,7 +100,12 @@ Backups (plan РК) write `backup.create` (the host or the office user who asked
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
 (the station). The copy before an upgrade (plan ОБН-1) writes `host.upgrade`
 (the host; see «Backups and restore»). The office's start of an update
-(plan ОБН-2) writes `app.update.start` (see «Updates from a file»).
+(plan ОБН-2) writes `app.update.start` (see «Updates from a file»). The
+license (plan ЛЦ-2) writes `license.load` (the administrator; `denied` for a
+refused file with its reason — a foreign or forged file is an event, unlike
+other refused office writes; the file itself never enters `details`),
+`license.state` (the host, one row per change of state, none for the first
+look) and `license.emergency`.
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
 SHA-256 of a copy's file in `backup.create` and `host.restore`, and of an
 installer in `app.update.start`, is a checksum to compare with a manifest, not
@@ -2121,6 +2126,17 @@ the 30 s wait (usually an unfinished `restore`: `host.restore-intent` makes
 `start` refuse, and Windows keeps retrying every 60 s, so a `restore` may meet
 «locked» once and be repeated; or a big first migration);
 `network-check` 0, 3, 1; a bad command line 2.
+
+`install_host` first makes the key of the trial's mark (plan ЛЦ-2,
+`HKLM\SOFTWARE\Markiro\Standalone\Trial`, `install::trial_key_script`): a
+PowerShell script makes it in the 64-bit view of the registry (a 32-bit
+PowerShell refuses rather than make it under `WOW6432Node`) and lets
+LocalService `ReadKey, SetValue, CreateSubKey` on this key only, without
+inheritance (`reg add` opens its key with `KEY_WRITE`, which asks for
+`CreateSubKey`); an existing key keeps its values, an uninstall leaves it. A
+refusal does not stop the install: `install_host` returns the warning
+`install::TRIAL_KEY_WARNING` (no value of the failure), and `main.rs` prints
+it as `markiro-host: <warning>`, since the command keeps no log.
 
 The installer build is `tauri build --config src-tauri/tauri.installer.conf.json
 --bundles nsis` after `markiro-host.exe` was copied to
@@ -4916,8 +4932,30 @@ transaction on one connection that is closed before the swap):
   changed after the copy is not carried; the copy's devices are not revoked
   when it came from another host. When the current database was not read or
   is not the copy's history, the summary says what is active again;
+- the license (plan ЛЦ-2), under the same condition as the revocations: the
+  `licenses` rows the current database loaded with a `sequence` above the
+  copy's highest are carried as they are (`INSERT OR IGNORE`), and the
+  license clock is merged by `restore::carried_clock` so that a restore never
+  buys a fresh trial nor gives back a spent extension: the later mark of the
+  time (one out of range is none), the earlier trial start with its own INN
+  (a start out of range reads as over and is carried; a copy without one, made
+  before the license, takes the current one), the current database's
+  emergency extension when it took one (else the copy's), the current
+  database's wrong-host sighting when there is one (the 30-day window goes
+  on); `last_state` stays the copy's, so the first look writes one
+  `license.state` row. The license is read apart (`read_license`): a value
+  that does not read (text in an INTEGER column) carries no file and no clock
+  and fails nothing else — the revocations and numbers still count, and a
+  database set aside counts with its numbers only (`read_floors_at`). The
+  summary says how many files were carried; else that the previous
+  database's license could not be read, that the copy's files are bound to
+  another host (the copy made by another host), that the copy holds the files
+  up to its time (no previous database, or the copy's identity put in place),
+  or (the current database not read, not the copy's history) that files
+  loaded after the copy must be loaded again in the office;
 - a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
-  `host.restore` row (the host as the actor; `carried` and `sessionsEnded` are
+  `host.restore` row (the host as the actor; `carried`, `licensesCarried` — a
+  number, or `null` when nothing could be carried — and `sessionsEnded` are
   part of its details).
 
 The intent marker `host.restore-intent` is written (synced) after the new
@@ -5143,6 +5181,85 @@ another PC's share, UNC and USB behaviour, antivirus against a rename, folder
 flush and ACL inheritance, `sc start` refusing while the marker is there, a
 really full disk, WebView2 for the page. The runbook's last section lists them
 as the manual test.
+
+## License
+
+Plan ЛЦ-2 (`docs/superpowers/plans/2026-10-13-standalone-lc2-host-license.md`,
+the spec `docs/superpowers/specs/2026-10-13-standalone-license-and-updates-design.md`,
+§3, §4, §7, §8 and §19). Only the host decides the license's state
+(`host/src/license/`); devices read it in `GET /v1/device` (`license`, a word
+and its dates, optional and never in the strict `site` feed record; a license
+the host cannot read leaves the record without it, it never costs a station
+its record).
+
+- A file is a compact JWS ES256 (`markiro_proto::trust`, plan ЛЦ-1), at most
+  16 KiB as sent, checked in the order of §4.3 (`license/verify.rs`) before
+  anything is written: form, key, signature, payload and issuer, this host's
+  `hostId`, the file's INN against the organization's (`license_inn_missing`
+  without one), a `sequence` above the highest stored row, read or not (the
+  same `licenseId` again changes nothing). `licenses` only grows; the file in
+  force is the highest `sequence` whose `validFrom` came. A row whose times
+  are out of range is not used; a row whose terms do not decode is read again
+  from its signed text, else not used; each is logged by its id once a
+  process.
+- The state (`license/state.rs`, a pure function): `wrong_host` (until 30 days
+  from when it was first seen or the file's own term and grace, whichever is
+  first, then `restricted`) before `inn_mismatch` before the file's term
+  (`active`, `expiring` at `min(30, ⌊term/3⌋)` days, `grace`, `restricted`);
+  without a file, the 14-day trial from the wizard (`trial`, `trial_expired`,
+  no grace). The time (`license/clock.rs`): the PC's clock, never below the
+  last known time (`license_clock.max_seen_at`, written hourly and at every
+  change, never before the wizard: a PC's wrong clock then must not become
+  the floor, and the wizard starts the time afresh from the PC's clock) nor
+  below a loaded file's issue less a day, never faster than the process's
+  monotonic time while it runs, at most 400 days ahead at a start. A stored
+  trial start after the trusted time counts from it; it is written back only
+  when the PC's own clock is behind it too (a clock set ahead at the wizard,
+  then back), never when the clock was put right ahead while the host ran.
+- What the state closes (`license/gate.rs`, `require_new_shifts`): in
+  `restricted`, `trial_expired` and `inn_mismatch` only a planned shift's
+  first entry and a station's new shift (`conflict` `license_restricted`, no
+  row), checked on the shift's writer transaction; a license that cannot be
+  read at all closes them too (500, fail-closed). The owner's entry again,
+  facts, blocks, closes, exports, copies, pairing and the office never. Every
+  router route is in `GATED` or `NEVER`, and `tests/license_routes.rs` fails
+  on a route in neither; `LIMITED` names the routes that refuse additions.
+  The emergency extension opens new shifts for 72 hours once per file and
+  once for the trial (also in `inn_mismatch`, an open question in the spec's
+  §19). Its end keeps the state's word but closes new shifts: the look
+  compares `opensNewShifts` with its last look in this process (the
+  extension's route sets it) and takes a revision without an audit row, so
+  the stations read `GET /v1/device` again; after a restart there is nothing
+  to compare with, and the first look wakes nobody.
+- Seats and features (`license/seats.rs`) refuse additions only, in any state
+  and inside the writer's transaction (`conflict` on `seat_limit` or
+  `feature_disabled`, no row): stations and handhelds share `stations`
+  (pairing, checked after the pairing code and before it is used up; an
+  office PC takes no seat), `cabinetUsers` are active office users, `lines`
+  lines not archived — the cloud import too, which refuses (and rolls back
+  whole) an import whose new lines would go over; `handheld` (pairing a
+  handheld), `pallets` (plans and a station's new shift with pallets, pallets
+  turned on in a plan) and `labelEditor` (a new template, a new name or
+  layout; not the A4 pallet sheets, not the cloud import). Nothing that runs
+  is disconnected, even over the limit.
+- The trial's mark outside the database: `HKLM\SOFTWARE\Markiro\Standalone\Trial`
+  (`StartedAt`, `HostId`, `Inn`) through `reg.exe … /reg:64`
+  (`license/trial_mark.rs`), read once at the service's start within 5 s
+  (`MARK_TIMEOUT`); a key that cannot be read (any code but 0, no start, no
+  answer in time) is neither used nor written. Only a key read without a
+  start gets the database's trial (its start, never after the trusted time,
+  and its INN; `StartedAt` last). The trial starts at the earlier of the
+  database's and the mark's start, with that start's INN (a mark's start
+  without a valid INN takes the database's). `markiro-host
+install` makes the key ("Installer and service"). Other systems have no
+  mark.
+- `markiro-host restore` carries the files the current database loaded after
+  the copy and merges its license clock, only when it is the copy's history
+  and its license reads ("Backups and restore", `licensesCarried`).
+- The log holds a file's id, the state and a refusal's code: never the file,
+  its signature, the activation request, the INN or the customer's name
+  (`no_secrets_in_logs.rs` loads an accepted and a refused file, asks the
+  activation request and counts the license's logging calls per module).
 
 ## Marking rules
 

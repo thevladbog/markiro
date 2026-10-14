@@ -11,6 +11,7 @@ import type {
   EmployeeRecord,
   EmployeeUpdate,
   LabelTemplate,
+  LicenseLoadRequest,
   LineCreate,
   LineUpdate,
   OfficeLine,
@@ -628,6 +629,15 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
           palletTemplateId: shift.pallets.templateId,
         }),
   };
+}
+
+/**
+ * `POST /v1/office/license/preview` and `PUT /v1/office/license`
+ * (`license-load-request.json`): the file's text as it was read; the host
+ * trims it and checks everything else.
+ */
+export function licenseLoad(file: string): LicenseLoadRequest {
+  return { file };
 }
 
 /** What a started update reports: this PC's version, the new one and the installer's SHA-256. */

@@ -1,3 +1,7 @@
+import {
+  standaloneActivationRequestSchema,
+  type StandaloneActivationRequest,
+} from "@markiro/domain";
 import { z } from "zod";
 
 import {
@@ -37,7 +41,9 @@ import {
   factReceiptsSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
+  licensePreviewSchema,
   officeBoxSchema,
+  officeLicenseSchema,
   officeLineSchema,
   officeOperatorSchema,
   officePalletSchema,
@@ -83,9 +89,12 @@ import {
   type FactReceipt,
   type LabelTemplate,
   type LabelTemplateSummary,
+  type LicenseLoadRequest,
+  type LicensePreview,
   type LineCreate,
   type LineUpdate,
   type OfficeBox,
+  type OfficeLicense,
   type OfficeLine,
   type OfficeLoginRequest,
   type OfficeOperator,
@@ -336,6 +345,16 @@ export interface HostApi {
   updateBackupSettings: (token: string, update: BackupSettingsUpdate) => Promise<BackupState>;
   /** End the hold of the stations' facts a restore set; without a hold it changes nothing. */
   resumeFacts: (token: string) => Promise<BackupState>;
+  /** The site's license (plan ЛЦ-2); every office role reads it. */
+  getLicense: (token: string) => Promise<OfficeLicense>;
+  /** «было → станет» of a file, checked as a load checks it; administrators, nothing written. */
+  previewLicense: (token: string, request: LicenseLoadRequest) => Promise<LicensePreview>;
+  /** Load a file (administrators); a refusal is `validation_failed` on `file` with `details.reason`. */
+  loadLicense: (token: string, request: LicenseLoadRequest) => Promise<OfficeLicense>;
+  /** The activation request the office saves for Маркиро (administrators). */
+  getActivationRequest: (token: string) => Promise<StandaloneActivationRequest>;
+  /** «Открывать новые смены ещё 3 дня» (administrators), once per file and once for the trial. */
+  enableLicenseEmergency: (token: string) => Promise<OfficeLicense>;
   /**
    * Plan ОБН-2: the office starts an installer on this PC; the host writes one
    * `app.update.start` row with this session's device. Administrators only.
@@ -793,6 +812,35 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("POST", "/v1/office/backups/resume", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getLicense: (token) =>
+      client.request("GET", "/v1/office/license", {
+        officeToken: token,
+        schema: officeLicenseSchema,
+      }),
+    previewLicense: (token, request) =>
+      client.request("POST", "/v1/office/license/preview", {
+        body: request,
+        officeToken: token,
+        schema: licensePreviewSchema,
+      }),
+    loadLicense: (token, request) =>
+      client.request("PUT", "/v1/office/license", {
+        body: request,
+        officeToken: token,
+        schema: officeLicenseSchema,
+      }),
+    // Parsed with the domain's strict schema on purpose: the office must not
+    // save a request the cloud would refuse.
+    getActivationRequest: (token) =>
+      client.request("GET", "/v1/office/license/activation-request", {
+        officeToken: token,
+        schema: standaloneActivationRequestSchema,
+      }),
+    enableLicenseEmergency: (token) =>
+      client.request("POST", "/v1/office/license/emergency", {
+        officeToken: token,
+        schema: officeLicenseSchema,
       }),
     recordUpdateStarted: async (token, record) => {
       await client.request("POST", "/v1/office/updates/started", {
