@@ -89,7 +89,7 @@ describe("«Поиск кодов» in the office", () => {
     expect(screen.queryByText("Свободен: ни в одном коробе")).toBeNull();
     expect(screen.getAllByText("В коробе").length).toBeGreaterThan(0);
     const link = screen.getAllByRole("link", { name: "OCT26-003" })[0];
-    expect(link?.getAttribute("href")).toBe("/shifts/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
+    expect(link?.getAttribute("href")).toBe("/shifts?shift=1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d");
     const history = screen.getByRole("heading", { name: "История" }).parentElement;
     if (history === null) throw new Error("no history");
     const items = within(history)
