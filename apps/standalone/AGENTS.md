@@ -2885,7 +2885,7 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   (`templateRequired` under the select, which takes the focus); a planned
   shift's or the form's choice that no longer fits stays, disabled, as
   «Шаблон недоступен — обновите данные»; another product chosen drops a
-  template it does not take. «Обязательная проверка этикетки» is off unless
+  template it does not take, with its refusal. «Обязательная проверка этикетки» is off unless
   chosen (the owner's default, the cloud's is on), with the cloud's hint of
   each state, and the cloud's copy hint closes the section. Resets (the
   cloud's): «Агрегация» turns the flag and the check off and clears the
@@ -2902,8 +2902,10 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   longer planned (a guard: the page does not open the dialog for one) shows
   the flag, the template by the name the office knows («Шаблон зафиксирован
   при открытии смены» when it is gone; the office has no snapshot) and the
-  check, all off, with «Параметры печати и проверки зафиксированы при
-  открытии смены.». The counterparty's hint follows the mode: a validation
+  check, all disabled, with «Параметры печати и проверки зафиксированы при
+  открытии смены.» closing the section, or under the flag when it prints
+  nothing. The flag and the check are buttons (Space toggles them), the
+  template a native select. The counterparty's hint follows the mode: a validation
   shift prints no box label, so it says «Необязательно», or «Необязательно:
   его название будет на этикетке дубликата» while the flag is on.
 - A row's actions follow its status. A planned shift has «Изменить»: the same
@@ -3358,8 +3360,10 @@ snapshot is the text of `floor_shifts.snapshot`).
 ## Shift modes
 
 Plan РЕЖ, part A (`docs/superpowers/plans/2026-10-13-standalone-shift-modes.md`;
-pilot spec §32). A shift is «Агрегация» (`aggregation`, the default) or
-«Проверка» (`validation`); the rules are where they act, this is their map:
+pilot spec §32.1). A shift is «Агрегация» (`aggregation`, the default) or
+«Проверка» (`validation`); the rules are where they act, this is their map.
+The Data Matrix duplicate a validation shift may print (part B) has its own
+map, «Unit labels», below.
 
 - The mode is a field of the shift, not of the line. The office chooses it
   when it plans a shift («Режим работы», «Office pages»); the host takes it
@@ -3418,8 +3422,7 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
 - A shift made on a station (`DeviceShiftCreate`) is created as aggregation;
   choosing the mode on the station's new-shift steps is part C (owner's
   decision), as are reprocessing codes of earlier shifts and modes on the
-  handheld. The duplicate print under «Проверка» is part B (protocol 5; its
-  wire is in «Protocol» and «Facts»; the host's side since task B3).
+  handheld. The duplicate print under «Проверка» is part B («Unit labels»).
 - Parity with the cloud is held by `test/scan-verdict-parity.test.ts` (every
   raw scan of the domain's KM fixtures and a line's scanner rows: the same
   verdict and duplicate key as `validateShiftScan`, in both modes; the one
@@ -3428,6 +3431,71 @@ pilot spec §32). A shift is «Агрегация» (`aggregation`, the default)
   draws the cloud renderer's bytes) and `test/export-parity.test.ts` (a
   validation shift's flat TXT and CSV are the domain's bytes for the codes
   in the cloud's order).
+
+## Unit labels
+
+Plan РЕЖ, part B (`docs/superpowers/plans/2026-10-13-standalone-shift-modes.md`,
+«Отклонения при исполнении — часть B»; pilot spec §32.2). A validation shift
+may print a Data Matrix duplicate of every accepted unit («Печатать дубликат
+Data Matrix»), with the label's check required or not; the cloud station's
+product labels are the model. The rules are where they act, this is their
+map:
+
+- The policy and the wire: protocol 5 («Protocol»): `validationPrint` of a
+  shift (`None {}` or `duplicate_dm` with `templateId` and `verification`),
+  the snapshot's frozen `validationPrint` (the duplicate template whole), the
+  `unit_label` fact and `ShiftTotals.unitLabels`; a shift that prints is
+  entered only by a station that names `validation-dm-duplicate-v1` beside
+  `validation-v1`. The shared fixtures are `proto/fixtures/*validation-print*`,
+  `fact-unit-label-*.json` and `unit-label-rules.json`.
+- The host keeps the policy in `shifts.validation_print_*` (`0021`, «Shift
+  modes»: the CHECK triggers, the freeze `shifts_mode_frozen`, no foreign key
+  on the template), takes and checks it in the office's plan and edit
+  («Shifts»: `check_duplicate_template`, `template_in_use`), freezes the
+  template at the entry (`duplicate_template_not_fit`, `snapshot_too_large`,
+  «Shifts») and keeps every `unit_label` event as sent in
+  `unit_label_events`, with the counts of a printing shift's card («Facts»).
+  It runs no state machine of its own.
+- The station keeps one row per job with its current attempt in
+  `floor_unit_labels` (`0015`, «Local database»: the domain's CHECKs, the
+  immutable print identity and bytes, one unresolved job per station across
+  shifts, one job per accepted unit, the retention). A unit is accepted with
+  its label in one transaction (`acceptWithLabel`) or not at all, and no scan
+  is taken while the station's unresolved label waits («Floor work»). The
+  label's fields, render and every step — send, check, skip, reprint,
+  recovery — are in «Floor printing» (Unit labels); the screen, the
+  verification window and «История этикеток» in «Floor work»; the close's
+  `label_unresolved` and the retention in «Floor exceptions and close».
+- The office: the flag, «Шаблон этикетки продукции» and «Обязательная
+  проверка этикетки» under «Проверка» in the shift dialog, a planned shift
+  marked `duplicate_template_not_fit` in the list («Office pages»); the card's
+  «Печать дубликата» and «Контроль печати», and the shift's blank with the
+  shift's own policy («Shift card and printed forms»).
+- Parity with the cloud: `test/unit-label-render.test.ts` (the fields and the
+  ZPL/TSPL bytes at 203 and 300 dpi against the cloud's duplicate),
+  `test/unit-label-work.test.ts` (every station step against the domain's
+  `canApplyProductLabelEvent`/`applyProductLabelEvent`),
+  `test/unit-label-schema.test.ts` (the CHECKs of `0015` against the domain's
+  projections), `test/forms-parity.test.ts` (the blank's «ПЕЧАТЬ ЭТИКЕТКИ» row
+  against the cloud's renderer, for both checks). The host's side is held by
+  `host/tests/unit_labels.rs`, `host/tests/validation_print.rs` and
+  `host/tests/migration_validation_print.rs`; the wire by
+  `proto/tests/validation_print.rs` and `test/protocol.test.ts`.
+- Deliberate differences from the cloud, each said where it acts: the label
+  prints the organization logo the shift froze, else the Markiro logo, in a
+  layout with an `organization_logo` box (the cloud's duplicate prints none);
+  the standalone catalog has no EGAIS code, so the field prints empty; the
+  host takes the label of a displaced or conflicting scan (the cloud
+  quarantines it as `ownership_conflict`); an operator is required only on a
+  skip and a reprint's `prepared` (the recovery after a restart writes
+  `delivery_unknown` with nobody signed in); the check is off by default (the
+  owner's decision; the cloud's is on); the card also counts «Пропущенные
+  проверки».
+- Not verified here (owner checks): the raster Data Matrix of the full code
+  printed on the client's printers and scanned back; a duplicate printer
+  through the Windows driver; a crash between `sending` and `sent`; the
+  verification window in WebView2; the dead end of an unresolved label of a
+  shift on another line.
 
 ## Facts
 
@@ -4337,7 +4405,12 @@ name), rendered by `unitLabelRender` (the shift labels' logo rule, the code as
 the GS1 raster, `kmDataMatrix: "raster"`; a driver page for a printer through
 the Windows driver) for the printer assigned to `duplicate` at the acceptance;
 `test/unit-label-render.test.ts` holds its bytes to the domain's ZPL and TSPL at
-203 and 300 dpi and to the domain's driver page. The job keeps those bytes and
+203 and 300 dpi and to the domain's driver page, and holds its fields and bytes
+to the cloud station's duplicate (plan РЕЖ, B8; the cloud's
+`duplicateLabelFields` and `renderLabelBytes` restated through the domain, not
+imported): the same fields for every optional value, the same ZPL and TSPL at
+203 and 300 dpi byte for byte for a layout without an `organization_logo` box,
+and with one a difference of the logo alone. The job keeps those bytes and
 their print identity for good. Each step is one transaction of the guarded
 `MOVE_JOB_SQL` and its `unit_label` record (`StaleUnitLabelError` when the job
 moved meanwhile, nothing written): `sendUnitLabel` sends a prepared attempt only —
@@ -5678,6 +5751,21 @@ either; a file log is stage 5.
   holds several blocks and the office's «Вернула» appearing only after the last
   part (runbook, section 10), and the records an older pairing left unsent
   named after «Подключить заново» on a new PC.
+- Shift modes and unit labels (plan РЕЖ) by hand, on Windows 10 and 11 with
+  the client's printers and scanners. They have run only under jsdom with
+  `node:sqlite` behind `LocalExecutor`, a fake `HostApi`, a recording canvas
+  and the host's `TestApp`; check at least:
+  - the host's migration `0020` on a site's real database against the
+    service's 30 s StartPending (the installer's exit code 4 and warning) and
+    about twice the database's size of free disk; the station's `0014` before
+    its window appears;
+  - a validation shift entered by a station of the previous version: refused,
+    with its own words;
+  - a unit's duplicate (ZPL and TSPL, 203 and 300 dpi): the raster Data
+    Matrix of the full code printed and scanned back; a duplicate printer
+    through the Windows driver; a crash between `sending` and `sent`;
+  - the verification window in WebView2 on the touch panel, and the dead end
+    of an unresolved label of a shift on another line (an owner question).
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. Since plan УСТ it also builds the
