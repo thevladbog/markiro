@@ -108,6 +108,7 @@ function SsccContent() {
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.sscc.table.actions"),
       render: (counter) =>
         isExhausted(counter) ? null : (

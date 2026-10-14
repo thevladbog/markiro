@@ -8,6 +8,7 @@ import { verifyPhc } from "@markiro/domain";
 import { HostError } from "../src/host/client.js";
 import type { BadgeInfo, BadgeSalt, OfficeOperator } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
+import { pressRowAction } from "./support/row-menu.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -96,7 +97,8 @@ async function openBadges(
   const name = `Бейджи оператора «${operator.name}»`;
   renderOffice(session);
   fireEvent.click(await screen.findByRole("link", { name: "Операторы" }));
-  fireEvent.click(await screen.findByRole("button", { name }));
+  await screen.findAllByRole("button", { name: /^Изменить оператора/ });
+  pressRowAction(screen, name);
   await screen.findByRole("dialog", { name });
 }
 

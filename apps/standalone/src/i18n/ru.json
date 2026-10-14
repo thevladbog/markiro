@@ -2023,6 +2023,7 @@
         "next": "Вперёд",
         "page": "Страница {{page}} из {{pages}}"
       },
+      "rowActions": "Действия: {{name}}",
       "selectSearch": {
         "label": "Поиск по списку",
         "placeholder": "Начните вводить",

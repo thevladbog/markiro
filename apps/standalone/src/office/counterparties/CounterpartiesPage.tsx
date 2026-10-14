@@ -66,6 +66,7 @@ export function CounterpartiesPage() {
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.counterparties.table.actions"),
       render: (counterparty) => (
         <Button

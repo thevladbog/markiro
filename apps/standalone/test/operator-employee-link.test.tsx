@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { EmployeeRecord, OfficeOperator } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
 import { chooseValue, optionTexts } from "./support/select.js";
+import { pressRowAction } from "./support/row-menu.js";
 
 const ANNA_OP: OfficeOperator = {
   id: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
@@ -88,11 +89,7 @@ describe("office operators: the linked employee", () => {
     const session = adminSession();
     session.api.updateEmployee.mockResolvedValue({ ...PETR, operatorId: BORIS_OP.id, rev: 63 });
     await openOperators(session);
-    fireEvent.click(
-      within(rowOf("Борис Орлов")).getByRole("button", {
-        name: "Сотрудник оператора «Борис Орлов»",
-      }),
-    );
+    pressRowAction(within(rowOf("Борис Орлов")), "Сотрудник оператора «Борис Орлов»");
     // Анна is linked already and Ольга is archived: neither is offered.
     expect(optionTexts("Сотрудник")).toEqual([
       "Выберите сотрудника",
@@ -125,11 +122,7 @@ describe("office operators: the linked employee", () => {
       rev: 64,
     });
     await openOperators(session);
-    fireEvent.click(
-      within(rowOf("Борис Орлов")).getByRole("button", {
-        name: "Сотрудник оператора «Борис Орлов»",
-      }),
-    );
+    pressRowAction(within(rowOf("Борис Орлов")), "Сотрудник оператора «Борис Орлов»");
     chooseValue("Сотрудник", "new");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Создать сотрудника" }));
     await screen.findByText(
@@ -146,11 +139,7 @@ describe("office operators: the linked employee", () => {
     const session = adminSession();
     session.api.updateEmployee.mockResolvedValue({ ...ANNA, operatorId: null, rev: 65 });
     await openOperators(session);
-    fireEvent.click(
-      within(rowOf("Анна Кузнецова")).getByRole("button", {
-        name: "Сотрудник оператора «Анна Кузнецова»",
-      }),
-    );
+    pressRowAction(within(rowOf("Анна Кузнецова")), "Сотрудник оператора «Анна Кузнецова»");
     expect(
       within(dialog()).getByText(
         "Оператор 0042 · Анна Кузнецова и сотрудник «Анна Кузнецова-Смирнова» больше не будут связаны. Вход оператора на станциях не меняется.",

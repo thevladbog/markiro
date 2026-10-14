@@ -13,6 +13,7 @@ import {
   Input,
   Modal,
   PageHeader,
+  RowActionMenu,
   RowActions,
   StatusChip,
   Table,
@@ -280,6 +281,7 @@ export function PalletSheetsPage() {
     },
     {
       key: "actions",
+      stickyEnd: true,
       title: t("office.palletSheets.table.actions"),
       render: (sheet) => {
         const spec = readSheetSpec(sheet.spec);
@@ -296,61 +298,66 @@ export function PalletSheetsPage() {
             >
               {t("office.palletSheets.preview")}
             </Button>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.palletSheets.exportNamed", { name: sheet.name })}
-              disabled={spec === null}
-              onClick={() => download(sheet)}
-            >
-              {t("office.palletSheets.export")}
-            </Button>
-            {canEdit && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="compact"
-                  aria-label={t(
-                    sheet.enabled
-                      ? "office.palletSheets.disableNamed"
-                      : "office.palletSheets.enableNamed",
-                    { name: sheet.name },
-                  )}
-                  disabled={busy}
-                  onClick={() =>
-                    void run(
-                      async () =>
-                        keepSheet(await update.mutateAsync({ sheet, enabled: !sheet.enabled })),
-                      t(
-                        sheet.enabled
-                          ? "office.palletSheets.disabledNotice"
-                          : "office.palletSheets.enabledNotice",
-                        { name: sheet.name },
+            {canEdit ? (
+              <RowActionMenu
+                label={t("office.common.rowActions", { name: sheet.name })}
+                disabled={busy}
+                items={[
+                  {
+                    key: "export",
+                    label: t("office.palletSheets.export"),
+                    ariaLabel: t("office.palletSheets.exportNamed", { name: sheet.name }),
+                    disabled: spec === null,
+                    onSelect: () => download(sheet),
+                  },
+                  {
+                    key: "state",
+                    label: t(
+                      sheet.enabled ? "office.palletSheets.disable" : "office.palletSheets.enable",
+                    ),
+                    ariaLabel: t(
+                      sheet.enabled
+                        ? "office.palletSheets.disableNamed"
+                        : "office.palletSheets.enableNamed",
+                      { name: sheet.name },
+                    ),
+                    onSelect: () =>
+                      void run(
+                        async () =>
+                          keepSheet(await update.mutateAsync({ sheet, enabled: !sheet.enabled })),
+                        t(
+                          sheet.enabled
+                            ? "office.palletSheets.disabledNotice"
+                            : "office.palletSheets.enabledNotice",
+                          { name: sheet.name },
+                        ),
                       ),
-                    )
-                  }
-                >
-                  {t(sheet.enabled ? "office.palletSheets.disable" : "office.palletSheets.enable")}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="compact"
-                  aria-label={t("office.palletSheets.renameNamed", { name: sheet.name })}
-                  disabled={busy}
-                  onClick={() => open({ kind: "rename", sheet })}
-                >
-                  {t("office.palletSheets.rename")}
-                </Button>
-                <Button
-                  variant="destructive-outline"
-                  size="compact"
-                  aria-label={t("office.palletSheets.deleteNamed", { name: sheet.name })}
-                  disabled={busy}
-                  onClick={() => open({ kind: "delete", sheet })}
-                >
-                  {t("office.palletSheets.delete")}
-                </Button>
-              </>
+                  },
+                  {
+                    key: "rename",
+                    label: t("office.palletSheets.rename"),
+                    ariaLabel: t("office.palletSheets.renameNamed", { name: sheet.name }),
+                    onSelect: () => open({ kind: "rename", sheet }),
+                  },
+                  {
+                    key: "delete",
+                    label: t("office.palletSheets.delete"),
+                    ariaLabel: t("office.palletSheets.deleteNamed", { name: sheet.name }),
+                    destructive: true,
+                    onSelect: () => open({ kind: "delete", sheet }),
+                  },
+                ]}
+              />
+            ) : (
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.palletSheets.exportNamed", { name: sheet.name })}
+                disabled={spec === null}
+                onClick={() => download(sheet)}
+              >
+                {t("office.palletSheets.export")}
+              </Button>
             )}
           </RowActions>
         );

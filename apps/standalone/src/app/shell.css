@@ -334,58 +334,12 @@
 
 /*
  * The buttons of a table row start where their column's heading starts (the
- * columns are left-aligned), instead of hugging the card's right edge while
- * the heading stays on the left.
+ * columns are left-aligned), and stay on one line: at most two buttons, or one
+ * and the «⋯» menu (`RowActionMenu`), so a row is as tall as one button.
  */
 .office-shell__content .mk-table .mk-row-actions {
+  flex-wrap: nowrap;
   justify-content: flex-start;
-}
-
-/*
- * Four or more actions in a row are a block of equal buttons, two to a line,
- * not a ragged stack of one button per line: a row of five is three lines tall
- * instead of five, and the table keeps the width of its other columns.
- */
-.office-shell__content .mk-table .mk-row-actions:has(> :nth-child(4)) {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  width: max-content;
-}
-
-/*
- * The operators' five actions: the table has eight other columns, so how the
- * buttons lie depends on the room the table has (the scroll region is a size
- * container). Narrow: one column of equal buttons; wider: two, three, and at
- * last a single row. The thresholds are the other columns' width plus the
- * actions' own, measured at each shape.
- */
-.office-shell__content .mk-table__scroll {
-  container: office-table / inline-size;
-}
-
-.office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
-  display: grid;
-  grid-template-columns: 1fr;
-  width: max-content;
-}
-
-@container office-table (min-width: 1090px) {
-  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@container office-table (min-width: 1220px) {
-  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@container office-table (min-width: 1410px) {
-  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
-    display: flex;
-    flex-wrap: nowrap;
-  }
 }
 
 /* A paragraph of a card has no browser margin on top of the card's gap. */

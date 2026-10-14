@@ -60,6 +60,7 @@ export function LinesPage() {
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.lines.table.actions"),
       render: (line) =>
         line.archived ? (

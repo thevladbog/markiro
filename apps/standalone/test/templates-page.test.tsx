@@ -16,6 +16,7 @@ import {
   type FakeOfficeSession,
 } from "./support/office.js";
 import { chooseText, optionTexts, shownIn } from "./support/select.js";
+import { findRowAction, hasRowAction, pressRowAction } from "./support/row-menu.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -586,10 +587,9 @@ describe("office label templates: switching on and off", () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
       const view = renderOffice(session(TEMPLATES, user));
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
-      expect(
-        await screen.findByRole("button", { name: "Выключить шаблон «Коробка 58×40»" }),
-      ).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Включить шаблон «Вода и молоко»" })).toBeTruthy();
+      await screen.findAllByRole("button", { name: /^Действия: / });
+      expect(hasRowAction(screen, "Выключить шаблон «Коробка 58×40»")).toBe(true);
+      expect(hasRowAction(screen, "Включить шаблон «Вода и молоко»")).toBe(true);
       view.unmount();
     }
   });
@@ -598,7 +598,7 @@ describe("office label templates: switching on and off", () => {
     const fake = session();
     fake.api.updateTemplate.mockResolvedValue(answer(MILK, { enabled: false }));
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     expect(screen.getByRole("dialog", { name: "Выключить шаблон?" })).toBeTruthy();
     expect(
       within(dialog()).getByText(
@@ -622,7 +622,7 @@ describe("office label templates: switching on and off", () => {
       "Молочная продукция",
       "✕Выключен",
     ]);
-    expect(screen.getByRole("button", { name: "Включить шаблон «Молоко 58×40»" })).toBeTruthy();
+    expect(hasRowAction(screen, "Включить шаблон «Молоко 58×40»")).toBe(true);
     await settle();
     expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
   });
@@ -640,7 +640,8 @@ describe("office label templates: switching on and off", () => {
         </OfficeSessionProvider>
       </QueryClientProvider>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    await screen.findAllByRole("button", { name: /^Действия: / });
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     await screen.findByText("Шаблон «Молоко 58×40» выключен.");
     expect(queryClient.getQueryData(officeKeys.templates)).toStrictEqual(
@@ -652,7 +653,7 @@ describe("office label templates: switching on and off", () => {
     const fake = session();
     fake.api.updateTemplate.mockResolvedValue(answer(DRINKS, { enabled: true }));
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Включить шаблон «Вода и молоко»" }));
+    pressRowAction(screen, "Включить шаблон «Вода и молоко»");
     expect(screen.getByRole("dialog", { name: "Включить шаблон?" })).toBeTruthy();
     expect(
       within(dialog()).getByText(
@@ -667,7 +668,7 @@ describe("office label templates: switching on and off", () => {
       ["office-session-token", DRINKS.id, { enabled: true, expectedRev: 60 }],
     ]);
     expect(within(rowOf("Вода и молоко")).getByText("Включён")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Коробка 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Коробка 58×40»");
     expect(screen.queryByText("Шаблон «Вода и молоко» включён.")).toBeNull();
   });
 
@@ -681,7 +682,7 @@ describe("office label templates: switching on and off", () => {
       }),
     );
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Коробка 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Коробка 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     expect(
       await within(dialog()).findByText(
@@ -696,7 +697,7 @@ describe("office label templates: switching on and off", () => {
     const fake = session();
     fake.api.updateTemplate.mockRejectedValue(hostError("stale_revision", 409, { currentRev: 61 }));
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     expect(
       await within(dialog()).findByText(
@@ -717,7 +718,7 @@ describe("office label templates: switching on and off", () => {
       }),
     );
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     expect(
       await within(dialog()).findByText("На хосте произошла ошибка. Повторите попытку."),
@@ -741,11 +742,11 @@ describe("office label templates: switching on and off", () => {
       }),
     );
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Коробка 100×100»" }));
+    pressRowAction(screen, "Выключить шаблон «Коробка 100×100»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(fake.api.updateTemplate).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     const submit = within(dialog()).getByRole("button", { name: "Выключить" });
     // Both clicks in one `act`: only the dialog's own guard drops the second.
     act(() => {
@@ -771,7 +772,7 @@ describe("office label templates: switching on and off", () => {
     chooseText("Назначение", "Короб");
     chooseText("Состояние", "Включённые");
     expect(names()).toEqual(["Коробка 58×40", "Молоко 58×40"]);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     await within(dialog()).findByText(
       "Данные изменились, пока вы их редактировали. Обновите их и повторите.",
@@ -796,13 +797,14 @@ describe("office label templates: switching on and off", () => {
       ["Коробка 58×40", "Выключить"],
       ["Вода и молоко", "Включить"],
     ] as const) {
-      // The row has a second button, «Категории»: the state button is the one whose name starts with its text.
-      const button = within(rowOf(name)).getByRole("button", { name: new RegExp(`^${label}`) });
-      expect(button.textContent).toBe(label);
-      expect(button.getAttribute("aria-label")).toBe(`${label} шаблон «${name}»`);
-      // A screen has one primary action, and a row's button is not it.
-      expect(button.classList.contains("mk-btn--secondary")).toBe(true);
-      expect(button.classList.contains("mk-btn--compact")).toBe(true);
+      // The state action is an item of the row's «⋯» menu, labelled with its own text and named after its template.
+      const item = findRowAction(within(rowOf(name)), new RegExp(`^${label}`));
+      expect(item.getAttribute("role")).toBe("menuitem");
+      expect(item.textContent).toBe(label);
+      expect(item.getAttribute("aria-label")).toBe(`${label} шаблон «${name}»`);
+      // Switching off takes a template out of use: the menu sets it apart.
+      expect(item.getAttribute("data-destructive")).toBe(label === "Выключить" ? "true" : null);
+      fireEvent.keyDown(item, { key: "Escape" });
     }
   });
 
@@ -819,7 +821,8 @@ describe("office label templates: switching on and off", () => {
         </OfficeSessionProvider>
       </QueryClientProvider>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Выключить шаблон «Молоко 58×40»" }));
+    await screen.findAllByRole("button", { name: /^Действия: / });
+    pressRowAction(screen, "Выключить шаблон «Молоко 58×40»");
     // Someone else narrowed the template to two categories (revision 61), and the list is read again while the dialog is open.
     fake.api.listTemplates.mockResolvedValueOnce(
       TEMPLATES.map((each) =>
@@ -855,7 +858,7 @@ describe("office label templates: switching on and off", () => {
       )
       .mockResolvedValueOnce(answer(BOX_58, { enabled: false }));
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: "Выключить шаблон «Коробка 58×40»" }));
+    pressRowAction(screen, "Выключить шаблон «Коробка 58×40»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     const refusal = await within(dialog()).findByText(
       "Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на вкладке «По умолчанию» раздела «Шаблоны».",
@@ -888,7 +891,7 @@ describe("office label templates: switching on and off", () => {
       )
       .mockResolvedValueOnce(answer(odd, { enabled: false }));
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: `Выключить шаблон «${name}»` }));
+    pressRowAction(screen, `Выключить шаблон «${name}»`);
     expect(
       within(dialog()).getByText(
         `Шаблон «${name}» перестанет предлагаться для товаров и умолчаний, а станции получат изменение. Включить его снова можно здесь же.`,
@@ -920,7 +923,7 @@ describe("office label templates: categories", () => {
    */
   async function openCategories(fake: FakeOfficeSession, name: string): Promise<void> {
     await openTemplates(fake);
-    fireEvent.click(screen.getByRole("button", { name: `Категории шаблона «${name}»` }));
+    pressRowAction(screen, `Категории шаблона «${name}»`);
     expect(screen.getByRole("dialog", { name: `Категории шаблона «${name}»` })).toBeTruthy();
   }
 
@@ -1059,9 +1062,8 @@ describe("office label templates: categories", () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
       const view = renderOffice(session(TEMPLATES, user));
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Категории шаблона «Коробка 58×40»" }),
-      );
+      await screen.findAllByRole("button", { name: /^Действия: / });
+      pressRowAction(screen, "Категории шаблона «Коробка 58×40»");
       expect(
         screen.getByRole("dialog", { name: "Категории шаблона «Коробка 58×40»" }),
       ).toBeTruthy();
@@ -1069,25 +1071,32 @@ describe("office label templates: categories", () => {
     }
   });
 
-  it("puts a row's actions in one box, the switch, «Категории» and «Изменить», or «Копировать» for a stock template, each a compact secondary button named after its template", async () => {
+  it("puts a row's actions in one box: «Изменить», or «Копировать» for a stock template, and the «⋯» menu with «Категории» and the switch, each named after its template", async () => {
     await openTemplates(session());
-    for (const [name, label, last] of [
+    for (const [name, label, primary] of [
       ["Коробка 58×40", "Выключить", "Копировать"],
       ["Вода и молоко", "Включить", "Изменить"],
     ] as const) {
       const buttons = within(rowOf(name)).getAllByRole("button");
-      expect(buttons.map((button) => button.textContent)).toEqual([label, "Категории", last]);
       expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-        `${label} шаблон «${name}»`,
-        `Категории шаблона «${name}»`,
-        `${last} шаблон «${name}»`,
+        `${primary} шаблон «${name}»`,
+        `Действия: ${name}`,
       ]);
+      expect(buttons[0]?.textContent).toBe(primary);
       expect(new Set(buttons.map((button) => button.parentElement)).size).toBe(1);
       for (const button of buttons) {
         expect(button.parentElement?.classList.contains("mk-row-actions")).toBe(true);
         expect(button.classList.contains("mk-btn--secondary")).toBe(true);
         expect(button.classList.contains("mk-btn--compact")).toBe(true);
       }
+      fireEvent.click(buttons[1] as HTMLElement);
+      const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+      expect(items.map((item) => item.textContent)).toEqual(["Категории", label]);
+      expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
+        `Категории шаблона «${name}»`,
+        `${label} шаблон «${name}»`,
+      ]);
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     }
   });
 
@@ -1100,7 +1109,7 @@ describe("office label templates: categories", () => {
     expect(fake.api.updateTemplate).not.toHaveBeenCalled();
     expect(screen.queryByText("Категории шаблона «Молоко 58×40» сохранены.")).toBeNull();
     expect(within(rowOf("Молоко 58×40")).getByText("Молочная продукция")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Категории шаблона «Молоко 58×40»" }));
+    pressRowAction(screen, "Категории шаблона «Молоко 58×40»");
     expect(
       screen.getByRole("radio", { name: "Только выбранные" }).getAttribute("aria-checked"),
     ).toBe("true");
@@ -1120,9 +1129,8 @@ describe("office label templates: categories", () => {
         </OfficeSessionProvider>
       </QueryClientProvider>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Категории шаблона «Молоко 58×40»" }),
-    );
+    await screen.findAllByRole("button", { name: /^Действия: / });
+    pressRowAction(screen, "Категории шаблона «Молоко 58×40»");
     // Someone else narrowed the template to two categories (revision 61), and the list is read again while the dialog is open.
     fake.api.listTemplates.mockResolvedValueOnce(
       TEMPLATES.map((each) =>
@@ -1211,7 +1219,8 @@ describe("office label templates: a template deleted on another workstation", ()
       const view = renderOffice(fake);
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
       await screen.findByRole("heading", { name: "Шаблоны этикеток" });
-      fireEvent.click(await screen.findByRole("button", { name: action }));
+      await screen.findAllByRole("button", { name: /^Действия: / });
+      pressRowAction(screen, action);
       fake.api.listTemplates.mockResolvedValue(TEMPLATES.filter((each) => each.id !== MILK.id));
       const submit = within(dialog()).getByRole("button", {
         name: title === "Выключить шаблон?" ? "Выключить" : "Сохранить",
@@ -1245,7 +1254,8 @@ describe("office label templates: a template deleted on another workstation", ()
       const view = renderOffice(fake);
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
       await screen.findByRole("heading", { name: "Шаблоны этикеток" });
-      fireEvent.click(await screen.findByRole("button", { name: action }));
+      await screen.findAllByRole("button", { name: /^Действия: / });
+      pressRowAction(screen, action);
       fake.api.listTemplates.mockResolvedValue(TEMPLATES.filter((each) => each.id !== MILK.id));
       if (submitName === "Сохранить") {
         fireEvent.click(within(dialog()).getByRole("radio", { name: "Все категории" }));
@@ -1287,7 +1297,8 @@ describe("office label templates: a template deleted on another workstation", ()
       const view = renderOffice(fake);
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
       await screen.findByRole("heading", { name: "Шаблоны этикеток" });
-      fireEvent.click(await screen.findByRole("button", { name: action }));
+      await screen.findAllByRole("button", { name: /^Действия: / });
+      pressRowAction(screen, action);
       if (submitName === "Сохранить") {
         fireEvent.click(within(dialog()).getByRole("radio", { name: "Все категории" }));
       }

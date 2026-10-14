@@ -21,6 +21,11 @@ export interface TableColumn<Row> {
   wrap?: boolean;
   /** Least width of the column: a wrapping column stops at it and the table scrolls, instead of squeezing the text. */
   minWidth?: number | string;
+  /**
+   * Pins the column to the right edge of the scrolling table (for the actions column), so it is
+   * always in reach however wide the table is; the other columns scroll under it.
+   */
+  stickyEnd?: boolean;
   /** Разрешить перенос заголовка (по умолчанию nowrap): для узкой колонки с длинным названием */
   wrapTitle?: boolean;
   sortable?: boolean;
@@ -124,6 +129,14 @@ export function Table<Row>({
                     width: column.width,
                     minWidth: column.minWidth,
                     userSelect: "none",
+                    ...(column.stickyEnd
+                      ? {
+                          position: "sticky" as const,
+                          right: 0,
+                          background: "var(--surface-panel)",
+                          boxShadow: "-1px 0 0 var(--line)",
+                        }
+                      : {}),
                   }}
                 >
                   {column.title}
@@ -184,6 +197,14 @@ export function Table<Row>({
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
                       minWidth: column.minWidth,
+                      ...(column.stickyEnd
+                        ? {
+                            position: "sticky" as const,
+                            right: 0,
+                            background: "var(--surface-card)",
+                            boxShadow: "-1px 0 0 var(--line)",
+                          }
+                        : {}),
                       whiteSpace: column.wrap ? "normal" : "nowrap",
                       // `break-word`, not `anywhere`: a squeezed column keeps its longest word whole
                       // (the table scrolls instead) and never breaks letter by letter.

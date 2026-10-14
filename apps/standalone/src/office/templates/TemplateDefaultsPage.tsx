@@ -427,6 +427,7 @@ function TemplateDefaultsForm({
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.templateDefaults.table.actions"),
       render: (row) => (
         <Button

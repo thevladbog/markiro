@@ -23,6 +23,7 @@ import {
   Pager,
   RadioGroup,
   RowActions,
+  RowActionMenu,
   Select,
   StatusChip,
   Table,
@@ -1477,6 +1478,27 @@ describe("геометрия тега", () => {
 });
 
 describe("Table", () => {
+  it("pins a column to the right edge of the scrolling table, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[
+          { key: "name", title: "Название" },
+          { key: "actions", title: "Действия", stickyEnd: true },
+        ]}
+        rows={[{ name: "Линия 1", actions: "Изменить" }]}
+      />,
+    );
+
+    for (const element of [
+      screen.getByRole("columnheader", { name: "Действия" }),
+      screen.getByRole("cell", { name: "Изменить" }),
+    ]) {
+      expect(element.style.position).toBe("sticky");
+      expect(element.style.right).toBe("0px");
+    }
+    expect(screen.getByRole("cell", { name: "Линия 1" }).style.position).toBe("");
+  });
+
   it("holds a column at its minimum width, heading and cells alike", () => {
     render(
       <Table
@@ -1611,5 +1633,57 @@ describe("инвариант словаря фаз", () => {
     for (const phase of PHASES) {
       expect(allowed.has(PHASE_TONE[phase])).toBe(true);
     }
+  });
+});
+
+describe("RowActionMenu", () => {
+  function menu(onSelect = vi.fn()) {
+    render(
+      <RowActionMenu
+        label="Действия: Иван"
+        items={[
+          { key: "pin", label: "Сменить PIN", ariaLabel: "Сменить PIN оператора Иван", onSelect },
+          { key: "off", label: "Выключить", destructive: true, onSelect: vi.fn() },
+        ]}
+      />,
+    );
+    return onSelect;
+  }
+
+  it("opens a labelled menu with the actions as items, the destructive one set apart", async () => {
+    const user = userEvent.setup();
+    menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await user.click(trigger);
+    expect(screen.getByRole("menu", { name: "Действия: Иван" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Сменить PIN оператора Иван" })).toBeTruthy();
+    const destructive = screen.getByRole("menuitem", { name: "Выключить" });
+    expect(destructive.getAttribute("data-destructive")).toBe("true");
+    expect(screen.getByRole("separator")).toBeTruthy();
+  });
+
+  it("is keyboard operable: arrows move, Enter chooses and closes, Escape returns to the button", async () => {
+    const user = userEvent.setup();
+    const onSelect = menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const first = await screen.findByRole("menuitem", { name: "Сменить PIN оператора Иван" });
+    await waitFor(() => expect(document.activeElement).toBe(first));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Выключить" }));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(first);
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await user.click(trigger);
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

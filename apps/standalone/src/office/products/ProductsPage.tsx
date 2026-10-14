@@ -122,6 +122,7 @@ export function ProductsPage() {
   if (canEdit) {
     columns.push({
       key: "actions",
+      stickyEnd: true,
       title: t("office.products.table.actions"),
       render: (product) => (
         <Button
