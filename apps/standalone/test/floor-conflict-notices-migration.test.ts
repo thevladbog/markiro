@@ -63,10 +63,12 @@ function plans(db: DatabaseSync): Record<string, string> {
   );
 }
 
-describe("migration 0016 over a database of 0013 (plan КНФ)", () => {
+describe("migration 0016 over a database of 0015 (plan КНФ)", () => {
   it("adds office_reviewed_at as NULL to every record and an empty table of displacements", () => {
     const db = new DatabaseSync(":memory:");
-    migrate(db, "0001", "0013");
+    // 0014 and 0015 are plan РЕЖ's: with both plans merged a database reaches 0016 through them,
+    // and the retention's tables (`floor_unit_labels`) exist before the plans are taken.
+    migrate(db, "0001", "0015");
     const pairing = [HOST_ID, DEVICE_ID];
     const insert = db.prepare(
       "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, " +
@@ -79,7 +81,6 @@ describe("migration 0016 over a database of 0013 (plan КНФ)", () => {
     const before = db.prepare("SELECT * FROM outbox ORDER BY seq").all();
     const plansBefore = plans(db);
 
-    // Migrations 0014 and 0015 belong to plan РЕЖ and may be absent.
     migrate(db, "0016", "0016");
 
     const after = db.prepare("SELECT * FROM outbox ORDER BY seq").all();

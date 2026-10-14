@@ -867,6 +867,37 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
     .collect()
 }
 
+/// The rows of `sqlite_master` as they were before migration `0016` (plan КНФ), which these
+/// tests (opening the database through the application, so every pending migration is applied)
+/// do not examine: its table `floor_displacements` with its indexes goes, and `outbox`, which
+/// got the column `office_reviewed_at` appended to its text, is replaced by its text in
+/// `before`. The migration's own shape is pinned in `migration_0016_*` and
+/// `test/floor-conflict-notices-migration.test.ts`.
+fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
+    rows.into_iter()
+        .filter(|row| row["tbl_name"] != "floor_displacements")
+        .map(|mut row| {
+            if row["type"] == "table" && row["name"] == "outbox" {
+                let old = before
+                    .iter()
+                    .find(|old| old["type"] == "table" && old["name"] == "outbox")
+                    .expect("the outbox table was there before");
+                let (old_sql, new_sql) =
+                    (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
+                // SQLite puts the column after the last one, before the table's constraints.
+                const COLUMN: &str = ", office_reviewed_at TEXT\n  CHECK (office_reviewed_at IS NULL OR resolved_at IS NOT NULL)";
+                assert_eq!(
+                    new_sql.replacen(COLUMN, "", 1),
+                    old_sql,
+                    "0016 only adds its column to outbox"
+                );
+                row["sql"] = old["sql"].clone();
+            }
+            row
+        })
+        .collect()
+}
+
 /// The plan of each statement of `0014`'s list, as the shell's SQLite gives it.
 async fn plans_of(raw: &mut sqlx::SqliteConnection, statements: &[&str]) -> Vec<Vec<String>> {
     let mut plans = Vec::new();
@@ -1119,8 +1150,7 @@ async fn migration_0014_lets_a_code_and_an_accepted_scan_have_no_box() {
     );
     // A later migration's table (`0015`, plan РЕЖ part B) comes with this start too, beside;
     // every object that was there stays as it was.
-    let later: Vec<Value> = master_rows(&mut raw, "NOT IN")
-        .await
+    let later: Vec<Value> = without_0016(master_rows(&mut raw, "NOT IN").await, &others)
         .into_iter()
         .filter(|row| row["tbl_name"] != "floor_unit_labels")
         .collect();
@@ -1359,6 +1389,8 @@ async fn migration_0015_adds_the_unit_labels_and_keeps_every_object() {
     let mut new = master_rows(&mut raw, "IN").await;
     new.extend(master_rows(&mut raw, "NOT IN").await);
     raw.close().await.unwrap();
+    // `0016` (plan КНФ) is applied by the same start; it is not what this test is about.
+    let new = without_0016(new, &old);
     let added: Vec<&Value> = new.iter().filter(|row| !old.contains(row)).collect();
     assert_eq!(
         new.iter().filter(|row| old.contains(row)).count(),
@@ -2575,7 +2607,7 @@ const DISPLACED_COUNT: &str =
      resolved_at IS NULL";
 const QUEUE_DISPLACED: &str =
     "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, \
-     coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, d.winner_shift_number, \
+     coalesce(d.box_sscc, b.sscc) AS sscc, d.box_id, d.detected_at, d.winner_shift_number, \
      d.winner_same_device FROM floor_displacements d LEFT JOIN floor_shifts s ON s.host_id = \
      d.host_id AND s.device_id = d.device_id AND s.id = d.shift_id LEFT JOIN floor_boxes b ON \
      b.id = d.box_id WHERE d.host_id = ? AND d.device_id = ? AND d.resolved_at IS NULL ORDER \
