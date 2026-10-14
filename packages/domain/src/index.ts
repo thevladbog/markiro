@@ -414,6 +414,8 @@ export type {
   PlacardDateRow,
   PlacardFormat,
 } from "./print-forms/pallet-placard.js";
+export { renderPairingCardFragment, renderPairingCardHtml } from "./print-forms/pairing-card.js";
+export type { PairingCardData, PairingCardFormat } from "./print-forms/pairing-card.js";
 export { renderShiftTaskFormHtml } from "./print-forms/shift-task-form.js";
 export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
 // The chrome helpers stay grouped under one name: `escapeHtml`, `formatInteger`
