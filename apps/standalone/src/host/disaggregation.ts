@@ -15,6 +15,8 @@ export const DISAGGREGATION_CONSTRAINTS = [
   "reason_required",
   "no_lines",
   "invalid_lines",
+  "restore_hold",
+  "document_not_applied",
 ] as const;
 
 export const disaggregationStatusSchema = z.enum(["draft", "applied", "cancelled"]);
@@ -150,3 +152,49 @@ export function disaggregationQuery(filter: DisaggregationFilter = {}): string {
   const text = params.toString();
   return text === "" ? "" : `?${text}`;
 }
+
+const bareSsccSchema = z.string().regex(/^\d{18}$/u);
+
+export const disaggregationReportVariantSchema = z.enum(["boxes", "full"]);
+export type DisaggregationReportVariant = z.infer<typeof disaggregationReportVariantSchema>;
+
+/** Mirrors `markiro_proto::disaggregation::DisaggregationReportRows` (plan ДЗГ-О). */
+export const disaggregationReportRowsSchema = z.object({
+  id: z.uuid(),
+  docNo: z.string().min(1),
+  status: disaggregationStatusSchema,
+  createdAt: z.iso.datetime(),
+  appliedAt: z.iso.datetime().nullable(),
+  createdByName: z.string().nullable(),
+  appliedByName: z.string().nullable(),
+  reasonName: z.string().nullable(),
+  comment: z.string().nullable(),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  variant: disaggregationReportVariantSchema,
+  lines: z.array(
+    z.object({
+      id: z.uuid(),
+      sscc: bareSsccSchema,
+      boxId: z.string().nullable(),
+      palletId: z.string().nullable(),
+      productName: z.string().nullable(),
+      codeCount: z.number().int().min(0),
+      items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
+      boxes: z.array(z.object({ sscc: bareSsccSchema.nullable(), units: z.number().int().min(0) })),
+    }),
+  ),
+});
+export type DisaggregationReportRows = z.infer<typeof disaggregationReportRowsSchema>;
+
+export const DISAGGREGATION_XML_FORMAT_ID = "disaggregation_xml_gismt";
+export const DISAGGREGATION_XML_FORMAT_VERSION = 1;
+
+/** Mirrors `DisaggregationExportRecord`: what the office tells the host about the saved ЧЗ file. */
+export const disaggregationExportRecordSchema = z
+  .object({
+    formatId: z.literal(DISAGGREGATION_XML_FORMAT_ID),
+    formatVersion: z.literal(DISAGGREGATION_XML_FORMAT_VERSION),
+    packingCount: z.number().int().min(1),
+  })
+  .strict();
+export type DisaggregationExportRecord = z.infer<typeof disaggregationExportRecordSchema>;

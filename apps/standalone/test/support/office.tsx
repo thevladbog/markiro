@@ -179,6 +179,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     cancelDisaggregation: vi.fn<HostApi["cancelDisaggregation"]>(() =>
       unexpected("cancelDisaggregation"),
     ),
+    getDisaggregationReportRows: vi.fn<HostApi["getDisaggregationReportRows"]>(() =>
+      unexpected("getDisaggregationReportRows"),
+    ),
+    recordDisaggregationExport: vi.fn<HostApi["recordDisaggregationExport"]>(() =>
+      unexpected("recordDisaggregationExport"),
+    ),
     listShiftExceptions: vi.fn<HostApi["listShiftExceptions"]>(async () => ({
       items: [],
       total: 0,

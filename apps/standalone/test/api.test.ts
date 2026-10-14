@@ -6,6 +6,7 @@ import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/
 import { knownBlocksRequestSchema } from "../src/host/backups.js";
 import {
   disaggregationCreateSchema,
+  disaggregationExportRecordSchema,
   disaggregationLinesAddSchema,
   disaggregationReasonCreateSchema,
   disaggregationReasonUpdateSchema,
@@ -133,6 +134,9 @@ const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
 const UPDATE_STARTED = updateStartedSchema.parse(fixture("update-started.json"));
 const DOCUMENT_ID = "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c";
+const DISAGGREGATION_EXPORT_RECORD = disaggregationExportRecordSchema.parse(
+  fixture("disaggregation-export-record.json"),
+);
 const REASON_ID = "d15a0000-0000-4000-8000-000000000003";
 const DOCUMENT_LINE_ID = "c0000000-0000-4000-8000-000000000004";
 const REASON_CREATE = disaggregationReasonCreateSchema.parse(
@@ -698,6 +702,26 @@ const CASES: Case[] = [
       method: "POST",
       path: `/v1/office/disaggregation/${DOCUMENT_ID}/cancel`,
       body: { expectedRev: 41 },
+    },
+  ],
+  [
+    "getDisaggregationReportRows",
+    fixture("disaggregation-report-rows-full.json"),
+    (api) => api.getDisaggregationReportRows(TOKEN, DOCUMENT_ID, "full"),
+    {
+      method: "GET",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/report-data?variant=full`,
+      body: undefined,
+    },
+  ],
+  [
+    "recordDisaggregationExport",
+    null,
+    (api) => api.recordDisaggregationExport(TOKEN, DOCUMENT_ID, DISAGGREGATION_EXPORT_RECORD),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/exports`,
+      body: DISAGGREGATION_EXPORT_RECORD,
     },
   ],
 ];

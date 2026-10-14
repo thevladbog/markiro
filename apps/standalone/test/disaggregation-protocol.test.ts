@@ -9,12 +9,14 @@ import {
   disaggregationCreateSchema,
   disaggregationDetailSchema,
   disaggregationDocumentSchema,
+  disaggregationExportRecordSchema,
   disaggregationLineStatusSchema,
   disaggregationLinesAddSchema,
   disaggregationQuery,
   disaggregationReasonCreateSchema,
   disaggregationReasonSchema,
   disaggregationReasonUpdateSchema,
+  disaggregationReportRowsSchema,
   disaggregationTransitionSchema,
   disaggregationUpdateSchema,
 } from "../src/host/disaggregation.js";
@@ -110,5 +112,54 @@ describe("disaggregation documents on the wire (plan ДЗГ)", () => {
     ).toBe(
       "?reasonId=d15a0000-0000-4000-8000-000000000003&from=2026-10-13T00%3A00%3A00Z&to=2026-10-14T00%3A00%3A00Z",
     );
+  });
+});
+
+describe("disaggregation act and file (plan ДЗГ-О)", () => {
+  it("parses the host's rows of both variants", () => {
+    const full = disaggregationReportRowsSchema.parse(
+      fixture("disaggregation-report-rows-full.json"),
+    );
+    expect(full.lines.map((line) => line.items.length)).toEqual([2, 0]);
+    expect(full.lines[1]?.boxes).toEqual([
+      { sscc: "046007034967000024", units: 12 },
+      { sscc: "046007034967000031", units: 12 },
+    ]);
+    expect(
+      disaggregationReportRowsSchema.parse(fixture("disaggregation-report-rows-boxes.json"))
+        .variant,
+    ).toBe("boxes");
+  });
+
+  it("refuses an SSCC with its AI and a record of another format or an extra field", () => {
+    const rows = disaggregationReportRowsSchema.parse(
+      fixture("disaggregation-report-rows-boxes.json"),
+    );
+    const [first] = rows.lines;
+    expect(first).toBeDefined();
+    if (first === undefined) return;
+    const changed = disaggregationReportRowsSchema.safeParse({
+      ...rows,
+      lines: [{ ...first, sscc: `00${first.sscc}` }],
+    });
+    expect(changed.success).toBe(false);
+    const record = disaggregationExportRecordSchema.parse(
+      fixture("disaggregation-export-record.json"),
+    );
+    expect(
+      disaggregationExportRecordSchema.safeParse({
+        ...record,
+        formatId: "shift_xml_gismt_aggregation",
+      }).success,
+    ).toBe(false);
+    expect(
+      disaggregationExportRecordSchema.safeParse({ ...record, fileName: "x.xml" }).success,
+    ).toBe(false);
+  });
+
+  it("names the restore hold as a constraint of a conflict", () => {
+    const error = errorBodySchema.parse(fixture("error-disaggregation-restore-hold.json"));
+    expect(DISAGGREGATION_CONSTRAINTS).toContain(error.error.details?.["constraint"]);
+    expect(error.error.details?.["constraint"]).toBe("restore_hold");
   });
 });
