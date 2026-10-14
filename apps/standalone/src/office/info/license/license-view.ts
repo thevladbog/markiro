@@ -276,15 +276,22 @@ export function noticeText(
   }
 }
 
+/** The warnings of a subscription's term: before its end, in the grace and after it. */
+const FREE_RENEWAL_NOTICES: ReadonlySet<LicenseNoticeKind> = new Set([
+  "expiring",
+  "grace",
+  "restricted",
+]);
+
 /**
- * The words that follow a warning's own: the subscription's expiry warning
- * adds that its next file is free (the owner's line); every other, nothing.
+ * The words that follow a warning's own: a subscription's warnings about its
+ * term add that its next file is free (the owner's line); every other, nothing.
  */
 export function noticeFreeRenewal(
   notice: LicenseNotice,
   license: OfficeLicense,
 ): LicenseText | null {
-  return notice.kind === "expiring" && renewsFree(license)
+  return FREE_RENEWAL_NOTICES.has(notice.kind) && renewsFree(license)
     ? { key: "office.banner.license.freeRenewal" }
     : null;
 }

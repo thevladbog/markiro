@@ -220,7 +220,7 @@ describe("the license as the office reads it", () => {
     expect(licenseNotices(RESTRICTED).map(noticeNeedsTime)).toEqual([false]);
   });
 
-  it("adds the free new file to the subscription's expiry warning, to no other", () => {
+  it("adds the free new file to the subscription's end warnings, to no other", () => {
     const addenda = (license: OfficeLicense) =>
       licenseNotices(license).map((notice) => {
         const addendum = noticeFreeRenewal(notice, license);
@@ -229,7 +229,12 @@ describe("the license as the office reads it", () => {
     expect(addenda(EXPIRING)).toEqual([FREE_RENEWAL]);
     expect(addenda(licenseOf({ ...DEMO, state: "expiring" }))).toEqual([null]);
     expect(addenda(TRIAL_ENDING)).toEqual([null]);
-    expect(addenda(GRACE)).toEqual([null]);
+    // The term has run out: then the free new file matters most (controller's decision).
+    expect(addenda(GRACE)).toEqual([FREE_RENEWAL]);
+    expect(addenda(RESTRICTED)).toEqual([FREE_RENEWAL]);
+    expect(addenda(licenseOf({ ...RESTRICTED, license: DEMO.license }))).toEqual([null]);
+    expect(addenda(TRIAL_EXPIRED)).toEqual([null]);
+    expect(addenda(INN_MISMATCH)).toEqual([null]);
     expect(
       addenda(
         licenseOf({
