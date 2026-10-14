@@ -52,6 +52,10 @@ describe("the host's list filter", () => {
     expect(documentFilter({ ...EMPTY, docNo: "   " }, "UTC")).toEqual({});
   });
 
+  it("ignores a period end that is no civil date instead of throwing", () => {
+    expect(documentFilter({ ...EMPTY, from: "13.10.20", to: "2026-1" }, "UTC")).toEqual({});
+  });
+
   it("ends the last day on its last second in the zone of a clock change", () => {
     expect(documentFilter({ ...EMPTY, to: "2026-03-29" }, "Europe/Berlin")).toEqual({
       to: "2026-03-29T21:59:59Z",

@@ -70,8 +70,9 @@ export function documentFilter(state: DocumentFilterState, timeZone: string): Di
     ...(state.status === "all" ? {} : { status: state.status }),
     ...(state.reasonId === "" ? {} : { reasonId: state.reasonId }),
     ...(q === "" ? {} : { q }),
-    ...(state.from === "" ? {} : { from: dayStartInstant(state.from, timeZone) }),
+    // A value that is no civil date (a picker's half-typed text) narrows nothing.
+    ...(!CIVIL.test(state.from) ? {} : { from: dayStartInstant(state.from, timeZone) }),
     // The last second of the day «По»: the host compares instants of whole seconds.
-    ...(state.to === "" ? {} : { to: hostInstant(dayStart(state.to, timeZone, 1) - 1000) }),
+    ...(!CIVIL.test(state.to) ? {} : { to: hostInstant(dayStart(state.to, timeZone, 1) - 1000) }),
   };
 }

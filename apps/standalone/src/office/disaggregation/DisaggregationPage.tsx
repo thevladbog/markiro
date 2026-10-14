@@ -66,12 +66,14 @@ export function DisaggregationPage() {
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
+    // Nothing typed since the host was asked: no timer, and the page the user turned to stays.
+    if (docNo === askedNo) return undefined;
     const timer = setTimeout(() => {
       setAskedNo(docNo);
       setPage(1);
     }, SEARCH_PAUSE_MS);
     return () => clearTimeout(timer);
-  }, [docNo]);
+  }, [docNo, askedNo]);
 
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const reasons = useOfficeQuery(officeKeys.disaggregationReasons, (api, token) =>

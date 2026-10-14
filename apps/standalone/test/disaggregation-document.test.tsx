@@ -420,8 +420,9 @@ describe("office «Дезагрегация»: a draft document", () => {
     const reads = session.api.getDisaggregation.mock.calls.length;
     const tokens = Array.from({ length: 1200 }, (_, n) => `MRK-${String(n).padStart(6, "0")}`);
     pickFile(new File([tokens.join("\n")], "list.txt"));
+    // The cause is told too, so the rest is not added blindly again.
     await expectFocusedNotice(
-      "Добавлено 500 из 1200 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз.",
+      "Добавлено 500 из 1200 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
     expect(session.api.addDisaggregationLines).toHaveBeenCalledTimes(2);
     await waitFor(() =>
@@ -441,7 +442,7 @@ describe("office «Дезагрегация»: a draft document", () => {
     paste(tokens.join("\n"));
     fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
     await expectFocusedNotice(
-      "Добавлено 500 из 700 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз.",
+      "Добавлено 500 из 700 SSCC: следующая часть не прошла. Добавьте оставшиеся ещё раз. На хосте произошла ошибка. Повторите попытку.",
     );
     const left = (screen.getByLabelText("SSCC коробов или паллет") as HTMLTextAreaElement).value;
     expect(left.split("\n")).toEqual(tokens.slice(500));
@@ -578,6 +579,27 @@ describe("office «Дезагрегация»: a draft document", () => {
     expect(screen.getByText("Проведён", { selector: "dt" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Провести" })).toBeNull();
     expect(screen.queryByLabelText("Комментарий")).toBeNull();
+  });
+
+  it("applies once when the confirmation is pressed twice in the same moment", async () => {
+    const { session, host } = fake();
+    session.api.applyDisaggregation.mockImplementation(async () => {
+      host.detail = {
+        document: header({ status: "applied", rev: 42, appliedAt: "2026-10-13T10:00:00Z" }),
+        lines: host.detail.lines,
+      };
+      return host.detail;
+    });
+    await openDocument(session);
+    fireEvent.click(screen.getByRole("button", { name: "Провести" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "Провести документ?" });
+    const button = within(confirm).getByRole("button", { name: "Провести" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await expectFocusedNotice("Документ проведён.");
+    expect(session.api.applyDisaggregation).toHaveBeenCalledTimes(1);
+    // The second press did not meet the first one's result as a refusal.
+    expect(screen.queryByText(/проведён или отменён в другом окне/)).toBeNull();
   });
 
   it("closes the confirmation with Escape and applies nothing", async () => {

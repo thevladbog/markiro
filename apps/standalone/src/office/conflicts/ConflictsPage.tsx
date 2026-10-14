@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
@@ -80,6 +80,8 @@ export function ConflictsPage() {
     | null
   >(null);
   const disassembleAlertId = useId();
+  // Set at once, so a second press in the same moment makes no second draft.
+  const disassembling = useRef(false);
   const at = instantFormat(formTimeZone(org.data));
 
   useEffect(() => {
@@ -93,6 +95,7 @@ export function ConflictsPage() {
     // A notice or a refusal is about the list it was given on.
     setNotice(null);
     setFailure(null);
+    setDisassembleAlert(null);
     const merged = new URLSearchParams(params);
     if (next.shift !== undefined) merged.set("shift", next.shift);
     if (next.state !== undefined) merged.set("state", next.state);
@@ -111,10 +114,15 @@ export function ConflictsPage() {
 
   /** «Расформировать короб»: a draft with the loser's box, then its page (plan ДЗГ-О). */
   const onDisassemble = (sscc: string) => {
+    if (disassembling.current) return;
+    disassembling.current = true;
     setFailure(null);
     setNotice(null);
     setDisassembleAlert(null);
     disassemble.mutate(sscc, {
+      onSettled: () => {
+        disassembling.current = false;
+      },
       onSuccess: (document) => {
         void queryClient.invalidateQueries({ queryKey: officeKeys.disaggregation });
         void navigate(`/disaggregation/${document.id}`);

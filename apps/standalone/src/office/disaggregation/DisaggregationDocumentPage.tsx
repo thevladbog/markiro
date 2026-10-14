@@ -181,6 +181,8 @@ function AddLinesCard({ busy, onPaste, onFile, onRejected }: AddLinesCardProps) 
           placeholder={t("office.disaggregation.detail.addPlaceholder")}
           rows={4}
           value={text}
+          // Held still while the lines go in: what the add leaves is put back into the field.
+          readOnly={busy}
           onChange={(event) => setText(event.target.value)}
         />
         <div className="standalone-form__actions">
@@ -229,6 +231,7 @@ export function DisaggregationDocumentPage() {
   const [adding, setAdding] = useState(false);
   // Set at once, so a second press in the same moment is refused before `adding` re-rendered.
   const inFlight = useRef(false);
+  const transitioning = useRef(false);
 
   const doc = useOfficeQuery(officeKeys.disaggregationDocument(id), (api, token) =>
     api.getDisaggregation(token, id),
@@ -282,41 +285,76 @@ export function DisaggregationDocumentPage() {
     say("ok", text, focus);
     readAgain();
   };
-  /** Explains a refused write; the document is read again where its state is what the host refused on. */
-  const refused = (error: unknown) => {
+  /**
+   * What a refused write says: a text and its tone, whether the document is read again (where its
+   * state is what the host refused on), or that the write was stale (the page offers to reload).
+   */
+  const explain = (
+    error: unknown,
+  ): { stale: true } | { stale: false; tone: "warn" | "error"; text: string; reread: boolean } => {
     if (error instanceof HostError) {
       if (error.code === "conflict") {
         switch (error.details.constraint) {
           case "invalid_lines":
-            say("warn", t("office.disaggregation.detail.applyBlocked"));
-            readAgain();
-            return;
+            return {
+              stale: false,
+              tone: "warn",
+              text: t("office.disaggregation.detail.applyBlocked"),
+              reread: true,
+            };
           case "reason_required":
-            say("warn", t("office.disaggregation.detail.applyNoReason"));
-            readAgain();
-            return;
+            return {
+              stale: false,
+              tone: "warn",
+              text: t("office.disaggregation.detail.applyNoReason"),
+              reread: true,
+            };
           case "no_lines":
-            say("warn", t("office.disaggregation.detail.applyNoLines"));
-            readAgain();
-            return;
+            return {
+              stale: false,
+              tone: "warn",
+              text: t("office.disaggregation.detail.applyNoLines"),
+              reread: true,
+            };
           case "document_not_draft":
-            say("warn", t("office.disaggregation.detail.notDraft"));
-            readAgain();
-            return;
+            return {
+              stale: false,
+              tone: "warn",
+              text: t("office.disaggregation.detail.notDraft"),
+              reread: true,
+            };
           case "restore_hold":
             // The host waits for the stations: the draft is as it was, nothing to read again.
-            say("warn", t("office.disaggregation.detail.restoreHold"));
-            return;
+            return {
+              stale: false,
+              tone: "warn",
+              text: t("office.disaggregation.detail.restoreHold"),
+              reread: false,
+            };
         }
       }
       if (error.code === "validation_failed" && error.field === "lines") {
-        say("warn", t("office.disaggregation.detail.documentFull"));
-        return;
+        return {
+          stale: false,
+          tone: "warn",
+          text: t("office.disaggregation.detail.documentFull"),
+          reread: false,
+        };
       }
     }
     const failure = alertFailure(error);
-    if (failure.kind === "stale") setStatus({ kind: "stale" });
-    else say("error", t(failure.message));
+    if (failure.kind === "stale") return { stale: true };
+    return { stale: false, tone: "error", text: t(failure.message), reread: false };
+  };
+  /** Explains a refused write on the page. */
+  const refused = (error: unknown) => {
+    const said = explain(error);
+    if (said.stale) {
+      setStatus({ kind: "stale" });
+      return;
+    }
+    say(said.tone, said.text);
+    if (said.reread) readAgain();
   };
 
   const changeHeader = async (change: HeaderChange) => {
@@ -370,7 +408,13 @@ export function DisaggregationDocumentPage() {
       );
       readAgain();
     } else if (added > 0) {
-      say("warn", t("office.disaggregation.detail.importPartial", { added, total: tokens.length }));
+      // What went in stays; the cause is told too, so the rest is not added blindly again.
+      const cause = explain(failure.error);
+      const why = cause.stale ? t("errors.api.stale_revision") : cause.text;
+      say(
+        "warn",
+        `${t("office.disaggregation.detail.importPartial", { added, total: tokens.length })} ${why}`,
+      );
       readAgain();
     } else {
       refused(failure.error);
@@ -407,6 +451,16 @@ export function DisaggregationDocumentPage() {
   };
 
   const transition = async (kind: "apply" | "cancel", rev: number) => {
+    // A second press in the same moment would meet the first one's result as a false refusal.
+    if (transitioning.current) return;
+    transitioning.current = true;
+    try {
+      await runTransition(kind, rev);
+    } finally {
+      transitioning.current = false;
+    }
+  };
+  const runTransition = async (kind: "apply" | "cancel", rev: number) => {
     setStatus(null);
     let detail: DisaggregationDetail;
     try {
@@ -626,6 +680,7 @@ export function DisaggregationDocumentPage() {
         {editable ? (
           <div className="standalone-form">
             <HeaderForm
+              key={header.id}
               document={header}
               reasons={reasons.data}
               busy={working}

@@ -361,6 +361,19 @@ describe("«Расформировать короб» on «Конфликты» 
     });
   });
 
+  it("makes one draft when the button is pressed twice in the same moment", async () => {
+    const value = session();
+    value.api.createDisaggregation.mockResolvedValue(DETAIL);
+    value.api.addDisaggregationLines.mockResolvedValue(DETAIL);
+    value.api.getDisaggregation.mockResolvedValue(DETAIL);
+    await openConflicts(value);
+    const button = within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(value.api.getDisaggregation).toHaveBeenCalledWith(TOKEN, DOC_ID));
+    expect(value.api.createDisaggregation).toHaveBeenCalledTimes(1);
+  });
+
   it("is as available to a technologist as to an administrator", async () => {
     await openConflicts(session(PAGE, TECHNOLOGIST));
     expect(within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON })).toBeTruthy();
