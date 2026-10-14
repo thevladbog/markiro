@@ -24,6 +24,7 @@ import {
   ORG_PROFILE,
   quietLabelRendering,
   renderOffice,
+  SSCC_STATE,
   type FakeOfficeSession,
 } from "./support/office.js";
 
@@ -31,7 +32,22 @@ function sessionWith(license: OfficeLicense): FakeOfficeSession {
   const api = fakeHostApi();
   api.getLicense.mockResolvedValue(license);
   api.getOrg.mockResolvedValue(ORG_PROFILE);
+  api.getSscc.mockResolvedValue(SSCC_STATE);
   return fakeOfficeSession({ api });
+}
+
+/**
+ * The office opened on a page other than «Обзор» («SSCC»: it reads neither
+ * the license nor the organization's profile), where the band is shown;
+ * «Обзор» carries the warnings in its own region instead.
+ */
+function renderPage(session: FakeOfficeSession, props: { hostRevision?: number } = {}) {
+  return renderOffice(session, { initialPath: "/sscc", ...props });
+}
+
+/** The page's own heading: the page is there under the band. */
+async function pageShown(): Promise<void> {
+  await screen.findByRole("heading", { name: "SSCC", level: 1 });
 }
 
 /** The band above the office's pages. */
@@ -61,7 +77,7 @@ const EXTENDED = licenseOf({
 describe("the license's band above the office's pages", () => {
   it("shows the trial's days left, neutral, with a hidden word for its tone and a link", async () => {
     const session = sessionWith(TRIAL);
-    renderOffice(session);
+    renderPage(session);
     expect(
       await within(band()).findByText(
         /Пробный период: осталось 12 дн\. Загрузите файл лицензии в разделе «Информация»\./,
@@ -77,19 +93,19 @@ describe("the license's band above the office's pages", () => {
   });
 
   it("is a quiet polite region, on the screen from the start, never an alert", async () => {
-    renderOffice(sessionWith(RESTRICTED));
+    renderPage(sessionWith(RESTRICTED));
     expect(band().getAttribute("aria-live")).toBe("polite");
     expect(band().getAttribute("role")).toBeNull();
     await within(band()).findByText(/лицензия площадки истекла/);
     expect(within(band()).queryAllByRole("alert")).toHaveLength(0);
-    // The band never stands between the user and the page: «Обзор» is there to work with.
-    expect(screen.getByRole("heading", { name: "Офис", level: 1 })).toBeTruthy();
-    expect(screen.getByText(/Вы вошли как/)).toBeTruthy();
+    // The band never stands between the user and the page: «SSCC» is there to work with.
+    await pageShown();
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeTruthy();
   });
 
   it("hides a dismissed warning for the session, and shows the trial's last days again", async () => {
     const session = sessionWith(TRIAL);
-    const view = renderOffice(session, { hostRevision: 1 });
+    const view = renderPage(session, { hostRevision: 1 });
     fireEvent.click(await within(band()).findByRole("button", { name: DISMISS }));
     await waitFor(() => expect(band().childElementCount).toBe(0));
     const nav = screen.getByRole("navigation", { name: "Разделы офиса" });
@@ -112,7 +128,7 @@ describe("the license's band above the office's pages", () => {
   });
 
   it("keeps the grace's warning, with both dates in the organization's zone, and no «Скрыть»", async () => {
-    renderOffice(sessionWith(GRACE));
+    renderPage(sessionWith(GRACE));
     expect(
       await within(band()).findByText(
         /Срок лицензии истёк 31\.10\. До 14\.11 всё работает; затем новые смены не будут открываться\./,
@@ -128,13 +144,13 @@ describe("the license's band above the office's pages", () => {
     [WRONG_HOST, /Лицензия выдана другому хосту\. Сохраните запрос на активацию/],
     [INN_MISMATCH, /ИНН организации больше не совпадает с ИНН лицензии/],
   ] as const)("keeps a serious warning on every page (%#)", async (license, text) => {
-    renderOffice(sessionWith(license));
+    renderPage(sessionWith(license));
     expect(await within(band()).findByText(text)).toBeTruthy();
     expect(within(band()).queryByRole("button", { name: DISMISS })).toBeNull();
   });
 
   it("warns of the license's end and of the host's clock, both dismissible", async () => {
-    renderOffice(sessionWith({ ...EXPIRING, flags: { clockBehindDays: 3, clockAhead: false } }));
+    renderPage(sessionWith({ ...EXPIRING, flags: { clockBehindDays: 3, clockAhead: false } }));
     expect(
       await within(band()).findByText(/Лицензия заканчивается 31\.10\.2027\. Чтобы продлить/),
     ).toBeTruthy();
@@ -151,7 +167,7 @@ describe("the license's band above the office's pages", () => {
   ] as const)(
     "adds the free new file right after a subscription's warning of %s",
     async (_, license, text) => {
-      renderOffice(sessionWith(license));
+      renderPage(sessionWith(license));
       const own = await within(band()).findByText(text);
       expect(own.textContent).toMatch(
         new RegExp(`${text.source}.*Новый файл по истечении срока бесплатно`),
@@ -167,14 +183,14 @@ describe("the license's band above the office's pages", () => {
     ["a changed INN", INN_MISMATCH, /ИНН организации больше не совпадает/],
     ["another host", WRONG_HOST, /Лицензия выдана другому хосту/],
   ] as const)("adds no free new file to %s", async (_, license, text) => {
-    renderOffice(sessionWith(license));
+    renderPage(sessionWith(license));
     await within(band()).findByText(text);
     expect(within(band()).queryByText(FREE_RENEWAL)).toBeNull();
   });
 
   it("says the running emergency extension instead of «не открываются», still serious", async () => {
     const session = sessionWith(EXTENDED);
-    renderOffice(session);
+    renderPage(session);
     const own = await within(band()).findByText(
       /Новые смены открываются по аварийному продлению до 23\.11 09:00: лицензия площадки истекла\./,
     );
@@ -192,7 +208,7 @@ describe("the license's band above the office's pages", () => {
     [TRIAL_EXPIRED, /по аварийному продлению до 23\.11 09:00: пробный период закончился\./],
     [INN_MISMATCH, /по аварийному продлению до 23\.11 09:00: ИНН организации больше не совпадает/],
   ] as const)("says the extension under another refusal too (%#)", async (license, text) => {
-    renderOffice(
+    renderPage(
       sessionWith(
         licenseOf({
           ...license,
@@ -207,8 +223,8 @@ describe("the license's band above the office's pages", () => {
 
   it("is empty and reads nothing more while the license is well or the host is silent", async () => {
     const session = sessionWith(ACTIVE_LICENSE);
-    renderOffice(session);
-    await screen.findByText(/Вы вошли как/);
+    renderPage(session);
+    await pageShown();
     await waitFor(() => expect(session.api.getLicense).toHaveBeenCalled());
     expect(band().childElementCount).toBe(0);
     expect(session.api.getOrg).not.toHaveBeenCalled();
@@ -217,15 +233,15 @@ describe("the license's band above the office's pages", () => {
   it("is empty when the host does not answer", async () => {
     const session = sessionWith(ACTIVE_LICENSE);
     session.api.getLicense.mockRejectedValue(new Error("down"));
-    renderOffice(session);
-    await screen.findByText(/Вы вошли как/);
+    renderPage(session);
+    await pageShown();
     await waitFor(() => expect(session.api.getLicense).toHaveBeenCalled());
     expect(band().childElementCount).toBe(0);
   });
 
   it("keeps the last warning when a re-read fails, instead of flickering out", async () => {
     const session = sessionWith(RESTRICTED);
-    const view = renderOffice(session, { hostRevision: 1 });
+    const view = renderPage(session, { hostRevision: 1 });
     const own = await within(band()).findByText(/лицензия площадки истекла/);
     session.api.getLicense.mockRejectedValue(new Error("down"));
     view.rerender(
@@ -240,7 +256,7 @@ describe("the license's band above the office's pages", () => {
   });
 
   it("leads to «Лицензия» on «Информация» and gives the focus to that section", async () => {
-    renderOffice(sessionWith(RESTRICTED));
+    renderPage(sessionWith(RESTRICTED));
     fireEvent.click(await within(band()).findByRole("link", { name: "Открыть раздел «Лицензия»" }));
     await screen.findByRole("heading", { name: "Информация", level: 1 });
     await waitFor(() => expect(document.activeElement).toBe(document.getElementById("license")));
@@ -265,6 +281,59 @@ describe("the license's band above the office's pages", () => {
     expect(within(region).getAllByText(FREE_RENEWAL)).toHaveLength(1);
     expect(within(region).queryByRole("button", { name: DISMISS })).toBeNull();
     expect(within(region).queryAllByRole("alert")).toHaveLength(0);
+  });
+
+  it("shows each warning exactly once on «Обзор»: in its own region, never in the band", async () => {
+    renderOffice(sessionWith({ ...EXPIRING, flags: { clockBehindDays: 3, clockAhead: false } }));
+    const region = overviewAlerts();
+    await within(region).findByText(/Лицензия заканчивается 31\.10\.2027\./);
+    await within(region).findByText(/Часы ПК хоста отстают/);
+    expect(band().childElementCount).toBe(0);
+    // One alert per warning on the whole page: the end and the clock.
+    expect(document.querySelectorAll(".mk-alert")).toHaveLength(2);
+    expect(screen.getAllByText(/Лицензия заканчивается 31\.10\.2027\./)).toHaveLength(1);
+    expect(screen.getAllByText(FREE_RENEWAL)).toHaveLength(1);
+  });
+
+  it("shows the band on the next page after «Обзор»", async () => {
+    renderOffice(sessionWith(RESTRICTED));
+    await within(overviewAlerts()).findByText(/лицензия площадки истекла/);
+    expect(band().childElementCount).toBe(0);
+    const nav = screen.getByRole("navigation", { name: "Разделы офиса" });
+    fireEvent.click(within(nav).getByRole("link", { name: "SSCC" }));
+    await pageShown();
+    expect(await within(band()).findByText(/лицензия площадки истекла/)).toBeTruthy();
+    expect(screen.getAllByText(/лицензия площадки истекла/)).toHaveLength(1);
+    // Back on «Обзор»: the band empties, the page's region carries the warning.
+    fireEvent.click(within(nav).getByRole("link", { name: "Обзор" }));
+    await within(overviewAlerts()).findByText(/лицензия площадки истекла/);
+    expect(band().childElementCount).toBe(0);
+    expect(screen.getAllByText(/лицензия площадки истекла/)).toHaveLength(1);
+  });
+
+  it("hides a warning dismissed on «Обзор» on the band too, for the session", async () => {
+    renderOffice(sessionWith(TRIAL));
+    const region = overviewAlerts();
+    await within(region).findByText(/Пробный период: осталось 12 дн\./);
+    fireEvent.click(within(region).getByRole("button", { name: DISMISS }));
+    await waitFor(() => expect(within(region).queryByText(/Пробный период/)).toBeNull());
+    const nav = screen.getByRole("navigation", { name: "Разделы офиса" });
+    fireEvent.click(within(nav).getByRole("link", { name: "SSCC" }));
+    await pageShown();
+    // The page has read its data: the band, read from the same cache, would be there by now.
+    await screen.findAllByRole("button", { name: "Сохранить" });
+    expect(band().childElementCount).toBe(0);
+  });
+
+  it("hides a warning dismissed on the band on «Обзор» too, for the session", async () => {
+    renderPage(sessionWith(TRIAL));
+    fireEvent.click(await within(band()).findByRole("button", { name: DISMISS }));
+    await waitFor(() => expect(band().childElementCount).toBe(0));
+    const nav = screen.getByRole("navigation", { name: "Разделы офиса" });
+    fireEvent.click(within(nav).getByRole("link", { name: "Обзор" }));
+    await screen.findByText(/Вы вошли как/);
+    expect(within(overviewAlerts()).queryByText(/Пробный период/)).toBeNull();
+    expect(screen.queryByText(/Пробный период/)).toBeNull();
   });
 
   it("repeats the running extension on «Обзор», never «не открываются»", async () => {

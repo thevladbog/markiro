@@ -11,6 +11,7 @@ import {
   FormPrinterProvider,
   type PrintForm,
 } from "./forms/form-printer-context.js";
+import { LicenseDismissalsProvider } from "./info/license/LicenseNotices.js";
 import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient, officeKeys } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
@@ -109,7 +110,10 @@ export function Office({
               <OfficeFilesProvider value={files}>
                 <FormPrinterProvider value={printForm}>
                   <WindowModeProvider value={windowMode}>
-                    <RouterProvider router={router} />
+                    {/* The license's warnings hidden for this session: the band's and «Обзор»'s. */}
+                    <LicenseDismissalsProvider>
+                      <RouterProvider router={router} />
+                    </LicenseDismissalsProvider>
                   </WindowModeProvider>
                 </FormPrinterProvider>
               </OfficeFilesProvider>

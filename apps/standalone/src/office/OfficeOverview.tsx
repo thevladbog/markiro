@@ -33,11 +33,15 @@ export function OfficeOverview() {
   );
 }
 
-/** The license's warnings where the office opens (spec §9.5: «Обзор» repeats the band), without «Скрыть». */
+/**
+ * The license's warnings where the office opens (spec §9.5: «Обзор» repeats
+ * the band's warnings, and the band is empty here); «Скрыть» hides a light
+ * one for the session on both.
+ */
 function OverviewLicense() {
   const shown = useLicenseNotices();
   if (shown === null) return null;
-  return <LicenseNotices license={shown.license} notices={shown.notices} zone={shown.zone} />;
+  return <LicenseNotices {...shown} />;
 }
 
 /**

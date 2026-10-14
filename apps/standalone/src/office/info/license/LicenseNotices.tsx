@@ -1,3 +1,4 @@
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -12,13 +13,41 @@ import {
   noticeNeedsTime,
   noticeText,
   type LicenseNotice,
+  type LicenseNoticeKind,
 } from "./license-view.js";
+
+interface Dismissals {
+  dismissed: ReadonlySet<LicenseNoticeKind>;
+  dismiss: (kind: LicenseNoticeKind) => void;
+}
+
+const DismissalsContext = createContext<Dismissals | null>(null);
+
+/**
+ * The warnings hidden by «Скрыть до конца сеанса», one set for the band and
+ * «Обзор»: a warning hidden on one is hidden on the other. `Office` holds it,
+ * so it lives exactly as long as the session (`App` keys `Office` by it).
+ */
+export function LicenseDismissalsProvider({ children }: { children: ReactNode }) {
+  const [dismissed, setDismissed] = useState<ReadonlySet<LicenseNoticeKind>>(() => new Set());
+  const value = useMemo<Dismissals>(
+    () => ({
+      dismissed,
+      dismiss: (kind) => setDismissed((previous) => new Set([...previous, kind])),
+    }),
+    [dismissed],
+  );
+  return <DismissalsContext.Provider value={value}>{children}</DismissalsContext.Provider>;
+}
 
 export interface ShownNotices {
   license: OfficeLicense;
+  /** The warnings to show: the dismissed ones are left out. */
   notices: LicenseNotice[];
   /** The organization's zone, or `null` for this PC's. */
   zone: string | null;
+  /** Hides a dismissible warning for the session; absent outside the shell's dismissals. */
+  onDismiss?: (notice: LicenseNotice) => void;
 }
 
 /**
@@ -26,23 +55,26 @@ export interface ShownNotices {
  * loads, when it never did (the section explains a host that does not
  * answer), or when it warns of nothing. A failed re-read keeps the last
  * answer, so the warnings do not vanish and come back (and are not heard
- * again) with a moment of silence from the host. The organization's profile
- * is read only when a warning writes a date, so an office whose license is
- * well asks nothing more.
+ * again) with a moment of silence from the host. A warning dismissed for
+ * the session is left out. The organization's profile is read only when a
+ * shown warning writes a date, so an office whose license is well asks
+ * nothing more.
  */
 export function useLicenseNotices(): ShownNotices | null {
   const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
+  const dismissals = useContext(DismissalsContext);
   const data = license.data;
-  const notices = data === undefined ? [] : licenseNotices(data);
+  const notices = (data === undefined ? [] : licenseNotices(data)).filter(
+    (notice) => !(notice.dismissible && dismissals?.dismissed.has(notice.kind) === true),
+  );
   const time = useBackupTime(notices.some(noticeNeedsTime));
   if (data === undefined || !time.ready || notices.length === 0) return null;
-  return { license: data, notices, zone: time.zone };
+  const shown: ShownNotices = { license: data, notices, zone: time.zone };
+  if (dismissals !== null) shown.onDismiss = (notice) => dismissals.dismiss(notice.kind);
+  return shown;
 }
 
-export interface LicenseNoticesProps extends ShownNotices {
-  /** «Скрыть до конца сеанса» on a dismissible warning; none — no button (on «Обзор»). */
-  onDismiss?: (notice: LicenseNotice) => void;
-}
+export type LicenseNoticesProps = ShownNotices;
 
 /**
  * The warnings, one alert each with a hidden word for its tone (a screen
