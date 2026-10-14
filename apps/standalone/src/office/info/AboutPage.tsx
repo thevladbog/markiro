@@ -21,7 +21,14 @@ export function AboutPage() {
     // A link to a section's anchor (the license band, plan ЛЦ-3) brings that
     // section into view with the focus, so a keyboard and a screen reader start there.
     if (location.hash === "") return;
-    document.getElementById(decodeURIComponent(location.hash.slice(1)))?.focus();
+    let id: string;
+    try {
+      id = decodeURIComponent(location.hash.slice(1));
+    } catch {
+      // A malformed anchor (`#%E0`) names no section: the page opens at its top.
+      return;
+    }
+    document.getElementById(id)?.focus();
   }, [location.hash, location.key]);
   return (
     <>

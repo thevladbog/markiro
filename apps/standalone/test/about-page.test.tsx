@@ -43,6 +43,7 @@ function renderAbout(
   about: FakeAbout,
   files: FakeOfficeFiles = fakeOfficeFiles(),
   link: HostStatus | null = ONLINE,
+  path = "/",
 ) {
   const session = fakeOfficeSession();
   const view = render(
@@ -53,7 +54,7 @@ function renderAbout(
             <OfficeFilesProvider value={files}>
               <AboutProvider value={about}>
                 {/* «Лицензия» links to the organization's profile (plan ЛЦ-3). */}
-                <MemoryRouter>
+                <MemoryRouter initialEntries={[path]}>
                   <AboutPage />
                 </MemoryRouter>
               </AboutProvider>
@@ -88,6 +89,14 @@ beforeEach(() => {
 });
 
 describe("Информация", () => {
+  it("ignores an anchor it cannot decode instead of failing the page", async () => {
+    renderAbout(fakeAbout(), fakeOfficeFiles(), ONLINE, "/about#%E0");
+    expect(await screen.findByRole("heading", { name: "Информация", level: 1 })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Лицензия", level: 2 })).toBeTruthy(),
+    );
+  });
+
   it("shows the program, the host, the protocol, the role and the system", async () => {
     renderAbout(fakeAbout());
     await screen.findByRole("heading", { name: "Информация", level: 1 });
