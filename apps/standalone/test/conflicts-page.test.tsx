@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
+import { disaggregationDetailSchema } from "../src/host/disaggregation.js";
 import { officeConflictPageSchema, type OfficeConflictPage } from "../src/host/review.js";
 import { renderOffice, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
 import { chooseText, optionTexts, selectTrigger, shownIn, waitForList } from "./support/select.js";
@@ -16,6 +17,13 @@ const PAGE: OfficeConflictPage = officeConflictPageSchema.parse(
     readFileSync(new URL("../proto/fixtures/office-conflict-page.json", testModuleUrl), "utf8"),
   ),
 );
+const DETAIL = disaggregationDetailSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/disaggregation-detail.json", testModuleUrl), "utf8"),
+  ),
+);
+const DOC_ID = DETAIL.document.id;
+const LOSER_SSCC = "046006820000015001";
 const TOKEN = "office-session-token";
 const LATE = "c0000000-0000-4000-8000-000000000002";
 const EMPTY: OfficeConflictPage = { items: [], page: 1, pageCount: 1, total: 0 };
@@ -299,5 +307,107 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     fireEvent.click(button);
     await expectFocusedNotice("Конфликт кода S000008 отмечен разобранным.");
     expect(value.api.reviewConflict).toHaveBeenCalledWith(TOKEN, LATE);
+  });
+});
+
+describe("«Расформировать короб» on «Конфликты» (plan ДЗГ-О)", () => {
+  const BUTTON = "Расформировать короб (00)046006820000015001";
+
+  it("offers it for the loser's closed box of a closed shift, and for no other row", async () => {
+    await openConflicts(session());
+    expect(within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON })).toBeTruthy();
+    // The second conflict's loser has no box, its winner's box is not offered.
+    expect(within(cell(1, "Проигравший скан")).queryByRole("button")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Расформировать короб/ })).toHaveLength(1);
+  });
+
+  it("says why an open shift's box has no button yet", async () => {
+    const first = PAGE.items[0];
+    if (first === undefined) throw new Error("fixture");
+    const open: OfficeConflictPage = {
+      ...PAGE,
+      items: [{ ...first, loser: { ...first.loser, shiftClosed: false } }],
+    };
+    await openConflicts(session(open));
+    expect(
+      within(cell(0, "Проигравший скан")).getByText("Расформировать можно после закрытия смены"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Расформировать короб/ })).toBeNull();
+  });
+
+  it("makes a draft with the box once and opens its page", async () => {
+    const value = session();
+    const created = deferred<typeof DETAIL>();
+    value.api.createDisaggregation.mockReturnValue(created.promise);
+    value.api.addDisaggregationLines.mockResolvedValue(DETAIL);
+    value.api.getDisaggregation.mockResolvedValue(DETAIL);
+    await openConflicts(value);
+    const button = within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON });
+    fireEvent.click(button);
+    // A second press while the host answers sends nothing more.
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    fireEvent.click(button);
+    created.resolve(DETAIL);
+    await waitFor(() => expect(value.api.getDisaggregation).toHaveBeenCalledWith(TOKEN, DOC_ID));
+    expect(value.api.createDisaggregation).toHaveBeenCalledTimes(1);
+    expect(value.api.createDisaggregation).toHaveBeenCalledWith(TOKEN, {
+      reasonId: null,
+      comment: null,
+    });
+    expect(value.api.addDisaggregationLines).toHaveBeenCalledTimes(1);
+    expect(value.api.addDisaggregationLines).toHaveBeenCalledWith(TOKEN, DOC_ID, {
+      lines: [{ input: LOSER_SSCC, sscc: LOSER_SSCC }],
+      import: false,
+    });
+  });
+
+  it("is as available to a technologist as to an administrator", async () => {
+    await openConflicts(session(PAGE, TECHNOLOGIST));
+    expect(within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON })).toBeTruthy();
+  });
+
+  it("explains a refused draft and focuses the explanation, without adding a line", async () => {
+    const value = session();
+    value.api.createDisaggregation.mockRejectedValue(
+      new HostError({ kind: "api", code: "forbidden", status: 403, message: "no" }),
+    );
+    await openConflicts(value);
+    fireEvent.click(within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON }));
+    const alert = await screen.findByText(/Не удалось создать документ дезагрегации/);
+    await waitFor(() => expect(document.activeElement).toBe(alert.closest("[tabindex]")));
+    expect(value.api.addDisaggregationLines).not.toHaveBeenCalled();
+    expect(value.api.getDisaggregation).not.toHaveBeenCalled();
+  });
+
+  it("names a draft that did not get the box and links it", async () => {
+    const value = session();
+    value.api.createDisaggregation.mockResolvedValue(DETAIL);
+    value.api.addDisaggregationLines.mockRejectedValue(
+      new HostError({ kind: "api", code: "forbidden", status: 403, message: "no" }),
+    );
+    await openConflicts(value);
+    fireEvent.click(within(cell(0, "Проигравший скан")).getByRole("button", { name: BUTTON }));
+    const alert = await screen.findByText(/создан, но SSCC не добавлен/);
+    const box = alert.closest("[tabindex]");
+    if (box === null) throw new Error("no alert");
+    const link = within(box instanceof HTMLElement ? box : alert).getByRole("link", {
+      name: `Открыть документ ${DETAIL.document.docNo}`,
+    });
+    expect(link.getAttribute("href")).toBe(`/disaggregation/${DOC_ID}`);
+    expect(value.api.getDisaggregation).not.toHaveBeenCalled();
+  });
+});
+
+describe("«Расформировать короб» for a box already taken apart (plan ДЗГ-О)", () => {
+  it("offers nothing", async () => {
+    const first = PAGE.items[0];
+    if (first === undefined) throw new Error("fixture");
+    const apart: OfficeConflictPage = {
+      ...PAGE,
+      items: [{ ...first, loser: { ...first.loser, boxDisassembled: true } }],
+    };
+    await openConflicts(session(apart));
+    expect(screen.queryByRole("button", { name: /Расформировать короб/ })).toBeNull();
+    expect(screen.queryByText("Расформировать можно после закрытия смены")).toBeNull();
   });
 });
