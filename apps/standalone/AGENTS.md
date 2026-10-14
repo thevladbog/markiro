@@ -131,6 +131,16 @@ loserDeviceId, winnerShiftId }` — never the code nor its hash; both office
 roles may, a conflict reviewed already answers as it is and writes no row,
 and a review takes a host revision (no feed item) so the stations' streams
 wake and ask after their conflicts.
+Disaggregation (plan ДЗГ) writes `disaggregation_reason.create` / `.update` (target
+`disaggregation_reason`; details `{ name, sortOrder }` and the update's `changed`),
+and, with the target `disaggregation_document`: `disaggregation.create`
+(`{ docNo, reasonId, comment }`), `.update` (header changes), `.lines.add`
+(`{ docNo, added, import }`), `.lines.delete` (`{ docNo, lineId, ssccInput }`),
+`.cancel` (`{ docNo }`) and `.apply`: `ok` with `{ docNo, boxes, pallets, codes }`, or
+`failed` with `{ docNo, invalidLines }` when the apply found a line that is not `ok` —
+the one refused office write that DOES write a row (and takes a revision), because the
+fresh line statuses are committed with it (the cloud's behaviour); a stale draft pressed
+again writes one more such row.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -642,7 +652,20 @@ On the device side a new entity also needs its entry in `ENTITIES`
 there changes `ENTITY_SET` and makes every device sync from zero once. It
 also adds three statements to the worst-case page batch (see "Reference
 sync"), which must stay within the shell's 32: the eight entities kept
-since plan 1e2 take 30, so a ninth needs a smaller batch first.
+since plan 1e2 plus the releases' one statement take 31, so a ninth kept
+entity needs a smaller batch first (or the way of `ACTION_ENTITIES`).
+
+`code_releases` (plan ДЗГ, migration `0024`) is an entity a station ACTS on
+and does not keep: one item per BOX an applied disaggregation document took
+apart, keyed by the box id, `data` `{ shiftId, documentId, releasedAt,
+codeCount }` (`CodeReleaseRecord`), at the apply's one revision. The unit is
+the box, not the code, so a document of 10 000 boxes is 10 000 small items in
+one revision (about 3 MB, which the feed sends whole, never split). A release
+is never deleted and has no tombstone. The device protocol version does not
+grow (a new feed entity is an answer, and an older station skips it), but
+`ENTITY_SET` names it (`ACTION_ENTITIES`), so a station that starts acting on
+it syncs from zero once and meets the releases it skipped. A release writes no
+feed item for the document, its lines or a pallet.
 
 ## Operators and badges
 
@@ -1319,13 +1342,27 @@ reports the quarantine's size
 in one run, or claims `hasMore` without moving past the revision it was
 fetched at) fails the run with `SyncFeedError`, not a silent infinite
 loop.
-For E kept entities a page batch holds at most 3E + 6 statements: the
+For E kept entities a page batch holds at most 3E + 7 statements: the
 guard, a deferred wipe (E copy tables, the quarantine, the sync state),
-two per entity, the quarantine upsert and lift, and the sync state. That
-is 30 for the eight entities kept today, the most the shell's 32 takes: a
-ninth entity needs a smaller batch first. A test builds the worst-case page.
-`ENTITY_SET` names the kept entities and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults;v4"`):
+two per entity, the code releases' one delete (plan ДЗГ, below), the
+quarantine upsert and lift, and the sync state. That
+is 31 for the eight entities kept today, within the shell's 32: a
+ninth kept entity needs a smaller batch first. A test builds the worst-case page.
+The page's `code_releases` items are acted on, not kept (`ACTION_ENTITIES`):
+one `APPLY_CODE_RELEASES_SQL` per page deletes this pairing's `floor_codes` of
+the boxes they name, only where this station's box of that id is closed and
+of the shift the release names. An open box here is never touched. The
+station's copy of the shift is not asked (it lags the host's, for instance
+when the office closed the shift while the station was offline, and a release
+skipped for that would be lost, the cursor having moved on). The host frees
+codes of closed shifts only, so a release names a box it saw closed. The
+delete is the station's own disassembly (`box-exceptions.ts`) by box, so
+a page applied again, or the whole feed from zero after a restore, deletes
+nothing new. An unreadable release is quarantined like any record (the code
+stays a local duplicate, fail closed). Its statement is pinned on the shell's
+SQLite in `tests/local_db.rs`.
+`ENTITY_SET` names the kept entities, the acted-on ones and `SYNC_SCHEMA_VERSION`
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v4"`):
 raise the version whenever a record schema or the meaning of a copy table
 changes, so every device syncs from zero once and gets back what an older
 build quarantined or kept differently.
@@ -4903,6 +4940,98 @@ Plan КНФ (parity spec §5.2, pilot spec §7).
   dialog warns of the shift's unreviewed conflicts (ПР-12: a warning only).
 - The station's part is in «Outbox recovery» and «Local database».
 
+## Disaggregation documents
+
+Plan ДЗГ (parity spec §5.1, owner decisions ПР-1 and ПР-3; the cloud's
+`apps/api/src/modules/disaggregation` is the reference). The office takes closed
+boxes and pallets of CLOSED shifts apart from a document; the office pages, the act
+and the XML «Расформирование упаковки» are plan ДЗГ-О.
+
+- **Tables (migration `0024`).** `disaggregation_reasons` (five defaults with fixed ids
+  `d15a0000-…-00000000000N`: «Не тот товар», «Неверное количество», «Повреждена
+  упаковка», «Брак по качеству», «Другое»; archived, never deleted),
+  `disaggregation_doc_counters` (the one counter of `DSG-YY-NNNN`, the year of creation
+  in UTC, never reset by year), `disaggregation_documents`, `disaggregation_document_lines`
+  and `code_releases` (the feed's source). The fact tables are NOT rebuilt:
+  `box_exceptions` and `pallet_exceptions` stay a device's records, so an applied
+  document's line is itself the record of the office's action.
+- **Routes** (`routes/disaggregation.rs`, `routes/disaggregation_reasons.rs`; roles
+  `auth::disaggregates`, administrators and technologists, no wildcard arm; the reasons'
+  and documents' reads are open to every office role). A document is a draft until it is
+  applied (for good) or cancelled; header, lines and cancel change a draft only
+  (`conflict` `document_not_draft`). `PUT`, apply and cancel take `expectedRev`; adding or
+  deleting a line takes a revision too, so the card's `rev` moves. Limits: 1–500 lines a
+  request, 10 000 a document, an input of 1–64 characters, a comment of at most 500, a
+  reason name of at most 120; an unchanged header or reason writes nothing. The list is
+  newest first, at most 1 000, filtered by `status`, `reasonId`, `from`/`to` (host
+  instants against the creation moment) and `q` (a piece of the number).
+- **Lines.** The webview reads the SSCC out of what was typed or imported (the marking
+  rules live in `@markiro/domain`) and sends `{ input, sscc }`; `sscc` is 18 digits or
+  `null`. The host checks the shape and what the SSCC names, box first, then pallet:
+  `not_found` → `not_closed` → `shift_open` → `already_disassembled` → `ok`, plus
+  `duplicate` for a repeat within the document (stored with `sscc = NULL`, so a repeat
+  stays one even after its original line is deleted, as in the cloud). A line without an
+  SSCC is `not_found`. `not_closed` and `written_off` do not occur today (an SSCC exists
+  only for a closed box or pallet; the standalone has no write-off).
+- **Apply** (`apply_document`). One transaction under `begin_write`, the lock of the
+  facts' batch: the role, the draft, the revision and EVERY line are checked again under
+  it. A line that is not `ok` (a late fact took its box apart, a shift reopened…) keeps its
+  fresh status, the document stays a draft and the answer is `conflict` `invalid_lines`
+  with `details.invalidLines`; the card has the lines. Otherwise each box is taken apart
+  as a station's `disassemble` does it: every live item gets `removed_at`, the code its scan
+  owns is freed (a set-based form of `facts::registry::release`: keep the two in step),
+  `boxes.disassembled_at` and the items' `removed_at` are ONE instant in the form of a
+  device (`rules::device_text`, 24 characters), so «Состав короба» still finds the
+  items by equality; and a `code_releases` row (the code count is the items taken out).
+  Each pallet gets `disassembled_at`, its boxes and their codes stay (open them by adding
+  their boxes as lines). Every shift touched is marked late (`late_data_at`, once, with the
+  apply's revision) as a station's late exception marks it: a file exported before no
+  longer describes the shift. The whole apply is one revision, one audit row, and runs on
+  its own task, so a client that hangs up never cuts it. Late facts afterwards see the
+  result: an exception of the box is `box_state`, a scan of a freed code is accepted, a
+  repeated `box_closed` changes nothing.
+- **Readers.** The exports, «Состав короба», the lists of boxes and pallets and the
+  warehouse reprint need no change: they read `disassembled_at` and `removed_at`. A
+  reader of a box's history (the shift review's exceptions, the code card, plan КРТ)
+  must also read the applied documents; the join to use:
+
+  ```sql
+  SELECT 'station' AS source, e.kind, e.box_id, e.occurred_at AS at, e.reason_code,
+    e.reason_text, e.device_id, e.operator_id, NULL AS document_id, NULL AS office_user_id
+  FROM box_exceptions e WHERE e.box_id = ?1
+  UNION ALL
+  SELECT 'office', 'disassemble', l.box_id, b.disassembled_at, NULL, r.name, NULL, NULL,
+    d.id, d.applied_by
+  FROM disaggregation_document_lines l
+  JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied'
+  JOIN boxes b ON b.id = l.box_id
+  LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id
+  WHERE l.box_id = ?1 AND l.status = 'ok'
+  ORDER BY at
+  ```
+
+  The same for a pallet through `pallet_exceptions` and `l.pallet_id`. Today the shift
+  review's «Исключения» (plan КНФ) and the code card do NOT list the office's
+  disassembly: its wire names a device and an operator; ДЗГ-О (or КРТ) adds a source and a
+  document number there. The shift card's «Данные после закрытия» chip and its warning
+  also appear after an office disassembly (the shift is marked late); ДЗГ-О may reword them.
+
+- **Station.** `code_releases` of the feed (see «Change feed» and «Reference sync»): the
+  station deletes its `floor_codes` of the box, so a code freed by a document is accepted
+  in a new shift on the same station. Without it the code stays «Дубль (локальный)» for the
+  30 days a closed shift's codes are kept. Only `floor_codes` change: the station's
+  `floor_boxes.disassembled_at` stays empty, so while its copy of the shift is still active
+  (the office closed it offline) the work totals and the close summary count the box with
+  fewer codes, and reprint and disassemble are still offered; the host answers them with
+  `box_state`, visible in the queue. Rolling out: `ENTITY_SET` changes, so a station that
+  starts on the new build syncs from zero before its reference copies are ready (nobody
+  signs in until then): upgrade stations while the host is reachable. A restore's hold
+  (`site.facts_held_since`) keeps device facts out but not an office apply: during it an
+  apply works on a copy that lacks later facts, so do not apply while the hold lasts.
+- **Not done.** A document of 10 000 boxes holds the write lock for as long as the apply
+  takes; stations' fact batches wait up to the 5 s `busy_timeout` and then retry from their
+  queue. Measure it on a real volume (the plan's owner check 5).
+
 ## Backups and restore
 
 Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
@@ -5049,7 +5178,14 @@ transaction on one connection that is closed before the swap):
   host issued. Otherwise the audit sequence also jumps by 1 000 000, no
   revocations are carried and the summary says «the current database is not
   this copy's history»; the live numbers still count as floors; every month's shift
-  number is raised by 10 above both, from the copy's month to the current one;
+  number is raised by 10 above both, from the copy's month to the current one,
+  and so is the disaggregation document counter (`DSG-YY-NNNN`, plan ДЗГ:
+  the larger of the counter and the highest `seq` of either database, plus 10; a
+  counter at zero in both stays at zero), so a number printed on an act after the
+  copy is never issued twice. A document applied after the copy is lost with
+  the restore, while the stations have already freed its codes: apply it again
+  from its act (repeating the feed from zero deletes nothing new), and look at
+  the conflicts that appear;
 - the revision is the copy's next one, BELOW what the current database
   reached: a station whose cursor passed it sees the host go back and starts
   again from zero. Best effort until the stations read the epoch. The audit
@@ -5800,3 +5936,13 @@ either; a file log is stage 5.
   preview matching the station's print on one PC, the Windows branches of the shell
   (`#[cfg(windows)]` compiles only in a Windows job — type-checked by a probe crate, never built
   by CI here), and the legibility of the 1-bit logo on a real 203/300 dpi thermal label.
+- Plan ДЗГ (disaggregation documents, code releases on the station): the host's routes ran
+  only against `TestApp`, the station's release only on node:sqlite and the shell's SQLite.
+  Not run: a real scanner and a real repack on Windows (a code freed by a document accepted in
+  a new shift on the same station, without «Дубль (локальный)»), a station offline while a
+  document is applied (the release arrives with its next sync, also when the office closed the
+  station's shift meanwhile), the XML of a shift after an office disassembly in the ЧЗ
+  cabinet, a pallet document and the pallet's label and sheet, a document of about 2 000 SSCCs
+  (the apply's time under the write lock, stations' facts meanwhile, the stations' sync after),
+  and a restore after an apply (the document is gone, the next number is above the last printed
+  one, applying it again by its act leaves the stations whole).

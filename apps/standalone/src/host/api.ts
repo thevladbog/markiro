@@ -27,6 +27,22 @@ import {
   type CloudImportSummary,
 } from "./cloud-import.js";
 import {
+  disaggregationDetailSchema,
+  disaggregationDocumentSchema,
+  disaggregationQuery,
+  disaggregationReasonSchema,
+  type DisaggregationCreate,
+  type DisaggregationDetail,
+  type DisaggregationDocument,
+  type DisaggregationFilter,
+  type DisaggregationLinesAdd,
+  type DisaggregationReason,
+  type DisaggregationReasonCreate,
+  type DisaggregationReasonUpdate,
+  type DisaggregationTransition,
+  type DisaggregationUpdate,
+} from "./disaggregation.js";
+import {
   badgeInfoSchema,
   badgeSaltSchema,
   bootstrapResponseSchema,
@@ -328,6 +344,58 @@ export interface HostApi {
    * КНФ answers `not_found`.
    */
   conflictStatus: (request: ConflictStatusRequest) => Promise<ConflictStatusResponse>;
+  /** The disaggregation reasons, archived ones included (plan ДЗГ); administrators and technologists. */
+  listDisaggregationReasons: (token: string) => Promise<DisaggregationReason[]>;
+  createDisaggregationReason: (
+    token: string,
+    create: DisaggregationReasonCreate,
+  ) => Promise<DisaggregationReason>;
+  /** The whole reason over its `rev`; `archived: true` archives it. */
+  updateDisaggregationReason: (
+    token: string,
+    id: string,
+    update: DisaggregationReasonUpdate,
+  ) => Promise<DisaggregationReason>;
+  /** Disaggregation documents, newest first, up to 1 000 (plan ДЗГ). */
+  listDisaggregations: (
+    token: string,
+    filter?: DisaggregationFilter,
+  ) => Promise<DisaggregationDocument[]>;
+  getDisaggregation: (token: string, id: string) => Promise<DisaggregationDetail>;
+  /** A new draft numbered `DSG-YY-NNNN`. */
+  createDisaggregation: (
+    token: string,
+    create: DisaggregationCreate,
+  ) => Promise<DisaggregationDetail>;
+  /** The whole header of a draft over its `rev`. */
+  updateDisaggregation: (
+    token: string,
+    id: string,
+    update: DisaggregationUpdate,
+  ) => Promise<DisaggregationDetail>;
+  /** 1–500 lines a request; each gets its status at once. */
+  addDisaggregationLines: (
+    token: string,
+    id: string,
+    add: DisaggregationLinesAdd,
+  ) => Promise<DisaggregationDetail>;
+  /** `DELETE …/lines/{lineId}`: the card without the line. */
+  deleteDisaggregationLine: (
+    token: string,
+    id: string,
+    lineId: string,
+  ) => Promise<DisaggregationDetail>;
+  /** `409 conflict` `invalid_lines`: the fresh statuses are saved, read the card again. */
+  applyDisaggregation: (
+    token: string,
+    id: string,
+    transition: DisaggregationTransition,
+  ) => Promise<DisaggregationDetail>;
+  cancelDisaggregation: (
+    token: string,
+    id: string,
+    transition: DisaggregationTransition,
+  ) => Promise<DisaggregationDetail>;
   /**
    * The station's scans an earlier scan elsewhere took the code from, oldest
    * first after `after` (plan КНФ), with the device key only.
@@ -849,6 +917,68 @@ export function createHostApi(client: HostClient): HostApi {
       }),
     listDisplacements: (after) =>
       client.request("GET", displacementsPath(after), { schema: deviceDisplacementsSchema }),
+    listDisaggregationReasons: (token) =>
+      client.request("GET", "/v1/office/disaggregation-reasons", {
+        officeToken: token,
+        schema: z.array(disaggregationReasonSchema),
+      }),
+    createDisaggregationReason: (token, create) =>
+      client.request("POST", "/v1/office/disaggregation-reasons", {
+        body: create,
+        officeToken: token,
+        schema: disaggregationReasonSchema,
+      }),
+    updateDisaggregationReason: (token, id, update) =>
+      client.request("PUT", `/v1/office/disaggregation-reasons/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: disaggregationReasonSchema,
+      }),
+    listDisaggregations: (token, filter) =>
+      client.request("GET", `/v1/office/disaggregation${disaggregationQuery(filter)}`, {
+        officeToken: token,
+        schema: z.array(disaggregationDocumentSchema),
+      }),
+    getDisaggregation: (token, id) =>
+      client.request("GET", `/v1/office/disaggregation/${id}`, {
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    createDisaggregation: (token, create) =>
+      client.request("POST", "/v1/office/disaggregation", {
+        body: create,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    updateDisaggregation: (token, id, update) =>
+      client.request("PUT", `/v1/office/disaggregation/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    addDisaggregationLines: (token, id, add) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/lines`, {
+        body: add,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    deleteDisaggregationLine: (token, id, lineId) =>
+      client.request("DELETE", `/v1/office/disaggregation/${id}/lines/${lineId}`, {
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    applyDisaggregation: (token, id, transition) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/apply`, {
+        body: transition,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    cancelDisaggregation: (token, id, transition) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/cancel`, {
+        body: transition,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
         officeToken: token,

@@ -148,6 +148,37 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       total: 0,
     })),
     reviewConflict: vi.fn<HostApi["reviewConflict"]>(() => unexpected("reviewConflict")),
+    listDisaggregationReasons: vi.fn<HostApi["listDisaggregationReasons"]>(() =>
+      unexpected("listDisaggregationReasons"),
+    ),
+    createDisaggregationReason: vi.fn<HostApi["createDisaggregationReason"]>(() =>
+      unexpected("createDisaggregationReason"),
+    ),
+    updateDisaggregationReason: vi.fn<HostApi["updateDisaggregationReason"]>(() =>
+      unexpected("updateDisaggregationReason"),
+    ),
+    listDisaggregations: vi.fn<HostApi["listDisaggregations"]>(() =>
+      unexpected("listDisaggregations"),
+    ),
+    getDisaggregation: vi.fn<HostApi["getDisaggregation"]>(() => unexpected("getDisaggregation")),
+    createDisaggregation: vi.fn<HostApi["createDisaggregation"]>(() =>
+      unexpected("createDisaggregation"),
+    ),
+    updateDisaggregation: vi.fn<HostApi["updateDisaggregation"]>(() =>
+      unexpected("updateDisaggregation"),
+    ),
+    addDisaggregationLines: vi.fn<HostApi["addDisaggregationLines"]>(() =>
+      unexpected("addDisaggregationLines"),
+    ),
+    deleteDisaggregationLine: vi.fn<HostApi["deleteDisaggregationLine"]>(() =>
+      unexpected("deleteDisaggregationLine"),
+    ),
+    applyDisaggregation: vi.fn<HostApi["applyDisaggregation"]>(() =>
+      unexpected("applyDisaggregation"),
+    ),
+    cancelDisaggregation: vi.fn<HostApi["cancelDisaggregation"]>(() =>
+      unexpected("cancelDisaggregation"),
+    ),
     listShiftExceptions: vi.fn<HostApi["listShiftExceptions"]>(async () => ({
       items: [],
       total: 0,

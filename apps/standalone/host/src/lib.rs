@@ -8,6 +8,7 @@ pub mod clock;
 pub mod cloud_import;
 pub mod config;
 pub mod db;
+pub mod disaggregation;
 pub mod error;
 pub mod facts;
 pub mod feed;

@@ -195,6 +195,7 @@ pub mod shift_close_reasons {
 pub mod backup;
 pub mod cloud_import;
 pub mod code_search;
+pub mod disaggregation;
 pub mod license;
 pub mod pairing;
 pub mod review;
@@ -559,6 +560,9 @@ pub mod entities {
     pub const PRODUCTS: &str = "products";
     pub const LABEL_TEMPLATES: &str = "label_templates";
     pub const CATEGORY_TEMPLATE_DEFAULTS: &str = "category_template_defaults";
+    /// A box a disaggregation document took apart (plan ДЗГ): a station acts
+    /// on it and keeps no copy ([`crate::disaggregation::CodeReleaseRecord`]).
+    pub const CODE_RELEASES: &str = "code_releases";
 }
 
 /// The feed id of a category default: `<code>:<purpose>` (`8:box`), the

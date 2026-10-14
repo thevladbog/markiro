@@ -86,6 +86,19 @@ pub mod actions {
     /// its kind, the losing shift and device and the winning shift, never the
     /// code or its hash. A conflict reviewed already writes no row.
     pub const CONFLICT_REVIEW: &str = "conflict.review";
+    /// The office's disaggregation reasons (plan ДЗГ); a change that changes
+    /// nothing writes no row.
+    pub const DISAGGREGATION_REASON_CREATE: &str = "disaggregation_reason.create";
+    pub const DISAGGREGATION_REASON_UPDATE: &str = "disaggregation_reason.update";
+    /// The office's disaggregation documents (plan ДЗГ); the target is the
+    /// document.
+    pub const DISAGGREGATION_CREATE: &str = "disaggregation.create";
+    pub const DISAGGREGATION_UPDATE: &str = "disaggregation.update";
+    pub const DISAGGREGATION_LINES_ADD: &str = "disaggregation.lines.add";
+    pub const DISAGGREGATION_LINE_DELETE: &str = "disaggregation.lines.delete";
+    /// `ok` with what the apply took apart, `failed` when a line was not `ok`.
+    pub const DISAGGREGATION_APPLY: &str = "disaggregation.apply";
+    pub const DISAGGREGATION_CANCEL: &str = "disaggregation.cancel";
     /// After a restore, a station gave the host back a block the copy had
     /// lost (plan РК).
     pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";
