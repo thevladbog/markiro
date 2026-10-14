@@ -240,7 +240,8 @@ async fn write(
         sqlx::query(
             "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
              pallet_box_capacity, shelf_life_days, default_box_template_id, \
-             default_pallet_template_id, archived, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             default_pallet_template_id, egais_code, default_counterparty_id, archived, rev) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&each.id)
         .bind(&each.gtin14)
@@ -252,6 +253,8 @@ async fn write(
         .bind(each.shelf_life_days)
         .bind(&each.default_box_template_id)
         .bind(&each.default_pallet_template_id)
+        .bind(&each.egais_code)
+        .bind(&each.default_counterparty_id)
         .bind(each.archived)
         .bind(rev)
         .execute(&mut *conn)
@@ -441,6 +444,15 @@ pub async fn import(
     require_groups(&mut tx, &valid).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let summary = write(&mut tx, &valid, rev, &at).await?;
+    // The lines it added take seats of the license (plan ЛЦ-2): beyond the
+    // file the import (and its dry run) is refused whole, without a row.
+    crate::license::seats::require_added_seats(
+        &state,
+        &mut tx,
+        crate::license::seats::Quota::Lines,
+        u64::from(summary.lines_created),
+    )
+    .await?;
     if request.dry_run {
         tx.rollback().await.map_err(ApiError::internal)?;
         return Ok(Json(CloudImportSummary {
@@ -471,5 +483,8 @@ pub async fn import(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // The import never writes the organization's INN; the license is looked
+    // at again all the same (plan ЛЦ-2, spec §4.9).
+    state.license.refresh_after_write(&state).await;
     Ok(Json(summary))
 }

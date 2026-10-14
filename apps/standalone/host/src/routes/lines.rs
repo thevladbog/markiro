@@ -75,6 +75,9 @@ pub async fn create_line(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
+    // A seat of the license (plan ЛЦ-2): lines that are not archived.
+    crate::license::seats::require_seat(&state, &mut tx, crate::license::seats::Quota::Lines)
+        .await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query("INSERT INTO lines (id, name, name_key, archived, rev) VALUES (?, ?, ?, 0, ?)")
         .bind(&id)
@@ -132,6 +135,11 @@ pub async fn update_line(
         .as_ref()
         .map_or(current.name.as_str(), |(name, _)| name.as_str());
     let archived = update.archived.unwrap_or(current.archived);
+    // A line back from the archive takes a seat of the license (plan ЛЦ-2).
+    if current.archived && !archived {
+        crate::license::seats::require_seat(&state, &mut tx, crate::license::seats::Quota::Lines)
+            .await?;
+    }
     let Some(details) = audit::update_details(&[
         ("name", json!(current.name), json!(name)),
         ("archived", json!(current.archived), json!(archived)),

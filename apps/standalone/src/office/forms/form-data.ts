@@ -14,6 +14,7 @@ import type {
   OfficeShift,
   OrgProfile,
   PalletReportRows,
+  ProductPhoto,
 } from "../../host/protocol.js";
 
 /**
@@ -168,19 +169,22 @@ export interface TaskFormInputs {
   line: OfficeLine;
   counterparty: CounterpartyRecord | null;
   organization: OrgProfile;
+  /** The product's photo (plan ТОВ), `null` without one or when it did not read. */
+  photo: ProductPhoto | null;
 }
 
 /**
  * «Бланк смены» (`ShiftsService.taskFormData`), or `null` for a closed shift
  * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The standalone shift has one date
  * (stage 2a spec, question В3), so it is both the shift's date and its
- * production date; the product has no photo; a validation shift's duplicate
- * print is its own policy (plan РЕЖ part B: none when the host sends none);
- * the standalone neither reprocesses earlier codes nor issues SSCCs under a
- * counterparty's prefix yet.
+ * production date; the product's photo is printed from its own bytes (a
+ * `data:` URL, plan ТОВ), as the cloud links its image; a validation shift's
+ * duplicate print is its own policy (plan РЕЖ part B: none when the host
+ * sends none); the standalone neither reprocesses earlier codes nor issues
+ * SSCCs under a counterparty's prefix yet.
  */
 export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTaskFormData | null {
-  const { shift, product, line, counterparty, organization } = inputs;
+  const { shift, product, line, counterparty, organization, photo } = inputs;
   if (shift.status === "closed") return null;
   const duplicate = shift.validationPrint?.mode === "duplicate_dm" ? shift.validationPrint : null;
   return {
@@ -193,7 +197,8 @@ export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTa
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
-    imageChecksum: null,
+    imageChecksum: photo?.checksum ?? null,
+    ...(photo === null ? {} : { imageSrc: `data:image/jpeg;base64,${photo.dataBase64}` }),
     lineName: line.name,
     plannedDate: shift.productionDate,
     productionDate: shift.productionDate,

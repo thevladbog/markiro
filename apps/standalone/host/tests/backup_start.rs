@@ -206,3 +206,55 @@ async fn a_host_that_stops_while_a_copy_is_made_lets_it_finish() {
     );
     pool.close().await;
 }
+
+/// A host started over a database of the previous build copies it before
+/// its migrations (plan ОБН-1), then the worker makes its own first copy at
+/// once, and the rule keeps both; one `host.upgrade` row names the copy.
+#[tokio::test]
+async fn a_started_host_copies_an_older_database_before_its_migrations_and_keeps_that_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    support::backup::write_identity(dir.path(), "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f");
+    support::backup::database_without(dir.path(), 31).await;
+    let paths = HostPaths::new(dir.path());
+    let host = start_host(&paths).await;
+    let backups = paths.backups_dir();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while manifests(&backups) < 2 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the copy before the migrations and the worker's first copy");
+    tokio::time::timeout(Duration::from_secs(15), host.stop())
+        .await
+        .expect("the host stops with its worker")
+        .unwrap();
+    let copies: Vec<String> = support::backup::names(&backups)
+        .into_iter()
+        .filter(|name| name.ends_with(".db"))
+        .collect();
+    assert_eq!(copies.len(), 2, "{copies:?}");
+    let before: Vec<&String> = copies
+        .iter()
+        .filter(|name| markiro_host::upgrade::is_pre_upgrade(name))
+        .collect();
+    assert_eq!(before.len(), 1, "{copies:?}");
+    let pool = markiro_host::db::open(&paths.database_file())
+        .await
+        .unwrap();
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT actor_kind, result, target_id FROM audit_log WHERE action = 'host.upgrade'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        [(
+            "system".to_owned(),
+            "ok".to_owned(),
+            Some(before[0].clone())
+        )]
+    );
+    pool.close().await;
+}

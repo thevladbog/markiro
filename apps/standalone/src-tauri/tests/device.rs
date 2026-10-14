@@ -7,8 +7,31 @@ use markiro_standalone_lib::device_config;
 use markiro_standalone_lib::host_client::{Credentials, PinnedClient, RequestError};
 use markiro_standalone_lib::host_probe::ProbeError;
 use serde_json::json;
+use sqlx::{ConnectOptions, Connection};
 
 const NAME: &str = "Рабочее место хоста";
+
+/// What the host stores of a device's version (plan ОБН-1), read from its
+/// stopped database.
+async fn recorded_version(
+    host_dir: &std::path::Path,
+    device_id: &str,
+) -> (String, i64, Option<String>) {
+    let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(HostPaths::new(host_dir).database_file())
+        .read_only(true)
+        .connect()
+        .await
+        .unwrap();
+    let row =
+        sqlx::query_as("SELECT app_version, protocol, version_seen_at FROM devices WHERE id = ?")
+            .bind(device_id)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    conn.close().await.unwrap();
+    row
+}
 
 async fn start_host(dir: &std::path::Path) -> RunningHost {
     start(
@@ -111,7 +134,7 @@ async fn requests_carry_the_device_key_and_the_office_token() {
 
     let wizard = json!({
         "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
-        "org": { "name": "ООО «Атолл»", "gln": "4600682000013", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
+        "org": { "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000013", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
         "sscc": { "boxNextSerial": 1, "palletNextSerial": 0 },
         "lines": ["Линия 1"]
     });
@@ -383,4 +406,37 @@ async fn local_pair_on_an_unreadable_config_is_reported() {
         Err(DeviceError::ConfigUnreadable)
     );
     host.stop().await.unwrap();
+}
+
+/// A paired app names its version on every request, and the host records
+/// it (plan ОБН-1, spec §10.11.7): the pairing named 0.0.9, the first device
+/// request says this build's version.
+#[tokio::test]
+async fn every_request_names_the_app_version_and_the_host_records_it() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    let status = state
+        .local_pair(&address(&host), NAME, "0.0.9")
+        .await
+        .unwrap();
+    let response = state
+        .request("GET", "/v1/device", None, None)
+        .await
+        .unwrap();
+    assert_eq!(response.status, 200);
+    host.stop().await.unwrap();
+    let (version, protocol, seen) = recorded_version(host_dir.path(), &status.device_id).await;
+    assert_eq!(
+        (version.as_str(), protocol),
+        (
+            env!("CARGO_PKG_VERSION"),
+            i64::from(markiro_proto::PROTOCOL_VERSION)
+        )
+    );
+    assert!(
+        seen.is_some(),
+        "the host notes when it first heard the version"
+    );
 }

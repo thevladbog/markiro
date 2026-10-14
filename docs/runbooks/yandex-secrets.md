@@ -84,6 +84,14 @@ activation и tenant smoke описан в `docs/runbooks/national-catalog-live-
 Порядок отдельной выкладки настроек описан в
 [`deploy/yandex/national-catalog-rollout.md`](../../deploy/yandex/national-catalog-rollout.md).
 
+## Офлайн-лицензии «Markiro Автоном»
+
+Так же необязательной группой (все четыре записи или ни одной) задаётся ключ офлайн-лицензий
+автонома — свой, не ключ грантов: `STANDALONE_LICENSE_ISSUER`, `STANDALONE_LICENSE_KID`,
+`STANDALONE_LICENSE_PRIVATE_KEY_PEM` (одной строкой, переводы строк как `\n`) и
+`STANDALONE_LICENSE_KEYSET_JSON`. Порядок включения и ротация — в
+[`docs/operations/standalone-licenses.md`](../operations/standalone-licenses.md).
+
 ## Офлайн-гранты устройств
 
 Lockbox не сохраняет записи с пустым значением, поэтому до включения подписывания

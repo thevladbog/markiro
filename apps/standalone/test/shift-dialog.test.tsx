@@ -20,9 +20,19 @@ import {
   PALLET,
   pickDate,
   shiftsSession,
+  SOUTH_ARCHIVED,
   stockSheets,
   WATER,
 } from "./support/shifts.js";
+import {
+  chooseValueOn,
+  isSelectTrigger,
+  optionTextsOn,
+  settleSelect,
+  shownOn,
+  valueOn,
+  waitForList,
+} from "./support/select.js";
 
 const TOKEN = "office-session-token";
 
@@ -50,21 +60,20 @@ function field(label: string): HTMLElement {
 }
 
 function set(label: string, value: string): void {
-  fireEvent.change(field(label), { target: { value } });
+  const control = field(label);
+  if (isSelectTrigger(control)) chooseValueOn(control, value);
+  else fireEvent.change(control, { target: { value } });
 }
 
 /** The texts of the options of the select labelled `label`. */
 function options(label: string): string[] {
-  return within(field(label))
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+  return optionTextsOn(field(label));
 }
 
 function valueOf(label: string): string {
   const control = field(label);
-  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
-    throw new Error(`${label} holds no value`);
-  }
+  if (isSelectTrigger(control)) return valueOn(control);
+  if (!(control instanceof HTMLInputElement)) throw new Error(`${label} holds no value`);
   return control.value;
 }
 
@@ -142,13 +151,13 @@ describe("office shifts: planning a shift", () => {
   it("offers the products in use by name with their GTINs, the active lines and the counterparties in use", async () => {
     await openCreate(shiftsSession());
     expect(options("Товар")).toEqual([
-      "Выберите товар",
       "Вода 0,5 л — 04601234000017",
       "Молоко 3,2% 0,9 л — 04600682000013",
     ]);
-    expect(options("Линия")).toEqual(["Выберите линию", "Линия 2", "Линия 10"]);
+    expect(options("Линия")).toEqual(["Линия 2", "Линия 10"]);
     expect(options("Контрагент")).toEqual(["Не выбран", "ООО «Северный берег»"]);
-    expect(options("Шаблон этикетки короба")).toEqual(["Сначала выберите товар"]);
+    expect(options("Шаблон этикетки короба")).toEqual([]);
+    expect(shownOn(field("Шаблон этикетки короба"))).toBe("Сначала выберите товар");
     expect((field("Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(true);
   });
 
@@ -157,17 +166,13 @@ describe("office shifts: planning a shift", () => {
     set("Товар", MILK.id);
     expect(valueOf("Вместимость короба, шт")).toBe("12");
     expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
-    expect(options("Шаблон этикетки короба")).toEqual([
-      "Выберите шаблон",
-      "Коробка 58×40",
-      "Молоко 100×72",
-    ]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40", "Молоко 100×72"]);
     // Water has no preference and its group no default; milk's template is not of its group.
     set("Вместимость короба, шт", "6");
     set("Товар", WATER.id);
     expect(valueOf("Вместимость короба, шт")).toBe("24");
     expect(valueOf("Шаблон этикетки короба")).toBe(BOX_58.id);
-    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40"]);
   });
 
   it("lets the product be chosen only once the templates and the defaults are read, so the template follows it", async () => {
@@ -181,7 +186,7 @@ describe("office shifts: planning a shift", () => {
     await openShifts(session);
     fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
     await screen.findByRole("dialog", { name: "Новая смена" });
-    await waitFor(() => expect(options("Товар")).toHaveLength(3));
+    await waitForList(() => expect(options("Товар")).toHaveLength(2));
     expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
     act(() => answer(DEFAULTS));
     await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
@@ -203,7 +208,7 @@ describe("office shifts: planning a shift", () => {
     await openCreate(session);
     set("Товар", WATER.id);
     expect(valueOf("Шаблон этикетки короба")).toBe("");
-    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Коробка 58×40"]);
   });
 
   it("plans the shift with the body built field by field, then closes, says so and reads the list again", async () => {
@@ -274,7 +279,7 @@ describe("office shifts: planning a shift", () => {
     expect(valueOf("Коробов на паллете")).toBe("40");
     // Milk has no pallet preference and its group no pallet default: the organization's.
     expect(valueOf("Шаблон этикетки паллеты")).toBe(PALLET.id);
-    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150"]);
     set("Коробов на паллете", " 32 ");
     submit();
     await screen.findByText("Смена OCT26-006 запланирована.");
@@ -307,6 +312,7 @@ describe("office shifts: planning a shift", () => {
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     expect(valueOf("Шаблон этикетки паллеты")).toBe("");
     set("Коробов на паллете", "");
+    await settleSelect();
     submit();
     await waitFor(() =>
       expect(messageOf("Шаблон этикетки паллеты")).toBe("Выберите шаблон этикетки паллеты"),
@@ -356,11 +362,8 @@ describe("office shifts: planning a shift", () => {
         "Шаблон паллеты выключен или больше не подходит товару. Выберите другой.",
       ),
     );
-    await waitFor(() =>
-      expect(options("Шаблон этикетки паллеты")).toEqual([
-        "Выберите шаблон",
-        "Паллета 100×150 — не подходит",
-      ]),
+    await waitForList(() =>
+      expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150 — не подходит"]),
     );
   });
 
@@ -425,14 +428,10 @@ describe("office shifts: planning a shift", () => {
     await openCreate(session);
     set("Товар", MILK.id);
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    expect(options("Шаблон этикетки паллеты")).toEqual([
-      "Выберите шаблон",
-      "Паллета 100×150",
-      "Паллета молочная",
-    ]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150", "Паллета молочная"]);
     set("Товар", WATER.id);
     // Water is not of group 8; the template of the organization still fits.
-    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Паллета 100×150"]);
   });
 
   it("holds the pallet controls too while the write is on its way", async () => {
@@ -522,9 +521,8 @@ describe("office shifts: planning a shift", () => {
         "Шаблон выключен или больше не подходит товару. Выберите другой.",
       ),
     );
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Шаблон этикетки короба")).toEqual([
-        "Выберите шаблон",
         "Коробка 58×40",
         "Молоко 100×72 — не подходит",
       ]),
@@ -737,6 +735,7 @@ describe("office shifts: planning a shift", () => {
     session.api.createShift.mockRejectedValue(api("validation_failed", { field: "lineId" }));
     await openCreate(session);
     fillMilk();
+    await settleSelect();
     submit();
     await waitFor(() => expect(messageOf("Линия")).toBe("Линия в архиве. Выберите другую."));
     await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
@@ -854,7 +853,6 @@ describe("office shifts: planning a shift", () => {
     session.api.listProducts.mockResolvedValue([hostile]);
     await openCreate(session);
     expect(options("Товар")).toEqual([
-      "Выберите товар",
       `<img src="x" onerror="window.pwned = 1"> Сок — 04600682000013`,
     ]);
     expect(dialog().querySelector("img")).toBeNull();
@@ -970,11 +968,11 @@ describe("office shifts: planning a shift", () => {
       await waitFor(() => expect(session.api[list]).toHaveBeenCalledTimes(before + 1));
       // The refused record is no longer offered as a normal choice, but the form still holds it,
       // so the select shows it - marked - rather than another record or «Не выбран».
-      await waitFor(() => expect(options(label)).toContain(marked));
+      await waitForList(() => expect(options(label)).toContain(marked));
       expect(options(label).filter((text) => text.startsWith(name))).toEqual([marked]);
-      const control = field(label) as HTMLSelectElement;
-      expect(control.value).toBe(id);
-      expect(control.selectedOptions[0]?.textContent).toBe(marked);
+      const control = field(label);
+      expect(valueOn(control)).toBe(id);
+      expect(shownOn(control)).toBe(marked);
       // The refusal stays under the field, and the person picks another record.
       expect(messageOf(label)).not.toBeUndefined();
     },
@@ -992,7 +990,9 @@ describe("office shifts: planning a shift", () => {
     await waitFor(() =>
       expect(messageOf("Контрагент")).toBe("Контрагент в архиве. Выберите другого."),
     );
-    await waitFor(() => expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"));
+    await waitForList(() =>
+      expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"),
+    );
     await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
     submit();
     await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(2));
@@ -1061,7 +1061,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+    await waitForList(() => expect(options("Лист А4")[0]).toBe(MAIN));
   }
 
   it("has no sheet field without pallets, reads the sheets only when they are on, and offers the main sheet first", async () => {
@@ -1072,7 +1072,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     fillMilk();
     expect(session.api.listPalletSheets).not.toHaveBeenCalled();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")[0]).toBe(MAIN));
+    await waitForList(() => expect(options("Лист А4")[0]).toBe(MAIN));
     expect(options("Лист А4")).toEqual([
       MAIN,
       "Палета А4 · вертикальная",
@@ -1141,7 +1141,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Лист А4")).toEqual([
         "По умолчанию для товара (Палета А4 · две одинаковые А5)",
         "Палета А4 · вертикальная",
@@ -1193,7 +1193,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(document.activeElement).toBe(field("Лист А4")));
     // The sheet the person chose stays visible, marked, so the select does not show another.
-    await waitFor(() =>
+    await waitForList(() =>
       expect(options("Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
     );
     // The sheet does not depend on the product: a new product leaves the refusal where it is.
@@ -1227,10 +1227,113 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     await openCreate(session);
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
-    await waitFor(() => expect(options("Лист А4")).toHaveLength(3));
+    await waitForList(() => expect(options("Лист А4")).toHaveLength(3));
     expect(options("Лист А4").slice(1)).toEqual([
       `${PORTRAIT.name} · ${PORTRAIT.id.slice(0, 8)}`,
       `${PORTRAIT.name} · ${LANDSCAPE.id.slice(0, 8)}`,
     ]);
+  });
+});
+
+describe("office shifts: the product's default counterparty (plan ТОВ)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const EAST = {
+    ...NORTH,
+    id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    name: "ООО «Восток»",
+    rev: 14,
+  };
+  const NORTH_MILK = { ...MILK, defaultCounterpartyId: NORTH.id };
+
+  function session(products = [NORTH_MILK, WATER]) {
+    const fake = shiftsSession();
+    fake.api.listProducts.mockResolvedValue(products);
+    fake.api.listCounterparties.mockResolvedValue([NORTH, EAST, SOUTH_ARCHIVED]);
+    return fake;
+  }
+
+  it("a product chosen with no counterparty yet offers its own", async () => {
+    await openCreate(session());
+    expect(valueOf("Контрагент")).toBe("");
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
+  it("a counterparty the person chose stays", async () => {
+    await openCreate(session());
+    set("Контрагент", EAST.id);
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(EAST.id);
+  });
+
+  it("an archived default is not offered", async () => {
+    await openCreate(session([{ ...MILK, defaultCounterpartyId: SOUTH_ARCHIVED.id }, WATER]));
+    set("Товар", MILK.id);
+    expect(valueOf("Контрагент")).toBe("");
+  });
+
+  it("a counterparty the product offered follows the product, until the person changes it", async () => {
+    const eastWater = {
+      ...WATER,
+      id: "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      name: "Вода «Восток»",
+      defaultCounterpartyId: EAST.id,
+    };
+    await openCreate(session([NORTH_MILK, eastWater, WATER]));
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+    set("Товар", eastWater.id);
+    expect(valueOf("Контрагент")).toBe(EAST.id);
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+    // A product without one takes the offered one away again.
+    set("Товар", WATER.id);
+    expect(valueOf("Контрагент")).toBe("");
+    set("Товар", eastWater.id);
+    set("Контрагент", NORTH.id);
+    set("Товар", NORTH_MILK.id);
+    set("Товар", eastWater.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
+  it("waits for the counterparties before a product can be chosen", async () => {
+    const fake = session();
+    let answer: (list: (typeof NORTH)[]) => void = () => undefined;
+    fake.api.listCounterparties.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await openShifts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalled());
+    expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
+    await act(async () => {
+      answer([NORTH, EAST]);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    set("Товар", NORTH_MILK.id);
+    expect(valueOf("Контрагент")).toBe(NORTH.id);
+  });
+
+  it("is sent with the plan", async () => {
+    const fake = session();
+    fake.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(fake);
+    set("Товар", NORTH_MILK.id);
+    set("Линия", LINE_2.id);
+    submit();
+    await waitFor(() => expect(fake.api.createShift).toHaveBeenCalledTimes(1));
+    expect(fake.api.createShift.mock.calls[0]?.[1]).toMatchObject({ counterpartyId: NORTH.id });
   });
 });

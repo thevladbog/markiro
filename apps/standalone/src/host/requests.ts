@@ -11,6 +11,7 @@ import type {
   EmployeeRecord,
   EmployeeUpdate,
   LabelTemplate,
+  LicenseLoadRequest,
   LineCreate,
   LineUpdate,
   OfficeLine,
@@ -32,6 +33,7 @@ import type {
   TemplatePurpose,
   TemplateSpec,
   TemplateUpdate,
+  UpdateStarted,
   ValidationPrint,
 } from "./protocol.js";
 import { SHIFT_SUPPORTS } from "./protocol.js";
@@ -255,6 +257,10 @@ export interface ProductInput {
   defaultPalletTemplateId: string | null;
   /** The A4 sheet the pallets print on: a sheet's id, never a label template's. */
   defaultPalletSheetId: string | null;
+  /** The EGAIS code (plan ТОВ): only for ЧЗ group 15, `null` otherwise. */
+  egaisCode: string | null;
+  /** The counterparty the shift dialog offers (plan ТОВ). */
+  defaultCounterpartyId: string | null;
 }
 
 /** `POST /v1/office/products` (`product-create.json`): every field, `null` for none. */
@@ -270,6 +276,8 @@ export function productCreate(product: ProductInput): ProductCreate {
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
     defaultPalletSheetId: product.defaultPalletSheetId,
+    egaisCode: product.egaisCode,
+    defaultCounterpartyId: product.defaultCounterpartyId,
   };
 }
 
@@ -293,6 +301,8 @@ export function productUpdate(
     defaultBoxTemplateId: product.defaultBoxTemplateId,
     defaultPalletTemplateId: product.defaultPalletTemplateId,
     defaultPalletSheetId: product.defaultPalletSheetId,
+    egaisCode: product.egaisCode,
+    defaultCounterpartyId: product.defaultCounterpartyId,
     archived,
     expectedRev,
   };
@@ -658,5 +668,38 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
           palletBoxCapacity: shift.pallets.boxCapacity,
           palletTemplateId: shift.pallets.templateId,
         }),
+  };
+}
+
+/**
+ * `POST /v1/office/license/preview` and `PUT /v1/office/license`
+ * (`license-load-request.json`): the file's text as it was read; the host
+ * trims it and checks everything else.
+ */
+export function licenseLoad(file: string): LicenseLoadRequest {
+  return { file };
+}
+
+/** What a started update reports: this PC's version, the new one and the installer's SHA-256. */
+export interface UpdateStartedInput {
+  from: string;
+  to: string;
+  installerSha256: string;
+}
+
+/**
+ * `POST /v1/office/updates/started` (`update-started.json`, plan ОБН-2):
+ * every field named, the source given. The device is never a field: the host
+ * takes the office session's.
+ */
+export function updateStarted(
+  input: UpdateStartedInput,
+  source: UpdateStarted["source"],
+): UpdateStarted {
+  return {
+    from: input.from,
+    to: input.to,
+    installerSha256: input.installerSha256,
+    source,
   };
 }

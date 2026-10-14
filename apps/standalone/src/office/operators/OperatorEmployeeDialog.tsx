@@ -7,6 +7,7 @@ import type { EmployeeRecord, OfficeOperator } from "../../host/protocol.js";
 import { employeeCreate, employeeUpdate } from "../../host/requests.js";
 import { operatorLabel } from "../employees/employee-records.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { searchableSelect } from "../select-search.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
@@ -142,7 +143,7 @@ export function OperatorEmployeeDialog({
       alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
     >
       <Select
-        native
+        {...searchableSelect(t)}
         label={t("office.operators.link.field")}
         hint={t("office.operators.link.hint")}
         options={[

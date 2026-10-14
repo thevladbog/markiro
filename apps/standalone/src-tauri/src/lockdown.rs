@@ -248,6 +248,15 @@ pub fn exit_lockdown<R: Runtime>(
     unlock(&app, &state).map_err(|error| error.code().to_owned())
 }
 
+/// The way out for an update (plan ОБН-2, spec §10.4 step 7): the flag goes
+/// off, so the close that the app's exit brings is never refused by
+/// [`refuse_close_while_locked`]; the window's properties are left as they
+/// are, since the app is leaving. Only the shell's update path calls it,
+/// right before it exits, once Windows has started the installer.
+pub fn release_for_exit(state: &LockdownState) {
+    state.set(false);
+}
+
 /// The window-event guard `run` installs: a close request (the frame's
 /// button, Alt+F4, the taskbar) is refused while kiosk mode is on. Checked
 /// at the event, not through `set_closable`, which Linux does not honour.
@@ -311,6 +320,16 @@ mod tests {
         assert_eq!(ordinary_window_size(Some((1000.0, 700.0))), (1000.0, 652.0));
         // Below the minimum the screen wins: the window must stay reachable.
         assert_eq!(ordinary_window_size(Some((800.0, 500.0))), (800.0, 452.0));
+    }
+
+    #[test]
+    fn releasing_for_an_exit_turns_the_flag_off_without_a_window() {
+        let state = LockdownState::default();
+        state.set(true);
+        release_for_exit(&state);
+        assert!(!state.is_locked());
+        release_for_exit(&state);
+        assert!(!state.is_locked());
     }
 
     #[test]

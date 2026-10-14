@@ -253,24 +253,31 @@ describe("Информация", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "О программе",
       "Лицензия",
+      "Обновление",
       "Контакты и поддержка",
       "Сведения для поддержки",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "#program",
       "#license",
+      "#update",
       "#contacts",
       "#support",
     ]);
-    for (const id of ["program", "license", "contacts", "support"]) {
+    for (const id of ["program", "license", "update", "contacts", "support"]) {
       expect(document.getElementById(id)).not.toBeNull();
     }
     expect(ABOUT_SECTIONS.map((section) => section.id)).toEqual([
       "program",
       "license",
+      "update",
       "contacts",
       "support",
     ]);
+    // «Обновление» comes right after «Лицензия» for both roles (spec §9.1).
+    const update = ABOUT_SECTIONS.find((section) => section.id === "update");
+    expect(update?.titleKey).toBe("office.about.update.title");
+    expect(update?.roles).toEqual(["admin", "technologist"]);
   });
 
   it("is a page of the office's «Сервис» for both roles, and works without the shell", async () => {

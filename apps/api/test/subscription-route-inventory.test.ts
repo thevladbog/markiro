@@ -658,6 +658,18 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformGrantActivationController.cancel": platform(
     "offline grant cancellation requires the dedicated platform activation capability",
   ),
+  "PlatformStandaloneLicensesController.inspect": platform(
+    "activation request inspection requires the dedicated standalone license capability",
+  ),
+  "PlatformStandaloneLicensesController.register": platform(
+    "standalone site registration requires the dedicated standalone license capability",
+  ),
+  "PlatformStandaloneLicensesController.previewIssuance": platform(
+    "offline license preview requires the dedicated standalone license capability",
+  ),
+  "PlatformStandaloneLicensesController.confirmIssuance": platform(
+    "offline license issuance requires the dedicated standalone license capability",
+  ),
   "PlatformGrantReadinessController.preview": platform(
     "cross-tenant rollout preview requires tenant read plus catalog read and write capabilities",
   ),

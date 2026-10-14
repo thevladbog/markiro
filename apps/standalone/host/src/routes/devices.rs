@@ -36,6 +36,8 @@ async fn read_info(
         name,
         line_id,
         paired_at,
+        // `GET /v1/device` adds the license (plan ЛЦ-2); the line's answer has none.
+        license: None,
     })
 }
 
@@ -43,8 +45,21 @@ pub async fn device_info(
     State(state): State<AppState>,
     device: AuthDevice,
 ) -> Result<Json<DeviceInfo>, ApiError> {
-    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
-    read_info(&mut conn, &device).await.map(Json)
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let mut info = read_info(&mut tx, &device).await?;
+    // The site's license as the host computes it (plan ЛЦ-2). It only
+    // informs, so a license the host cannot read costs the device nothing:
+    // the record goes without the line, and the reason is logged.
+    match state.license.snapshot(&state, &mut tx).await {
+        Ok(snapshot) => info.license = Some(crate::license::routes::device_license(&snapshot)),
+        Err(error) => tracing::warn!(%error, "the license was not read for a device"),
+    }
+    // A read: the record is whole, and a rollback that fails (the reader's
+    // connection lost after a failed read) is the pool's, not the device's.
+    if let Err(error) = tx.rollback().await {
+        tracing::warn!(%error, "a device's read did not roll back");
+    }
+    Ok(Json(info))
 }
 
 /// `line_id` names an existing, active line: `validation_failed` on
@@ -114,8 +129,8 @@ pub async fn select_line(
     Ok(Json(info))
 }
 
-const DEVICES: &str = "SELECT id, kind, name, line_id, app_version, paired_at, last_seen_at, \
-     revoked_at FROM devices";
+const DEVICES: &str = "SELECT id, kind, name, line_id, app_version, protocol, version_seen_at, \
+     paired_at, last_seen_at, revoked_at FROM devices";
 
 #[derive(sqlx::FromRow)]
 struct DeviceRow {
@@ -124,6 +139,8 @@ struct DeviceRow {
     name: String,
     line_id: Option<String>,
     app_version: String,
+    protocol: i64,
+    version_seen_at: Option<String>,
     paired_at: String,
     last_seen_at: Option<String>,
     revoked_at: Option<String>,
@@ -137,6 +154,8 @@ fn record(row: DeviceRow) -> Result<DeviceRecord, ApiError> {
         name: row.name,
         line_id: row.line_id,
         app_version: row.app_version,
+        protocol: u32::try_from(row.protocol).map_err(ApiError::internal)?,
+        version_seen_at: row.version_seen_at,
         paired_at: row.paired_at,
         last_seen_at: row.last_seen_at,
         revoked_at: row.revoked_at,

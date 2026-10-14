@@ -111,6 +111,15 @@ export function ShiftCardPage() {
     },
   );
 
+  // The product's photo for «Бланк смены» (plan ТОВ), read only when the product has one.
+  const cardProduct = products.data?.find((each) => each.id === shift.data?.productId);
+  const productId = cardProduct?.id ?? "";
+  const photo = useOfficeQuery(
+    officeKeys.productPhoto(productId),
+    (api, token) => api.getProductPhoto(token, productId),
+    { enabled: cardProduct !== undefined && cardProduct.photoChecksum !== null },
+  );
+
   useEffect(() => {
     if (notice !== null) document.getElementById(noticeId)?.focus();
   }, [notice, noticeId]);
@@ -164,6 +173,8 @@ export function ShiftCardPage() {
     lines.data,
     counterparties.data,
     org.isSuccess ? org.data : undefined,
+    // Waited for while it is read; one that did not read leaves the blank without it.
+    photo.isError ? null : photo.data?.photo,
   );
   // The cloud offers the shift's placards only when a pallet has one to print.
   const placards =
@@ -171,7 +182,7 @@ export function ShiftCardPage() {
     true;
 
   return (
-    <div className="shift-card">
+    <div className="office-stack">
       {back}
       <PageHeader
         title={t("office.shiftCard.title", { number: current.number })}
@@ -496,6 +507,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       key: "closedAt",
       title: t("office.shiftCard.boxes.closedAt"),
       wrap: true,
+      minWidth: 150,
       render: (box) => at(box.closedAt),
     },
     ...(shift.palletsEnabled
@@ -512,6 +524,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       key: "state",
       title: t("office.shiftCard.boxes.state"),
       wrap: true,
+      minWidth: 180,
       render: (box) => (
         <PackStateCell
           pack={box}
@@ -640,12 +653,14 @@ function ShiftPallets({ shift, at, onForm }: SectionProps) {
       key: "closedAt",
       title: t("office.shiftCard.pallets.closedAt"),
       wrap: true,
+      minWidth: 150,
       render: (pallet) => at(pallet.closedAt),
     },
     {
       key: "state",
       title: t("office.shiftCard.pallets.state"),
       wrap: true,
+      minWidth: 180,
       render: (pallet) => <PackStateCell pack={pallet} kind="pallet" at={at} />,
     },
     {

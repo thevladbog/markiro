@@ -43,6 +43,16 @@ pub async fn bootstrap(
     let name = validate::person_name("admin.name", &request.admin.name)?;
     validate::password("admin.password", request.admin.password.expose())?;
     let org = validate::org("org", &request.org)?;
+    // A license is issued to the organization's INN (plan ЛЦ-2, spec §4.9,
+    // ЛО24): the wizard takes only one whose check digit holds. The office's
+    // profile keeps the plain 10-or-12-digit rule (ЛО27).
+    let trial_inn = org
+        .inn
+        .as_deref()
+        .and_then(crate::inn::normalize)
+        .ok_or_else(|| {
+            ApiError::validation("org.inn", "an INN whose check digit holds is required")
+        })?;
     let prefix = validate::issuer_prefix(&org.gln).to_owned();
     validate::sscc_serial(
         "sscc.boxNextSerial",
@@ -137,6 +147,23 @@ pub async fn bootstrap(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    // The built-in trial starts with the wizard (plan ЛЦ-2, spec §3.4),
+    // once, with the INN the wizard took (it goes into the activation
+    // request). Migration 0030 seeds the clock's one row: without it the
+    // host would come up with no trial at all, so the wizard fails instead.
+    let started_at = crate::license::to_ms(now);
+    let trial = sqlx::query(
+        "UPDATE license_clock SET trial_started_at = coalesce(trial_started_at, ?), \
+         trial_inn = coalesce(trial_inn, ?) WHERE id = 1",
+    )
+    .bind(started_at)
+    .bind(&trial_inn)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if trial.rows_affected() != 1 {
+        return Err(ApiError::internal("the license clock row is missing"));
+    }
 
     // The templates first: the organization's defaults refer to them.
     let mut template_ids: Vec<String> = Vec::with_capacity(templates.len());
@@ -234,6 +261,10 @@ pub async fn bootstrap(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
+    // The trial's mark outside the database (plan ЛЦ-2, spec §3.4), then
+    // the license's first look: the state later looks compare with (Д7),
+    // written without a row or a revision.
+    state.license.after_bootstrap(&state).await;
 
     Ok(Json(BootstrapResponse {
         session: OfficeSession {

@@ -2,6 +2,7 @@
   "bundle": {
     "externalBin": ["binaries/markiro-host"],
     "windows": {
+      "allowDowngrades": false,
       "nsis": {
         "installMode": "perMachine",
         "languages": ["Russian"],

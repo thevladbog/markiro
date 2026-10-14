@@ -119,7 +119,8 @@ function requestOf(parityCase: ParityCase): FormRequest {
     case "task":
       return {
         kind: "task",
-        inputs: parityCase.host,
+        // The cloud's cases have no photo: the blank's bytes are the cloud's (plan ТОВ).
+        inputs: { ...parityCase.host, photo: null },
         generatedAt: new Date(parityCase.generatedAt),
       };
   }

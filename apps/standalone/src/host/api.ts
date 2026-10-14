@@ -1,3 +1,7 @@
+import {
+  standaloneActivationRequestSchema,
+  type StandaloneActivationRequest,
+} from "@markiro/domain";
 import { z } from "zod";
 
 import {
@@ -37,7 +41,9 @@ import {
   factReceiptsSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
+  licensePreviewSchema,
   officeBoxSchema,
+  officeLicenseSchema,
   officeLineSchema,
   officeOperatorSchema,
   officePalletSchema,
@@ -46,6 +52,7 @@ import {
   officeUserRecordSchema,
   officeUserSchema,
   orgLogoStateSchema,
+  productPhotoStateSchema,
   orgProfileSchema,
   palletSheetSchema,
   palletSheetsSchema,
@@ -82,9 +89,12 @@ import {
   type FactReceipt,
   type LabelTemplate,
   type LabelTemplateSummary,
+  type LicenseLoadRequest,
+  type LicensePreview,
   type LineCreate,
   type LineUpdate,
   type OfficeBox,
+  type OfficeLicense,
   type OfficeLine,
   type OfficeLoginRequest,
   type OfficeOperator,
@@ -100,6 +110,8 @@ import {
   type OperatorUpdate,
   type OrgLogoPut,
   type OrgLogoState,
+  type ProductPhotoPut,
+  type ProductPhotoState,
   type OrgProfile,
   type OrgProfileUpdate,
   type PalletSheet,
@@ -131,6 +143,7 @@ import {
   type TemplateDefaults,
   type TemplateDefaultsUpdate,
   type TemplateUpdate,
+  type UpdateStarted,
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
@@ -164,6 +177,10 @@ export interface HostApi {
   getOrgLogo: (token: string) => Promise<OrgLogoState>;
   putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
   deleteOrgLogo: (token: string) => Promise<OrgLogoState>;
+  /** A product's photo (plan ТОВ): administrators and technologists write it; no revision. */
+  getProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
+  putProductPhoto: (token: string, id: string, put: ProductPhotoPut) => Promise<ProductPhotoState>;
+  deleteProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
   listPalletSheets: (token: string) => Promise<PalletSheets>;
   createPalletSheet: (token: string, create: PalletSheetCreate) => Promise<PalletSheet>;
   updatePalletSheet: (token: string, id: string, update: PalletSheetUpdate) => Promise<PalletSheet>;
@@ -331,6 +348,21 @@ export interface HostApi {
   updateBackupSettings: (token: string, update: BackupSettingsUpdate) => Promise<BackupState>;
   /** End the hold of the stations' facts a restore set; without a hold it changes nothing. */
   resumeFacts: (token: string) => Promise<BackupState>;
+  /** The site's license (plan ЛЦ-2); every office role reads it. */
+  getLicense: (token: string) => Promise<OfficeLicense>;
+  /** «было → станет» of a file, checked as a load checks it; administrators, nothing written. */
+  previewLicense: (token: string, request: LicenseLoadRequest) => Promise<LicensePreview>;
+  /** Load a file (administrators); a refusal is `validation_failed` on `file` with `details.reason`. */
+  loadLicense: (token: string, request: LicenseLoadRequest) => Promise<OfficeLicense>;
+  /** The activation request the office saves for Маркиро (administrators). */
+  getActivationRequest: (token: string) => Promise<StandaloneActivationRequest>;
+  /** «Открывать новые смены ещё 3 дня» (administrators), once per file and once for the trial. */
+  enableLicenseEmergency: (token: string) => Promise<OfficeLicense>;
+  /**
+   * Plan ОБН-2: the office starts an installer on this PC; the host writes one
+   * `app.update.start` row with this session's device. Administrators only.
+   */
+  recordUpdateStarted: (token: string, record: UpdateStarted) => Promise<void>;
 }
 
 /** How long the scan pipeline waits for the host's code check (stage 2a spec, decision 16). */
@@ -383,6 +415,22 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("DELETE", "/v1/office/org/logo", {
         officeToken: token,
         schema: orgLogoStateSchema,
+      }),
+    getProductPhoto: (token, id) =>
+      client.request("GET", `/v1/office/products/${id}/photo`, {
+        officeToken: token,
+        schema: productPhotoStateSchema,
+      }),
+    putProductPhoto: (token, id, put) =>
+      client.request("PUT", `/v1/office/products/${id}/photo`, {
+        body: put,
+        officeToken: token,
+        schema: productPhotoStateSchema,
+      }),
+    deleteProductPhoto: (token, id) =>
+      client.request("DELETE", `/v1/office/products/${id}/photo`, {
+        officeToken: token,
+        schema: productPhotoStateSchema,
       }),
     listPalletSheets: (token) =>
       client.request("GET", "/v1/office/pallet-sheets", {
@@ -771,5 +819,41 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: backupStateSchema,
       }),
+    getLicense: (token) =>
+      client.request("GET", "/v1/office/license", {
+        officeToken: token,
+        schema: officeLicenseSchema,
+      }),
+    previewLicense: (token, request) =>
+      client.request("POST", "/v1/office/license/preview", {
+        body: request,
+        officeToken: token,
+        schema: licensePreviewSchema,
+      }),
+    loadLicense: (token, request) =>
+      client.request("PUT", "/v1/office/license", {
+        body: request,
+        officeToken: token,
+        schema: officeLicenseSchema,
+      }),
+    // Parsed with the domain's strict schema on purpose: the office must not
+    // save a request the cloud would refuse.
+    getActivationRequest: (token) =>
+      client.request("GET", "/v1/office/license/activation-request", {
+        officeToken: token,
+        schema: standaloneActivationRequestSchema,
+      }),
+    enableLicenseEmergency: (token) =>
+      client.request("POST", "/v1/office/license/emergency", {
+        officeToken: token,
+        schema: officeLicenseSchema,
+      }),
+    recordUpdateStarted: async (token, record) => {
+      await client.request("POST", "/v1/office/updates/started", {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
   };
 }

@@ -163,7 +163,7 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
             />
             <Input
               label={t("org.inn")}
-              hint={t("org.innHint")}
+              hint={t("wizard.innHint")}
               inputMode="numeric"
               mono
               {...fieldError(errors.inn?.message)}

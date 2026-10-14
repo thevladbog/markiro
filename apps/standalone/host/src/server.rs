@@ -43,6 +43,9 @@ pub struct AppState {
     /// Pairing claims, per address; separate from `login_limiter`, so a
     /// mistyped pairing code never locks the office out on the same computer.
     pub claim_limiter: Arc<crate::rate_limit::RateLimiter>,
+    /// License previews and loads, per address (plan ЛЦ-2, spec §8.3: like
+    /// the sign-in); its refusals write no row.
+    pub license_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
     /// Raised by `commit_with_revision` after each commit that moved the
     /// revision; it starts at 0, so read `db::current_revision` for the
@@ -59,6 +62,9 @@ pub struct AppState {
     /// The copies of the database (plan РК); `None` answers the office's
     /// backup routes `not_found`. `crate::start` always sets it.
     pub backups: Option<Arc<crate::backup::Backups>>,
+    /// The site's license (plan ЛЦ-2): its files, its state, the time it
+    /// trusts and its gates.
+    pub license: Arc<crate::license::LicenseService>,
 }
 
 impl AppState {
@@ -76,6 +82,11 @@ impl AppState {
                 time::Duration::minutes(1),
                 clock.clone(),
             )),
+            license_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
+                10,
+                time::Duration::minutes(1),
+                clock.clone(),
+            )),
             endpoint: Endpoint {
                 fingerprint: String::new(),
                 port: markiro_proto::DEFAULT_PORT,
@@ -86,6 +97,10 @@ impl AppState {
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
+            license: Arc::new(crate::license::LicenseService::new(
+                markiro_proto::trust::license_keyset(),
+                Arc::new(crate::license::trial_mark::NoMark),
+            )),
             clock,
         }
     }
@@ -124,6 +139,13 @@ impl AppState {
     /// The copies of the database the office's backup routes read.
     pub fn with_backups(mut self, backups: Arc<crate::backup::Backups>) -> Self {
         self.backups = Some(backups);
+        self
+    }
+
+    /// Replace the license service (`crate::start` gives it the registry's
+    /// mark; tests a mark of their own).
+    pub fn with_license(mut self, license: Arc<crate::license::LicenseService>) -> Self {
+        self.license = license;
         self
     }
 }
@@ -331,6 +353,12 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::products::update_product),
         )
         .route(
+            "/v1/office/products/{id}/photo",
+            get(crate::routes::product_photos::get_photo)
+                .put(crate::routes::product_photos::put_photo)
+                .delete(crate::routes::product_photos::delete_photo),
+        )
+        .route(
             "/v1/office/templates",
             get(crate::routes::templates::list_templates)
                 .post(crate::routes::templates::create_template),
@@ -420,6 +448,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::backups::resume_facts),
         )
         .route(
+            "/v1/office/updates/started",
+            post(crate::routes::app_updates::record_started),
+        )
+        .route(
             "/v1/office/import",
             post(crate::routes::cloud_import::import).layer(axum::extract::DefaultBodyLimit::max(
                 crate::routes::cloud_import::MAX_BODY_BYTES,
@@ -443,6 +475,28 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::pairing::create_code),
         )
         .route("/v1/pairing/claim", post(crate::routes::pairing::claim))
+        .route(
+            "/v1/office/license",
+            get(crate::license::routes::get_license)
+                .put(crate::license::routes::load_license)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::license::routes::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/office/license/preview",
+            post(crate::license::routes::preview_license).layer(
+                axum::extract::DefaultBodyLimit::max(crate::license::routes::MAX_BODY_BYTES),
+            ),
+        )
+        .route(
+            "/v1/office/license/activation-request",
+            get(crate::license::routes::activation_request),
+        )
+        .route(
+            "/v1/office/license/emergency",
+            post(crate::license::routes::enable_emergency),
+        )
 }
 
 /// The protocol version the client sent, set by [`protocol_guard`] for every

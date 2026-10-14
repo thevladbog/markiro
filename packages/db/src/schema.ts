@@ -34,3 +34,4 @@ export * from "./schema/public-api.js";
 export * from "./schema/device-grants.js";
 export * from "./schema/device-grant-activations.js";
 export * from "./schema/service-periods.js";
+export * from "./schema/standalone-licenses.js";

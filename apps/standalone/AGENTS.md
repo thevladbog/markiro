@@ -92,13 +92,24 @@ and a template's `spec`: they are named in `changed` without a value
 because it may be 256 KB. A station's writes (shift create and open, SSCC
 blocks) carry the device as the actor (`Actor::Device`), and a request a
 station repeats (a create, a re-entry, a block) writes no row.
+A product's photo (plan ТОВ) writes `product.photo.set` (`details`: `width`, `height`, `bytes`,
+never the picture) and `product.photo.clear` (only when there was one); `product.create` names
+`egaisCode` and `defaultCounterpartyId` when either is set, `product.update` both as any field.
 Backups (plan РК) write `backup.create` (the host or the office user who asked;
 `failed` when a folder did not get the copy), `backup.settings.update`,
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
-(the station).
+(the station). The copy before an upgrade (plan ОБН-1) writes `host.upgrade`
+(the host; see «Backups and restore»). The office's start of an update
+(plan ОБН-2) writes `app.update.start` (see «Updates from a file»). The
+license (plan ЛЦ-2) writes `license.load` (the administrator; `denied` for a
+refused file with its reason — a foreign or forged file is an event, unlike
+other refused office writes; the file itself never enters `details`),
+`license.state` (the host, one row per change of state, none for the first
+look) and `license.emergency`.
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
-SHA-256 of a copy's file in `backup.create` and `host.restore` is a checksum to
-compare with the manifest, not a credential hash), and
+SHA-256 of a copy's file in `backup.create` and `host.restore`, and of an
+installer in `app.update.start`, is a checksum to compare with a manifest, not
+a credential hash), and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
 refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
@@ -106,12 +117,14 @@ refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
 writer since plan 1b1: the `denied` rows are refused sign-ins, password
 changes and pairing claims. `office_user.password` covers
 both an administrator's reset and a user's own change (`actor_id ==
-target_id`). `shift.export` (plan ЧЗ) is the one row that records no change:
-the office saved an export's files and then wrote it (`POST
-/v1/office/shifts/{id}/exports`), every office role, no revision, the
-shift as its target and the record's fields as its details. The host cannot
-check those counts against the files, which it never sees: the row says what
-the office session reported it wrote, and it is no evidence of the bytes.
+target_id`). `shift.export` (plan ЧЗ) and `app.update.start` (plan ОБН-2)
+are the two rows that record no change. `shift.export`: the office saved an
+export's files and then wrote it (`POST /v1/office/shifts/{id}/exports`),
+every office role, no revision, the shift as its target and the record's
+fields as its details. The host cannot check those counts against the files,
+which it never sees: the row says what the office session reported it wrote,
+and it is no evidence of the bytes. `app.update.start` says the same of an
+installer the office started (see «Updates from a file»).
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -174,6 +187,29 @@ parameter of up to several MiB and passes whole (`tests/local_db.rs` pins it).
 Rejections are bare codes: `local_db_unavailable` (the database did not
 open; the app starts anyway), `invalid_statement`, `unsupported_value`,
 `statement_failed`, `changes_mismatch`.
+
+Before this build's pending migrations (plan ОБН-1) `LocalDb::open` copies the
+database: `VACUUM INTO standalone-station.pre-<app version>.db.partial`,
+`integrity_check` on it read-only, flushed, renamed over a copy of that name,
+and every older `standalone-station.pre-*.db` goes with its side files, so one
+stays. Between the copy and the end of the migrations the database carries
+`PRAGMA user_version` «OBN1» (`UPGRADE_UNFINISHED`); while it does, a copy of
+that name that is sound and older than the database (an earlier open of this
+version whose first migration committed before a later one failed) stays as
+it is: it holds the state before all of them, which the previous app can
+open. A copy of that name left by an upgrade that finished (two builds can
+share a version: a rebuild of the same release, or a development build) is
+replaced. Since plan ОБН-2 `CARGO_PKG_VERSION` is the release version: the
+contract `tools/standalone-release/test/versions.test.mjs` keeps
+`tauri.conf.json`, the three crates, `package.json` and `Cargo.lock` at one
+version. A new file, a failed or an unknown migration take no
+copy (sqlx decides as before). A copy that fails runs no migration: the open
+fails as `OpenFailure::Other` (the file stays, the app starts without its
+local database), except damage the copy met in the database, which stays
+`Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
+file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
+it, with the PIN and badge hashes it held at the upgrade, and only the next
+upgrade that brings migrations replaces it (carried to the owner, Д9).
 
 A forget (`clear_copies`) empties every disposable table (see below),
 `floor_sign_in_failures` included, so it resets every lockout counter of the
@@ -984,9 +1020,52 @@ category's default, then the organization's, then the operator's choice
 category's default and the organization's and omits the product's
 preference, and an applied migration is never edited. (The
 cloud has no per-product template since its 2026-09-02 spec; these follow the
-stage-1 spec.) National-catalog links, photos, EGAIS
-codes, prices and default counterparties are not part of the standalone
-catalog yet.
+stage-1 spec.) National-catalog links and prices are not part of the
+standalone catalog; plan ТОВ added the EGAIS code, the default counterparty
+and the photo (below).
+
+The EGAIS code, the default counterparty and the photo (plan ТОВ, host
+migration `0023`; parity spec §5.5). `products.egais_code` is the code the
+labels print — the cloud's `products.egais_code`, its regulatory profile's
+primary code; one code a product (open question ТОВ-2): free text by the
+rule every text field shares (`validate::egais_code`: trimmed, 1–64
+characters, no control character; 19 digits are not required, as in the
+cloud, question ТОВ-3), and only with ЧЗ group 15 (`EGAIS_PRODUCT_GROUP_CODE`,
+the domain's `isEgaisApplicable`): `validation_failed` on `egaisCode` for a
+code with another group or none, checked before anything is read when the
+code is sent, and against the stored code when an update leaves it out (an
+office before plan ТОВ: `egaisCode` and `defaultCounterpartyId`, like
+`defaultPalletSheetId`, are kept when left out of a `PUT`, so changing such
+a product's group away from 15 is refused until the code is cleared).
+`products.default_counterparty_id` is a preference the office's new-shift
+dialog offers: a counterparty sent must be in use
+(`shifts::counterparty_in_use`, `validation_failed` on
+`defaultCounterpartyId`); one archived later stays named, an update that
+keeps it is not refused, and the dialog never offers it. Neither field is in
+the station feed's product record: the code reaches the station only in a
+shift's snapshot (`ShiftSnapshotProduct.egaisCode`, `#[serde(default)]`,
+frozen when the shift opens; a snapshot of an older host has none), and the
+counterparty only the office reads. The office shows «Код ЕГАИС» only for
+group 15, keeps a typed code while the field is hidden and sends it only
+with group 15 (its rule `egaisCodeRule` applies only while the field
+shows); a code of another form than 19 digits gets a note that the A4 sheet
+goes without it (below, «Floor printing»). A new shift's product fills an
+empty counterparty with its default in use and replaces one an earlier
+product offered, never one the person chose; the product waits for the
+counterparties. A product's photo is `product_photos` (one row a product):
+a JPEG of at most 640 × 640 and 300 000 bytes that the office makes in the
+webview (`photo-encode.ts`: a JPEG, PNG or WebP of at most 25 MiB and
+8192 × 4096 declared pixels, checked before a byte is decoded; drawn on
+white, quality 0.85, 0.7, 0.5 until it fits). The host checks the sides, the
+length and the JPEG signature `FF D8 FF` (`validate::product_photo`) and
+parses no picture, as the logo. `GET/PUT/DELETE /v1/office/products/{id}/photo`:
+every office role reads, administrators and technologists write (the roles
+read again inside the write transaction), an unknown product is
+`not_found`; the photo takes no revision and rides no feed, the same photo
+again writes nothing, and the list names it by `photoChecksum` (SHA-256 of
+the bytes) without the bytes. The dialog writes it at once by its own
+buttons, not by «Сохранить». A backup copies the whole database file, so it
+holds the photos (a thousand products — up to 300 MB).
 
 Label templates (`GET/POST/PUT/DELETE /v1/office/templates`): every office
 role reads them — the list as summaries without the layout, whose size,
@@ -1202,6 +1281,19 @@ tied by one golden file, `proto/fixtures/cloud-export-file.json`:
   under one of this tenant's prefixes (its numbers are NOT in the file) and
   the credential-verifier warning. A file whose cloud was not clean
   (`--rehearsal`) carries `rehearsal: true`.
+  The file's format is 2 since plan ТОВ: `export.sql` reads a product's
+  EGAIS code and default counterparty as values (raw format 2; the tool
+  still reads raw format 1), and `transform.mjs` keeps a code only for ЧЗ
+  group 15 and a counterparty only one the file keeps, clearing others
+  with `product_value_cleared` (the office words a code of another group,
+  `reason: "group"`, and a dropped counterparty by their rule,
+  `office.cloudImport.ruleCleared`). A code is never changed: one with a
+  control character, a blank one or one past 64 characters is cleared too,
+  only the blanks around it go. Photos stay a lost field (`photo`,
+  question ТОВ-1: the cloud's pictures live in object storage, which the
+  tool does not read). The host and the office read files of formats 1
+  and 2 (`CLOUD_IMPORT_FORMAT_VERSIONS`): a format-1 file's products carry
+  neither field, and the host checks both by the product route's rules.
 - `POST /v1/office/import` (`routes/cloud_import.rs`, administrators, its
   own 32 MiB body limit): its extractor checks the office session and the
   administrator role BEFORE the body is read, and answers every unreadable
@@ -1478,6 +1570,43 @@ and the owner. The `product`, `protocol` and `minProtocol` fields of `hello`
 never change shape: read `HelloEnvelope` first and decide compatibility
 (`host_too_old`, `app_too_old`) before parsing the rest.
 
+## Signed documents and trust keys
+
+The license file and the update manifest (spec 2026-10-13, plan ЛЦ-1) are
+compact JWS with ES256, checked by `markiro_proto::trust` here and by
+`@markiro/domain` (`verifyCompactJws`, `verifyStandaloneLicense`,
+`verifyStandaloneUpdateManifest`) in TypeScript. The order is size, form,
+`kid`, signature, then the payload, read strictly; both sides refuse a struct
+given as a JSON array and an enum given as a one-key object (serde alone would take both; Rust reads through a `Value` and reads `plan` and `channel` from strings only), a byte order mark, a `__proto__` key and a lone surrogate (the
+domain's `parseJsonStrict` reads JSON as serde_json does), and keep a
+repeated key's last value. Zod still takes `1.0`, `-0`, `1e0` and over-precise forms of an integer that serde refuses; no signer writes them. The license's `tenantId` and `siteId` are opaque
+ids the counterparty chooses (`STANDALONE_OPAQUE_ID_PATTERN`,
+`trust::is_opaque_id`: 1-64 of `A-Za-z0-9._:-`, compared byte for byte);
+`licenseId`, `planVersionId`, `replaces` and `hostId` are lower-case UUIDs.
+`packages/domain/fixtures/standalone-license/` holds the shared fixtures: the
+signed files with `expectations.json` (the outcome of each, adversarial files
+included; an entry may retire kids) and `schema-cases.json` (the field rules),
+which `proto/tests/trust.rs` and the domain's Vitest both walk.
+`packages/domain/scripts/generate-standalone-fixtures.mjs` makes them with the
+TEST keys and never runs in CI: its signatures are random, so a rerun rewrites
+every `.jws`. `packages/domain/fixtures/inn-cases.json` holds `normalizeInn`
+and the host's `inn::normalize` to the same answers (the JavaScript
+whitespace set, not Rust's `trim`).
+
+The keysets a build trusts are `proto/fixtures/trust-keys.json`: public JWKs
+only, the license keyset with its issuer's origin (`https://host[:port]`).
+Until the owner adds the production keys both keysets are empty and a release
+build trusts no license and no manifest. The test keys join them only under
+`cfg(test)` or the `test-keys` feature of `markiro-proto`, which only the
+host's dev-dependency enables; in a test build the license issuer is the test
+one. A unit test of `trust` fails when a production keyset holds a test key's
+point under any kid, or the test issuer. `markiro-host trust-keys` prints the
+kids of both keysets, and the Windows CI job fails when the release host
+prints a `test-…` kid. No tracked file holds a private key but the two test
+keys `tools/standalone-release/test/no-private-keys.test.mjs` names; the
+production license key lives in the API's environment (plan ЛЦ-0) and the
+release key on the owner's machine.
+
 ## Network and TLS
 
 The webview never performs HTTP: every call to the host is a shell command.
@@ -1493,6 +1622,21 @@ reported as `certificate_mismatch`, never as `unreachable`. `host_probe`
 observes a fingerprint without trusting it (`FingerprintPolicy::Observe`)
 and exists only to discover a host before loopback, a person or a pairing
 code confirms it.
+
+Every request of `host_client` (both clients, through `pinned_builder`'s
+default headers) carries `x-markiro-app-version`
+(`markiro_proto::APP_VERSION_HEADER`, the shell's `CARGO_PKG_VERSION`; plan
+ОБН-1). `auth::authenticate` (`AuthDevice`, never `AskingDevice`) writes
+`devices.app_version`, `protocol` and `version_seen_at` when the reported
+version or protocol differs from the stored one or nothing was reported since
+pairing, and takes no write lock otherwise: no revision, no audit row, like
+`last_seen_at`. A header that is not plain text of 1–50 characters is ignored;
+the protocol is the guard's `ClientProtocol` or, outside the guard, the
+header's whole number 1–1000. `GET /v1/office/devices` answers `protocol` and
+`versionSeenAt` (optional in Zod: a host of the same protocol before ОБН-1
+sends neither; `proto/fixtures/device-record-legacy.json` pins that for Zod
+only, the Rust `DeviceRecord` requires `protocol` because only the host writes
+it), and «Устройства» shows «0.3.0, протокол 3» or «0.1.0 (при подключении)».
 
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//` or
@@ -2147,6 +2291,17 @@ the 30 s wait (usually an unfinished `restore`: `host.restore-intent` makes
 «locked» once and be repeated; or a big first migration);
 `network-check` 0, 3, 1; a bad command line 2.
 
+`install_host` first makes the key of the trial's mark (plan ЛЦ-2,
+`HKLM\SOFTWARE\Markiro\Standalone\Trial`, `install::trial_key_script`): a
+PowerShell script makes it in the 64-bit view of the registry (a 32-bit
+PowerShell refuses rather than make it under `WOW6432Node`) and lets
+LocalService `ReadKey, SetValue, CreateSubKey` on this key only, without
+inheritance (`reg add` opens its key with `KEY_WRITE`, which asks for
+`CreateSubKey`); an existing key keeps its values, an uninstall leaves it. A
+refusal does not stop the install: `install_host` returns the warning
+`install::TRIAL_KEY_WARNING` (no value of the failure), and `main.rs` prints
+it as `markiro-host: <warning>`, since the command keeps no log.
+
 The installer build is `tauri build --config src-tauri/tauri.installer.conf.json
 --bundles nsis` after `markiro-host.exe` was copied to
 `src-tauri/binaries/markiro-host-x86_64-pc-windows-msvc.exe` (ignored by git).
@@ -2215,7 +2370,93 @@ pins the overlay, the hooks, the job's step order and the smoke test's checks.
 The installer is not signed (owner question П12); `sign-overlay.mjs` builds
 the Tauri overlay for a certificate in the build machine's store, and no
 signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
-`.nsh` hooks.
+`.nsh` hooks. The overlay sets `bundle.windows.allowDowngrades: false` (plan
+ОБН-1; Tauri's default is `true`), and the release contract pins it: an older
+installer over a newer one refuses, so a rollback is an uninstall, the older
+installer and `markiro-host restore` of the copy before the upgrade
+(`docs/runbooks/standalone-install.md`, «Откат хоста к прежней версии»). How
+the NSIS template refuses, with and without `/S`, has not been seen on
+Windows. A copy before the migrations that fails is one more cause of
+`install`'s exit code 4.
+
+## Updates from a file
+
+Plan ОБН-2 (spec `2026-10-13-standalone-license-and-updates-design.md`, §10,
+§22) updates a PC from a package: the installer `prepare.mjs` names and its
+signed manifest `markiro-standalone-<version>.update.jws` (compact JWS ES256,
+`typ` `markiro-standalone-update+jws`), side by side. CI writes the unsigned
+draft (`markiro-standalone-<version>.update-draft.json`: version, commit,
+installer, the protocol range of `proto/src/lib.rs`); the owner adds the
+channel, the date, `minUpgradeFrom` and the notes and signs it offline with
+`tools/standalone-release/sign-update.mjs`: the passphrase from a terminal
+only, the key (one encrypted PKCS#8 block) and the result outside any Git
+work tree, the installer hashed again against its evidence, and only with a
+key the build lists under that kid in `proto/fixtures/trust-keys.json`, not
+retired (a package signed by another key would be refused on every site).
+Authenticode first, then `prepare.mjs`, then the signing. No key reaches CI;
+`test/offline.test.mjs` pins the network crates of the lock and refuses an
+updater or HTTP plugin. The shell compares a package with
+`app.package_info().version` (`tauri.conf.json`), which `versions.test.mjs`
+keeps equal to every crate's version.
+
+The shell (`src-tauri/src/update/`) looks for `*.update.jws` in
+`Документы\Markiro\Обновления` (`office_files::UPDATES_ROOT`, not one of the
+roots the office writes) and in the root and `Markiro\` folder of removable
+drives from `C:` on, no deeper, at most 32 packages, with Windows' «no disk»
+window off for the search (an empty card reader is skipped), and verifies
+each manifest with `markiro_proto::trust::verify_update_manifest` at once,
+read through one handle that follows no link and no further than 64 KiB.
+`update_verify` and `update_install` take only a path the last `update_scan`
+found. The installer beside a manifest must be named for its version and is
+read through a handle that shares reading only and opens no link
+(`package::open_installer`); it is started by the final path of that handle
+(`GetFinalPathNameByHandleW`), so a junction above it retargeted after the
+hash cannot send the start elsewhere, and the handle is kept from the hash
+until the app's process ends (`UpdateState::leaving`), while the installer
+reopens itself to read its data. `rules::decide` refuses an older version
+always (the passive installer would not: `allowDowngrades` stops only `/S`
+and the dialog, so this is the only protection on this path), a version
+below `minUpgradeFrom`, and, on a PC whose role is not `host`, a protocol
+above the host's `hello` (`host_probe::host_versions`, read whatever the
+protocol, without pinning the certificate: a number to compare, not a
+credential); the same version and a silent host each need a confirmation the
+webview sends back, and every one of them must be sent. The launch is
+`ShellExecuteExW` with `runas`, the app's window as the prompt's owner (kiosk
+mode hides the taskbar a prompt without an owner would flash in) and
+`/P /UPDATE /R` behind `launch::Launcher` (a final path of 260 units or more
+keeps its `\\?\` prefix and may not start: the office then offers the manual
+install; no `/ROLE`: the hooks take it from
+the registry; without `/UPDATE` a passive install may uninstall first and the
+hooks would drop the role and `installation.json`). Before it the shell
+writes `update-pending.json` (`{ from, to, startedAtMs }`); a refused prompt
+puts back the mark an earlier attempt left; after a start
+`lockdown::release_for_exit` lets the close guard go and the app exits. The
+next start reads the mark: «обновлено» (the mark goes), «не завершилось» (it
+stays until «Скрыть»), and nothing for a reinstall of the same version, whose
+version cannot tell whether it finished.
+
+The office (`src/office/info/UpdateSection.tsx`, after «Лицензия» in
+`ABOUT_SECTIONS`) shows the version and the outcome to both roles; only an
+administrator searches, checks and installs. On the host's PC it asks the
+host for a copy first (`POST /v1/office/backups`, up to 10 minutes) and names
+the paired devices whose protocol the new `minProtocol` refuses; it names
+this PC's open shift. Then `POST /v1/office/updates/started` writes
+`app.update.start` (administrator, the role checked before the fields' form,
+after the body's shape: a body the host does not read is a 400 for anyone; the
+session's device as the target, `{ from, to, installerSha256, source }`, no
+revision — what the office reported, like `shift.export`), and the shell
+starts the installer. A host that does not answer the report stops nothing
+only when the person confirmed an update without the host. Nothing is
+installed while this PC's role is unknown (the host's PC would skip its
+copy), the confirmation keeps the report and the role its warnings were
+computed for, and an update whose section is left stops before its report
+and its launch (`update-flow.ts`, `cancelled`). The installer's
+hook asks no network question on an update (`$UpdateMode = 1`). Nothing here
+runs on Windows in the macOS tests: the administrator prompt, the handle's
+sharing on NTFS, a process started from a held file and the final path
+(Windows-only unit tests in `update/package.rs`), removable drives and the
+passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
+are checked by the Windows job and by hand.
 
 ## Office pages
 
@@ -4467,6 +4708,23 @@ code reaches a record or a log line. The logo follows the station's rule
 duplicate, which prints none: only a layout with an `organization_logo` box
 prints one.
 
+The EGAIS code (plan ТОВ). The box and pallet labels take `product.egais` from the
+shift's snapshot (`snapshot.product.egaisCode ?? null`, `label-render.ts`), as the
+cloud station takes it from its frozen grant: the stock box label's bytes equal those
+the cloud's `boxLabelFields` make for the same product, in ZPL and TSPL at 203 and 300
+dpi (`test/label-egais.test.ts`). A snapshot of a host before plan ТОВ has no code and
+prints the field empty. A pallet's A4 sheet takes it too, but the sheet's renderer
+(`pallet-sheet-render.ts`) takes only 19 digits: a frozen code of another form is left
+off the sheet with one diagnostic line (`EGAIS_NOT_ON_SHEET_LINE`) instead of failing
+every sheet of a shift whose code can no longer change; the thermal labels still print
+it, and the office warns when the code is typed. The station says so on screen too,
+never stopping the work (`sheetWithoutEgais`: a pallet job whose printer prints A4
+sheets and a frozen code not of 19 digits): the label panel of such a job carries a
+warning, and a sheet sent — by the line or by «Напечатать снова» — leaves a notice in
+the work screen's alerts until «Понятно» (`floor.print.egaisOffSheet`): the sheet went
+without the code, which must be corrected in the office's product card. Samples — the sheet preview
+(`sampleSheetContext`) and the A4 test print (`a4-test.ts`) — print no code.
+
 ## Floor exceptions and close
 
 Stage 2a, plan 2a8 (`src/floor/exceptions`, `src/floor/close`,
@@ -4997,6 +5255,10 @@ never finished, or one left open under a pairing since replaced, is never
 purged (the retention takes finished sessions only), so its jobs and records
 stay; a later stage carries that.
 
+The lookup's `product` is the record's shift snapshot as it stands, its EGAIS code
+included (plan ТОВ): a reprint prints the code the first label printed, whatever the
+office changed since, and a record of a shift opened by an older host prints none.
+
 ## Shift exports
 
 Plan ЧЗ ports the cloud's shift exports into the office; the bytes of every
@@ -5200,6 +5462,14 @@ mapping; the bytes are the acceptance rule.
   of thousands of codes freezes the window for seconds (about 8 ms a code in
   jsdom under load), and a press already inside `openInBrowser` cannot be
   cancelled by closing the dialog; a worker is the real fix.
+- «Бланк смены» prints the product's photo (plan ТОВ). The domain's
+  `ShiftTaskFormData` takes an optional `imageSrc`: the office passes the photo
+  as `data:image/jpeg;base64,…` with its checksum as `imageChecksum`; left out,
+  the cloud's relative link is drawn by the same expression, so the cloud's
+  bytes and the parity golden are unchanged. The card waits for the photo of a
+  product that has one (`officeKeys.productPhoto`), a press reads it again, and
+  a photo that does not read leaves the form without it — a photo never stops
+  the form.
 
 ## Backups and restore
 
@@ -5359,8 +5629,30 @@ transaction on one connection that is closed before the swap):
   changed after the copy is not carried; the copy's devices are not revoked
   when it came from another host. When the current database was not read or
   is not the copy's history, the summary says what is active again;
+- the license (plan ЛЦ-2), under the same condition as the revocations: the
+  `licenses` rows the current database loaded with a `sequence` above the
+  copy's highest are carried as they are (`INSERT OR IGNORE`), and the
+  license clock is merged by `restore::carried_clock` so that a restore never
+  buys a fresh trial nor gives back a spent extension: the later mark of the
+  time (one out of range is none), the earlier trial start with its own INN
+  (a start out of range reads as over and is carried; a copy without one, made
+  before the license, takes the current one), the current database's
+  emergency extension when it took one (else the copy's), the current
+  database's wrong-host sighting when there is one (the 30-day window goes
+  on); `last_state` stays the copy's, so the first look writes one
+  `license.state` row. The license is read apart (`read_license`): a value
+  that does not read (text in an INTEGER column) carries no file and no clock
+  and fails nothing else — the revocations and numbers still count, and a
+  database set aside counts with its numbers only (`read_floors_at`). The
+  summary says how many files were carried; else that the previous
+  database's license could not be read, that the copy's files are bound to
+  another host (the copy made by another host), that the copy holds the files
+  up to its time (no previous database, or the copy's identity put in place),
+  or (the current database not read, not the copy's history) that files
+  loaded after the copy must be loaded again in the office;
 - a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
-  `host.restore` row (the host as the actor; `carried` and `sessionsEnded` are
+  `host.restore` row (the host as the actor; `carried`, `licensesCarried` — a
+  number, or `null` when nothing could be carried — and `sessionsEnded` are
   part of its details).
 
 The intent marker `host.restore-intent` is written (synced) after the new
@@ -5536,6 +5828,47 @@ paired after the copy; its SSCC is safe only when the previous database was
 read (runbook check 4). The checks that make up for all of this are the
 runbook's, done by a person before the resume.
 
+Plan ОБН-1 adds the copy before an upgrade. `crate::start` opens the master
+database through `db::open_upgrading`: the pool opens without migrations,
+`upgrade::pending` compares `_sqlx_migrations` with the build's migrations,
+and when the build brings any the database lacks (on top of at least one it
+has; a new file, a failed or an unknown migration are left to sqlx as before;
+checksums are not compared) `upgrade::prepare` makes a verified copy through
+`backup::copy` (`VACUUM INTO`, `integrity_check`, the manifest, the host
+identity when it names this host) into the local folder, named
+`markiro-host-<UTC time>-pre-upgrade-<from>-<to>.db` (`from` the newest
+migration the database has, `to` the build's newest), and only then do the
+migrations run. One `host.upgrade` row: the host as the actor, target `backup`
+and the copy's name, details `from`, `to`, `migrations`, `file`, `reused`,
+`code`, `appVersion`. A copy that fails runs no migration and the host does not
+start (`upgrade::OpenError::Copy`, whose text gives the advice its code calls
+for; the service exits, `install` answers 4, Windows retries every 60 s); its
+`failed` row is written once while the same failure repeats. A migration that
+fails after a good copy writes `failed` with `code: "migration_failed"` and the
+copy's name. The next start uses that copy again (`reused: true`, and the row
+names the copy's own `from` and `migrations`) when the newest audit row is
+that failed row towards the same `to` with a `from` no newer than the
+database's (a migration that committed before a later one failed moves the
+database on, the copy still holds the state before all of them), and the
+copy's manifest reads with the same schema, host and size; so a crash loop
+does not fill the disk. The proof that nothing wrote in between rests on every
+start writing rows at once (the worker's first `backup.create`) and a restore
+writing `host.restore`: a change there must keep it. The manifest says
+`trigger: "scheduled"` on purpose: an older build's `read_manifest` and an
+older office's `backupTriggerSchema` refuse an unknown trigger, and the
+rollback needs the older `restore` to read this copy; the name is the mark
+(`upgrade::is_pre_upgrade`, the copy's UTC time and `-pre-upgrade-`).
+A copy made of a database already half migrated (the failed row could not be
+written, or the power went) is named with a larger `from`: the rollback takes
+the copy with the smallest `from` for the upgrade's `to`, the only one the
+older `restore` accepts (runbook «Откат хоста к прежней версии»).
+`retention::keep_anchored` keeps such a copy while it is no more than 14 days
+older than the copy the run just made (`rotate`'s `keep_also`; the folder's
+newest without one), whatever the other rules say, so a copy dated ahead by a
+clock once set forward does not void it; it is not replicated to the second
+folder. `db::open` (no copy) stays for a new database and the restore's own
+staging.
+
 Migration `0011` may be applied after `0012` on a database that already had
 it (sqlx accepts a lower version not yet applied; the test builds a
 `Migrator` from doc-hidden fields, which a sqlx upgrade may touch).
@@ -5545,6 +5878,85 @@ another PC's share, UNC and USB behaviour, antivirus against a rename, folder
 flush and ACL inheritance, `sc start` refusing while the marker is there, a
 really full disk, WebView2 for the page. The runbook's last section lists them
 as the manual test.
+
+## License
+
+Plan ЛЦ-2 (`docs/superpowers/plans/2026-10-13-standalone-lc2-host-license.md`,
+the spec `docs/superpowers/specs/2026-10-13-standalone-license-and-updates-design.md`,
+§3, §4, §7, §8 and §19). Only the host decides the license's state
+(`host/src/license/`); devices read it in `GET /v1/device` (`license`, a word
+and its dates, optional and never in the strict `site` feed record; a license
+the host cannot read leaves the record without it, it never costs a station
+its record).
+
+- A file is a compact JWS ES256 (`markiro_proto::trust`, plan ЛЦ-1), at most
+  16 KiB as sent, checked in the order of §4.3 (`license/verify.rs`) before
+  anything is written: form, key, signature, payload and issuer, this host's
+  `hostId`, the file's INN against the organization's (`license_inn_missing`
+  without one), a `sequence` above the highest stored row, read or not (the
+  same `licenseId` again changes nothing). `licenses` only grows; the file in
+  force is the highest `sequence` whose `validFrom` came. A row whose times
+  are out of range is not used; a row whose terms do not decode is read again
+  from its signed text, else not used; each is logged by its id once a
+  process.
+- The state (`license/state.rs`, a pure function): `wrong_host` (until 30 days
+  from when it was first seen or the file's own term and grace, whichever is
+  first, then `restricted`) before `inn_mismatch` before the file's term
+  (`active`, `expiring` at `min(30, ⌊term/3⌋)` days, `grace`, `restricted`);
+  without a file, the 14-day trial from the wizard (`trial`, `trial_expired`,
+  no grace). The time (`license/clock.rs`): the PC's clock, never below the
+  last known time (`license_clock.max_seen_at`, written hourly and at every
+  change, never before the wizard: a PC's wrong clock then must not become
+  the floor, and the wizard starts the time afresh from the PC's clock) nor
+  below a loaded file's issue less a day, never faster than the process's
+  monotonic time while it runs, at most 400 days ahead at a start. A stored
+  trial start after the trusted time counts from it; it is written back only
+  when the PC's own clock is behind it too (a clock set ahead at the wizard,
+  then back), never when the clock was put right ahead while the host ran.
+- What the state closes (`license/gate.rs`, `require_new_shifts`): in
+  `restricted`, `trial_expired` and `inn_mismatch` only a planned shift's
+  first entry and a station's new shift (`conflict` `license_restricted`, no
+  row), checked on the shift's writer transaction; a license that cannot be
+  read at all closes them too (500, fail-closed). The owner's entry again,
+  facts, blocks, closes, exports, copies, pairing and the office never. Every
+  router route is in `GATED` or `NEVER`, and `tests/license_routes.rs` fails
+  on a route in neither; `LIMITED` names the routes that refuse additions.
+  The emergency extension opens new shifts for 72 hours once per file and
+  once for the trial (also in `inn_mismatch`, an open question in the spec's
+  §19). Its end keeps the state's word but closes new shifts: the look
+  compares `opensNewShifts` with its last look in this process (the
+  extension's route sets it) and takes a revision without an audit row, so
+  the stations read `GET /v1/device` again; after a restart there is nothing
+  to compare with, and the first look wakes nobody.
+- Seats and features (`license/seats.rs`) refuse additions only, in any state
+  and inside the writer's transaction (`conflict` on `seat_limit` or
+  `feature_disabled`, no row): stations and handhelds share `stations`
+  (pairing, checked after the pairing code and before it is used up; an
+  office PC takes no seat), `cabinetUsers` are active office users, `lines`
+  lines not archived — the cloud import too, which refuses (and rolls back
+  whole) an import whose new lines would go over; `handheld` (pairing a
+  handheld), `pallets` (plans and a station's new shift with pallets, pallets
+  turned on in a plan) and `labelEditor` (a new template, a new name or
+  layout; not the A4 pallet sheets, not the cloud import). Nothing that runs
+  is disconnected, even over the limit.
+- The trial's mark outside the database: `HKLM\SOFTWARE\Markiro\Standalone\Trial`
+  (`StartedAt`, `HostId`, `Inn`) through `reg.exe … /reg:64`
+  (`license/trial_mark.rs`), read once at the service's start within 5 s
+  (`MARK_TIMEOUT`); a key that cannot be read (any code but 0, no start, no
+  answer in time) is neither used nor written. Only a key read without a
+  start gets the database's trial (its start, never after the trusted time,
+  and its INN; `StartedAt` last). The trial starts at the earlier of the
+  database's and the mark's start, with that start's INN (a mark's start
+  without a valid INN takes the database's). `markiro-host
+install` makes the key ("Installer and service"). Other systems have no
+  mark.
+- `markiro-host restore` carries the files the current database loaded after
+  the copy and merges its license clock, only when it is the copy's history
+  and its license reads ("Backups and restore", `licensesCarried`).
+- The log holds a file's id, the state and a refusal's code: never the file,
+  its signature, the activation request, the INN or the customer's name
+  (`no_secrets_in_logs.rs` loads an accepted and a refused file, asks the
+  activation request and counts the license's logging calls per module).
 
 ## Marking rules
 
@@ -5615,6 +6027,19 @@ either; a file log is stage 5.
   row, `host_revision` reads the revision. Add a helper there before copying
   one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
+- Plan ТОВ by hand, on the client's printers and Windows 10/11: a beer label (ЧЗ group 15
+  with an EGAIS code) in ZPL and TSPL at 203 and 300 dpi — the «ЕГАИС» row whole and
+  legible on the box and pallet labels and on the A4 pallet sheet (a long code on a
+  58 × 40 label is the cloud's risk too); an exception reprint and a warehouse reprint
+  after the code changed in the office print the frozen code; a shift opened before the
+  update prints the row empty, without an error, and a new one prints it; the product
+  dialog in WebView2 (the field appears and goes with the group, the default counterparty
+  fills a new shift, Tab/Enter/Esc); photos from a phone (JPEG, PNG and WebP of 4000 ×
+  3000 and 5 MB) compressed and shown, «Бланк смены» with the photo on an A4 printer and
+  in «Открыть в браузере», and without it after a delete; the transfer from a copy of the
+  client's cloud — beer with its code, default counterparties in place, the notes in
+  words, and a format-1 file made earlier still accepted. The encoder ran in desktop
+  Chromium (a 4000 × 3000 PNG became a 640 × 480 JPEG of 147 KB), never in WebView2.
 - The floor's shifts (plan 2a5) by hand, on Windows 10 and 11: the list, the
   new shift and the work screen on the real screen and touch panel (64 px
   controls, a long product name on a card); a product scanned on the new

@@ -30,6 +30,8 @@ export interface SelectProps<TValue extends string = string> {
   searchable?: boolean;
   searchLabel?: string;
   searchPlaceholder?: string;
+  /** Shown in the open menu when the filter matches no option. */
+  searchEmptyLabel?: string;
   id?: string;
   className?: string;
   style?: CSSProperties;
@@ -54,6 +56,7 @@ export function Select<TValue extends string = string>({
   searchable = false,
   searchLabel,
   searchPlaceholder,
+  searchEmptyLabel,
   hint,
   error,
   size = "md",
@@ -220,6 +223,10 @@ export function Select<TValue extends string = string>({
         {...(disabled === undefined ? {} : { disabled })}
         {...(name === undefined || value !== undefined ? {} : { name })}
         {...(required === undefined ? {} : { required })}
+        onOpenChange={(open) => {
+          // A filter typed into one opening must not narrow the next one.
+          if (!open) setSearch("");
+        }}
       >
         <RadixSelect.Trigger
           id={selectId}
@@ -330,6 +337,19 @@ export function Select<TValue extends string = string>({
               </div>
             ) : null}
             <RadixSelect.Viewport className="mk-select__viewport">
+              {searchable && searchEmptyLabel !== undefined && visibleItemOptions.length === 0 ? (
+                <div
+                  role="status"
+                  className="mk-select__empty"
+                  style={{
+                    padding: "12px",
+                    color: "var(--fg-3)",
+                    font: "var(--text-body-sm)",
+                  }}
+                >
+                  {searchEmptyLabel}
+                </div>
+              ) : null}
               {visibleItemOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}

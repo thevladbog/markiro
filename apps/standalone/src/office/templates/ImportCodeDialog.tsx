@@ -95,7 +95,6 @@ export function ImportCodeDialog({
         <div className="template-import__source">
           <div className="template-import__options">
             <Select
-              native
               label={t("office.templateImport.format")}
               options={FORMATS.map((value) => ({
                 value,
@@ -110,7 +109,6 @@ export function ImportCodeDialog({
             {/* JSON carries its own resolution; this one rescales code only. */}
             {!isJson && (
               <Select
-                native
                 label={t("office.templateImport.dpi")}
                 options={DPI_CHOICES.map((value) => ({
                   value: String(value),

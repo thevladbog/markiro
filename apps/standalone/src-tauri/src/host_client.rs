@@ -1,12 +1,16 @@
 //! Authenticated calls to the paired host (spec §5.2). A connection is
 //! accepted only when the host certificate's SHA-256 equals the fingerprint
 //! pinned at pairing. No proxy, no redirects, short timeouts, and the
-//! protocol header on every request. [`StreamClient`] holds the change stream
+//! protocol header on every request, and the app's version (plan ОБН-1).
+//! [`StreamClient`] holds the change stream
 //! the same way, limited by silence instead of a total time.
 
 use std::time::Duration;
 
-use markiro_proto::{Secret, OFFICE_SESSION_HEADER, PROTOCOL_HEADER, PROTOCOL_VERSION};
+use markiro_proto::{
+    Secret, APP_VERSION_HEADER, OFFICE_SESSION_HEADER, PROTOCOL_HEADER, PROTOCOL_VERSION,
+};
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Method;
 use serde::Serialize;
 use serde_json::Value;
@@ -255,14 +259,28 @@ impl HostStream {
     }
 }
 
+/// The headers every request to the host carries besides the protocol (plan
+/// ОБН-1): the app's own version, which the host records on the device
+/// (`devices.app_version`, spec §10.11.7).
+fn default_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        APP_VERSION_HEADER,
+        HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    );
+    headers
+}
+
 /// A client builder that trusts only the certificate with `fingerprint`:
-/// no proxy, no redirects, HTTPS only, 2 s to connect.
+/// no proxy, no redirects, HTTPS only, 2 s to connect, and the app's version
+/// on every request ([`default_headers`]).
 fn pinned_builder(fingerprint: &str) -> Result<reqwest::ClientBuilder, RequestError> {
     let config = tls::client_config(FingerprintPolicy::Pin {
         expected: fingerprint.to_owned(),
     })
     .map_err(|_| RequestError::Unreachable)?;
     Ok(reqwest::Client::builder()
+        .default_headers(default_headers())
         .use_preconfigured_tls(config)
         .connect_timeout(CONNECT_TIMEOUT)
         .no_proxy()
@@ -407,6 +425,21 @@ mod tests {
                 "{method}"
             );
         }
+    }
+
+    /// Every request to the host names the app's version (plan ОБН-1): the
+    /// host records it on the device. Both clients take these headers from
+    /// `pinned_builder`.
+    #[test]
+    fn every_request_names_the_apps_version() {
+        let headers = default_headers();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers
+                .get(markiro_proto::APP_VERSION_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]

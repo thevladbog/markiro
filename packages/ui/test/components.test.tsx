@@ -616,6 +616,30 @@ describe("Select", () => {
     expect(onValueChange).toHaveBeenCalledWith("Вода");
   });
 
+  it("says so when the searchable filter matches no option, and starts afresh at the next opening", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select
+        label="Категория"
+        searchable
+        searchLabel="Поиск категории"
+        searchEmptyLabel="Ничего не найдено"
+        options={["Соки", "Нектары"]}
+      />,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Категория" });
+    await user.click(trigger);
+    await user.type(screen.getByRole("searchbox", { name: "Поиск категории" }), "яблоко");
+    expect(screen.getByRole("status").textContent).toBe("Ничего не найдено");
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+
+    await user.keyboard("{Escape}");
+    await user.click(trigger);
+    expect(screen.getByRole("searchbox", { name: "Поиск категории" })).toHaveProperty("value", "");
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("edits a searchable select filter with selection, caret movement and paste", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -1453,6 +1477,55 @@ describe("геометрия тега", () => {
 });
 
 describe("Table", () => {
+  it("holds a column at its minimum width, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[{ key: "name", title: "Название", wrap: true, minWidth: 180 }]}
+        rows={[{ name: "Молоко 3,2% 0,9 л" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Название" }).style.minWidth).toBe("180px");
+    expect(screen.getByRole("cell", { name: "Молоко 3,2% 0,9 л" }).style.minWidth).toBe("180px");
+  });
+
+  it("wraps a wrapping column by words and never letter by letter", () => {
+    render(
+      <Table
+        columns={[
+          { key: "line", title: "Линия", wrap: true },
+          { key: "date", title: "Дата" },
+        ]}
+        rows={[{ line: "Линия 1 — розлив", date: "13.10.2026" }]}
+      />,
+    );
+
+    // `anywhere` would make the column's minimum width one character.
+    expect(screen.getByRole("cell", { name: "Линия 1 — розлив" }).style.overflowWrap).toBe(
+      "break-word",
+    );
+    expect(screen.getByRole("cell", { name: "13.10.2026" }).style.whiteSpace).toBe("nowrap");
+  });
+
+  it("keeps headings on one line unless the column asks for a wrapping heading", () => {
+    render(
+      <Table
+        columns={[
+          { key: "login", title: "Табельный номер", wrapTitle: true },
+          { key: "name", title: "Полное имя" },
+        ]}
+        rows={[{ login: "001", name: "Иван" }]}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Табельный номер" }).style.whiteSpace).toBe(
+      "normal",
+    );
+    expect(screen.getByRole("columnheader", { name: "Полное имя" }).style.whiteSpace).toBe(
+      "nowrap",
+    );
+  });
+
   it("renders an overflow-x:auto wrapper and font-mono nowrap numeric cells", () => {
     const { container } = render(
       <Table

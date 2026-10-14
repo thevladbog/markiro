@@ -102,7 +102,7 @@ async fn after_the_wizard_the_feed_holds_the_organization_the_site_and_the_lines
     expected.push(json!({
         "entity": "org_profile", "id": "1", "rev": 1, "deleted": false,
         "data": {
-            "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
+            "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
             "defaultBoxTemplateId": null, "defaultPalletTemplateId": null, "defaultDuplicateTemplateId": null
         }
     }));
@@ -735,7 +735,7 @@ async fn catalog_records_ride_the_feed_with_their_flags() {
             json!({
                 "entity": "org_profile", "id": "1", "rev": rev, "deleted": false,
                 "data": {
-                    "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
+                    "name": "ООО «Атолл»", "inn": "7707083893", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
                     "defaultBoxTemplateId": universal, "defaultPalletTemplateId": null, "defaultDuplicateTemplateId": null
                 }
             }),

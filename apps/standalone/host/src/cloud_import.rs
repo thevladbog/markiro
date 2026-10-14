@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use markiro_proto::cloud_import::{CloudImportRequest, CLOUD_IMPORT_FORMAT_VERSION};
+use markiro_proto::cloud_import::{CloudImportRequest, CLOUD_IMPORT_FORMAT_VERSIONS};
 use markiro_proto::{OrgProfileInput, TemplatePurpose};
 
 use crate::error::ApiError;
@@ -55,6 +55,8 @@ pub struct Product {
     pub shelf_life_days: Option<u32>,
     pub default_box_template_id: Option<String>,
     pub default_pallet_template_id: Option<String>,
+    pub egais_code: Option<String>,
+    pub default_counterparty_id: Option<String>,
     pub archived: bool,
 }
 
@@ -133,10 +135,10 @@ fn unique_id<'a>(seen: &mut HashSet<&'a str>, field: &str, id: &'a str) -> Resul
 
 pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
     validate::client_uuid("importId", &request.import_id)?;
-    if request.format_version != CLOUD_IMPORT_FORMAT_VERSION {
+    if !CLOUD_IMPORT_FORMAT_VERSIONS.contains(&request.format_version) {
         return Err(ApiError::validation(
             "formatVersion",
-            format!("this host reads format version {CLOUD_IMPORT_FORMAT_VERSION}"),
+            "this host reads format versions 1 and 2",
         ));
     }
     if time::OffsetDateTime::parse(
@@ -224,6 +226,10 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
             )?,
         });
     }
+
+    // The ids a product's default counterparty may name (plan ТОВ).
+    let counterparty_ids: HashSet<&str> =
+        counterparties.iter().map(|each| each.id.as_str()).collect();
 
     let mut ids = HashSet::new();
     let mut templates = Vec::with_capacity(payload.templates.len());
@@ -375,6 +381,25 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
                 }
             }
         }
+        // The office's rules (plan ТОВ): an EGAIS code only with ЧЗ group
+        // 15, a default counterparty only one this file carries.
+        let egais_code = validate::egais_code(&field("egaisCode"), each.egais_code.as_deref())?;
+        if egais_code.is_some()
+            && each.chz_product_group_code != Some(validate::EGAIS_PRODUCT_GROUP_CODE)
+        {
+            return Err(ApiError::validation(
+                &field("egaisCode"),
+                "only a product of ЧЗ group 15 carries an EGAIS code",
+            ));
+        }
+        if let Some(id) = &each.default_counterparty_id {
+            if !counterparty_ids.contains(id.as_str()) {
+                return Err(ApiError::validation(
+                    &field("defaultCounterpartyId"),
+                    "a counterparty of the file is required",
+                ));
+            }
+        }
         products.push(Product {
             id: each.id.clone(),
             gtin14,
@@ -386,6 +411,8 @@ pub fn check(request: &CloudImportRequest) -> Result<ValidImport, ApiError> {
             shelf_life_days: each.shelf_life_days,
             default_box_template_id: each.default_box_template_id.clone(),
             default_pallet_template_id: each.default_pallet_template_id.clone(),
+            egais_code,
+            default_counterparty_id: each.default_counterparty_id.clone(),
             archived: each.archived,
         });
     }

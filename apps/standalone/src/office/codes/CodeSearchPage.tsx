@@ -270,16 +270,11 @@ export function CodeSearchPage() {
       : "";
 
   return (
-    <div className="shift-card">
+    <div className="office-stack">
       <PageHeader title={t("office.codeSearch.title")} />
       <p className="office-note">{t("office.codeSearch.intro")}</p>
       <form role="search" aria-label={t("office.codeSearch.title")} onSubmit={submit} noValidate>
-        <FilterBar
-          label={t("office.codeSearch.filters")}
-          resultSummary={summary}
-          resetLabel={t("office.codeSearch.reset")}
-          onReset={reset}
-        >
+        <FilterBar label={t("office.codeSearch.filters")} resultSummary={summary}>
           <Input
             mono
             label={t("office.codeSearch.input")}
@@ -307,6 +302,10 @@ export function CodeSearchPage() {
             onValueChange={(value) => setTo(value ?? "")}
           />
           <Button type="submit">{t("office.codeSearch.submit")}</Button>
+          {/* As tall as the fields beside it: the filter bar's own reset button is the compact one. */}
+          <Button type="button" variant="secondary" onClick={reset}>
+            {t("office.codeSearch.reset")}
+          </Button>
         </FilterBar>
       </form>
       {codeHash !== null && (asked.from !== "" || asked.to !== "") && (

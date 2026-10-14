@@ -30,6 +30,7 @@ function values(overrides: Partial<WizardValues> = {}): WizardValues {
     password: "correct horse battery",
     passwordConfirm: "correct horse battery",
     orgName: "ООО «Атолл»",
+    inn: "7707083893",
     gln: "4600682000013",
     ...overrides,
   };
@@ -66,6 +67,14 @@ describe("wizard steps", () => {
     expect(validateStep("org", values({ inn: "77012345678" }))).toEqual([
       { field: "inn", message: "rules.inn" },
     ]);
+    // A license is issued to the INN (plan ЛЦ-2): the wizard needs one whose check digit holds.
+    expect(validateStep("org", values({ inn: "" }))).toEqual([
+      { field: "inn", message: "wizard.errors.innRequired" },
+    ]);
+    expect(validateStep("org", values({ inn: "7707083894" }))).toEqual([
+      { field: "inn", message: "wizard.errors.innChecksum" },
+    ]);
+    expect(validateStep("org", values({ inn: " 7707083893 " }))).toEqual([]);
     expect(validateStep("org", values({ gs1Prefixes: "12, 4600682" }))).toEqual([
       { field: "gs1Prefixes", message: "rules.gs1Prefixes" },
     ]);

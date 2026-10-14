@@ -82,20 +82,23 @@ INSERT INTO counterparties (id, tenant_id, name, gln, inn, gs1_prefixes, notes, 
 
 INSERT INTO products (id, tenant_id, gtin14, name, print_name, chz_product_group_code, box_capacity,
     pallet_box_capacity, archived, default_label_template_id, unit_price, egais_code, shelf_life_days,
-    external_ref, created_at) VALUES
+    external_ref, default_counterparty_id, created_at) VALUES
   ('0e0e0000-0000-4000-8000-000000000001', 'imp-test-atoll', '04600682000013', 'Молоко 3,2% 0,9 л',
     'Молоко 3,2%', 8, 12, 40, false, '0d0d0000-0000-4000-8000-000000000002', 89.90, NULL, 10, NULL,
-    '2026-01-14 09:00:01+00'),
+    '0c0c0000-0000-4000-8000-000000000002', '2026-01-14 09:00:01+00'),
   ('0e0e0000-0000-4000-8000-000000000002', 'imp-test-atoll', '04600682000020', 'Вода ' || repeat('я', 200),
     NULL, 13, 6, 100000, false, '0d0d0000-0000-4000-8000-000000000003', NULL, NULL, 5000, 'erp-17',
-    '2026-01-14 09:00:02+00'),
+    NULL, '2026-01-14 09:00:02+00'),
   ('0e0e0000-0000-4000-8000-000000000003', 'imp-test-atoll', '04600682000013', 'Молоко (старая карточка)',
     NULL, 8, 12, 40, true, '0d0d0000-0000-4000-8000-000000000004', NULL, '0123', NULL, NULL,
-    '2026-01-14 09:00:03+00'),
+    NULL, '2026-01-14 09:00:03+00'),
   ('0e0e0000-0000-4000-8000-000000000004', 'imp-test-atoll', '4600682000037', 'Кефир',
-    NULL, NULL, NULL, NULL, false, NULL, NULL, NULL, NULL, NULL, '2026-01-14 09:00:04+00'),
+    NULL, NULL, NULL, NULL, false, NULL, NULL, NULL, NULL, NULL, NULL, '2026-01-14 09:00:04+00'),
+  ('0e0e0000-0000-4000-8000-000000000005', 'imp-test-atoll', '04607001234562', 'Пиво светлое 0,5 л',
+    NULL, 15, 20, 60, false, NULL, NULL, '0150320000001234567', 180, NULL,
+    '0c0c0000-0000-4000-8000-000000000001', '2026-01-14 09:00:06+00'),
   ('0e0e0000-0000-4000-8000-000000000099', 'imp-test-other', '04600682000013', 'Чужое молоко',
-    NULL, 8, 12, 40, false, NULL, NULL, NULL, NULL, NULL, '2026-01-14 09:00:05+00');
+    NULL, 8, 12, 40, false, NULL, NULL, NULL, NULL, NULL, NULL, '2026-01-14 09:00:05+00');
 
 INSERT INTO employees (id, tenant_id, full_name, role, status) VALUES
   ('0f0f0000-0000-4000-8000-000000000001', 'imp-test-atoll', 'Анна Кузнецова', 'Оператор линии', 'active'),

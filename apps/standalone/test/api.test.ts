@@ -27,6 +27,7 @@ import {
   operatorCreateSchema,
   operatorUpdateSchema,
   orgLogoPutSchema,
+  productPhotoPutSchema,
   palletSheetCreateSchema,
   palletSheetDefaultUpdateSchema,
   palletSheetUpdateSchema,
@@ -43,7 +44,9 @@ import {
   templateCreateSchema,
   templateDefaultsUpdateSchema,
   templateUpdateSchema,
+  updateStartedSchema,
 } from "../src/host/protocol.js";
+import { licenseLoad } from "../src/host/requests.js";
 import { fakeHostApi } from "./support/office.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -84,6 +87,7 @@ const TOKEN = "office-session-token";
 const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
 const LOGO_PUT = orgLogoPutSchema.parse(fixture("org-logo-put.json"));
+const PHOTO_PUT = productPhotoPutSchema.parse(fixture("product-photo-put.json"));
 const SHEET_ID = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
 const SHEET_CREATE = palletSheetCreateSchema.parse(fixture("pallet-sheet-create.json"));
 const SHEET_UPDATE = palletSheetUpdateSchema.parse(fixture("pallet-sheet-update.json"));
@@ -121,6 +125,7 @@ const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
 const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
+const UPDATE_STARTED = updateStartedSchema.parse(fixture("update-started.json"));
 
 type Case = [
   name: string,
@@ -165,6 +170,24 @@ const CASES: Case[] = [
     { logo: null },
     (api) => api.deleteOrgLogo(TOKEN),
     { method: "DELETE", path: "/v1/office/org/logo", body: undefined },
+  ],
+  [
+    "getProductPhoto",
+    fixture("product-photo-state.json"),
+    (api) => api.getProductPhoto(TOKEN, PRODUCT.id),
+    { method: "GET", path: `/v1/office/products/${PRODUCT.id}/photo`, body: undefined },
+  ],
+  [
+    "putProductPhoto",
+    fixture("product-photo-state.json"),
+    (api) => api.putProductPhoto(TOKEN, PRODUCT.id, PHOTO_PUT),
+    { method: "PUT", path: `/v1/office/products/${PRODUCT.id}/photo`, body: PHOTO_PUT },
+  ],
+  [
+    "deleteProductPhoto",
+    { photo: null },
+    (api) => api.deleteProductPhoto(TOKEN, PRODUCT.id),
+    { method: "DELETE", path: `/v1/office/products/${PRODUCT.id}/photo`, body: undefined },
   ],
   [
     "listPalletSheets",
@@ -532,6 +555,12 @@ const CASES: Case[] = [
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
   ],
   [
+    "recordUpdateStarted",
+    null,
+    (api) => api.recordUpdateStarted(TOKEN, UPDATE_STARTED),
+    { method: "POST", path: "/v1/office/updates/started", body: UPDATE_STARTED },
+  ],
+  [
     "getBoxReportRows",
     fixture("box-report-rows.json"),
     (api) => api.getBoxReportRows(TOKEN, BOX_ID),
@@ -590,6 +619,21 @@ describe("HostApi office endpoints", () => {
     const logo = fixture("org-logo.json") as { logo: Record<string, unknown> };
     const stale = { logo: { ...logo.logo, updatedAt: "yesterday" } };
     await expect(recording(stale).api.putOrgLogo(TOKEN, LOGO_PUT)).rejects.toThrow();
+  });
+
+  it("reads a product's photo as the host sent it, none as null, and refuses anything else (plan ТОВ)", async () => {
+    await expect(
+      recording(fixture("product-photo-state.json")).api.getProductPhoto(TOKEN, PRODUCT.id),
+    ).resolves.toEqual(fixture("product-photo-state.json"));
+    await expect(
+      recording({ photo: null }).api.getProductPhoto(TOKEN, PRODUCT.id),
+    ).resolves.toEqual({ photo: null });
+    await expect(recording({}).api.getProductPhoto(TOKEN, PRODUCT.id)).rejects.toThrow();
+    const state = fixture("product-photo-state.json") as { photo: Record<string, unknown> };
+    const wrong = { photo: { ...state.photo, checksum: "ABC" } };
+    await expect(
+      recording(wrong).api.putProductPhoto(TOKEN, PRODUCT.id, PHOTO_PUT),
+    ).rejects.toThrow();
   });
 
   it("rejects a sheet answer that is not a sheet, and a list without its default", async () => {
@@ -665,6 +709,13 @@ describe("HostApi shifts", () => {
     await expect(
       recording(shift).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
     ).rejects.toThrow();
+  });
+
+  it("resolves a recorded update start with nothing, and rejects an answer that carries a body", async () => {
+    await expect(
+      recording(null).api.recordUpdateStarted(TOKEN, UPDATE_STARTED),
+    ).resolves.toBeUndefined();
+    await expect(recording(shift).api.recordUpdateStarted(TOKEN, UPDATE_STARTED)).rejects.toThrow();
   });
 
   it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {
@@ -1011,5 +1062,49 @@ describe("HostApi floor work", () => {
     await expect(recording({ id: "x" }).api.requestSsccBlock(BLOCK_REQUEST)).rejects.toThrow();
     await expect(recording({ status: "maybe" }).api.checkCode(CODE_HASH)).rejects.toThrow();
     await expect(recording({ receipts: [{ id: null }] }).api.sendFacts(RECORDS)).rejects.toThrow();
+  });
+});
+
+describe("the license (plan ЛЦ-2)", () => {
+  it("reads, previews and loads a file, asks for the activation request and the emergency, with the session", async () => {
+    const office = fixture("office-license.json");
+    const load = licenseLoad("eyJ0eXAiOiJ4In0.e30.c2ln");
+    const activation = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../packages/domain/fixtures/standalone-license/activation-request.json",
+          testModuleUrl,
+        ),
+        "utf8",
+      ),
+    ) as unknown;
+    const read = recording(office);
+    await expect(read.api.getLicense(TOKEN)).resolves.toEqual(office);
+    const previewed = recording(fixture("office-license-preview.json"));
+    await previewed.api.previewLicense(TOKEN, load);
+    const loaded = recording(office);
+    await loaded.api.loadLicense(TOKEN, load);
+    const asked = recording(activation);
+    await expect(asked.api.getActivationRequest(TOKEN)).resolves.toEqual(activation);
+    const extended = recording(office);
+    await extended.api.enableLicenseEmergency(TOKEN);
+    expect([
+      ...read.sent,
+      ...previewed.sent,
+      ...loaded.sent,
+      ...asked.sent,
+      ...extended.sent,
+    ]).toEqual([
+      { method: "GET", path: "/v1/office/license", body: undefined, officeToken: TOKEN },
+      { method: "POST", path: "/v1/office/license/preview", body: load, officeToken: TOKEN },
+      { method: "PUT", path: "/v1/office/license", body: load, officeToken: TOKEN },
+      {
+        method: "GET",
+        path: "/v1/office/license/activation-request",
+        body: undefined,
+        officeToken: TOKEN,
+      },
+      { method: "POST", path: "/v1/office/license/emergency", body: undefined, officeToken: TOKEN },
+    ]);
   });
 });

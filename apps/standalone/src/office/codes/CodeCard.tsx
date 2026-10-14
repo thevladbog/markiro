@@ -200,7 +200,7 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
     },
   ];
   return (
-    <div className="shift-card">
+    <div className="office-stack">
       <DefinitionGrid
         items={[
           {

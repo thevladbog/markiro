@@ -45,6 +45,7 @@ test("the Windows job builds, smoke-tests and keeps the installer, in that order
 test("the smoke test checks what the installer promises", () => {
   for (const promise of [
     "Install @('/S')",
+    "Install @('/P', '/UPDATE')",
     "/ROLE=host",
     "/ROLE=office",
     "/ROLE=station",
@@ -311,6 +312,7 @@ test("the smoke test follows the installer's life in order, and every step is bo
     "role host: the service, its account, its restart policy, the port",
     "a crash: Windows starts the service again",
     "a reinstall keeps the role and the host",
+    "an update the app starts (/P /UPDATE) keeps the role, the host and its data",
     "a reinstall over an unfinished restore ends with exit 4: a warning, not a failure",
     "another role on a reinstall is refused",
     "uninstall with the host running removes the service and the rule and keeps the data",
@@ -393,4 +395,41 @@ test("the smoke test covers an uninstall with a running host, exit 4 and data ke
   assert.match(smoke, /Install @\('\/S', '\/ROLE=HOST'\)\) -eq 0\)/u);
   // The data survives the station role's uninstall at the very end too.
   assert.match(smoke, /'the host data from the first install is still there'/u);
+});
+
+test("the release host is checked to trust no test key before it is bundled", () => {
+  const compile = runs.findIndex((run) => run.startsWith("cargo build --release"));
+  const check = runs.findIndex((run) => run.includes("markiro-host.exe trust-keys"));
+  const sidecar = runs.findIndex((run) =>
+    run.includes("mkdir -p apps/standalone/src-tauri/binaries"),
+  );
+  assert.ok(
+    compile >= 0 && compile < check && check < sidecar,
+    `${compile} < ${check} < ${sidecar}`,
+  );
+  const step = stepRunning("markiro-host.exe trust-keys");
+  assert.equal(step.shell, "bash");
+  assert.match(
+    step.run,
+    /"\$\(apps\/standalone\/target\/release\/markiro-host\.exe trust-keys\)"/u,
+  );
+  assert.match(step.run, /grep -q '\^test-' <<<"\$kids"/u);
+  assert.match(step.run, /exit 1/u);
+});
+
+test("the passive update the app starts keeps the role, the host's identity and its rule, and opens no app", () => {
+  const update = smoke.slice(
+    smoke.indexOf("Step 'an update the app starts"),
+    smoke.indexOf("Step 'a reinstall over an unfinished restore"),
+  );
+  assert.ok(update.length > 0, "the step comes before the restore marker's");
+  assert.match(update, /\(Install @\('\/P', '\/UPDATE'\)\) -eq 0\) 'the passive update succeeds/u);
+  assert.match(update, /RoleFileIs 'host'/u);
+  assert.match(update, /\(RegValue \$roleKey 'Role'\) -ceq 'host'/u);
+  assert.match(update, /host\.json'\)\) -eq \$hostJson\) 'the host identity is the same'/u);
+  assert.match(update, /@\(Get-NetFirewallRule -Name 'MarkiroHost'\)\.Count -eq 1/u);
+  assert.match(update, /WaitFor \{ HostAnswers \} 120/u);
+  // `/R` would open the app on the runner; the app's own launch adds it (update/launch.rs).
+  assert.doesNotMatch(update, /'\/R'/u);
+  assert.doesNotMatch(update, /\/ROLE=/u);
 });

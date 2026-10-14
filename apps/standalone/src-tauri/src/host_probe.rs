@@ -53,7 +53,51 @@ impl ProbeError {
     }
 }
 
+/// The protocol range and the version a Markiro host's `hello` names, read
+/// whatever its protocol (plan ОБН-2): an update compares them with the
+/// package, while [`observe_hello`] refuses a host this build cannot talk to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostVersions {
+    pub version: Option<String>,
+    pub protocol: u32,
+    pub min_protocol: u32,
+}
+
+/// [`HostVersions`] of a `hello` body; another service is `NotMarkiroHost`.
+pub fn read_versions(body: &serde_json::Value) -> Result<HostVersions, ProbeError> {
+    let envelope: HelloEnvelope =
+        serde_json::from_value(body.clone()).map_err(|_| ProbeError::NotMarkiroHost)?;
+    if envelope.product != HOST_PRODUCT {
+        return Err(ProbeError::NotMarkiroHost);
+    }
+    Ok(HostVersions {
+        version: body
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        protocol: envelope.protocol,
+        min_protocol: envelope.min_protocol,
+    })
+}
+
+/// The versions of the host at `address`, without trusting its certificate:
+/// a number to compare, not a credential (spec §10.7).
+pub async fn host_versions(address: &str) -> Result<HostVersions, ProbeError> {
+    let (body, _) = fetch_hello(address).await?;
+    read_versions(&body)
+}
+
 pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError> {
+    let (body, fingerprint) = fetch_hello(address).await?;
+    let hello = classify_hello(body)?;
+    let fingerprint = fingerprint.ok_or(ProbeError::Unreachable)?;
+    Ok(HelloObservation { hello, fingerprint })
+}
+
+/// `GET /v1/hello` at `address` through the observing verifier: the body and
+/// the fingerprint of the certificate the host presented.
+async fn fetch_hello(address: &str) -> Result<(serde_json::Value, Option<String>), ProbeError> {
     let seen = Arc::new(Mutex::new(None::<String>));
     let config = tls::client_config(FingerprintPolicy::Observe(seen.clone()))
         .map_err(|_| ProbeError::Unreachable)?;
@@ -77,13 +121,8 @@ pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError
         .json()
         .await
         .map_err(|_| ProbeError::NotMarkiroHost)?;
-    let hello = classify_hello(body)?;
-    let fingerprint = seen
-        .lock()
-        .expect("fingerprint lock")
-        .clone()
-        .ok_or(ProbeError::Unreachable)?;
-    Ok(HelloObservation { hello, fingerprint })
+    let fingerprint = seen.lock().expect("fingerprint lock").clone();
+    Ok((body, fingerprint))
 }
 
 /// Classify a `/v1/hello` response body: foreign service, incompatible
@@ -167,6 +206,35 @@ mod tests {
             ),
             Err(ProbeError::InvalidResponse)
         );
+    }
+
+    #[test]
+    fn the_versions_of_any_markiro_host_are_read() {
+        // A host this build could not talk to still names its versions.
+        assert_eq!(
+            read_versions(&json!({
+                "product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5, "version": "0.9.0"
+            })),
+            Ok(HostVersions {
+                version: Some("0.9.0".into()),
+                protocol: 9,
+                min_protocol: 5
+            })
+        );
+        assert_eq!(
+            read_versions(&json!({ "product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1 })),
+            Ok(HostVersions {
+                version: None,
+                protocol: 3,
+                min_protocol: 1
+            })
+        );
+        for body in [
+            json!({ "product": "other", "protocol": 3, "minProtocol": 1 }),
+            json!({ "status": "ok" }),
+        ] {
+            assert_eq!(read_versions(&body), Err(ProbeError::NotMarkiroHost));
+        }
     }
 
     #[test]

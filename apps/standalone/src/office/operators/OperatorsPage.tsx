@@ -87,6 +87,8 @@ export function OperatorsPage() {
       key: "login",
       title: t("office.operators.table.login"),
       mono: true,
+      // A short number under a long heading: the heading takes two lines, not the column's width.
+      wrapTitle: true,
       render: (operator) => operator.login,
     },
     { key: "name", title: t("office.operators.table.name"), render: (operator) => operator.name },
@@ -110,6 +112,7 @@ export function OperatorsPage() {
       key: "badges",
       title: t("office.operators.table.badges"),
       wrap: true,
+      minWidth: 140,
       render: badgeSummary,
     },
     {
@@ -128,7 +131,7 @@ export function OperatorsPage() {
       key: "actions",
       title: t("office.operators.table.actions"),
       render: (operator) => (
-        <RowActions>
+        <RowActions className="office-row-actions--many">
           <Button
             variant="secondary"
             size="compact"

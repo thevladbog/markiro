@@ -11,9 +11,11 @@ pub mod db;
 pub mod error;
 pub mod facts;
 pub mod feed;
+pub mod inn;
 pub mod install;
 #[cfg(windows)]
 pub mod install_windows;
+pub mod license;
 pub mod logging;
 pub mod network;
 pub mod network_profile;
@@ -28,6 +30,7 @@ pub mod service;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
+pub mod upgrade;
 pub mod validate;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -81,6 +84,8 @@ pub struct RunningHost {
     task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// The backup worker (plan РК); it ends with `stopping`.
     backups: tokio::task::JoinHandle<()>,
+    /// The license's minute look (plan ЛЦ-2); it ends with `stopping`.
+    license: tokio::task::JoinHandle<()>,
     pool: SqlitePool,
     _lock: std::fs::File,
 }
@@ -107,6 +112,14 @@ impl RunningHost {
             tracing::warn!("the backup worker did not stop in time; aborting it");
             backups.abort();
         }
+        let mut license = self.license;
+        if tokio::time::timeout(SHUTDOWN_DEADLINE, &mut license)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the license look did not stop in time; aborting it");
+            license.abort();
+        }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
         Ok(())
@@ -122,7 +135,11 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     // here). The next `markiro-host restore` finishes it first.
     restore::refuse_unfinished(paths)?;
     let config = HostConfig::load_or_create(paths, options.port_override)?;
-    let pool = db::open(&paths.database_file()).await?;
+    let clock: std::sync::Arc<dyn clock::Clock> = std::sync::Arc::new(clock::SystemClock);
+    // The copy before this build's pending migrations (plan ОБН-1): one that
+    // fails stops the start before any migration runs.
+    let pre_upgrade = upgrade::PreUpgrade::for_paths(paths, config.host_id.clone(), clock.now());
+    let pool = db::open_upgrading(&paths.database_file(), &pre_upgrade).await?;
     // Build the unknown-login verifier now, off the async threads, so the
     // first unknown login does not pay for building it.
     tokio::task::spawn_blocking(|| {
@@ -134,13 +151,21 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port));
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
-    let clock: std::sync::Arc<dyn clock::Clock> = std::sync::Arc::new(clock::SystemClock);
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
     let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())
-        .with_backups(backups.clone());
+        .with_backups(backups.clone())
+        // The trial's mark: the registry on Windows, none elsewhere.
+        .with_license(std::sync::Arc::new(license::LicenseService::new(
+            markiro_proto::trust::license_keyset(),
+            license::trial_mark::system(),
+        )));
     let stopping = state.stopping.clone();
     let backup_worker = backup::worker::spawn(backups, clock, stopping.subscribe());
+    // The license (plan ЛЦ-2): the trial of a site from before it, the state
+    // and the INN at the start, then a look every minute.
+    state.license.startup(&state).await;
+    let license_ticker = license::spawn_ticker(state.clone(), stopping.subscribe());
     let mut stopped = state.stopping.subscribe();
     let task = tokio::spawn(server::serve(listener, state, async move {
         let _ = stopped.wait_for(|stopping| *stopping).await;
@@ -159,6 +184,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         stopping,
         task,
         backups: backup_worker,
+        license: license_ticker,
         pool,
         _lock: lock,
     })

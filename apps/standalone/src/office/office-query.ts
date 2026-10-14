@@ -26,6 +26,8 @@ export const officeKeys = {
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
+  /** A product's photo (plan ТОВ, `GET /v1/office/products/{id}/photo`); a write changes the list's `photoChecksum` too. */
+  productPhoto: (id: string) => ["office", "product-photo", id],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */

@@ -153,6 +153,8 @@ async fn the_administrator_lists_paired_devices() {
                 "name": "Тестовое устройство",
                 "lineId": lines[0],
                 "appVersion": "0.1.0",
+                "protocol": markiro_proto::PROTOCOL_VERSION,
+                "versionSeenAt": null,
                 "pairedAt": now,
                 "lastSeenAt": now,
                 "revokedAt": null
@@ -163,6 +165,8 @@ async fn the_administrator_lists_paired_devices() {
                 "name": "Тестовое устройство",
                 "lineId": null,
                 "appVersion": "0.1.0",
+                "protocol": markiro_proto::PROTOCOL_VERSION,
+                "versionSeenAt": null,
                 "pairedAt": now,
                 "lastSeenAt": now,
                 "revokedAt": null

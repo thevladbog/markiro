@@ -25,6 +25,12 @@ export interface ShiftTaskFormData {
   productPrintName: string | null;
   gtin14: string;
   imageChecksum: string | null;
+  /**
+   * The photo's own source (the standalone office: a `data:` URL); left out,
+   * the cloud's relative link to the product's image. Shown only with an
+   * `imageChecksum`.
+   */
+  imageSrc?: string;
   lineName: string | null;
   plannedDate: string | null;
   productionDate: string | null;
@@ -145,7 +151,9 @@ export function renderShiftTaskFormHtml(data: ShiftTaskFormData): string {
   const photo =
     data.imageChecksum === null
       ? ""
-      : `<div class="product-photo"><img src="../../products/${escapeHtml(data.productId)}/image/${escapeHtml(data.imageChecksum)}" alt=""></div>`;
+      : data.imageSrc === undefined
+        ? `<div class="product-photo"><img src="../../products/${escapeHtml(data.productId)}/image/${escapeHtml(data.imageChecksum)}" alt=""></div>`
+        : `<div class="product-photo"><img src="${escapeHtml(data.imageSrc)}" alt=""></div>`;
 
   const printNameSegment =
     data.productPrintName === null

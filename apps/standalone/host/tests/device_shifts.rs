@@ -587,7 +587,8 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     let snapshot = json!({
         "product": {
             "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
-            "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+            "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10,
+            "egaisCode": null
         },
         "boxTemplate": {
             "id": setup.template, "name": "Короб 58×40", "rev": 2,
@@ -596,7 +597,7 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
         "issuerPrefix": "460068200",
         "counterpartyName": "ООО «Северный берег»",
         // The wizard's organization, without a logo (plan А4).
-        "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
+        "organization": { "name": "ООО «Атолл»", "inn": "7707083893", "logo": null }
     });
     let mut expected = device_shift(&id, "OCT26-001", &setup);
     for (key, value) in [
@@ -1365,7 +1366,8 @@ async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_i
         json!({
             "product": {
                 "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
-                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10,
+                "egaisCode": null
             },
             "boxTemplate": {
                 "id": setup.template, "name": "Короб 58×40", "rev": template_rev,
@@ -1373,7 +1375,7 @@ async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_i
             },
             "issuerPrefix": "460068200",
             "counterpartyName": null,
-            "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
+            "organization": { "name": "ООО «Атолл»", "inn": "7707083893", "logo": null }
         })
     );
     // The number of a shift a station made keeps its `/S` in the audit row.
@@ -2518,7 +2520,7 @@ async fn the_entry_freezes_the_sheet_and_the_organization_with_its_logo() {
     assert_eq!(
         snapshot["organization"],
         json!({
-            "name": "ООО «Атолл»", "inn": "7701234567",
+            "name": "ООО «Атолл»", "inn": "7707083893",
             "logo": { "width": 10, "height": 2, "pixelsBase64": LOGO }
         })
     );
@@ -2714,7 +2716,7 @@ async fn a_shift_with_no_sheet_and_one_without_pallets_freeze_the_organization_o
     assert!(entered["snapshot"].get("palletSheet").is_none());
     assert_eq!(
         entered["snapshot"]["organization"],
-        json!({ "name": "ООО «Атолл»", "inn": "7701234567", "logo": null })
+        json!({ "name": "ООО «Атолл»", "inn": "7707083893", "logo": null })
     );
     // No pallets, a default sheet: none reaches the shift.
     let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
@@ -2912,4 +2914,123 @@ async fn the_main_sheet_a_planned_shift_went_back_to_is_the_one_its_entry_freeze
     let (status, entered) = enter(&admin, &admin.key, &main).await;
     assert_eq!(status, StatusCode::OK, "{entered}");
     assert_eq!(entered["snapshot"]["palletSheet"]["id"], json!(portrait));
+}
+
+/// A beer product (ЧЗ group 15) with an EGAIS code and a box template for
+/// group 15 (plan ТОВ); returns `(product, template)`.
+async fn beer_setup(admin: &Admin, egais_code: Value) -> (Value, String) {
+    let template = office_template(admin, "box", true, json!([15])).await;
+    let (status, product) = admin
+        .call(
+            "POST",
+            "/v1/office/products",
+            Some(json!({
+                "gtin14": "04607001234560", "name": "Пиво светлое 0,5 л",
+                "chzProductGroupCode": 15, "boxCapacity": 20, "palletBoxCapacity": 60,
+                "egaisCode": egais_code
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    (product, template)
+}
+
+#[tokio::test]
+async fn a_shift_freezes_the_product_egais_code_when_it_opens() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (beer, template) = beer_setup(&admin, json!("0150320000001234567")).await;
+    let shift = plan_shift(
+        &admin,
+        json!({
+            "productId": beer["id"], "lineId": setup.line,
+            "productionDate": "2026-10-13", "boxTemplateId": template
+        }),
+    )
+    .await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(
+        entered["snapshot"]["product"]["egaisCode"],
+        "0150320000001234567"
+    );
+    // The office changes the code: the open shift keeps the frozen one.
+    let mut change = beer.clone();
+    for computed in ["id", "status", "rev", "photoChecksum"] {
+        change.as_object_mut().unwrap().remove(computed);
+    }
+    change["egaisCode"] = json!("0150320000007654321");
+    change["expectedRev"] = beer["rev"].clone();
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{}", beer["id"].as_str().unwrap()),
+            Some(change),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["egaisCode"], "0150320000007654321");
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        again["snapshot"]["product"]["egaisCode"],
+        "0150320000001234567"
+    );
+    let stored: String = sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let stored: Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(stored["product"]["egaisCode"], "0150320000001234567");
+}
+
+#[tokio::test]
+async fn a_product_without_an_egais_code_freezes_none() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (beer, template) = beer_setup(&admin, Value::Null).await;
+    let shift = plan_shift(
+        &admin,
+        json!({
+            "productId": beer["id"], "lineId": setup.line,
+            "productionDate": "2026-10-13", "boxTemplateId": template
+        }),
+    )
+    .await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let product = entered["snapshot"]["product"].as_object().unwrap();
+    assert_eq!(product.get("egaisCode"), Some(&Value::Null));
+}
+
+/// A shift opened by a host before plan ТОВ keeps a snapshot without the
+/// EGAIS code: a re-entry after the update reads it as none.
+#[tokio::test]
+async fn a_snapshot_stored_before_plan_tov_reads_as_no_code() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    sqlx::query(
+        "UPDATE shifts SET snapshot = json_remove(snapshot, '$.product.egaisCode') WHERE id = ?",
+    )
+    .bind(shift["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let stored: String = sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert!(!stored.contains("egaisCode"), "{stored}");
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["snapshot"]["product"]["egaisCode"], Value::Null);
+    assert_eq!(again["snapshot"]["product"]["gtin14"], "04600682000013");
 }

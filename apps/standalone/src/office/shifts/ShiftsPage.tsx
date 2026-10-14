@@ -24,6 +24,7 @@ import {
 
 import type { OfficeShift, ShiftMode, ShiftStatus } from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
@@ -196,12 +197,14 @@ export function ShiftsPage() {
       key: "line",
       title: t("office.shifts.table.line"),
       wrap: true,
+      minWidth: 150,
       render: (shift) => recordLabel("line", lines.data, shift.lineId, t),
     },
     {
       key: "product",
       title: t("office.shifts.table.product"),
       wrap: true,
+      minWidth: 200,
       render: (shift) => (
         <span className="shift-cell">
           <span>{productName(shift)}</span>
@@ -234,6 +237,7 @@ export function ShiftsPage() {
       key: "status",
       title: t("office.shifts.table.status"),
       wrap: true,
+      minWidth: 220,
       render: (shift) => {
         const blocker = openBlocker(shift, products.data, templates.data);
         return (
@@ -243,7 +247,11 @@ export function ShiftsPage() {
               label={t(`office.shifts.statuses.${shift.status}`)}
             />
             {blocker !== null && (
-              <StatusChip phase="attention" wrap label={t(`office.shifts.blockers.${blocker}`)} />
+              // A sentence, not a chip: a long warning in a chip is a tall box in a narrow column.
+              <span className="shift-cell__warn">
+                <span aria-hidden="true">!</span>
+                <span>{t(`office.shifts.blockers.${blocker}`)}</span>
+              </span>
             )}
             {shift.lateDataAt !== null && (
               <StatusChip phase="attention" label={t("office.shifts.lateData")} />
@@ -430,7 +438,6 @@ export function ShiftsPage() {
               })
             : ""
         }
-        {...(filtersOn ? { resetLabel: t("office.shifts.reset"), onReset: resetFilters } : {})}
       >
         <Input
           label={t("office.shifts.search")}
@@ -441,7 +448,6 @@ export function ShiftsPage() {
           }}
         />
         <Select
-          native
           label={t("office.shifts.statusFilter")}
           options={STATUS_FILTERS.map((value) => ({
             value,
@@ -454,7 +460,7 @@ export function ShiftsPage() {
           }}
         />
         <Select
-          native
+          {...searchableSelect(t)}
           label={t("office.shifts.lineFilter")}
           options={[
             { value: "", label: t("office.shifts.allLines") },
@@ -490,6 +496,12 @@ export function ShiftsPage() {
             setPage(1);
           }}
         />
+        {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}
+        {filtersOn && (
+          <Button variant="secondary" onClick={resetFilters}>
+            {t("office.shifts.reset")}
+          </Button>
+        )}
       </FilterBar>
       <p className="office-note" aria-live="polite">
         {period.kind === "partial"

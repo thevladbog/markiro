@@ -138,13 +138,7 @@ pub async fn shift_product(
 /// `validation_failed` on `counterpartyId` unless `id` names a counterparty
 /// that is not archived.
 pub async fn check_counterparty(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
-    let archived: Option<bool> =
-        sqlx::query_scalar("SELECT archived FROM counterparties WHERE id = ?")
-            .bind(id)
-            .fetch_optional(conn)
-            .await
-            .map_err(ApiError::internal)?;
-    if archived == Some(false) {
+    if counterparty_in_use(conn, id).await? {
         Ok(())
     } else {
         Err(ApiError::validation(
@@ -152,6 +146,19 @@ pub async fn check_counterparty(conn: &mut SqliteConnection, id: &str) -> Result
             "no such counterparty in use",
         ))
     }
+}
+
+/// Whether `id` names a counterparty that exists and is not archived; a
+/// failed read is an internal error, never a refusal. A shift's counterparty
+/// and a product's default one (plan ТОВ) follow this rule.
+pub async fn counterparty_in_use(conn: &mut SqliteConnection, id: &str) -> Result<bool, ApiError> {
+    let archived: Option<bool> =
+        sqlx::query_scalar("SELECT archived FROM counterparties WHERE id = ?")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+            .map_err(ApiError::internal)?;
+    Ok(archived == Some(false))
 }
 
 /// `validation_failed` on `boxTemplateId` unless `id` names a box template
@@ -590,16 +597,17 @@ pub async fn snapshot(
         Option<u32>,
         String,
         bool,
+        Option<String>,
     );
     let product: Option<ProductRow> = sqlx::query_as(
-        "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived \
-         FROM products WHERE id = ?",
+        "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived, \
+         egais_code FROM products WHERE id = ?",
     )
     .bind(product_id)
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let (gtin14, name, print_name, group, shelf_life_days, status, archived) =
+    let (gtin14, name, print_name, group, shelf_life_days, status, archived, egais_code) =
         product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
     let group = match (status.parse::<ProductStatus>(), archived, group) {
         (Ok(ProductStatus::Active), false, Some(group)) => group,
@@ -690,6 +698,9 @@ pub async fn snapshot(
             print_name,
             chz_product_group_code: group,
             shelf_life_days,
+            // Frozen with the rest (plan ТОВ): a catalog change never reaches
+            // an open shift, and a reprint prints the first label's code.
+            egais_code,
         },
         box_template,
         issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
@@ -724,6 +735,7 @@ mod tests {
                 print_name: None,
                 chz_product_group_code: 8,
                 shelf_life_days: None,
+                egais_code: None,
             },
             box_template: ShiftSnapshotTemplate {
                 id: "t".to_owned(),

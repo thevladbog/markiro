@@ -165,13 +165,174 @@ export const hostRevisionSchema = z.object({ rev: z.number().int().nonnegative()
 // of their copy); see the note at the top. The policy is plan 5's, and the
 // block sizes' coupling to a fail-closed record is plan 2a's and the owner's.
 
-/** `GET /v1/device`. */
+// --- The site's license (plan ЛЦ-2, `proto/src/license.rs`) ---
+// Answers are lenient like every host response; the state is a word, not an
+// enum, so a state a newer host adds does not fail the page.
+
+/** `state` of a license answer (spec §3.2). */
+export const LICENSE_STATES = [
+  "trial",
+  "active",
+  "expiring",
+  "grace",
+  "restricted",
+  "wrong_host",
+  "inn_mismatch",
+  "trial_expired",
+] as const;
+/** `details.reason` of a refused file, in the host's order of checks (§4.3). */
+export const LICENSE_REFUSALS = [
+  "license_malformed",
+  "license_unknown_key",
+  "license_signature",
+  "license_wrong_host",
+  "license_inn_mismatch",
+  "license_inn_missing",
+  "license_older",
+] as const;
+export const LICENSE_WARNINGS = ["expired", "not_yet_valid", "over_limit"] as const;
+/** `details.constraint` of a `conflict` the license causes. */
+export const LICENSE_CONSTRAINTS = [
+  "license_restricted",
+  "seat_limit",
+  "feature_disabled",
+  "emergency_used",
+  "emergency_not_needed",
+] as const;
+export const LICENSE_QUOTA_KEYS = ["lines", "stations", "kiosks", "cabinetUsers"] as const;
+export const LICENSE_FEATURE_KEYS = [
+  "labelEditor",
+  "publicApi",
+  "pallets",
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
+] as const;
+/**
+ * The most a license file may hold (`verify::MAX_FILE_BYTES`). Zod's `.max()`
+ * counts UTF-16 units, not bytes: the host's 16 KiB byte limit is the one that
+ * decides (a `.mklic` file is ASCII, where the two agree).
+ */
+export const MAX_LICENSE_FILE_BYTES = 16 * 1024;
+
+const quotaUseSchema = z.object({
+  limit: z.number().int().nonnegative().nullable(),
+  used: z.number().int().nonnegative(),
+  over: z.boolean(),
+});
+export const licenseQuotasSchema = z.object({
+  lines: quotaUseSchema,
+  stations: quotaUseSchema,
+  kiosks: quotaUseSchema,
+  cabinetUsers: quotaUseSchema,
+});
+export const licenseFeaturesSchema = z.object({
+  labelEditor: z.boolean(),
+  publicApi: z.boolean(),
+  pallets: z.boolean(),
+  chzIntegration: z.boolean(),
+  inventory: z.boolean(),
+  commerceMl: z.boolean(),
+  handheld: z.boolean(),
+});
+
+/** `GET /v1/office/license`, and the answers of a load and of the emergency extension. */
+export const officeLicenseSchema = z.object({
+  state: z.string(),
+  since: z.iso.datetime(),
+  flags: z.object({
+    clockBehindDays: z.number().int().positive().nullable(),
+    clockAhead: z.boolean(),
+  }),
+  effectiveAt: z.iso.datetime(),
+  phaseEndsAt: z.iso.datetime().nullable(),
+  daysLeft: z.number().int().nonnegative().nullable(),
+  warnDays: z.number().int().nonnegative(),
+  opensNewShifts: z.boolean(),
+  license: z
+    .object({
+      licenseId: z.uuid(),
+      sequence: z.number().int().positive(),
+      kid: z.string(),
+      customer: z.object({ name: z.string(), inn: z.string() }),
+      plan: z.string(),
+      planVersionId: z.string(),
+      issuedAt: z.iso.datetime(),
+      validFrom: z.iso.datetime(),
+      validUntil: z.iso.datetime(),
+      graceDays: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  trial: z
+    .object({
+      startedAt: z.iso.datetime(),
+      endsAt: z.iso.datetime(),
+      inn: z.string().nullable(),
+    })
+    .nullable(),
+  binding: z.object({
+    hostId: z.uuid(),
+    fingerprint: z.string(),
+    orgInn: z.string().nullable(),
+    innMatches: z.boolean().nullable(),
+  }),
+  quotas: licenseQuotasSchema,
+  features: licenseFeaturesSchema,
+  emergency: z.object({ available: z.boolean(), until: z.iso.datetime().nullable() }),
+  warnings: z.array(z.string()).optional(),
+});
+export type OfficeLicense = z.infer<typeof officeLicenseSchema>;
+
+/** One column of the preview's «было → станет». */
+export const licenseTermsSchema = z.object({
+  licenseId: z.uuid().nullable(),
+  sequence: z.number().int().positive().nullable(),
+  plan: z.string(),
+  validFrom: z.iso.datetime().nullable(),
+  validUntil: z.iso.datetime().nullable(),
+  graceDays: z.number().int().nonnegative(),
+  quotas: licenseQuotasSchema,
+  features: licenseFeaturesSchema,
+});
+export type LicenseTerms = z.infer<typeof licenseTermsSchema>;
+
+/** `POST /v1/office/license/preview`. */
+export const licensePreviewSchema = z.object({
+  before: licenseTermsSchema,
+  after: licenseTermsSchema,
+  changes: z.array(z.string()),
+  warnings: z.array(z.string()),
+});
+export type LicensePreview = z.infer<typeof licensePreviewSchema>;
+
+/** The license line of `GET /v1/device`. */
+export const deviceLicenseSchema = z.object({
+  state: z.string(),
+  since: z.iso.datetime(),
+  phaseEndsAt: z.iso.datetime().nullable(),
+  emergencyUntil: z.iso.datetime().nullable(),
+});
+export type DeviceLicense = z.infer<typeof deviceLicenseSchema>;
+
+/** `POST /v1/office/license/preview` and `PUT /v1/office/license` (strict, `licenseLoad`). */
+export const licenseLoadRequestSchema = z
+  .object({ file: z.string().min(1).max(MAX_LICENSE_FILE_BYTES) })
+  .strict();
+export type LicenseLoadRequest = z.infer<typeof licenseLoadRequestSchema>;
+
+/**
+ * `GET /v1/device`; `license` since plan ЛЦ-2. A license line of the wrong
+ * shape reads as none (as `DeviceInfo.license` in proto): it never blocks the
+ * device's own record.
+ */
 export const deviceInfoSchema = z.object({
   id: z.uuid(),
   kind: deviceKindSchema,
   name: z.string(),
   lineId: z.uuid().nullable(),
   pairedAt: z.iso.datetime(),
+  license: deviceLicenseSchema.optional().catch(undefined),
 });
 export type DeviceInfo = z.infer<typeof deviceInfoSchema>;
 
@@ -182,6 +343,14 @@ export const deviceRecordSchema = z.object({
   name: z.string(),
   lineId: z.uuid().nullable(),
   appVersion: z.string(),
+  /**
+   * The protocol the device spoke when it last reported its version, or at
+   * pairing (plan ОБН-1). Optional: a host before ОБН-1 of the same protocol
+   * does not send it.
+   */
+  protocol: z.number().int().positive().optional(),
+  /** When the host first heard the device report its current version; `null` while it has not. */
+  versionSeenAt: z.iso.datetime().nullable().optional(),
   pairedAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime().nullable(),
   revokedAt: z.iso.datetime().nullable(),
@@ -544,12 +713,32 @@ export const productGroupSchema = z.object({
 export type ProductGroup = z.infer<typeof productGroupSchema>;
 
 /**
+ * A product's EGAIS code as the office sends it (plan ТОВ, the cloud's
+ * `egaisCode`): 1 to 64 characters after trimming; only a product of ЧЗ
+ * group 15 carries one (the host's rule). Answers read it as any text, as
+ * every other text of an answer, so a bound counted otherwise never fails
+ * the products list or a shift's snapshot.
+ */
+export const egaisCodeSchema = z.string().min(1).max(64);
+
+/** SHA-256 in lower-case hex. */
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/** Standard base64 with padding (a photo's JPEG, plan ТОВ). */
+const base64Schema = z
+  .string()
+  .min(4)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/u);
+
+/**
  * `GET /v1/office/products`: a product as the office sees it, archived ones
  * included. `gtin14` is the 14 digits the office saved; the two templates are
  * preferences, which the host checks only for their purpose, and so is the
  * A4 sheet its pallets print on (`defaultPalletSheetId`, a sheet of
  * `GET /v1/office/pallet-sheets`, never a label template; absent from a host
- * before it, read as none).
+ * before it, read as none). Plan ТОВ adds the EGAIS code, the default
+ * counterparty and the photo's checksum (`null` without a photo; the bytes
+ * come from `getProductPhoto`), each read as none from an older host.
  */
 export const officeProductSchema = z.object({
   id: z.uuid(),
@@ -563,11 +752,42 @@ export const officeProductSchema = z.object({
   defaultBoxTemplateId: z.uuid().nullable(),
   defaultPalletTemplateId: z.uuid().nullable(),
   defaultPalletSheetId: z.uuid().nullable().default(null),
+  egaisCode: z.string().nullable().default(null),
+  defaultCounterpartyId: z.uuid().nullable().default(null),
+  photoChecksum: sha256HexSchema.nullable().default(null),
   archived: z.boolean(),
   status: productStatusSchema,
   rev: z.number().int(),
 });
 export type OfficeProduct = z.infer<typeof officeProductSchema>;
+
+/**
+ * Mirrors `markiro_proto::ProductPhoto` (plan ТОВ): a JPEG the office made, at
+ * most 640 × 640 and 300 000 bytes, in standard base64; `checksum` is SHA-256
+ * of the bytes.
+ */
+export const productPhotoSchema = z.object({
+  width: z.number().int().min(1).max(640),
+  height: z.number().int().min(1).max(640),
+  dataBase64: base64Schema,
+  checksum: sha256HexSchema,
+  updatedAt: z.string(),
+});
+export type ProductPhoto = z.infer<typeof productPhotoSchema>;
+
+/** Mirrors `markiro_proto::ProductPhotoState`: `GET`/`PUT`/`DELETE /v1/office/products/{id}/photo`. */
+export const productPhotoStateSchema = z.object({ photo: productPhotoSchema.nullable() });
+export type ProductPhotoState = z.infer<typeof productPhotoStateSchema>;
+
+/** Mirrors `markiro_proto::ProductPhotoPut`: the whole photo, replacing any. */
+export const productPhotoPutSchema = z
+  .object({
+    width: z.number().int().min(1).max(640),
+    height: z.number().int().min(1).max(640),
+    dataBase64: base64Schema,
+  })
+  .strict();
+export type ProductPhotoPut = z.infer<typeof productPhotoPutSchema>;
 
 /**
  * `GET /v1/office/templates`: a label template without its layout. The size,
@@ -968,6 +1188,8 @@ export const shiftSnapshotProductSchema = z.object({
   printName: z.string().nullable(),
   chzProductGroupCode: z.number().int().nonnegative(),
   shelfLifeDays: z.number().int().positive().nullable(),
+  /** As the shift froze it (plan ТОВ); a snapshot of an older host has none. */
+  egaisCode: z.string().nullable().optional(),
 });
 
 /**
@@ -1514,6 +1736,8 @@ export const productCreateSchema = z
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
     defaultPalletSheetId: z.uuid().nullable(),
+    egaisCode: egaisCodeSchema.nullable(),
+    defaultCounterpartyId: z.uuid().nullable(),
   })
   .strict();
 export type ProductCreate = z.infer<typeof productCreateSchema>;
@@ -1521,8 +1745,8 @@ export type ProductCreate = z.infer<typeof productCreateSchema>;
 /**
  * `PUT /v1/office/products/{id}`: the whole record with `archived` and the
  * loaded revision, as a counterparty's; `null` clears a field. The office
- * always sends `defaultPalletSheetId` (the host keeps it when an older office
- * leaves it out).
+ * always sends `defaultPalletSheetId`, `egaisCode` and `defaultCounterpartyId`
+ * (the host keeps each when an older office leaves it out).
  */
 export const productUpdateSchema = z
   .object({
@@ -1536,6 +1760,8 @@ export const productUpdateSchema = z
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
     defaultPalletSheetId: z.uuid().nullable(),
+    egaisCode: egaisCodeSchema.nullable(),
+    defaultCounterpartyId: z.uuid().nullable(),
     archived: z.boolean(),
     expectedRev: z.number().int(),
   })
@@ -1685,6 +1911,28 @@ export const shiftExportRecordSchema = z
   })
   .strict();
 export type ShiftExportRecord = z.infer<typeof shiftExportRecordSchema>;
+
+/** `MAJOR.MINOR.PATCH` as `markiro_proto::update::AppVersion` reads it: no leading zeros, nothing around it. */
+export const appVersionSchema = z
+  .string()
+  .regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/)
+  // Each part is a `u32` on the Rust side.
+  .refine((text) => text.split(".").every((part) => Number(part) <= 4_294_967_295));
+
+/**
+ * Mirrors `markiro_proto::update::UpdateStarted`: `POST /v1/office/updates/started`
+ * (plan ОБН-2), the office starts an installer on its PC. No device: the host
+ * takes the session's.
+ */
+export const updateStartedSchema = z
+  .object({
+    from: appVersionSchema,
+    to: appVersionSchema,
+    installerSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    source: z.enum(["file", "host"]),
+  })
+  .strict();
+export type UpdateStarted = z.infer<typeof updateStartedSchema>;
 
 /**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's

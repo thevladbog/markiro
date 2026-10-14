@@ -418,7 +418,7 @@ async fn a_plan_needs_an_active_product_an_active_line_and_a_fitting_template() 
         .await;
     assert_eq!(status, StatusCode::OK, "{archived}");
     let mut archive = archived.clone();
-    for computed in ["id", "status", "rev"] {
+    for computed in ["id", "status", "rev", "photoChecksum"] {
         archive.as_object_mut().unwrap().remove(computed);
     }
     archive["archived"] = json!(true);
@@ -939,7 +939,7 @@ async fn an_edit_checks_a_changed_line_template_or_counterparty_and_keeps_unchan
         .cloned()
         .expect("the product is listed");
     let product_rev = archive["rev"].clone();
-    for computed in ["id", "status", "rev"] {
+    for computed in ["id", "status", "rev", "photoChecksum"] {
         archive.as_object_mut().unwrap().remove(computed);
     }
     archive["archived"] = json!(true);

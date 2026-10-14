@@ -336,6 +336,16 @@ pub async fn create_shift(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_shift_planning_in(&mut tx).await?;
+    // Pallets are a feature of the license (plan ЛЦ-2 Д8): a new plan with
+    // them asks.
+    if create.pallets_enabled {
+        crate::license::seats::require_feature(
+            &state,
+            &mut tx,
+            crate::license::seats::Feature::Pallets,
+        )
+        .await?;
+    }
     let product = shifts::shift_product(&mut tx, &create.product_id).await?;
     require_active_line(&mut tx, &create.line_id).await?;
     if let Some(counterparty_id) = &create.counterparty_id {
@@ -579,6 +589,16 @@ pub async fn update_shift(
         || validation_print != current_print;
     match current.status {
         ShiftStatus::Planned => {
+            // Pallets turned on in a plan ask the license (plan ЛЦ-2 Д8); a
+            // plan that has them keeps them, whatever else its edit changes.
+            if pallets_enabled && !current.pallets_enabled {
+                crate::license::seats::require_feature(
+                    &state,
+                    &mut tx,
+                    crate::license::seats::Feature::Pallets,
+                )
+                .await?;
+            }
             // A changed pallet template is checked; pallets just turned on
             // (the only way to have a template and no capacity yet) take the
             // product's capacity.

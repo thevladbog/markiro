@@ -42,7 +42,8 @@ export function latin1ToBytes(text: string): Uint8Array {
  * snapshot — never from today's catalog: the product, the counterparty and
  * the shift as they were frozen when the shift opened — the box (its SSCC,
  * its count and the time it closed, kept with the box) and the operator who
- * closed it. `egaisCode` is none (no alcohol in stage 2a).
+ * closed it. `egaisCode` is the EGAIS code as the shift froze it (plan ТОВ);
+ * `null` for a product without one or a snapshot of a host before plan ТОВ.
  */
 export function boxLabelData(
   shift: WorkShift,
@@ -56,7 +57,7 @@ export function boxLabelData(
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
-    egaisCode: null,
+    egaisCode: product.egaisCode ?? null,
     shelfLifeDays: product.shelfLifeDays,
     operatorName,
     counterpartyName,
@@ -86,7 +87,7 @@ export function palletLabelData(
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
-    egaisCode: null,
+    egaisCode: product.egaisCode ?? null,
     shelfLifeDays: product.shelfLifeDays,
     operatorName,
     counterpartyName,

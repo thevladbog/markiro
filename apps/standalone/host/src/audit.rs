@@ -13,6 +13,14 @@ pub mod actions {
     pub const HOST_RESTORE: &str = "host.restore";
     /// An administrator resumed the stations' facts a restore held.
     pub const HOST_RESTORE_RESUME: &str = "host.restore.resume";
+    /// The host copied its database before this build's pending migrations
+    /// (plan ОБН-1); `failed` when the copy or the migrations failed. The
+    /// host is the actor, the copy its target.
+    pub const HOST_UPGRADE: &str = "host.upgrade";
+    /// The office started an installer on its PC (plan ОБН-2): the session's
+    /// device is the target, and the row records what the office reported,
+    /// as `shift.export` does.
+    pub const APP_UPDATE_START: &str = "app.update.start";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";
@@ -43,6 +51,10 @@ pub mod actions {
     pub const DEVICE_REVOKE: &str = "device.revoke";
     pub const PRODUCT_CREATE: &str = "product.create";
     pub const PRODUCT_UPDATE: &str = "product.update";
+    /// A product's photo set or replaced, and cleared (plan ТОВ); the
+    /// details name the size, never the bytes.
+    pub const PRODUCT_PHOTO_SET: &str = "product.photo.set";
+    pub const PRODUCT_PHOTO_CLEAR: &str = "product.photo.clear";
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";
@@ -78,6 +90,15 @@ pub mod actions {
     pub const BACKUP_CREATE: &str = "backup.create";
     /// An administrator set or cleared the second folder of copies.
     pub const BACKUP_SETTINGS_UPDATE: &str = "backup.settings.update";
+    /// An administrator loaded a license file (plan ЛЦ-2); `denied` for a
+    /// file the host refused, with its reason: unlike other refused office
+    /// writes, a foreign or forged file is an event for the log.
+    pub const LICENSE_LOAD: &str = "license.load";
+    /// The license state changed (the host is the actor): a phase that ended
+    /// by time, a file, the organization's INN.
+    pub const LICENSE_STATE: &str = "license.state";
+    /// An administrator opened new shifts for 72 hours more (spec §3.5).
+    pub const LICENSE_EMERGENCY: &str = "license.emergency";
 }
 
 /// `details.reason` of a denied row: every denial names one.
@@ -96,6 +117,14 @@ pub mod reasons {
     pub const CODE_USED: &str = "code_used";
     pub const TOO_MANY_ATTEMPTS: &str = "too_many_attempts";
     pub const CODE_EXPIRED: &str = "code_expired";
+    /// A refused license file (plan ЛЦ-2, spec §4.3), as the answer names it.
+    pub const LICENSE_MALFORMED: &str = markiro_proto::license::refusals::MALFORMED;
+    pub const LICENSE_UNKNOWN_KEY: &str = markiro_proto::license::refusals::UNKNOWN_KEY;
+    pub const LICENSE_SIGNATURE: &str = markiro_proto::license::refusals::SIGNATURE;
+    pub const LICENSE_WRONG_HOST: &str = markiro_proto::license::refusals::WRONG_HOST;
+    pub const LICENSE_INN_MISMATCH: &str = markiro_proto::license::refusals::INN_MISMATCH;
+    pub const LICENSE_INN_MISSING: &str = markiro_proto::license::refusals::INN_MISSING;
+    pub const LICENSE_OLDER: &str = markiro_proto::license::refusals::OLDER;
 }
 
 /// `details` of an update row: `changed` names the changed fields in order,

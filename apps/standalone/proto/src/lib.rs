@@ -30,6 +30,10 @@ pub const MIN_PROTOCOL_VERSION: u32 = 1;
 pub const PROTOCOL_HEADER: &str = "x-markiro-protocol";
 /// Request header carrying the office session token.
 pub const OFFICE_SESSION_HEADER: &str = "x-office-session";
+/// Request header carrying the app's own version on every request of the
+/// shell (plan ОБН-1): the host records it on the device
+/// (`devices.app_version`, spec §10.11.7). A host before it ignores it.
+pub const APP_VERSION_HEADER: &str = "x-markiro-app-version";
 /// `product` value the host reports in [`Hello`].
 pub const HOST_PRODUCT: &str = "markiro-host";
 /// Default TCP port of the host (IANA-unassigned range 45679-45823).
@@ -203,7 +207,10 @@ pub mod shift_close_reasons {
 pub mod backup;
 pub mod cloud_import;
 pub mod code_search;
+pub mod license;
 pub mod pairing;
+pub mod trust;
+pub mod update;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
 /// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with
@@ -492,7 +499,10 @@ pub struct PairingCodeRequest {
     pub replaces: Option<String>,
 }
 
-/// `GET /v1/device`.
+/// `GET /v1/device`. `license` (plan ЛЦ-2) is the site's license state as
+/// the host computed it: a host before ЛЦ-2 sends none, and `PUT
+/// /v1/device/line` answers without it. A license line this build cannot
+/// read is `None`: it never blocks the device's own record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
@@ -501,6 +511,12 @@ pub struct DeviceInfo {
     pub name: String,
     pub line_id: Option<String>,
     pub paired_at: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "license::device_license_or_none"
+    )]
+    pub license: Option<license::DeviceLicense>,
 }
 
 /// `PUT /v1/device/line`: a station chooses the line it works on.
@@ -518,7 +534,14 @@ pub struct DeviceRecord {
     pub kind: DeviceKind,
     pub name: String,
     pub line_id: Option<String>,
+    /// The version the device last reported (`APP_VERSION_HEADER`), or the
+    /// one it named when it paired until it reports (plan ОБН-1).
     pub app_version: String,
+    /// The protocol it spoke when it last reported, or at pairing.
+    pub protocol: u32,
+    /// When the host first heard it report its current version and
+    /// protocol; `None` while it has reported nothing since it paired.
+    pub version_seen_at: Option<String>,
     pub paired_at: String,
     pub last_seen_at: Option<String>,
     pub revoked_at: Option<String>,
@@ -948,6 +971,38 @@ pub struct OrgLogoPut {
     pub pixels_base64: String,
 }
 
+/// A product's photo (plan ТОВ): a JPEG the office made, at most 640 × 640
+/// and 300 000 bytes, in standard base64 with padding. The host checks the
+/// sides, the length and the JPEG signature only; it parses no picture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductPhoto {
+    pub width: u32,
+    pub height: u32,
+    pub data_base64: String,
+    /// SHA-256 of the bytes in lower-case hex.
+    pub checksum: String,
+    pub updated_at: String,
+}
+
+/// `GET`, `PUT` and `DELETE /v1/office/products/{id}/photo`: the photo, or
+/// `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductPhotoState {
+    pub photo: Option<ProductPhoto>,
+}
+
+/// `PUT /v1/office/products/{id}/photo` (administrators and technologists):
+/// the whole photo, replacing any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProductPhotoPut {
+    pub width: u32,
+    pub height: u32,
+    pub data_base64: String,
+}
+
 /// An A4 pallet sheet (plan А4; the cloud's `PalletSheetSpecV2`, #702). The
 /// host keeps `spec` an object of `schemaVersion` 2 and `kind`
 /// "pallet_sheet" of at most 64 KiB; the domain checks the layout. A stock
@@ -1358,6 +1413,18 @@ pub struct OfficeProduct {
     /// preference, as the two templates; not in the station feed.
     #[serde(default)]
     pub default_pallet_sheet_id: Option<String>,
+    /// The EGAIS code the labels print (plan ТОВ, the cloud's
+    /// `products.egais_code`): only a product of ЧЗ group 15 has one.
+    #[serde(default)]
+    pub egais_code: Option<String>,
+    /// The counterparty the office's shift dialog offers for the product
+    /// (plan ТОВ); one archived later stays named here.
+    #[serde(default)]
+    pub default_counterparty_id: Option<String>,
+    /// SHA-256 of the photo's bytes in lower-case hex, `null` without a photo
+    /// (the bytes come from `GET /v1/office/products/{id}/photo`).
+    #[serde(default)]
+    pub photo_checksum: Option<String>,
     pub archived: bool,
     pub status: ProductStatus,
     pub rev: i64,
@@ -1387,13 +1454,21 @@ pub struct ProductCreate {
     /// An A4 sheet (`pallet_sheet_templates`), never a label template.
     #[serde(default)]
     pub default_pallet_sheet_id: Option<String>,
+    /// The EGAIS code (plan ТОВ): only with ЧЗ group 15.
+    #[serde(default)]
+    pub egais_code: Option<String>,
+    /// A counterparty in use (plan ТОВ).
+    #[serde(default)]
+    pub default_counterparty_id: Option<String>,
 }
 
 /// `PUT /v1/office/products/{id}`: every field, like a counterparty, so an
 /// optional field left out or `null` is cleared (a missing `gtin14`, `name`,
 /// `archived` or `expectedRev` is refused); `archived: true` archives. The
-/// one exception is `defaultPalletSheetId`, newer than the rest: left out it
-/// is kept, so an office from before it never clears a product's sheet.
+/// exceptions are the fields newer than the rest — `defaultPalletSheetId`,
+/// `egaisCode` and `defaultCounterpartyId` (plan ТОВ): left out they are
+/// kept, so an office from before them never clears a product's sheet, its
+/// EGAIS code or its counterparty.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductUpdate {
@@ -1415,6 +1490,10 @@ pub struct ProductUpdate {
     pub default_pallet_template_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
     pub default_pallet_sheet_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub egais_code: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub default_counterparty_id: Option<Option<String>>,
     pub archived: bool,
     pub expected_rev: i64,
 }
@@ -2010,6 +2089,10 @@ pub struct ShiftSnapshotProduct {
     pub print_name: Option<String>,
     pub chz_product_group_code: u32,
     pub shelf_life_days: Option<u32>,
+    /// The product's EGAIS code as the shift froze it (plan ТОВ): only a
+    /// product of ЧЗ group 15 has one. Left out by a host before plan ТОВ.
+    #[serde(default)]
+    pub egais_code: Option<String>,
 }
 
 /// A label template as a shift froze it (its box template, its pallet

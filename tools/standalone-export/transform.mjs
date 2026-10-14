@@ -18,7 +18,24 @@ import { decodeCanonical, hashBadge, isBadgePhcUnder, parsePhc } from "./phc.mjs
 import { BOX_WINDOW, PALLET_WINDOW, planShiftNumberCounters, planSsccCounters } from "./sscc.mjs";
 
 export const FILE_FORMAT = "markiro-cloud-export";
-export const FILE_FORMAT_VERSION = 1;
+export const FILE_FORMAT_VERSION = 2;
+
+/**
+ * The raw output versions this tool reads: 1, an older `export.sql` that
+ * named a product's EGAIS code and default counterparty only as lost fields,
+ * and 2, which carries both (plan ТОВ).
+ */
+export const RAW_FORMAT_VERSIONS = [1, 2];
+
+/**
+ * The ЧЗ product group whose products carry an EGAIS code: the domain's
+ * `EGAIS_PRODUCT_GROUP_CODE` (`packages/domain/src/product-attributes/egais.ts`)
+ * and the host's rule; the tool does not depend on `@markiro/domain`.
+ */
+export const EGAIS_PRODUCT_GROUP_CODE = 15;
+
+/** The longest EGAIS code, the host's and the cloud's bound. */
+const MAX_EGAIS_CODE = 64;
 export const TOOL = "standalone-export/1";
 
 /** The host's bounds (`apps/standalone/host/src/validate.rs`). */
@@ -161,8 +178,11 @@ function assertRawShape(raw) {
       throw new ExportError("export_output_invalid", `the export output has no count "${key}"`);
     }
   }
-  if (raw.formatVersion !== 1) {
-    throw new ExportError("export_output_invalid", "the export output is not format version 1");
+  if (!RAW_FORMAT_VERSIONS.includes(raw.formatVersion)) {
+    throw new ExportError(
+      "export_output_invalid",
+      "the export output is not format version 1 or 2",
+    );
   }
 }
 
@@ -280,6 +300,8 @@ export function buildExportFile(raw, options) {
     );
     counterparties.push({ id: each.id, name, inn, gln: cpGln, gs1Prefixes });
   }
+  // A product's default counterparty must be one the file keeps (plan ТОВ).
+  const keptCounterpartyIds = new Set(counterparties.map((each) => each.id));
   if (counterpartyNotes > 0) note({ code: "counterparty_notes_lost", count: counterpartyNotes });
 
   // Templates. An A4 pallet sheet is no thermal label: imported as one, a
@@ -403,6 +425,31 @@ export function buildExportFile(raw, options) {
           templateId: each.defaultLabelTemplateId,
         });
     }
+    // The EGAIS code (plan ТОВ): free text the host keeps only for ЧЗ group
+    // 15; another group's, or a blank one, is cleared with a note. A raw
+    // output of format 1 has none (it named the code as lost).
+    // An identifier is never changed: a code with a control character, or
+    // longer than the host's bound, is cleared (a code cut or with a space
+    // for a control character would print another code), as is a blank one;
+    // only the blanks around it go.
+    const egais = each.egaisCode ?? null;
+    let egaisCode = null;
+    if (egais !== null) {
+      const text = egais.trim();
+      if (each.chzProductGroupCode !== EGAIS_PRODUCT_GROUP_CODE) {
+        note({ code: "product_value_cleared", id: each.id, field: "egaisCode", reason: "group" });
+      } else if (text === "" || /\p{Cc}/u.test(text) || Array.from(text).length > MAX_EGAIS_CODE) {
+        note({ code: "product_value_cleared", id: each.id, field: "egaisCode" });
+      } else {
+        egaisCode = text;
+      }
+    }
+    const counterpartyId = each.defaultCounterpartyId ?? null;
+    const defaultCounterpartyId =
+      counterpartyId !== null && keptCounterpartyIds.has(counterpartyId) ? counterpartyId : null;
+    if (counterpartyId !== null && defaultCounterpartyId === null) {
+      note({ code: "product_value_cleared", id: each.id, field: "defaultCounterpartyId" });
+    }
     products.push({
       id: each.id,
       gtin14: each.gtin14,
@@ -414,6 +461,8 @@ export function buildExportFile(raw, options) {
       shelfLifeDays: bounded("shelfLifeDays", MAX_SHELF_LIFE_DAYS),
       defaultBoxTemplateId,
       defaultPalletTemplateId,
+      egaisCode,
+      defaultCounterpartyId,
       archived: each.archived,
     });
   }
