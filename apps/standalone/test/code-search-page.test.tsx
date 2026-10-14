@@ -142,8 +142,13 @@ describe("«Поиск кодов» in the office", () => {
       .getAllByRole("columnheader")
       .findIndex((cell) => cell.textContent === "Короб");
     for (const row of rows) {
-      expect(within(row).getAllByRole("cell")[boxColumn]?.textContent).toBe("—");
+      const boxCell = within(row).getAllByRole("cell")[boxColumn];
+      expect(boxCell?.textContent).toBe("—");
+      // No box, no card to open (plan КРТ links a box by its id): a link would be dead.
+      expect(boxCell?.querySelector("a")).toBeNull();
     }
+    // Nor does the «Сейчас» line of the card link to a box that is not there.
+    expect(document.querySelector('a[href^="/codes/box/"]')).toBeNull();
     expect(rows[0]?.textContent).toContain("Забран другим сканом");
     expect(rows[1]?.textContent).toContain("Принят без короба");
     const history = screen.getByRole("heading", { name: "История" }).parentElement;

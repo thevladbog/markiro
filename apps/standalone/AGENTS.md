@@ -3755,7 +3755,9 @@ map, «Unit labels», below.
   round, and the earliest scan owns it (`code_owners.box_id` NULL for a
   validation owner, no `box_items` row). The office's code search shows such
   a placement as «Принят без короба» (`checked`, `OfficeCodeItem.boxId`
-  null; `routes/office_codes.rs`, `office-code-card-validation.json`).
+  null; `routes/office_codes.rs`, `office-code-card-validation.json`). Its
+  box cell is «—» without a link (`BoxText`): the box and pallet cards (plan
+  КРТ) are opened by an id a box-less scan does not have.
 - A validation shift has no exceptions (Р9): no box or pallet facts, their
   labels included (`facts::admits`, `invalid_record` on `shift_mode`), no
   «Исключения» on the station, no SSCC blocks. One that prints the duplicate

@@ -66,6 +66,22 @@ export function boxLabel(item: OfficeCodeItem, t: TFunction): string {
     : t("office.codeSearch.disassembled", { what: sscc });
 }
 
+/**
+ * A scan's box: a link to the box's card, or just «—» for a validation shift's scan, which has
+ * no box and so no card to open (a link built from its null id would be dead).
+ */
+function BoxText({ item }: { item: OfficeCodeItem }) {
+  const { t } = useTranslation();
+  const label = boxLabel(item, t);
+  return item.boxId === null ? (
+    <>{label}</>
+  ) : (
+    <PackTextLink kind="box" id={item.boxId}>
+      {label}
+    </PackTextLink>
+  );
+}
+
 export function palletLabel(item: OfficeCodeItem, t: TFunction): string {
   if (item.palletId === null) return t("office.common.none");
   const sscc =
@@ -180,9 +196,7 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
       title: t("office.codeSearch.table.box"),
       mono: true,
       render: (item) => (
-        <PackTextLink kind="box" id={item.boxId}>
-          {boxLabel(item, t)}
-        </PackTextLink>
+        <BoxText item={item} />
       ),
     },
     {
@@ -243,9 +257,7 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
                 <span className="shift-cell">
                   <PlacementChip state={owner.state} />
                   <span className="shift-cell__quiet">
-                    <PackTextLink kind="box" id={owner.boxId}>
-                      {boxLabel(owner, t)}
-                    </PackTextLink>
+                    <BoxText item={owner} />
                   </span>
                 </span>
               ),
