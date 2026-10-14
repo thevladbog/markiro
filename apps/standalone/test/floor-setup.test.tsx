@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { sampleLabelData } from "@markiro/domain";
@@ -25,6 +25,7 @@ import {
 import { playSignalTone } from "../src/floor/work/signal-sound.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { fakeHardware } from "./support/hardware.js";
+import { choicesOf, setField, shownInList, usbListed } from "./support/floor-fields.js";
 import { openLocalDb } from "./support/local-db.js";
 import {
   closeBoxWithLabel,
@@ -113,7 +114,7 @@ const realRender: RenderLabel = (spec, fields, printer) =>
   renderLabel(spec, fields, printer, fakeRaster);
 
 function type(label: string, value: string): void {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  setField(label, value);
 }
 
 function click(name: string): void {
@@ -185,12 +186,7 @@ describe("the workstation setup", () => {
     type("Адрес принтера", "192.168.1.50");
     click("Готово");
     expect(screen.getByText("Сеть: 192.168.1.50:9100 · ZPL · 203 dpi")).toBeTruthy();
-    const box = screen.getByLabelText("Этикетка короба");
-    fireEvent.change(box, {
-      target: {
-        value: within(box).getByRole("option", { name: "Zebra у линии" }).getAttribute("value"),
-      },
-    });
+    setField("Этикетка короба", "Zebra у линии");
     expect((await readWorkstationSettings(local)).printers).toEqual([]);
     expect(screen.getByRole("button", { name: "Назад без сохранения" })).toBeTruthy();
     await act(async () => {
@@ -235,7 +231,7 @@ describe("the workstation setup", () => {
     });
     await setup({ local });
     click("Изменить принтер «TSC на COM4»");
-    fireEvent.change(screen.getByLabelText("Разрешение"), { target: { value: "203" } });
+    setField("Разрешение", "203");
     click("Готово");
     expect(screen.getByText("COM4, 9600 бод · TSPL · 203 dpi")).toBeTruthy();
     click("Удалить принтер «Zebra у линии»");
@@ -259,8 +255,8 @@ describe("the workstation setup", () => {
     await setup({ shell });
     click("Добавить принтер");
     type("Название", "Zebra USB");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
-    await screen.findByRole("option", { name: "ZDesigner GK420d" });
+    setField("Подключение", "usb");
+    await usbListed();
     type("Принтер Windows", "ZDesigner GK420d");
     click("Обновить список принтеров");
     expect(await screen.findByText("Служба печати Windows не ответила.")).toBeTruthy();
@@ -502,7 +498,7 @@ describe("what a change of the purposes leaves alone", () => {
     expect(job.printer?.id).toBe("zebra");
     const before = jobRows(station.db);
     await setup({ local: station.local });
-    fireEvent.change(screen.getByLabelText("Этикетка короба"), { target: { value: "tsc" } });
+    setField("Этикетка короба", "tsc");
     await act(async () => {
       click("Сохранить");
     });
@@ -546,7 +542,7 @@ describe("what the screen says to a reader of it", () => {
     // `role="presentation"`: inside a polite region an alert would be read twice.
     expect(sent.closest("[role]")?.getAttribute("role")).toBe("presentation");
     expect(sent.closest('[role="alert"]')).toBeNull();
-    fireEvent.change(screen.getByLabelText("Этикетка паллеты"), { target: { value: "tsc" } });
+    setField("Этикетка паллеты", "tsc");
     await act(async () => {
       click("Сохранить");
     });
@@ -571,10 +567,12 @@ describe("what the screen says to a reader of it", () => {
     for (const button of screen.getAllByRole("button")) {
       expect(button.className).toContain("mk-btn--floor");
     }
-    const selects = [...document.querySelectorAll("select")];
-    expect(selects.length).toBeGreaterThan(0);
-    for (const select of selects) {
-      expect(select.style.height).toBe("var(--control-floor)");
+    // The product's own lists, never the browser's <select>, and as tall as the floor's controls.
+    expect(document.querySelectorAll("select")).toHaveLength(0);
+    const lists = [...document.querySelectorAll<HTMLElement>('button[role="combobox"]')];
+    expect(lists.length).toBeGreaterThan(0);
+    for (const list of lists) {
+      expect(list.style.height).toBe("var(--control-floor)");
     }
   });
 });
@@ -623,12 +621,12 @@ describe("saving", () => {
     const local = openLocalDb().executor;
     await setUpPrinting(local);
     await setup({ local });
-    fireEvent.change(screen.getByLabelText("Этикетка паллеты"), { target: { value: "tsc" } });
+    setField("Этикетка паллеты", "tsc");
     await act(async () => {
       click("Сохранить");
     });
     await screen.findByText("Настройки сохранены.");
-    fireEvent.change(screen.getByLabelText("Дубль кода"), { target: { value: "tsc" } });
+    setField("Дубль кода", "tsc");
     expect(screen.queryByText("Настройки сохранены.")).toBeNull();
     expect(screen.getByRole("button", { name: "Назад без сохранения" })).toBeTruthy();
   });
@@ -698,20 +696,19 @@ describe("the list of Windows printers", () => {
       .mockReturnValueOnce(second.promise);
     await setup({ shell });
     click("Добавить принтер");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    setField("Подключение", "usb");
     expect(screen.getByText("Спрашиваем у Windows список принтеров…")).toBeTruthy();
     click("Обновить список принтеров");
     await act(async () => {
       second.resolve([{ name: "Новый", port: "USB002" }]);
     });
-    await screen.findByRole("option", { name: "Новый" });
+    await usbListed();
     expect(screen.queryByText("Спрашиваем у Windows список принтеров…")).toBeNull();
     // The first, slower answer is stale: it must not replace the newer list.
     await act(async () => {
       first.resolve([{ name: "Старый", port: "USB001" }]);
     });
-    expect(screen.queryByRole("option", { name: "Старый" })).toBeNull();
-    expect(screen.getByRole("option", { name: "Новый" })).toBeTruthy();
+    expect(choicesOf("Принтер Windows")).toEqual(["Выберите принтер", "Новый"]);
   });
 
   it("does not let an old failure undo a newer list", async () => {
@@ -723,17 +720,17 @@ describe("the list of Windows printers", () => {
       .mockReturnValueOnce(second.promise);
     await setup({ shell });
     click("Добавить принтер");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    setField("Подключение", "usb");
     click("Обновить список принтеров");
     await act(async () => {
       second.resolve([{ name: "Новый", port: "USB002" }]);
     });
-    await screen.findByRole("option", { name: "Новый" });
+    await usbListed();
     await act(async () => {
       first.reject(new Error("spooler_unavailable"));
     });
     expect(screen.queryByText("Служба печати Windows не ответила.")).toBeNull();
-    expect(screen.getByRole("option", { name: "Новый" })).toBeTruthy();
+    expect(choicesOf("Принтер Windows")).toContain("Новый");
   });
 
   it("keeps the printer that was chosen when the spooler stops answering, and says so", async () => {
@@ -742,7 +739,7 @@ describe("the list of Windows printers", () => {
     await setup({ shell });
     click("Добавить принтер");
     type("Название", "Zebra USB");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    setField("Подключение", "usb");
     expect(await screen.findByText("Служба печати Windows не ответила.")).toBeTruthy();
     expect(screen.queryByText("Спрашиваем у Windows список принтеров…")).toBeNull();
     click("Готово");
@@ -753,7 +750,7 @@ describe("the list of Windows printers", () => {
     const shell = fakeHardware();
     await setup({ shell });
     click("Добавить принтер");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    setField("Подключение", "usb");
     expect(await screen.findByText("Принтеров Windows не найдено.")).toBeTruthy();
   });
 });
@@ -815,9 +812,9 @@ describe("the scanners, the sound and the label check of the setup", () => {
       .mockResolvedValueOnce(["COM3", "COM4"])
       .mockRejectedValueOnce(new Error("serial_unavailable"));
     await setup({ shell, tab: "Сканер" });
-    click("Показать COM-порты");
+    // The screen asks once by itself when the tab opens.
     expect(await screen.findByText("COM-порты этого компьютера: COM3, COM4.")).toBeTruthy();
-    click("Показать COM-порты");
+    click("Обновить список портов");
     expect(await screen.findByText("Список COM-портов не прочитался.")).toBeTruthy();
   });
 
@@ -915,7 +912,7 @@ describe("a COM port is one thing's at a time", () => {
     tab("Принтеры");
     click("Добавить принтер");
     type("Название", "Второй TSC");
-    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "serial" } });
+    setField("Подключение", "serial");
     type("COM-порт", "com3");
     click("Готово");
     expect(
@@ -1202,10 +1199,10 @@ describe("the list of COM ports", () => {
     vi.mocked(shell.hardware.listSerialPorts)
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
+    // The first ask is the screen's own, as the tab opens; the second is the button's.
     await setup({ shell, tab: "Сканер" });
-    click("Показать COM-порты");
     expect(screen.getByText("Спрашиваем у системы список COM-портов…")).toBeTruthy();
-    click("Показать COM-порты");
+    click("Обновить список портов");
     await act(async () => {
       second.resolve(["COM8"]);
     });
@@ -1225,8 +1222,7 @@ describe("the list of COM ports", () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
     await setup({ shell, tab: "Сканер" });
-    click("Показать COM-порты");
-    click("Показать COM-порты");
+    click("Обновить список портов");
     await act(async () => {
       second.resolve([]);
     });
@@ -1387,7 +1383,7 @@ describe("what the scanners, the sound and the check say to a reader of them", (
     expect(empty.closest('[aria-live="polite"]')).not.toBeNull();
     expect(empty.closest('[role="alert"]')).toBeNull();
     expect(empty.closest("[role]")?.getAttribute("role")).toBe("presentation");
-    click("Показать COM-порты");
+    click("Обновить список портов");
     const ports = await screen.findByText("COM-порты этого компьютера: COM3.");
     expect(ports.closest('[aria-live="polite"]')).not.toBeNull();
     type("COM-порт сканера", "COM3");
@@ -1504,8 +1500,7 @@ describe("the setup's fields and the keyboard wedge", () => {
       { label: "Порт" },
       {
         label: "COM-порт",
-        open: () =>
-          fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "serial" } }),
+        open: () => setField("Подключение", "serial"),
       },
       { label: "Скорость, бод" },
     ];
@@ -1625,5 +1620,133 @@ describe("the setup's tabs (the cloud station's layout)", () => {
     const stored = await readWorkstationSettings(local);
     expect(stored.scanners).toEqual([{ port: "COM3", baud: 9600 }]);
     expect(stored.sound).toEqual({ muted: false, volume: 70 });
+  });
+});
+
+describe("the COM port is chosen from the computer's ports (owner feedback, beta 3)", () => {
+  it("lists the ports in the product's searchable list, picks one and adds the scanner", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM3", "COM7"]);
+    const { local } = await setup({ shell, tab: "Сканер" });
+    await screen.findByText("COM-порты этого компьютера: COM3, COM7.");
+    expect(document.querySelectorAll("select")).toHaveLength(0);
+    expect(choicesOf("COM-порт сканера")).toEqual([
+      "Выберите порт",
+      "COM3",
+      "COM7",
+      "Ввести вручную…",
+    ]);
+    setField("COM-порт сканера", "COM7");
+    expect(shownInList("COM-порт сканера")).toBe("COM7");
+    click("Добавить сканер");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM7", baud: 9600 }]);
+  });
+
+  it("types the port by hand when it is not on the list, and when the list is empty", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM3"]);
+    await setup({ shell, tab: "Сканер" });
+    await screen.findByText("COM-порты этого компьютера: COM3.");
+    setField("COM-порт сканера", "Ввести вручную…");
+    type("Название порта", "COM12");
+    click("Добавить сканер");
+    expect(screen.getByText("COM12, 9600 бод")).toBeTruthy();
+    cleanup();
+
+    const empty = fakeHardware();
+    await setup({ shell: empty, tab: "Сканер" });
+    await screen.findByText("COM-портов не найдено.");
+    // Nothing to choose from: the field is the text field, under the name it always had.
+    type("COM-порт сканера", "COM5");
+    click("Добавить сканер");
+    expect(screen.getByText("COM5, 9600 бод")).toBeTruthy();
+  });
+
+  it("lists the ports for a serial printer too", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM4"]);
+    await setup({ shell });
+    click("Добавить принтер");
+    setField("Подключение", "serial");
+    await waitFor(() => expect(choicesOf("COM-порт")).toContain("COM4"));
+  });
+});
+
+describe("a new printer's name (owner feedback, beta 3)", () => {
+  it("is «Принтер N» with the next free number, and stays editable", async () => {
+    const { local } = await setup();
+    click("Добавить принтер");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Принтер 1");
+    type("Адрес принтера", "10.0.0.1");
+    click("Готово");
+    click("Добавить принтер");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Принтер 2");
+    type("Название", "Склад");
+    type("Адрес принтера", "10.0.0.2");
+    click("Готово");
+    click("Добавить принтер");
+    // «Принтер 2» was renamed away: the number is free again.
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Принтер 2");
+    click("Отмена");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect((await readWorkstationSettings(local)).printers.map((p) => p.name)).toEqual([
+      "Принтер 1",
+      "Склад",
+    ]);
+  });
+
+  it("takes the Windows printer's name when it is chosen from the list, until a name is typed", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listUsbPrinters).mockResolvedValue([
+      { name: "Godex G500", port: "USB001" },
+      { name: "HP LaserJet", port: "USB002" },
+    ]);
+    await setup({ shell });
+    click("Добавить принтер");
+    setField("Подключение", "usb");
+    await usbListed();
+    setField("Принтер Windows", "Godex G500");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Godex G500");
+    setField("Принтер Windows", "HP LaserJet");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("HP LaserJet");
+    type("Название", "Принтер у весов");
+    setField("Принтер Windows", "Godex G500");
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Принтер у весов");
+  });
+});
+
+describe("«Проверить сканер» on the scanner tab", () => {
+  it("is under «Сканер» and judges its scans there only", async () => {
+    const { scanner } = await setup({ tab: "Сканер" });
+    expect(screen.getByRole("heading", { name: "Проверить сканер" })).toBeTruthy();
+    const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
+    await scanner.read(code);
+    expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
+    tab("Принтеры");
+    await scanner.read("not-for-the-self-test");
+    tab("Сканер");
+    expect(screen.getByTestId("self-test-history").children).toHaveLength(1);
+  });
+
+  it("prints the test DataMatrix on a label printer through the label model (GS1 framed), marked TEST", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const { shell } = await setup({ local, render: realRender, tab: "Сканер" });
+    await act(async () => {
+      click("Печать");
+    });
+    await screen.findByText("Тестовый код отправлен на печать.");
+    const text = shell.sends[0]?.text ?? "";
+    // The printer's own DataMatrix with FNC1 first and real separators (`_1D`) between the AIs.
+    expect(text).toMatch(/\^BXN[^\n]*\^FD_1010299999999999\d21TEST[0-9A-Z]+_1D91TEST_1D92TEST/);
+    expect(text).toContain("^FDTEST^FS");
+    expect(text).not.toContain(sampleLabelData()["km.code"]);
   });
 });

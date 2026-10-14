@@ -26,6 +26,7 @@ import {
   type PrinterProfile,
 } from "../src/floor/setup/workstation-settings.js";
 import { fakeHardware } from "./support/hardware.js";
+import { choicesOf, setField, usbListed } from "./support/floor-fields.js";
 import { openLocalDb } from "./support/local-db.js";
 import { km } from "./support/floor-work.js";
 import { FIRST_SSCC, fakeRender, printStation, setUpPrinting, ZEBRA } from "./support/printing.js";
@@ -61,7 +62,7 @@ const source: ScanSource = {
 };
 
 function type(label: string, value: string): void {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  setField(label, value);
 }
 
 describe("the workstation setup's way of printing", () => {
@@ -91,11 +92,11 @@ describe("the workstation setup's way of printing", () => {
     // Not offered for the network.
     expect(screen.queryByLabelText("Способ печати")).toBeNull();
     type("Подключение", "usb");
-    await screen.findByRole("option", { name: "Godex G500" });
+    await usbListed();
     type("Принтер Windows", "Godex G500");
-    const mode = await screen.findByLabelText("Способ печати");
+    await screen.findByLabelText("Способ печати");
     expect(screen.getByLabelText("Язык принтера")).toBeTruthy();
-    fireEvent.change(mode, { target: { value: "windows_driver" } });
+    setField("Способ печати", "windows_driver");
     expect(screen.queryByLabelText("Язык принтера")).toBeNull();
     expect(screen.getByText(/Размер бумаги и разрешение в драйвере/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
@@ -131,7 +132,7 @@ describe("the workstation setup's way of printing", () => {
     await screen.findByRole("heading", { name: "Принтеры" });
     fireEvent.click(screen.getByRole("button", { name: "Добавить принтер" }));
     type("Подключение", "usb");
-    await screen.findByRole("option", { name: "Godex G500" });
+    await usbListed();
     expect(screen.queryByLabelText("Способ печати")).toBeNull();
   });
 });
@@ -476,12 +477,10 @@ describe("the workstation setup's driver controls", () => {
     type("Подключение", "usb");
     // The shell's answer arrives after the form opened: wait for it.
     expect(await screen.findByLabelText("Способ печати")).toBeTruthy();
-    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    const options = choicesOf("Способ печати");
     expect(options).toContain("На языке принтера (ZPL / TSPL)");
     expect(options).toContain("Через драйвер Windows");
-    fireEvent.change(screen.getByLabelText("Способ печати"), {
-      target: { value: "windows_driver" },
-    });
+    setField("Способ печати", "windows_driver");
     expect(screen.queryByLabelText("Язык принтера")).toBeNull();
     // The way of printing is a Windows queue's: a COM port keeps its language, and no driver hint.
     type("Подключение", "serial");
@@ -503,9 +502,9 @@ describe("the workstation setup's driver controls", () => {
       await screen.findByRole("button", { name: "Изменить принтер «Godex через драйвер»" }),
     );
     const mode = await screen.findByLabelText("Способ печати");
-    expect((mode as HTMLSelectElement).value).toBe("windows_driver");
+    expect(mode.textContent).toBe("Через драйвер Windows");
     expect(screen.queryByLabelText("Язык принтера")).toBeNull();
-    fireEvent.change(mode, { target: { value: "raw" } });
+    setField("Способ печати", "raw");
     expect(screen.getByLabelText("Язык принтера")).toBeTruthy();
     expect(screen.queryByText(/Размер бумаги и разрешение в драйвере/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
@@ -537,7 +536,7 @@ describe("the workstation setup's driver controls", () => {
     await screen.findByRole("heading", { name: "Принтеры" });
     fireEvent.click(screen.getByRole("button", { name: "Добавить принтер" }));
     type("Подключение", "usb");
-    await screen.findByRole("option", { name: "Godex G500" });
+    await usbListed();
     expect(screen.queryByLabelText("Способ печати")).toBeNull();
     // And a runtime of the shell that can print through Windows is asked, too.
     view.rerenderWith(createPrintRuntime(shell.hardware.printBytes, { windows: windows(true) }));

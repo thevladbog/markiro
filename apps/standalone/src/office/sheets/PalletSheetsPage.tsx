@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { shiftCardPath } from "../shifts/shift-card.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -85,7 +86,7 @@ function FailureAlert({ failure }: { failure: Failure | null }) {
         <ul>
           {ids.slice(0, SHIFTS_LISTED).map((id) => (
             <li key={id}>
-              <Link to={`/shifts/${id}`}>
+              <Link to={shiftCardPath(id)}>
                 {t("office.palletSheets.errors.shiftLink", { id: id.slice(0, 8) })}
               </Link>
             </li>

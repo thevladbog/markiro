@@ -81,3 +81,14 @@ export function endsWithTail(sscc: string | null, tail: string): boolean {
 export function ssccText(sscc: string): string {
   return `(00)${sscc}`;
 }
+
+/**
+ * Where a shift's card is: the drawer over «Смены», named by `?shift=`. `tab` opens a section
+ * and `box` filters the boxes by an SSCC tail (a conflict's older link).
+ */
+export function shiftCardPath(id: string, options: { tab?: string; box?: string } = {}): string {
+  const params = new URLSearchParams({ shift: id });
+  if (options.tab !== undefined) params.set("tab", options.tab);
+  if (options.box !== undefined) params.set("box", options.box);
+  return `/shifts?${params.toString()}`;
+}

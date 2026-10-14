@@ -56,12 +56,42 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("asks a new product to be saved first, and reads nothing", () => {
+  it("lets a new product's photo be picked at once, keeps it staged and writes nothing yet", async () => {
     const fake = session();
-    show(fake, null, vi.fn<PhotoEncoder>());
-    expect(screen.getByText("Фото можно добавить после сохранения товара")).toBeTruthy();
-    expect(screen.queryByTestId("file-drop-input")).toBeNull();
+    const encode = vi.fn<PhotoEncoder>(async () => ENCODED);
+    const onStage = vi.fn();
+    const queryClient = createOfficeQueryClient();
+    const view = (staged: typeof ENCODED | null) => (
+      <QueryClientProvider client={queryClient}>
+        <OfficeSessionProvider value={fake}>
+          <ProductPhotoField
+            productId={null}
+            productName={NAME}
+            encode={encode}
+            staged={staged}
+            onStage={onStage}
+          />
+        </OfficeSessionProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(view(null));
+    expect(screen.getByText("Фото не загружено")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Загрузить фото/u })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ (JPEG).",
+      ),
+    ).toBeTruthy();
+    pick(JPEG);
+    await waitFor(() => expect(onStage).toHaveBeenCalledWith(ENCODED));
+    rerender(view(ENCODED));
+    expect(screen.getByRole("img", { name: `Фото товара ${NAME}` })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Заменить фото/u })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить фото" }));
+    expect(onStage).toHaveBeenLastCalledWith(null);
+    // Nothing is read or written for a product that does not exist yet.
     expect(fake.api.getProductPhoto).not.toHaveBeenCalled();
+    expect(fake.api.putProductPhoto).not.toHaveBeenCalled();
   });
 
   it("encodes a picked picture, writes it at once and shows it by the product's name", async () => {
@@ -69,11 +99,16 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     fake.api.putProductPhoto.mockResolvedValue({ photo: PHOTO });
     const encode = vi.fn<PhotoEncoder>(async () => ENCODED);
     const queryClient = show(fake, PRODUCT_ID, encode);
-    const choose = await screen.findByRole("button", { name: /Выбрать фото/u });
+    const choose = await screen.findByRole("button", { name: /Загрузить фото/u });
     expect(choose.tabIndex).toBe(0);
     expect(
       screen.getByText(
-        "JPEG, PNG или WebP. Фото уменьшается до 640 точек по большей стороне, сохраняется сразу, без кнопки «Сохранить», и печатается на бланке смены.",
+        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ (JPEG).",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Фото сохраняется сразу, без кнопки «Сохранить», и печатается на бланке смены.",
       ),
     ).toBeTruthy();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -88,7 +123,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     );
     // The list's `photoChecksum` changes with it.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: officeKeys.products, exact: true });
-    expect(screen.getByRole("button", { name: /Заменить/u })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Заменить фото/u })).toBeTruthy();
   });
 
   it("writes only the latest picked picture when an earlier encode ends later", async () => {
@@ -106,7 +141,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
       )
       .mockImplementationOnce(async () => second);
     show(fake, PRODUCT_ID, encode);
-    await screen.findByRole("button", { name: /Выбрать фото/u });
+    await screen.findByRole("button", { name: /Загрузить фото/u });
     pick(JPEG);
     pick(JPEG);
     await waitFor(() => expect(fake.api.putProductPhoto).toHaveBeenCalledTimes(1));
@@ -121,7 +156,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
 
   it("names its section by its heading", async () => {
     show(session(), PRODUCT_ID, vi.fn<PhotoEncoder>());
-    expect(await screen.findByRole("region", { name: "Фото" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Фото товара" })).toBeTruthy();
   });
 
   it("removes the photo and offers to choose one again", async () => {
@@ -130,7 +165,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     show(fake, PRODUCT_ID, vi.fn<PhotoEncoder>());
     await screen.findByRole("img", { name: `Фото товара ${NAME}` });
     fireEvent.click(screen.getByRole("button", { name: "Удалить фото" }));
-    await screen.findByRole("button", { name: /Выбрать фото/u });
+    await screen.findByRole("button", { name: /Загрузить фото/u });
     expect(screen.queryByRole("img")).toBeNull();
     expect(fake.api.deleteProductPhoto).toHaveBeenCalledWith("office-session-token", PRODUCT_ID);
     expect(screen.queryByRole("button", { name: "Удалить фото" })).toBeNull();
@@ -146,7 +181,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
       PRODUCT_ID,
       vi.fn<PhotoEncoder>(() => Promise.reject(error)),
     );
-    await screen.findByRole("button", { name: /Выбрать фото/u });
+    await screen.findByRole("button", { name: /Загрузить фото/u });
     pick(JPEG);
     expect(within(await screen.findByRole("alert")).getByText(text)).toBeTruthy();
     expect(fake.api.putProductPhoto).not.toHaveBeenCalled();
@@ -156,7 +191,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     const fake = session();
     const encode = vi.fn<PhotoEncoder>(async () => ENCODED);
     show(fake, PRODUCT_ID, encode);
-    await screen.findByRole("button", { name: /Выбрать фото/u });
+    await screen.findByRole("button", { name: /Загрузить фото/u });
     pick(new File(["<svg/>"], "logo.svg", { type: "image/svg+xml" }));
     expect(
       within(await screen.findByRole("alert")).getByText("Не удалось прочитать картинку"),
@@ -174,7 +209,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
       PRODUCT_ID,
       vi.fn<PhotoEncoder>(async () => ENCODED),
     );
-    await screen.findByRole("button", { name: /Выбрать фото/u });
+    await screen.findByRole("button", { name: /Загрузить фото/u });
     pick(JPEG);
     expect(await screen.findByText("На хосте произошла ошибка. Повторите попытку.")).toBeTruthy();
     expect(screen.queryByRole("img")).toBeNull();
@@ -184,7 +219,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     const fake = session(PHOTO);
     show(fake, PRODUCT_ID, vi.fn<PhotoEncoder>());
     await screen.findByRole("img", { name: `Фото товара ${NAME}` });
-    const replace = screen.getByRole("button", { name: /Заменить/u });
+    const replace = screen.getByRole("button", { name: /Заменить фото/u });
     const remove = screen.getByRole("button", { name: "Удалить фото" });
     for (const button of [replace, remove]) {
       act(() => button.focus());

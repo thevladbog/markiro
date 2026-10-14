@@ -13,7 +13,6 @@ import { DevicesPage } from "./devices/DevicesPage.js";
 import { DisaggregationDocumentPage } from "./disaggregation/DisaggregationDocumentPage.js";
 import { DisaggregationPage } from "./disaggregation/DisaggregationPage.js";
 import { DisaggregationReasonsPage } from "./disaggregation/DisaggregationReasonsPage.js";
-import { EmployeesPage } from "./employees/EmployeesPage.js";
 import { AboutPage } from "./info/AboutPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
@@ -24,7 +23,7 @@ import { OrgProfilePage } from "./org/OrgProfilePage.js";
 import { PalletSheetsPage } from "./sheets/PalletSheetsPage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
-import { ShiftCardPage } from "./shifts/ShiftCardPage.js";
+import { ShiftCardRedirect } from "./shifts/ShiftCardRedirect.js";
 import { ShiftsPage } from "./shifts/ShiftsPage.js";
 import { SsccPage } from "./sscc/SsccPage.js";
 import { TemplateDefaultsPage } from "./templates/TemplateDefaultsPage.js";
@@ -49,7 +48,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "counterparties", element: <CounterpartiesPage /> },
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
-      { path: "shifts/:id", element: <ShiftCardPage /> },
+      { path: "shifts/:id", element: <ShiftCardRedirect /> },
       { path: "disaggregation", element: <DisaggregationPage /> },
       // A static segment ranks above `:id`, so «reasons» is never a document.
       { path: "disaggregation/reasons", element: <DisaggregationReasonsPage /> },
@@ -66,14 +65,6 @@ export const officeRoutes: RouteObject[] = [
           { path: "box/:id", element: <BoxCardPage /> },
           { path: "pallet/:id", element: <PalletCardPage /> },
         ],
-      },
-      {
-        path: "employees",
-        element: (
-          <RequireRole roles={["admin"]}>
-            <EmployeesPage />
-          </RequireRole>
-        ),
       },
       {
         path: "operators",

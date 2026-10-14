@@ -178,6 +178,37 @@ pub struct OfficeShiftRejections {
     pub total: u32,
 }
 
+/// An export of a shift the office saved (`shift.export` in the audit trail), as
+/// `GET /v1/office/shifts/{id}/exports` lists it: when, by whom (the office user's
+/// name now, `None` when the user is gone), and the record of `ShiftExportRecord`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeShiftExport {
+    pub id: i64,
+    pub recorded_at: String,
+    pub user_name: Option<String>,
+    pub format_id: String,
+    pub format_version: u32,
+    pub max_lines: Option<u32>,
+    pub pallet_id: Option<String>,
+    pub document_id: String,
+    pub part_count: u32,
+    pub code_count: u64,
+    pub box_count: u32,
+    pub pallet_count: u32,
+    pub open_pallet_suppressed_box_count: u32,
+}
+
+/// The shift's saved exports, newest first, at most `SHIFT_EXPORT_HISTORY_LIMIT`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeShiftExports {
+    pub items: Vec<OfficeShiftExport>,
+}
+
+/// The exports one `GET /v1/office/shifts/{id}/exports` answers at most.
+pub const SHIFT_EXPORT_HISTORY_LIMIT: u32 = 50;
+
 /// The most records one `POST /v1/device/conflicts/status` names.
 pub const MAX_CONFLICT_STATUS_RECORDS: usize = 200;
 /// The displacements one `GET /v1/device/displacements` answers at most.

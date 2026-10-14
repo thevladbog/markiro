@@ -633,6 +633,71 @@ async fn an_export_writes_one_audit_row_with_what_it_wrote() {
     );
 }
 
+/// The history of a shift's exports lists what was saved, newest first, with
+/// the user's name, for every office role; an unknown shift is `not_found`;
+/// another shift's exports are not in it; the query searches by an index.
+#[tokio::test]
+async fn the_history_of_a_shifts_exports_lists_the_saved_ones_newest_first() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    let shift = floor.shift.clone();
+    let path = format!("/v1/office/shifts/{shift}/exports");
+    let (status, none) = admin.call_as(&admin.token, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{none}");
+    assert_eq!(none, json!({ "items": [] }));
+    close_by_station(&admin, &floor).await;
+    let first = record_of("shift_txt_pallets", 1);
+    let mut second = record_of("shift_xml_gismt_aggregation_pallets", 1);
+    second["maxLines"] = json!(2);
+    second["partCount"] = json!(3);
+    assert_eq!(
+        record_export(&admin, &admin.token, &shift, first).await.0,
+        StatusCode::NO_CONTENT
+    );
+    let technologist = admin.technologist().await;
+    assert_eq!(
+        record_export(&admin, &technologist, &shift, second).await.0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, body) = admin.call_as(&technologist, "GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{body}");
+    assert_eq!(items[0]["formatId"], "shift_xml_gismt_aggregation_pallets");
+    assert_eq!(items[0]["maxLines"], 2);
+    assert_eq!(items[0]["partCount"], 3);
+    assert_eq!(items[1]["formatId"], "shift_txt_pallets");
+    assert_eq!(items[1]["documentId"], DOCUMENT);
+    assert!(items[0]["id"].as_i64().unwrap() > items[1]["id"].as_i64().unwrap());
+    assert!(items[0]["userName"].is_string() && items[1]["userName"].is_string());
+    assert_ne!(items[0]["userName"], items[1]["userName"]);
+    assert!(items[0]["recordedAt"].as_str().unwrap() >= items[1]["recordedAt"].as_str().unwrap());
+    let (status, body) = admin
+        .call_as(
+            &admin.token,
+            "GET",
+            "/v1/office/shifts/0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b/exports",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(&format!(
+        "EXPLAIN QUERY PLAN {}",
+        markiro_host::routes::office_exports::EXPORT_HISTORY_SQL
+    ))
+    .bind(&shift)
+    .bind(50_i64)
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let steps: Vec<&str> = plan.iter().map(|(_, _, _, step)| step.as_str()).collect();
+    assert!(
+        steps.iter().all(|step| !step.starts_with("SCAN a"))
+            && steps.iter().any(|s| s.contains("audit_log_target")),
+        "{steps:?}"
+    );
+}
+
 /// What the host refuses changes nothing and writes no row: a format the
 /// domain does not advertise (a retired version too), a pallet named or
 /// missing against the format, `maxLines` outside 2–1 000 000 or on a

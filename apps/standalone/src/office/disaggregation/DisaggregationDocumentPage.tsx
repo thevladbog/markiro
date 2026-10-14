@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { shiftCardPath } from "../shifts/shift-card.js";
 import type { TFunction } from "i18next";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -592,7 +593,7 @@ export function DisaggregationDocumentPage() {
       mono: true,
       render: (line) =>
         line.shiftId !== null && line.shiftNumber !== null ? (
-          <Link to={`/shifts/${line.shiftId}`}>{line.shiftNumber}</Link>
+          <Link to={shiftCardPath(line.shiftId)}>{line.shiftNumber}</Link>
         ) : (
           t("office.common.none")
         ),

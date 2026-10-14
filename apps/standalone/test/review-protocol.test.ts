@@ -13,6 +13,7 @@ import {
   conflictsPath,
   officeConflictPageSchema,
   officeShiftExceptionsSchema,
+  officeShiftExportsSchema,
   officeShiftRejectionsSchema,
 } from "../src/host/review.js";
 
@@ -26,6 +27,7 @@ describe.each([
   ["office-conflict-page.json", officeConflictPageSchema],
   ["office-shift-exceptions.json", officeShiftExceptionsSchema],
   ["office-shift-rejections.json", officeShiftRejectionsSchema],
+  ["office-shift-exports.json", officeShiftExportsSchema],
   ["conflict-status-request.json", conflictStatusRequestSchema],
   ["conflict-status-response.json", conflictStatusResponseSchema],
   ["device-displacements.json", deviceDisplacementsSchema],

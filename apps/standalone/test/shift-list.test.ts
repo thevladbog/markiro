@@ -8,6 +8,8 @@ import {
   openBlocker,
   periodState,
   SHIFT_PAGE_SIZE,
+  sortShifts,
+  totalShifts,
 } from "../src/office/shifts/shift-list.js";
 import {
   ACTIVE,
@@ -233,5 +235,86 @@ describe("the shifts list's rules", () => {
     expect(officeKeys.shiftList({ from: "2026-09-01", to: "2026-10-08" })).not.toEqual(
       officeKeys.shiftList(null),
     );
+  });
+});
+
+describe("the shifts list's order and totals", () => {
+  const names = {
+    line: (shift: { lineId: string }) => (shift.lineId === LINE_10.id ? "Линия 10" : "Линия 2"),
+    product: () => "",
+  };
+  const two = { ...ACTIVE, number: "OCT26-002" };
+  const ten = { ...ACTIVE, number: "OCT26-010", plannedQty: null };
+
+  it("compares numbers as numbers and keeps the host's order between equal keys", () => {
+    expect(sortShifts([ten, two], "number", "asc", names).map((s) => s.number)).toEqual([
+      "OCT26-002",
+      "OCT26-010",
+    ]);
+    expect(sortShifts([ten, two], "number", "desc", names).map((s) => s.number)).toEqual([
+      "OCT26-010",
+      "OCT26-002",
+    ]);
+    // Equal keys: the host's order, both ways.
+    const a = { ...ACTIVE, number: "A" };
+    const b = { ...ACTIVE, number: "B" };
+    expect(sortShifts([a, b], "productionDate", "desc", names)).toEqual([a, b]);
+    expect(sortShifts([b, a], "status", "asc", names)).toEqual([b, a]);
+  });
+
+  it("sorts by the shift date («Дата смены», beta 3) apart from the production date", () => {
+    const early = {
+      ...ACTIVE,
+      number: "E",
+      productionDate: "2026-10-20",
+      plannedDate: "2026-10-01",
+    };
+    const late = {
+      ...ACTIVE,
+      number: "L",
+      productionDate: "2026-10-01",
+      plannedDate: "2026-10-20",
+    };
+    expect(sortShifts([late, early], "plannedDate", "asc", names).map((s) => s.number)).toEqual([
+      "E",
+      "L",
+    ]);
+    expect(sortShifts([early, late], "plannedDate", "desc", names).map((s) => s.number)).toEqual([
+      "L",
+      "E",
+    ]);
+    // The production date orders the other way round for the same two shifts.
+    expect(sortShifts([early, late], "productionDate", "asc", names).map((s) => s.number)).toEqual([
+      "L",
+      "E",
+    ]);
+  });
+
+  it("puts a shift without a plan last whichever way the plan runs, and sorts by the line's name", () => {
+    expect(sortShifts([ten, two], "plannedQty", "asc", names)[1]).toBe(ten);
+    expect(sortShifts([ten, two], "plannedQty", "desc", names)[1]).toBe(ten);
+    const onTen = { ...two, lineId: LINE_10.id };
+    expect(sortShifts([onTen, two], "line", "asc", names)).toEqual([two, onTen]);
+    expect(sortShifts([PLANNED, CLOSED, ACTIVE], "status", "desc", names)).toEqual([
+      CLOSED,
+      ACTIVE,
+      PLANNED,
+    ]);
+  });
+
+  it("sums the output, the closed boxes and the closed pallets, a validation shift by its accepted codes, a planned one by nothing", () => {
+    const validation = {
+      ...ACTIVE,
+      mode: "validation" as const,
+      totals: { ...ACTIVE.totals, acceptedUnits: 100, unitsInClosedBoxes: 0, closedBoxes: 0 },
+    };
+    const withPallets = { ...ACTIVE, totals: { ...ACTIVE.totals, closedPallets: 2 } };
+    expect(totalShifts([PLANNED, ACTIVE, validation, withPallets])).toEqual({
+      shifts: 4,
+      units: ACTIVE.totals.unitsInClosedBoxes * 2 + 100,
+      boxes: ACTIVE.totals.closedBoxes * 2,
+      pallets: 2,
+    });
+    expect(totalShifts([])).toEqual({ shifts: 0, units: 0, boxes: 0, pallets: 0 });
   });
 });
