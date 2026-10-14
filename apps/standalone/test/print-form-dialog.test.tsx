@@ -86,6 +86,23 @@ async function openCard(
   await screen.findByRole("heading", { name: `Смена ${shift.number}` });
 }
 
+/**
+ * The button of one box's or one pallet's form: the card keeps them in the tab of the boxes or of
+ * the pallets, so the tab is opened first.
+ */
+async function formButton(name: string): Promise<HTMLElement> {
+  const tab = name.startsWith("Состав короба")
+    ? "Короба"
+    : /^(Состав|Ярлык) паллеты /.test(name)
+      ? "Паллеты"
+      : null;
+  if (tab !== null) {
+    const opened = await screen.findByRole("tab", { name: tab });
+    if (opened.getAttribute("aria-selected") !== "true") fireEvent.click(opened);
+  }
+  return screen.findByRole("button", { name });
+}
+
 /** The dialog named `name`, once its form is drawable (its rows are read). */
 async function readyDialog(name: string): Promise<HTMLElement> {
   const dialog = screen.getByRole("dialog", { name });
@@ -146,7 +163,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     const session = formSession(SHIFT);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     expect(session.api.getBoxReportRows).toHaveBeenCalledWith("office-session-token", BOX_ROWS.id);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
@@ -161,7 +178,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     freezeClock();
     const files = fakeOfficeFiles();
     await openCard(formSession(SHIFT), SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
     const folder = ["Формы", "OCT26-004", "2026-10-08_18-30-00_box"];
@@ -182,7 +199,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     const files = fakeOfficeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("documents_unavailable", "no folder"));
     await openCard(formSession(SHIFT), SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
     await within(dialog).findByText(
@@ -196,7 +213,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     session.api.listShiftPallets.mockResolvedValue([...PALLETS, OPEN_PALLET]);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    await screen.findByRole("button", { name: "Состав паллеты Без SSCC" });
+    await formButton("Состав паллеты Без SSCC");
     expect(screen.queryByRole("button", { name: "Ярлык паллеты Без SSCC" })).toBeNull();
     const placard = "Ярлык паллеты (00)146006820000000409";
     fireEvent.click(screen.getByRole("button", { name: placard }));
@@ -221,7 +238,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
     const contents = "Состав паллеты (00)146006820000000409";
-    fireEvent.click(await screen.findByRole("button", { name: contents }));
+    fireEvent.click(await formButton(contents));
     let dialog = await readyDialog(contents);
     expect(within(dialog).queryByRole("radio")).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
@@ -359,7 +376,7 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
       throw new Error("no frame");
     });
     await openCard(formSession(SHIFT), SHIFT, print, fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     expect(
@@ -388,7 +405,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     expect(session.api.getBoxReportRows).toHaveBeenCalledTimes(1);
     session.api.getBoxReportRows.mockResolvedValue(NEWER_BOX_ROWS);
@@ -408,7 +425,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT);
     const files = fakeOfficeFiles();
     await openCard(session, SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     session.api.getBoxReportRows.mockResolvedValue(NEWER_BOX_ROWS);
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
@@ -420,7 +437,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
   it("draws from nothing the dialog's earlier opening cached: it waits for the read of this one", async () => {
     const session = formSession(SHIFT);
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     closeDialog(await readyDialog(BOX_FORM));
     session.api.getBoxReportRows.mockImplementationOnce(() => new Promise(() => undefined));
     fireEvent.click(screen.getByRole("button", { name: BOX_FORM }));
@@ -437,7 +454,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT);
     session.api.getBoxReportRows.mockRejectedValueOnce(HOST_DOWN());
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = screen.getByRole("dialog", { name: BOX_FORM });
     await within(dialog).findByText(HOST_DOWN_TEXT);
     expect(within(dialog).getByRole("button", { name: "Печать" })).toHaveProperty("disabled", true);
@@ -450,7 +467,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT);
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     session.api.getBoxReportRows.mockRejectedValueOnce(HOST_DOWN());
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
@@ -468,7 +485,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const print = vi.fn<PrintForm>();
     const files = fakeOfficeFiles();
     await openCard(session, SHIFT, print, files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     const read = deferred<typeof BOX_ROWS>();
     session.api.getBoxReportRows.mockImplementationOnce(() => read.promise);
@@ -511,7 +528,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
         log.push("print");
       });
       await openCard(formSession(SHIFT), SHIFT, print, fakeOfficeFiles());
-      fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+      fireEvent.click(await formButton(BOX_FORM));
       const dialog = await readyDialog(BOX_FORM);
       fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
       await within(dialog).findByText("Рисуем форму…");
@@ -527,7 +544,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const print = vi.fn<PrintForm>();
     const files = fakeOfficeFiles();
     await openCard(session, SHIFT, print, files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     let dialog = await readyDialog(BOX_FORM);
     const read = deferred<typeof BOX_ROWS>();
     session.api.getBoxReportRows.mockImplementationOnce(() => read.promise);
@@ -561,7 +578,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT, stillOpen);
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
     const placard = "Ярлык паллеты (00)146006820000000409";
-    fireEvent.click(await screen.findByRole("button", { name: placard }));
+    fireEvent.click(await formButton(placard));
     const dialog = screen.getByRole("dialog", { name: placard });
     const refusal = await within(dialog).findByText(
       "Ярлык печатается только у закрытой паллеты с SSCC.",
@@ -578,7 +595,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const session = formSession(SHIFT, { ...PALLET_ROWS, pallets: [] });
     await openCard(session, SHIFT, vi.fn<PrintForm>(), fakeOfficeFiles());
     const contents = "Состав паллеты (00)146006820000000409";
-    fireEvent.click(await screen.findByRole("button", { name: contents }));
+    fireEvent.click(await formButton(contents));
     const dialog = screen.getByRole("dialog", { name: contents });
     await within(dialog).findByText("Паллета не найдена.");
     expect(within(dialog).getByRole("button", { name: "Печать" })).toHaveProperty("disabled", true);
@@ -596,7 +613,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
     const placard = "Ярлык паллеты (00)146006820000000409";
-    fireEvent.click(await screen.findByRole("button", { name: placard }));
+    fireEvent.click(await formButton(placard));
     const dialog = await readyDialog(placard);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
@@ -682,7 +699,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     files.openFile.mockRejectedValueOnce(new OfficeFilesError("storage", "no program"));
     files.save.mockRejectedValueOnce(new Error("disk"));
     await openCard(formSession(SHIFT), SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     const storage =
       "Не удалось записать или открыть форму: проверьте место на диске и доступ к папке «Документы».";
@@ -707,7 +724,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const files = fakeOfficeFiles();
     files.open.mockRejectedValue(new OfficeFilesError("unsupported", "not windows"));
     await openCard(formSession(SHIFT), SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
     fireEvent.click(await within(dialog).findByRole("button", { name: "Показать папку" }));
@@ -726,7 +743,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
         throw new Error("no frame");
       });
       await openCard(session, SHIFT, print, files);
-      fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+      fireEvent.click(await formButton(BOX_FORM));
       const dialog = await readyDialog(BOX_FORM);
       fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
       await within(dialog).findByText(/Окно печати не открылось/);
@@ -772,7 +789,7 @@ describe("a form is drawn from the rows read at the press, and the press is safe
     const print = vi.fn<PrintForm>();
     await openCard(session, SHIFT, print, fakeOfficeFiles());
     const first = `Состав паллеты (00)${pallets[0]?.sscc}`;
-    fireEvent.click(await screen.findByRole("button", { name: first }));
+    fireEvent.click(await formButton(first));
     let dialog = await readyDialog(first);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
@@ -824,7 +841,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     const print = vi.fn<PrintForm>();
     const files = fakeOfficeFiles();
     await openCard(formSession(SHIFT), SHIFT, print, files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     let dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
     await within(dialog).findByText("Рисуем форму…");
@@ -869,7 +886,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     try {
       const print = vi.fn<PrintForm>();
       await openCard(formSession(SHIFT), SHIFT, print, fakeOfficeFiles());
-      fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+      fireEvent.click(await formButton(BOX_FORM));
       const dialog = await readyDialog(BOX_FORM);
       fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
       await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
@@ -903,7 +920,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     const files = fakeOfficeFiles();
     files.save.mockRejectedValueOnce(new OfficeFilesError("storage", "disk"));
     await openCard(formSession(SHIFT), SHIFT, vi.fn<PrintForm>(), files);
-    fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+    fireEvent.click(await formButton(BOX_FORM));
     const dialog = await readyDialog(BOX_FORM);
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
     const failure = await within(dialog).findByText(/Не удалось записать или открыть форму/);
@@ -941,7 +958,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
       renderOffice(session, { files: fakeOfficeFiles() });
       fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
       fireEvent.click(await screen.findByRole("link", { name: `Карточка смены ${SHIFT.number}` }));
-      fireEvent.click(await screen.findByRole("button", { name: BOX_FORM }));
+      fireEvent.click(await formButton(BOX_FORM));
       const dialog = await readyDialog(BOX_FORM);
       fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
       await waitFor(() => expect(printed).toHaveLength(1));

@@ -117,6 +117,26 @@ export function Table<Row>({
                   key={column.key}
                   scope="col"
                   onClick={column.sortable && onSort ? () => onSort(column.key) : undefined}
+                  // A sortable header is a control: reachable by the keyboard, and it says its order.
+                  tabIndex={column.sortable && onSort ? 0 : undefined}
+                  aria-sort={
+                    column.sortable && onSort
+                      ? sortKey === column.key
+                        ? sortDir === "desc"
+                          ? "descending"
+                          : "ascending"
+                        : "none"
+                      : undefined
+                  }
+                  onKeyDown={
+                    column.sortable && onSort
+                      ? (event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          onSort(column.key);
+                        }
+                      : undefined
+                  }
                   style={{
                     textAlign: column.align ?? "left",
                     padding: "10px 16px",
@@ -169,7 +189,22 @@ export function Table<Row>({
               <tr
                 key={getRowKey(row, index)}
                 tabIndex={onRowClick ? 0 : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={
+                  onRowClick
+                    ? (event) => {
+                        // A control inside the row (a link, a button, a menu) does its own thing.
+                        if (
+                          event.target instanceof Element &&
+                          event.target.closest(
+                            "a, button, input, select, textarea, [role='menuitem']",
+                          )
+                        ) {
+                          return;
+                        }
+                        onRowClick(row);
+                      }
+                    : undefined
+                }
                 onKeyDown={
                   onRowClick
                     ? (event) => {

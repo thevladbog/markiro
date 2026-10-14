@@ -2,7 +2,7 @@ import { isShiftCloseReasonCode } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -38,8 +38,14 @@ import {
   periodState,
   recordLabel,
   SHIFT_PAGE_SIZE,
+  sortShifts,
+  totalShifts,
+  type ShiftSortDir,
+  type ShiftSortKey,
   type ShiftStatusFilter,
 } from "./shift-list.js";
+import { shiftCardPath } from "./shift-card.js";
+import { ShiftDrawer } from "./ShiftDrawer.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
 import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftDialog } from "./ShiftDialog.js";
@@ -94,6 +100,11 @@ export function ShiftsPage() {
   const { t } = useTranslation();
   const canPlan = useCan("planShifts");
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  // The shift whose drawer is open is the link's `?shift=`, so a card can be linked to and the
+  // list behind it keeps its filters, its sort and its page.
+  const openShiftId = params.get("shift");
+  const [sort, setSort] = useState<{ key: ShiftSortKey; dir: ShiftSortDir } | null>(null);
   const [dialog, setDialog] = useState<ShiftsDialog | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeId = useId();
@@ -169,19 +180,46 @@ export function ShiftsPage() {
         ? t("office.shifts.period.tooLong")
         : undefined;
   // The shifts the filters keep, in the host's order; none while the list is not loaded.
-  const found = shifts.isSuccess
+  const filtered = shifts.isSuccess
     ? findShifts(shifts.data, { status, lineId, search }, searchName)
     : [];
+  const found =
+    sort === null
+      ? filtered
+      : sortShifts(filtered, sort.key, sort.dir, {
+          line: (shift) => lines.data?.find((each) => each.id === shift.lineId)?.name ?? "",
+          product: searchName,
+        });
+  const totals = totalShifts(filtered);
+  const onSort = (key: string) => {
+    setSort((previous) => ({
+      key: key as ShiftSortKey,
+      dir: previous?.key === key && previous.dir === "asc" ? "desc" : "asc",
+    }));
+    setPage(1);
+  };
+  const closeDrawer = () =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("shift");
+        next.delete("tab");
+        next.delete("box");
+        return next;
+      },
+      { replace: true },
+    );
 
   const columns: TableColumn<OfficeShift>[] = [
     {
       key: "number",
+      sortable: true,
       title: t("office.shifts.table.number"),
       mono: true,
       // The number opens the shift's card (plan О-Ф).
       render: (shift) => (
         <Link
-          to={`/shifts/${shift.id}`}
+          to={shiftCardPath(shift.id)}
           aria-label={t("office.shifts.cardNamed", { number: shift.number })}
         >
           {shift.number}
@@ -190,12 +228,14 @@ export function ShiftsPage() {
     },
     {
       key: "productionDate",
+      sortable: true,
       title: t("office.shifts.table.productionDate"),
       mono: true,
       render: (shift) => civilDateLabel(shift.productionDate),
     },
     {
       key: "line",
+      sortable: true,
       title: t("office.shifts.table.line"),
       wrap: true,
       minWidth: 150,
@@ -203,6 +243,7 @@ export function ShiftsPage() {
     },
     {
       key: "product",
+      sortable: true,
       title: t("office.shifts.table.product"),
       wrap: true,
       minWidth: 200,
@@ -228,6 +269,7 @@ export function ShiftsPage() {
     },
     {
       key: "plannedQty",
+      sortable: true,
       title: t("office.shifts.table.plannedQty"),
       mono: true,
       align: "right",
@@ -236,6 +278,7 @@ export function ShiftsPage() {
     },
     {
       key: "status",
+      sortable: true,
       title: t("office.shifts.table.status"),
       wrap: true,
       minWidth: 220,
@@ -280,6 +323,7 @@ export function ShiftsPage() {
       // What the shift put in closed boxes, as the cloud's list shows it; a planned shift has none.
       // After the status, so the columns before it keep their places.
       key: "output",
+      sortable: true,
       title: t("office.shifts.table.output"),
       mono: true,
       align: "right",
@@ -384,8 +428,21 @@ export function ShiftsPage() {
     const shown = Math.min(page, pageCount);
     return (
       <Card>
+        {/* What the filters keep, however many pages: the figures of the period. */}
+        <p className="office-note shift-totals" aria-live="polite">
+          {t("office.shifts.totalsRow.line", {
+            shifts: UNITS.format(totals.shifts),
+            units: UNITS.format(totals.units),
+            boxes: UNITS.format(totals.boxes),
+            pallets: UNITS.format(totals.pallets),
+          })}
+        </p>
         <Table
           columns={columns}
+          sortKey={sort?.key ?? ""}
+          sortDir={sort?.dir ?? "asc"}
+          onSort={onSort}
+          onRowClick={(shift) => setParams({ shift: shift.id })}
           rows={found.slice((shown - 1) * SHIFT_PAGE_SIZE, shown * SHIFT_PAGE_SIZE)}
           getRowKey={(shift) => shift.id}
           empty={t(shifts.data.length === 0 ? "office.shifts.empty" : "office.shifts.nothingFound")}
@@ -523,6 +580,9 @@ export function ShiftsPage() {
               })}
       </p>
       {content()}
+      {openShiftId !== null && openShiftId !== "" && (
+        <ShiftDrawer key={openShiftId} id={openShiftId} onClose={closeDrawer} />
+      )}
       {canPlan && (dialog?.kind === "create" || dialog?.kind === "edit") && (
         <ShiftDialog
           shift={dialog.kind === "edit" ? dialog.shift : null}

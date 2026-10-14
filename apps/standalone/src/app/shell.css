@@ -1120,3 +1120,34 @@
   border: 1px solid var(--line-strong);
   background: #ffffff;
 }
+
+/* The shift's drawer over «Смены»: wider than the panel's own size, so a table of boxes fits; the
+   whole window on a narrow one (the kit's panel does the same below its breakpoint). */
+.mk-side-panel.shift-drawer {
+  --mk-panel-width: min(960px, 92vw);
+}
+
+@media (max-width: 1100px) {
+  .mk-side-panel.shift-drawer {
+    --mk-panel-width: 100vw;
+  }
+}
+
+.shift-totals {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+/* The status and its marks across the drawer's head, not one under another as in a narrow cell. */
+.shift-drawer .office-stack > .shift-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A grid track would grow to the widest table: the table scrolls in its own region instead. */
+.shift-drawer .office-stack,
+.shift-drawer .shift-card__section {
+  grid-template-columns: minmax(0, 1fr);
+}

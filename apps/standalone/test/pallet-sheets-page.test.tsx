@@ -537,7 +537,7 @@ describe("the A4 sheets page: deleting", () => {
     const links = within(box).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["Смена 11111111", "Смена 11111111"]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
-      ids.map((id) => `/shifts/${id}`),
+      ids.map((id) => `/shifts?shift=${id}`),
     );
     expect(screen.getByRole("dialog", { name: `Удалить «${LANDSCAPE.name}»?` })).toBeTruthy();
     expect(rows()).toHaveLength(3);

@@ -4,6 +4,7 @@ import {
   type OfficeConflict,
   type OfficeConflictScan,
 } from "../../host/review.js";
+import { shiftCardPath } from "../shifts/shift-card.js";
 
 /** The «Состояние» filter of «Конфликты», unreviewed first (the cloud's default). */
 export const REVIEWED_FILTERS = ["unreviewed", "reviewed", "all"] as const;
@@ -40,7 +41,7 @@ export function conflictQuery(
  * page itself offers no «box» link for it.
  */
 export function loserBoxLink(scan: OfficeConflictScan): string {
-  return scan.boxId === null ? `/shifts/${scan.shiftId}` : `/codes/box/${scan.boxId}`;
+  return scan.boxId === null ? shiftCardPath(scan.shiftId) : `/codes/box/${scan.boxId}`;
 }
 
 /**

@@ -44,6 +44,6 @@ describe("the conflicts' filters and links (plan КНФ)", () => {
   it("opens the loser's box in its card (plan КРТ), a scan with no box in its shift's card", () => {
     expect(loserBoxLink(SCAN)).toBe("/codes/box/box-1");
     expect(loserBoxLink({ ...SCAN, boxSscc: null })).toBe("/codes/box/box-1");
-    expect(loserBoxLink({ ...SCAN, boxId: null, boxSscc: null })).toBe("/shifts/shift-1");
+    expect(loserBoxLink({ ...SCAN, boxId: null, boxSscc: null })).toBe("/shifts?shift=shift-1");
   });
 });

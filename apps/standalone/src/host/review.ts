@@ -107,6 +107,30 @@ export const officeShiftRejectionsSchema = z.object({
 });
 export type OfficeShiftRejections = z.infer<typeof officeShiftRejectionsSchema>;
 
+/**
+ * Mirrors `markiro_proto::review::OfficeShiftExports`: `GET /v1/office/shifts/{id}/exports`,
+ * the exports of the shift the office saved (the audit trail's `shift.export` rows), newest first.
+ */
+export const officeShiftExportSchema = z.object({
+  id: z.number().int(),
+  recordedAt: z.string(),
+  userName: z.string().nullable(),
+  formatId: z.string(),
+  formatVersion: z.number().int(),
+  maxLines: z.number().int().nullable(),
+  palletId: z.string().nullable(),
+  documentId: z.string(),
+  partCount: z.number().int(),
+  codeCount: z.number().int(),
+  boxCount: z.number().int(),
+  palletCount: z.number().int(),
+  openPalletSuppressedBoxCount: z.number().int(),
+});
+export type OfficeShiftExport = z.infer<typeof officeShiftExportSchema>;
+
+export const officeShiftExportsSchema = z.object({ items: z.array(officeShiftExportSchema) });
+export type OfficeShiftExports = z.infer<typeof officeShiftExportsSchema>;
+
 /** What `GET /v1/office/conflicts` narrows to; the first page when `page` is left out. */
 export interface ConflictQuery {
   /** The losing shift's id. */

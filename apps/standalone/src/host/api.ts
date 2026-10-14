@@ -186,6 +186,7 @@ import {
   officeConflictPageSchema,
   officeConflictSchema,
   officeShiftExceptionsSchema,
+  officeShiftExportsSchema,
   officeShiftRejectionsSchema,
   type ConflictQuery,
   type ConflictStatusRequest,
@@ -194,6 +195,7 @@ import {
   type OfficeConflict,
   type OfficeConflictPage,
   type OfficeShiftExceptions,
+  type OfficeShiftExports,
   type OfficeShiftRejections,
 } from "./review.js";
 
@@ -346,6 +348,8 @@ export interface HostApi {
   /** A shift's box and pallet exceptions, newest first, up to 500 (plan КНФ); every office role. */
   listShiftExceptions: (token: string, id: string) => Promise<OfficeShiftExceptions>;
   /** The shift's records the host refused, newest first, up to 500 (plan КНФ); every office role. */
+  /** The exports of the shift the office saved, newest first (the shift drawer's history). */
+  listShiftExports: (token: string, id: string) => Promise<OfficeShiftExports>;
   listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
   /**
    * One page of the placements of codes the criteria find, newest scan
@@ -947,6 +951,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/shifts/${id}/exceptions`, {
         officeToken: token,
         schema: officeShiftExceptionsSchema,
+      }),
+    listShiftExports: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/exports`, {
+        officeToken: token,
+        schema: officeShiftExportsSchema,
       }),
     listShiftRejections: (token, id) =>
       client.request("GET", `/v1/office/shifts/${id}/rejections`, {

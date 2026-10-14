@@ -1,17 +1,18 @@
 import { isShiftCloseReasonCode, type PlacardFormat } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import {
   Alert,
   Button,
   Card,
+  DataTabs,
   DefinitionGrid,
   Input,
-  PageHeader,
   RowActions,
+  SidePanel,
   StatusChip,
   Table,
   type TableColumn,
@@ -43,7 +44,8 @@ import {
 import { civilDateLabel, recordLabel } from "./shift-list.js";
 import { ShiftConflicts, ShiftExceptions, ShiftRejections } from "./ShiftReview.js";
 import { shiftOutput } from "./shift-text.js";
-import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
+import { ShiftTotalsBody } from "./ShiftTotalsDialog.js";
+import { ShiftExports } from "./ShiftExports.js";
 
 /**
  * The export dialog comes with the domain's renderers and the check of every
@@ -71,26 +73,62 @@ const PACK_PHASE = {
 /** Counts with the thousands apart by a no-break space: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
-type CardDialog = "totals" | "export" | "close";
+type CardDialog = "export" | "close";
+
+/** The sections of the drawer, in the order of its tabs. */
+export const DRAWER_TABS = [
+  "summary",
+  "boxes",
+  "pallets",
+  "exceptions",
+  "rejections",
+  "conflicts",
+  "exports",
+] as const;
+export type DrawerTab = (typeof DRAWER_TABS)[number];
+
+function isDrawerTab(value: string | null): value is DrawerTab {
+  return DRAWER_TABS.some((tab) => tab === value);
+}
+
+/** The tabs a shift has: a planned one only its summary, a validation one no boxes or pallets. */
+export function drawerTabs(shift: OfficeShift): DrawerTab[] {
+  if (shift.status === "planned") return ["summary"];
+  const validation = shift.mode === "validation";
+  return DRAWER_TABS.filter((tab) => {
+    if (tab === "boxes") return !validation;
+    if (tab === "pallets") return shift.palletsEnabled;
+    // Box and pallet exceptions only: a validation shift can have none.
+    if (tab === "exceptions") return !validation;
+    return true;
+  });
+}
+
+export interface ShiftDrawerProps {
+  /** The shift's id, from `?shift=` of «Смены». */
+  id: string;
+  onClose: () => void;
+}
 
 /**
- * The card of a shift (plan О-Ф, pilot spec §7), opened from «Смены» by the
- * shift's number: what the shift is, its boxes and its pallets as the host
- * derives them now, and what the office does with it — the figures
- * («Итоги»), the exports («Выгрузка», plan ЧЗ), the close and the printed
- * forms: «Бланк смены» until the shift closes, «Состав короба» of a box,
- * «Состав паллеты» and «Ярлык паллеты» of a pallet, «Ярлыки паллет смены»
- * (pilot spec §5.5). Every role reads it and prints; closing stays with
- * `planShifts`. Times are written in the organization's zone, as the forms
- * write them. A validation shift says whether it prints a duplicate and
- * whether its check is required, and one that prints counts its labels in
- * «Контроль печати» once a station opened it (plan РЕЖ part B).
+ * The card of a shift (plan О-Ф, pilot spec §7) as a side drawer over «Смены»,
+ * the way the cloud opens a shift: the list stays behind, the drawer says what
+ * the shift is and has a tab per section, each reading on its own when it is
+ * first opened — the figures («Итоги»), its boxes and its pallets as the host
+ * derives them now, the exceptions, refused records and code conflicts of
+ * plan КНФ, and the exports. Above the tabs stand the actions: the export
+ * («Выгрузка», plan ЧЗ), the close, and the printed forms — «Бланк смены» until
+ * the shift closes, «Ярлыки паллет смены», and in the tabs «Состав короба»,
+ * «Состав паллеты» and «Ярлык паллеты» of one (pilot spec §5.5). Every role
+ * reads it and prints; closing stays with `planShifts`. Times are written in
+ * the organization's zone, as the forms write them. The tab is the link's
+ * `?tab=`, so a drawer can be opened on a section.
  */
-export function ShiftCardPage() {
+export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   const { t } = useTranslation();
-  const { id = "" } = useParams();
   const canPlan = useCan("planShifts");
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
   const [dialog, setDialog] = useState<CardDialog | null>(null);
   const [form, setForm] = useState<FormTarget | null>(null);
   const [paper, setPaper] = useState<PlacardFormat>("a4");
@@ -134,35 +172,34 @@ export function ShiftCardPage() {
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftPallets(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExceptions(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftRejections(id) });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExports(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.conflicts });
   };
 
-  const back = (
-    <Link className="shift-card__back" to="/shifts">
-      {t("office.shiftCard.back")}
-    </Link>
+  const panel = (title: string, body: ReactNode, footer?: ReactNode) => (
+    <SidePanel
+      open
+      size="complex"
+      className="shift-drawer"
+      title={title}
+      closeLabel={t("office.shiftCard.close")}
+      onClose={onClose}
+      footer={footer}
+    >
+      {body}
+    </SidePanel>
   );
   if (shift.isPending) {
-    return (
-      <>
-        {back}
-        <PageLoading />
-      </>
-    );
+    return panel(t("office.shiftCard.loadingTitle"), <PageLoading />);
   }
   if (shift.isError) {
-    return (
-      <>
-        {back}
-        <LoadError error={shift.error} onRetry={() => void shift.refetch()} />
-      </>
+    return panel(
+      t("office.shiftCard.loadingTitle"),
+      <LoadError error={shift.error} onRetry={() => void shift.refetch()} />,
     );
   }
 
   const current = shift.data;
-  const validation = current.mode === "validation";
-  const duplicate =
-    current.validationPrint?.mode === "duplicate_dm" ? current.validationPrint : null;
   const zone = formTimeZone(org.data);
   const time = new Intl.DateTimeFormat("ru", {
     dateStyle: "short",
@@ -186,53 +223,169 @@ export function ShiftCardPage() {
     palletList.data?.some((pallet) => hasPlacard(pallet) && pallet.disassembledAt === null) ===
     true;
 
-  return (
+  const tabs = drawerTabs(current);
+  const asked = params.get("tab");
+  // A conflict's older link names a box: it opens on the boxes, filtered.
+  const active: DrawerTab =
+    isDrawerTab(asked) && tabs.includes(asked)
+      ? asked
+      : params.get("box") !== null && tabs.includes("boxes")
+        ? "boxes"
+        : "summary";
+  const selectTab = (tab: DrawerTab) =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set("tab", tab);
+        return next;
+      },
+      { replace: true },
+    );
+
+  return panel(
+    t("office.shiftCard.title", { number: current.number }),
     <div className="office-stack">
-      {back}
-      <PageHeader
-        title={t("office.shiftCard.title", { number: current.number })}
-        actions={
-          <RowActions>
-            {current.status !== "planned" && (
-              <Button variant="secondary" onClick={() => setDialog("totals")}>
-                {t("office.shifts.totalsAction")}
-              </Button>
-            )}
-            {current.status !== "planned" && (
-              <Button variant="secondary" onClick={() => setDialog("export")}>
-                {t("office.shifts.export")}
-              </Button>
-            )}
-            {canPlan && current.status === "active" && (
-              <Button variant="secondary" onClick={() => setDialog("close")}>
-                {t("office.shifts.close")}
-              </Button>
-            )}
-            {current.status !== "closed" && (
-              <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
-                {t("office.shiftCard.taskForm")}
-              </Button>
-            )}
-            {current.status !== "planned" && placards && (
-              <Button variant="secondary" onClick={() => setForm({ kind: "placards" })}>
-                {t("office.shiftCard.placards")}
-              </Button>
-            )}
-          </RowActions>
-        }
-      />
+      <ShiftStatusLine shift={current} />
+      <RowActions>
+        {current.status !== "planned" && (
+          <Button variant="secondary" onClick={() => setDialog("export")}>
+            {t("office.shifts.export")}
+          </Button>
+        )}
+        {canPlan && current.status === "active" && (
+          <Button variant="secondary" onClick={() => setDialog("close")}>
+            {t("office.shifts.close")}
+          </Button>
+        )}
+        {current.status !== "closed" && (
+          <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
+            {t("office.shiftCard.taskForm")}
+          </Button>
+        )}
+        {current.status !== "planned" && placards && (
+          <Button variant="secondary" onClick={() => setForm({ kind: "placards" })}>
+            {t("office.shiftCard.placards")}
+          </Button>
+        )}
+      </RowActions>
       {notice && (
         <Alert tone="ok" id={noticeId} tabIndex={-1}>
           {notice}
         </Alert>
       )}
-      <ShiftStatusLine shift={current} />
+      {tabs.length > 1 && (
+        <DataTabs
+          label={t("office.shiftCard.tabs.label")}
+          items={tabs.map((tab) => ({
+            id: tab,
+            label: t(`office.shiftCard.tabs.${tab}`),
+            panelId: `${id}-tab-panel`,
+          }))}
+          activeId={active}
+          onChange={selectTab}
+        />
+      )}
+      {/* Keyed by the shift: a link to another shift's card (a conflict's winner) opens this
+          drawer again, and its filters and pages, `?box=` included, start afresh. */}
+      <div id={`${id}-tab-panel`} role="tabpanel" className="office-stack">
+        {active === "summary" && (
+          <ShiftSummary
+            shift={current}
+            at={at}
+            products={products.data}
+            lines={lines.data}
+            counterparties={counterparties.data}
+          />
+        )}
+        {active === "boxes" && (
+          <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
+        )}
+        {active === "pallets" && (
+          <ShiftPallets key={`pallets-${current.id}`} shift={current} at={at} onForm={setForm} />
+        )}
+        {active === "exceptions" && (
+          <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
+        )}
+        {active === "rejections" && (
+          <ShiftRejections key={`rejections-${current.id}`} shift={current} at={at} />
+        )}
+        {active === "conflicts" && (
+          <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
+        )}
+        {active === "exports" && (
+          <ShiftExports key={`exports-${current.id}`} shift={current} at={at} />
+        )}
+      </div>
+      {form !== null && (
+        <PrintFormDialog
+          shift={current}
+          target={form}
+          taskInputs={taskInputs}
+          timeZone={zone}
+          format={paper}
+          onFormat={setPaper}
+          onClose={() => setForm(null)}
+        />
+      )}
+      {dialog === "export" && (
+        <Suspense fallback={null}>
+          <ExportDialog
+            shift={current}
+            onClose={() => {
+              setDialog(null);
+              // A finished export wrote a row of the history.
+              void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExports(id) });
+            }}
+          />
+        </Suspense>
+      )}
+      {canPlan && dialog === "close" && (
+        <CloseShiftDialog
+          shift={current}
+          onClose={() => setDialog(null)}
+          onClosed={(closed) => {
+            setDialog(null);
+            setNotice(t("office.shifts.closed", { number: closed.number }));
+            readAgain();
+          }}
+          onReload={() => {
+            setDialog(null);
+            readAgain();
+          }}
+          onOutdated={readAgain}
+        />
+      )}
+    </div>,
+  );
+}
+
+/** What the shift is and its figures: the details, the print control and «Итоги». */
+function ShiftSummary({
+  shift: current,
+  at,
+  products,
+  lines,
+  counterparties,
+}: {
+  shift: OfficeShift;
+  at: (instant: string | null) => string;
+  products: Parameters<typeof recordLabel>[1];
+  lines: Parameters<typeof recordLabel>[1];
+  counterparties: Parameters<typeof recordLabel>[1];
+}) {
+  const { t } = useTranslation();
+  const figuresId = useId();
+  const validation = current.mode === "validation";
+  const duplicate =
+    current.validationPrint?.mode === "duplicate_dm" ? current.validationPrint : null;
+  return (
+    <>
       <DefinitionGrid
         items={[
           {
             id: "product",
             term: t("office.shifts.table.product"),
-            description: recordLabel("product", products.data, current.productId, t),
+            description: recordLabel("product", products, current.productId, t),
           },
           {
             id: "productionDate",
@@ -243,7 +396,7 @@ export function ShiftCardPage() {
           {
             id: "line",
             term: t("office.shifts.table.line"),
-            description: recordLabel("line", lines.data, current.lineId, t),
+            description: recordLabel("line", lines, current.lineId, t),
           },
           {
             id: "counterparty",
@@ -251,7 +404,7 @@ export function ShiftCardPage() {
             description:
               current.counterpartyId === null
                 ? t("office.common.none")
-                : recordLabel("counterparty", counterparties.data, current.counterpartyId, t),
+                : recordLabel("counterparty", counterparties, current.counterpartyId, t),
           },
           {
             id: "mode",
@@ -327,58 +480,15 @@ export function ShiftCardPage() {
       {current.status !== "planned" && current.totals.unitLabels !== undefined && (
         <UnitLabelControl figures={current.totals.unitLabels} />
       )}
-      {/* Keyed by the shift: a link to another shift's card (a conflict's winner) opens this
-          page again, and its filters and pages, `?box=` included, start afresh. */}
-      {current.status !== "planned" && !validation && (
-        <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
-      )}
-      {current.status !== "planned" && current.palletsEnabled && (
-        <ShiftPallets key={`pallets-${current.id}`} shift={current} at={at} onForm={setForm} />
-      )}
       {current.status !== "planned" && (
-        <>
-          {/* Box and pallet exceptions only: a validation shift can have none. */}
-          {!validation && (
-            <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
-          )}
-          <ShiftRejections key={`rejections-${current.id}`} shift={current} at={at} />
-          <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
-        </>
+        <section className="shift-card__section" aria-labelledby={figuresId}>
+          <h2 id={figuresId}>{t("office.shiftCard.figures")}</h2>
+          <Card>
+            <ShiftTotalsBody shift={current} />
+          </Card>
+        </section>
       )}
-      {form !== null && (
-        <PrintFormDialog
-          shift={current}
-          target={form}
-          taskInputs={taskInputs}
-          timeZone={zone}
-          format={paper}
-          onFormat={setPaper}
-          onClose={() => setForm(null)}
-        />
-      )}
-      {dialog === "totals" && <ShiftTotalsDialog shift={current} onClose={() => setDialog(null)} />}
-      {dialog === "export" && (
-        <Suspense fallback={null}>
-          <ExportDialog shift={current} onClose={() => setDialog(null)} />
-        </Suspense>
-      )}
-      {canPlan && dialog === "close" && (
-        <CloseShiftDialog
-          shift={current}
-          onClose={() => setDialog(null)}
-          onClosed={(closed) => {
-            setDialog(null);
-            setNotice(t("office.shifts.closed", { number: closed.number }));
-            readAgain();
-          }}
-          onReload={() => {
-            setDialog(null);
-            readAgain();
-          }}
-          onOutdated={readAgain}
-        />
-      )}
-    </div>
+    </>
   );
 }
 

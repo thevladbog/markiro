@@ -156,7 +156,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(bare.queryByRole("link", { name: /Короб проигравшего/ })).toBeNull();
     expect(bare.getByText("Без короба")).toBeTruthy();
     expect(bare.getByRole("link", { name: "Смена OCT26-005/S" }).getAttribute("href")).toBe(
-      "/shifts/6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e",
+      "/shifts?shift=6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e",
     );
   });
 

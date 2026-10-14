@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "id": 42,
+      "recordedAt": "2026-10-08T07:30:00Z",
+      "userName": "Иван Петров",
+      "formatId": "shift_xml_gismt_aggregation_pallets",
+      "formatVersion": 1,
+      "maxLines": 2,
+      "palletId": null,
+      "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+      "partCount": 3,
+      "codeCount": 3,
+      "boxCount": 2,
+      "palletCount": 1,
+      "openPalletSuppressedBoxCount": 1
+    },
+    {
+      "id": 41,
+      "recordedAt": "2026-10-08T07:10:00Z",
+      "userName": null,
+      "formatId": "pallet_xml_gismt_aggregation",
+      "formatVersion": 1,
+      "maxLines": null,
+      "palletId": "a0000000-0000-4000-8000-000000000001",
+      "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+      "partCount": 1,
+      "codeCount": 0,
+      "boxCount": 1,
+      "palletCount": 1,
+      "openPalletSuppressedBoxCount": 0
+    }
+  ]
+}

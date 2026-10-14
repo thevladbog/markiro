@@ -93,6 +93,8 @@ export const officeKeys = {
   shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
   /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
   shiftRejections: (id: string) => ["office", "shift-rejections", id],
+  /** A shift's saved exports (`GET /v1/office/shifts/{id}/exports`), for the drawer's history. */
+  shiftExports: (id: string) => ["office", "shift-exports", id],
   /** A box's card (`GET /v1/office/boxes/{id}`, plan КРТ). */
   boxCard: (id: string) => ["office", "box-card", id],
   /** A pallet's card (`GET /v1/office/pallets/{id}`, plan КРТ). */

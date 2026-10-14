@@ -53,7 +53,7 @@ describe("the card of a box (plan КРТ)", () => {
     const pallet = screen.getByRole("link", { name: "(00)146006820000000409" });
     expect(pallet.getAttribute("href")).toBe(`/codes/pallet/${BOX_CARD.pallet?.id ?? ""}`);
     expect(screen.getByRole("link", { name: "OCT26-003" }).getAttribute("href")).toBe(
-      `/shifts/${BOX_CARD.shift.id}`,
+      `/shifts?shift=${BOX_CARD.shift.id}`,
     );
   });
 
@@ -190,6 +190,7 @@ describe("the card of a box (plan КРТ)", () => {
     await openShifts(value);
     fireEvent.click(screen.getByRole("link", { name: `Карточка смены ${CARD_SHIFT.number}` }));
     await screen.findByRole("heading", { name: `Смена ${CARD_SHIFT.number}` });
+    fireEvent.click(screen.getByRole("tab", { name: "Короба" }));
     fireEvent.click(await screen.findByRole("link", { name: "(00)046006820000015000" }));
     await screen.findByRole("heading", { name: TITLE });
     fireEvent.click(screen.getByRole("link", { name: "← Назад" }));
