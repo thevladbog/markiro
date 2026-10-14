@@ -187,6 +187,11 @@ async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceSt
 /// command answers `storage` and `device.json` stays for another try (stage
 /// 2a spec §5.2, question В7).
 ///
+/// The copies an upgrade made (`standalone-station.pre-<version>.db`, plan
+/// ОБН-1) hold the PIN and badge hashes of that moment; the forget removes them
+/// once the database itself is cleared ([`LocalDbState::remove_pre_upgrade_copies`]),
+/// and answers `storage` when one cannot go.
+///
 /// One window stays by design: a fact written between the clear's commit and
 /// the removal of `device.json` belongs to the pairing that is still current,
 /// but the count did not see it, and it loses its link with no confirmation.
@@ -239,6 +244,15 @@ async fn device_forget(
                 return Err(storage());
             }
         }
+    }
+    // The copy an upgrade made keeps the hashes the database held then; the
+    // forget has just emptied the database itself, so it goes too (beta 3).
+    if let Err(error) = local.remove_pre_upgrade_copies() {
+        eprintln!(
+            "standalone: device_forget could not remove the upgrade's copy of the database: {:?}",
+            error.kind()
+        );
+        return Err(storage());
     }
     state
         .forget()

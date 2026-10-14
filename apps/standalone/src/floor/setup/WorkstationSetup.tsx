@@ -35,6 +35,7 @@ import {
   type PrinterDraft,
 } from "./printer-draft.js";
 import { SetupTabs, type SetupTabId } from "./SetupTabs.js";
+import { UnpairStation } from "./UnpairStation.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "./test-label.js";
 import {
   canonicalPort,
@@ -1288,6 +1289,8 @@ export function WorkstationSetup({
           {t(dirty ? "floor.setup.backUnsaved" : "floor.setup.back")}
         </Button>
         <span className="workstation-setup__footer-spacer" />
+        {/* Beta 3: the station's unpairing; renders only where the app provides it. */}
+        {!scannersOnly && <UnpairStation />}
         {/* Kept on the keyboard while it saves or has nothing to save: a button that vanishes from the tab order takes the focus with it. */}
         <Button
           size="floor"

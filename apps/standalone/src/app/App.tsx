@@ -10,7 +10,8 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { FloorApp } from "../floor/FloorApp.js";
-import { FloorStatusBar } from "../floor/FloorStatusBar.js";
+import { FloorStatusBar, type FloorBarTools } from "../floor/FloorStatusBar.js";
+import { createGatedScanSource } from "../floor/gated-scan-source.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import {
   createComScanSource,
@@ -19,6 +20,7 @@ import {
   type ScanSource,
 } from "../floor/scan-source.js";
 import { createPrintRuntime } from "../floor/print/print-runtime.js";
+import { UnpairContext, type UnpairApi } from "../floor/setup/unpair-context.js";
 import { applySavedScanners } from "../floor/setup/workstation-settings.js";
 import { WorkstationSetup } from "../floor/setup/WorkstationSetup.js";
 import type { FloorOperator } from "../floor/sign-in.js";
@@ -198,6 +200,9 @@ export function App({
       mergeScanSources(createKeyboardWedgeSource(), createComScanSource(hardwareApi.onScan)),
     [scanSource, hardwareApi],
   );
+  // What the floor's screens hear: the same scans, muted while a dialog asks
+  // for a badge of its own (the identity re-confirmation, beta 3).
+  const floorGate = useMemo(() => createGatedScanSource(scanner), [scanner]);
   // The COM scanners the workstation's settings name, once the app starts;
   // the setup gives the shell a changed set itself.
   useEffect(() => {
@@ -678,6 +683,79 @@ export function App({
     () => (kiosk.enabled && officeAdmin ? { mode: kioskSnapshot.mode, leave: leaveKiosk } : null),
     [kiosk.enabled, officeAdmin, kioskSnapshot.mode, leaveKiosk],
   );
+  // The floor's own way to change the window (beta 3): only where the table
+  // locks this PC (`due`), so a host, an office PC and an unconfigured station
+  // never show it. Leaving needs a fresh proof of identity (`Reconfirm`, in the
+  // control); the way back needs none.
+  const floorWindowMode = useMemo<FloorBarTools["windowMode"]>(
+    () =>
+      kiosk.enabled && due
+        ? {
+            snapshot: kioskSnapshot,
+            enter: kiosk.enter,
+            exit: async () => {
+              await kiosk.exit();
+            },
+            clearError: kiosk.clearError,
+          }
+        : null,
+    [kiosk, due, kioskSnapshot],
+  );
+  // When the reference sync last finished since the app started.
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  useEffect(() => {
+    if (state.sync.kind === "done") setLastSyncedAt(new Date());
+  }, [state.sync.kind, state.sync.synced]);
+  const retryNow = useCallback(() => {
+    requestSync();
+    requestFacts();
+  }, [requestSync, requestFacts]);
+  const floorTools = useMemo<FloorBarTools>(
+    () => ({
+      retry: retryNow,
+      lastSyncedAt,
+      windowMode: floorWindowMode,
+      source: scanner,
+      onMute: floorGate.setMuted,
+    }),
+    [retryNow, lastSyncedAt, floorWindowMode, scanner, floorGate],
+  );
+  // «Отвязать станцию» in «Рабочее место» (beta 3): the existing forget, behind
+  // the identity re-confirmation and with the unsent records kept on the disk.
+  const unpairApi = useMemo<UnpairApi | null>(
+    () =>
+      forgetHostId === null || forgetDeviceId === null
+        ? null
+        : {
+            local: localDb,
+            pairing: { hostId: forgetHostId, deviceId: forgetDeviceId },
+            operatorId: state.operator?.id ?? null,
+            inShift: state.floorWork !== null,
+            source: scanner,
+            onMute: floorGate.setMuted,
+            countUnsent: () =>
+              countUnsentRecords(localDb, { hostId: forgetHostId, deviceId: forgetDeviceId }),
+            owesBlocks: () =>
+              restoreDue(localDb, { hostId: forgetHostId, deviceId: forgetDeviceId }),
+            forget: async (keepUnsent) => {
+              await deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined);
+              setUnsent(null);
+              dispatch({ type: "forgotten" });
+              retryProbe();
+            },
+          },
+    [
+      localDb,
+      forgetHostId,
+      forgetDeviceId,
+      state.operator?.id,
+      state.floorWork,
+      scanner,
+      floorGate,
+      deviceApi,
+      retryProbe,
+    ],
+  );
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
     // Scoped to this session's token: a late failure from a session the
@@ -846,6 +924,7 @@ export function App({
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
             watchScanners={hardwareApi.watchScanners}
+            tools={floorTools}
             {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
           />
           {view.kind === "floor" ? (
@@ -857,40 +936,42 @@ export function App({
               lineId={pairedStatus.lineId}
               sync={state.sync}
               notice={state.floorNotice}
-              source={scanner}
+              source={floorGate.source}
               onSignedIn={operatorSignedIn}
               onSync={signInSync.request}
               onOffice={() => dispatch({ type: "office_requested" })}
               watchScanners={hardwareApi.watchScanners}
             />
           ) : (
-            <FloorApp
-              // One session's screen: nothing of it outlives the sign-out.
-              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
-              operator={view.operator}
-              local={localDb}
-              device={pairedStatus}
-              link={state.link}
-              sync={state.sync}
-              shiftReads={state.shiftReads}
-              outboxVersion={state.outboxVersion}
-              lineChangePending={state.pendingDevice !== null}
-              rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
-              enter={hostApi.enterShift}
-              create={hostApi.createDeviceShift}
-              checkCode={hostApi.checkCode}
-              requestBlock={hostApi.requestSsccBlock}
-              warehouseLookup={hostApi.warehouseLookup}
-              requestFacts={requestFacts}
-              source={scanner}
-              printing={printing}
-              hardware={hardwareApi}
-              awake={awake}
-              {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
-              dispatch={dispatch}
-              onSignOut={operatorSignedOut}
-              onSignOutReady={floorSignOutReady}
-            />
+            <UnpairContext.Provider value={unpairApi}>
+              <FloorApp
+                // One session's screen: nothing of it outlives the sign-out.
+                key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
+                operator={view.operator}
+                local={localDb}
+                device={pairedStatus}
+                link={state.link}
+                sync={state.sync}
+                shiftReads={state.shiftReads}
+                outboxVersion={state.outboxVersion}
+                lineChangePending={state.pendingDevice !== null}
+                rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
+                enter={hostApi.enterShift}
+                create={hostApi.createDeviceShift}
+                checkCode={hostApi.checkCode}
+                requestBlock={hostApi.requestSsccBlock}
+                warehouseLookup={hostApi.warehouseLookup}
+                requestFacts={requestFacts}
+                source={floorGate.source}
+                printing={printing}
+                hardware={hardwareApi}
+                awake={awake}
+                {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+                dispatch={dispatch}
+                onSignOut={operatorSignedOut}
+                onSignOutReady={floorSignOutReady}
+              />
+            </UnpairContext.Provider>
           )}
         </div>
       )}

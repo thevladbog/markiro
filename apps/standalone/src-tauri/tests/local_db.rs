@@ -5228,3 +5228,39 @@ async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
         fresh.query(journal, vec![]).await.unwrap()
     );
 }
+
+/// Beta 3: a forget takes the upgrade's copy of the database with it, side files
+/// included, and nothing else in the directory.
+#[tokio::test]
+async fn removing_the_upgrade_copies_takes_every_pre_file_and_only_those() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = LocalDbState::open(dir.path()).await;
+    let pre = pre_upgrade_file("0.9.0");
+    let files = [
+        pre.clone(),
+        format!("{pre}-wal"),
+        format!("{pre}-shm"),
+        format!("{pre}-journal"),
+        format!("{pre}.partial"),
+        format!("{PRE_UPGRADE_PREFIX}0.8.0.db"),
+    ];
+    for name in &files {
+        std::fs::write(dir.path().join(name), b"hashes").unwrap();
+    }
+    std::fs::write(dir.path().join("device.json"), b"{}").unwrap();
+    assert_eq!(local.remove_pre_upgrade_copies().unwrap(), files.len());
+    for name in &files {
+        assert!(!dir.path().join(name).exists(), "{name} stays");
+    }
+    // The database and the pairing file are not touched.
+    assert!(dir.path().join(FILE_NAME).exists());
+    assert!(dir.path().join("device.json").exists());
+    // Nothing left to remove is no error.
+    assert_eq!(local.remove_pre_upgrade_copies().unwrap(), 0);
+    assert_eq!(
+        LocalDbState::unavailable()
+            .remove_pre_upgrade_copies()
+            .unwrap(),
+        0
+    );
+}
