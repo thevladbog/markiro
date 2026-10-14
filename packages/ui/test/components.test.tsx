@@ -955,6 +955,41 @@ describe("shared control styles", () => {
   });
 });
 
+describe("Select at the floor size with `custom`", () => {
+  it("renders the product's own list in touch dimensions, never a native select", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { container } = render(
+      <Select
+        custom
+        searchable
+        size="floor"
+        label="Port"
+        options={[
+          { value: "", label: "Choose" },
+          { value: "COM3", label: "COM3" },
+          { value: "COM7", label: "COM7" },
+        ]}
+        value=""
+        onValueChange={onValueChange}
+      />,
+    );
+
+    expect(container.querySelector("select")).toBeNull();
+    const trigger = screen.getByRole("combobox", { name: "Port" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.style.height).toBe("var(--control-floor)");
+    expect(trigger.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Port").style.font).toBe("var(--floor-body-strong)");
+
+    await user.click(trigger);
+    const option = await screen.findByRole("option", { name: "COM7" });
+    expect(option.style.minHeight).toBe("var(--control-floor)");
+    await user.click(option);
+    expect(onValueChange).toHaveBeenCalledWith("COM7");
+  });
+});
+
 describe("Pager", () => {
   it("exports an accessible floor pager with deterministic adjacent page requests", async () => {
     const user = userEvent.setup();

@@ -21,6 +21,11 @@ export interface SelectProps<TValue extends string = string> {
   size?: SelectSize;
   /** Keep native select semantics for forms that rely on browser option behavior. */
   native?: boolean;
+  /**
+   * At the floor size, render the product's own (Radix) list in touch dimensions instead of the
+   * browser's `<select>`; the standalone station sets it on every floor Select.
+   */
+  custom?: boolean;
   disabled?: boolean;
   name?: string;
   required?: boolean;
@@ -61,6 +66,7 @@ export function Select<TValue extends string = string>({
   error,
   size = "md",
   native = false,
+  custom = false,
   className,
   style,
   id,
@@ -89,7 +95,7 @@ export function Select<TValue extends string = string>({
       )
     : itemOptions;
 
-  if (size === "floor" || native) {
+  if ((size === "floor" && !custom) || native) {
     const floor = size === "floor";
     return (
       <div
@@ -187,6 +193,7 @@ export function Select<TValue extends string = string>({
     );
   }
 
+  const floorList = size === "floor";
   const handleFocus = (_event: FocusEvent<HTMLButtonElement>) => {
     setFocus(true);
   };
@@ -201,7 +208,13 @@ export function Select<TValue extends string = string>({
       style={{ position: "relative", display: "flex", flexDirection: "column", gap: 6, ...style }}
     >
       {label && (
-        <label htmlFor={selectId} style={{ font: "var(--text-caption)", color: "var(--fg-2)" }}>
+        <label
+          htmlFor={selectId}
+          style={{
+            font: floorList ? "var(--floor-body-strong)" : "var(--text-caption)",
+            color: "var(--fg-2)",
+          }}
+        >
           {label}
         </label>
       )}
@@ -241,12 +254,12 @@ export function Select<TValue extends string = string>({
             appearance: "none",
             WebkitAppearance: "none",
             width: "100%",
-            height: "var(--control-md)",
+            height: floorList ? "var(--control-floor)" : "var(--control-md)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 8,
-            padding: "0 12px",
+            padding: floorList ? "0 16px" : "0 12px",
             borderRadius: "var(--r-2)",
             background: "var(--surface-card)",
             color: "var(--fg-1)",
@@ -256,7 +269,7 @@ export function Select<TValue extends string = string>({
             boxShadow: focus
               ? "0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent)"
               : "none",
-            font: "var(--text-body)",
+            font: floorList ? "var(--floor-body)" : "var(--text-body)",
             cursor: disabled ? "not-allowed" : "pointer",
             opacity: disabled ? 0.45 : 1,
           }}
@@ -325,13 +338,13 @@ export function Select<TValue extends string = string>({
                   style={{
                     boxSizing: "border-box",
                     width: "100%",
-                    height: "var(--control-sm)",
+                    height: floorList ? "var(--control-floor)" : "var(--control-sm)",
                     padding: "0 10px",
                     border: "1px solid var(--line-strong)",
                     borderRadius: "var(--r-1)",
                     background: "var(--surface-card)",
                     color: "var(--fg-1)",
-                    font: "var(--text-body-sm)",
+                    font: floorList ? "var(--floor-body)" : "var(--text-body-sm)",
                   }}
                 />
               </div>
@@ -360,12 +373,12 @@ export function Select<TValue extends string = string>({
                     position: "relative",
                     display: "flex",
                     alignItems: "center",
-                    minHeight: "var(--control-md)",
-                    padding: "0 32px 0 12px",
+                    minHeight: floorList ? "var(--control-floor)" : "var(--control-md)",
+                    padding: floorList ? "0 44px 0 16px" : "0 32px 0 12px",
                     borderRadius: "calc(var(--r-2) - 2px)",
                     background: "transparent",
                     outline: "none",
-                    font: "var(--text-body)",
+                    font: floorList ? "var(--floor-body)" : "var(--text-body)",
                     cursor: option.disabled ? "not-allowed" : "pointer",
                     opacity: option.disabled ? 0.45 : 1,
                   }}
@@ -406,7 +419,7 @@ export function Select<TValue extends string = string>({
         <span
           id={error ? errorId : hintId}
           style={{
-            font: "var(--text-body-sm)",
+            font: floorList ? "var(--floor-body)" : "var(--text-body-sm)",
             color: error ? "var(--err-fg)" : "var(--fg-3)",
           }}
         >
