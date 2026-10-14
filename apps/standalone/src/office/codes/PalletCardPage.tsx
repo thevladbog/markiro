@@ -20,6 +20,7 @@ import {
   type OfficePalletBox,
   type OfficePalletCard,
 } from "../../host/pack-cards.js";
+import { CardFiles } from "../exports/CardFiles.js";
 import { hasPlacard } from "../forms/form-data.js";
 import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
@@ -219,6 +220,7 @@ export function PalletCardPage() {
       <PalletMembers card={pallet} at={at} />
       <PalletExceptions card={pallet} at={at} receivedAt={format} />
       <PackDocuments documents={pallet.documents} at={at} />
+      <CardFiles targetType="pallet" targetId={pallet.id} label={label} at={at} timeZone={zone} />
       {form !== null && shift.data !== undefined && (
         <PrintFormDialog
           shift={shift.data}

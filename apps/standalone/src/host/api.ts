@@ -47,6 +47,22 @@ import {
   type DisaggregationUpdate,
 } from "./disaggregation.js";
 import {
+  exportFileChunkSchema,
+  exportFileListSchema,
+  exportFileOpenedSchema,
+  exportFileProgressSchema,
+  exportFilesPath,
+  exportSettingsSchema,
+  type ExportFileBegin,
+  type ExportFileChunk,
+  type ExportFileList,
+  type ExportFileOpened,
+  type ExportFileProgress,
+  type ExportFileQuery,
+  type ExportSettings,
+  type ExportSettingsUpdate,
+} from "./export-files.js";
+import {
   isPackId,
   officeBoxCardSchema,
   officePalletCardSchema,
@@ -327,6 +343,33 @@ export interface HostApi {
   listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
   /** `204`: the export's files are saved; the host writes its `shift.export` audit row (plan ЧЗ). */
   recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
+  /**
+   * Starts the upload of a file the office generated to the host's store (host migration
+   * `0029`); a file of one chunk that carries its bytes is stored by this call. Repeating a
+   * call answers where the upload stands.
+   */
+  beginExportFile: (token: string, begin: ExportFileBegin) => Promise<ExportFileProgress>;
+  /** Chunk `seq` (at most 1 MiB of the file, base64) of an upload, in order. */
+  putExportFileChunk: (
+    token: string,
+    id: string,
+    seq: number,
+    contentBase64: string,
+  ) => Promise<ExportFileProgress>;
+  /** Seals an upload: the host checks the whole against the declared size and SHA-256. */
+  completeExportFile: (token: string, id: string) => Promise<ExportFileProgress>;
+  /** The stored files of a shift or of a card, newest first. */
+  listExportFiles: (token: string, query: ExportFileQuery) => Promise<ExportFileList>;
+  /**
+   * Opens a download: the host checks the stored bytes against their SHA-256 (`export_file_corrupted`
+   * otherwise) and writes the `shift.export.download` audit row; the chunks follow.
+   */
+  openExportFileDownload: (token: string, id: string) => Promise<ExportFileOpened>;
+  getExportFileChunk: (token: string, id: string, seq: number) => Promise<ExportFileChunk>;
+  /** The retention of stored files and what the store holds. */
+  getExportSettings: (token: string) => Promise<ExportSettings>;
+  /** Administrators only. */
+  putExportSettings: (token: string, update: ExportSettingsUpdate) => Promise<ExportSettings>;
   /** What «Состав короба» prints of the box, in one snapshot (plan О-Ф); every office role. */
   getBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
   /**
@@ -927,6 +970,49 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    beginExportFile: (token, begin) =>
+      client.request("POST", "/v1/office/export-files", {
+        body: begin,
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    putExportFileChunk: (token, id, seq, contentBase64) =>
+      client.request("PUT", `/v1/office/export-files/${id}/chunks/${seq}`, {
+        body: { contentBase64 },
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    completeExportFile: (token, id) =>
+      client.request("POST", `/v1/office/export-files/${id}/complete`, {
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    listExportFiles: (token, query) =>
+      client.request("GET", exportFilesPath(query), {
+        officeToken: token,
+        schema: exportFileListSchema,
+      }),
+    openExportFileDownload: (token, id) =>
+      client.request("POST", `/v1/office/export-files/${id}/download`, {
+        officeToken: token,
+        schema: exportFileOpenedSchema,
+      }),
+    getExportFileChunk: (token, id, seq) =>
+      client.request("GET", `/v1/office/export-files/${id}/chunks/${seq}`, {
+        officeToken: token,
+        schema: exportFileChunkSchema,
+      }),
+    getExportSettings: (token) =>
+      client.request("GET", "/v1/office/export-files/settings", {
+        officeToken: token,
+        schema: exportSettingsSchema,
+      }),
+    putExportSettings: (token, update) =>
+      client.request("PUT", "/v1/office/export-files/settings", {
+        body: update,
+        officeToken: token,
+        schema: exportSettingsSchema,
+      }),
     getBoxReportRows: (token, id) =>
       client.request("GET", `/v1/office/boxes/${id}/report-data`, {
         officeToken: token,

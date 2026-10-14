@@ -195,6 +195,49 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     await waitFor(() => expect(files.open).toHaveBeenCalledWith(folder));
   });
 
+  it("keeps the form's exact HTML on the host, printed or opened, as a file of the box it came from", async () => {
+    freezeClock();
+    const session = formSession(SHIFT);
+    const print = vi.fn<PrintForm>();
+    await openCard(session, SHIFT, print, fakeOfficeFiles());
+    fireEvent.click(await formButton(BOX_FORM));
+    const dialog = await readyDialog(BOX_FORM);
+    const html = renderForm({ kind: "box", rows: BOX_ROWS, timeZone: ORG_PROFILE.timeZone })?.html;
+    for (const [press, calls] of [
+      ["Печать", 1],
+      ["Открыть в браузере", 2],
+    ] as const) {
+      fireEvent.click(within(dialog).getByRole("button", { name: press }));
+      await waitFor(() => expect(session.api.beginExportFile).toHaveBeenCalledTimes(calls));
+      await afterPaint();
+    }
+    for (const [, begin] of session.api.beginExportFile.mock.calls) {
+      expect(begin).toMatchObject({
+        kind: "form",
+        targetType: "box",
+        targetId: BOX_ROWS.id,
+        formatId: "form_box",
+        formatVersion: 1,
+        fileName: "Состав короба 046006820000015000.html",
+      });
+      const bytes = Uint8Array.from(atob(begin.contentBase64 ?? ""), (c) => c.charCodeAt(0));
+      expect(new TextDecoder().decode(bytes)).toBe(html);
+    }
+    expect(print).toHaveBeenCalledTimes(1);
+  });
+
+  it("prints all the same when the host cannot keep the form, and says so", async () => {
+    const session = formSession(SHIFT);
+    session.api.beginExportFile.mockRejectedValue(HOST_DOWN());
+    const print = vi.fn<PrintForm>();
+    await openCard(session, SHIFT, print, fakeOfficeFiles());
+    fireEvent.click(await formButton(BOX_FORM));
+    const dialog = await readyDialog(BOX_FORM);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    await within(dialog).findByText(`Копия на хосте не сохранена: ${HOST_DOWN_TEXT}`);
+  });
+
   it("says why a form was not opened in the browser, and opens nothing", async () => {
     const files = fakeOfficeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("documents_unavailable", "no folder"));

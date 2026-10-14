@@ -189,6 +189,41 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       total: 0,
     })),
     listShiftExports: vi.fn<HostApi["listShiftExports"]>(async () => ({ items: [] })),
+    // The host's store of generated files (host migration 0029): by default it takes every
+    // file whole and lists none, so a test about something else sees no warning.
+    beginExportFile: vi.fn<HostApi["beginExportFile"]>(async (_token, begin) => ({
+      id: begin.id,
+      chunkCount: Math.max(1, Math.ceil(begin.sizeBytes / 1_048_576)),
+      receivedChunks: begin.contentBase64 === undefined ? 0 : 1,
+      ready: begin.contentBase64 !== undefined,
+    })),
+    putExportFileChunk: vi.fn<HostApi["putExportFileChunk"]>(async (_token, id, seq) => ({
+      id,
+      chunkCount: seq + 1,
+      receivedChunks: seq + 1,
+      ready: false,
+    })),
+    completeExportFile: vi.fn<HostApi["completeExportFile"]>(async (_token, id) => ({
+      id,
+      chunkCount: 1,
+      receivedChunks: 1,
+      ready: true,
+    })),
+    listExportFiles: vi.fn<HostApi["listExportFiles"]>(async () => ({ items: [] })),
+    openExportFileDownload: vi.fn<HostApi["openExportFileDownload"]>(() =>
+      unexpected("openExportFileDownload"),
+    ),
+    getExportFileChunk: vi.fn<HostApi["getExportFileChunk"]>(() =>
+      unexpected("getExportFileChunk"),
+    ),
+    getExportSettings: vi.fn<HostApi["getExportSettings"]>(async () => ({
+      retentionDays: null,
+      fileCount: 0,
+      storedBytes: 0,
+      originalBytes: 0,
+      maxStoredBytes: 2_147_483_648,
+    })),
+    putExportSettings: vi.fn<HostApi["putExportSettings"]>(() => unexpected("putExportSettings")),
     listShiftRejections: vi.fn<HostApi["listShiftRejections"]>(async () => ({
       items: [],
       total: 0,

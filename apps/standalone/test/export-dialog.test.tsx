@@ -438,11 +438,114 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     const files = fakeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("documents_unavailable", "no documents"));
     const session = await openExport(CLOSED_PALLETS, rows(), files);
+    // Neither the folder nor the host has the files: only then is the export a failure.
+    session.api.beginExportFile.mockRejectedValue(new Error("the host is gone"));
     form();
     await within(dialog()).findByText(
       "На этом компьютере не найдена папка «Документы». Файлы не сохранены.",
     );
     expect(session.api.recordShiftExport).not.toHaveBeenCalled();
+  });
+
+  it("hands the host the exact bytes of every part before the folder gets them, then records the export", async () => {
+    const files = fakeFiles();
+    const session = await openExport(CLOSED_PALLETS, rows(), files);
+    fireEvent.click(
+      within(dialog()).getByRole("radio", { name: "[XML][ГИСМТ] Паллетная агрегация" }),
+    );
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    const parts = expectedParts(rows(), {
+      formatId: "shift_xml_gismt_aggregation_pallets",
+      formatVersion: 1,
+      maxLines: null,
+      palletId: null,
+    });
+    expect(session.api.beginExportFile).toHaveBeenCalledTimes(parts.length);
+    const [token, begin] = session.api.beginExportFile.mock.calls[0] ?? [];
+    expect(token).toBe(TOKEN);
+    expect(begin).toMatchObject({
+      batchId: DOCUMENT,
+      partNo: 1,
+      kind: "shift_export",
+      targetType: "shift",
+      targetId: ACTIVE.id,
+      formatId: "shift_xml_gismt_aggregation_pallets",
+      formatVersion: 1,
+      fileName: parts[0]?.name,
+      sizeBytes: parts[0]?.bytes.length,
+    });
+    // The bytes the host holds are the ones the folder holds, and its digest is theirs.
+    const sent = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (char) => char.charCodeAt(0));
+    expect([...sent]).toEqual([...(parts[0]?.bytes ?? [])]);
+    const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(parts[0]?.bytes ?? []));
+    expect(begin?.sha256).toBe(
+      Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    );
+    const [stored] = session.api.beginExportFile.mock.invocationCallOrder;
+    const [saved] = files.save.mock.invocationCallOrder;
+    const [recorded] = session.api.recordShiftExport.mock.invocationCallOrder;
+    expect(stored !== undefined && saved !== undefined && stored < saved).toBe(true);
+    expect(saved !== undefined && recorded !== undefined && saved < recorded).toBe(true);
+    expect(within(dialog()).queryByText(/Копия на хосте не сохранена/)).toBeNull();
+  });
+
+  it("keeps a pallet's document on the host as the pallet's own file", async () => {
+    const files = fakeFiles();
+    const session = await openExport(
+      { ...CLOSED_PALLETS, status: "active", closedAt: null },
+      rows(),
+      files,
+    );
+    fireEvent.click(
+      within(dialog()).getByRole("button", { name: "XML паллеты 146006820000000409" }),
+    );
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    expect(session.api.beginExportFile.mock.calls[0]?.[1]).toMatchObject({
+      kind: "pallet_export",
+      targetType: "pallet",
+      targetId: PALLET_ID,
+      formatId: "pallet_xml_gismt_aggregation",
+      batchId: DOCUMENT,
+    });
+  });
+
+  it("is not stopped by a host that cannot keep the files: the folder is written, the export recorded, and the dialog says why", async () => {
+    const files = fakeFiles();
+    const session = await openExport(CLOSED_PALLETS, rows(), files);
+    session.api.beginExportFile.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "export_store_full",
+        message: "full",
+        status: 507,
+        details: {},
+      }),
+    );
+    form();
+    await within(dialog()).findByText(/^Сохранено файлов: 1\./);
+    expect(
+      await within(dialog()).findByText(
+        /^Копия на хосте не сохранена: Хранилище файлов на хосте заполнено/,
+      ),
+    ).toBeTruthy();
+    expect(files.save).toHaveBeenCalledTimes(1);
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the export and says the host holds the files when only the folder could not be written", async () => {
+    const files = fakeFiles();
+    files.save.mockRejectedValue(new OfficeFilesError("storage", "disk"));
+    const session = await openExport(CLOSED_PALLETS, rows(), files);
+    form();
+    await within(dialog()).findByText(/Не удалось записать файлы/);
+    expect(
+      within(dialog()).getByText(/Файлы сохранены на хосте: скачайте их из карточки смены/),
+    ).toBeTruthy();
+    expect(session.api.beginExportFile).toHaveBeenCalledTimes(1);
+    expect(session.api.recordShiftExport).toHaveBeenCalledTimes(1);
+    // The folder button of a folder that does not exist is not offered.
+    expect(within(dialog()).queryByRole("button", { name: "Открыть папку" })).toBeNull();
   });
 
   it("says a record the host did not take, keeps the saved files and writes the same record again", async () => {
@@ -781,6 +884,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     const files = fakeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("invalid_request", "too long"));
     const session = await openExport(CLOSED_PALLETS, rows(), files);
+    session.api.beginExportFile.mockRejectedValue(new Error("the host is gone"));
     form();
     await within(dialog()).findByText(
       "Файлы не сохранены: имя файла или путь к папке получились слишком длинными либо содержат недопустимый символ. В имени файла стоит название товара: сократите его в карточке товара, или выберите смену с более коротким названием, и повторите выгрузку.",
@@ -792,7 +896,8 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     const files = fakeFiles();
     files.save.mockRejectedValue(new Error("not a refusal of the shell"));
     files.open.mockRejectedValue(new OfficeFilesError("unsupported", "no explorer"));
-    await openExport(CLOSED_PALLETS, rows(), files);
+    const session = await openExport(CLOSED_PALLETS, rows(), files);
+    session.api.beginExportFile.mockRejectedValueOnce(new Error("the host is gone"));
     form();
     await within(dialog()).findByText(
       "Не удалось записать файлы: проверьте место на диске и доступ к папке «Документы». Файлы не сохранены.",
@@ -965,7 +1070,8 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
   it("gives the focus to a failure, which is an alert", async () => {
     const files = fakeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("storage", "disk"));
-    await openExport(CLOSED_PALLETS, rows(), files);
+    const session = await openExport(CLOSED_PALLETS, rows(), files);
+    session.api.beginExportFile.mockRejectedValue(new Error("the host is gone"));
     form();
     const failure = (await within(dialog()).findByText(/^Не удалось записать файлы/)).closest(
       '[role="alert"]',

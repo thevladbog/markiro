@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
+import { exportFileListSchema } from "../src/host/export-files.js";
 import { renderOffice, TECHNOLOGIST } from "./support/office.js";
 import {
   BOX_CARD,
@@ -11,6 +12,7 @@ import {
   packSession,
   SHIFT_BOXES,
 } from "./support/pack-cards.js";
+import { fakeOfficeFiles } from "./support/office-files.js";
 import { openShifts } from "./support/shifts.js";
 
 const PATH = `/codes/box/${BOX_CARD.id}`;
@@ -27,11 +29,63 @@ function section(name: string): HTMLElement {
   return found;
 }
 
-async function boxCard(value = packSession()) {
-  renderOffice(value, { initialPath: PATH });
+async function boxCard(value = packSession(), files = fakeOfficeFiles()) {
+  renderOffice(value, { initialPath: PATH, files });
   await screen.findByRole("heading", { name: TITLE });
   return value;
 }
+
+describe("the box's saved files (host migration 0029)", () => {
+  it("lists the forms made from the box that the host keeps, each with «Скачать», and nothing when it has none", async () => {
+    const none = await boxCard();
+    expect(screen.queryByRole("heading", { name: "Сохранённые файлы" })).toBeNull();
+    expect(none.api.listExportFiles).toHaveBeenCalledWith("office-session-token", {
+      targetType: "box",
+      targetId: BOX_CARD.id,
+    });
+  });
+
+  it("shows the file of a printed form and downloads it", async () => {
+    const value = packSession();
+    const list = exportFileListSchema.parse({
+      items: [
+        {
+          id: "7a1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8",
+          batchId: "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+          partNo: 1,
+          kind: "form",
+          targetType: "box",
+          targetId: BOX_CARD.id,
+          shiftId: BOX_CARD.shift.id,
+          formatId: "form_box",
+          formatVersion: 1,
+          fileName: "Состав короба 046006820000015000.html",
+          mediaType: "text/html; charset=utf-8",
+          sizeBytes: 5,
+          sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          generator: "markiro-autonom test",
+          createdAt: "2026-10-08T07:30:00Z",
+          userName: "Иван Петров",
+        },
+      ],
+    });
+    value.api.listExportFiles.mockResolvedValue(list);
+    value.api.openExportFileDownload.mockResolvedValue({ file: list.items[0]!, chunkCount: 1 });
+    value.api.getExportFileChunk.mockResolvedValue({ contentBase64: "aGVsbG8=" });
+    const files = fakeOfficeFiles();
+    await boxCard(value, files);
+    expect(await screen.findByRole("heading", { name: "Сохранённые файлы" })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Скачать файл Состав короба 046006820000015000.html" }),
+    );
+    await screen.findByText(/^Файл сохранён в папке:/);
+    expect(value.api.openExportFileDownload).toHaveBeenCalledTimes(1);
+    expect(files.save.mock.calls[0]?.[0][0]).toBe("Формы");
+    expect(files.save.mock.calls[0]?.[1].map((each) => each.name)).toEqual([
+      "Состав короба 046006820000015000.html",
+    ]);
+  });
+});
 
 describe("the card of a box (plan КРТ)", () => {
   it("says where the box stands: its state, operator, shift, station and pallet", async () => {

@@ -21,6 +21,7 @@ import {
   type OfficeBoxException,
   type OfficeBoxItem,
 } from "../../host/pack-cards.js";
+import { CardFiles } from "../exports/CardFiles.js";
 import { PrintFormDialog } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
@@ -205,6 +206,7 @@ export function BoxCardPage() {
       <BoxItems card={box} at={at} />
       <BoxExceptions card={box} at={at} format={format} />
       <PackDocuments documents={box.documents} at={at} />
+      <CardFiles targetType="box" targetId={box.id} label={label} at={at} timeZone={zone} />
       {printing && shift.data !== undefined && (
         <PrintFormDialog
           shift={shift.data}

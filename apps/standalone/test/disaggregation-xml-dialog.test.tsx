@@ -148,14 +148,71 @@ describe("the ЧЗ file of an applied document (plan ДЗГ-О)", () => {
     await waitFor(() => expect(files.open).toHaveBeenCalledWith(FOLDER));
   });
 
-  it("says why the file was not saved and records nothing", async () => {
+  it("says why the file was not saved and records nothing when neither the folder nor the host has it", async () => {
     const files = fakeOfficeFiles();
     files.save.mockRejectedValue(new OfficeFilesError("invalid_request", "bad name"));
     const session = withHost();
+    session.api.beginExportFile.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "host down" }),
+    );
     const dialog = await openDialog(session, files);
     fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать файл" }));
     await within(dialog).findByText(/Файлы не сохранены/);
     expect(session.api.recordDisaggregationExport).not.toHaveBeenCalled();
+  });
+
+  it("hands the host the generator's exact bytes first, as the document's own file", async () => {
+    const files = fakeOfficeFiles();
+    const session = withHost();
+    const dialog = await openDialog(session, files);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать файл" }));
+    await within(dialog).findByText(/Файл сохранён в папке:/);
+    const [, begin] = session.api.beginExportFile.mock.calls[0] ?? [];
+    expect(begin).toMatchObject({
+      kind: "disaggregation_xml",
+      targetType: "disaggregation_document",
+      targetId: DETAIL.document.id,
+      formatId: "disaggregation_xml_gismt",
+      formatVersion: 1,
+      partNo: 1,
+      fileName: "disaggregation-DSG-26-0007.xml",
+      sizeBytes: BYTES.length,
+    });
+    const sent = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (c) => c.charCodeAt(0));
+    expect([...sent]).toEqual([...BYTES]);
+    const stored = session.api.beginExportFile.mock.invocationCallOrder[0] ?? 0;
+    expect(stored).toBeLessThan(files.save.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("records the file and says the host holds it when only the folder could not be written", async () => {
+    const files = fakeOfficeFiles();
+    files.save.mockRejectedValue(new OfficeFilesError("storage", "disk"));
+    const session = withHost();
+    const dialog = await openDialog(session, files);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать файл" }));
+    await within(dialog).findByText(/Файл сохранён на хосте: скачайте его из карточки документа/);
+    expect(session.api.recordDisaggregationExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("still saves the folder copy and records it when the host cannot keep the file, and says why", async () => {
+    const files = fakeOfficeFiles();
+    const session = withHost();
+    session.api.beginExportFile.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "export_file_too_large",
+        message: "big",
+        status: 413,
+        details: {},
+      }),
+    );
+    const dialog = await openDialog(session, files);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать файл" }));
+    await within(dialog).findByText(/Файл сохранён в папке:/);
+    await within(dialog).findByText(
+      "Копия на хосте не сохранена: Файл больше 256 МБ: хост его не хранит.",
+    );
+    expect(session.api.recordDisaggregationExport).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the saved file when the record is refused, and writes the same record again without saving twice", async () => {

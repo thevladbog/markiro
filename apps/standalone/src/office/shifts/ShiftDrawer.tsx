@@ -313,7 +313,7 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
           <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
         )}
         {active === "exports" && (
-          <ShiftExports key={`exports-${current.id}`} shift={current} at={at} />
+          <ShiftExports key={`exports-${current.id}`} shift={current} at={at} timeZone={zone} />
         )}
       </div>
       {form !== null && (
