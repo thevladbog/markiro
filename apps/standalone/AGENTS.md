@@ -121,9 +121,10 @@ target_id`). `shift.export` (plan ЧЗ) and `app.update.start` (plan ОБН-2)
 are the two rows that record no change. `shift.export`: the office saved an
 export's files and then wrote it (`POST /v1/office/shifts/{id}/exports`),
 every office role, no revision, the shift as its target and the record's
-fields as its details. The host cannot check those counts against the files,
-which it never sees: the row says what the office session reported it wrote,
-and it is no evidence of the bytes. `app.update.start` says the same of an
+fields as its details. The host cannot check those counts against the files:
+the row says what the office session reported it wrote. The bytes themselves
+are evidence only where the host stored them (`export_files`, migration
+`0029`, «Stored files» under «Shifts»), and the row joins them by its `documentId`. `app.update.start` says the same of an
 installer the office started (see «Updates from a file»).
 `conflict.review` (plan КНФ) is the office user who marked a code conflict
 reviewed, target `code_conflict`/`{id}`, details `{ kind, loserShiftId,
@@ -3713,6 +3714,67 @@ does not read is `null`, not a refusal of the shift — the thermal labels still
 print of that shift ends `render_failed`. The snapshot keeps its bound of 327 680 bytes, so a big
 sheet or logo can make the entry `snapshot_too_large`; the station table is unchanged (the
 snapshot is the text of `floor_shifts.snapshot`).
+
+## Stored files
+
+Beta 3 owner decision: «файлы должны быть доступны всегда для выгрузки». Every file
+the office generates is kept on the host, so a file lost from the office PC's
+`Документы\Markiro` folder is still downloadable. What is kept: a shift's and a pallet's
+ЧЗ export parts (`shift_export`, `pallet_export`), a disaggregation document's ГИС МТ
+file (`disaggregation_xml`) and the printed forms (`form`, format ids `form_box`,
+`form_pallet`, `form_placard`, `form_placards`, `form_task`, `form_act`), printed or opened
+in the browser alike. Not kept, on purpose: the pairing card (it carries a one-time code),
+the support bundle (a diagnostic snapshot) and a label template's ZPL/TSPL/JSON (the
+template is the host's data; the file is rebuilt on demand). The cloud's inventory documents
+and True API exports have no standalone counterpart (no inventory, no cloud).
+
+- Generators are untouched: `@markiro/domain` renders in the office window exactly as before
+  (parity: `test/export-parity.test.ts`, `test/forms-parity.test.ts`); the host never renders
+  or reads a file. A new generation hands the bytes to the host FIRST
+  (`src/office/exports/stored-files.ts`, `storeExportFiles`), then the shell writes the
+  folder copy, then the record is written. A host that cannot keep a file (store full, too
+  large, unreachable) never stops an export: the dialog says why and the folder copy is made;
+  a folder that cannot be written does not stop it either when the host holds the files (the
+  export is recorded and says so). Only when neither has the files is it a failure.
+- Transport: Tauri's IPC is JSON, so files go by chunks of at most 1 MiB, base64. A file of
+  one chunk goes whole in `POST /v1/office/export-files`; larger ones are begun there, sent by
+  `PUT …/{id}/chunks/{seq}` in order (a repeated chunk with the same bytes is fine) and sealed
+  by `POST …/{id}/complete`, where the host checks the size and SHA-256 declared at the
+  begin. The file's id is derived from `(batchId, partNo)`, so a retry is the same file.
+  A half-sent file is never listed or served and is swept after an hour.
+- Storage: SQLite, `export_files` (record: kind, target, shift, format and version, name,
+  media type, size, SHA-256, generator = the office build, creator, time) and
+  `export_file_chunks` (each chunk deflated when that saves a tenth, with its own SHA-256).
+  In the database, not beside it, so every copy and `markiro-host restore` carry the files
+  with no second place to keep in step. Cost: each copy holds every file stored before it,
+  and a copy is a whole database: the store is capped at 2 GiB as it occupies the database
+  (`EXPORT_STORE_MAX_BYTES`, refused with `export_store_full` and 507), a file at 256 MiB
+  (`export_file_too_large`), an export at 1000 parts. The retention is the administrator's
+  setting (`export_settings`, 30–3650 days or «Хранить всегда», the default); a term deletes
+  the older files when it is saved and when the next file is stored, and `shift.export.purge`
+  says how many.
+- Serving: `POST …/{id}/download` re-reads every chunk, checks the whole against the stored
+  SHA-256 and size and only then writes `shift.export.download` and answers with the chunk
+  count; bytes that no longer match are `export_file_corrupted` with a `failed` row and the
+  host serves nothing of the file (a chunk is also checked by its own SHA-256). The office
+  checks the SHA-256 again before it saves, byte for byte, into a new folder under
+  `Документы\Markiro`. Audit: `shift.export.store` (target = the file's target, details name
+  the file, never its bytes), `.download`, `.purge`, `.retention`.
+- Routes (every office role unless noted; a device key is `401`; all in
+  `license/gate.rs` `NEVER`): `GET`/`POST /v1/office/export-files`, `GET`/`PUT …/settings`
+  (`PUT`: administrators), `PUT`/`GET …/{id}/chunks/{seq}`, `POST …/{id}/complete`,
+  `POST …/{id}/download`. A disaggregation file is stored by the roles that may
+  disaggregate, as its record is. The shift's history (`GET …/shifts/{id}/exports`) names each
+  export's stored files (`files`, empty for an export from before `0029`: «Файл не сохранён:
+  сформируйте выгрузку заново»); the drawer's «Выгрузки» also lists the shift's forms and the
+  retention, and the box, pallet and disaggregation cards have «Сохранённые файлы»
+  (`CardFiles`).
+- Wire: `proto/src/export_files.rs`, `src/host/export-files.ts` and the `export-file*.json` /
+  `export-settings*.json` fixtures; `export_store_full`, `export_file_too_large` and
+  `export_file_corrupted` are in `markiro_proto::codes::ALL` and `API_ERROR_CODES`.
+  Tests: `host/tests/office_export_files.rs` (byte-equal re-download, corruption refusal,
+  device-key denial, restore keeps the files, caps, retention), `test/stored-files.test.ts`,
+  `test/shift-stored-files.test.tsx` and the dialogs' suites.
 
 ## Shift modes
 
