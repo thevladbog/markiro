@@ -2,22 +2,28 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HostError } from "../src/host/client.js";
 import type { OfficeShift } from "../src/host/protocol.js";
 import { createOfficeQueryClient } from "../src/office/office-query.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { ShiftDialog } from "../src/office/shifts/ShiftDialog.js";
 import {
   ACTIVE,
+  BOX_58,
+  DUPLICATE_58,
   freezeToday,
   LINE_2,
   MILK,
   MILK_BOX,
+  MILK_DUPLICATE,
   NO_TOTALS,
   NORTH,
+  OLD_DUPLICATE,
   openShifts,
   PALLET,
   PLANNED,
   shiftsSession,
+  WATER,
 } from "./support/shifts.js";
 
 const TOKEN = "office-session-token";
@@ -154,6 +160,7 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
       counterpartyId: NORTH.id,
       mode: "validation",
       palletsEnabled: false,
+      validationPrint: { mode: "none" },
     });
   });
 
@@ -291,5 +298,442 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
     fireEvent.keyDown(mode(NEW, "Проверка"), { key: "ArrowDown" });
     await waitFor(() => expect(isChecked(mode(NEW, "Агрегация"))).toBe(true));
     expect(field(NEW, "Вместимость короба, шт")).toBeTruthy();
+  });
+});
+
+const PRINT = "Печатать дубликат Data Matrix";
+const COPY_HINT =
+  "На внешнюю упаковку переносится полный код с продукции. Количество продукции не меняется.";
+const CHECK = "Обязательная проверка этикетки";
+const TEMPLATE = "Шаблон этикетки продукции";
+const NONE_HINT = "После отправки на принтер можно сканировать следующую единицу";
+const REQUIRED_HINT = "Оператор должен отсканировать новую этикетку перед следующей единицей.";
+const FROZEN = "Параметры печати и проверки зафиксированы при открытии смены.";
+const NO_TEMPLATES =
+  "Для этого продукта нет доступных шаблонов дубликата. Добавьте или включите подходящий шаблон в библиотеке этикеток.";
+
+function printFlag(name: string): HTMLElement | null {
+  return within(dialog(name)).queryByRole("checkbox", { name: PRINT });
+}
+
+function checkbox(name: string, label: string): HTMLElement {
+  return within(dialog(name)).getByRole("checkbox", { name: label });
+}
+
+function isOn(box: HTMLElement): boolean {
+  return box.getAttribute("aria-checked") === "true";
+}
+
+/** The section «Печать дубликата», or `null` while it is hidden. */
+function duplicateSection(name: string): HTMLElement | null {
+  return within(dialog(name)).queryByRole("region", { name: "Печать дубликата" });
+}
+
+/** The options of the select labelled `label`, by text, the placeholder left out. */
+function optionsOf(name: string, label: string): { text: string; disabled: boolean }[] {
+  const control = field(name, label);
+  if (!(control instanceof HTMLSelectElement)) throw new Error(`${label} is no select`);
+  return [...control.options]
+    .filter((option) => option.value !== "")
+    .map((option) => ({ text: option.textContent, disabled: option.disabled }));
+}
+
+/** A planned validation shift of milk that prints with `verification`. */
+function printingShift(verification: "none" | "required" = "none"): OfficeShift {
+  return {
+    ...PLANNED,
+    productId: MILK.id,
+    boxTemplateId: MILK_BOX.id,
+    mode: "validation",
+    validationPrint: { mode: "duplicate_dm", templateId: MILK_DUPLICATE.id, verification },
+  };
+}
+
+function renderDialog(session: ReturnType<typeof shiftsSession>, shift: OfficeShift) {
+  return render(
+    <QueryClientProvider client={createOfficeQueryClient()}>
+      <OfficeSessionProvider value={session}>
+        <ShiftDialog
+          shift={shift}
+          onClose={() => undefined}
+          onSaved={() => undefined}
+          onReload={() => undefined}
+          onOutdated={() => undefined}
+        />
+      </OfficeSessionProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe("office shifts: the duplicate print under «Проверка» (plan РЕЖ part B, B7)", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("has no flag under «Агрегация»", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    expect(printFlag(NEW)).toBeNull();
+    expect(duplicateSection(NEW)).toBeNull();
+    expect(within(dialog(NEW)).queryByText(COPY_HINT)).toBeNull();
+  });
+
+  it("offers the flag under «Проверка», off, with the copy hint under it, before the date", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    const flag = printFlag(NEW);
+    if (flag === null) throw new Error("no flag");
+    expect(isOn(flag)).toBe(false);
+    expect(messageOf(NEW, PRINT)).toBe(COPY_HINT);
+    expect(duplicateSection(NEW)).toBeNull();
+    expect(precedes(modes(NEW), flag)).toBe(true);
+    expect(
+      precedes(flag, within(dialog(NEW)).getByRole("button", { name: "Дата производства" })),
+    ).toBe(true);
+    // The box template stays (the owner's decision), with its validation hint.
+    expect(messageOf(NEW, "Шаблон этикетки короба")).toBe(VALIDATION_HINT);
+  });
+
+  it("opens «Печать дубликата» with the fitting duplicate templates and the check off, after the counterparty and before the box template", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    const section = duplicateSection(NEW);
+    if (section === null) throw new Error("no section");
+    expect(within(section).getByRole("heading", { name: "Печать дубликата" })).toBeTruthy();
+    // Enabled duplicate templates covering milk, by name: not the switched-off one, not a box's.
+    expect(optionsOf(NEW, TEMPLATE)).toEqual([
+      { text: "Дубликат 58×40 · 58 × 40 мм · 203 dpi", disabled: false },
+      { text: "Дубликат молока · 43 × 25 мм · 300 dpi", disabled: false },
+    ]);
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+    const check = checkbox(NEW, CHECK);
+    expect(isOn(check)).toBe(false);
+    expect(messageOf(NEW, CHECK)).toBe(NONE_HINT);
+    fireEvent.click(check);
+    expect(messageOf(NEW, CHECK)).toBe(REQUIRED_HINT);
+    // The copy hint moves into the section.
+    expect(messageOf(NEW, PRINT)).toBeUndefined();
+    expect(within(section).getByText(COPY_HINT)).toBeTruthy();
+    expect(within(dialog(NEW)).queryByText(NO_TEMPLATES)).toBeNull();
+    // The order (Р16): counterparty, the section, the box template.
+    expect(precedes(field(NEW, "Контрагент"), section)).toBe(true);
+    expect(precedes(section, field(NEW, "Шаблон этикетки короба"))).toBe(true);
+    expect(messageOf(NEW, "Шаблон этикетки короба")).toBe(VALIDATION_HINT);
+  });
+
+  it("offers a product of another group only the templates for every category", async () => {
+    await openCreate();
+    set(NEW, "Товар", WATER.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(optionsOf(NEW, TEMPLATE)).toEqual([
+      { text: "Дубликат 58×40 · 58 × 40 мм · 203 dpi", disabled: false },
+    ]);
+  });
+
+  it("refuses a save without the template, says so under it and puts the focus on it", async () => {
+    const session = await openCreate();
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(messageOf(NEW, TEMPLATE)).toBe("Выберите шаблон этикетки продукции"),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(field(NEW, TEMPLATE)));
+    expect(session.api.createShift).not.toHaveBeenCalled();
+    // Choosing one clears the message.
+    set(NEW, TEMPLATE, DUPLICATE_58.id);
+    expect(messageOf(NEW, TEMPLATE) ?? "").not.toContain("Выберите шаблон");
+  });
+
+  it("says when no duplicate template fits the product, and the flag on cannot be saved", async () => {
+    const session = shiftsSession();
+    session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, PALLET, OLD_DUPLICATE]);
+    await openCreate(session);
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(optionsOf(NEW, TEMPLATE)).toEqual([]);
+    expect(within(dialog(NEW)).getByText(NO_TEMPLATES)).toBeTruthy();
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(messageOf(NEW, TEMPLATE)).toBe("Выберите шаблон этикетки продукции"),
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
+  });
+
+  it("clears the template when the flag is turned off, and shows it empty when turned on again; the check stays", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    fireEvent.click(checkbox(NEW, CHECK));
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(duplicateSection(NEW)).toBeNull();
+    expect(messageOf(NEW, PRINT)).toBe(COPY_HINT);
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+    // As the cloud's form, the check is kept until the mode changes.
+    expect(isOn(checkbox(NEW, CHECK))).toBe(true);
+  });
+
+  it("drops the flag, the template, the check and the template's refusal when «Агрегация» is chosen", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    fireEvent.click(checkbox(NEW, CHECK));
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(messageOf(NEW, TEMPLATE)).toBe("Выберите шаблон этикетки продукции"),
+    );
+    fireEvent.click(mode(NEW, "Агрегация"));
+    expect(printFlag(NEW)).toBeNull();
+    expect(duplicateSection(NEW)).toBeNull();
+    fireEvent.click(mode(NEW, "Проверка"));
+    const flag = printFlag(NEW);
+    if (flag === null) throw new Error("no flag");
+    expect(isOn(flag)).toBe(false);
+    fireEvent.click(flag);
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+    expect(isOn(checkbox(NEW, CHECK))).toBe(false);
+    expect(field(NEW, TEMPLATE).getAttribute("aria-invalid")).not.toBe("true");
+    expect(messageOf(NEW, TEMPLATE) ?? "").not.toContain("Выберите шаблон");
+  });
+
+  it.each([
+    ["the check not required", false, "none"],
+    ["the check required", true, "required"],
+  ] as const)(
+    "plans a validation shift that prints, with %s",
+    async (_label, required, verification) => {
+      const session = await openCreate();
+      session.api.createShift.mockResolvedValue({ ...CREATED, mode: "validation" });
+      set(NEW, "Товар", MILK.id);
+      set(NEW, "Линия", LINE_2.id);
+      fireEvent.click(mode(NEW, "Проверка"));
+      fireEvent.click(checkbox(NEW, PRINT));
+      set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+      if (required) fireEvent.click(checkbox(NEW, CHECK));
+      fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+      await screen.findByText("Смена OCT26-006 запланирована.");
+      expect(session.api.createShift).toHaveBeenCalledWith(TOKEN, {
+        productId: MILK.id,
+        lineId: LINE_2.id,
+        productionDate: "2026-10-09",
+        boxTemplateId: MILK_BOX.id,
+        boxCapacity: 12,
+        plannedQty: null,
+        counterpartyId: null,
+        mode: "validation",
+        palletsEnabled: false,
+        validationPrint: { mode: "duplicate_dm", templateId: MILK_DUPLICATE.id, verification },
+      });
+    },
+  );
+
+  it("plans an aggregation and a validation without the flag with no duplicate, whatever was chosen before", async () => {
+    const session = await openCreate();
+    session.api.createShift.mockResolvedValue(CREATED);
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    fireEvent.click(mode(NEW, "Агрегация"));
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift.mock.calls[0]?.[1]).toMatchObject({
+      mode: "aggregation",
+      validationPrint: { mode: "none" },
+    });
+  });
+
+  it("opens a planned shift that prints on its own policy and sends a changed template alone", async () => {
+    const shift = printingShift("required");
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, rev: 90 });
+    const name = await openEdit(session, shift);
+    const flag = printFlag(name);
+    if (flag === null) throw new Error("no flag");
+    expect(isOn(flag)).toBe(true);
+    expect(valueOf(name, TEMPLATE)).toBe(MILK_DUPLICATE.id);
+    expect(isOn(checkbox(name, CHECK))).toBe(true);
+    set(name, TEMPLATE, DUPLICATE_58.id);
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      validationPrint: {
+        mode: "duplicate_dm",
+        templateId: DUPLICATE_58.id,
+        verification: "required",
+      },
+      expectedRev: shift.rev,
+    });
+  });
+
+  it("turns a printing shift into an aggregation with the duplicate dropped in the same request", async () => {
+    const shift = printingShift();
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, mode: "aggregation", rev: 90 });
+    const name = await openEdit(session, shift);
+    fireEvent.click(mode(name, "Агрегация"));
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      mode: "aggregation",
+      validationPrint: { mode: "none" },
+      expectedRev: shift.rev,
+    });
+  });
+
+  it("marks a planned shift's template that no longer fits as unavailable, never chosen again", async () => {
+    const shift = {
+      ...printingShift(),
+      validationPrint: {
+        mode: "duplicate_dm" as const,
+        templateId: OLD_DUPLICATE.id,
+        verification: "none" as const,
+      },
+    };
+    const name = await openEdit(shiftsSession([shift]), shift);
+    expect(valueOf(name, TEMPLATE)).toBe(OLD_DUPLICATE.id);
+    expect(optionsOf(name, TEMPLATE)).toContainEqual({
+      text: "Шаблон недоступен — обновите данные",
+      disabled: true,
+    });
+  });
+
+  it("puts the host's refusal of the duplicate template under it, focuses it and reads the templates again", async () => {
+    const session = await openCreate();
+    session.api.createShift.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 422,
+        message: "x",
+        details: { field: "validationPrint.templateId" },
+      }),
+    );
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    const reads = session.api.listTemplates.mock.calls.length;
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(messageOf(NEW, TEMPLATE)).toBe(
+        "Шаблон дубликата выключен или больше не подходит товару. Выберите другой.",
+      ),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(field(NEW, TEMPLATE)));
+    await waitFor(() => expect(session.api.listTemplates.mock.calls.length).toBeGreaterThan(reads));
+  });
+
+  it("drops a template that does not fit another product chosen, and keeps one that does", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, DUPLICATE_58.id);
+    set(NEW, "Товар", WATER.id);
+    expect(valueOf(NEW, TEMPLATE)).toBe(DUPLICATE_58.id);
+    set(NEW, "Товар", MILK.id);
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    set(NEW, "Товар", WATER.id);
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+  });
+
+  it("words the counterparty's hint for «Проверка»: no box label, the duplicate's when it prints", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    expect(messageOf(NEW, "Контрагент")).toBe(
+      "Необязательно: его название будет на этикетке короба",
+    );
+    fireEvent.click(mode(NEW, "Проверка"));
+    expect(messageOf(NEW, "Контрагент")).toBe("Необязательно");
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(messageOf(NEW, "Контрагент")).toBe(
+      "Необязательно: его название будет на этикетке дубликата",
+    );
+  });
+
+  it("is worked from the keyboard: the flag and the check are buttons in the tab order, the template a native select", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    const flag = checkbox(NEW, PRINT);
+    expect(flag.tagName).toBe("BUTTON");
+    expect(flag.tabIndex).toBe(0);
+    act(() => flag.focus());
+    expect(document.activeElement).toBe(flag);
+    fireEvent.click(flag);
+    const check = checkbox(NEW, CHECK);
+    expect(check.tagName).toBe("BUTTON");
+    expect(check.tabIndex).toBe(0);
+    expect(field(NEW, TEMPLATE).tagName).toBe("SELECT");
+  });
+
+  it.each([
+    ["is active and its template is known", MILK_DUPLICATE.id, "Дубликат молока"],
+    [
+      "is active and its template is gone",
+      "e0f1a2b3-c4d5-4e6f-8a7b-8c9d0e1f2a3b",
+      "Шаблон зафиксирован при открытии смены",
+    ],
+  ])(
+    "shows the frozen policy of a shift that %s, nothing changeable",
+    async (_label, templateId, shown) => {
+      const session = shiftsSession();
+      const shift: OfficeShift = {
+        ...ACTIVE,
+        mode: "validation",
+        validationPrint: { mode: "duplicate_dm", templateId, verification: "required" },
+      };
+      renderDialog(session, shift);
+      const name = `Смена ${ACTIVE.number}`;
+      await screen.findByRole("dialog", { name });
+      await waitFor(() => expect(optionsOf(name, TEMPLATE).length).toBeGreaterThan(0));
+      const flag = checkbox(name, PRINT);
+      expect(isOn(flag)).toBe(true);
+      expect(flag.hasAttribute("disabled")).toBe(true);
+      expect((field(name, TEMPLATE) as HTMLSelectElement).disabled).toBe(true);
+      expect(valueOf(name, TEMPLATE)).toBe(templateId);
+      const select = field(name, TEMPLATE) as HTMLSelectElement;
+      expect(select.selectedOptions[0]?.textContent).toBe(shown);
+      expect(checkbox(name, CHECK).hasAttribute("disabled")).toBe(true);
+      expect(within(dialog(name)).getByText(FROZEN)).toBeTruthy();
+      expect(within(dialog(name)).queryByText(COPY_HINT)).toBeNull();
+      expect(within(dialog(name)).queryByText(NO_TEMPLATES)).toBeNull();
+    },
+  );
+
+  it("marks a planned shift whose duplicate template a station will refuse", async () => {
+    const shift = {
+      ...printingShift(),
+      validationPrint: {
+        mode: "duplicate_dm" as const,
+        templateId: OLD_DUPLICATE.id,
+        verification: "none" as const,
+      },
+    };
+    await openShifts(shiftsSession([shift]));
+    expect(
+      await screen.findByText("Не откроется: шаблон дубликата выключен или не подходит товару"),
+    ).toBeTruthy();
   });
 });

@@ -147,6 +147,17 @@
   margin: 0;
 }
 
+/* «Печать дубликата» of the shift dialog (plan РЕЖ part B): a titled group of its fields. */
+.shift-duplicate {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-duplicate h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
 .standalone-form__actions {
   display: flex;
   justify-content: flex-end;

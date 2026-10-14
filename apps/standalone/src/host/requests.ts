@@ -32,6 +32,7 @@ import type {
   TemplatePurpose,
   TemplateSpec,
   TemplateUpdate,
+  ValidationPrint,
 } from "./protocol.js";
 import { SHIFT_SUPPORTS } from "./protocol.js";
 
@@ -436,6 +437,8 @@ export interface ShiftInput {
   pallets: ShiftPallets | null;
   /** The shift's mode (plan РЕЖ); left out, aggregation. */
   mode?: ShiftMode;
+  /** The print policy (plan РЕЖ part B); left out, the host's `none`. */
+  validationPrint?: ValidationPrint;
 }
 
 /**
@@ -455,6 +458,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,
     mode: shift.mode ?? "aggregation",
+    ...(shift.validationPrint === undefined ? {} : { validationPrint: shift.validationPrint }),
     ...(shift.pallets === null
       ? { palletsEnabled: false }
       : {
@@ -482,6 +486,14 @@ export interface ShiftChange {
   pallets?: ShiftPallets | null;
   /** The mode (plan РЕЖ); a planned shift's alone changes (Р1). */
   mode?: ShiftMode;
+  /** The print policy (plan РЕЖ part B); a planned shift's alone changes. */
+  validationPrint?: ValidationPrint;
+}
+
+/** Whether two print policies say the same: the mode, and a duplicate's template and check. */
+function samePrint(a: ValidationPrint, b: ValidationPrint): boolean {
+  if (a.mode === "none" || b.mode === "none") return a.mode === b.mode;
+  return a.templateId === b.templateId && a.verification === b.verification;
 }
 
 /**
@@ -504,12 +516,20 @@ export function shiftUpdate(
     | "palletTemplateId"
     | "palletSheetTemplateId"
     | "mode"
+    | "validationPrint"
     | "rev"
   >,
   next: ShiftChange,
 ): ShiftUpdate {
   const update: ShiftUpdate = { expectedRev: shift.rev };
   if (next.mode !== undefined && next.mode !== shift.mode) update.mode = next.mode;
+  // A shift without a policy (a host before protocol 5) prints none.
+  if (
+    next.validationPrint !== undefined &&
+    !samePrint(next.validationPrint, shift.validationPrint ?? { mode: "none" })
+  ) {
+    update.validationPrint = next.validationPrint;
+  }
   if (next.lineId !== undefined && next.lineId !== shift.lineId) update.lineId = next.lineId;
   if (next.productionDate !== undefined && next.productionDate !== shift.productionDate) {
     update.productionDate = next.productionDate;

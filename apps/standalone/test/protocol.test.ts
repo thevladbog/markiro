@@ -537,6 +537,20 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
     expect(shiftCreate(input)).toStrictEqual(fixture("shift-create.json"));
   });
 
+  it("plans a validation shift that prints a duplicate as the shared fixture (plan РЕЖ, B7)", () => {
+    expect(
+      shiftCreate({
+        ...input,
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          verification: "none",
+          templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+        },
+      }),
+    ).toStrictEqual(fixture("shift-create-validation-print.json"));
+  });
+
   it("reads a validation scan accepted without a box; whether an ok scan needs one is the host's", () => {
     const record = factRecordSchema.parse(fixture("fact-scan-validation.json"));
     expect(record.kind).toBe("scan");

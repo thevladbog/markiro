@@ -2796,7 +2796,11 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   lists (`openBlocker`, `src/office/shifts/shift-list.ts`): its product
   archived or a draft (`product_inactive`), or its template switched off,
   narrowed or of another group (`template_not_fit`, by `templateFitsSlot` for
-  the product's group). While a list it needs is not loaded, or lacks the
+  the product's group), its pallet template so too (`pallet_template_not_fit`)
+  or the template of the duplicate it prints so too
+  (`duplicate_template_not_fit`, plan РЕЖ part B: «Не откроется: шаблон
+  дубликата выключен или не подходит товару»), in the host's order. While a
+  list it needs is not loaded, or lacks the
   record, nothing is claimed; an archived line does not stop an opening and is
   not marked. A closed shift says why: the office's words («Закрыта в офисе:
   …») or a station's code in words («Причина расхождения: …»; a code a newer
@@ -2860,12 +2864,48 @@ signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
   rule takes it, and leaves it out otherwise; a change sends `mode` only when
   it changed. The page opens the dialog for planned shifts only; a shift
   that is no longer planned would show its mode with both choices off (Р1).
-  `validationPrint` and «Печатать дубликат Data Matrix» come with part B
-  (B7); the rest of the cloud's order of fields (Р16) is not this task's.
   The list and the card call the mode «Проверка» / «Агрегация»
   (`office.shifts.modes`); a validation shift's «Выпуск» is the codes it
   accepted («1 300 шт», `shiftOutput`), its «Итоги» show «Принято кодов»
   without box figures, and its card has no box capacity, pallets or «Короба».
+- The dialog's fields come in the cloud's order (Р16, B7), which is also
+  `SHIFT_FIELD_ORDER`, the order a refusal takes the focus in: the product,
+  «Режим работы», «Печатать дубликат Data Matrix», the date and the plan, the
+  line and the counterparty, «Печать дубликата», the box template, then the
+  box capacity and the pallets. The flag (plan РЕЖ part B, the cloud
+  station's `Checkbox`) shows under «Проверка» only, off for a new shift,
+  with «На внешнюю упаковку переносится полный код с продукции. Количество
+  продукции не меняется.» under it while off. On, it opens the titled section
+  «Печать дубликата» (a `region`): «Шаблон этикетки продукции» offers the
+  enabled `product_duplicate` templates covering the product's group
+  (`fittingTemplates`, the box template's `templateFitsSlot` mirror), «{{name}}
+  · {{widthMm}} × {{heightMm}} мм · {{dpi}} dpi» (the name alone when a size
+  is unknown), empty until chosen (no default is suggested, Р16); none
+  fitting is an `Alert` (`noTemplates`) and the flag on cannot be saved
+  (`templateRequired` under the select, which takes the focus); a planned
+  shift's or the form's choice that no longer fits stays, disabled, as
+  «Шаблон недоступен — обновите данные»; another product chosen drops a
+  template it does not take. «Обязательная проверка этикетки» is off unless
+  chosen (the owner's default, the cloud's is on), with the cloud's hint of
+  each state, and the cloud's copy hint closes the section. Resets (the
+  cloud's): «Агрегация» turns the flag and the check off and clears the
+  template and its refusal; the flag turned off clears the template and its
+  refusal and keeps the check. The policy goes as the cloud's `toPayload`
+  builds it (`toValidationPrint`): `{ mode: "none" }` for an aggregation and
+  for «Проверка» without the flag, the duplicate with its `templateId` and
+  `verification` with it, sent on every create; a change sends it only for a
+  planned shift and only when it differs from the shift's own (`shiftUpdate`;
+  a shift without one, from a host before protocol 5, is `none`), so a
+  printing shift turned into an aggregation sends `{ mode: "none" }` beside
+  `mode`, as the host requires. A host refusal on `validationPrint.templateId`
+  goes under the select and reads the templates again. A shift that is no
+  longer planned (a guard: the page does not open the dialog for one) shows
+  the flag, the template by the name the office knows («Шаблон зафиксирован
+  при открытии смены» when it is gone; the office has no snapshot) and the
+  check, all off, with «Параметры печати и проверки зафиксированы при
+  открытии смены.». The counterparty's hint follows the mode: a validation
+  shift prints no box label, so it says «Необязательно», or «Необязательно:
+  его название будет на этикетке дубликата» while the flag is on.
 - A row's actions follow its status. A planned shift has «Изменить»: the same
   dialog on the shift's own values, the product shown as text because it never
   changes, its own line, counterparty and template kept as marked choices when

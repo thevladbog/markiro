@@ -223,6 +223,8 @@ describe("office shifts: planning a shift", () => {
       plannedQty: 1200,
       counterpartyId: NORTH.id,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: false,
     });
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
@@ -256,6 +258,8 @@ describe("office shifts: planning a shift", () => {
       plannedQty: null,
       counterpartyId: null,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: false,
     });
   });
@@ -283,6 +287,8 @@ describe("office shifts: planning a shift", () => {
       plannedQty: 1200,
       counterpartyId: NORTH.id,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: true,
       palletBoxCapacity: 32,
       palletTemplateId: PALLET.id,
@@ -708,11 +714,12 @@ describe("office shifts: planning a shift", () => {
     expect(planFocused).not.toHaveBeenCalled();
     set("Товар", MILK.id);
     submit();
-    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
-    set("Линия", LINE_2.id);
-    submit();
+    // The cloud's order (plan РЕЖ, Р16): the date and the plan come before the line.
     await waitFor(() => expect(document.activeElement).toBe(field("План, шт")));
     set("План, шт", "");
+    submit();
+    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
+    set("Линия", LINE_2.id);
     fireEvent.click(
       within(dialog()).getByRole("button", { name: "Очистить дату: Дата производства" }),
     );
