@@ -198,7 +198,11 @@ describe("Информация", () => {
     expect(text).toContain("Связь с хостом: на связи");
     expect(text).toContain("Хост: https://127.0.0.1:45710 (id 3f1c2d4e)");
     expect(text).toContain("Последняя копия (UTC): 2026-10-09T14:00:00.000Z");
-    expect(text).toContain("Лицензия: Лицензирование ещё не подключено");
+    // The license is a block of its own after the base text (plan ЛЦ-3), read through the session.
+    expect(text).toContain("\r\nЛицензия\r\nСостояние: Действует (active)\r\n");
+    expect(text).not.toContain("Лицензирование ещё не подключено");
+    expect(text).not.toContain("7707083893");
+    expect(session.api.getLicense).toHaveBeenCalled();
     expect(text).not.toContain(HOST_ID);
     expect(text).not.toContain(DEVICE_STATUS.fingerprint);
     expect(session.api.getBackups).toHaveBeenCalled();

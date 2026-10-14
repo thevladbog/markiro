@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Textarea } from "@markiro/ui";
 
+import type { HostApi } from "../../host/api.js";
 import { PROTOCOL_VERSION } from "../../host/protocol.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeLink } from "../office-link.js";
+import { useOfficeSession } from "../office-session.js";
 import { ABOUT_KEY, loadAboutData } from "./about-data.js";
 import { useAbout } from "./about-context.js";
 import { BUILD_INFO } from "./build-info.js";
@@ -40,7 +42,13 @@ export function SupportSection() {
   const files = useOfficeFiles();
   const link = useOfficeLink();
   const queryClient = useQueryClient();
+  const session = useOfficeSession();
   const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token));
+
+  /** The host through the session, for the contributors (`SupportContext.read`). */
+  function readHost<T>(operation: (api: HostApi, token: string) => Promise<T>): Promise<T> {
+    return session.call((token) => operation(session.api, token));
+  }
   const [text, setText] = useState<string | null>(null);
   const [copied, setCopied] = useState<Copied | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -73,7 +81,12 @@ export function SupportSection() {
       hostId: fresh.hostId,
       lastBackupAt: backupState?.local.copies[0]?.createdAt ?? null,
     };
-    const blocks = await collectSupportBlocks(SUPPORT_CONTRIBUTORS, { t, facts, about: fresh });
+    const blocks = await collectSupportBlocks(SUPPORT_CONTRIBUTORS, {
+      t,
+      facts,
+      about: fresh,
+      read: readHost,
+    });
     const report = buildSupportReport(facts, t, blocks);
     setText(report);
     setCopied((await copyText(report)) ? "copied" : "failed");
