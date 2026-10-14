@@ -543,8 +543,17 @@ function ShiftForm({
           render={({ field }) => (
             <Checkbox
               label={t("office.shifts.duplicate.print")}
-              // While it is off, what it would do; on, the section says it.
-              {...(field.value ? {} : { hint: t("office.shifts.duplicate.copyHint") })}
+              // While it is off, what it would do (or, once the shift is opened, that it is
+              // fixed); on, the section says it.
+              {...(field.value
+                ? {}
+                : {
+                    hint: t(
+                      modeFixed
+                        ? "office.shifts.duplicate.frozen"
+                        : "office.shifts.duplicate.copyHint",
+                    ),
+                  })}
               checked={field.value}
               onCheckedChange={(on) => choosePrint(on, field.onChange)}
               id={fieldId("printDuplicate")}

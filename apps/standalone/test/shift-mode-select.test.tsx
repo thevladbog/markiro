@@ -324,6 +324,21 @@ function isOn(box: HTMLElement): boolean {
   return box.getAttribute("aria-checked") === "true";
 }
 
+/**
+ * Space on a focused button, as a browser presses it. jsdom has no keyboard activation of a
+ * button, so the helper plays the browser's part: the click follows only when neither the
+ * key-down nor the key-up was swallowed (`preventDefault`) by the control or around it.
+ */
+function pressSpace(control: HTMLElement): void {
+  act(() => control.focus());
+  expect(document.activeElement).toBe(control);
+  expect(control.tagName).toBe("BUTTON");
+  const down = fireEvent.keyDown(control, { key: " ", code: "Space" });
+  const up = fireEvent.keyUp(control, { key: " ", code: "Space" });
+  expect({ down, up }).toEqual({ down: true, up: true });
+  fireEvent.click(control);
+}
+
 /** The section «Печать дубликата», or `null` while it is hidden. */
 function duplicateSection(name: string): HTMLElement | null {
   return within(dialog(name)).queryByRole("region", { name: "Печать дубликата" });
@@ -545,6 +560,58 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     },
   );
 
+  it("forgets the chosen template when «Агрегация» is chosen, so «Проверка» and the flag again start it empty", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    fireEvent.click(mode(NEW, "Агрегация"));
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+  });
+
+  it("drops the template's refusal when the flag is turned off, so turning it on again shows none", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() =>
+      expect(messageOf(NEW, TEMPLATE)).toBe("Выберите шаблон этикетки продукции"),
+    );
+    fireEvent.click(checkbox(NEW, PRINT));
+    fireEvent.click(checkbox(NEW, PRINT));
+    expect(field(NEW, TEMPLATE).getAttribute("aria-invalid")).not.toBe("true");
+    expect(messageOf(NEW, TEMPLATE) ?? "").not.toContain("Выберите шаблон");
+  });
+
+  it("drops the host's refusal of a template with the template another product does not take", async () => {
+    const session = await openCreate();
+    session.api.createShift.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 422,
+        message: "x",
+        details: { field: "validationPrint.templateId" },
+      }),
+    );
+    set(NEW, "Товар", MILK.id);
+    set(NEW, "Линия", LINE_2.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    fireEvent.click(checkbox(NEW, PRINT));
+    set(NEW, TEMPLATE, MILK_DUPLICATE.id);
+    fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
+    await waitFor(() => expect(field(NEW, TEMPLATE).getAttribute("aria-invalid")).toBe("true"));
+    set(NEW, "Товар", WATER.id);
+    expect(valueOf(NEW, TEMPLATE)).toBe("");
+    expect(field(NEW, TEMPLATE).getAttribute("aria-invalid")).not.toBe("true");
+    expect(messageOf(NEW, TEMPLATE) ?? "").not.toContain("Шаблон дубликата");
+  });
+
   it("plans an aggregation and a validation without the flag with no duplicate, whatever was chosen before", async () => {
     const session = await openCreate();
     session.api.createShift.mockResolvedValue(CREATED);
@@ -688,6 +755,22 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     expect(field(NEW, TEMPLATE).tagName).toBe("SELECT");
   });
 
+  it("toggles the flag and the check with Space", async () => {
+    await openCreate();
+    set(NEW, "Товар", MILK.id);
+    fireEvent.click(mode(NEW, "Проверка"));
+    pressSpace(checkbox(NEW, PRINT));
+    expect(isOn(checkbox(NEW, PRINT))).toBe(true);
+    pressSpace(checkbox(NEW, CHECK));
+    expect(isOn(checkbox(NEW, CHECK))).toBe(true);
+    expect(messageOf(NEW, CHECK)).toBe(REQUIRED_HINT);
+    pressSpace(checkbox(NEW, CHECK));
+    expect(isOn(checkbox(NEW, CHECK))).toBe(false);
+    pressSpace(checkbox(NEW, PRINT));
+    expect(isOn(checkbox(NEW, PRINT))).toBe(false);
+    expect(duplicateSection(NEW)).toBeNull();
+  });
+
   it.each([
     ["is active and its template is known", MILK_DUPLICATE.id, "Дубликат молока"],
     [
@@ -721,6 +804,19 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
       expect(within(dialog(name)).queryByText(NO_TEMPLATES)).toBeNull();
     },
   );
+
+  it("says under the switched-off flag of an active validation shift that it was frozen at the opening", async () => {
+    const shift: OfficeShift = { ...ACTIVE, mode: "validation", validationPrint: { mode: "none" } };
+    renderDialog(shiftsSession(), shift);
+    const name = `Смена ${ACTIVE.number}`;
+    await screen.findByRole("dialog", { name });
+    const flag = checkbox(name, PRINT);
+    expect(isOn(flag)).toBe(false);
+    expect(flag.hasAttribute("disabled")).toBe(true);
+    expect(messageOf(name, PRINT)).toBe(FROZEN);
+    expect(within(dialog(name)).queryByText(COPY_HINT)).toBeNull();
+    expect(duplicateSection(name)).toBeNull();
+  });
 
   it("marks a planned shift whose duplicate template a station will refuse", async () => {
     const shift = {
