@@ -88,15 +88,39 @@ pub const PALLET_EXCEPTIONS_SQL: &str = "SELECT e.id, e.kind, e.reason_code, e.r
      LEFT JOIN operators op ON op.id = e.operator_id \
      WHERE e.pallet_id = ?1 ORDER BY e.occurred_at, e.id LIMIT ?2";
 
+/// Plan ДЗГ's applied documents that took the box apart: an applied
+/// document's `ok` line names the box (the office branch of the readers'
+/// union, `AGENTS.md` «Disaggregation documents»). A draft's or a cancelled
+/// document's lines and a line that found the box taken apart already are
+/// not.
+pub const BOX_DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.applied_at, \
+     r.name AS reason_name, u.name AS applied_by_name \
+     FROM disaggregation_document_lines l \
+     JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied' \
+     LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
+     LEFT JOIN office_users u ON u.id = d.applied_by \
+     WHERE l.box_id = ?1 AND l.status = 'ok' ORDER BY d.applied_at, d.id LIMIT ?2";
+
+/// The same of a pallet.
+pub const PALLET_DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.applied_at, \
+     r.name AS reason_name, u.name AS applied_by_name \
+     FROM disaggregation_document_lines l \
+     JOIN disaggregation_documents d ON d.id = l.document_id AND d.status = 'applied' \
+     LEFT JOIN disaggregation_reasons r ON r.id = d.reason_id \
+     LEFT JOIN office_users u ON u.id = d.applied_by \
+     WHERE l.pallet_id = ?1 AND l.status = 'ok' ORDER BY d.applied_at, d.id LIMIT ?2";
+
 /// Every query of this module by name, for the test that each one searches
 /// by an index.
-pub const QUERIES: [(&str, &str); 6] = [
+pub const QUERIES: [(&str, &str); 8] = [
     ("box", BOX_SQL),
     ("box items", BOX_ITEMS_SQL),
     ("box exceptions", BOX_EXCEPTIONS_SQL),
     ("pallet", PALLET_SQL),
     ("pallet boxes", PALLET_BOXES_SQL),
     ("pallet exceptions", PALLET_EXCEPTIONS_SQL),
+    ("box documents", BOX_DOCUMENTS_SQL),
+    ("pallet documents", PALLET_DOCUMENTS_SQL),
 ];
 
 #[derive(sqlx::FromRow)]
@@ -151,6 +175,15 @@ struct ExceptionRow {
     received_at: String,
     device_name: String,
     operator_name: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct DocumentRow {
+    id: String,
+    doc_no: String,
+    applied_at: String,
+    reason_name: Option<String>,
+    applied_by_name: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -350,13 +383,36 @@ async fn read_box(
     }))
 }
 
-/// Plan ДЗГ's applied documents of the box; none until its tables are read
-/// (plan КРТ, task 8).
+/// The applied disaggregation documents that took the box apart (plan ДЗГ).
 async fn box_documents(
-    _conn: &mut SqliteConnection,
-    _id: &str,
+    conn: &mut SqliteConnection,
+    id: &str,
 ) -> Result<Vec<OfficePackDocument>, ApiError> {
-    Ok(Vec::new())
+    documents(conn, BOX_DOCUMENTS_SQL, id).await
+}
+
+/// The documents of one box or pallet, oldest first.
+async fn documents(
+    conn: &mut SqliteConnection,
+    sql: &str,
+    id: &str,
+) -> Result<Vec<OfficePackDocument>, ApiError> {
+    let rows: Vec<DocumentRow> = sqlx::query_as(sql)
+        .bind(id)
+        .bind(i64::from(CARD_ROW_LIMIT))
+        .fetch_all(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| OfficePackDocument {
+            id: row.id,
+            doc_no: row.doc_no,
+            applied_at: row.applied_at,
+            reason_name: row.reason_name,
+            applied_by_name: row.applied_by_name,
+        })
+        .collect())
 }
 
 /// `GET /v1/office/boxes/{id}`: a malformed id is `validation_failed`, a box
@@ -460,13 +516,12 @@ async fn read_pallet(
     }))
 }
 
-/// Plan ДЗГ's applied documents of the pallet; none until its tables are
-/// read (plan КРТ, task 8).
+/// The applied disaggregation documents that took the pallet apart (plan ДЗГ).
 async fn pallet_documents(
-    _conn: &mut SqliteConnection,
-    _id: &str,
+    conn: &mut SqliteConnection,
+    id: &str,
 ) -> Result<Vec<OfficePackDocument>, ApiError> {
-    Ok(Vec::new())
+    documents(conn, PALLET_DOCUMENTS_SQL, id).await
 }
 
 /// `GET /v1/office/pallets/{id}`: a malformed id is `validation_failed`, a

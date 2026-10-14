@@ -155,9 +155,11 @@ describe("the card of a pallet (plan КРТ)", () => {
     });
     value.api.getPalletReportRows.mockResolvedValue(PALLET_ROWS);
     await palletCard(value);
-    expect(within(section("Документы дезагрегации")).getByRole("listitem").textContent).toContain(
-      "DSG-26-0002",
-    );
+    const item = within(section("Документы дезагрегации")).getByRole("listitem");
+    expect(item.textContent).toContain("DSG-26-0002");
+    expect(
+      within(item).getByRole("link", { name: "Открыть документ DSG-26-0002" }).getAttribute("href"),
+    ).toBe("/disaggregation/d0c00000-0000-4000-8000-000000000002");
   });
 
   it("says a pallet the host never saw is not found", async () => {

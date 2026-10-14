@@ -3312,7 +3312,13 @@
     },
     "packs": {
       "noSscc": "Без SSCC",
-      "openPallet": "Открытая"
+      "openPallet": "Открытая",
+      "documents": {
+        "title": "Документы дезагрегации",
+        "appliedAt": "проведён {{at}}",
+        "byDocument": "по документу {{docNo}}",
+        "open": "Открыть документ {{docNo}}"
+      }
     },
     "boxCard": {
       "back": "← Назад",
@@ -3328,10 +3334,6 @@
       "exceptions": "Исключения",
       "noExceptions": "Исключений нет",
       "receivedAt": "получено хостом {{at}}",
-      "documents": "Документы дезагрегации",
-      "documentLine": "{{docNo}} · {{at}}",
-      "documentReason": "причина — {{reason}}",
-      "documentBy": "провёл {{name}}",
       "disassembledAt": "Расформирован {{at}}",
       "notFoundHint": "Хост знает только то, что собрали станции этой площадки.",
       "title": "Короб {{label}}",
@@ -3377,10 +3379,6 @@
       "exceptions": "Исключения",
       "noExceptions": "Исключений нет",
       "receivedAt": "получено хостом {{at}}",
-      "documents": "Документы дезагрегации",
-      "documentLine": "{{docNo}} · {{at}}",
-      "documentReason": "причина — {{reason}}",
-      "documentBy": "провёл {{name}}",
       "disassembledAt": "Расформирована {{at}}",
       "notFoundHint": "Хост знает только то, что собрали станции этой площадки.",
       "title": "Паллета {{label}}",

@@ -29,6 +29,7 @@ import { civilDateLabel } from "../shifts/shift-list.js";
 import { labelState, packState, palletCountDiffers, ssccText } from "../shifts/shift-card.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
 import { CardBack, isNotFound } from "./BoxCardPage.js";
+import { PackDocuments } from "./PackDocuments.js";
 import { BoxLink, PackStateChip } from "./PackLinks.js";
 
 /** The export dialog is a chunk of its own, read when «XML паллеты» is first pressed. */
@@ -208,35 +209,7 @@ export function PalletCardPage() {
       />
       <PalletMembers card={pallet} at={at} />
       <PalletExceptions card={pallet} at={at} receivedAt={format} />
-      {pallet.documents.length > 0 && (
-        <section className="shift-card__section" aria-labelledby="pallet-documents">
-          <h2 id="pallet-documents">{t("office.palletCard.documents")}</h2>
-          <ol className="shift-card__section">
-            {pallet.documents.map((document) => (
-              <li key={document.id} className="shift-cell">
-                <span>
-                  {t("office.palletCard.documentLine", {
-                    docNo: document.docNo,
-                    at: at(document.appliedAt),
-                  })}
-                </span>
-                <span className="shift-cell__quiet">
-                  {[
-                    document.reasonName === null
-                      ? null
-                      : t("office.palletCard.documentReason", { reason: document.reasonName }),
-                    document.appliedByName === null
-                      ? null
-                      : t("office.palletCard.documentBy", { name: document.appliedByName }),
-                  ]
-                    .filter((part) => part !== null)
-                    .join(" · ")}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <PackDocuments documents={pallet.documents} at={at} />
       {form !== null && shift.data !== undefined && (
         <PrintFormDialog
           shift={shift.data}

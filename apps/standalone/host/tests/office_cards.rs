@@ -372,6 +372,8 @@ async fn every_card_query_searches_by_an_index() {
             "box exceptions" => Some("box_exceptions_box"),
             "pallet boxes" => Some("boxes_pallet"),
             "pallet exceptions" => Some("pallet_exceptions_pallet"),
+            "box documents" => Some("disaggregation_lines_box"),
+            "pallet documents" => Some("disaggregation_lines_pallet"),
             _ => None,
         };
         if let Some(index) = driving {
@@ -543,4 +545,157 @@ async fn only_an_office_session_reads_a_pallet_card_and_a_read_writes_nothing() 
         (pallets_after, exceptions_after),
         (pallets_before, exceptions_before)
     );
+}
+
+/// An office call of the yard's administrator (the session of the day after
+/// the host's clock moved on).
+impl Yard {
+    async fn office(&self, method: &str, path: &str, body: Option<Value>) -> Value {
+        let (status, answer) = self
+            .admin
+            .call_as(&self.admin_token, method, path, body)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{method} {path}: {answer}");
+        answer
+    }
+
+    async fn close_shift(&self, shift: &str) {
+        let path = format!("/v1/office/shifts/{shift}");
+        let current = self.office("GET", &path, None).await;
+        self.office(
+            "POST",
+            &format!("{path}/close"),
+            Some(json!({ "reason": "Конец смены", "expectedRev": current["rev"] })),
+        )
+        .await;
+    }
+
+    /// A draft with `sscc` as its only line, over `reason` when given.
+    async fn draft_of(&self, sscc: &str, reason: Option<&str>) -> Value {
+        let created = self
+            .office("POST", "/v1/office/disaggregation", Some(json!({})))
+            .await;
+        let id = created["document"]["id"].as_str().unwrap().to_owned();
+        let with_line = self
+            .office(
+                "POST",
+                &format!("/v1/office/disaggregation/{id}/lines"),
+                Some(json!({ "lines": [{ "input": sscc, "sscc": sscc }], "import": false })),
+            )
+            .await;
+        match reason {
+            None => with_line,
+            Some(reason) => {
+                self.office(
+                    "PUT",
+                    &format!("/v1/office/disaggregation/{id}"),
+                    Some(json!({
+                        "reasonId": reason,
+                        "comment": null,
+                        "expectedRev": with_line["document"]["rev"]
+                    })),
+                )
+                .await
+            }
+        }
+    }
+
+    async fn apply_draft(&self, draft: &Value) -> Value {
+        let id = draft["document"]["id"].as_str().unwrap();
+        self.office(
+            "POST",
+            &format!("/v1/office/disaggregation/{id}/apply"),
+            Some(json!({ "expectedRev": draft["document"]["rev"] })),
+        )
+        .await
+    }
+}
+
+/// Plan ДЗГ's applied documents are on the cards of the box and the pallet
+/// they took apart, and only those: a draft, a cancelled document and a line
+/// that found the box taken apart already are not. The office's disassembly
+/// writes no exception of the station, so the exceptions stay as they were.
+#[tokio::test]
+async fn the_applied_documents_that_took_a_box_or_a_pallet_apart_are_on_their_cards() {
+    let yard = yard().await;
+    yard.close_shift(&yard.floor.shift).await;
+    yard.close_shift(&yard.colleague.shift).await;
+    const WRONG_QUANTITY: &str = "d15a0000-0000-4000-8000-000000000002";
+    let box_draft = yard.draft_of(&sscc(1500), Some(WRONG_QUANTITY)).await;
+    let box_document = yard.apply_draft(&box_draft).await;
+    let pallet_draft = yard.draft_of(&pallet_sscc(240), Some(WRONG_QUANTITY)).await;
+    let pallet_document = yard.apply_draft(&pallet_draft).await;
+    // A draft on box 12 stays a draft.
+    yard.draft_of(&sscc(3501), Some(WRONG_QUANTITY)).await;
+    // A second document finds box 1 taken apart already, and is cancelled.
+    let again = yard.draft_of(&sscc(1500), Some(WRONG_QUANTITY)).await;
+    assert_eq!(again["lines"][0]["status"], "already_disassembled");
+    let id = again["document"]["id"].as_str().unwrap();
+    yard.office(
+        "POST",
+        &format!("/v1/office/disaggregation/{id}/cancel"),
+        Some(json!({ "expectedRev": again["document"]["rev"] })),
+    )
+    .await;
+
+    let (_, card) = yard.get(&format!("/v1/office/boxes/{}", box_id(1))).await;
+    assert_eq!(
+        card["documents"],
+        json!([{
+            "id": box_document["document"]["id"],
+            "docNo": box_document["document"]["docNo"],
+            "appliedAt": box_document["document"]["appliedAt"],
+            "reasonName": "Неверное количество",
+            "appliedByName": "Ирина Смирнова",
+        }])
+    );
+    assert!(card["documents"][0]["docNo"]
+        .as_str()
+        .unwrap()
+        .ends_with("-0001"));
+    assert!(card["disassembledAt"].is_string());
+    let live = card["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["serial"] == "S000001")
+        .unwrap();
+    assert_eq!(live["state"], "removed");
+    assert_eq!(
+        live["leftAt"], card["disassembledAt"],
+        "the live item left at the instant the document took the box apart"
+    );
+    assert_eq!(
+        card["exceptions"].as_array().unwrap().len(),
+        1,
+        "the station's exceptions are as they were: one undo"
+    );
+
+    let (_, pallet) = yard
+        .get(&format!("/v1/office/pallets/{}", pallet_id(2)))
+        .await;
+    assert_eq!(
+        pallet["documents"],
+        json!([{
+            "id": pallet_document["document"]["id"],
+            "docNo": pallet_document["document"]["docNo"],
+            "appliedAt": pallet_document["document"]["appliedAt"],
+            "reasonName": "Неверное количество",
+            "appliedByName": "Ирина Смирнова",
+        }])
+    );
+    assert!(pallet["disassembledAt"].is_string());
+    assert_eq!(
+        pallet["members"].as_array().unwrap().len(),
+        1,
+        "the pallet's boxes are not touched"
+    );
+    assert_eq!(pallet["members"][0]["disassembledAt"], Value::Null);
+
+    let (_, draft_only) = yard.get(&format!("/v1/office/boxes/{}", box_id(12))).await;
+    assert_eq!(draft_only["documents"], json!([]));
+    let (_, other_pallet) = yard
+        .get(&format!("/v1/office/pallets/{}", pallet_id(1)))
+        .await;
+    assert_eq!(other_pallet["documents"], json!([]));
 }

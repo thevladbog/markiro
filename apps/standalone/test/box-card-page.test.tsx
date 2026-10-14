@@ -100,10 +100,16 @@ describe("the card of a box (plan КРТ)", () => {
     expect(screen.queryByRole("heading", { name: "Документы дезагрегации" })).toBeNull();
   });
 
-  it("lists the applied documents that took the box apart", async () => {
+  it("lists the applied documents that took the box apart, linked to their pages, and says which items they took out", async () => {
     const value = packSession();
     value.api.getBoxCard.mockResolvedValue({
       ...BOX_CARD,
+      disassembledAt: "2026-10-26T09:00:00.000Z",
+      items: BOX_CARD.items.map((item) =>
+        item.state === "packed"
+          ? { ...item, state: "removed", leftAt: "2026-10-26T09:00:00.000Z" }
+          : item,
+      ),
       documents: [
         {
           id: "d0c00000-0000-4000-8000-000000000001",
@@ -116,9 +122,15 @@ describe("the card of a box (plan КРТ)", () => {
     });
     await boxCard(value);
     const item = within(section("Документы дезагрегации")).getByRole("listitem");
-    expect(item.textContent).toContain("DSG-26-0001");
-    expect(item.textContent).toContain("причина — Неверное количество");
-    expect(item.textContent).toContain("провёл Ирина Смирнова");
+    const link = within(item).getByRole("link", { name: "Открыть документ DSG-26-0001" });
+    expect(link.getAttribute("href")).toBe("/disaggregation/d0c00000-0000-4000-8000-000000000001");
+    expect(item.textContent).toContain("проведён 26.10.2026, 12:00:00");
+    expect(item.textContent).toContain("Неверное количество");
+    expect(item.textContent).toContain("Ирина Смирнова");
+    // The item the document took out says so; the ones the station took out do not.
+    const rows = within(section("Состав")).getAllByRole("row").slice(1);
+    expect(rows[2]?.textContent).toContain("по документу DSG-26-0001");
+    expect(rows[0]?.textContent).not.toContain("по документу");
   });
 
   it("says in words that a box was taken apart, and when", async () => {

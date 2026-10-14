@@ -35,6 +35,7 @@ import {
   type FormatInstant,
 } from "./CodeCard.js";
 import { useBackToRegistry } from "./CodesSection.js";
+import { PackDocuments } from "./PackDocuments.js";
 import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
 
 /** Counts with the thousands apart by a no-break space: «1 200». */
@@ -193,35 +194,7 @@ export function BoxCardPage() {
       />
       <BoxItems card={box} at={at} />
       <BoxExceptions card={box} at={at} format={format} />
-      {box.documents.length > 0 && (
-        <section className="shift-card__section" aria-labelledby="box-documents">
-          <h2 id="box-documents">{t("office.boxCard.documents")}</h2>
-          <ol className="shift-card__section">
-            {box.documents.map((document) => (
-              <li key={document.id} className="shift-cell">
-                <span>
-                  {t("office.boxCard.documentLine", {
-                    docNo: document.docNo,
-                    at: at(document.appliedAt),
-                  })}
-                </span>
-                <span className="shift-cell__quiet">
-                  {[
-                    document.reasonName === null
-                      ? null
-                      : t("office.boxCard.documentReason", { reason: document.reasonName }),
-                    document.appliedByName === null
-                      ? null
-                      : t("office.boxCard.documentBy", { name: document.appliedByName }),
-                  ]
-                    .filter((part) => part !== null)
-                    .join(" · ")}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
+      <PackDocuments documents={box.documents} at={at} />
       {printing && shift.data !== undefined && (
         <PrintFormDialog
           shift={shift.data}
@@ -239,6 +212,11 @@ export function BoxCardPage() {
 
 function BoxItems({ card, at }: { card: OfficeBoxCard; at: (instant: string | null) => string }) {
   const { t } = useTranslation();
+  // An item the box's applied document took out left at the instant the box was taken apart.
+  const byDocument = (item: OfficeBoxItem): string | null =>
+    item.state === "removed" && card.disassembledAt !== null && item.leftAt === card.disassembledAt
+      ? (card.documents[0]?.docNo ?? null)
+      : null;
   const columns: TableColumn<OfficeBoxItem>[] = [
     {
       key: "code",
@@ -263,7 +241,16 @@ function BoxItems({ card, at }: { card: OfficeBoxCard; at: (instant: string | nu
     {
       key: "state",
       title: t("office.boxCard.items.state"),
-      render: (item) => <PlacementChip state={item.state} />,
+      render: (item) => (
+        <span className="shift-cell">
+          <PlacementChip state={item.state} />
+          {byDocument(item) !== null && (
+            <span className="shift-cell__quiet">
+              {t("office.packs.documents.byDocument", { docNo: byDocument(item) ?? "" })}
+            </span>
+          )}
+        </span>
+      ),
     },
     {
       key: "leftAt",
