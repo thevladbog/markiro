@@ -1863,3 +1863,49 @@ fn the_shift_date_travels_beside_the_production_date_and_old_bodies_still_read()
     value["plannedDate"] = serde_json::json!(20261009);
     assert!(serde_json::from_value::<ShiftCreate>(value).is_err());
 }
+
+#[test]
+fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
+    use markiro_proto::usage_stats::{UsageStats, USAGE_MONTHS};
+    let stats: UsageStats = round_trip("usage-stats.json");
+    // Twelve calendar months, the oldest first, each once.
+    assert_eq!(stats.months.len(), USAGE_MONTHS);
+    let keys: Vec<&str> = stats
+        .months
+        .iter()
+        .map(|month| month.month.as_str())
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(keys, sorted);
+    // The only text in the answer is the month key: every other leaf is a count.
+    fn leaves(value: &Value, path: &str, found: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, inner) in map {
+                    leaves(inner, &format!("{path}.{key}"), found);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    leaves(item, &format!("{path}[]"), found);
+                }
+            }
+            Value::Number(number) => {
+                assert!(number.is_u64(), "{path} is not an unsigned count");
+            }
+            Value::String(_) => found.push(path.to_owned()),
+            other => panic!("{path}: {other}"),
+        }
+    }
+    let mut texts = Vec::new();
+    leaves(&fixture("usage-stats.json"), "", &mut texts);
+    texts.sort();
+    texts.dedup();
+    assert_eq!(texts, [".months[].month"]);
+    // A field outside the allowlist is refused, not carried.
+    let mut value = fixture("usage-stats.json");
+    value["months"][0]["shifts"]["productName"] = serde_json::json!("Молоко");
+    assert!(serde_json::from_value::<UsageStats>(value).is_err());
+}

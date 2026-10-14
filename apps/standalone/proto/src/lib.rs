@@ -214,6 +214,7 @@ pub mod pairing;
 pub mod review;
 pub mod trust;
 pub mod update;
+pub mod usage_stats;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
 /// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with

@@ -266,6 +266,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::devices::list_devices),
         )
         .route(
+            "/v1/office/usage-stats",
+            get(crate::routes::usage_stats::usage_stats),
+        )
+        .route(
             "/v1/office/devices/{id}",
             put(crate::routes::devices::update_device),
         )
