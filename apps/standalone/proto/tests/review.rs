@@ -1,8 +1,8 @@
 use markiro_proto::review::{
     ConflictKind, ConflictStatusRequest, ConflictStatusResponse, DeviceDisplacements,
     ExceptionSource, ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions,
-    OfficeShiftRejections, CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, DISPLACEMENT_PAGE_SIZE,
-    MAX_CONFLICT_STATUS_RECORDS, SHIFT_REVIEW_LIMIT,
+    OfficeShiftExports, OfficeShiftRejections, CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE,
+    DISPLACEMENT_PAGE_SIZE, MAX_CONFLICT_STATUS_RECORDS, SHIFT_REVIEW_LIMIT,
 };
 use markiro_proto::{ExceptionKind, FactKind};
 use serde::{de::DeserializeOwned, Serialize};
@@ -55,6 +55,9 @@ fn a_shifts_exceptions_and_refusals_round_trip() {
     let refusals: OfficeShiftRejections = round_trip("office-shift-rejections.json");
     assert_eq!(refusals.items[1].kind, Some(FactKind::Scan));
     assert_eq!(SHIFT_REVIEW_LIMIT, 500);
+    let exports: OfficeShiftExports = round_trip("office-shift-exports.json");
+    assert_eq!(exports.items.len(), 2);
+    assert!(exports.items[0].id > exports.items[1].id);
 }
 
 #[test]

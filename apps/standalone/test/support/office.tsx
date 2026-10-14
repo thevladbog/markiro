@@ -189,6 +189,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
+    listShiftExports: vi.fn<HostApi["listShiftExports"]>(async () => ({ items: [] })),
     listShiftRejections: vi.fn<HostApi["listShiftRejections"]>(async () => ({
       items: [],
       total: 0,
