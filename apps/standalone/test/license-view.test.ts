@@ -255,6 +255,60 @@ describe("the license as the office reads it", () => {
     expect(licenseNotices(RESTRICTED).map(noticeNeedsTime)).toEqual([false]);
   });
 
+  it("warns of the running emergency extension, never «не открываются» beside it", () => {
+    const extended = (license: OfficeLicense) =>
+      licenseOf({
+        ...license,
+        opensNewShifts: true,
+        emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+      });
+    const warned = (license: OfficeLicense) =>
+      licenseNotices(license).map((notice) => ({
+        kind: notice.kind,
+        tone: notice.tone,
+        dismissible: notice.dismissible,
+        dated: noticeNeedsTime(notice),
+        text: said(noticeText(notice, license, MSK)),
+      }));
+    expect(warned(extended(RESTRICTED))).toEqual([
+      {
+        kind: "restrictedEmergency",
+        tone: "error",
+        dismissible: false,
+        dated: true,
+        text: "Новые смены открываются по аварийному продлению до 23.11 09:00: лицензия площадки истекла. Загрузите новый файл лицензии до конца продления.",
+      },
+    ]);
+    expect(warned(extended(TRIAL_EXPIRED))).toEqual([
+      {
+        kind: "trialExpiredEmergency",
+        tone: "error",
+        dismissible: false,
+        dated: true,
+        text: "Новые смены открываются по аварийному продлению до 23.11 09:00: пробный период закончился. Загрузите файл лицензии до конца продления.",
+      },
+    ]);
+    expect(warned(extended(INN_MISMATCH))).toEqual([
+      {
+        kind: "innMismatchEmergency",
+        tone: "error",
+        dismissible: false,
+        dated: true,
+        text: "Новые смены открываются по аварийному продлению до 23.11 09:00: ИНН организации больше не совпадает с ИНН лицензии. Верните ИНН в «Профиле организации» или загрузите файл лицензии для нового ИНН.",
+      },
+    ]);
+    // The extension over: the host refuses new shifts again, and so does the band.
+    const over = licenseOf({
+      ...RESTRICTED,
+      opensNewShifts: false,
+      emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+    });
+    expect(warned(over).map((notice) => notice.kind)).toEqual(["restricted"]);
+    // The extension's end in another zone: the date follows the zone given.
+    const notice = licenseNotices(extended(RESTRICTED))[0]!;
+    expect(said(noticeText(notice, extended(RESTRICTED), "UTC"))).toContain("до 23.11 06:00:");
+  });
+
   it("adds the free new file to the subscription's end warnings, to no other", () => {
     const addenda = (license: OfficeLicense) =>
       licenseNotices(license).map((notice) => {
@@ -270,6 +324,11 @@ describe("the license as the office reads it", () => {
     expect(addenda(licenseOf({ ...RESTRICTED, license: DEMO.license }))).toEqual([null]);
     expect(addenda(TRIAL_EXPIRED)).toEqual([null]);
     expect(addenda(INN_MISMATCH)).toEqual([null]);
+    // A subscription restricted, its extension running: the free new file still follows.
+    const extension = { opensNewShifts: true, emergency: { available: false, until: GRACE.since } };
+    expect(addenda(licenseOf({ ...RESTRICTED, ...extension }))).toEqual([FREE_RENEWAL]);
+    expect(addenda(licenseOf({ ...TRIAL_EXPIRED, ...extension }))).toEqual([null]);
+    expect(addenda(licenseOf({ ...INN_MISMATCH, ...extension }))).toEqual([null]);
     expect(
       addenda(
         licenseOf({
@@ -296,6 +355,9 @@ describe("the license as the office reads it", () => {
       "trialExpired",
       "wrongHost",
       "innMismatch",
+      "restrictedEmergency",
+      "trialExpiredEmergency",
+      "innMismatchEmergency",
       "freeRenewal",
     ]) {
       expect(i18n.exists(`office.banner.license.${kind}`), kind).toBe(true);

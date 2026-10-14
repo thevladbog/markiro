@@ -190,6 +190,10 @@ export type LicenseNoticeKind =
   | "trialExpired"
   | "wrongHost"
   | "innMismatch"
+  // The same three while the emergency extension runs: new shifts open by it.
+  | "restrictedEmergency"
+  | "trialExpiredEmergency"
+  | "innMismatchEmergency"
   | "clockBehind"
   | "clockAhead";
 
@@ -202,6 +206,9 @@ export interface LicenseNotice {
 }
 
 function phaseNotice(license: OfficeLicense): LicenseNotice | null {
+  // While the extension runs the host opens new shifts again, so the band
+  // says until when instead of «не открываются»; still serious, never hidden.
+  const extended = emergencyRuns(license);
   switch (license.state) {
     case "trial":
       return license.daysLeft !== null && license.daysLeft <= license.warnDays
@@ -216,13 +223,25 @@ function phaseNotice(license: OfficeLicense): LicenseNotice | null {
     case "grace":
       return { kind: "grace", tone: "error", dismissible: false };
     case "restricted":
-      return { kind: "restricted", tone: "error", dismissible: false };
+      return {
+        kind: extended ? "restrictedEmergency" : "restricted",
+        tone: "error",
+        dismissible: false,
+      };
     case "trial_expired":
-      return { kind: "trialExpired", tone: "error", dismissible: false };
+      return {
+        kind: extended ? "trialExpiredEmergency" : "trialExpired",
+        tone: "error",
+        dismissible: false,
+      };
     case "wrong_host":
       return { kind: "wrongHost", tone: "warn", dismissible: false };
     case "inn_mismatch":
-      return { kind: "innMismatch", tone: "error", dismissible: false };
+      return {
+        kind: extended ? "innMismatchEmergency" : "innMismatch",
+        tone: "error",
+        dismissible: false,
+      };
     default:
       // `active`, and a state a newer host adds: the section names it.
       return null;
@@ -249,7 +268,10 @@ export function noticeNeedsTime(notice: LicenseNotice): boolean {
     notice.kind === "trialEnding" ||
     notice.kind === "expiring" ||
     notice.kind === "expiringDemo" ||
-    notice.kind === "grace"
+    notice.kind === "grace" ||
+    notice.kind === "restrictedEmergency" ||
+    notice.kind === "trialExpiredEmergency" ||
+    notice.kind === "innMismatchEmergency"
   );
 }
 
@@ -286,6 +308,16 @@ export function noticeText(
           until: dayMonth(license.phaseEndsAt),
         },
       };
+    case "restrictedEmergency":
+    case "trialExpiredEmergency":
+    case "innMismatchEmergency":
+      return {
+        key,
+        values: {
+          until:
+            license.emergency.until === null ? "—" : licenseMinute(license.emergency.until, zone),
+        },
+      };
     case "clockBehind":
       return { key, values: { n: license.flags.clockBehindDays ?? 0 } };
     default:
@@ -298,6 +330,7 @@ const FREE_RENEWAL_NOTICES: ReadonlySet<LicenseNoticeKind> = new Set([
   "expiring",
   "grace",
   "restricted",
+  "restrictedEmergency",
 ]);
 
 /**
