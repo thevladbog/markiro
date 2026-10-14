@@ -19,6 +19,7 @@ import { useBackupTime } from "../backups/backup-time.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { copyText } from "./clipboard.js";
+import { LicenseLoad } from "./license/LicenseLoad.js";
 import {
   featureRows,
   licenseTerms,
@@ -87,7 +88,11 @@ function LicenseBody({ license, zone }: { license: OfficeLicense; zone: string |
       <LicenseSeats rows={quotaRows(license)} />
       <LicenseFeatures license={license} />
       <LicenseBinding license={license} />
-      {admin ? null : <p className="office-note">{t("office.about.license.readOnly")}</p>}
+      {admin ? (
+        <LicenseLoad license={license} zone={zone} />
+      ) : (
+        <p className="office-note">{t("office.about.license.readOnly")}</p>
+      )}
       <p className="office-note">{t("office.about.license.keepFile")}</p>
     </div>
   );

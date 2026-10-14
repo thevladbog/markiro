@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import type { OfficeLicense } from "../src/host/protocol.js";
+import type { LicensePreview, LicenseTerms, OfficeLicense } from "../src/host/protocol.js";
 import { HOST_ID } from "./support/fixtures.js";
 import {
   ACTIVE_LICENSE,
@@ -269,5 +269,237 @@ describe("«Лицензия» on «Информация»", () => {
     session.api.getLicense.mockResolvedValue(ACTIVE_LICENSE);
     fireEvent.click(within(card).getByRole("button", { name: "Повторить" }));
     expect(await within(card).findByText("Действует")).toBeTruthy();
+  });
+});
+
+/** The terms of `license`'s file, as the preview answers them. */
+function termsOf(license: OfficeLicense): LicenseTerms {
+  const file = license.license;
+  if (file === null) throw new Error("the fixture has a file");
+  return {
+    licenseId: file.licenseId,
+    sequence: file.sequence,
+    plan: file.plan,
+    validFrom: file.validFrom,
+    validUntil: file.validUntil,
+    graceDays: file.graceDays,
+    quotas: license.quotas,
+    features: license.features,
+  };
+}
+
+/** The next file: a year more and 8 stations. */
+function upgradePreview(): LicensePreview {
+  const before = termsOf(ACTIVE_LICENSE);
+  return {
+    before,
+    after: {
+      ...before,
+      licenseId: "9c8b7a6f-5e4d-4c3b-8a29-1f0e9d8c7b6a",
+      sequence: 4,
+      validUntil: "2028-10-31T21:00:00Z",
+      quotas: { ...before.quotas, stations: { limit: 8, used: 3, over: false } },
+    },
+    changes: ["validUntil", "quotas.stations"],
+    warnings: [],
+  };
+}
+
+const UPGRADED = licenseOf({
+  license: { ...ACTIVE_LICENSE.license!, sequence: 4, validUntil: "2028-10-31T21:00:00Z" },
+  quotas: { ...ACTIVE_LICENSE.quotas, stations: { limit: 8, used: 3, over: false } },
+});
+
+function pick(card: HTMLElement, file: File): void {
+  fireEvent.change(within(card).getByTestId("file-drop-input"), { target: { files: [file] } });
+}
+
+const FILE_TEXT = "eyJ0eXAiOiJtYXJraXJvIn0.eyJ2ZXJzaW9uIjoxfQ.c2ln";
+
+describe("loading a license file", () => {
+  it("checks the file first, shows «было → станет», then loads it and says till when it runs", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    session.api.loadLicense.mockResolvedValue(UPGRADED);
+    const card = await openLicense(session);
+    pick(card, new File([`${FILE_TEXT}\n`], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    expect(session.api.previewLicense.mock.calls[0]?.[1]).toEqual({ file: FILE_TEXT });
+    expect(session.api.loadLicense).not.toHaveBeenCalled();
+    const stations = rowsOf(preview).find((row) => row[0] === "Станции и ТСД");
+    expect(stations).toEqual(["Станции и ТСД", "5", "8 (изменится)"]);
+    fireEvent.click(within(preview).getByRole("button", { name: "Загрузить" }));
+    expect(
+      await within(card).findByText("Лицензия загружена. Действует по 31.10.2028 включительно."),
+    ).toBeTruthy();
+    expect(session.api.loadLicense.mock.calls[0]?.[1]).toEqual({ file: FILE_TEXT });
+    expect(within(card).queryByRole("region", { name: "Было → станет" })).toBeNull();
+    expect(within(card).getByText("Действует по 31.10.2028 включительно.")).toBeTruthy();
+  });
+
+  it("warns before loading a file that leaves more devices than it gives", async () => {
+    const session = sessionWith();
+    const upgrade = upgradePreview();
+    session.api.previewLicense.mockResolvedValue({
+      ...upgrade,
+      after: {
+        ...upgrade.after,
+        quotas: { ...upgrade.after.quotas, stations: { limit: 2, used: 3, over: true } },
+      },
+      warnings: ["over_limit"],
+    });
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    expect(
+      await within(card).findByText(
+        "Станции и ТСД: будет использовано 3 из 2. Новые устройства не подключатся, работающие продолжат.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("warns before loading a file whose term has already ended", async () => {
+    const session = sessionWith();
+    const upgrade = upgradePreview();
+    session.api.previewLicense.mockResolvedValue({
+      ...upgrade,
+      after: { ...upgrade.after, validUntil: "2026-09-30T21:00:00Z" },
+      warnings: ["expired"],
+    });
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    expect(
+      within(preview).getByText(
+        "Срок этого файла уже истёк 30.09.2026: после загрузки новые смены открываться не будут.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("checks and loads the file picked last", async () => {
+    const session = sessionWith();
+    const upgrade = upgradePreview();
+    session.api.previewLicense.mockImplementation((_token, request) =>
+      Promise.resolve(
+        request.file === "second"
+          ? { ...upgrade, after: { ...upgrade.after, sequence: 5 } }
+          : upgrade,
+      ),
+    );
+    session.api.loadLicense.mockResolvedValue(UPGRADED);
+    const card = await openLicense(session);
+    pick(card, new File(["first"], "first.mklic"));
+    await within(card).findByRole("region", { name: "Было → станет" });
+    pick(card, new File(["second"], "second.mklic"));
+    await waitFor(() => expect(session.api.previewLicense).toHaveBeenCalledTimes(2));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(preview).getByRole("button", { name: "Загрузить" }));
+    await within(card).findByText(/Лицензия загружена/);
+    expect(session.api.loadLicense.mock.calls.map((call) => call[1])).toEqual([{ file: "second" }]);
+  });
+
+  it("forgets a file still being read once another is picked", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    session.api.loadLicense.mockResolvedValue(UPGRADED);
+    const card = await openLicense(session);
+    let finishFirst: (text: string) => void = () => undefined;
+    const slow = new File(["first"], "first.mklic");
+    Object.defineProperty(slow, "text", {
+      value: () =>
+        new Promise<string>((resolve) => {
+          finishFirst = resolve;
+        }),
+    });
+    pick(card, slow);
+    pick(card, new File(["second"], "second.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    finishFirst("first");
+    fireEvent.click(within(preview).getByRole("button", { name: "Загрузить" }));
+    await within(card).findByText(/Лицензия загружена/);
+    expect(session.api.previewLicense.mock.calls.map((call) => call[1])).toEqual([
+      { file: "second" },
+    ]);
+    expect(session.api.loadLicense.mock.calls.map((call) => call[1])).toEqual([{ file: "second" }]);
+  });
+
+  it("drops the checked file on «Отмена» and loads nothing", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(preview).getByRole("button", { name: "Отмена" }));
+    expect(within(card).queryByRole("region", { name: "Было → станет" })).toBeNull();
+    expect(session.api.loadLicense).not.toHaveBeenCalled();
+  });
+
+  it("explains a refused file and moves the focus to the explanation", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockRejectedValue(
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "x",
+        details: { field: "file", reason: "license_signature" },
+      }),
+    );
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const text = await within(card).findByText(
+      "Подпись файла не сходится: файл изменён после выпуска. Запросите файл заново.",
+    );
+    await waitFor(() => expect(document.activeElement?.contains(text)).toBe(true));
+    expect(within(card).queryByRole("region", { name: "Было → станет" })).toBeNull();
+  });
+
+  it("refuses a file over 16 KiB and one of another type without asking the host", async () => {
+    const session = sessionWith();
+    const card = await openLicense(session);
+    pick(card, new File(["a".repeat(16 * 1024 + 1)], "site.mklic"));
+    expect(
+      await within(card).findByText("Файл больше 16 КиБ: это не файл лицензии Маркиро."),
+    ).toBeTruthy();
+    pick(card, new File([FILE_TEXT], "site.txt"));
+    expect(await within(card).findByText("Нужен файл лицензии с расширением .mklic.")).toBeTruthy();
+    expect(session.api.previewLicense).not.toHaveBeenCalled();
+  });
+
+  it("sends a double click on «Загрузить» once", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    let answer: (license: OfficeLicense) => void = () => undefined;
+    session.api.loadLicense.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const preview = await within(card).findByRole("region", { name: "Было → станет" });
+    const load = within(preview).getByRole("button", { name: "Загрузить" });
+    fireEvent.click(load);
+    fireEvent.click(load);
+    // The office's call reaches the host a tick later: answer only the request that went out.
+    await waitFor(() => expect(session.api.loadLicense).toHaveBeenCalled());
+    fireEvent.click(load);
+    answer(UPGRADED);
+    await within(card).findByText(/Лицензия загружена/);
+    expect(session.api.loadLicense).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no file to the technologist", async () => {
+    const card = await openLicense(sessionWith(ACTIVE_LICENSE, { technologist: true }));
+    expect(within(card).queryByTestId("file-drop-input")).toBeNull();
+  });
+
+  it("offers no file before the organization has an INN", async () => {
+    const card = await openLicense(
+      sessionWith(
+        licenseOf({ binding: { ...ACTIVE_LICENSE.binding, orgInn: null, innMatches: null } }),
+      ),
+    );
+    expect(within(card).getByTestId("file-drop-input")).toHaveProperty("disabled", true);
   });
 });
