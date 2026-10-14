@@ -214,6 +214,7 @@ pub mod pairing;
 pub mod review;
 pub mod trust;
 pub mod update;
+pub mod usage_stats;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
 /// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with
@@ -1822,8 +1823,12 @@ pub struct OfficeShift {
     pub product_id: String,
     pub line_id: String,
     pub counterparty_id: Option<String>,
-    /// The shift's civil date, `YYYY-MM-DD`; the number's month comes from it.
+    /// The shift's production date, `YYYY-MM-DD`; the number's month comes from it.
     pub production_date: String,
+    /// The shift's own date (the cloud's `plannedDate`, «Дата смены»): the
+    /// working day it takes place, a civil date apart from the production
+    /// date. A shift written before it has its production date here.
+    pub planned_date: String,
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
@@ -1918,6 +1923,9 @@ pub struct ShiftCreate {
     pub product_id: String,
     pub line_id: String,
     pub production_date: String,
+    /// The shift's own date (beta 3); left out, the production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     pub box_template_id: String,
     #[serde(default)]
     pub box_capacity: Option<u32>,
@@ -1958,6 +1966,9 @@ pub struct ShiftUpdate {
     pub line_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub production_date: Option<String>,
+    /// The shift's own date (beta 3); left out, it stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub box_template_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2018,6 +2029,10 @@ pub struct DeviceShift {
     pub product_gtin14: String,
     pub counterparty_name: Option<String>,
     pub production_date: String,
+    /// The shift's own date (beta 3, the cloud's `plannedDate`); left out by
+    /// a host before it, which reads as the production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
@@ -2172,6 +2187,11 @@ pub struct DeviceShiftCreate {
     pub product_id: String,
     pub box_template_id: String,
     pub production_date: String,
+    /// The shift's own date, today in the organization's time zone as the
+    /// station reads it (beta 3); left out (an older station), the
+    /// production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     #[serde(default)]
     pub box_capacity: Option<u32>,
     #[serde(default)]

@@ -13,6 +13,7 @@ import {
   type KnownBlocksResponse,
 } from "./backups.js";
 import type { HostClient } from "./client.js";
+import { usageStatsSchema, type UsageStats } from "./usage-stats.js";
 import {
   codeSearchPath,
   officeCodeCardSchema,
@@ -205,10 +206,32 @@ export interface SsccCounterKey {
   extension: number;
 }
 
-/** A period of production dates, both ends included, `YYYY-MM-DD`. */
+/**
+ * A period of production dates (`from`, `to`) and a period of shift dates
+ * (`plannedFrom`, `plannedTo`), both ends included, `YYYY-MM-DD`; any end may
+ * be left out and the two periods narrow each other.
+ */
 export interface ShiftPeriod {
-  from: string;
-  to: string;
+  from?: string;
+  to?: string;
+  plannedFrom?: string;
+  plannedTo?: string;
+}
+
+/** The query of `GET /v1/office/shifts` for a period; empty for none. */
+export function shiftPeriodQuery(period: ShiftPeriod | undefined): string {
+  if (period === undefined) return "";
+  const parts = (
+    [
+      ["from", period.from],
+      ["to", period.to],
+      ["plannedFrom", period.plannedFrom],
+      ["plannedTo", period.plannedTo],
+    ] as const
+  ).flatMap(([name, value]) =>
+    value === undefined ? [] : [`${name}=${encodeURIComponent(value)}`],
+  );
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
 /**
@@ -498,6 +521,11 @@ export interface HostApi {
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
+  /**
+   * The counts by month for the support bundle (beta 3 feedback); administrators
+   * only, `forbidden` for another role.
+   */
+  getUsageStats: (token: string) => Promise<UsageStats>;
   /**
    * «Сделать копию сейчас»: `202` with the copy running; the host makes it on
    * its own, and the office reads the state again until nothing runs.
@@ -836,9 +864,7 @@ export function createHostApi(client: HostClient): HostApi {
     listShifts: (token, period) =>
       client.request(
         "GET",
-        period === undefined
-          ? "/v1/office/shifts"
-          : `/v1/office/shifts?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`,
+        `/v1/office/shifts${shiftPeriodQuery(period)}`,
         { officeToken: token, schema: z.array(officeShiftSchema) },
       ),
     getShift: (token, id) =>
@@ -1089,6 +1115,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getUsageStats: (token) =>
+      client.request("GET", "/v1/office/usage-stats", {
+        officeToken: token,
+        schema: usageStatsSchema,
       }),
     startBackup: (token) =>
       client.request("POST", "/v1/office/backups", {

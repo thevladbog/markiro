@@ -1009,6 +1009,8 @@ const officeShiftObject = z.object({
   lineId: z.uuid(),
   counterpartyId: z.uuid().nullable(),
   productionDate: civilDateTextSchema,
+  /** The shift's own date (the cloud's `plannedDate`, «Дата смены»), apart from the production date. */
+  plannedDate: civilDateTextSchema,
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
@@ -1286,6 +1288,8 @@ const deviceShiftObject = z.object({
   productGtin14: z.string(),
   counterpartyName: z.string().nullable(),
   productionDate: civilDateTextSchema,
+  /** The shift's own date; left out by a host before beta 3, which is the production date. */
+  plannedDate: civilDateTextSchema.optional(),
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
@@ -1850,6 +1854,8 @@ export const shiftCreateSchema = z
     productId: z.uuid(),
     lineId: z.uuid(),
     productionDate: z.string(),
+    /** The shift's own date; left out, the host takes the production date. */
+    plannedDate: z.string().optional(),
     boxTemplateId: z.uuid(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
@@ -1878,6 +1884,7 @@ export const shiftUpdateSchema = z
   .object({
     lineId: z.uuid().optional(),
     productionDate: z.string().optional(),
+    plannedDate: z.string().optional(),
     boxTemplateId: z.uuid().optional(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
@@ -1958,6 +1965,8 @@ export const deviceShiftCreateSchema = z
     productId: z.uuid(),
     boxTemplateId: z.uuid(),
     productionDate: z.string(),
+    /** The shift's own date, today in the organization's zone; left out, the host takes the production date. */
+    plannedDate: z.string().optional(),
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
     counterpartyId: z.uuid().nullable().optional(),

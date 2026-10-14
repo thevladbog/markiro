@@ -421,6 +421,8 @@ export function NewShift({
       productId: form.product.id,
       boxTemplateId: form.templateId,
       productionDate: form.productionDate,
+      // The working day: today in the organization's zone, whatever production date was chosen.
+      plannedDate: civilToday(ready?.timeZone ?? null, current.current.now()),
       boxCapacity: checked.boxCapacity,
       plannedQty: checked.plannedQty,
       ...(pallets.kind === "pallets" ? { pallets: pallets.pallets } : {}),

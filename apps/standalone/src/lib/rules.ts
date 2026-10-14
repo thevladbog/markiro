@@ -347,6 +347,9 @@ export const shiftPalletBoxCapacityRule = requiredCountRule(
 /** A production date: a civil date the host takes (`validate::civil_date`). */
 export const productionDateRule = z.string().refine(isCivilDate, "rules.productionDate");
 
+/** A shift's own date, the working day (the cloud's `plannedDate`): a civil date the host takes. */
+export const plannedDateRule = z.string().refine(isCivilDate, "rules.plannedDate");
+
 /** The shortest and the longest reason the office gives for closing a shift. */
 export const MIN_CLOSE_REASON = 3;
 export const MAX_CLOSE_REASON = 500;

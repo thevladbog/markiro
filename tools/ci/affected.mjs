@@ -226,6 +226,9 @@ function jobsForPath(path) {
   // The cloud → standalone export (plan IMP): its pure tests run in the Node
   // job, its SQL against the migrated cloud schema in the API job.
   if (path.startsWith("tools/standalone-export/")) return ["verify_static", "verify_api_tests"];
+  // The maker's decrypting tool: its Node contract (verify_static) and the webview's
+  // round-trip test, which opens a token with it (the app tests).
+  if (path.startsWith("tools/standalone-support/")) return ["verify_static", standaloneAppTests];
   if (path.startsWith("tools/production-browser/")) {
     return ["production_bundle"];
   }

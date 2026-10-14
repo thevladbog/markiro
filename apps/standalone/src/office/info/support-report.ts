@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 
 import type { InstallRole } from "../../host/device.js";
+import { BLOB_PATTERN } from "./support-crypto.js";
 
 /** The state of the link to the host as the shell reports it (`HostStatus.state`). */
 export type ReportLinkState = "online" | "connecting" | "offline";
@@ -154,6 +155,13 @@ function lines(facts: SupportFacts, t: TFunction): [string, string][] {
 export interface SupportBlock {
   title: string;
   lines: readonly (readonly [label: string, value: string])[];
+  /**
+   * A token the maker alone can open (`support-crypto.ts`), printed on its own
+   * line after the lines, exactly as it is. It passes only if it has the
+   * token's shape; anything else is left out, so a block cannot carry free
+   * text this way.
+   */
+  opaque?: string;
 }
 
 /**
@@ -174,6 +182,7 @@ export function buildSupportReport(
     "",
     safeValue(block.title),
     ...block.lines.map(([label, value]) => `${safeValue(label)}: ${safeValue(value)}`),
+    ...(block.opaque !== undefined && BLOB_PATTERN.test(block.opaque) ? [block.opaque] : []),
   ]);
   return [
     ...head,

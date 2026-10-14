@@ -34,7 +34,8 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      COALESCE(json_extract(s.snapshot, '$.product.gtin14'), p.gtin14) AS product_gtin14, \
      CASE WHEN s.snapshot IS NULL THEN c.name \
          ELSE json_extract(s.snapshot, '$.counterpartyName') END AS counterparty_name, \
-     s.production_date, s.planned_qty, s.box_capacity, s.box_template_id, \
+     s.production_date, COALESCE(s.planned_date, s.production_date) AS planned_date, \
+     s.planned_qty, s.box_capacity, s.box_template_id, \
      s.pallet_box_capacity, s.pallet_template_id, s.validation_print_mode, \
      s.validation_print_verification, s.validation_print_template_id, s.owner_device_id, \
      s.opened_at, s.closed_at \
@@ -56,6 +57,7 @@ struct ShiftRow {
     product_gtin14: String,
     counterparty_name: Option<String>,
     production_date: String,
+    planned_date: String,
     planned_qty: Option<u32>,
     box_capacity: u32,
     box_template_id: String,
@@ -84,6 +86,7 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         product_gtin14: row.product_gtin14,
         counterparty_name: row.counterparty_name,
         production_date: row.production_date,
+        planned_date: Some(row.planned_date),
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
         box_template_id: row.box_template_id,
@@ -187,6 +190,13 @@ pub async fn create_device_shift(
         create.pallet_template_id.as_deref(),
     )?;
     let production_date = validate::civil_date("productionDate", &create.production_date)?;
+    // A station before beta 3 sends no shift date: it is the production date.
+    let planned_date = create
+        .planned_date
+        .as_deref()
+        .map(|date| validate::civil_date("plannedDate", date))
+        .transpose()?
+        .unwrap_or(production_date);
     validate::count("plannedQty", create.planned_qty, validate::MAX_PLANNED_QTY)?;
     validate::count(
         "boxCapacity",
@@ -255,6 +265,7 @@ pub async fn create_device_shift(
             line_id: &line_id,
             counterparty_id: create.counterparty_id.as_deref(),
             production_date,
+            planned_date,
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,

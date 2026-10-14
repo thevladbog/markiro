@@ -388,6 +388,12 @@ function ShiftSummary({
             description: recordLabel("product", products, current.productId, t),
           },
           {
+            id: "plannedDate",
+            term: t("office.shifts.table.plannedDate"),
+            description: civilDateLabel(current.plannedDate),
+            mono: true,
+          },
+          {
             id: "productionDate",
             term: t("office.shifts.table.productionDate"),
             description: civilDateLabel(current.productionDate),
@@ -501,6 +507,10 @@ function ShiftStatusLine({ shift }: { shift: OfficeShift }) {
         phase={STATUS_PHASE[shift.status]}
         label={t(`office.shifts.statuses.${shift.status}`)}
       />
+      {/* The working day, in the header of every tab (beta 3); the production date is in the summary. */}
+      <span className="shift-cell__quiet">
+        {t("office.shiftCard.headerDate", { date: civilDateLabel(shift.plannedDate) })}
+      </span>
       {shift.lateDataAt !== null && (
         <StatusChip phase="attention" label={t("office.shifts.lateData")} />
       )}

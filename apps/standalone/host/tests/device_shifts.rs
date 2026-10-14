@@ -124,7 +124,7 @@ fn device_shift(id: &str, number: &str, setup: &ShiftSetup) -> Value {
         "palletsEnabled": false, "createdFrom": "office", "lineId": setup.line,
         "productId": setup.product, "productName": "Молоко 3,2% 0,9 л",
         "productGtin14": "04600682000013", "counterpartyName": null,
-        "productionDate": "2026-10-08", "plannedQty": null, "boxCapacity": 12,
+        "productionDate": "2026-10-08", "plannedDate": "2026-10-08", "plannedQty": null, "boxCapacity": 12,
         "boxTemplateId": setup.template, "ownerDeviceId": null, "openedAt": null,
         "closedAt": null
     })
@@ -327,6 +327,7 @@ async fn a_station_creates_a_shift_on_its_line_once_per_request() {
     let mut expected = device_shift(&id, "OCT26-001/S", &setup);
     expected["createdFrom"] = json!("station");
     expected["productionDate"] = json!("2026-10-09");
+    expected["plannedDate"] = json!("2026-10-09");
     assert_eq!(created, expected);
     assert_eq!(host_revision(&admin.app).await, 4);
     assert_eq!(
@@ -1778,6 +1779,7 @@ async fn a_station_creates_a_shift_with_pallets_and_its_entry_freezes_the_pallet
     let mut expected = device_shift(&id, "OCT26-001/S", &setup);
     expected["createdFrom"] = json!("station");
     expected["productionDate"] = json!("2026-10-09");
+    expected["plannedDate"] = json!("2026-10-09");
     expected["palletsEnabled"] = json!(true);
     expected["palletBoxCapacity"] = json!(40);
     expected["palletTemplateId"] = json!(pallet);
