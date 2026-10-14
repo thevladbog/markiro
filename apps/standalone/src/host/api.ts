@@ -34,6 +34,7 @@ import {
   codeCheckSchema,
   counterpartyRecordSchema,
   employeeRecordSchema,
+  deviceInfoSchema,
   deviceRecordSchema,
   deviceShiftSchema,
   deviceShiftsSchema,
@@ -81,6 +82,7 @@ import {
   type EmployeeCreate,
   type EmployeeRecord,
   type EmployeeUpdate,
+  type DeviceInfo,
   type DeviceRecord,
   type DeviceShift,
   type DeviceShiftCreate,
@@ -289,6 +291,13 @@ export interface HostApi {
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
+  /**
+   * This device's record (`GET /v1/device`) with the site's license (field
+   * `license`, plan ЛЦ-2), with the device key only (plan ЛЦ-3). The shell's
+   * `device_refresh` keeps the line from the same route; this read carries
+   * only what the floor shows.
+   */
+  getDevice: () => Promise<DeviceInfo>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -703,6 +712,7 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    getDevice: () => client.request("GET", "/v1/device", { schema: deviceInfoSchema }),
     getDeviceShifts: async () =>
       (await client.request("GET", "/v1/device/shifts", { schema: deviceShiftsSchema })).shifts,
     createDeviceShift: (create) =>

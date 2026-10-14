@@ -1,5 +1,5 @@
-import type { OfficeLicense } from "../../src/host/protocol.js";
-import { HOST_ID } from "./fixtures.js";
+import type { DeviceInfo, DeviceLicense, OfficeLicense } from "../../src/host/protocol.js";
+import { DEVICE_ID, HOST_ID } from "./fixtures.js";
 
 export const LICENSE_ID = "5b1d7c2e-8f3a-4c6b-9d0e-1a2b3c4d5e6f";
 export const HOST_FINGERPRINT = "cd".repeat(32);
@@ -162,3 +162,21 @@ export const INN_MISMATCH = licenseOf({
   binding: { ...ACTIVE_LICENSE.binding, orgInn: OTHER_INN, innMatches: false },
   emergency: { available: true, until: null },
 });
+
+/** `GET /v1/device` without a license (a host before plan ЛЦ-2): the station stays silent. */
+export const DEVICE_INFO: DeviceInfo = {
+  id: DEVICE_ID,
+  kind: "station",
+  name: "Станция линии 1",
+  lineId: null,
+  pairedAt: "2026-09-26T09:15:00Z",
+};
+
+/** The license line of `GET /v1/device` in `state`. */
+export function deviceLicense(
+  state: string,
+  phaseEndsAt: string | null = null,
+  emergencyUntil: string | null = null,
+): DeviceLicense {
+  return { state, since: "2027-11-14T21:00:00Z", phaseEndsAt, emergencyUntil };
+}

@@ -1095,3 +1095,18 @@ describe("the license (plan ЛЦ-2)", () => {
     ]);
   });
 });
+
+describe("the station's own record (plan ЛЦ-3)", () => {
+  it("reads GET /v1/device with the device key only, the site's license with it", async () => {
+    const record = fixture("device-license.json") as { license: unknown };
+    const reading = recording(record);
+    await expect(reading.api.getDevice()).resolves.toMatchObject({ license: record.license });
+    expect(reading.sent).toEqual([
+      { method: "GET", path: "/v1/device", body: undefined, officeToken: undefined },
+    ]);
+    // A host before plan ЛЦ-2 sends no license: still a record.
+    await expect(
+      recording(fixture("device-info.json")).api.getDevice(),
+    ).resolves.not.toHaveProperty("license");
+  });
+});

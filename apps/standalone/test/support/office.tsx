@@ -15,7 +15,7 @@ import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
 import { HEALTHY_BACKUPS } from "./backups.js";
-import { ACTIVE_LICENSE } from "./license.js";
+import { ACTIVE_LICENSE, DEVICE_INFO } from "./license.js";
 import { SESSION } from "./fixtures.js";
 
 /** A `HostApi` of mocks. */
@@ -123,6 +123,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     // The floor reads its shifts whenever it reads its device record; a test
     // about something else gets none.
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
+    // The station reads its license with its record (plan ЛЦ-3); a host that says nothing keeps it silent.
+    getDevice: vi.fn<HostApi["getDevice"]>(async () => DEVICE_INFO),
     createDeviceShift: vi.fn<HostApi["createDeviceShift"]>(() => unexpected("createDeviceShift")),
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),

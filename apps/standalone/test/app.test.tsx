@@ -62,6 +62,7 @@ import {
 import { km, rows, unsentScans } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
+import { DEVICE_INFO, deviceLicense } from "./support/license.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
@@ -4540,5 +4541,82 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(device.changeAddress).not.toHaveBeenCalled();
     expect(screen.getByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
     expect(document.activeElement).toBe(open);
+  });
+});
+
+describe("the site's license on the station (plan ЛЦ-3)", () => {
+  /** The bar's polite region of warnings. */
+  function barAlerts(): HTMLElement {
+    const found = document.querySelector(".floor-status__alerts");
+    if (!(found instanceof HTMLElement)) throw new Error("no alerts region");
+    return found;
+  }
+
+  it("says on the floor's bar what the host says, and reads it again after a revision", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDevice.mockResolvedValue({ ...DEVICE_INFO, license: deviceLicense("restricted") });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    expect(
+      await within(barAlerts()).findByText(
+        "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+      ),
+    ).toBeTruthy();
+    // The operator still signs in: the line never stops the floor.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const reads = host.getDevice.mock.calls.length;
+
+    host.getDevice.mockResolvedValue({ ...DEVICE_INFO, license: deviceLicense("active") });
+    await link.revision(43);
+    await waitFor(() => expect(host.getDevice.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() =>
+      expect(within(barAlerts()).queryByText(/Новые смены не открываются/)).toBeNull(),
+    );
+  });
+
+  it("asks nothing on an office PC, whatever pairing its disk holds", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    device.installRole.mockResolvedValue("office");
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    // The sync runs (the copies), the license is never asked.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((settle) => setTimeout(settle, 50));
+    });
+    expect(host.getDevice).not.toHaveBeenCalled();
+  });
+
+  it("waits for the shell to say the role before it asks", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    let sayRole: (role: "station") => void = () => undefined;
+    device.installRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          sayRole = resolve;
+        }),
+    );
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    // The link is online and the copies are read: a read of the license
+    // would have gone right after them.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((settle) => setTimeout(settle, 50));
+    });
+    expect(host.getDevice).not.toHaveBeenCalled();
+    await act(async () => {
+      sayRole("station");
+    });
+    await waitFor(() => expect(host.getDevice).toHaveBeenCalled());
   });
 });
