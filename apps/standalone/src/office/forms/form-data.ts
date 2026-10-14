@@ -198,7 +198,7 @@ export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTa
     productPrintName: product.printName,
     gtin14: product.gtin14,
     imageChecksum: photo?.checksum ?? null,
-    ...(photo === null ? {} : { imageSrc: `data:image/jpeg;base64,${photo.dataBase64}` }),
+    ...(photo === null ? {} : { imageSrc: `data:${photo.mediaType};base64,${photo.dataBase64}` }),
     lineName: line.name,
     plannedDate: shift.plannedDate,
     productionDate: shift.productionDate,

@@ -1,3 +1,5 @@
+import type { PhotoMediaType } from "../../host/protocol.js";
+
 /** The longest side of a product photo, the host's `MAX_PHOTO_SIDE` (plan ТОВ). */
 export const PHOTO_MAX_SIDE = 640;
 
@@ -24,17 +26,29 @@ export const PHOTO_MAX_SOURCE_PIXELS = 8192 * 4096;
 /** The JPEG qualities tried in turn until the photo fits `PHOTO_MAX_BYTES`. */
 const QUALITIES = [0.85, 0.7, 0.5] as const;
 
-/** A photo as the host keeps it (`ProductPhotoPut`). */
+/** The WebP qualities tried for a picture with transparency. */
+const WEBP_QUALITIES = [0.9, 0.75, 0.5] as const;
+
+/**
+ * How much smaller each further attempt draws a picture that does not fit
+ * `PHOTO_MAX_BYTES` at the lowest quality, and the shortest side at which the
+ * attempts stop.
+ */
+const SHRINK_STEP = 0.75;
+const MIN_SIDE = 96;
+
+/** A photo as the office holds it: the host's `ProductPhotoPut` and the type of its bytes. */
 export interface EncodedPhoto {
   width: number;
   height: number;
   dataBase64: string;
+  mediaType: PhotoMediaType;
 }
 
-/** Turns a picked file into the JPEG the host keeps. */
+/** Turns a picked file into the picture the host keeps. */
 export type PhotoEncoder = (file: Blob) => Promise<EncodedPhoto>;
 
-/** A picture that stays larger than `PHOTO_MAX_BYTES` at the lowest quality. */
+/** A picture that stays larger than `PHOTO_MAX_BYTES` at the lowest quality and size. */
 export class PhotoTooLargeError extends Error {
   constructor() {
     super("the photo is too large even compressed");
@@ -93,20 +107,61 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   return image;
 }
 
-function jpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+function toBlob(
+  canvas: HTMLCanvasElement,
+  type: PhotoMediaType,
+  quality?: number,
+): Promise<Blob | null> {
   return new Promise((resolve) => {
-    canvas.toBlob(resolve, "image/jpeg", quality);
+    canvas.toBlob(resolve, type, quality);
   });
 }
 
+/** Whether any pixel of the canvas is not fully opaque. */
+function hasTransparency(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): boolean {
+  const { data } = context.getImageData(0, 0, width, height);
+  for (let at = 3; at < data.length; at += 4) {
+    if ((data[at] ?? 255) < 255) return true;
+  }
+  return false;
+}
+
 /**
- * A picture as the JPEG the host keeps: drawn on white (a transparent PNG
- * prints on paper) with the longer side at most 640, at quality 0.85, then
- * 0.7 and 0.5 until it fits 300 000 bytes. The file is untrusted: its type
- * and size are checked before the webview reads a byte, and its declared
- * pixels before it is decoded. Only the canvas's JPEG goes to the host, so
- * nothing of the original file (its metadata included) leaves the office.
- * The canvas work is not exercised in jsdom (owner check 5 of plan ТОВ).
+ * The smallest of `candidates` that fits `PHOTO_MAX_BYTES`, or `null`. A blob
+ * of another type than asked for (a webview without a WebP encoder answers
+ * PNG) counts as what it is.
+ */
+export async function smallestWithinCap(
+  candidates: readonly (() => Promise<Blob | null>)[],
+): Promise<{ blob: Blob; mediaType: PhotoMediaType } | null> {
+  let best: { blob: Blob; mediaType: PhotoMediaType } | null = null;
+  for (const make of candidates) {
+    const blob = await make();
+    if (blob === null) continue;
+    if (blob.type !== "image/jpeg" && blob.type !== "image/png" && blob.type !== "image/webp") {
+      continue;
+    }
+    if (blob.size > PHOTO_MAX_BYTES) continue;
+    if (best === null || blob.size < best.blob.size) best = { blob, mediaType: blob.type };
+  }
+  return best;
+}
+
+/**
+ * A picture as the photo the host keeps. The file is untrusted: its type and
+ * size are checked before the webview reads a byte, and its declared pixels
+ * before it is decoded. The picture is drawn with the longer side at most 640
+ * and read back: with transparency (a PNG or WebP cut out of its background)
+ * it stays a PNG, or a WebP with alpha when that is smaller, so the product
+ * card's colour shows through; without any it is a JPEG on white, as before.
+ * Whatever does not fit 300 000 bytes at the lowest quality is drawn smaller,
+ * by a quarter each time. Only the canvas's bytes go to the host, so nothing
+ * of the original file (its metadata included) leaves the office. The canvas
+ * work is not exercised in jsdom beyond a stub (owner check of plan ТОВ).
  */
 export const encodePhoto: PhotoEncoder = async (file) => {
   if (!PHOTO_FILE_TYPES.includes(file.type) || file.size > PHOTO_MAX_FILE_BYTES) {
@@ -115,24 +170,48 @@ export const encodePhoto: PhotoEncoder = async (file) => {
   const url = URL.createObjectURL(file);
   try {
     const image = await loadImage(url);
-    const size = fitPhotoSize(image.naturalWidth, image.naturalHeight);
-    const canvas = document.createElement("canvas");
-    canvas.width = size.width;
-    canvas.height = size.height;
-    const context = canvas.getContext("2d");
-    if (context === null) throw new PhotoUnreadableError();
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, size.width, size.height);
-    context.drawImage(image, 0, 0, size.width, size.height);
-    for (const quality of QUALITIES) {
-      const blob = await jpeg(canvas, quality);
-      if (blob === null) throw new PhotoUnreadableError();
-      if (blob.size <= PHOTO_MAX_BYTES) {
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        return { ...size, dataBase64: toBase64(bytes) };
+    let size = fitPhotoSize(image.naturalWidth, image.naturalHeight);
+    let transparent: boolean | null = null;
+    for (;;) {
+      const canvas = document.createElement("canvas");
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (context === null) throw new PhotoUnreadableError();
+      context.drawImage(image, 0, 0, size.width, size.height);
+      // Only a PNG or WebP can carry alpha; the answer holds for every smaller size.
+      transparent ??=
+        file.type !== "image/jpeg" && hasTransparency(context, size.width, size.height);
+      let chosen: { blob: Blob; mediaType: PhotoMediaType } | null;
+      if (transparent) {
+        chosen = await smallestWithinCap([
+          () => toBlob(canvas, "image/png"),
+          ...WEBP_QUALITIES.map((quality) => () => toBlob(canvas, "image/webp", quality)),
+        ]);
+      } else {
+        // An opaque picture is a JPEG on white (a stray translucent edge prints on paper).
+        context.globalCompositeOperation = "destination-over";
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, size.width, size.height);
+        chosen = null;
+        for (const quality of QUALITIES) {
+          chosen = await smallestWithinCap([() => toBlob(canvas, "image/jpeg", quality)]);
+          if (chosen !== null) break;
+        }
       }
+      if (chosen !== null) {
+        const bytes = new Uint8Array(await chosen.blob.arrayBuffer());
+        return { ...size, dataBase64: toBase64(bytes), mediaType: chosen.mediaType };
+      }
+      const next = {
+        width: Math.round(size.width * SHRINK_STEP),
+        height: Math.round(size.height * SHRINK_STEP),
+      };
+      if (Math.min(next.width, next.height) < Math.min(MIN_SIDE, size.width, size.height)) {
+        throw new PhotoTooLargeError();
+      }
+      size = next;
     }
-    throw new PhotoTooLargeError();
   } finally {
     URL.revokeObjectURL(url);
   }

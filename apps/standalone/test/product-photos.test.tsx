@@ -62,7 +62,14 @@ async function feedProducts(items: ChangeItem[], rev: number, since = 0) {
 }
 
 const photo = (checksum: string): ProductPhotoState => ({
-  photo: { width: 2, height: 1, dataBase64: DATA, checksum, updatedAt: "2026-10-14T10:00:00.000Z" },
+  photo: {
+    width: 2,
+    height: 1,
+    dataBase64: DATA,
+    mediaType: "image/jpeg",
+    checksum,
+    updatedAt: "2026-10-14T10:00:00.000Z",
+  },
 });
 
 const rows = (db: DatabaseSync, sql: string) =>
@@ -104,6 +111,27 @@ describe("syncProductPhotos", () => {
       checksum: SUM_1,
     });
     expect(await readProductPhoto(executor, B)).toBeNull();
+  });
+
+  it("keeps a transparent PNG's media type and shows it as a PNG, an old copy as a JPEG", async () => {
+    const { db, executor } = await feedProducts([productItem(A, 5, SUM_1)], 5);
+    await syncProductPhotos({
+      local: executor,
+      fetchPhoto: async () => ({ photo: { ...photo(SUM_1).photo!, mediaType: "image/png" } }),
+    });
+    expect(rows(db, "SELECT media_type FROM ref_product_photos")).toEqual([
+      { media_type: "image/png" },
+    ]);
+    expect(await readProductPhoto(executor, A)).toEqual({
+      src: `data:image/png;base64,${DATA}`,
+      checksum: SUM_1,
+    });
+    // A copy stored before migration 0019 has the column's default.
+    db.exec("DELETE FROM ref_product_photos");
+    db.prepare(
+      "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64) VALUES (?, ?, 2, 1, ?)",
+    ).run(A, SUM_1, DATA);
+    expect((await readProductPhoto(executor, A))?.src).toBe(`data:image/jpeg;base64,${DATA}`);
   });
 
   it("fetches nothing again while the stored checksum is the record's, and again when it changes", async () => {

@@ -4681,6 +4681,7 @@ describe("the floor's own controls in the status bar (beta 3)", () => {
         width: 2,
         height: 1,
         dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        mediaType: "image/jpeg",
         checksum: SUM,
         updatedAt: "2026-10-14T10:00:00.000Z",
       },

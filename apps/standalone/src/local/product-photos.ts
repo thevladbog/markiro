@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { ProductPhotoState } from "../host/protocol.js";
+import { photoMediaTypeSchema, type ProductPhotoState } from "../host/protocol.js";
 import type { LocalExecutor } from "./executor.js";
 
 /**
@@ -32,9 +32,10 @@ export const DROP_STALE_SQL =
   "(SELECT id FROM ref_products WHERE photo_checksum IS NOT NULL)";
 
 const SAVE_SQL =
-  "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64) " +
-  "VALUES (?, ?, ?, ?, ?) ON CONFLICT (product_id) DO UPDATE SET checksum = excluded.checksum, " +
-  "width = excluded.width, height = excluded.height, data_base64 = excluded.data_base64";
+  "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64, media_type) " +
+  "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (product_id) DO UPDATE SET checksum = excluded.checksum, " +
+  "width = excluded.width, height = excluded.height, data_base64 = excluded.data_base64, " +
+  "media_type = excluded.media_type";
 
 const wantedRow = z.object({ id: z.string(), photo_checksum: z.string() });
 
@@ -85,7 +86,14 @@ export async function syncProductPhotos({
       await local.transaction([
         {
           sql: SAVE_SQL,
-          values: [product.id, photo.checksum, photo.width, photo.height, photo.dataBase64],
+          values: [
+            product.id,
+            photo.checksum,
+            photo.width,
+            photo.height,
+            photo.dataBase64,
+            photo.mediaType,
+          ],
           expectedChanges: 1,
         },
       ]);
@@ -98,12 +106,16 @@ export async function syncProductPhotos({
 }
 
 export interface StoredPhoto {
-  /** A `data:` URL the page can show; the stored bytes are only ever JPEG. */
+  /** A `data:` URL the page can show; its type is the one the host named (JPEG, PNG or WebP). */
   src: string;
   checksum: string;
 }
 
-const photoRow = z.object({ checksum: z.string(), data_base64: z.string() });
+const photoRow = z.object({
+  checksum: z.string(),
+  data_base64: z.string(),
+  media_type: photoMediaTypeSchema,
+});
 
 /** The stored photo of `productId` as a `data:` URL, or `null` when the station holds none. */
 export async function readProductPhoto(
@@ -111,10 +123,10 @@ export async function readProductPhoto(
   productId: string,
 ): Promise<StoredPhoto | null> {
   const [row] = await local.query(
-    "SELECT checksum, data_base64 FROM ref_product_photos WHERE product_id = ?",
+    "SELECT checksum, data_base64, media_type FROM ref_product_photos WHERE product_id = ?",
     [productId],
     photoRow,
   );
   if (row === undefined) return null;
-  return { src: `data:image/jpeg;base64,${row.data_base64}`, checksum: row.checksum };
+  return { src: `data:${row.media_type};base64,${row.data_base64}`, checksum: row.checksum };
 }

@@ -30,7 +30,7 @@ export function ProductThumb({
       {photo === null ? null : (
         <img
           className="product-thumb__image"
-          src={`data:image/jpeg;base64,${photo.dataBase64}`}
+          src={`data:${photo.mediaType};base64,${photo.dataBase64}`}
           alt={t("office.products.photo.alt", { name: product.name })}
         />
       )}

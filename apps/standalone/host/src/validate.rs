@@ -419,11 +419,20 @@ pub const MAX_PHOTO_BYTES: usize = 300_000;
 /// The base64 of `MAX_PHOTO_BYTES`: 4 × ceil(300 000 / 3).
 const MAX_PHOTO_BASE64: usize = 400_000;
 
-/// A product photo's JPEG: standard base64 of 4 to `MAX_PHOTO_BYTES` bytes
-/// that start with the JPEG signature `FF D8 FF`, within 1..=640 dots on each
-/// side; returns the bytes. The host parses no picture: the office made the
-/// JPEG, and the sides are the office's word for it.
-pub fn product_photo(width: u32, height: u32, data_base64: &str) -> Result<Vec<u8>, ApiError> {
+/// A product photo's picture: standard base64 of 4 to `MAX_PHOTO_BYTES` bytes
+/// of a JPEG (signature `FF D8 FF`), a PNG or a WebP (beta 3.2: a transparent
+/// product shot keeps its alpha), within 1..=640 dots on each side; returns
+/// the bytes and their media type, which the host derives from the magic
+/// bytes and never from a word of the client. The host decodes no picture: a
+/// PNG's IHDR and a WebP's VP8 / VP8L / VP8X header are read (a few bytes, so
+/// a decompression bomb is refused before anything decodes it) and must
+/// declare the sides the office sent; a JPEG's sides are the office's word.
+/// Nothing else (an SVG included) is a photo.
+pub fn product_photo(
+    width: u32,
+    height: u32,
+    data_base64: &str,
+) -> Result<(Vec<u8>, &'static str), ApiError> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     for (field, side) in [("width", width), ("height", height)] {
         if !(1..=MAX_PHOTO_SIDE).contains(&side) {
@@ -440,13 +449,76 @@ pub fn product_photo(width: u32, height: u32, data_base64: &str) -> Result<Vec<u
     let bytes = STANDARD
         .decode(data_base64)
         .map_err(|_| ApiError::validation("dataBase64", "standard base64 is required"))?;
-    if bytes.len() < 4 || bytes.len() > MAX_PHOTO_BYTES || !bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Err(ApiError::validation(
+    let refused = || {
+        ApiError::validation(
             "dataBase64",
-            "a JPEG of at most 300 000 bytes is required",
-        ));
+            "a JPEG, PNG or WebP of at most 300 000 bytes is required",
+        )
+    };
+    if bytes.len() < 4 || bytes.len() > MAX_PHOTO_BYTES {
+        return Err(refused());
     }
-    Ok(bytes)
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Ok((bytes, "image/jpeg"));
+    }
+    let declared = if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        png_sides(&bytes).map(|sides| (sides, "image/png"))
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        webp_sides(&bytes).map(|sides| (sides, "image/webp"))
+    } else {
+        None
+    };
+    match declared {
+        Some(((w, h), media_type)) if (w, h) == (width, height) => Ok((bytes, media_type)),
+        Some(_) => Err(ApiError::validation(
+            "dataBase64",
+            "the picture's own sides differ from width and height",
+        )),
+        None => Err(refused()),
+    }
+}
+
+/// The sides a PNG's first chunk (IHDR) declares.
+fn png_sides(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 24 || &bytes[12..16] != b"IHDR" || bytes[8..12] != [0, 0, 0, 13] {
+        return None;
+    }
+    let side =
+        |at: usize| u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+    Some((side(16), side(20)))
+}
+
+/// The sides a WebP's first chunk declares: lossy `VP8 `, lossless `VP8L`
+/// or extended `VP8X`.
+fn webp_sides(bytes: &[u8]) -> Option<(u32, u32)> {
+    let chunk = bytes.get(12..16)?;
+    match chunk {
+        b"VP8 " => {
+            let frame = bytes.get(20..30)?;
+            if frame[3..6] != [0x9D, 0x01, 0x2A] {
+                return None;
+            }
+            let width = u16::from_le_bytes([frame[6], frame[7]]) & 0x3FFF;
+            let height = u16::from_le_bytes([frame[8], frame[9]]) & 0x3FFF;
+            Some((u32::from(width), u32::from(height)))
+        }
+        b"VP8L" => {
+            let head = bytes.get(20..25)?;
+            if head[0] != 0x2F {
+                return None;
+            }
+            let bits = u32::from_le_bytes([head[1], head[2], head[3], head[4]]);
+            Some(((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1))
+        }
+        b"VP8X" => {
+            let head = bytes.get(24..30)?;
+            let side = |at: usize| {
+                u32::from(head[at]) | u32::from(head[at + 1]) << 8 | u32::from(head[at + 2]) << 16
+            };
+            Some((side(0) + 1, side(3) + 1))
+        }
+        _ => None,
+    }
 }
 
 /// The most units a box holds. The cloud bounds none; this cap only keeps a

@@ -172,6 +172,7 @@ describe("office products", () => {
         width: 2,
         height: 1,
         dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        mediaType: "image/jpeg",
         checksum: photo,
         updatedAt: "2026-10-13T09:00:00.000Z",
       },
