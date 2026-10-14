@@ -301,6 +301,10 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
     shift.productId === input.productId &&
     shift.boxTemplateId === input.boxTemplateId &&
     shift.productionDate === input.productionDate &&
+    // A host before beta 3 names no shift date, a body before it sent none: nothing to compare.
+    (shift.plannedDate === undefined ||
+      input.plannedDate === undefined ||
+      shift.plannedDate === input.plannedDate) &&
     shift.boxCapacity === input.boxCapacity &&
     shift.plannedQty === input.plannedQty &&
     shift.palletsEnabled === (input.pallets !== undefined) &&
@@ -313,6 +317,7 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
 export function createdCopy(shift: DeviceShift): ShiftCopy {
   return {
     ...shift,
+    plannedDate: shift.plannedDate ?? null,
     palletBoxCapacity: shift.palletBoxCapacity ?? null,
     palletTemplateId: shift.palletTemplateId ?? null,
     localState: null,

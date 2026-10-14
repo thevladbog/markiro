@@ -82,6 +82,8 @@ describe("the station's copies of its shifts", () => {
       productGtin14: "04600682000013",
       counterpartyName: "ООО «Северный берег»",
       productionDate: "2026-10-08",
+      // The fixture is a host before beta 3: it sends no shift date, so the copy keeps none.
+      plannedDate: null,
       plannedQty: 1200,
       boxCapacity: 12,
       boxTemplateId: ACTIVE.boxTemplateId,
@@ -107,6 +109,34 @@ describe("the station's copies of its shifts", () => {
     expect(await readShiftCopy(executor, PAIRING, ACTIVE.id)).toBeNull();
     await replaceShiftCopies(executor, PAIRING, [], SEEN + 2);
     expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toEqual([]);
+  });
+
+  it("keep the shift date (beta 3) apart from the production date, and none for a host before it", async () => {
+    const { executor } = openLocalDb();
+    const [dated, other] = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json"))
+      .shifts as [DeviceShift, DeviceShift];
+    const moved = { ...other, plannedDate: "2026-10-12" };
+    await replaceShiftCopies(executor, PAIRING, [dated, moved], SEEN);
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toMatchObject([
+      { id: dated.id, productionDate: "2026-10-08", plannedDate: "2026-10-08" },
+      { id: moved.id, productionDate: "2026-10-09", plannedDate: "2026-10-12" },
+    ]);
+    // A later list from a host that names no date clears it rather than keeping a stale one.
+    const { plannedDate: _dropped, ...bare } = moved;
+    await replaceShiftCopies(executor, PAIRING, [bare], SEEN + 1);
+    expect((await readShiftCopy(executor, PAIRING, moved.id))?.plannedDate).toBeNull();
+  });
+
+  it("keep the shift date of an entered shift and of one the station created", async () => {
+    const { executor } = openLocalDb();
+    const entered = enteredShiftSchema.parse(fixture("device-shift-entered-planned-date.json"));
+    await keepEnteredShift(executor, PAIRING, entered, AT, SEEN);
+    expect((await readShiftCopy(executor, PAIRING, entered.id))?.plannedDate).toBe("2026-10-10");
+    const [created] = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json")).shifts;
+    await keepCreatedShift(executor, PAIRING, created as DeviceShift, SEEN);
+    expect((await readShiftCopy(executor, PAIRING, created?.id ?? ""))?.plannedDate).toBe(
+      "2026-10-08",
+    );
   });
 
   it("keep a shift this station entered, with its snapshot, whatever a later list says", async () => {

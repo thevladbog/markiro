@@ -207,6 +207,17 @@ function shownDate(): string {
   return screen.getByRole("button", { name: "Дата производства" }).textContent ?? "";
 }
 
+/** The shift date («Дата смены») the picker shows, in words. */
+function shownShiftDate(): string {
+  return screen.getByRole("button", { name: "Дата смены" }).textContent ?? "";
+}
+
+/** Picks a shift date in its own DatePicker: opens it and presses the day. */
+async function pickShiftDate(day: string): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: "Дата смены" }));
+  fireEvent.click(await screen.findByRole("button", { name: day }));
+}
+
 /** Picks a production date in the cloud's DatePicker: opens it and presses the day. */
 async function pickDate(day: string): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: "Дата производства" }));
@@ -795,6 +806,29 @@ describe("a new shift on the station", () => {
       productionDate: "2026-10-09",
       plannedQty: 1200,
       boxCapacity: 6,
+    });
+  });
+
+  it("offers the shift date beside the production date: today to begin with, editable on its own", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    expect(shownShiftDate()).toContain("10 октября 2026");
+    expect(
+      screen.getByRole("button", { name: "Дата смены" }).closest(".new-shift__date"),
+    ).not.toBeNull();
+    // The production date moves apart from it: the shift date stays the working day.
+    await pickDate("8 октября 2026");
+    await pickDate("9 октября 2026");
+    expect(shownShiftDate()).toContain("10 октября 2026");
+    await pickShiftDate("12 октября 2026");
+    expect(shownShiftDate()).toContain("12 октября 2026");
+    expect(shownDate()).toContain("9 октября 2026");
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      productionDate: "2026-10-09",
+      plannedDate: "2026-10-12",
     });
   });
 
@@ -1804,6 +1838,7 @@ describe("a request to create a shift", () => {
     ["the product", { productId: uuid(77) }],
     ["the template", { boxTemplateId: uuid(78) }],
     ["the day", { productionDate: "2026-10-09" }],
+    ["the shift date", { plannedDate: "2026-10-09" }],
     ["the capacity", { boxCapacity: 6 }],
     ["the plan", { plannedQty: 500 }],
   ] as const)("does not enter a shift that is not the form's in %s", async (_name, patch) => {
@@ -1920,6 +1955,7 @@ describe("a request to create a shift", () => {
       "disabled",
       true,
     );
+    expect(screen.getByRole("button", { name: "Дата смены" })).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
     next();
@@ -2213,11 +2249,14 @@ describe("the creation of a shift, apart from its screen", () => {
   it("makes the copy of a created shift one nobody has entered and nobody is closing", () => {
     expect(createdCopy(PLANNED)).toEqual({
       ...PLANNED,
+      // A host before beta 3 names no shift date: the copy keeps none.
+      plannedDate: null,
       palletBoxCapacity: null,
       palletTemplateId: null,
       localState: null,
       entered: false,
     });
+    expect(createdCopy({ ...PLANNED, plannedDate: "2026-10-12" }).plannedDate).toBe("2026-10-12");
   });
 
   it("makes the copy of a created shift with pallets keep its boxes per pallet and pallet template", () => {
@@ -2229,6 +2268,7 @@ describe("the creation of a shift, apart from its screen", () => {
     };
     expect(createdCopy(palletsShift)).toEqual({
       ...palletsShift,
+      plannedDate: null,
       localState: null,
       entered: false,
     });
