@@ -76,6 +76,9 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/device/sscc/blocks/known"),
     ("POST", "/v1/device/facts"),
     ("GET", "/v1/device/codes/{code_hash}"),
+    // What the host tells a station of its conflicts (plan КНФ): reads, none opens a shift.
+    ("POST", "/v1/device/conflicts/status"),
+    ("GET", "/v1/device/displacements"),
     ("POST", "/v1/device/warehouse/lookup"),
     ("POST", "/v1/device/warehouse/reprints"),
     ("GET", "/v1/changes"),
@@ -144,6 +147,11 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/boxes/{id}/report-data"),
     ("GET", "/v1/office/codes"),
     ("GET", "/v1/office/codes/{code_hash}"),
+    // A shift's review and the conflicts' page (plan КНФ): reads and a mark, nothing that opens.
+    ("GET", "/v1/office/shifts/{id}/exceptions"),
+    ("GET", "/v1/office/shifts/{id}/rejections"),
+    ("GET", "/v1/office/conflicts"),
+    ("POST", "/v1/office/conflicts/{id}/review"),
     ("GET", "/v1/office/backups"),
     ("POST", "/v1/office/backups"),
     ("PUT", "/v1/office/backups/settings"),
