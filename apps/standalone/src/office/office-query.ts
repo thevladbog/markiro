@@ -1,14 +1,19 @@
 import {
+  keepPreviousData,
   QueryClient,
+  useInfiniteQuery,
   useMutation,
   useQuery,
+  type InfiniteData,
   type QueryKey,
+  type UseInfiniteQueryResult,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 
 import type { HostApi } from "../host/api.js";
 import type { DisaggregationFilter } from "../host/disaggregation.js";
+import type { PalletListQuery } from "../host/pack-cards.js";
 import type { ConflictQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
 
@@ -87,6 +92,12 @@ export const officeKeys = {
   shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
   /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
   shiftRejections: (id: string) => ["office", "shift-rejections", id],
+  /** A box's card (`GET /v1/office/boxes/{id}`, plan КРТ). */
+  boxCard: (id: string) => ["office", "box-card", id],
+  /** A pallet's card (`GET /v1/office/pallets/{id}`, plan КРТ). */
+  palletCard: (id: string) => ["office", "pallet-card", id],
+  /** Every page of one query of the pallet list (`GET /v1/office/pallets`, plan КРТ). */
+  palletList: (query: PalletListQuery) => ["office", "pallet-list", query],
   /** What a box's and a shift's pallets' forms print (`…/report-data`, plan О-Ф). */
   boxReport: (id: string) => ["office", "box-report", id],
   shiftPalletReport: (id: string) => ["office", "shift-pallet-report", id],
@@ -158,5 +169,30 @@ export function useOfficeMutation<V, T>(
   const { api, call } = useOfficeSession();
   return useMutation({
     mutationFn: (variables: V) => call((token) => write(api, token, variables)),
+  });
+}
+
+/**
+ * Reads office data a page at a time, each page below the cursor the one
+ * before named (the pallet list, plan КРТ). `nextCursor` is `null` on the
+ * last page.
+ */
+export function useOfficeInfiniteQuery<T>(
+  key: QueryKey,
+  read: (api: HostApi, token: string, cursor: string | null) => Promise<T>,
+  nextCursor: (page: T) => string | null,
+  options: Pick<OfficeQueryOptions, "enabled"> = {},
+): UseInfiniteQueryResult<InfiniteData<T, string | null>, Error> {
+  const { api, call } = useOfficeSession();
+  return useInfiniteQuery<T, Error, InfiniteData<T, string | null>, QueryKey, string | null>({
+    queryKey: key,
+    queryFn: ({ pageParam }) => call((token) => read(api, token, pageParam)),
+    initialPageParam: null,
+    getNextPageParam: (last) => nextCursor(last) ?? undefined,
+    // A page of another filter keeps the last answer until its own arrives (`isPlaceholderData`),
+    // so what the filters were read from (the stations of the list) does not vanish meanwhile.
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+    enabled: options.enabled ?? true,
   });
 }

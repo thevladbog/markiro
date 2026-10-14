@@ -201,6 +201,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     })),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
+    getBoxCard: vi.fn<HostApi["getBoxCard"]>(() => unexpected("getBoxCard")),
+    getPalletCard: vi.fn<HostApi["getPalletCard"]>(() => unexpected("getPalletCard")),
+    listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
     getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
     startBackup: vi.fn<HostApi["startBackup"]>(() => unexpected("startBackup")),

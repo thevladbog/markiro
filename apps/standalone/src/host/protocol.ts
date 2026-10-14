@@ -1004,6 +1004,9 @@ export const officeBoxSchema = z.object({
   digestMatches: z.boolean().nullable(),
   printVerifiedAt: z.iso.datetime().nullable(),
   printSkippedAt: z.iso.datetime().nullable(),
+  // Plan КРТ (П-14): the operator who closed the box; optional so a host
+  // before it, and the shift card's older fixtures, still read.
+  operatorName: z.string().nullable().optional(),
 });
 export type OfficeBox = z.infer<typeof officeBoxSchema>;
 

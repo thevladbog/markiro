@@ -148,6 +148,19 @@ describe("«Поиск кодов» in the office", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("links the box and the pallet of a code's placements to their cards (plan КРТ)", async () => {
+    const value = session();
+    value.api.getCodeCard.mockResolvedValue(CARD);
+    await openSearch(value);
+    search(KM);
+    await screen.findByText("010460068200001321S000002<GS>93Tail");
+    const placement = CARD.placements[0];
+    const boxLink = screen.getAllByRole("link", { name: /^\(00\)046006820000015000/ })[0];
+    expect(boxLink?.getAttribute("href")).toBe(`/codes/box/${placement?.boxId ?? ""}`);
+    const palletLink = screen.getAllByRole("link", { name: /^\(00\)146006820000000402/ })[0];
+    expect(palletLink?.getAttribute("href")).toBe(`/codes/pallet/${placement?.palletId ?? ""}`);
+  });
+
   it("refuses what is no criterion without asking the host", async () => {
     const value = session();
     await openSearch(value);

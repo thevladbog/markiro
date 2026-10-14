@@ -4830,7 +4830,8 @@ mapping; the bytes are the acceptance rule.
   from the boxes standing is marked, never fixed). «Итоги» opens
   `ShiftTotalsDialog`, «Выгрузка» `ExportDialog` (plan ЧЗ) and «Закрыть»
   `CloseShiftDialog` (`planShifts`), all as the list opens them; a close
-  reads the card and every list again. Every role prints. The card does not
+  reads the card and every list again. The SSCC of a box and of a pallet there
+  link to their own cards (plan КРТ, «Box and pallet cards»). Every role prints. The card does not
   refresh itself: an active shift's lists are as of opening, and the pallet
   list is not paged (fine at hundreds; page it at about a thousand).
 - The host only reads, one snapshot a route, each query by an index
@@ -4905,6 +4906,69 @@ mapping; the bytes are the acceptance rule.
   `paint()` moved with it from `PrintFormDialog.tsx` to `print-form.ts` and the act's dialog
   (`DisaggregationActDialog`) is a smaller copy of the dialog's flow without a shift.
 
+## Box and pallet cards
+
+Plan КРТ (parity spec §5.3, rows П-14…П-17; the cloud's `BoxCard`, `PalletCard`,
+`pages/pallets` and `pages/boxes` are the references). «Поиск кодов» is one office
+section of three parts and two cards, all under `/codes`: `/codes` «Коды»,
+`/codes/boxes?shift=` «Короба», `/codes/pallets?…` «Паллеты», `/codes/box/:id` and
+`/codes/pallet/:id`. One menu item (`NavLink` without `end` keeps it lit on all of
+them).
+
+- **Host routes** (`routes/office_cards.rs`, `routes/office_pallets.rs`; every office
+  role, the license gate's `NEVER`): `GET /v1/office/boxes/{id}`,
+  `GET /v1/office/pallets/{id}` and `GET /v1/office/pallets` (the list across shifts).
+  Read only: one read transaction each, rolled back, no audit row, every query by an
+  index (`every_card_query_searches_by_an_index`, `the_list_is_read_in_its_order_through_an_index`).
+  The device protocol does not grow (office reads). A card never carries a full code: an
+  item is its hash, GTIN and serial (`01<GTIN>21<serial>`); the full text is the code
+  card's and `report-data`'s only. The shift's box list also names the operator who
+  closed each box (`operatorName`, П-14).
+- **Items.** A box card lists every accepted scan into the box (`scans_ok_box`), newest
+  first, each with the state it stands in: `removed` before `displaced`, then
+  `packed`/`open_box` by the box's close (the code search's order). Rows are capped at
+  `CARD_ROW_LIMIT` (10 000, `itemsCapped`/`membersCapped`). A pallet card lists every box
+  that joined it, taken apart or not (the evidence that a labelled pallet left a box
+  short); its `boxes` and `units` count the closed boxes not taken apart and their live
+  items, as the shift's pallet list does.
+- **Pallet list.** Open pallets first, then closed newest first, 100 a page, keyed by
+  `(ifnull(closed_at, '~'), id)` through `pallets_list_order` (migration `0025`), which
+  also re-creates `scans_ok_box` if a rebuild of `scans` lost it. The cursor is
+  `o~<id>` after an open pallet and `<milliseconds>~<id>` after a closed one (characters the
+  shell's `validate_path` lets through); a pallet that closes between two pages neither
+  skips nor repeats a row. Filters: product and line (the SHIFT's, not the station's
+  current line), station, a period of closing, an SSCC. The page carries the stations (the
+  device list is the administrator's). No warehouse pallets and no «Вид» until the
+  handheld stage.
+- **«Состав изменился после закрытия»** is `palletCountDiffers` (the station's count at the
+  close against the boxes standing now), the same sign as the shift card's, not the
+  cloud's server-time comparison.
+- **Documents.** Both cards read the applied disaggregation documents whose `ok` line names
+  them (`d.status = 'applied'`, `l.status = 'ok'`: a draft, a cancelled document and a line
+  that found the box taken apart are not): the readers' union of «Disaggregation
+  documents», office branch. The office's disassembly writes no station exception, so
+  the cards show the station's exceptions and the documents as two sections. In the
+  composition an item that left at the instant of the box's disassembly is marked «по
+  документу …». A number links to `/disaggregation/:id` (plan ДЗГ-О).
+- **«Расформировать»** (`PackDisassembly.tsx`, `pack-disassembly.ts`): for a closed,
+  not disassembled box or pallet with an SSCC of a CLOSED shift (ПР-1; before that a quiet
+  line), for both roles. It makes a draft with no reason (a reason is asked of an applied
+  document only), adds the SSCC as its line and opens the document; a press while the first
+  works sends nothing (a ref: the mutation's own pending flag arrives a tick late). When the
+  draft was made and the line was not, the alert names the draft with a link to it.
+- **Office.** `CodesSection` keeps the memory of the parts in its own state: the last
+  `?…` of each part (`RegistryTabs` writes it in an effect) and the last part, for a card's
+  «← Назад» when it was opened with no page before (`location.key === "default"`);
+  otherwise it takes the page before. A tab chosen on one page takes the focus again on
+  the next, after the shell's own focus move. `useOfficeInfiniteQuery` reads the list;
+  the filters live in the address (`pallet-query.ts`), the days in the organization's zone.
+  Printing is `PrintFormDialog` with the same targets as the shift's card; «XML паллеты»
+  is `ExportDialog` with `palletId` (the dialog reads the shift's whole source and lists
+  that pallet only: slow on a big shift, not wrong).
+- **Not run.** The cards, the list and the dialogs ran under jsdom and `TestApp` only: no
+  WebView2, no printer, no ЛК ЧЗ acceptance of the pallet's XML, no real database of a
+  year's work for the list's time (the plan's owner check 10).
+
 ## Conflicts and the review of a shift
 
 Plan КНФ (parity spec §5.2, pilot spec §7).
@@ -4942,9 +5006,9 @@ Plan КНФ (parity spec §5.2, pilot spec §7).
 - Office: «Конфликты» in «Производство» (`src/office/conflicts`), its
   filters in the address (`?shift=&state=&page=`), «Отметить разобранным»
   (one press, the notice takes the focus, every list of conflicts reads
-  again). The loser's box links to its shift's card with `?box=<SSCC>`, which
-  fills the boxes' SSCC filter, until plan КРТ gives a box a card of its own
-  (`loserBoxLink`, one line). The shift card adds «Исключения», «Отклонённые
+  again). The loser's box links to the box's own card (`/codes/box/:id`, plan КРТ;
+  `loserBoxLink`), a scan with no box to its shift's card; the older `?box=<SSCC>` link still
+  fills the shift card's SSCC filter. The shift card adds «Исключения», «Отклонённые
   записи станции» and «Конфликты» (the losing shift's, «Не разобрано: N из M»
   and «Все конфликты смены») after the boxes and pallets, each loading on its
   own, paged by 50, with «Показаны последние N из M» past 500. The export
@@ -5675,6 +5739,10 @@ either; a file log is stage 5.
   row, `host_revision` reads the revision. Add a helper there before copying
   one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
+- Plan КРТ (box and pallet cards): `cargo test -p markiro-host --test office_cards --test office_pallets
+--test office_boxes` and, in `src/`, `registry-tabs`, `boxes-tab`, `pallets-tab`, `box-card-page`,
+  `pallet-card-page`, `pack-disassembly`, `pallet-query`, `pack-cards-protocol` tests; the Vitest page
+  tests also run under a 3 ms delayed `setImmediate` (see the vitest effect-race notes).
 - Plan КНФ (conflicts and the review of a shift): the host's routes ran only
   against `TestApp` (and the loopback walk of `no_secrets_in_logs`), the
   office's page, card sections and warning only in jsdom, and the station's

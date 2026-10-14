@@ -47,6 +47,17 @@ import {
   type DisaggregationUpdate,
 } from "./disaggregation.js";
 import {
+  isPackId,
+  officeBoxCardSchema,
+  officePalletCardSchema,
+  officePalletPageSchema,
+  palletListPath,
+  type OfficeBoxCard,
+  type OfficePalletCard,
+  type OfficePalletPage,
+  type PalletListQuery,
+} from "./pack-cards.js";
+import {
   badgeInfoSchema,
   badgeSaltSchema,
   bootstrapResponseSchema,
@@ -342,6 +353,16 @@ export interface HostApi {
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
+  /** A box's card (plan КРТ); `not_found` for a box the host never saw. Every office role. */
+  getBoxCard: (token: string, id: string) => Promise<OfficeBoxCard>;
+  /** A pallet's card (plan КРТ); `not_found` for a pallet the host never saw. Every office role. */
+  getPalletCard: (token: string, id: string) => Promise<OfficePalletCard>;
+  /** One page of every pallet of the site (plan КРТ); `cursor` from the previous page. */
+  listPallets: (
+    token: string,
+    query: PalletListQuery,
+    cursor: string | null,
+  ) => Promise<OfficePalletPage>;
   /**
    * Of the station's records it names (1–200), those whose conflict the office
    * marked reviewed (plan КНФ), with the device key only; a host before plan
@@ -1021,6 +1042,25 @@ export function createHostApi(client: HostClient): HostApi {
         schema: officeCodeCardSchema,
       });
     },
+    getBoxCard: (token, id) => {
+      if (!isPackId(id)) return Promise.reject(new RangeError("not a box id"));
+      return client.request("GET", `/v1/office/boxes/${id}`, {
+        officeToken: token,
+        schema: officeBoxCardSchema,
+      });
+    },
+    getPalletCard: (token, id) => {
+      if (!isPackId(id)) return Promise.reject(new RangeError("not a pallet id"));
+      return client.request("GET", `/v1/office/pallets/${id}`, {
+        officeToken: token,
+        schema: officePalletCardSchema,
+      });
+    },
+    listPallets: (token, query, cursor) =>
+      client.request("GET", palletListPath(query, cursor), {
+        officeToken: token,
+        schema: officePalletPageSchema,
+      }),
     getBackups: (token) =>
       client.request("GET", "/v1/office/backups", {
         officeToken: token,

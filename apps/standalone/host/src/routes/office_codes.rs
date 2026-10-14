@@ -315,7 +315,7 @@ fn shift_number(text: &str) -> Result<ShiftNumber, ApiError> {
 /// Digits only, 1-15 of them, naming an instant of the years 1970-9999 in
 /// milliseconds; returned as a device instant's text, which orders with the
 /// stored ones.
-fn period_end(field: &str, text: &str) -> Result<String, ApiError> {
+pub(crate) fn period_end(field: &str, text: &str) -> Result<String, ApiError> {
     let refused = || ApiError::validation(field, "milliseconds since 1970 up to the year 9999");
     if !(1..=15).contains(&text.len()) || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(refused());

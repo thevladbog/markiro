@@ -34,6 +34,7 @@ import {
   type FormatInstant,
 } from "./CodeCard.js";
 import { classifySearchInput, searchQuery, type SearchInput } from "./code-query.js";
+import { RegistryTabs } from "./RegistryTabs.js";
 
 /** Counts with the thousands apart by a no-break space: «10 000». */
 const COUNT = new Intl.NumberFormat("ru");
@@ -272,6 +273,7 @@ export function CodeSearchPage() {
   return (
     <div className="office-stack">
       <PageHeader title={t("office.codeSearch.title")} />
+      <RegistryTabs active="codes" />
       <p className="office-note">{t("office.codeSearch.intro")}</p>
       <form role="search" aria-label={t("office.codeSearch.title")} onSubmit={submit} noValidate>
         <FilterBar label={t("office.codeSearch.filters")} resultSummary={summary}>
