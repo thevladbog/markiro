@@ -2023,7 +2023,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 100] = [
+    let reads: [(&str, &str); 101] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -2466,6 +2466,16 @@ async fn the_floors_repeating_reads_search_an_index() {
         (QUEUE_RESEND_INSERT, "sqlite_autoindex_outbox_1 (id=?)"),
         (QUEUE_RESEND_MARK, "sqlite_autoindex_outbox_1 (id=?)"),
         (QUEUE_DISMISS, "sqlite_autoindex_outbox_1 (id=?)"),
+        // A code release of the feed (plan ДЗГ; `src/local/reference-sync.ts`,
+        // `test/floor-schema.test.ts` checks the texts agree): the pairing's codes of the
+        // boxes it names, found by the box.
+        (
+            "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id IN \
+             (SELECT b.id FROM json_each(?) AS r JOIN floor_boxes AS b ON b.id = r.value ->> 'id' \
+             WHERE +b.host_id = ? AND +b.device_id = ? AND +b.shift_id = r.value ->> 'shiftId' \
+             AND b.closed_at IS NOT NULL)",
+            "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
     ];
     for (sql, index) in reads {
         let placeholders = sql.matches('?').count();

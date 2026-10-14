@@ -65,6 +65,7 @@ import {
   OPEN_NOTICE_IDS_SQL,
 } from "../src/local/conflict-notices.js";
 import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
+import { APPLY_CODE_RELEASES_SQL } from "../src/local/reference-sync.js";
 import {
   BLOCKS_SQL,
   DUE_SQL,
@@ -2121,5 +2122,43 @@ describe("the conflict notices' statements (migration 0016, plan КНФ)", () =>
     const statements = [...new Set(STATEMENTS.map(([sql]) => sql))];
     expect(statements).toHaveLength(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
+  });
+});
+
+// Plan ДЗГ: what the station does with a code release of the feed. Pinned on the shell's SQLite
+// too (`the_floors_repeating_reads_search_an_index` in `tests/local_db.rs`), with the same text.
+describe("the code releases' statement (plan ДЗГ)", () => {
+  it("searches the pairing's codes of a box and the box by its key, never a whole table", () => {
+    const { db } = openLocalDb();
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${APPLY_CODE_RELEASES_SQL}`)
+      .all("x", "x", "x", "x", "x")
+      .map((step) => String(step["detail"]));
+    expect(
+      plan.some((step) =>
+        step.includes(
+          "SEARCH floor_codes USING COVERING INDEX floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+      ),
+      plan.join("\n"),
+    ).toBe(true);
+    expect(
+      plan.some((step) =>
+        step.includes("SEARCH b USING INDEX sqlite_autoindex_floor_boxes_1 (id=?)"),
+      ),
+      plan.join("\n"),
+    ).toBe(true);
+    // `json_each` (alias `r`) is the statement's own list.
+    expect(
+      plan.filter((step) => step.startsWith("SCAN ") && !step.startsWith("SCAN r ")),
+      plan.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("is pinned on the shell's SQLite with the same text", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    expect(source).toContain(`"${APPLY_CODE_RELEASES_SQL}"`);
   });
 });
