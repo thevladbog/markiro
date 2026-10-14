@@ -223,6 +223,12 @@ section.workstation-setup {
 
 .setup-printer-list__header > button {
   flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.setup-card__actions > button,
+.setup-printer-assignments label {
+  white-space: nowrap;
 }
 
 .setup-printer-list__scroll {
@@ -246,11 +252,13 @@ section.workstation-setup {
   font: var(--floor-body);
 }
 
+/* A row is its words over its buttons: a side-by-side row left the words one letter wide once the three buttons took their share. */
 .setup-printer-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
 
@@ -259,14 +267,17 @@ section.workstation-setup {
 }
 
 .setup-printer-row__detail {
-  flex: 1;
+  display: grid;
   min-width: 0;
+  gap: var(--sp-1);
+  justify-items: start;
 }
 
 .setup-printer-row h3,
 .setup-printer-row p {
+  min-width: 0;
   margin: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .setup-printer-row h3 {
@@ -274,22 +285,36 @@ section.workstation-setup {
 }
 
 .setup-printer-row__connection {
-  padding-top: var(--sp-1);
   color: var(--fg-3);
   font: 400 15px/22px var(--font-mono);
 }
 
 .setup-printer-row__purposes {
-  padding-top: var(--sp-1);
   color: var(--fg-2);
   font: 500 16px/22px var(--font-ui);
 }
 
+/* The three buttons share the row, the test print the widest: they never wrap onto a second line. */
 .setup-printer-row__actions {
-  display: flex;
-  flex-shrink: 0;
+  display: grid;
+  min-width: 0;
   gap: var(--sp-2);
-  margin-left: auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+}
+
+.setup-printer-row__actions > button {
+  min-width: 0;
+  padding-inline: var(--sp-2);
+  white-space: nowrap;
+}
+
+/* A button or a list that takes the whole row of the printer's form, and never breaks its words. */
+.setup-printer-connection__wide {
+  grid-column: 1 / -1;
+}
+
+.setup-nowrap {
+  white-space: nowrap;
 }
 
 .setup-printer-assignments {
@@ -368,7 +393,7 @@ section.workstation-setup {
   gap: var(--sp-1);
   justify-items: start;
   font: var(--floor-body-strong);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* Sound: one centred card, the mute toggle, the level and the check on one row. */
@@ -433,7 +458,13 @@ section.workstation-setup {
   gap: var(--sp-3);
 }
 
+.setup-printer-verification .setup-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .setup-printer-verification {
+  position: relative;
   display: flex;
   min-width: 0;
   gap: var(--sp-3);
@@ -504,6 +535,16 @@ p.workstation-setup__result {
 }
 
 @media (max-width: 1100px) {
+  /* The state is also the toggle's mark and its pressed state: out of sight here, so the label keeps its one line. */
+  .setup-printer-verification__state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .setup-split,
   .setup-split--scanners,
   .setup-split--editor,
