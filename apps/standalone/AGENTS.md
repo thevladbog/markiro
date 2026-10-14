@@ -3985,18 +3985,31 @@ unknown outcome and a send that failed before it left («Напечатать п
 and «Настройки принтера» for the latter), a label prepared before a restart
 («Отправить сохранённую этикетку»: nothing is sent on entry), a send this app
 lost (`sending`: «Повторить» recovers it to unknown, nothing sent), another
-shift's label (`anotherShift`, no unit), no duplicate printer (on entry, not
-in finish mode: «Повторить», «Настройки принтера» — the workstation, by
-`onSetup`) and a failed read (`storageError`, «Повторить»). «Пауза» is the
-way out of the shift, the label kept; it stays on the keyboard while the leave
+shift's label (no unit; the view keeps the label and reads that shift's copy:
+«Смена N · …суффикс», and where the shift is found — in the list of this line,
+`anotherShift` «Вернитесь к выбору смены»; on another line, «Смена другой
+линии. Обратитесь в офис.»; in no list, or no copy left (the code's end
+alone), «Смену этой этикетки нельзя выбрать на станции…» — the work screen's
+shift stands for the station's line, as a move of the station leaves the
+screen), no duplicate printer (on entry, not in finish mode: «Повторить»,
+«Настройки принтера» — the workstation, by `onSetup`) and a failed read
+(`storageError`, «Повторить»). The window's status line is always in it: «Сохраняем
+результат…» while a decision or a send runs (a send prepared, a reprint,
+«Повторить», a skip), «Ожидаем сканирование этикетки» only where a scan checks
+the label. «Пауза» (and Escape) is the way out of the shift, the label kept;
+it waits while a decision runs and stays on the keyboard while the leave
 waits. A reprint asks the reason first (`UnitLabelReprintReason`: three floor
 choices marked by a sign, «Напечатать повторно» held until one is chosen),
 writes the new attempt (`reprintUnitLabel`) and sends it at once, as the
-cloud's. The scanner stays the screen's: while the window stands a scan goes
-to `verifyUnitLabel` when the check is open (a required check after the
-send, or an unknown outcome — in finish mode too), its mismatch or
-unreadable code said in the window and by tone; any other scan is refused in
-words and nothing is journalled. Every decision is one turn of the work queue,
+cloud's; the reasons belong to the view they were opened in (a view that
+changes under them closes them). The scanner stays the screen's: while the
+window stands a scan goes to `verifyUnitLabel` when the check is open (a
+required check after the send, or an unknown outcome — in finish mode too),
+no decision runs and the reasons are not open (the cloud pauses its
+verification), its mismatch or unreadable code said in the window and by
+tone; any other scan is refused in words — under the window by tone and in it
+(«Скан не принят. Сначала завершите этикетку.», announced again for each, gone
+with the view) — and nothing is journalled. Every decision is one turn of the work queue,
 handed to the gate, with the view's double-tap guard (`VIEW_GUARD_MS`). A
 unit's own refusal (`incomplete_km`, `render_failed`) is said as its outcome
 («Не удалось прочитать полный Data Matrix», or the label not prepared for the
@@ -4006,9 +4019,10 @@ window of a label left unresolved at once. «История этикеток» r
 «Исключения» in the footer (three columns again): the shift's labels newest
 first (`readShiftUnitLabels` over the pinned `SHIFT_JOBS_SQL`, 100 rows), each
 with its state, «Попытка N» and «Напечатать повторно» (with a reason; held
-while a label is unresolved or on its way; in finish mode too, a deliberate
-difference from the cloud, which holds it in a closed shift), the empty text,
-and «Назад» back to its button. The close is refused while a label of the
+while a decision is saved, a label is unresolved, waits for its send or is on
+its way, and in finish mode, as the cloud holds it in a closed shift — said
+in words there), the empty text, a failure announced, and «Назад» back to its
+button. The close is refused while a label of the
 shift is unresolved («Floor exceptions and close»). The screen's tests are
 `test/unit-label-screen.test.tsx`.
 

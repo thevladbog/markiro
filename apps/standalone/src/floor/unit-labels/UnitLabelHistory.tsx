@@ -27,6 +27,11 @@ export interface UnitLabelHistoryProps {
    * at a time, as the cloud's `canAccept`), and one on its way is not either.
    */
   blocked: boolean;
+  /**
+   * The office closed the shift (finish mode): no label is printed again, as the cloud holds its
+   * reprint in a closed shift (`canAccept`), and the history says so.
+   */
+  closed: boolean;
   onReprint: (jobId: string, reason: ReprintReason) => void;
   onBack: () => void;
   clock?: () => number;
@@ -37,13 +42,15 @@ export interface UnitLabelHistoryProps {
  * shift that prints the duplicate it stands where an aggregation shift has «Исключения». Each
  * label of the shift — its code's end, its state in words and its attempt — can be printed
  * again with a reason, which asks the reason first (`UnitLabelReprintReason`); the work screen
- * sends it and closes the history.
+ * sends it and closes the history. Not while a decision is saved, an unresolved label waits, the
+ * office closed the shift, or the label itself waits for its send or is on its way.
  */
 export function UnitLabelHistory({
   entries,
   failure,
   busy,
   blocked,
+  closed,
   onReprint,
   onBack,
   clock,
@@ -66,10 +73,12 @@ export function UnitLabelHistory({
   return (
     <section className="unit-label-history" aria-labelledby="unit-label-history-title">
       <h2 id="unit-label-history-title">{t("floor.unitLabels.history")}</h2>
+      {closed && (
+        <p className="unit-label-history__closed">{t("floor.unitLabels.closedHistory")}</p>
+      )}
       {failure !== null && (
         <Alert
           tone="error"
-          role="presentation"
           title={t(
             failure === "shift_closed"
               ? "floor.unitLabels.shiftClosed"
@@ -89,7 +98,11 @@ export function UnitLabelHistory({
         >
           {entries.map((job) => {
             const held =
-              busy || blocked || job.attemptState === "prepared" || job.attemptState === "sending";
+              busy ||
+              blocked ||
+              closed ||
+              job.attemptState === "prepared" ||
+              job.attemptState === "sending";
             return (
               <li className="unit-label-history__row" key={job.id}>
                 <code>…{unitLabelSuffix(job)}</code>

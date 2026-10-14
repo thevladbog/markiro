@@ -12,13 +12,27 @@ import { unitLabelStatusKey, unitLabelSuffix } from "./UnitLabelPanel.js";
 import "./unit-labels.css";
 
 /**
+ * Where the operator finds the shift of another shift's label: in the list of this station's line
+ * (`listed`: «Вернитесь к выбору смены» leads to it), on another line (`other_line`: the office
+ * moved the station after the label), or in no list at all (`unavailable`: no copy of the shift is
+ * left, or the list does not show it any more). Only the office can help in the last two.
+ */
+export type AnotherShiftReach = "listed" | "other_line" | "unavailable";
+
+/**
  * What the window of a unit label stands for: the station's unresolved label of this shift
- * (`job`), another shift's (`another_shift`: no unit is taken here), no duplicate printer
- * assigned (`printer`), or the label's job not read or written (`storage`).
+ * (`job`), another shift's (`another_shift`: no unit is taken here; the label, its shift's
+ * number from the station's copy — `null` when none is left — and where that shift is found),
+ * no duplicate printer assigned (`printer`), or the label's job not read or written (`storage`).
  */
 export type UnitLabelWindow =
   | { kind: "job"; job: UnitLabelEntry }
-  | { kind: "another_shift" }
+  | {
+      kind: "another_shift";
+      job: UnitLabelEntry;
+      number: string | null;
+      reach: AnotherShiftReach;
+    }
   | { kind: "printer" }
   | { kind: "storage" };
 
@@ -63,7 +77,19 @@ export interface UnitLabelReprintReasonProps {
   busy: boolean;
   onConfirm: (reason: ReprintReason) => void;
   onBack: () => void;
+  /** How many scans the window refused while it stood (see `UnitLabelVerificationProps`). */
+  refused?: number;
   clock?: () => number;
+}
+
+/**
+ * A scan the window refused, said where the operator looks (the cloud only drops it): announced,
+ * and again for every next refusal (`count` remounts it). Nothing for none.
+ */
+function RefusedScan({ count }: { count: number }) {
+  const { t } = useTranslation();
+  if (count === 0) return null;
+  return <Alert key={count} tone="error" title={t("floor.unitLabels.refused")} />;
 }
 
 /**
@@ -75,6 +101,7 @@ export function UnitLabelReprintReason({
   busy,
   onConfirm,
   onBack,
+  refused = 0,
   clock = realClock,
 }: UnitLabelReprintReasonProps) {
   const { t } = useTranslation();
@@ -105,6 +132,7 @@ export function UnitLabelReprintReason({
       }
     >
       <div className="unit-label-window__body">
+        <RefusedScan count={refused} />
         <div className="unit-label-reasons" role="group" aria-labelledby="unit-label-reason-hint">
           <p id="unit-label-reason-hint">{t("floor.unitLabels.reasonHint")}</p>
           <div className="unit-label-reasons__choices">
@@ -134,13 +162,19 @@ export function UnitLabelReprintReason({
 export interface UnitLabelVerificationProps {
   view: UnitLabelWindow;
   note: UnitLabelNote | null;
-  /** A decision or a check is being saved: every button waits. */
+  /**
+   * How many scans the window refused in this view (a scan that checks no label: a new unit, one
+   * while a decision runs or while the reasons are open); 0 — none. Said in the window in words.
+   */
+  refused: number;
+  /** A decision or a check is being saved, or the leave waits: every button waits. */
   busy: boolean;
   /**
-   * «Пауза» waits: a decision or a send runs. Not while the leave waits, which
-   * keeps it on the keyboard (a press then does nothing).
+   * A decision or a send runs: «Пауза» waits, and the status line says the result is being
+   * saved («Сохраняем результат…»). Not while the leave waits, which keeps «Пауза» on the
+   * keyboard (a press then does nothing).
    */
-  pauseHeld: boolean;
+  running: boolean;
   /** The office closed the shift: the label is finished, no new unit (no skip, as the cloud's). */
   closed: boolean;
   /** «Пауза»: out of the shift, the label kept for the next entry. */
@@ -153,6 +187,12 @@ export interface UnitLabelVerificationProps {
   onRetry: () => void;
   /** «Настройки принтера»: the workstation; none — no button. */
   onSetup?: () => void;
+  /**
+   * Told whether the reprint's reasons are open: the work screen checks no label meanwhile (the
+   * cloud pauses its verification), and refuses the scan in words. Told `false` when they close,
+   * when the window's view changes under them, and when the window goes.
+   */
+  onReasonOpen?: (open: boolean) => void;
   clock?: () => number;
 }
 
@@ -169,8 +209,9 @@ export interface UnitLabelVerificationProps {
 export function UnitLabelVerification({
   view,
   note,
+  refused,
   busy,
-  pauseHeld,
+  running,
   closed,
   onPause,
   onSkip,
@@ -178,15 +219,27 @@ export function UnitLabelVerification({
   onSendPrepared,
   onRetry,
   onSetup,
+  onReasonOpen,
   clock = realClock,
 }: UnitLabelVerificationProps) {
   const { t } = useTranslation();
-  const [reasonOpen, setReasonOpen] = useState(false);
   const job = view.kind === "job" ? view.job : null;
   const status = job === null ? null : unitLabelStatus(job);
   const awaiting = status === "awaiting_verification";
   const viewKey =
-    job === null ? view.kind : `${job.id}:${job.attemptNo}:${job.attemptState}:${job.verification}`;
+    job !== null
+      ? `${job.id}:${job.attemptNo}:${job.attemptState}:${job.verification}`
+      : view.kind === "another_shift"
+        ? `${view.kind}:${view.job.id}:${view.reach}`
+        : view.kind;
+  // The reasons belong to the view they were opened in: a view that changes under them (another
+  // label, or this one moved on) closes them, so a reason is never given for what is not shown.
+  const [reasonFor, setReasonFor] = useState<string | null>(null);
+  const reasonOpen = job !== null && reasonFor === viewKey;
+  useLayoutEffect(() => {
+    onReasonOpen?.(reasonOpen);
+  }, [reasonOpen, onReasonOpen]);
+  useLayoutEffect(() => () => onReasonOpen?.(false), [onReasonOpen]);
   const press = useGuard(viewKey, busy, clock);
   // The button pressed may be gone with the view it was in: the focus goes back to the window
   // itself, which decides nothing, never to a button a second press would activate.
@@ -201,14 +254,15 @@ export function UnitLabelVerification({
     }
   }, [viewKey]);
 
-  if (reasonOpen && job !== null) {
+  if (reasonOpen) {
     return (
       <UnitLabelReprintReason
         busy={busy}
+        refused={refused}
         clock={clock}
-        onBack={() => setReasonOpen(false)}
+        onBack={() => setReasonFor(null)}
         onConfirm={(reason) => {
-          setReasonOpen(false);
+          setReasonFor(null);
           onReprint(reason);
         }}
       />
@@ -239,7 +293,15 @@ export function UnitLabelVerification({
               : "floor.unitLabels.scanHint";
   // The printed label's scan settles a required check after the send, and an unknown outcome.
   const scanned = awaiting || job?.attemptState === "delivery_unknown";
-  const suffix = job === null ? "" : unitLabelSuffix(job);
+  const labelled = job ?? (view.kind === "another_shift" ? view.job : null);
+  const suffix = labelled === null ? "" : unitLabelSuffix(labelled);
+  // Another shift's label: which shift (its number from the station's copy) and which label.
+  const code =
+    view.kind === "another_shift" && view.number !== null
+      ? t("floor.unitLabels.anotherShiftNumber", { number: view.number, suffix })
+      : suffix === ""
+        ? null
+        : `…${suffix}`;
   const alert =
     view.kind === "printer"
       ? t("floor.unitLabels.failedHint")
@@ -248,7 +310,13 @@ export function UnitLabelVerification({
         : view.kind === "storage" || note === "failed"
           ? t("floor.unitLabels.storageError")
           : view.kind === "another_shift"
-            ? t("floor.unitLabels.anotherShift")
+            ? t(
+                view.reach === "listed"
+                  ? "floor.unitLabels.anotherShift"
+                  : view.reach === "other_line"
+                    ? "floor.unitLabels.anotherShiftLine"
+                    : "floor.unitLabels.anotherShiftGone",
+              )
             : null;
 
   let main: ReactNode;
@@ -271,7 +339,7 @@ export function UnitLabelVerification({
         // One node per action: a view that changes the action never leaves the focus on it.
         key={awaiting ? "label-problem" : "reprint"}
         size="floor"
-        {...press(() => setReasonOpen(true))}
+        {...press(() => setReasonFor(viewKey))}
       >
         {t(awaiting ? "floor.unitLabels.labelProblem" : "floor.unitLabels.reprint")}
       </Button>
@@ -291,7 +359,7 @@ export function UnitLabelVerification({
       title={title}
       backLabel={t("floor.unitLabels.pause")}
       backPlacement="footer"
-      backDisabled={pauseHeld}
+      backDisabled={running}
       onClose={onPause}
       initialFocus="dialog"
       className={`unit-label-window${awaiting ? " unit-label-window--awaiting" : ""}`}
@@ -309,19 +377,27 @@ export function UnitLabelVerification({
     >
       <div className="unit-label-window__body" ref={body}>
         {instruction !== null && <p className="unit-label-window__instruction">{t(instruction)}</p>}
-        {suffix !== "" && <p className="unit-label-window__code">…{suffix}</p>}
+        {code !== null && <p className="unit-label-window__code">{code}</p>}
         {(note === "mismatch" || note === "invalid") && (
           <Alert tone="error" title={t(`floor.unitLabels.${note}`)} />
         )}
         {alert !== null && <Alert tone="error" title={alert} />}
+        <RefusedScan count={refused} />
         {awaiting && !closed && (
           <p className="unit-label-window__skip-hint">{t("floor.unitLabels.skipHint")}</p>
         )}
-        {scanned && (
-          <p className="unit-label-window__waiting" role="status">
-            {t(busy ? "floor.unitLabels.saving" : "floor.unitLabels.waitScan")}
-          </p>
-        )}
+        {/*
+          Always in the window, so that its words are announced (the cloud's status line): the
+          result being saved while a decision or a send runs, and the printed label's scan only
+          where that scan checks it.
+        */}
+        <p className="unit-label-window__waiting" role="status">
+          {running
+            ? t("floor.unitLabels.saving")
+            : scanned && !busy
+              ? t("floor.unitLabels.waitScan")
+              : ""}
+        </p>
       </div>
     </FullScreenDialog>
   );

@@ -515,6 +515,18 @@ describe("what a change of the purposes leaves alone", () => {
     // And a print again of that label goes where it was made for, not to the new box printer.
     expect(printerForAgain(job, settings, null)?.id).toBe("zebra");
   });
+
+  it("says nothing of the pallet and duplicate printers printing nothing yet: both print now", async () => {
+    // The pallet's label prints since plan ПЛ-Ц, the unit's Data Matrix duplicate since plan РЕЖ
+    // (its window sends the operator here): the old «only box labels» hint would be false.
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    await setup({ local });
+    for (const purpose of ["Этикетка короба", "Этикетка паллеты", "Дубль кода"]) {
+      expect(screen.getByLabelText(purpose).getAttribute("aria-describedby")).toBeNull();
+    }
+    expect(screen.queryByText("Станция пока печатает только этикетки коробов.")).toBeNull();
+  });
 });
 
 describe("what the screen says to a reader of it", () => {

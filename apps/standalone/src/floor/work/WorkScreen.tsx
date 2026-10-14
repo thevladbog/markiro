@@ -95,7 +95,7 @@ import { shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings, resolvePrinter } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
-import type { WorkShift } from "../shifts/shift-copies.js";
+import { readShiftCopies, readShiftCopy, type WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
 import {
@@ -123,6 +123,7 @@ import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
 import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
 import {
   UnitLabelVerification,
+  type AnotherShiftReach,
   type UnitLabelNote,
   type UnitLabelWindow,
 } from "../unit-labels/UnitLabelVerification.js";
@@ -621,6 +622,31 @@ function printsUnitLabels(shift: WorkShift): boolean {
   return shift.copy.mode === "validation" && shift.snapshot.validationPrint !== null;
 }
 
+/**
+ * Another shift's label in the way (plan РЕЖ part B): that shift's number from the station's copy
+ * (`null` when none is left), and where the operator finds it — in the list of this line (the
+ * work screen's shift is one of it: a move of the station to another line leaves the screen), on
+ * another line, or nowhere. The last two are a dead end only the office can open.
+ */
+async function anotherShiftOf(
+  live: LiveRef,
+  shiftId: string,
+): Promise<{ number: string | null; reach: AnotherShiftReach }> {
+  const now = live.current;
+  const pairing = pairingOf(now);
+  const lineId = now.shift.copy.lineId;
+  const copy = await readShiftCopy(now.local, pairing, shiftId);
+  const listed = (await readShiftCopies(now.local, pairing, lineId)).some(
+    (listedCopy) => listedCopy.id === shiftId,
+  );
+  const reach: AnotherShiftReach = listed
+    ? "listed"
+    : copy !== null && copy.lineId !== lineId
+      ? "other_line"
+      : "unavailable";
+  return { number: copy?.number ?? null, reach };
+}
+
 /** How many of a shift's labels «История этикеток» lists, newest first. */
 const HISTORY_ROWS = 100;
 
@@ -845,6 +871,14 @@ export function WorkScreen(props: WorkScreenProps) {
   const [unitNote, setUnitNote] = useState<UnitLabelNote | null>(null);
   const [unitBusy, setUnitBusy] = useState(false);
   const unitDeciding = useRef(false);
+  // The scans the window refused in the view it stands in (said in it, in words; a new view —
+  // after any decision or read — says nothing of the old ones), and whether its reprint's
+  // reasons are open, while no label is checked (the cloud pauses its verification).
+  const [unitRefusal, setUnitRefusal] = useState<{ view: UnitView; count: number } | null>(null);
+  const unitReasonOpen = useRef(false);
+  const holdUnitChecks = useCallback((open: boolean) => {
+    unitReasonOpen.current = open;
+  }, []);
   // The shift's pallets (plan ПЛ-Ц): what its copy and snapshot give. A shift that
   // works with pallets and gives none is a stop from the first render, never boxes alone.
   const pallets = validation ? null : shiftPallets(shift);
@@ -1176,8 +1210,10 @@ export function WorkScreen(props: WorkScreenProps) {
       const [newest] = await readShiftUnitLabels(now.local, pairing, shiftId, 1);
       const gate = canAcceptNext(waiting, shiftId);
       let view: UnitView | null = null;
-      if (gate.kind === "another_shift") view = { kind: "another_shift" };
-      else if (gate.kind !== "accept") view = { kind: "job", job: gate.job };
+      if (gate.kind === "another_shift") {
+        const found = await anotherShiftOf(live, gate.job.shiftId);
+        view = { kind: "another_shift", job: gate.job, ...found };
+      } else if (gate.kind !== "accept") view = { kind: "job", job: gate.job };
       else if (
         !live.current.officeClosed &&
         resolvePrinter(await readWorkstationSettings(now.local), "duplicate") === null
@@ -1868,6 +1904,7 @@ export function WorkScreen(props: WorkScreenProps) {
         if (
           view.kind === "job" &&
           !unitDeciding.current &&
+          !unitReasonOpen.current &&
           canAcceptNext(view.job, live.current.shift.copy.id).kind === "verify"
         ) {
           try {
@@ -1879,6 +1916,10 @@ export function WorkScreen(props: WorkScreenProps) {
           return;
         }
         refuse(false);
+        // Said in the window too, where the operator looks, not only under it.
+        if (alive.current) {
+          setUnitRefusal((was) => ({ view, count: was?.view === view ? was.count + 1 : 1 }));
+        }
         return;
       }
       if (stopped !== null) {
@@ -2996,6 +3037,7 @@ export function WorkScreen(props: WorkScreenProps) {
               failure={stop.failure}
               busy={unitBusy || leaving}
               blocked={stop.blocked}
+              closed={officeClosed}
               onReprint={reprintUnit}
               onBack={() => setStop(null)}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
@@ -3138,9 +3180,11 @@ export function WorkScreen(props: WorkScreenProps) {
         <UnitLabelVerification
           view={stop.view}
           note={unitNote}
+          refused={unitRefusal?.view === stop.view ? unitRefusal.count : 0}
           busy={unitBusy || sending || leaving}
-          pauseHeld={unitBusy || sending}
+          running={unitBusy || sending}
           closed={officeClosed}
+          onReasonOpen={holdUnitChecks}
           onPause={pauseUnit}
           onSkip={skipUnit}
           onReprint={(reason) => {

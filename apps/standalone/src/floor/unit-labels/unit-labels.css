@@ -154,7 +154,8 @@
   font: var(--floor-title);
 }
 
-.unit-label-history__empty {
+.unit-label-history__empty,
+.unit-label-history__closed {
   margin: 0;
   color: var(--fg-2);
   font: var(--floor-body);
