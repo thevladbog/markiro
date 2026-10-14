@@ -5,11 +5,13 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use super::app::{
-    box_closed, box_id, close_from_office, fact, instant, issue_block, ok_scan, open_floor,
-    pair_device, receipts, record_id, shift_setup, Admin, Floor,
+    box_closed, box_exception, box_id, close_from_office, fact, instant, issue_block,
+    issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pair_device, pallet_closed,
+    pallet_id, receipts, record_id, shift_setup, Admin, Floor,
 };
 
 pub const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
+pub const PALLET_REQUEST: &str = "5e4d3c2b-1a09-4f8e-9d7c-6b5a4f3e2d1c";
 
 /// «Повреждена упаковка», one of the migration's default reasons.
 pub const REASON: &str = "d15a0000-0000-4000-8000-000000000003";
@@ -117,4 +119,93 @@ pub async fn applied(admin: &Admin, ssccs: &[String]) -> Value {
     let (status, done) = apply(admin, &detail).await;
     assert_eq!(status, StatusCode::OK, "{done}");
     done
+}
+
+/// A pallet shift of one station: box 1 (codes 1 and 2, serial 1500) and
+/// box 2 (code 3, serial 1501) closed on pallet 1 (serial 40), the pallet
+/// closed; `close` closes the shift from the office. The station is the
+/// administrator's own.
+pub async fn pallet_day(admin: &Admin, close: bool) -> Floor {
+    let setup = shift_setup(admin).await;
+    let floor = open_pallet_floor(admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let pallets = issue_pallet_block(&admin.app, &floor.key, PALLET_REQUEST).await;
+    let p1 = pallet_id(1);
+    let closed_on = |n: u32, serial: u64, members: &[u32], opened: u32, closed: u32| {
+        let mut data = box_closed(
+            &box_id(n),
+            &block,
+            serial,
+            members,
+            &instant(opened, 0),
+            &instant(closed, 0),
+        );
+        data["palletId"] = json!(p1);
+        data
+    };
+    let scan = |record: u32, code: u32, n: u32, second: u32| {
+        fact(
+            &record_id(record),
+            "scan",
+            &floor.shift,
+            ok_scan(code, &box_id(n), &instant(second, 0)),
+        )
+    };
+    let records = [
+        scan(1, 1, 1, 10),
+        scan(2, 2, 1, 11),
+        fact(
+            &record_id(3),
+            "box_closed",
+            &floor.shift,
+            closed_on(1, 1500, &[1, 2], 10, 20),
+        ),
+        scan(4, 3, 2, 30),
+        fact(
+            &record_id(5),
+            "box_closed",
+            &floor.shift,
+            closed_on(2, 1501, &[3], 30, 40),
+        ),
+        fact(
+            &record_id(6),
+            "pallet_closed",
+            &floor.shift,
+            pallet_closed(&p1, &pallets, 40, 2, &instant(20, 0), &instant(41, 500)),
+        ),
+    ];
+    let answered = receipts(&admin.app, &floor.key, &records).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    if close {
+        close_from_office(admin, &floor.shift, "Конец смены").await;
+    }
+    floor
+}
+
+/// The station's `disassemble` of box `n` at second `second` as fact
+/// `record`; the receipt.
+pub async fn station_disassembles(
+    admin: &Admin,
+    floor: &Floor,
+    record: u32,
+    n: u32,
+    second: u32,
+) -> Value {
+    let mut data = box_exception("disassemble", &box_id(n), &instant(second, 0));
+    data["reasonCode"] = json!("damaged_package");
+    let answered = receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(record),
+            "box_exception",
+            &floor.shift,
+            data,
+        )],
+    )
+    .await;
+    answered[0].clone()
 }

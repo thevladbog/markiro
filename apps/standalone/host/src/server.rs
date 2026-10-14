@@ -322,6 +322,32 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::disaggregation_reasons::update_reason),
         )
         .route(
+            "/v1/office/disaggregation",
+            get(crate::routes::disaggregation::list_documents)
+                .post(crate::routes::disaggregation::create_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}",
+            get(crate::routes::disaggregation::get_document)
+                .put(crate::routes::disaggregation::update_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/lines",
+            post(crate::routes::disaggregation::add_lines),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/lines/{line_id}",
+            delete(crate::routes::disaggregation::delete_line),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/apply",
+            post(crate::routes::disaggregation::apply_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/cancel",
+            post(crate::routes::disaggregation::cancel_document),
+        )
+        .route(
             "/v1/office/lines",
             get(crate::routes::lines::list_lines).post(crate::routes::lines::create_line),
         )
