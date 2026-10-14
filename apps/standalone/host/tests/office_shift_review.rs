@@ -152,18 +152,21 @@ async fn a_shifts_exceptions_name_their_box_or_pallet_reason_station_and_operato
         items.iter().map(strip_id).collect::<Vec<_>>(),
         vec![
             json!({
+                "source": "station", "documentId": null, "documentNo": null, "officeUserName": null,
                 "subject": "pallet", "kind": "disassemble", "subjectId": pallet_id(1),
                 "sscc": pallet_sscc(40), "serial": null, "reasonCode": "other",
                 "reasonText": "Паллета упала", "deviceId": floor.station, "deviceName": "Станция А",
                 "operatorName": "Анна Кузнецова", "occurredAt": instant(70, 0), "receivedAt": received
             }),
             json!({
+                "source": "station", "documentId": null, "documentNo": null, "officeUserName": null,
                 "subject": "box", "kind": "undo", "subjectId": box_id(3), "sscc": null,
                 "serial": "S000004", "reasonCode": null, "reasonText": null,
                 "deviceId": floor.station, "deviceName": "Станция А",
                 "operatorName": "Анна Кузнецова", "occurredAt": instant(55, 0), "receivedAt": received
             }),
             json!({
+                "source": "station", "documentId": null, "documentNo": null, "officeUserName": null,
                 "subject": "box", "kind": "reprint", "subjectId": box_id(1), "sscc": sscc(1500),
                 "serial": null, "reasonCode": "damaged_label", "reasonText": null,
                 "deviceId": floor.station, "deviceName": "Станция А",
@@ -423,9 +426,29 @@ async fn an_unknown_shift_is_not_found_and_the_refusals_read_their_own_index() {
             .map(|row| row.3.clone())
             .collect::<Vec<_>>()
             .join("\n");
-        for index in ["box_exceptions_shift", "pallet_exceptions_shift"] {
+        // The office's disassemblies (plan ДЗГ-О) are found by the shift's
+        // boxes and pallets, then by the document lines' own indexes.
+        for index in [
+            "box_exceptions_shift",
+            "pallet_exceptions_shift",
+            "boxes_shift",
+            "pallets_shift",
+            "disaggregation_lines_box",
+            "disaggregation_lines_pallet",
+        ] {
             assert!(text.contains(index), "{sql}: {text}");
         }
+        // No step reads a table through: the only scans are the compound's own
+        // result being ordered and the count's constant row.
+        let scans: Vec<&str> = text
+            .lines()
+            .filter(|line| {
+                line.starts_with("SCAN")
+                    && !line.contains("(subquery")
+                    && !line.contains("CONSTANT ROW")
+            })
+            .collect();
+        assert!(scans.is_empty(), "{sql}: {scans:?}\n{text}");
         // An undo's serial is looked up by its code's hash.
         if sql.contains("serial FROM scans") {
             assert!(text.contains("scans_code_hash"), "{text}");

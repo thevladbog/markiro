@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
   renderDisaggregationReportHtml,
   type DisaggregationReportData,
   type DisaggregationReportLine,
-} from "../src/modules/disaggregation/report";
+} from "../src/print-forms/disaggregation-report.js";
 
 /**
  * GS (ASCII 0x1D) — the real KM segment separator byte (see kiosk-orders.e2e.test.ts
@@ -245,5 +246,43 @@ describe("pallet lines in the act", () => {
     );
     expect(html).toContain("01 04600682000013 21 BOX1SER1");
     expect(html).toContain("(00)146007034967000001");
+  });
+});
+
+describe("the act's zone and note (plan ДЗГ-О)", () => {
+  const applied = fixture({
+    createdAt: new Date("2026-10-12T09:12:00.000Z"),
+    appliedAt: new Date("2026-10-12T21:30:00.000Z"),
+  });
+
+  it("prints UTC by default, as the cloud does", () => {
+    const html = renderDisaggregationReportHtml(applied);
+    expect(html).toContain("от 12 октября 2026 г.");
+    expect(html).toContain("12.10.2026 21:30");
+  });
+
+  it("prints the organization's day and time when given its zone", () => {
+    const html = renderDisaggregationReportHtml(applied, "Europe/Moscow");
+    expect(html).toContain("от 13 октября 2026 г.");
+    // h23: a minute past midnight is 00:30, never 24:30.
+    expect(html).toContain("13.10.2026 00:30");
+  });
+
+  it("keeps the cloud's sentence without a note and escapes a given one", () => {
+    expect(renderDisaggregationReportHtml(applied)).toContain(
+      "Изменения агрегации передаются в ГИС МТ автоматически.",
+    );
+    const html = renderDisaggregationReportHtml({ ...applied, operationNote: "<b>вручную</b>" });
+    expect(html).not.toContain("передаются в ГИС МТ автоматически");
+    expect(html).toContain("&lt;b&gt;вручную&lt;/b&gt;");
+  });
+
+  it("says the file is uploaded by hand, never that ГИС МТ is told automatically", () => {
+    const html = renderDisaggregationReportHtml({
+      ...applied,
+      operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+    });
+    expect(html).toContain("загружается в личный кабинет Честного знака вручную");
+    expect(html).not.toContain("автоматически");
   });
 });

@@ -82,6 +82,10 @@ export const officeCodeEventSchema = z.discriminatedUnion("type", [
     reasonCode: z.string().nullable(),
     reasonText: z.string().nullable(),
     operatorName: z.string().nullable(),
+    /** Set when an applied disaggregation document took the box apart (plan ДЗГ-О). */
+    documentId: z.string().nullable(),
+    documentNo: z.string().nullable(),
+    officeUserName: z.string().nullable(),
   }),
   z.object({
     type: z.literal("displaced"),

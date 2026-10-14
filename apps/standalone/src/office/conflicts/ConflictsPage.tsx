@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -15,9 +15,11 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
+import { errorMessageKey } from "../../host/errors.js";
 import type { OfficeConflict, OfficeConflictScan } from "../../host/review.js";
 import { useCan } from "../access.js";
 import { instantFormat, type FormatInstant } from "../codes/CodeCard.js";
+import { PackDraftWithoutLine, startPackDisassembly } from "../codes/pack-disassembly.js";
 import { alertFailure, type AlertFailure } from "../form-errors.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -66,16 +68,34 @@ export function ConflictsPage() {
   const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token));
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const review = useOfficeMutation((api, token, id: string) => api.reviewConflict(token, id));
+  const canDisassemble = useCan("planShifts");
+  const navigate = useNavigate();
+  const disassemble = useOfficeMutation((api, token, sscc: string) =>
+    startPackDisassembly(api, token, sscc),
+  );
+  // «Расформировать короб» refused, or a draft made without its SSCC (plan ДЗГ-О).
+  const [disassembleAlert, setDisassembleAlert] = useState<
+    | { kind: "failed"; reason: string }
+    | { kind: "draft"; id: string; docNo: string; reason: string }
+    | null
+  >(null);
+  const disassembleAlertId = useId();
+  // Set at once, so a second press in the same moment makes no second draft.
+  const disassembling = useRef(false);
   const at = instantFormat(formTimeZone(org.data));
 
   useEffect(() => {
     if (notice !== null) document.getElementById(noticeId)?.focus();
   }, [notice, noticeId]);
+  useEffect(() => {
+    if (disassembleAlert !== null) document.getElementById(disassembleAlertId)?.focus();
+  }, [disassembleAlert, disassembleAlertId]);
 
   const setFilter = (next: { shift?: string; state?: ReviewedFilter; page?: number }) => {
     // A notice or a refusal is about the list it was given on.
     setNotice(null);
     setFailure(null);
+    setDisassembleAlert(null);
     const merged = new URLSearchParams(params);
     if (next.shift !== undefined) merged.set("shift", next.shift);
     if (next.state !== undefined) merged.set("state", next.state);
@@ -90,6 +110,35 @@ export function ConflictsPage() {
       }
     }
     setParams(merged);
+  };
+
+  /** «Расформировать короб»: a draft with the loser's box, then its page (plan ДЗГ-О). */
+  const onDisassemble = (sscc: string) => {
+    if (disassembling.current) return;
+    disassembling.current = true;
+    setFailure(null);
+    setNotice(null);
+    setDisassembleAlert(null);
+    disassemble.mutate(sscc, {
+      onSettled: () => {
+        disassembling.current = false;
+      },
+      onSuccess: (document) => {
+        void queryClient.invalidateQueries({ queryKey: officeKeys.disaggregation });
+        void navigate(`/disaggregation/${document.id}`);
+      },
+      onError: (error) =>
+        setDisassembleAlert(
+          error instanceof PackDraftWithoutLine
+            ? {
+                kind: "draft",
+                id: error.document.id,
+                docNo: error.document.docNo,
+                reason: t(errorMessageKey(error.cause)),
+              }
+            : { kind: "failed", reason: t(errorMessageKey(error)) },
+        ),
+    });
   };
 
   const onReview = (conflict: OfficeConflict) => {
@@ -137,6 +186,14 @@ export function ConflictsPage() {
       render: (row) => (
         <span className="shift-cell">
           <ScanCell scan={row.loser} at={at} />
+          {canDisassemble && row.loser.boxSscc !== null && !row.loser.boxDisassembled && (
+            <DisassembleAction
+              sscc={row.loser.boxSscc}
+              shiftClosed={row.loser.shiftClosed}
+              busy={disassemble.isPending}
+              onDisassemble={onDisassemble}
+            />
+          )}
           <Link
             to={loserBoxLink(row.loser)}
             aria-label={
@@ -239,6 +296,23 @@ export function ConflictsPage() {
         </Alert>
       )}
       <WriteFailureAlert failure={failure} />
+      {disassembleAlert !== null && (
+        <Alert tone="error" id={disassembleAlertId} tabIndex={-1}>
+          {disassembleAlert.kind === "failed" ? (
+            t("office.conflicts.disassembleFailed", { reason: disassembleAlert.reason })
+          ) : (
+            <>
+              {t("office.conflicts.disassembleLineFailed", {
+                docNo: disassembleAlert.docNo,
+                reason: disassembleAlert.reason,
+              })}{" "}
+              <Link to={`/disaggregation/${disassembleAlert.id}`}>
+                {t("office.conflicts.openDocument", { docNo: disassembleAlert.docNo })}
+              </Link>
+            </>
+          )}
+        </Alert>
+      )}
       <FilterBar
         label={t("office.conflicts.filters.label")}
         resultSummary={
@@ -303,5 +377,39 @@ function ScanCell({ scan, at }: { scan: OfficeConflictScan; at: FormatInstant })
       <span className="shift-cell__quiet">{at(scan.scannedAt)}</span>
       <span className="shift-cell__quiet">{box}</span>
     </span>
+  );
+}
+
+/**
+ * «Расформировать короб» of the loser's closed box (plan ДЗГ-О): it opens a
+ * draft disaggregation document with this SSCC. Only a closed shift's box is
+ * taken apart (owner decision ПР-1), so an open shift says why there is no
+ * button. The conditions are a hint: the host checks the line itself.
+ */
+function DisassembleAction({
+  sscc,
+  shiftClosed,
+  busy,
+  onDisassemble,
+}: {
+  sscc: string;
+  shiftClosed: boolean;
+  busy: boolean;
+  onDisassemble: (sscc: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!shiftClosed) {
+    return <span className="shift-cell__quiet">{t("office.conflicts.disassembleAfterClose")}</span>;
+  }
+  return (
+    <Button
+      variant="secondary"
+      size="compact"
+      disabled={busy}
+      aria-label={t("office.conflicts.disassembleNamed", { sscc: ssccText(sscc) })}
+      onClick={() => onDisassemble(sscc)}
+    >
+      {t("office.conflicts.disassemble")}
+    </Button>
   );
 }

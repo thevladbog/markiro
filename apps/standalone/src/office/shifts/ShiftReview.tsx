@@ -53,6 +53,8 @@ function recordKindText(kind: string | null, t: TFunction): string {
 
 /** An exception's reason in the station's words; `other` with the words the operator typed. */
 function reasonText(item: OfficeShiftException, t: TFunction): string {
+  // An office disassembly carries its document's reason as plain words.
+  if (item.source === "office") return item.reasonText ?? t("office.common.none");
   if (item.reasonCode === null) return t("office.common.none");
   const list = item.kind === "reprint" ? "reprint" : "disassemble";
   const reason = t(`floor.exceptions.reasons.${list}.${item.reasonCode}`, {
@@ -165,6 +167,13 @@ export function ShiftExceptions({ shift, at }: ReviewSectionProps) {
       render: (item) => (
         <span className="shift-cell">
           <span>{t(`office.shiftCard.review.exceptions.kinds.${item.kind}`)}</span>
+          {item.documentId !== null && item.documentNo !== null && (
+            <span className="shift-cell__quiet">
+              <Link to={`/disaggregation/${item.documentId}`}>
+                {t("office.shiftCard.review.exceptions.document", { docNo: item.documentNo })}
+              </Link>
+            </span>
+          )}
           {item.serial !== null && (
             <span className="shift-cell__quiet">
               {t("office.shiftCard.review.exceptions.code", { serial: item.serial })}
@@ -197,12 +206,15 @@ export function ShiftExceptions({ shift, at }: ReviewSectionProps) {
     {
       key: "device",
       title: t("office.shiftCard.review.exceptions.device"),
-      render: (item) => item.deviceName,
+      render: (item) =>
+        item.source === "office"
+          ? t("office.shiftCard.review.exceptions.office")
+          : (item.deviceName ?? t("office.common.none")),
     },
     {
       key: "operator",
       title: t("office.shiftCard.review.exceptions.operator"),
-      render: (item) => item.operatorName ?? t("office.common.none"),
+      render: (item) => item.operatorName ?? item.officeUserName ?? t("office.common.none"),
     },
   ];
   return (

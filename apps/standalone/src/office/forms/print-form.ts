@@ -76,6 +76,27 @@ export function printInFrame(
 }
 
 /**
+ * Lets the window paint what the press has said (a frame and a turn after it)
+ * before the heavy work blocks it. A window that draws no frames (hidden,
+ * minimised) waits no longer than 100 ms.
+ */
+export function paint(): Promise<void> {
+  return new Promise((resolve) => {
+    let waiting = true;
+    const finish = () => {
+      if (waiting) {
+        waiting = false;
+        resolve();
+      }
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => setTimeout(finish, 0));
+    }
+    setTimeout(finish, 100);
+  });
+}
+
+/**
  * Where a form's file goes for «Открыть в браузере», as the shell's segments
  * under `Документы\Markiro`: `Формы\<номер смены>\<дата_время>_<форма>`, the
  * number and the moment written as an export's folder writes them (plan ЧЗ),
@@ -88,6 +109,23 @@ export function formFolder(
   timeZone: string,
 ): string[] {
   return ["Формы", ...exportFolder(shiftNumber, kind, formedAt, timeZone).slice(1)];
+}
+
+/**
+ * Where «Акт дезагрегации» goes for «Открыть в браузере» (plan ДЗГ-О):
+ * `Формы\Дезагрегация\<номер>\<дата_время>_act_<вариант>`, four segments.
+ */
+export function actFolder(
+  docNo: string,
+  variant: "boxes" | "full",
+  formedAt: string,
+  timeZone: string,
+): string[] {
+  return [
+    "Формы",
+    "Дезагрегация",
+    ...exportFolder(docNo, `act_${variant}`, formedAt, timeZone).slice(1),
+  ];
 }
 
 /** The longest stem of a file name, in UTF-16 units: the shell bounds the whole path. */

@@ -46,11 +46,13 @@ const COLUMNS: &str = "SELECT c.id, c.kind, c.code_hash, l.gtin14, l.serial, c.d
      l.shift_id AS l_shift_id, ls.number_month_key AS l_month_key, ls.number_seq AS l_seq, \
      ls.created_from AS l_origin, l.device_id AS l_device_id, ld.name AS l_device_name, \
      lo.name AS l_operator_name, l.scanned_at AS l_scanned_at, l.box_id AS l_box_id, \
-     lb.sscc AS l_box_sscc, \
+     lb.sscc AS l_box_sscc, ls.status = 'closed' AS l_shift_closed, \
+     lb.disassembled_at IS NOT NULL AS l_box_disassembled, \
      w.shift_id AS w_shift_id, ws.number_month_key AS w_month_key, ws.number_seq AS w_seq, \
      ws.created_from AS w_origin, w.device_id AS w_device_id, wd.name AS w_device_name, \
      wo.name AS w_operator_name, w.scanned_at AS w_scanned_at, w.box_id AS w_box_id, \
-     wb.sscc AS w_box_sscc ";
+     wb.sscc AS w_box_sscc, ws.status = 'closed' AS w_shift_closed, \
+     wb.disassembled_at IS NOT NULL AS w_box_disassembled ";
 
 const FILTER: &str = " WHERE (?1 IS NULL OR l.shift_id = ?1) \
      AND (?2 IS NULL OR (c.reviewed_at IS NOT NULL) = ?2)";
@@ -83,6 +85,8 @@ struct ConflictRow {
     l_scanned_at: String,
     l_box_id: Option<String>,
     l_box_sscc: Option<String>,
+    l_shift_closed: bool,
+    l_box_disassembled: bool,
     w_shift_id: String,
     w_month_key: String,
     w_seq: i64,
@@ -93,6 +97,8 @@ struct ConflictRow {
     w_scanned_at: String,
     w_box_id: Option<String>,
     w_box_sscc: Option<String>,
+    w_shift_closed: bool,
+    w_box_disassembled: bool,
 }
 
 fn number(month_key: &str, seq: i64, origin: &str) -> Result<String, ApiError> {
@@ -115,6 +121,8 @@ fn conflict(row: ConflictRow) -> Result<OfficeConflict, ApiError> {
             scanned_at: row.l_scanned_at,
             box_id: row.l_box_id,
             box_sscc: row.l_box_sscc,
+            shift_closed: row.l_shift_closed,
+            box_disassembled: row.l_box_disassembled,
         },
         winner: OfficeConflictScan {
             shift_number: number(&row.w_month_key, row.w_seq, &row.w_origin)?,
@@ -125,6 +133,8 @@ fn conflict(row: ConflictRow) -> Result<OfficeConflict, ApiError> {
             scanned_at: row.w_scanned_at,
             box_id: row.w_box_id,
             box_sscc: row.w_box_sscc,
+            shift_closed: row.w_shift_closed,
+            box_disassembled: row.w_box_disassembled,
         },
         id: row.id,
         code_hash: row.code_hash,

@@ -17,6 +17,8 @@ const SCAN: OfficeConflictScan = {
   scannedAt: "2026-10-08T06:01:40.000Z",
   boxId: "box-1",
   boxSscc: "046006820000015001",
+  shiftClosed: true,
+  boxDisassembled: false,
 };
 
 describe("the conflicts' filters and links (plan КНФ)", () => {

@@ -141,6 +141,13 @@ and, with the target `disaggregation_document`: `disaggregation.create`
 the one refused office write that DOES write a row (and takes a revision), because the
 fresh line statuses are committed with it (the cloud's behaviour); a stale draft pressed
 again writes one more such row.
+`disaggregation.export` (plan ДЗГ-О) is the third row that records no change, after
+`shift.export` and `app.update.start`: the office saved the document's ЧЗ file
+«Расформирование упаковки» and then wrote it (`POST /v1/office/disaggregation/{id}/exports`),
+administrators and technologists (`require_disaggregation_in`), no revision, the document as
+its target, details `{ formatId, formatVersion, packingCount }`. The host checks that the
+document is applied (`conflict` `document_not_applied`) and that `packingCount` is the number
+of its distinct SSCCs (a refusal writes no row); it never sees the file.
 Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
@@ -4894,6 +4901,10 @@ mapping; the bytes are the acceptance rule.
   product that has one (`officeKeys.productPhoto`), a press reads it again, and
   a photo that does not read leaves the form without it — a photo never stops
   the form.
+- `render-form.ts` draws a fifth, shift-less form for plan ДЗГ-О: the kind `act`,
+  «Акт дезагрегации» of a disaggregation document (see «Disaggregation in the office»).
+  `paint()` moved with it from `PrintFormDialog.tsx` to `print-form.ts` and the act's dialog
+  (`DisaggregationActDialog`) is a smaller copy of the dialog's flow without a shift.
 
 ## Box and pallet cards
 
@@ -5004,6 +5015,72 @@ Plan КНФ (parity spec §5.2, pilot spec §7).
   dialog warns of the shift's unreviewed conflicts (ПР-12: a warning only).
 - The station's part is in «Outbox recovery» and «Local database».
 
+## Disaggregation in the office
+
+Plan ДЗГ-О (parity spec §5.1, owner decisions ПР-1…ПР-3, ПР-2: the ЧЗ file) gives the office
+the pages of plan ДЗГ's documents, «Акт дезагрегации» and the file «Расформирование
+упаковки». No migration, no `PROTOCOL_VERSION` bump: the new routes are office-only.
+
+- **Pages** (`src/office/disaggregation`, «Производство» after «Конфликты»): the list
+  `/disaggregation` (filters status, reason, number after 300 ms, period; the host filters,
+  the office turns «С»/«По» into host instants in the organization's zone — `to` is the last
+  second of its day, the host compares `<=`; pages of 50), the document `/disaggregation/:id`
+  (header form on a draft, paste or file import, lines table, apply and cancel behind a
+  `ConfirmDialog`), the reasons `/disaggregation/reasons` (a static route above `:id`; a reason
+  is archived, never deleted). Every write is `useCan("planShifts")` — the roles of the host's
+  `auth::disaggregates` (administrator and technologist); reads are open to every office role.
+  The page never applies a document that has a line that is not `ok` or no reason, and it
+  re-reads the document after every write; the host re-checks everything under its lock.
+- **Input.** Pasted text splits on `[\s;,]+`, a `.txt`/`.csv` file on `[\r\n;,]+` (trimmed,
+  empties dropped, duplicates kept — they become `duplicate` lines), at most 10 000 tokens
+  and 1 MiB. The BOM Excel writes is dropped (`sscc-input.ts`); the cloud does not, and its
+  first token then becomes `not_found` — deliberate difference. Each token goes to the host as
+  `{ input, sscc: parseScannedSscc(input) }` (the host only checks the shape) in parts of 500
+  (`DISAGGREGATION_MAX_LINES_PER_REQUEST`), in order, stopping at the first part that fails;
+  the page says how many went in (`importPartial`) and reads the document, so a half-imported
+  file leaves draft lines that can be deleted.
+- **Act.** «Акт дезагрегации» is `@markiro/domain`'s `renderDisaggregationReportHtml`, moved
+  from `apps/api/src/modules/disaggregation/report.ts` with `git mv` after a characterisation
+  lock (`packages/domain/test/fixtures/print-forms/disaggregation-act-*.html`, written by the
+  cloud's renderer BEFORE the move). Two additive parameters with defaults that keep the cloud's
+  bytes: `timeZone` (UTC) and `operationNote` (the cloud's «передаются в ГИС МТ
+  автоматически»). The office passes the organization's zone and
+  `DISAGGREGATION_MANUAL_UPLOAD_NOTE` (the standalone sends nothing to ГИС МТ). Chain of
+  evidence: the cloud's snapshots → the fixtures `disaggregation-report-rows-*.json` →
+  `test/disaggregation-act.test.ts`. `GET /v1/office/disaggregation/{id}/report-data?variant=
+boxes|full` (every office role) reads in one snapshot (rolled-back transaction, hook
+  `after_query`): the lines with an SSCC in order, the product's name now, the codes of a box
+  by the rule of «Состав короба» (read once per SHIFT of the document through `scans_shift`,
+  never per box) and a pallet's boxes not taken apart; the short variant reads no codes.
+  `render-form.ts` draws it as the form kind `act` (never refused: the cloud prints an act of
+  any status); `paint()` now lives in `print-form.ts`; the files go to
+  `Формы\Дезагрегация\<номер>\<дата_время>_act_<вариант>` (`actFolder`).
+- **ЧЗ file.** `renderGismtDisaggregationXml` (`packages/domain/src/gismt-disaggregation.ts`)
+  is the inventory's generator, now shared (its golden `disaggregation.golden.xml` is
+  unchanged). The office forms it for an APPLIED document from every SSCC, boxes and pallets;
+  an empty INN is refused (`ORG_INN_MISSING`), the INN's form is the generator's (9, 10 or 12
+  digits — softer than the shift aggregation's 10; the owner accepted it); saves to
+  `Выгрузки\Дезагрегация\<номер>\<дата_время>_disaggregation_xml_gismt\disaggregation-<номер>.xml`
+  and only then records it. A record the host refuses leaves the saved file and offers
+  «Записать снова» (same record, no second save). The file is uploaded to the Честный знак
+  cabinet by hand.
+- **The stitch with plan КНФ.** An applied document's box or pallet is now listed where a
+  station's exception is: the shift's «Исключения» (`OfficeShiftException` got `source`
+  `station|office`, nullable `deviceId`/`deviceName`, and `documentId`, `documentNo`,
+  `officeUserName`; the document's reason is `reasonText`) and the code card (`removed` events
+  carry `documentId`, `documentNo`, `officeUserName`; exception `disassemble`). The office
+  arms of `EXCEPTIONS_SQL` start from the shift's boxes/pallets with `CROSS JOIN`
+  (`boxes_shift`/`pallets_shift`, then `disaggregation_lines_box`/`_pallet`): never from every
+  applied document; `host/tests/office_shift_review.rs` forbids a table scan in the plan.
+- **From the conflicts page.** `OfficeConflictScan` got `shiftClosed` and `boxDisassembled`;
+  the loser's closed box of a closed shift has «Расформировать короб», which makes a draft
+  with its SSCC through plan КРТ's helper `src/office/codes/pack-disassembly.ts`
+  (`startPackDisassembly`, the same as the cards' «Расформировать») and opens it. The conditions are a hint: the host checks.
+- **Not checked.** Everything here ran under jsdom, fake hosts and `TestApp`: never the
+  print dialog of WebView2, an A4 printer, the DataMatrix of the full act read by a scanner,
+  a 200-box full act's time, the acceptance of the XML by the Честный знак cabinet (for a box
+  and for a pallet SSCC, and a 12-digit INN), a CSV from Excel on Windows.
+
 ## Disaggregation documents
 
 Plan ДЗГ (parity spec §5.1, owner decisions ПР-1 and ПР-3; the cloud's
@@ -5074,11 +5151,11 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
   ORDER BY at
   ```
 
-  The same for a pallet through `pallet_exceptions` and `l.pallet_id`. Today the shift
-  review's «Исключения» (plan КНФ) and the code card do NOT list the office's
-  disassembly: its wire names a device and an operator; ДЗГ-О (or КРТ) adds a source and a
-  document number there. The shift card's «Данные после закрытия» chip and its warning
-  also appear after an office disassembly (the shift is marked late); ДЗГ-О may reword them.
+  The same for a pallet through `pallet_exceptions` and `l.pallet_id`. Plan ДЗГ-О did the
+  join for the two readers that needed it: the shift review's «Исключения» and the code card
+  (see «Disaggregation in the office»). The shift card's «Данные после закрытия» chip and its
+  warning also appear after an office disassembly (the shift is marked late — owner decision,
+  kept in plan ДЗГ-О).
 
 - **Station.** `code_releases` of the feed (see «Change feed» and «Reference sync»): the
   station deletes its `floor_codes` of the box, so a code freed by a document is accepted
@@ -5090,8 +5167,11 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
   `box_state`, visible in the queue. Rolling out: `ENTITY_SET` changes, so a station that
   starts on the new build syncs from zero before its reference copies are ready (nobody
   signs in until then): upgrade stations while the host is reachable. A restore's hold
-  (`site.facts_held_since`) keeps device facts out but not an office apply: during it an
-  apply works on a copy that lacks later facts, so do not apply while the hold lasts.
+  (`site.facts_held_since`) keeps device facts out, and since plan ДЗГ-О an apply too: read
+  under the write lock, right after the role check, an apply during the hold answers `409`
+  `conflict` with `details.constraint = "restore_hold"` (and `since`) and takes nothing apart —
+  it would work on a copy that lacks the stations' later facts. Drafts can still be edited,
+  read and cancelled; once an administrator resumes the facts the same draft applies.
 - **Not done.** A document of 10 000 boxes holds the write lock for as long as the apply
   takes; stations' fact batches wait up to the 5 s `busy_timeout` and then retry from their
   queue. Measure it on a real volume (the plan's owner check 5).
@@ -6014,3 +6094,21 @@ either; a file log is stage 5.
   (the apply's time under the write lock, stations' facts meanwhile, the stations' sync after),
   and a restore after an apply (the document is gone, the next number is above the last printed
   one, applying it again by its act leaves the stations whole).
+- Plan ДЗГ-О (disaggregation in the office, the act, the ЧЗ file): by hand on Windows 10/11 —
+  (1) the act, both variants, «Печать» and «Открыть в браузере» for a document of two boxes and
+  a pallet: the number, the date and time of the apply in local time, the status, the reason,
+  the comment, the author and the one who applied it, and at the bottom the text about the
+  manual upload; (2) the full act's DataMatrix read by a station or a ТСД equals the code on
+  the bottle (with the GS), the Code128 SSCC reads; (3) a document of 200 boxes of 20 codes in
+  the full variant: page numbers, no lone box row at a page bottom, the window not hanging
+  for more than a few seconds (write the time down); (4) upload the XML of an applied
+  document to the Честный знак cabinet under the organization's INN: accepted, the boxes (and
+  the pallet) disassembled there — and what the cabinet answers for an SSCC whose aggregation
+  was never filed; a 12-digit INN of an individual entrepreneur; (5) a `.csv` from Excel (UTF-8
+  with BOM, `;`) and a `.txt` from 1С: every SSCC added, the first not `not_found`; a file of
+  2 000 SSCCs goes in parts in a reasonable time; (6) keyboard only through the list, the
+  document, the reasons and both dialogs (Tab, Enter, Esc), the focus visible and, after an
+  apply, on the message; (7) a technologist creates, applies, prints, forms the XML and edits
+  reasons; (8) «Расформировать короб» on «Конфликты» for a closed box of a closed shift;
+  (9) an apply during a restore's hold is refused with the hold's message, and works after
+  «Возобновить».

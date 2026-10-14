@@ -1,5 +1,7 @@
 import {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
   renderBoxReportHtml,
+  renderDisaggregationReportHtml,
   renderPalletPlacardHtml,
   renderPalletReportHtml,
   renderShiftPlacardsHtml,
@@ -7,8 +9,10 @@ import {
   type PlacardFormat,
 } from "@markiro/domain";
 
+import type { DisaggregationReportRows } from "../../host/disaggregation.js";
 import type { BoxReportRows, OrgProfile, PalletReportRows } from "../../host/protocol.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { actData } from "../disaggregation/act-data.js";
 import {
   boxReportData,
   palletPlacardData,
@@ -19,7 +23,7 @@ import {
 } from "./form-data.js";
 
 /** The printed forms of a shift (pilot spec §5.5), as the cloud's routes serve them. */
-export type FormKind = "box" | "pallet" | "placard" | "placards" | "task";
+export type FormKind = "box" | "pallet" | "placard" | "placards" | "task" | "act";
 
 /** A form to draw and the host's rows (or the office's records) it is drawn from. */
 export type FormRequest =
@@ -27,7 +31,9 @@ export type FormRequest =
   | { kind: "pallet"; rows: PalletReportRows; palletId: string; timeZone: string }
   | { kind: "placard"; rows: PalletReportRows; palletId: string; format: PlacardFormat }
   | { kind: "placards"; rows: PalletReportRows; format: PlacardFormat }
-  | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date };
+  | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date }
+  // «Акт дезагрегации» of a disaggregation document (plan ДЗГ-О), of any status.
+  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string };
 
 /** A drawn form: its HTML, exactly the cloud's for the same input, and its file's name. */
 export interface RenderedForm {
@@ -118,6 +124,21 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
         kind: "task",
         draw: () => renderShiftTaskFormHtml(data),
         fileName: "Бланк смены.html",
+      };
+    }
+    case "act": {
+      // The cloud prints an act of any status, so there is no refusal. The
+      // note replaces the cloud's «передаются в ГИС МТ автоматически»: the
+      // standalone sends nothing, a person uploads the file.
+      const data = actData(request.rows);
+      return {
+        kind: "act",
+        draw: () =>
+          renderDisaggregationReportHtml(
+            { ...data, operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE },
+            request.timeZone,
+          ),
+        fileName: `Акт дезагрегации ${request.rows.docNo}.html`,
       };
     }
   }

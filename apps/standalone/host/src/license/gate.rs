@@ -156,6 +156,8 @@ pub const NEVER: &[(&str, &str)] = &[
     ("DELETE", "/v1/office/disaggregation/{id}/lines/{line_id}"),
     ("POST", "/v1/office/disaggregation/{id}/apply"),
     ("POST", "/v1/office/disaggregation/{id}/cancel"),
+    ("GET", "/v1/office/disaggregation/{id}/report-data"),
+    ("POST", "/v1/office/disaggregation/{id}/exports"),
     ("GET", "/v1/office/disaggregation-reasons"),
     ("POST", "/v1/office/disaggregation-reasons"),
     ("PUT", "/v1/office/disaggregation-reasons/{id}"),

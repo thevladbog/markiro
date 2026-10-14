@@ -868,6 +868,22 @@ async fn apply(
 ) -> Result<DisaggregationDetail, ApiError> {
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
+    // A restore holds the stations' facts (`site.facts_held_since`) until an
+    // administrator resumes them: the host is a copy that lacks everything
+    // after it, so an apply would take boxes apart on stale data and the
+    // facts that follow would meet the result. Read under the lock, with the
+    // role: the hold cannot start between this check and the writes.
+    let held: Option<String> = sqlx::query_scalar("SELECT facts_held_since FROM site WHERE id = 1")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if let Some(since) = held {
+        return Err(ApiError::conflict(
+            constraints::RESTORE_HOLD,
+            "the host was restored from a copy: documents wait until the office resumes the facts",
+        )
+        .with_details(json!({ "constraint": constraints::RESTORE_HOLD, "since": since })));
+    }
     let now = state.now();
     let at = format_timestamp(now);
     let doc = draft(&mut tx, &id).await?;
