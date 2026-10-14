@@ -151,4 +151,42 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
+
+  it("offers «Проверить сканер» with a test DataMatrix and judges a scan against it, by its channel", async () => {
+    const shell = fakeHardware();
+    let listener: ((raw: string, channel: "keyboard" | "com" | "unknown") => void) | null = null;
+    const source: ScanSource = {
+      start: () => () => undefined,
+      startTagged(next) {
+        listener = next;
+        return () => undefined;
+      },
+      clearPendingInput: () => undefined,
+      setManualTextEntryActive: () => undefined,
+    };
+    render(
+      <ThemeProvider>
+        <WorkstationSetup
+          scope="scanners"
+          local={openLocalDb().executor}
+          hardware={shell.hardware}
+          printing={manualRuntime(shell.hardware).runtime}
+          source={source}
+          render={fakeRender}
+          onSaved={vi.fn()}
+          onBack={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+    await screen.findByRole("heading", { name: "Проверить сканер" });
+    const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
+    act(() => listener?.(code.replaceAll("\u001d", ""), "com"));
+    expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("problem");
+    expect(screen.getByTestId("self-test-reason").textContent).toContain("Разделители групп");
+    act(() => listener?.(code, "keyboard"));
+    expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
+    expect(screen.getByText("сканер как клавиатура")).toBeTruthy();
+    // The pairing screen's own check still reads the scan, without its text.
+    expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
+  });
 });

@@ -326,3 +326,44 @@ describe("merging scan sources", () => {
     }).not.toThrow();
   });
 });
+
+describe("the channel of a scan (the scanner self-test explains by channel)", () => {
+  it("tags a wedge scan «keyboard» and a COM frame «com», through a merged source too", async () => {
+    const target = new EventTarget();
+    const events = comEvents();
+    const merged = mergeScanSources(
+      createKeyboardWedgeSource(target as unknown as Window),
+      createComScanSource(events.subscribe),
+    );
+    const scans: [string, string][] = [];
+    merged.startTagged?.((raw, channel) => scans.push([raw, channel]));
+    await events.answer();
+    for (const key of ["4", "2"]) {
+      target.dispatchEvent(Object.assign(new Event("keydown"), { key }));
+    }
+    target.dispatchEvent(
+      Object.assign(new Event("keydown", { cancelable: true }), { key: "Enter" }),
+    );
+    events.emit("]d2010460068200001321MRK-1");
+    expect(scans).toEqual([
+      ["42", "keyboard"],
+      ["]d2010460068200001321MRK-1", "com"],
+    ]);
+  });
+
+  it("calls the channel «unknown» for a source that cannot tell", () => {
+    let listener: ScanListener | null = null;
+    const plain = {
+      start: (next: ScanListener) => {
+        listener = next;
+        return () => undefined;
+      },
+      clearPendingInput: () => undefined,
+      setManualTextEntryActive: () => undefined,
+    };
+    const scans: [string, string][] = [];
+    mergeScanSources(plain).startTagged?.((raw, channel) => scans.push([raw, channel]));
+    (listener as ScanListener | null)?.("x");
+    expect(scans).toEqual([["x", "unknown"]]);
+  });
+});

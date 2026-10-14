@@ -1721,3 +1721,32 @@ describe("a new printer's name (owner feedback, beta 3)", () => {
     expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Принтер у весов");
   });
 });
+
+describe("«Проверить сканер» on the scanner tab", () => {
+  it("is under «Сканер» and judges its scans there only", async () => {
+    const { scanner } = await setup({ tab: "Сканер" });
+    expect(screen.getByRole("heading", { name: "Проверить сканер" })).toBeTruthy();
+    const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
+    await scanner.read(code);
+    expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
+    tab("Принтеры");
+    await scanner.read("not-for-the-self-test");
+    tab("Сканер");
+    expect(screen.getByTestId("self-test-history").children).toHaveLength(1);
+  });
+
+  it("prints the test DataMatrix on a label printer through the label model (GS1 framed), marked TEST", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const { shell } = await setup({ local, render: realRender, tab: "Сканер" });
+    await act(async () => {
+      click("Печать");
+    });
+    await screen.findByText("Тестовый код отправлен на печать.");
+    const text = shell.sends[0]?.text ?? "";
+    // The printer's own DataMatrix with FNC1 first and real separators (`_1D`) between the AIs.
+    expect(text).toMatch(/\^BXN[^\n]*\^FD_1010299999999999\d21TEST[0-9A-Z]+_1D91TEST_1D92TEST/);
+    expect(text).toContain("^FDTEST^FS");
+    expect(text).not.toContain(sampleLabelData()["km.code"]);
+  });
+});
