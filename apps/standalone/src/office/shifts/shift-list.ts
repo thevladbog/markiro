@@ -156,3 +156,77 @@ export function periodState(from: string, to: string): PeriodState {
   if (days + 1 > MAX_PERIOD_DAYS) return { kind: "too_long" };
   return { kind: "ready", from, to };
 }
+
+/** The columns of the list the office sorts by; the others (mode, marks, actions) have no order worth keeping. */
+export type ShiftSortKey =
+  "number" | "productionDate" | "line" | "product" | "plannedQty" | "status" | "output";
+export type ShiftSortDir = "asc" | "desc";
+
+const STATUS_ORDER: Record<ShiftStatus, number> = { planned: 0, active: 1, closed: 2 };
+
+/** What a shift output (boxes aside): a validation shift's accepted codes, else the codes in closed boxes. */
+export function shiftUnits(shift: Pick<OfficeShift, "mode" | "totals">): number {
+  return shift.mode === "validation" ? shift.totals.acceptedUnits : shift.totals.unitsInClosedBoxes;
+}
+
+/**
+ * The shifts in the order of a column: a copy, stable (equal keys keep the host's order).
+ * `names` gives the line's and the product's own names; numbers compare as numbers
+ * («OCT26-010» after «OCT26-004»), a missing plan sorts last in both directions.
+ */
+export function sortShifts(
+  shifts: readonly OfficeShift[],
+  key: ShiftSortKey,
+  dir: ShiftSortDir,
+  names: { line: (shift: OfficeShift) => string; product: (shift: OfficeShift) => string },
+): OfficeShift[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const text = (a: string, b: string) => a.localeCompare(b, "ru", { numeric: true });
+  const number = (a: number, b: number) => a - b;
+  const compare = (a: OfficeShift, b: OfficeShift): number => {
+    switch (key) {
+      case "number":
+        return sign * text(a.number, b.number);
+      case "productionDate":
+        return sign * text(a.productionDate, b.productionDate);
+      case "line":
+        return sign * text(names.line(a), names.line(b));
+      case "product":
+        return sign * text(names.product(a), names.product(b));
+      case "status":
+        return sign * number(STATUS_ORDER[a.status], STATUS_ORDER[b.status]);
+      case "output":
+        return sign * number(shiftUnits(a), shiftUnits(b));
+      case "plannedQty": {
+        // A shift without a plan goes last whichever way the column runs.
+        if (a.plannedQty === null || b.plannedQty === null) {
+          return a.plannedQty === b.plannedQty ? 0 : a.plannedQty === null ? 1 : -1;
+        }
+        return sign * number(a.plannedQty, b.plannedQty);
+      }
+    }
+  };
+  return shifts
+    .map((shift, index) => ({ shift, index }))
+    .sort((a, b) => compare(a.shift, b.shift) || a.index - b.index)
+    .map(({ shift }) => shift);
+}
+
+/** The totals row of the list: what the shifts it keeps put in closed boxes and on closed pallets. */
+export interface ShiftListTotals {
+  shifts: number;
+  units: number;
+  boxes: number;
+  pallets: number;
+}
+
+export function totalShifts(shifts: readonly OfficeShift[]): ShiftListTotals {
+  const sum: ShiftListTotals = { shifts: shifts.length, units: 0, boxes: 0, pallets: 0 };
+  for (const shift of shifts) {
+    if (shift.status === "planned") continue;
+    sum.units += shiftUnits(shift);
+    sum.boxes += shift.totals.closedBoxes;
+    sum.pallets += shift.totals.closedPallets;
+  }
+  return sum;
+}

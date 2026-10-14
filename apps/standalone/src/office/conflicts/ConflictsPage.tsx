@@ -26,7 +26,7 @@ import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.j
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
-import { ssccText } from "../shifts/shift-card.js";
+import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
 import {
   conflictKindKey,
   conflictQuery,
@@ -362,7 +362,7 @@ function ScanCell({ scan, at }: { scan: OfficeConflictScan; at: FormatInstant })
         : t("office.conflicts.scan.box", { sscc: ssccText(scan.boxSscc) });
   return (
     <span className="shift-cell">
-      <Link to={`/shifts/${scan.shiftId}`}>
+      <Link to={shiftCardPath(scan.shiftId)}>
         {t("office.conflicts.scan.shift", { number: scan.shiftNumber })}
       </Link>
       <span>{scan.deviceName}</span>

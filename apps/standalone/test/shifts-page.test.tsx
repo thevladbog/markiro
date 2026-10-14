@@ -281,6 +281,35 @@ describe("office shifts: the list", () => {
     expect(session.api.listShifts).toHaveBeenCalledTimes(2);
   });
 
+  it("sorts by a key column, by a click or the keyboard, and again the other way", async () => {
+    await openShifts(shiftsSession());
+    const numbers = () =>
+      shiftRows().map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    const header = (name: string) => screen.getByRole("columnheader", { name });
+    expect(header("Номер").getAttribute("aria-sort")).toBe("none");
+    fireEvent.click(header("Номер"));
+    expect(numbers()).toEqual(["OCT26-001/S", "OCT26-004", "OCT26-005"]);
+    expect(header("Номер").getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(header("Номер"));
+    expect(numbers()).toEqual(["OCT26-005", "OCT26-004", "OCT26-001/S"]);
+    expect(header("Номер").getAttribute("aria-sort")).toBe("descending");
+    // The keyboard does what the mouse does: the header is a stop of Tab.
+    expect(header("Выпуск").tabIndex).toBe(0);
+    fireEvent.keyDown(header("Выпуск"), { key: "Enter" });
+    expect(header("Выпуск").getAttribute("aria-sort")).toBe("ascending");
+    // A planned shift put nothing out; the closed one's output is the least of the two after it.
+    expect(numbers()[0]).toBe("OCT26-005");
+  });
+
+  it("sums the shifts the filters keep, whatever the page, in a line over the table", async () => {
+    await openShifts(shiftsSession());
+    const totals = () => screen.getByText(/^Итого по выбранным сменам/).textContent;
+    // OCT26-004 puts 540 in 45 boxes; OCT26-001/S puts its own; the planned one nothing.
+    expect(totals()).toMatch(/^Итого по выбранным сменам: смен 3 · выпуск /);
+    chooseText("Статус", "Запланирована");
+    expect(totals()).toBe("Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · паллет 0");
+  });
+
   it("filters by status and line and searches the number and the product's name, without case", async () => {
     await openShifts(shiftsSession());
     const numbers = () =>

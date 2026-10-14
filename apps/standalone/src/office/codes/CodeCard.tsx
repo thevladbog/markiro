@@ -10,7 +10,7 @@ import type {
   OfficeCodeEvent,
   OfficeCodeItem,
 } from "../../host/code-search.js";
-import { ssccText } from "../shifts/shift-card.js";
+import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
 import { PackTextLink } from "./PackLinks.js";
 
 /**
@@ -94,7 +94,7 @@ export function palletLabel(item: OfficeCodeItem, t: TFunction): string {
 /** The link to a shift's card, which a row's click does not also open. */
 export function ShiftLink({ item }: { item: Pick<OfficeCodeItem, "shiftId" | "shiftNumber"> }) {
   return (
-    <Link to={`/shifts/${item.shiftId}`} onClick={(event) => event.stopPropagation()}>
+    <Link to={shiftCardPath(item.shiftId)} onClick={(event) => event.stopPropagation()}>
       {item.shiftNumber}
     </Link>
   );
