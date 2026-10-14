@@ -197,6 +197,13 @@ describe("Информация", () => {
     expect(text).not.toContain(HOST_ID);
     expect(text).not.toContain(DEVICE_STATUS.fingerprint);
     expect(session.api.getBackups).toHaveBeenCalled();
+    // The usage statistics are asked of the host at the click; this build carries no key
+    // (the production keyset is empty until the owner generates the pair), so the text says
+    // so and holds no count and no token.
+    expect(session.api.getUsageStats).toHaveBeenCalledTimes(1);
+    expect(text).toContain("Данные для анализа использования");
+    expect(text).toContain("Статистика: недоступна в этой сборке");
+    expect(text).not.toMatch(/MKS1\./u);
     const shown = screen.getByRole("textbox", { name: "Сведения для поддержки" });
     // A text field keeps line breaks as LF; the copy and the file keep the CRLF of the text.
     expect((shown as HTMLTextAreaElement).value).toBe(text.replaceAll("\r\n", "\n"));

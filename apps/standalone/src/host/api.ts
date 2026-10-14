@@ -13,6 +13,7 @@ import {
   type KnownBlocksResponse,
 } from "./backups.js";
 import type { HostClient } from "./client.js";
+import { usageStatsSchema, type UsageStats } from "./usage-stats.js";
 import {
   codeSearchPath,
   officeCodeCardSchema,
@@ -511,6 +512,11 @@ export interface HostApi {
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
+  /**
+   * The counts by month for the support bundle (beta 3 feedback); administrators
+   * only, `forbidden` for another role.
+   */
+  getUsageStats: (token: string) => Promise<UsageStats>;
   /**
    * «Сделать копию сейчас»: `202` with the copy running; the host makes it on
    * its own, and the office reads the state again until nothing runs.
@@ -1091,6 +1097,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getUsageStats: (token) =>
+      client.request("GET", "/v1/office/usage-stats", {
+        officeToken: token,
+        schema: usageStatsSchema,
       }),
     startBackup: (token) =>
       client.request("POST", "/v1/office/backups", {

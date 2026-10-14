@@ -140,6 +140,7 @@ import {
   templateUpdate,
   updateStarted,
 } from "../src/host/requests.js";
+import { USAGE_MONTHS, usageStatsSchema } from "../src/host/usage-stats.js";
 
 // Vite statically rewrites the literal pattern `new URL(..., import.meta.url)`
 // for browser asset bundling (see `vite:asset-import-meta-url`); under the
@@ -3721,5 +3722,44 @@ describe("the shift's own date (beta 3, «Дата смены»)", () => {
     expect(
       enteredShiftSchema.parse(fixture("device-shift-entered-planned-date.json")).plannedDate,
     ).toBe("2026-10-10");
+  });
+});
+
+describe("the usage statistics (beta 3)", () => {
+  it("parse the shared fixture: twelve months of counts", () => {
+    const stats = usageStatsSchema.parse(fixture("usage-stats.json"));
+    expect(stats.months).toHaveLength(USAGE_MONTHS);
+    expect(stats.months.map((month) => month.month)).toEqual(
+      [...stats.months.map((month) => month.month)].sort(),
+    );
+    expect(stats.months.at(-2)?.scans).toEqual({ accepted: 21640, duplicates: 212, rejected: 37 });
+    expect(stats.devices).toEqual({ station: 3, office: 2, handheld: 1 });
+  });
+
+  it("refuse a month that is no month, a count that is not one, and a month that lacks a part", () => {
+    const base = JSON.parse(JSON.stringify(fixture("usage-stats.json"))) as {
+      months: Record<string, unknown>[];
+    };
+    const broken = (change: (month: Record<string, unknown>) => void): boolean => {
+      const copy = structuredClone(base);
+      const first = copy.months[0];
+      if (first === undefined) throw new Error("no month");
+      change(first);
+      return usageStatsSchema.safeParse(copy).success;
+    };
+    expect(broken(() => undefined)).toBe(true);
+    expect(broken((month) => (month.month = "2026-13"))).toBe(false);
+    expect(broken((month) => (month.month = "Сентябрь"))).toBe(false);
+    expect(broken((month) => ((month.scans as Record<string, unknown>).accepted = -1))).toBe(false);
+    expect(broken((month) => ((month.scans as Record<string, unknown>).accepted = 1.5))).toBe(
+      false,
+    );
+    expect(broken((month) => delete month.pallets)).toBe(false);
+    expect(
+      usageStatsSchema.safeParse({
+        ...base,
+        months: Array.from({ length: 13 }, () => base.months[0]),
+      }).success,
+    ).toBe(false);
   });
 });

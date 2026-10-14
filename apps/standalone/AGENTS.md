@@ -6843,3 +6843,71 @@ either; a file log is stage 5.
   reasons; (8) «Расформировать короб» on «Конфликты» for a closed box of a closed shift;
   (9) an apply during a restore's hold is refused with the hold's message, and works after
   «Возобновить».
+
+## Shift date (beta 3)
+
+A shift has its own date beside the production date: `shifts.planned_date`
+(host migration `0028`), the cloud's `plannedDate`, labelled «Дата смены» — the
+working day the shift takes place. A civil date `YYYY-MM-DD`, not an instant.
+The shift's NUMBER (`MONYY-NNN`) is still drawn from the production date. The
+migration gives every shift already there its production date and a trigger
+(`shifts_planned_date_default`) gives the same to an insert that names none; the
+column is nullable only for that reason, the answers read
+`COALESCE(planned_date, production_date)`. `OfficeShift.plannedDate` is always
+present; `DeviceShift.plannedDate` is optional (a host before beta 3 sends none);
+`ShiftCreate`, `ShiftUpdate` and `DeviceShiftCreate` take it as an optional field,
+so a body of an earlier build reads as before (`proto/fixtures/*-planned-date.json`
+beside the older fixtures, which stay). `PROTOCOL_VERSION` is not raised: a station
+sends `plannedDate` only to a host updated before it, as the installer's order
+already requires. A planned shift's date is edited in the office (`ShiftDialog`);
+an open or closed shift's is fixed like the production date. The create audit row
+names `plannedDate` only when it differs from the production date, the update row
+as any changed field. The office list has a «Дата смены» column and a shift-date
+period (`plannedFrom`/`plannedTo`, both ends, narrowing the production-date period)
+served by `shifts_planned_date`; the card shows it and the task form prints it. The
+station (`NewShift`) sends today in the organization's zone (`civilToday`); it keeps
+no copy of the date yet (no `floor_shifts` column, no shell migration), so its shift
+card still shows the production date alone.
+
+## Usage statistics in the support text (beta 3)
+
+`GET /v1/office/usage-stats` (`routes/usage_stats.rs`, administrators only,
+read-only, in `license::gate::NEVER`) answers `markiro_proto::usage_stats::UsageStats`:
+counts by calendar month for the last twelve months — shifts by mode, origin,
+print policy and pallets; scans by verdict; boxes (and the codes their stations
+reported, so the average per box), pallets, exceptions by kind, conflicts by kind and
+review, warehouse and duplicate-label reprints, applied disaggregation documents,
+refused records — and the paired devices by kind. Counts and month keys only; the
+types deny a field beyond the allowlist. A shift's rows belong to the month of the
+shift's own date, the host's instants to the UTC month of the instant. Every query is
+a grouped aggregate driven by an index (`tests/usage_stats.rs` reads each plan and
+fails on a scan of a table of facts), so no migration was needed for `scans`;
+`warehouse_reprints` and `disaggregation_documents` are read whole (a handful of rows).
+
+The webview asks for it at the click of «Сформировать и скопировать»
+(`SupportSection`) and puts it into the support text only ENCRYPTED
+(`office/info/support-usage.ts`, `support-crypto.ts`): the payload is copied field by
+field from the answer (`usagePayload`), deflated when the webview can, and sealed for
+the maker's public key — ephemeral ECDH P-256, HKDF-SHA256, AES-256-GCM — into
+`MKS1.<kid>.<base64url>`. The text shows a neutral label and that one token; a build
+whose keyset is empty (`proto/fixtures/support-keys.json`, public JWKs only, in the
+shape of `trust-keys.json`; the production keyset is EMPTY until the owner adds one)
+says «недоступна в этой сборке» instead of printing counts, and so does a role that is
+not an administrator or a host that did not answer. `tools/standalone-support/decrypt.mjs`
+opens a token with the private key (`--key support-private.pem`, a whole support text on
+stdin or a file) and prints the JSON and a table; its Node contract
+(`pnpm test:standalone-support:contract`) uses an independent writer, and
+`test/support-crypto.test.ts` opens the webview's own token with the tool, with tamper
+tests on the key id, flag, ephemeral key, nonce and ciphertext. The test keys are made
+when the tests run; no private key is committed (`no-private-keys.test.mjs`).
+
+Owner's steps, once (the private key stays on the owner's machine):
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out support-private.pem
+node tools/standalone-support/decrypt.mjs --public-jwk --key support-private.pem
+```
+
+then put the printed `{ kid, jwk }` into `keys` of `proto/fixtures/support-keys.json`
+and build. A key that must stop being used goes into `retiredKids` (an old text still
+opens with its file); the newest key that is not retired is the one the build uses.
