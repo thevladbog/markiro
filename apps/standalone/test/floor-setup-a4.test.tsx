@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { decodeMonoRaster, type MonoBitmap, type RasterizeTextFn } from "@markiro/domain";
@@ -16,6 +16,7 @@ import {
 import type { PrintResult, WindowsPrinting } from "../src/hardware/hardware.js";
 import { paintMonoRaster } from "../src/labels/sheet-render.js";
 import { fakeHardware } from "./support/hardware.js";
+import { choicesOf, setField, shownInList, usbListed } from "./support/floor-fields.js";
 import { openLocalDb } from "./support/local-db.js";
 import {
   fakeRender,
@@ -150,13 +151,11 @@ function click(name: string): void {
 }
 
 function choose(label: string, value: string): void {
-  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  setField(label, value);
 }
 
 function optionsOf(label: string): string[] {
-  return within(screen.getByLabelText(label))
-    .getAllByRole("option")
-    .map((option) => option.textContent ?? "");
+  return choicesOf(label);
 }
 
 describe("the printer form's paper (plan А4)", () => {
@@ -218,20 +217,20 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     click("Добавить принтер");
     expect(screen.queryByLabelText("Бумага")).toBeNull();
     choose("Подключение", "usb");
-    await screen.findByRole("option", { name: "HP LaserJet" });
+    await usbListed();
     choose("Принтер Windows", "HP LaserJet");
     // A Windows queue, but printing in the printer's language: no paper to choose.
     expect(screen.queryByLabelText("Бумага")).toBeNull();
     choose("Способ печати", "windows_driver");
     expect(optionsOf("Бумага")).toEqual(["Термоэтикетка", "Лист А4 (драйвер Windows)"]);
-    expect((screen.getByLabelText("Разрешение") as HTMLSelectElement).disabled).toBe(false);
+    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(false);
     choose("Бумага", "a4");
-    expect((screen.getByLabelText("Разрешение") as HTMLSelectElement).value).toBe("300");
-    expect((screen.getByLabelText("Разрешение") as HTMLSelectElement).disabled).toBe(true);
+    expect(shownInList("Разрешение")).toBe("300 dpi");
+    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(true);
     // Back to the language: the hidden paper goes back to the label's, and the resolution is free.
     choose("Способ печати", "raw");
     expect(screen.queryByLabelText("Бумага")).toBeNull();
-    expect((screen.getByLabelText("Разрешение") as HTMLSelectElement).disabled).toBe(false);
+    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(false);
   });
 
   it("stores an A4 profile and sums it up by its paper, not by a language and a resolution", async () => {
@@ -241,17 +240,13 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     click("Добавить принтер");
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "HP на складе" } });
     choose("Подключение", "usb");
-    await screen.findByRole("option", { name: "HP LaserJet" });
+    await usbListed();
     choose("Принтер Windows", "HP LaserJet");
     choose("Способ печати", "windows_driver");
     choose("Бумага", "a4");
     click("Готово");
     expect(screen.getByText("Лист А4 · HP LaserJet")).toBeTruthy();
-    choose(
-      "Этикетка паллеты",
-      (await screen.findAllByRole("option", { name: "HP на складе" }))[0]?.getAttribute("value") ??
-        "",
-    );
+    choose("Этикетка паллеты", "HP на складе");
     await act(async () => {
       click("Сохранить");
     });
@@ -285,9 +280,9 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     click("Изменить принтер «Godex через драйвер»");
     choose("Бумага", "a4");
     click("Готово");
-    expect((screen.getByLabelText("Этикетка короба") as HTMLSelectElement).value).toBe("");
-    expect((screen.getByLabelText("Дубль кода") as HTMLSelectElement).value).toBe("");
-    expect((screen.getByLabelText("Этикетка паллеты") as HTMLSelectElement).value).toBe("godex");
+    expect(shownInList("Этикетка короба")).toBe("Не назначен");
+    expect(shownInList("Дубль кода")).toBe("Не назначен");
+    expect(shownInList("Этикетка паллеты")).toBe("Godex через драйвер");
     await act(async () => {
       click("Сохранить");
     });
@@ -306,7 +301,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     });
     click("Добавить принтер");
     choose("Подключение", "usb");
-    await screen.findByRole("option", { name: "HP LaserJet" });
+    await usbListed();
     expect(screen.queryByLabelText("Способ печати")).toBeNull();
     expect(screen.queryByLabelText("Бумага")).toBeNull();
   });

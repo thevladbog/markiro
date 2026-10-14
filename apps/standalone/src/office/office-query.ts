@@ -29,12 +29,13 @@ export const officeKeys = {
   lines: ["office", "lines"],
   operators: ["office", "operators"],
   /** The site's register of people and their links to operators (host migration 0018). */
-  employees: ["office", "employees"],
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
   /** A product's photo (plan ТОВ, `GET /v1/office/products/{id}/photo`); a write changes the list's `photoChecksum` too. */
   productPhoto: (id: string) => ["office", "product-photo", id],
+  /** A list row's thumbnail: keyed by the photo's checksum, so a changed photo is read again. */
+  productThumb: (id: string, checksum: string) => ["office", "product-thumb", id, checksum],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */

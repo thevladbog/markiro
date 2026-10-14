@@ -223,6 +223,12 @@ section.workstation-setup {
 
 .setup-printer-list__header > button {
   flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.setup-card__actions > button,
+.setup-printer-assignments label {
+  white-space: nowrap;
 }
 
 .setup-printer-list__scroll {
@@ -246,11 +252,13 @@ section.workstation-setup {
   font: var(--floor-body);
 }
 
+/* A row is its words over its buttons: a side-by-side row left the words one letter wide once the three buttons took their share. */
 .setup-printer-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
 
@@ -259,14 +267,17 @@ section.workstation-setup {
 }
 
 .setup-printer-row__detail {
-  flex: 1;
+  display: grid;
   min-width: 0;
+  gap: var(--sp-1);
+  justify-items: start;
 }
 
 .setup-printer-row h3,
 .setup-printer-row p {
+  min-width: 0;
   margin: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .setup-printer-row h3 {
@@ -274,22 +285,36 @@ section.workstation-setup {
 }
 
 .setup-printer-row__connection {
-  padding-top: var(--sp-1);
   color: var(--fg-3);
   font: 400 15px/22px var(--font-mono);
 }
 
 .setup-printer-row__purposes {
-  padding-top: var(--sp-1);
   color: var(--fg-2);
   font: 500 16px/22px var(--font-ui);
 }
 
+/* The three buttons share the row, the test print the widest: they never wrap onto a second line. */
 .setup-printer-row__actions {
-  display: flex;
-  flex-shrink: 0;
+  display: grid;
+  min-width: 0;
   gap: var(--sp-2);
-  margin-left: auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+}
+
+.setup-printer-row__actions > button {
+  min-width: 0;
+  padding-inline: var(--sp-2);
+  white-space: nowrap;
+}
+
+/* A button or a list that takes the whole row of the printer's form, and never breaks its words. */
+.setup-printer-connection__wide {
+  grid-column: 1 / -1;
+}
+
+.setup-nowrap {
+  white-space: nowrap;
 }
 
 .setup-printer-assignments {
@@ -368,7 +393,7 @@ section.workstation-setup {
   gap: var(--sp-1);
   justify-items: start;
   font: var(--floor-body-strong);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* Sound: one centred card, the mute toggle, the level and the check on one row. */
@@ -433,7 +458,13 @@ section.workstation-setup {
   gap: var(--sp-3);
 }
 
+.setup-printer-verification .setup-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .setup-printer-verification {
+  position: relative;
   display: flex;
   min-width: 0;
   gap: var(--sp-3);
@@ -504,6 +535,16 @@ p.workstation-setup__result {
 }
 
 @media (max-width: 1100px) {
+  /* The state is also the toggle's mark and its pressed state: out of sight here, so the label keeps its one line. */
+  .setup-printer-verification__state {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .setup-split,
   .setup-split--scanners,
   .setup-split--editor,
@@ -514,4 +555,202 @@ p.workstation-setup__result {
   .setup-sound__controls {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* The scanner tab: the connection and its check, and under them the self-test across the width. */
+.setup-scanner-stack {
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+  min-width: 0;
+}
+
+.self-test {
+  gap: var(--sp-3);
+}
+
+.self-test__body {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.self-test__code-side,
+.self-test__result-side {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.self-test__kinds,
+.self-test__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.self-test__kind[data-checked="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.self-test__figure {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  padding: 16px;
+  background: #fff;
+  border: 2px dashed var(--fg-3);
+  border-radius: var(--r-2);
+}
+
+/* «ТЕСТ» on the figure itself: a code of this panel cannot be taken for a product's. */
+.self-test__badge {
+  justify-self: start;
+  padding: 2px 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: #1b1b1b;
+  border-radius: 4px;
+}
+
+.self-test__symbol {
+  width: 100%;
+  color: #000;
+}
+
+.self-test__symbol svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.self-test__symbol--dm {
+  max-width: 240px;
+}
+
+.self-test__symbol--plain {
+  max-width: 420px;
+}
+
+.self-test__symbol--big {
+  max-width: min(56vh, 80vw);
+}
+
+.self-test__shown {
+  box-sizing: border-box;
+  max-height: 100%;
+  overflow: auto;
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-4);
+  padding: 24px;
+  background: #fff;
+}
+
+/* On the white card whatever the theme: fixed dark colours, as the symbol's own card. */
+.self-test__shown {
+  color: #17161a;
+}
+
+.self-test__shown .self-test__shown-status {
+  margin: 0;
+  font-weight: 700;
+}
+
+.self-test__shown .self-test__shown-status[data-tone="ok"] {
+  color: #116335;
+}
+
+.self-test__shown .self-test__shown-status[data-tone="warning"] {
+  color: #8a4c07;
+}
+
+.self-test__shown .self-test__shown-status[data-tone="problem"] {
+  color: #a1231a;
+}
+
+.self-test__code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.self-test__gs {
+  padding: 0 2px;
+  color: inherit;
+  background: transparent;
+  outline: 1px solid currentColor;
+  border-radius: 3px;
+}
+
+.self-test__verdict {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 2px solid var(--border-default, var(--fg-3));
+  border-radius: var(--r-2);
+  background: var(--bg-2, transparent);
+  color: var(--fg-1);
+}
+
+.self-test__verdict[data-tone="ok"] {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-fg);
+}
+
+.self-test__verdict[data-tone="warning"] {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.self-test__verdict[data-tone="problem"] {
+  background: var(--err-bg);
+  border-color: var(--err-border);
+  color: var(--err-fg);
+}
+
+.self-test__status {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.self-test__reason {
+  margin: 0;
+  font-weight: 600;
+}
+
+.self-test__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.self-test__facts dt {
+  font-weight: 600;
+}
+
+.self-test__facts dd {
+  margin: 0;
+}
+
+.self-test__history-title {
+  margin: 0;
+}
+
+.self-test__history {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.self-test__history li {
+  overflow-wrap: anywhere;
 }

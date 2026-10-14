@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -6,6 +6,7 @@ import {
   Button,
   DefinitionGrid,
   Modal,
+  RadioGroup,
   Spinner,
   VisuallyHidden,
   type DefinitionGridItem,
@@ -14,7 +15,17 @@ import {
 import { formatFingerprint } from "../../app/fingerprint.js";
 import { parsePairingPayload } from "../../host/pairing-code.js";
 import type { PairingCode } from "../../host/protocol.js";
+import { usePrintForm } from "../forms/form-printer-context.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { downloadFile } from "../templates/download.js";
+import {
+  pairingCardData,
+  pairingCardHtml,
+  pairingCardPdf,
+  rasterizeCard,
+  type CardRasterizer,
+} from "./pairing-card.js";
+import type { PairingCardFormat } from "@markiro/domain";
 
 const PairingDataMatrix = lazy(() => import("./PairingDataMatrix.js"));
 
@@ -68,6 +79,8 @@ export interface PairingCodeDialogProps {
   failure: string | null;
   onRegenerate: () => void;
   onClose: () => void;
+  /** Draws the card for the PDF; the webview's canvas by default, a test's mock otherwise. */
+  rasterize?: CardRasterizer;
 }
 
 /**
@@ -82,8 +95,20 @@ export function PairingCodeDialog({
   failure,
   onRegenerate,
   onClose,
+  rasterize = rasterizeCard,
 }: PairingCodeDialogProps) {
   const { t } = useTranslation();
+  const print = usePrintForm();
+  const [paper, setPaper] = useState<PairingCardFormat>("a4");
+  const [cardFailure, setCardFailure] = useState<string | null>(null);
+  const [drawing, setDrawing] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   // A claim does not raise the host revision, so no event announces the new
   // device: the list is read again every few seconds while the code shows.
   useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
@@ -91,6 +116,37 @@ export function PairingCodeDialog({
   });
   const remainingMs = useRemainingMs(deadline, codeLifetimeMs(code));
   const payload = parsePairingPayload(code.payload);
+  // The card is drawn when a button is pressed, from this code, and handed on
+  // (the print frame, the downloaded file): the dialog keeps none of it. The
+  // code is one-time and secret-like, so it is neither logged nor stored.
+  const card = () => pairingCardData(code, deadline, codeLifetimeMs(code));
+  const printCard = () => {
+    const data = card();
+    if (data === null) return;
+    setCardFailure(null);
+    try {
+      print(pairingCardHtml(data, paper));
+    } catch {
+      setCardFailure("office.devices.pairing.card.printFailed");
+    }
+  };
+  const downloadCard = async () => {
+    const data = card();
+    if (data === null || drawing) return;
+    setCardFailure(null);
+    setDrawing(true);
+    try {
+      downloadFile(
+        await pairingCardPdf(data, paper, rasterize),
+        `Подключение устройства ${paper.toUpperCase()}.pdf`,
+      );
+    } catch {
+      if (alive.current) setCardFailure("office.devices.pairing.card.pdfFailed");
+    } finally {
+      if (alive.current) setDrawing(false);
+    }
+  };
+  const expired = remainingMs === 0;
   const details: DefinitionGridItem[] = [];
   if (payload !== null) {
     details.push({
@@ -117,6 +173,16 @@ export function PairingCodeDialog({
       closeLabel={t("office.common.close")}
       footer={
         <>
+          {payload !== null && !expired && (
+            <>
+              <Button variant="secondary" loading={drawing} onClick={() => void downloadCard()}>
+                {t("office.devices.pairing.card.pdf")}
+              </Button>
+              <Button variant="secondary" onClick={printCard}>
+                {t("office.devices.pairing.card.print")}
+              </Button>
+            </>
+          )}
           <Button variant="secondary" loading={regenerating} onClick={onRegenerate}>
             {t("office.devices.pairing.regenerate")}
           </Button>
@@ -128,9 +194,10 @@ export function PairingCodeDialog({
     >
       <div className="standalone-form">
         {failure && <Alert tone="error">{t(failure)}</Alert>}
+        {cardFailure && <Alert tone="error">{t(cardFailure)}</Alert>}
         {/* Announces a new code or its expiry; the countdown stays outside. */}
         <div className="standalone-form" aria-live="polite">
-          {remainingMs === 0 ? (
+          {expired ? (
             <Alert tone="warn">{t("office.devices.pairing.expired")}</Alert>
           ) : (
             <>
@@ -151,6 +218,19 @@ export function PairingCodeDialog({
                 <Alert tone="warn">{t("office.devices.pairing.noAddresses")}</Alert>
               )}
               <DefinitionGrid items={details} />
+              {payload !== null && (
+                <RadioGroup
+                  label={t("office.devices.pairing.card.paper")}
+                  name="pairing-card-paper"
+                  className="pairing-card-paper"
+                  value={paper}
+                  onValueChange={(value) => setPaper(value === "a5" ? "a5" : "a4")}
+                  options={[
+                    { value: "a4", label: t("office.forms.papers.a4") },
+                    { value: "a5", label: t("office.forms.papers.a5") },
+                  ]}
+                />
+              )}
             </>
           )}
         </div>

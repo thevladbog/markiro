@@ -596,6 +596,17 @@ describe("Select", () => {
     expect(getComputedStyle(optionText!).whiteSpace).toBe("nowrap");
   });
 
+  it("keeps the full text of a long value as a tooltip of the closed control and its items", async () => {
+    const user = userEvent.setup();
+    const longLabel = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    render(<Select label="Группа" options={[{ value: "15", label: longLabel }]} value="15" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    expect(trigger.getAttribute("title")).toBe(longLabel);
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: longLabel }).getAttribute("title")).toBe(longLabel);
+  });
+
   it("selects the next enabled option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -952,6 +963,41 @@ describe("shared control styles", () => {
     expect(document.getElementById(select.getAttribute("aria-describedby")!)?.textContent).toBe(
       "Unavailable",
     );
+  });
+});
+
+describe("Select at the floor size with `custom`", () => {
+  it("renders the product's own list in touch dimensions, never a native select", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { container } = render(
+      <Select
+        custom
+        searchable
+        size="floor"
+        label="Port"
+        options={[
+          { value: "", label: "Choose" },
+          { value: "COM3", label: "COM3" },
+          { value: "COM7", label: "COM7" },
+        ]}
+        value=""
+        onValueChange={onValueChange}
+      />,
+    );
+
+    expect(container.querySelector("select")).toBeNull();
+    const trigger = screen.getByRole("combobox", { name: "Port" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.style.height).toBe("var(--control-floor)");
+    expect(trigger.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Port").style.font).toBe("var(--floor-body-strong)");
+
+    await user.click(trigger);
+    const option = await screen.findByRole("option", { name: "COM7" });
+    expect(option.style.minHeight).toBe("var(--control-floor)");
+    await user.click(option);
+    expect(onValueChange).toHaveBeenCalledWith("COM7");
   });
 });
 

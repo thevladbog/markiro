@@ -20,6 +20,11 @@ export interface PrinterDraft {
   /** The profile being changed; `null` — a new one. */
   id: string | null;
   name: string;
+  /**
+   * The name is one the form made (the next free «Принтер N», or the Windows printer's name): it
+   * follows the chosen printer until the operator types a name of their own.
+   */
+  nameAuto: boolean;
   kind: Kind;
   host: string;
   tcpPort: string;
@@ -37,6 +42,7 @@ export interface PrinterDraft {
 export const NEW_PRINTER: PrinterDraft = {
   id: null,
   name: "",
+  nameAuto: true,
   kind: "tcp",
   host: "",
   tcpPort: "9100",
@@ -55,6 +61,7 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
     ...NEW_PRINTER,
     id: profile.id,
     name: profile.name,
+    nameAuto: false,
     kind: target.kind,
     host: target.kind === "tcp" ? target.host : "",
     tcpPort: target.kind === "tcp" ? String(target.port) : NEW_PRINTER.tcpPort,
@@ -68,6 +75,19 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
   };
 }
 
+/** «Принтер N» with the smallest N that no printer of the list bears yet. */
+export function nextPrinterName(taken: readonly string[], prefix: string): string {
+  const used = new Set(taken.map((name) => name.trim()));
+  let n = 1;
+  while (used.has(`${prefix} ${n}`)) n += 1;
+  return `${prefix} ${n}`;
+}
+
+/** The form of a new printer, already named (see `nextPrinterName`). */
+export function newPrinterDraft(taken: readonly string[], prefix: string): PrinterDraft {
+  return { ...NEW_PRINTER, name: nextPrinterName(taken, prefix) };
+}
+
 /**
  * The draft after a change, kept consistent (plan А4): A4 paper is the 300 dpi
  * of a Windows queue in driver mode, so choosing it sets 300 dpi and leaving
@@ -75,7 +95,12 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
  * paper, instead of leaving a hidden choice that the check would refuse.
  */
 export function settleDraft(draft: PrinterDraft, patch: Partial<PrinterDraft>): PrinterDraft {
-  const next = { ...draft, ...patch };
+  let next = { ...draft, ...patch };
+  // Typing a name takes it over from the form; choosing a Windows printer names the form's own name.
+  if (patch.name !== undefined && patch.nameAuto === undefined) next = { ...next, nameAuto: false };
+  if (patch.usbPrinter !== undefined && patch.usbPrinter !== "" && next.nameAuto) {
+    next = { ...next, name: patch.usbPrinter };
+  }
   if (!(next.kind === "usb" && next.mode === "windows_driver")) return { ...next, paper: "label" };
   return next.paper === "a4" ? { ...next, dpi: "300" } : next;
 }

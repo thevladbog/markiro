@@ -11,9 +11,10 @@ import { gtinRule, toGroupCode, toGtin14 } from "../../lib/rules.js";
 import { usePalletSheets, useProductGroups, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
-import { FormDialog } from "../FormDialog.js";
+import { EntityDrawer } from "../EntityDrawer.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import type { EncodedPhoto } from "./photo-encode.js";
 import { ProductPhotoField } from "./ProductPhotoField.js";
 import { activeFirstByName } from "../records.js";
 import { recordLabel } from "../shifts/shift-list.js";
@@ -43,11 +44,15 @@ interface ProductWrite {
   archived: boolean;
 }
 
-export interface ProductDialogProps {
+export interface ProductDrawerProps {
   /** `null` adds a product. */
   product: OfficeProduct | null;
   onClose: () => void;
-  onSaved: (product: OfficeProduct) => void;
+  /**
+   * `photoFailed` when a new product was saved but the photo picked with it
+   * was not (the product exists; the photo is added from its drawer).
+   */
+  onSaved: (product: OfficeProduct, photoFailed: boolean) => void;
   /**
    * The product changed on the host, or a template it names was deleted:
    * close and load the list again.
@@ -56,7 +61,11 @@ export interface ProductDialogProps {
 }
 
 /**
- * Adds a product, or changes one: the host takes the whole record with the
+ * Adds a product, or changes one, in a drawer from the right (owner decision
+ * after beta 3): the photo on top, then the fields. The photo of a new product
+ * is picked at once and written right after the product is saved; of a saved
+ * one it is written at once by its own buttons. Both hold for every product
+ * group. The host takes the whole record with the loaded revision, and archiving is its `archived` flag (no delete): the host takes the whole record with the
  * loaded revision, and archiving is its `archived` flag (no delete). The GTIN
  * may change too. Once it is valid, the dialog shows the 14 digits it is saved
  * as and whose GS1 prefix it has; neither blocks a save. The two default
@@ -71,10 +80,12 @@ export interface ProductDialogProps {
  * that is archived (or missing) as a marked choice, and is left as it is while
  * the counterparties do not load.
  */
-export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDialogProps) {
+export function ProductDrawer({ product, onClose, onSaved, onReload }: ProductDrawerProps) {
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
+  // A new product's picked photo, until the product exists to write it to.
+  const [stagedPhoto, setStagedPhoto] = useState<EncodedPhoto | null>(null);
   const groups = useProductGroups();
   const templates = useTemplates();
   const sheets = usePalletSheets();
@@ -86,6 +97,9 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     product === null
       ? api.createProduct(token, productCreate(input))
       : api.updateProduct(token, product.id, productUpdate(input, archived, product.rev)),
+  );
+  const writePhoto = useOfficeMutation((api, token, write: { id: string; photo: EncodedPhoto }) =>
+    api.putProductPhoto(token, write.id, write.photo),
   );
   const {
     register,
@@ -188,11 +202,20 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
       }
       return;
     }
-    onSaved(saved);
+    let photoFailed = false;
+    if (product === null && stagedPhoto !== null) {
+      try {
+        await writePhoto.mutateAsync({ id: saved.id, photo: stagedPhoto });
+      } catch {
+        photoFailed = true;
+      }
+    }
+    onSaved(saved, photoFailed);
   });
 
   return (
-    <FormDialog
+    <EntityDrawer
+      dirty={isDirty || stagedPhoto !== null}
       title={
         product === null
           ? t("office.products.createTitle")
@@ -200,6 +223,14 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
       }
       submitLabel={product === null ? t("office.products.create") : t("office.common.save")}
       submitDisabled={product !== null && !isDirty}
+      top={
+        <ProductPhotoField
+          productId={product?.id ?? null}
+          productName={product?.name ?? ""}
+          staged={stagedPhoto}
+          onStage={setStagedPhoto}
+        />
+      }
       onSubmit={submit}
       onClose={onClose}
       alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
@@ -360,7 +391,6 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           />
         )}
       />
-      <ProductPhotoField productId={product?.id ?? null} productName={product?.name ?? ""} />
       {product !== null && (
         <Controller
           control={control}
@@ -374,6 +404,6 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
           )}
         />
       )}
-    </FormDialog>
+    </EntityDrawer>
   );
 }

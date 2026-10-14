@@ -457,7 +457,7 @@ describe("office product dialog", () => {
     ]);
     // The record the host returned took the old row's place, and sorts as archived now.
     const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
-    expect(rows.map((row) => within(row).getAllByRole("cell")[1]?.textContent)).toEqual([
+    expect(rows.map((row) => within(row).getAllByRole("cell")[2]?.textContent)).toEqual([
       "Айран",
       "Молоко 3,2% 1 лДля печати: Молоко 3,2%",
     ]);

@@ -1,6 +1,12 @@
 /** A raw scan, as the scanner typed it, before anything trims or reads it. */
 export type ScanListener = (raw: string) => void;
 
+/** Where a scan came from: the keyboard (a wedge scanner), a COM port, or a source that does not say. */
+export type ScanChannel = "keyboard" | "com" | "unknown";
+
+/** A scan together with its channel, for the scanner self-test (it explains by channel). */
+export type TaggedScanListener = (raw: string, channel: ScanChannel) => void;
+
 /**
  * Where scans come from (stage 1 spec §5.6): a keyboard-wedge scanner and the
  * COM scanners of the shell (plan 2a4). The sign-in screen, a new shift and
@@ -9,6 +15,11 @@ export type ScanListener = (raw: string) => void;
 export interface ScanSource {
   /** Begins delivering scans; returns the function that stops it. */
   start(listener: ScanListener): () => void;
+  /**
+   * The same scans with the channel they came through; absent in a source that cannot tell
+   * (the setup then calls the channel «unknown»).
+   */
+  startTagged?(listener: TaggedScanListener): () => void;
   /** Drops the keys typed since the last Enter. */
   clearPendingInput(): void;
   /**
@@ -39,41 +50,43 @@ const GROUP_SEPARATOR = "\u001d";
 export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSource {
   const buffers = new Set<() => void>();
   let manualTextEntry = false;
-  return {
-    start(listener) {
-      let payload = "";
-      const clear = () => {
+  const begin = (listener: TaggedScanListener) => {
+    let payload = "";
+    const clear = () => {
+      payload = "";
+    };
+    buffers.add(clear);
+    const onKeyDown = (event: Event) => {
+      // Typing into a text field: no scan, and its Enter stays the field's.
+      if (manualTextEntry) return;
+      const { key, ctrlKey, altKey, metaKey } = event as KeyboardEvent;
+      if (key === "Enter") {
+        // The scan's closing Enter lands on whatever holds the focus, and a
+        // focused button would also take it as a click. `preventDefault`
+        // stops that; filtering by the event's target instead would drop
+        // the scan itself, which is worse.
+        event.preventDefault();
+        if (payload.length > 0) listener(payload, "keyboard");
         payload = "";
-      };
-      buffers.add(clear);
-      const onKeyDown = (event: Event) => {
-        // Typing into a text field: no scan, and its Enter stays the field's.
-        if (manualTextEntry) return;
-        const { key, ctrlKey, altKey, metaKey } = event as KeyboardEvent;
-        if (key === "Enter") {
-          // The scan's closing Enter lands on whatever holds the focus, and a
-          // focused button would also take it as a click. `preventDefault`
-          // stops that; filtering by the event's target instead would drop
-          // the scan itself, which is worse.
-          event.preventDefault();
-          if (payload.length > 0) listener(payload);
-          payload = "";
-          return;
-        }
-        if (ctrlKey && !altKey && key === "]") {
-          payload += GROUP_SEPARATOR;
-          return;
-        }
-        if ((ctrlKey || metaKey) && !altKey) return;
-        if (key.length === 1) payload += key;
-      };
-      target.addEventListener("keydown", onKeyDown);
-      return () => {
-        clear();
-        buffers.delete(clear);
-        target.removeEventListener("keydown", onKeyDown);
-      };
-    },
+        return;
+      }
+      if (ctrlKey && !altKey && key === "]") {
+        payload += GROUP_SEPARATOR;
+        return;
+      }
+      if ((ctrlKey || metaKey) && !altKey) return;
+      if (key.length === 1) payload += key;
+    };
+    target.addEventListener("keydown", onKeyDown);
+    return () => {
+      clear();
+      buffers.delete(clear);
+      target.removeEventListener("keydown", onKeyDown);
+    };
+  };
+  return {
+    start: (listener) => begin((raw) => listener(raw)),
+    startTagged: begin,
     clearPendingInput() {
       for (const clear of buffers) clear();
     },
@@ -99,26 +112,28 @@ export function createComScanSource(
   subscribe: (listener: ScanListener) => Promise<() => void>,
 ): ScanSource {
   let manualTextEntry = false;
+  const begin = (listener: TaggedScanListener) => {
+    let stopped = false;
+    let unsubscribe: (() => void) | null = null;
+    subscribe((raw) => {
+      if (stopped || manualTextEntry || raw.length === 0) return;
+      listener(raw, "com");
+    }).then(
+      (stop) => {
+        if (stopped) stop();
+        else unsubscribe = stop;
+      },
+      () => undefined,
+    );
+    return () => {
+      stopped = true;
+      unsubscribe?.();
+      unsubscribe = null;
+    };
+  };
   return {
-    start(listener) {
-      let stopped = false;
-      let unsubscribe: (() => void) | null = null;
-      subscribe((raw) => {
-        if (stopped || manualTextEntry || raw.length === 0) return;
-        listener(raw);
-      }).then(
-        (stop) => {
-          if (stopped) stop();
-          else unsubscribe = stop;
-        },
-        () => undefined,
-      );
-      return () => {
-        stopped = true;
-        unsubscribe?.();
-        unsubscribe = null;
-      };
-    },
+    start: (listener) => begin((raw) => listener(raw)),
+    startTagged: begin,
     clearPendingInput() {
       // A COM frame arrives whole: nothing is pending between two scans.
     },
@@ -139,6 +154,16 @@ export function mergeScanSources(...sources: readonly ScanSource[]): ScanSource 
   return {
     start(listener) {
       const stops = sources.map((source) => source.start(listener));
+      return () => {
+        for (const stop of stops) stop();
+      };
+    },
+    startTagged(listener) {
+      const stops = sources.map((source) =>
+        source.startTagged
+          ? source.startTagged(listener)
+          : source.start((raw) => listener(raw, "unknown")),
+      );
       return () => {
         for (const stop of stops) stop();
       };
