@@ -39,15 +39,15 @@ describe("migration 0018 over a database of 0017 (the shift date on the station)
       expect.objectContaining({ id: "old", planned_date: null }),
     ]);
     const column = db
-      .prepare("SELECT \"notnull\" AS required, dflt_value AS dflt FROM pragma_table_info('floor_shifts') WHERE name = 'planned_date'")
+      .prepare(
+        "SELECT \"notnull\" AS required, dflt_value AS dflt FROM pragma_table_info('floor_shifts') WHERE name = 'planned_date'",
+      )
       .get();
     expect({ ...column }).toEqual({ required: 0, dflt: null });
     db.prepare(SHIFT).run(HOST_ID, DEVICE_ID, "new", "2026-10-12");
     expect(db.prepare("SELECT planned_date FROM floor_shifts WHERE id = 'new'").get()).toEqual(
       expect.objectContaining({ planned_date: "2026-10-12" }),
     );
-    expect(() => db.prepare(SHIFT).run(HOST_ID, DEVICE_ID, "bad", "12.10.2026")).toThrow(
-      /CHECK/,
-    );
+    expect(() => db.prepare(SHIFT).run(HOST_ID, DEVICE_ID, "bad", "12.10.2026")).toThrow(/CHECK/);
   });
 });
