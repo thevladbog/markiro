@@ -439,6 +439,8 @@ export interface ShiftInput {
   productId: string;
   lineId: string;
   productionDate: string;
+  /** The shift's own date (beta 3); left out, the host takes the production date. */
+  plannedDate?: string;
   boxTemplateId: string;
   /** Left out only by a validation shift whose hidden capacity the form refuses: the product's. */
   boxCapacity?: number;
@@ -463,6 +465,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     productId: shift.productId,
     lineId: shift.lineId,
     productionDate: shift.productionDate,
+    ...(shift.plannedDate === undefined ? {} : { plannedDate: shift.plannedDate }),
     boxTemplateId: shift.boxTemplateId,
     ...(shift.boxCapacity === undefined ? {} : { boxCapacity: shift.boxCapacity }),
     plannedQty: shift.plannedQty,
@@ -489,6 +492,7 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
 export interface ShiftChange {
   lineId?: string;
   productionDate?: string;
+  plannedDate?: string;
   boxTemplateId?: string;
   boxCapacity?: number;
   plannedQty?: number | null;
@@ -528,7 +532,8 @@ export function shiftUpdate(
     | "mode"
     | "validationPrint"
     | "rev"
-  >,
+  > &
+    Partial<Pick<OfficeShift, "plannedDate">>,
   next: ShiftChange,
 ): ShiftUpdate {
   const update: ShiftUpdate = { expectedRev: shift.rev };
@@ -543,6 +548,9 @@ export function shiftUpdate(
   if (next.lineId !== undefined && next.lineId !== shift.lineId) update.lineId = next.lineId;
   if (next.productionDate !== undefined && next.productionDate !== shift.productionDate) {
     update.productionDate = next.productionDate;
+  }
+  if (next.plannedDate !== undefined && next.plannedDate !== shift.plannedDate) {
+    update.plannedDate = next.plannedDate;
   }
   if (next.boxTemplateId !== undefined && next.boxTemplateId !== shift.boxTemplateId) {
     update.boxTemplateId = next.boxTemplateId;
@@ -640,6 +648,8 @@ export interface DeviceShiftInput {
   productId: string;
   boxTemplateId: string;
   productionDate: string;
+  /** Today in the organization's zone (beta 3); left out, the host takes the production date. */
+  plannedDate?: string;
   boxCapacity: number;
   plannedQty: number | null;
   /** «С паллетами» (plan ПЛ-Ц): boxes per pallet and the pallet template; absent — none. */
@@ -658,6 +668,7 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
     productId: shift.productId,
     boxTemplateId: shift.boxTemplateId,
     productionDate: shift.productionDate,
+    ...(shift.plannedDate === undefined ? {} : { plannedDate: shift.plannedDate }),
     boxCapacity: shift.boxCapacity,
     plannedQty: shift.plannedQty,
     counterpartyId: null,

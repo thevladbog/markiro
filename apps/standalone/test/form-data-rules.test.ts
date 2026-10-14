@@ -325,7 +325,7 @@ describe("the blank's data (plan О-Ф)", () => {
       gtin14: MILK.gtin14,
       imageChecksum: null,
       lineName: LINE_2.name,
-      plannedDate: PLANNED.productionDate,
+      plannedDate: PLANNED.plannedDate,
       productionDate: PLANNED.productionDate,
       plannedQty: null,
       boxCapacity: PLANNED.boxCapacity,

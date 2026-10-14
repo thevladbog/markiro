@@ -228,6 +228,8 @@ const CREATED_BODY: DeviceShiftCreate = {
   productId: MILK,
   boxTemplateId: MILK_TEMPLATE,
   productionDate: "2026-10-10",
+  // The working day: today in the organization's zone, whatever production date is chosen.
+  plannedDate: "2026-10-10",
   boxCapacity: 12,
   plannedQty: null,
   counterpartyId: null,
@@ -2017,6 +2019,7 @@ describe("the creation of a shift, apart from its screen", () => {
     productId: MILK,
     boxTemplateId: MILK_TEMPLATE,
     productionDate: "2026-10-10",
+    plannedDate: "2026-10-10",
     boxCapacity: 12,
     plannedQty: null,
   };

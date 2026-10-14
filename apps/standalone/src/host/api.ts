@@ -203,10 +203,32 @@ export interface SsccCounterKey {
   extension: number;
 }
 
-/** A period of production dates, both ends included, `YYYY-MM-DD`. */
+/**
+ * A period of production dates (`from`, `to`) and a period of shift dates
+ * (`plannedFrom`, `plannedTo`), both ends included, `YYYY-MM-DD`; any end may
+ * be left out and the two periods narrow each other.
+ */
 export interface ShiftPeriod {
-  from: string;
-  to: string;
+  from?: string;
+  to?: string;
+  plannedFrom?: string;
+  plannedTo?: string;
+}
+
+/** The query of `GET /v1/office/shifts` for a period; empty for none. */
+export function shiftPeriodQuery(period: ShiftPeriod | undefined): string {
+  if (period === undefined) return "";
+  const parts = (
+    [
+      ["from", period.from],
+      ["to", period.to],
+      ["plannedFrom", period.plannedFrom],
+      ["plannedTo", period.plannedTo],
+    ] as const
+  ).flatMap(([name, value]) =>
+    value === undefined ? [] : [`${name}=${encodeURIComponent(value)}`],
+  );
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
 /**
@@ -827,9 +849,7 @@ export function createHostApi(client: HostClient): HostApi {
     listShifts: (token, period) =>
       client.request(
         "GET",
-        period === undefined
-          ? "/v1/office/shifts"
-          : `/v1/office/shifts?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`,
+        `/v1/office/shifts${shiftPeriodQuery(period)}`,
         { officeToken: token, schema: z.array(officeShiftSchema) },
       ),
     getShift: (token, id) =>

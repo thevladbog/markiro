@@ -167,7 +167,24 @@ describe("office shifts: changing a shift", () => {
     expect(
       within(dialog(name)).getByRole("button", { name: "Дата производства" }).textContent,
     ).toBe("9 октября 2026");
+    // The working day is the shift's own and differs from the production date.
+    expect(within(dialog(name)).getByRole("button", { name: "Дата смены" }).textContent).toBe(
+      "10 октября 2026",
+    );
     expect(save(name).disabled).toBe(true);
+  });
+
+  it("changes the shift's own date alone, and sends nothing else", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockResolvedValue({ ...PLANNED, plannedDate: "2026-10-12", rev: 90 });
+    const name = await openEdit(session, PLANNED);
+    pickDate("Дата смены", "12 октября 2026");
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, PLANNED.id, {
+      plannedDate: "2026-10-12",
+      expectedRev: 72,
+    });
   });
 
   it("sends only what changed with the loaded revision, then says so and reads the list again", async () => {

@@ -1818,3 +1818,48 @@ fn a_shift_update_sends_the_main_sheet_as_null() {
     )
     .is_err());
 }
+
+#[test]
+fn the_shift_date_travels_beside_the_production_date_and_old_bodies_still_read() {
+    // The cloud's `plannedDate` (beta 3): optional in every request, so a
+    // body of an earlier build (the fixtures without it) still reads.
+    let create: ShiftCreate = round_trip("shift-create-planned-date.json");
+    assert_eq!(
+        (
+            create.production_date.as_str(),
+            create.planned_date.as_deref()
+        ),
+        ("2026-10-08", Some("2026-10-09"))
+    );
+    assert_eq!(
+        round_trip::<ShiftCreate>("shift-create.json").planned_date,
+        None
+    );
+    let update: ShiftUpdate = round_trip("shift-update-planned-date.json");
+    assert_eq!(update.planned_date.as_deref(), Some("2026-10-10"));
+    assert_eq!(
+        round_trip::<ShiftUpdate>("shift-update.json").planned_date,
+        None
+    );
+    let device: DeviceShiftCreate = round_trip("device-shift-create-planned-date.json");
+    assert_eq!(device.planned_date.as_deref(), Some("2026-10-09"));
+    assert_eq!(
+        round_trip::<DeviceShiftCreate>("device-shift-create.json").planned_date,
+        None
+    );
+    // The answers: the office's carries it always, a station's when the host
+    // knows it (a host before beta 3 sends none).
+    let office: OfficeShift = round_trip("office-shift.json");
+    assert_eq!(office.planned_date, office.production_date);
+    let list: DeviceShifts = round_trip("device-shifts-planned-date.json");
+    assert!(list.shifts.iter().all(|shift| shift.planned_date.is_some()));
+    let entered: DeviceShift = round_trip("device-shift-entered-planned-date.json");
+    assert_eq!(entered.planned_date.as_deref(), Some("2026-10-10"));
+    let old: DeviceShifts = round_trip("device-shifts.json");
+    assert!(old.shifts.iter().all(|shift| shift.planned_date.is_none()));
+    // A malformed field is the host's to refuse, not the type's: the type
+    // keeps text, and a non-text value is no date at all.
+    let mut value = fixture("shift-create-planned-date.json");
+    value["plannedDate"] = serde_json::json!(20261009);
+    assert!(serde_json::from_value::<ShiftCreate>(value).is_err());
+}

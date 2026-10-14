@@ -235,6 +235,12 @@ export function ShiftCardPage() {
             description: recordLabel("product", products.data, current.productId, t),
           },
           {
+            id: "plannedDate",
+            term: t("office.shifts.table.plannedDate"),
+            description: civilDateLabel(current.plannedDate),
+            mono: true,
+          },
+          {
             id: "productionDate",
             term: t("office.shifts.table.productionDate"),
             description: civilDateLabel(current.productionDate),

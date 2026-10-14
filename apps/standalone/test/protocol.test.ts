@@ -3647,3 +3647,79 @@ describe("the report of a started update (plan ОБН-2)", () => {
     }
   });
 });
+
+describe("the shift's own date (beta 3, «Дата смены»)", () => {
+  const input = {
+    productId: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+    lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+    productionDate: "2026-10-08",
+    boxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+    boxCapacity: 12,
+    plannedQty: 1200,
+    counterpartyId: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+    pallets: null,
+  };
+
+  it("is a field of the office's shift, always present, beside the production date", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    expect(shift.plannedDate).toBe("2026-10-08");
+    const body = JSON.parse(JSON.stringify(fixture("office-shift.json"))) as Record<
+      string,
+      unknown
+    >;
+    delete body.plannedDate;
+    expect(officeShiftSchema.safeParse(body).success).toBe(false);
+    expect(officeShiftSchema.safeParse({ ...body, plannedDate: "2026-02-3" }).success).toBe(false);
+  });
+
+  it("is named by a plan only when the form has it, and the older body stays as it was", () => {
+    expect(shiftCreate({ ...input, plannedDate: "2026-10-09" })).toStrictEqual(
+      fixture("shift-create-planned-date.json"),
+    );
+    expect(shiftCreate(input)).toStrictEqual(fixture("shift-create.json"));
+    expect(shiftCreateSchema.parse(fixture("shift-create-planned-date.json"))).toEqual(
+      fixture("shift-create-planned-date.json"),
+    );
+  });
+
+  it("is sent by a change only when it differs from the loaded shift's", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    expect(shiftUpdate(shift, { plannedDate: shift.plannedDate })).toStrictEqual({
+      expectedRev: shift.rev,
+    });
+    expect(shiftUpdate(shift, { plannedDate: "2026-10-10" })).toStrictEqual({
+      plannedDate: "2026-10-10",
+      expectedRev: shift.rev,
+    });
+    expect(shiftUpdateSchema.parse(fixture("shift-update-planned-date.json"))).toEqual(
+      fixture("shift-update-planned-date.json"),
+    );
+  });
+
+  it("is a station's field too, and a station's list reads with or without it", () => {
+    const create = {
+      requestId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      productId: input.productId,
+      boxTemplateId: input.boxTemplateId,
+      productionDate: "2026-10-09",
+      boxCapacity: 12,
+      plannedQty: null,
+    };
+    expect(deviceShiftCreate({ ...create, plannedDate: "2026-10-09" })).toStrictEqual(
+      fixture("device-shift-create-planned-date.json"),
+    );
+    expect(deviceShiftCreate(create)).toStrictEqual(fixture("device-shift-create.json"));
+    expect(deviceShiftCreateSchema.parse(fixture("device-shift-create-planned-date.json"))).toEqual(
+      fixture("device-shift-create-planned-date.json"),
+    );
+    // A host before beta 3 sends no shift date: the list and the entry still read.
+    expect(deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts[0]?.plannedDate).toBe(
+      undefined,
+    );
+    const shifts = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json")).shifts;
+    expect(shifts.map((shift) => shift.plannedDate)).toEqual(["2026-10-08", "2026-10-09"]);
+    expect(
+      enteredShiftSchema.parse(fixture("device-shift-entered-planned-date.json")).plannedDate,
+    ).toBe("2026-10-10");
+  });
+});

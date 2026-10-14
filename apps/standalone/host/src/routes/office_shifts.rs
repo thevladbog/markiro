@@ -32,7 +32,8 @@ use crate::validate;
 /// units without boxes: they are the codes it owns, each without a box
 /// (`code_owners_shift_unboxed` of `0020`); it has no boxes and no pallets.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
-     pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
+     pallets_enabled, product_id, line_id, counterparty_id, production_date, \
+     COALESCE(planned_date, production_date) AS planned_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
      pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
      validation_print_template_id, owner_device_id, \
@@ -101,6 +102,7 @@ struct ShiftRow {
     line_id: String,
     counterparty_id: Option<String>,
     production_date: String,
+    planned_date: String,
     planned_qty: Option<u32>,
     box_capacity: u32,
     box_template_id: String,
@@ -160,6 +162,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         line_id: row.line_id,
         counterparty_id: row.counterparty_id,
         production_date: row.production_date,
+        planned_date: row.planned_date,
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
         box_template_id: row.box_template_id,
@@ -208,13 +211,16 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeShif
 /// their production date on the host's clock (UTC).
 const RECENT_DAYS: i64 = 31;
 
-/// `GET /v1/office/shifts?from=&to=`: a period of production dates, both
-/// ends included; either may be left out.
+/// `GET /v1/office/shifts?from=&to=&plannedFrom=&plannedTo=`: a period of
+/// production dates and a period of shift dates (beta 3), both ends included;
+/// any end may be left out, and the two periods narrow each other.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftListQuery {
     from: Option<String>,
     to: Option<String>,
+    planned_from: Option<String>,
+    planned_to: Option<String>,
 }
 
 /// `GET /v1/office/shifts`: without a period every planned and active shift
@@ -227,7 +233,35 @@ pub async fn list_shifts(
 ) -> Result<Json<Vec<OfficeShift>>, ApiError> {
     let order = "ORDER BY production_date DESC, created_at DESC, number_month_key DESC, \
                  number_seq DESC, id";
-    let rows: Vec<ShiftRow> = if query.from.is_none() && query.to.is_none() {
+    let period = |from: &Option<String>, to: &Option<String>, names: (&str, &str)| {
+        let from = from
+            .as_deref()
+            .map(|from| validate::civil_date(names.0, from))
+            .transpose()?;
+        let to = to
+            .as_deref()
+            .map(|to| validate::civil_date(names.1, to))
+            .transpose()?;
+        if let (Some(from), Some(to)) = (from, to) {
+            if from > to {
+                return Err(ApiError::validation(
+                    names.1,
+                    "the period ends before it starts",
+                ));
+            }
+        }
+        Ok::<_, ApiError>((from, to))
+    };
+    let produced = period(&query.from, &query.to, ("from", "to"))?;
+    let planned = period(
+        &query.planned_from,
+        &query.planned_to,
+        ("plannedFrom", "plannedTo"),
+    )?;
+    let end = |bound: Option<time::Date>, open: &str| {
+        bound.map_or_else(|| open.to_owned(), shifts::civil_text)
+    };
+    let rows: Vec<ShiftRow> = if produced == (None, None) && planned == (None, None) {
         let cutoff = state.now().date() - time::Duration::days(RECENT_DAYS);
         sqlx::query_as(&format!(
             "{SELECT} WHERE status <> 'closed' OR production_date >= ? {order}"
@@ -236,29 +270,17 @@ pub async fn list_shifts(
         .fetch_all(&state.pool)
         .await
     } else {
-        let from = query
-            .from
-            .as_deref()
-            .map(|from| validate::civil_date("from", from))
-            .transpose()?;
-        let to = query
-            .to
-            .as_deref()
-            .map(|to| validate::civil_date("to", to))
-            .transpose()?;
-        if let (Some(from), Some(to)) = (from, to) {
-            if from > to {
-                return Err(ApiError::validation(
-                    "to",
-                    "the period ends before it starts",
-                ));
-            }
-        }
+        // Every row has a shift date (`0027` filled the old ones and a
+        // trigger fills a new one), so the plain column serves the index
+        // `shifts_planned_date`.
         sqlx::query_as(&format!(
-            "{SELECT} WHERE production_date >= ? AND production_date <= ? {order}"
+            "{SELECT} WHERE production_date >= ? AND production_date <= ? \
+             AND planned_date >= ? AND planned_date <= ? {order}"
         ))
-        .bind(from.map_or_else(|| "0001-01-01".to_owned(), shifts::civil_text))
-        .bind(to.map_or_else(|| "9999-12-31".to_owned(), shifts::civil_text))
+        .bind(end(produced.0, "0001-01-01"))
+        .bind(end(produced.1, "9999-12-31"))
+        .bind(end(planned.0, "0001-01-01"))
+        .bind(end(planned.1, "9999-12-31"))
         .fetch_all(&state.pool)
         .await
     }
@@ -327,6 +349,13 @@ pub async fn create_shift(
         create.pallet_template_id.as_deref(),
     )?;
     let production_date = validate::civil_date("productionDate", &create.production_date)?;
+    // Left out, the shift's date is the production date.
+    let planned_date = create
+        .planned_date
+        .as_deref()
+        .map(|date| validate::civil_date("plannedDate", date))
+        .transpose()?
+        .unwrap_or(production_date);
     validate::count("plannedQty", create.planned_qty, validate::MAX_PLANNED_QTY)?;
     validate::count(
         "boxCapacity",
@@ -375,6 +404,7 @@ pub async fn create_shift(
             line_id: &create.line_id,
             counterparty_id: create.counterparty_id.as_deref(),
             production_date,
+            planned_date,
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
@@ -394,6 +424,11 @@ pub async fn create_shift(
         "lineId": created.line_id,
         "productionDate": created.production_date,
     });
+    // Named only when it is not the production date, so the rows of shifts
+    // that have one date keep their shape (beta 3).
+    if created.planned_date != created.production_date {
+        details["plannedDate"] = json!(created.planned_date);
+    }
     // Named only by a shift that has a sheet, so the rows of shifts without
     // one keep their shape.
     if let Some(sheet_id) = &created.pallet_sheet_template_id {
@@ -475,6 +510,11 @@ pub async fn update_shift(
         .as_deref()
         .map(|date| validate::civil_date("productionDate", date))
         .transpose()?;
+    let planned_date = update
+        .planned_date
+        .as_deref()
+        .map(|date| validate::civil_date("plannedDate", date))
+        .transpose()?;
     if let Some(planned_qty) = update.planned_qty {
         validate::count("plannedQty", planned_qty, validate::MAX_PLANNED_QTY)?;
     }
@@ -498,6 +538,8 @@ pub async fn update_shift(
         .unwrap_or_else(|| current.line_id.clone());
     let production_date =
         production_date.map_or_else(|| current.production_date.clone(), shifts::civil_text);
+    let planned_date =
+        planned_date.map_or_else(|| current.planned_date.clone(), shifts::civil_text);
     let box_template_id = update
         .box_template_id
         .clone()
@@ -579,6 +621,7 @@ pub async fn update_shift(
     let fixed_changed = mode != current.mode
         || line_id != current.line_id
         || production_date != current.production_date
+        || planned_date != current.planned_date
         || box_template_id != current.box_template_id
         || box_capacity != current.box_capacity
         || counterparty_id != current.counterparty_id
@@ -657,6 +700,11 @@ pub async fn update_shift(
             json!(production_date),
         ),
         (
+            "plannedDate",
+            json!(current.planned_date),
+            json!(planned_date),
+        ),
+        (
             "boxTemplateId",
             json!(current.box_template_id),
             json!(box_template_id),
@@ -707,7 +755,7 @@ pub async fn update_shift(
     let (print_mode, print_verification, print_template_id) =
         shifts::print_columns(&validation_print);
     sqlx::query(
-        "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
+        "UPDATE shifts SET line_id = ?, production_date = ?, planned_date = ?, box_template_id = ?, \
          box_capacity = ?, planned_qty = ?, counterparty_id = ?, mode = ?, pallets_enabled = ?, \
          pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, \
          validation_print_mode = ?, validation_print_verification = ?, \
@@ -715,6 +763,7 @@ pub async fn update_shift(
     )
     .bind(&line_id)
     .bind(&production_date)
+    .bind(&planned_date)
     .bind(&box_template_id)
     .bind(box_capacity)
     .bind(planned_qty)

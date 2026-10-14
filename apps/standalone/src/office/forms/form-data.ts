@@ -175,9 +175,9 @@ export interface TaskFormInputs {
 
 /**
  * «Бланк смены» (`ShiftsService.taskFormData`), or `null` for a closed shift
- * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The standalone shift has one date
- * (stage 2a spec, question В3), so it is both the shift's date and its
- * production date; the product's photo is printed from its own bytes (a
+ * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The shift's own date («Дата смены»,
+ * beta 3) is the form's date and the production date stays its own line; the
+ * product's photo is printed from its own bytes (a
  * `data:` URL, plan ТОВ), as the cloud links its image; a validation shift's
  * duplicate print is its own policy (plan РЕЖ part B: none when the host
  * sends none); the standalone neither reprocesses earlier codes nor issues
@@ -200,7 +200,7 @@ export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTa
     imageChecksum: photo?.checksum ?? null,
     ...(photo === null ? {} : { imageSrc: `data:image/jpeg;base64,${photo.dataBase64}` }),
     lineName: line.name,
-    plannedDate: shift.productionDate,
+    plannedDate: shift.plannedDate,
     productionDate: shift.productionDate,
     plannedQty: shift.plannedQty,
     boxCapacity: shift.boxCapacity,

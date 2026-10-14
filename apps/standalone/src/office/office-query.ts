@@ -42,11 +42,22 @@ export const officeKeys = {
   /** Every list of shifts, whatever its period: a write reads them all again. */
   shifts: ["office", "shifts"],
   /** The list of shifts of a period of production dates, or the host's own list (`null`). */
-  shiftList: (period: { from: string; to: string } | null) => [
+  shiftList: (
+    period: {
+      from?: string;
+      to?: string;
+      plannedFrom?: string;
+      plannedTo?: string;
+    } | null,
+  ) => [
     "office",
     "shifts",
     period?.from ?? null,
     period?.to ?? null,
+    // A period of production dates alone keeps its key of four parts.
+    ...(period?.plannedFrom === undefined && period?.plannedTo === undefined
+      ? []
+      : [period.plannedFrom ?? null, period.plannedTo ?? null]),
   ],
   /** Every list of conflicts, whatever its filter: a review reads them all again (plan КНФ). */
   conflicts: ["office", "conflicts"],

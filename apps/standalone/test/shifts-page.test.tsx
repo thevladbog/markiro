@@ -353,6 +353,47 @@ describe("office shifts: the list", () => {
     await waitFor(() => expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN));
   });
 
+  it("lists the shift date beside the production date, and asks the host for a period of shift dates", async () => {
+    const session = shiftsSession();
+    await openShifts(session);
+    // The planned shift works on 10 October and is produced on 9 October.
+    const row = shiftRow(PLANNED.number);
+    expect(cells(PLANNED.number)[1]).toBe("09.10.2026");
+    expect(within(row).getByText("10.10.2026")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Дата смены" })).toBeTruthy();
+    pickDate("Дата смены с", "8 октября 2026");
+    expect(screen.getByText("Укажите обе даты периода. Пока показан прежний список.")).toBeTruthy();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+    pickDate("Дата смены по", "12 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText("Показаны смены с датой смены с 08.10.2026 по 12.10.2026."),
+    ).toBeTruthy();
+    // Both periods together narrow each other.
+    pickDate("Дата производства с", "1 октября 2026");
+    pickDate("Дата производства по", "9 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        from: "2026-10-01",
+        to: "2026-10-09",
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Показаны смены с датой производства с 01.10.2026 по 09.10.2026 и датой смены с 08.10.2026 по 12.10.2026.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    await screen.findByText(/Показаны запланированные и активные смены/);
+  });
+
   it("refuses a period that ends before it starts or is longer than 366 days, and asks nothing", async () => {
     const session = shiftsSession();
     await openShifts(session);
