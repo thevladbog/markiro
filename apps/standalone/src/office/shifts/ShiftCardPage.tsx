@@ -21,6 +21,7 @@ import {
 import type { OfficeBox, OfficePallet, OfficeShift, ShiftStatus } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { hasPlacard } from "../forms/form-data.js";
+import { BoxLink, PalletLink, PalletLinkOrOpen } from "../codes/PackLinks.js";
 import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { taskFormInputs } from "../forms/task-inputs.js";
@@ -395,7 +396,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const [params] = useSearchParams();
-  // A conflict's link names the loser's box (plan КНФ) until plan КРТ gives a box its card.
+  // An older link of a conflict names the loser's box here (plan КНФ); the box's card has it now.
   const [tail, setTail] = useState(() => ssccTail(params.get("box") ?? ""));
   const [page, setPage] = useState(1);
   const boxes = useOfficeQuery(officeKeys.shiftBoxes(shift.id), (api, token) =>
@@ -418,7 +419,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
     if (pallets.isError) return t("office.shiftCard.palletsUnread");
     const pallet = palletById.get(box.palletId);
     if (pallet === undefined) return t("office.shiftCard.unknownPallet");
-    return pallet.sscc === null ? t("office.shiftCard.openPallet") : ssccText(pallet.sscc);
+    return <PalletLinkOrOpen id={pallet.id} sscc={pallet.sscc} />;
   };
 
   const columns: TableColumn<OfficeBox>[] = [
@@ -426,7 +427,7 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
       key: "sscc",
       title: t("office.shiftCard.boxes.sscc"),
       mono: true,
-      render: (box) => (box.sscc === null ? t("office.shiftCard.noSscc") : ssccText(box.sscc)),
+      render: (box) => <BoxLink id={box.id} sscc={box.sscc} />,
     },
     {
       key: "units",
@@ -561,8 +562,7 @@ function ShiftPallets({ shift, at, onForm }: SectionProps) {
       key: "sscc",
       title: t("office.shiftCard.pallets.sscc"),
       mono: true,
-      render: (pallet) =>
-        pallet.sscc === null ? t("office.shiftCard.noSscc") : ssccText(pallet.sscc),
+      render: (pallet) => <PalletLink id={pallet.id} sscc={pallet.sscc} />,
     },
     {
       key: "boxes",

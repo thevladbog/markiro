@@ -11,6 +11,7 @@ import type {
   OfficeCodeItem,
 } from "../../host/code-search.js";
 import { ssccText } from "../shifts/shift-card.js";
+import { PackTextLink } from "./PackLinks.js";
 
 /** A placement's state in its phase: a code taken out is retired, one taken elsewhere wants a look. */
 export const PLACEMENT_PHASE = {
@@ -164,13 +165,24 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
       key: "box",
       title: t("office.codeSearch.table.box"),
       mono: true,
-      render: (item) => boxLabel(item, t),
+      render: (item) => (
+        <PackTextLink kind="box" id={item.boxId}>
+          {boxLabel(item, t)}
+        </PackTextLink>
+      ),
     },
     {
       key: "pallet",
       title: t("office.codeSearch.table.pallet"),
       mono: true,
-      render: (item) => palletLabel(item, t),
+      render: (item) =>
+        item.palletId === null ? (
+          palletLabel(item, t)
+        ) : (
+          <PackTextLink kind="pallet" id={item.palletId}>
+            {palletLabel(item, t)}
+          </PackTextLink>
+        ),
     },
     {
       key: "shift",
@@ -216,7 +228,11 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
               ) : (
                 <span className="shift-cell">
                   <PlacementChip state={owner.state} />
-                  <span className="shift-cell__quiet">{boxLabel(owner, t)}</span>
+                  <span className="shift-cell__quiet">
+                    <PackTextLink kind="box" id={owner.boxId}>
+                      {boxLabel(owner, t)}
+                    </PackTextLink>
+                  </span>
                 </span>
               ),
           },

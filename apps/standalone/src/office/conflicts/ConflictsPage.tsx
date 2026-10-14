@@ -139,10 +139,14 @@ export function ConflictsPage() {
           <ScanCell scan={row.loser} at={at} />
           <Link
             to={loserBoxLink(row.loser)}
-            aria-label={t("office.conflicts.loserBoxNamed", {
-              serial: row.serial,
-              number: row.loser.shiftNumber,
-            })}
+            aria-label={
+              row.loser.boxId === null
+                ? t("office.conflicts.loserBoxNamed", {
+                    serial: row.serial,
+                    number: row.loser.shiftNumber,
+                  })
+                : t("office.conflicts.loserBoxCardNamed", { serial: row.serial })
+            }
           >
             {t("office.conflicts.loserBox")}
           </Link>

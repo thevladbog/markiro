@@ -83,11 +83,11 @@ describe("the pallet list's path", () => {
   it("writes the parameters in a fixed order with the cursor last", () => {
     expect(
       palletListPath(
-        { sscc: "146006820000000402", product: "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f", fromMs: 1 },
+        { sscc: "146006820000000409", product: "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f", fromMs: 1 },
         "o~a0000000-0000-4000-8000-000000000003",
       ),
     ).toBe(
-      "/v1/office/pallets?product=6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f&fromMs=1&sscc=146006820000000402&cursor=o~a0000000-0000-4000-8000-000000000003",
+      "/v1/office/pallets?product=6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f&fromMs=1&sscc=146006820000000409&cursor=o~a0000000-0000-4000-8000-000000000003",
     );
     expect(palletListPath({}, null)).toBe("/v1/office/pallets");
   });
@@ -126,12 +126,12 @@ describe("HostApi cards", () => {
     await expect(pallet.api.getPalletCard("token", palletId)).resolves.toEqual(PALLET);
     const list = recording(PAGE);
     await expect(
-      list.api.listPallets("token", { sscc: "146006820000000402" }, null),
+      list.api.listPallets("token", { sscc: "146006820000000409" }, null),
     ).resolves.toEqual(PAGE);
     expect([...box.sent, ...pallet.sent, ...list.sent]).toEqual([
       { method: "GET", path: `/v1/office/boxes/${boxId}`, officeToken: "token" },
       { method: "GET", path: `/v1/office/pallets/${palletId}`, officeToken: "token" },
-      { method: "GET", path: "/v1/office/pallets?sscc=146006820000000402", officeToken: "token" },
+      { method: "GET", path: "/v1/office/pallets?sscc=146006820000000409", officeToken: "token" },
     ]);
   });
 

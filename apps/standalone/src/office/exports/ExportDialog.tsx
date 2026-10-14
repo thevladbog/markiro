@@ -55,6 +55,11 @@ type Outcome =
 export interface ExportDialogProps {
   /** An active or closed shift. */
   shift: OfficeShift;
+  /**
+   * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
+   * shows its row and its «XML паллеты», not the shift's formats.
+   */
+  palletId?: string;
   onClose: () => void;
 }
 
@@ -76,7 +81,7 @@ export interface ExportDialogProps {
  * What the dialog says it does goes into one polite region, where the focus
  * goes when an export starts; the focus then goes to its result.
  */
-export function ExportDialog({ shift, onClose }: ExportDialogProps) {
+export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const { t } = useTranslation();
   const formId = useId();
   const progressId = useId();
@@ -131,12 +136,17 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
       : Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const checks = plan.status === "ready" ? plan.plan.checks : [];
+  // A pallet's own dialog (plan КРТ) lists that pallet only.
+  const pallets =
+    plan.status === "ready"
+      ? plan.plan.pallets.filter((pallet) => palletId === undefined || pallet.palletId === palletId)
+      : [];
   const firstAllowed = checks.find((check) => check.refusal === null);
   const selected =
     checks.find((check) => formatKey(check.format) === chosen && check.refusal === null) ??
     firstAllowed;
   const warnings: ExportWarning[] =
-    selected === undefined
+    selected === undefined || palletId !== undefined
       ? []
       : [
           ...selected.warnings,
@@ -461,49 +471,56 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         </div>
         {plan.status === "ready" && (
           <>
-            <RadioGroup
-              label={t("office.exports.formats")}
-              name="shift-export-format"
-              disabled={busy}
-              value={selected === undefined ? "" : formatKey(selected.format)}
-              onValueChange={setChosen}
-              options={checks.map((check) => ({
-                value: formatKey(check.format),
-                disabled: check.refusal !== null,
-                label:
-                  check.refusal === null ? (
-                    check.format.label
-                  ) : (
-                    <span className="shift-cell">
-                      <span>{check.format.label}</span>
-                      <span className="shift-cell__quiet">
-                        {t(`office.exports.failures.${check.refusal}`)}
-                      </span>
-                    </span>
-                  ),
-              }))}
-            />
-            <Checkbox
-              label={t("office.exports.split")}
-              checked={split}
-              disabled={busy}
-              onCheckedChange={setSplit}
-            />
-            {split && (
-              <Input
-                label={t("office.exports.lineLimit")}
-                inputMode="numeric"
-                value={lineLimit}
-                disabled={busy}
-                {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
-                onChange={(event) => setLineLimit(event.target.value)}
-              />
+            {palletId === undefined && (
+              <>
+                <RadioGroup
+                  label={t("office.exports.formats")}
+                  name="shift-export-format"
+                  disabled={busy}
+                  value={selected === undefined ? "" : formatKey(selected.format)}
+                  onValueChange={setChosen}
+                  options={checks.map((check) => ({
+                    value: formatKey(check.format),
+                    disabled: check.refusal !== null,
+                    label:
+                      check.refusal === null ? (
+                        check.format.label
+                      ) : (
+                        <span className="shift-cell">
+                          <span>{check.format.label}</span>
+                          <span className="shift-cell__quiet">
+                            {t(`office.exports.failures.${check.refusal}`)}
+                          </span>
+                        </span>
+                      ),
+                  }))}
+                />
+                <Checkbox
+                  label={t("office.exports.split")}
+                  checked={split}
+                  disabled={busy}
+                  onCheckedChange={setSplit}
+                />
+                {split && (
+                  <Input
+                    label={t("office.exports.lineLimit")}
+                    inputMode="numeric"
+                    value={lineLimit}
+                    disabled={busy}
+                    {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
+                    onChange={(event) => setLineLimit(event.target.value)}
+                  />
+                )}
+              </>
             )}
             <p className="office-note">{t("office.exports.folderHint")}</p>
-            {plan.plan.pallets.length > 0 && (
+            {palletId !== undefined && pallets.length === 0 && (
+              <Alert tone="warn">{t("office.exports.palletUnavailable")}</Alert>
+            )}
+            {pallets.length > 0 && (
               <section aria-label={t("office.exports.pallets")}>
                 <p>{t("office.exports.pallets")}</p>
-                {plan.plan.pallets.map((pallet) => (
+                {pallets.map((pallet) => (
                   <div key={pallet.palletId} className="shift-cell">
                     <span>
                       {pallet.sscc === null
@@ -555,7 +572,11 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
   return (
     <Modal
       open
-      title={t("office.exports.title", { number: shift.number })}
+      title={
+        palletId === undefined
+          ? t("office.exports.title", { number: shift.number })
+          : t("office.exports.palletTitle", { sscc: pallets[0]?.sscc ?? "—" })
+      }
       onClose={close}
       closeLabel={t("office.common.close")}
       width="min(760px, calc(100vw - 32px))"
@@ -564,14 +585,16 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
           <Button variant="secondary" onClick={close} disabled={busy}>
             {t("office.common.close")}
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            loading={busy}
-            disabled={selected === undefined || lineLimitError !== undefined}
-          >
-            {t("office.exports.submit")}
-          </Button>
+          {palletId === undefined && (
+            <Button
+              type="submit"
+              form={formId}
+              loading={busy}
+              disabled={selected === undefined || lineLimitError !== undefined}
+            >
+              {t("office.exports.submit")}
+            </Button>
+          )}
         </>
       }
     >
