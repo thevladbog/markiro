@@ -38,25 +38,28 @@ async fn copy(app: &TestApp) -> (PathBuf, Manifest) {
 }
 
 /// Stop using the app's database as a service that stopped cleanly has:
-/// every connection closed and the WAL folded into the file (a WAL left
-/// behind is `the_commits_a_crashed_host_left_in_its_wal_count_too`). A
-/// pool's `close` can return while a connection is still on its way out,
-/// so one more connection folds the WAL in and closes, until no WAL is
-/// left. The data folder gets what a host's has: `host.json`, the folders
-/// and the lock file, released.
+/// every connection closed and the WAL folded into the file. A pool's
+/// `close` can return while a connection is still on its way out, so one
+/// more connection folds the WAL in and closes, until the WAL is gone or
+/// empty after a checkpoint that was not busy: in that case everything is in
+/// the main file, and an empty `-wal` that a lingering connection keeps open
+/// (seen about once in 150 stops on a busy machine) holds nothing. The data
+/// folder gets what a host's has: `host.json`, the folders and the lock
+/// file, released.
 async fn stop(app: &TestApp) -> HostPaths {
     app.state.pool.close().await;
     let db = app.dir().join("host.db");
     let wal = app.dir().join("host.db-wal");
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
             let mut conn = markiro_host::db::options(&db).connect().await.unwrap();
-            sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-                .execute(&mut conn)
+            let (busy, _, _): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+                .fetch_one(&mut conn)
                 .await
                 .unwrap();
             conn.close().await.unwrap();
-            if !wal.exists() {
+            let emptied = std::fs::metadata(&wal).map_or(true, |meta| meta.len() == 0);
+            if busy == 0 && emptied {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
