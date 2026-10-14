@@ -176,10 +176,17 @@ office's list and a device's cursor), the partial `fact_receipts_rejected`
 and `box_exceptions_shift`/`pallet_exceptions_shift`. None is on `scans` or
 `code_owners`: plan РЕЖ rebuilds both tables (and `code_conflicts`, in the
 shape of `0010`) and recreates only its own and the code search's indexes.
-So РЕЖ's `0020` must run before `0022`: a host that applied `0022` first
-would lose `kind`, `reviewed_by` and the two indexes when sqlx applies the
-lower `0020` late, and every fact that meets a conflict would then fail;
-merge РЕЖ first, or give its rebuild the columns of `0022`.
+So РЕЖ's `0020` must run before `0022`, and it does on every database: a
+fresh one applies them in order, and a host older than both has neither, so
+`0022` adds its columns after the rebuild (`0020` is not edited to carry them).
+The constraint is on builds: none may ship `0022` without `0020`, because a
+database that applied `0022` first would lose `kind`, `reviewed_by` and the
+two indexes when sqlx applies the lower `0020` late, and every fact that meets
+a conflict would then fail (a development database that did so is thrown
+away). `tests/migration_conflict_review_order.rs` migrates a `0019` database
+with a late and a displaced conflict through the whole `MIGRATOR`: every row
+stays, `kind` follows the loser's receipt, `reviewed_by` is empty, and the
+indexes of both migrations exist.
 
 ## Local database
 
@@ -5575,6 +5582,15 @@ Plan КНФ (parity spec §5.2, pilot spec §7).
   The office reads both sides live: the host never deletes a shift or a box
   its scans name (foreign keys; only a planned shift can be deleted), so they
   stay readable without a snapshot, unlike the station's copies.
+  A scan with no box (a validation shift's, plan РЕЖ) takes part on either
+  side: the loser's cell says «Без короба», offers no «Короб проигравшего»
+  link (the shift's own link is there), and a displacement of one reads «этот
+  скан его потерял», not «из короба он ушёл» (`conflictKindKey`). On the
+  station, `floor_displacements.box_id` is NULL for it and the queue screen
+  says «Без короба» and «проверьте изделие» (`DisplacedRecord.boxed`), where a
+  boxed one says «проверьте короб». A validation shift's card shows its
+  refused records and conflicts but not «Исключения»: box and pallet
+  exceptions it cannot have.
 - A shift's exceptions and refused records each answer at most 500 rows,
   newest first, with `total`. An undo's serial is its code's (any scan of the
   hash). Refusals the host could not tie to a shift (`unknown_shift`,
