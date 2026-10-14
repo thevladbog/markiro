@@ -625,6 +625,9 @@ async fn check_copy(conn: &mut SqliteConnection) -> Result<i64, BoxError> {
 struct Floors {
     counters: BTreeMap<(String, i64), i64>,
     shift_numbers: BTreeMap<String, i64>,
+    /// The last disaggregation document number issued (plan ДЗГ): the
+    /// counter's, or the highest number a document holds.
+    disaggregation_seq: Option<i64>,
     audit_sequence: Option<i64>,
 }
 
@@ -637,6 +640,7 @@ impl Floors {
         for (key, value) in other.shift_numbers {
             raise_to(&mut self.shift_numbers, key, value);
         }
+        self.disaggregation_seq = self.disaggregation_seq.max(other.disaggregation_seq);
         self.audit_sequence = self.audit_sequence.max(other.audit_sequence);
     }
 }
@@ -817,6 +821,21 @@ async fn read_floors(conn: &mut SqliteConnection) -> Result<Floors, sqlx::Error>
         for (month, last) in rows {
             raise_to(&mut floors.shift_numbers, month, last);
         }
+    }
+    // A copy from before migration `0024` has neither table.
+    if tables.contains("disaggregation_doc_counters") {
+        let last: Option<i64> =
+            sqlx::query_scalar("SELECT last_seq FROM disaggregation_doc_counters")
+                .fetch_optional(&mut *conn)
+                .await?;
+        floors.disaggregation_seq = floors.disaggregation_seq.max(last);
+    }
+    if tables.contains("disaggregation_documents") {
+        let highest: Option<i64> =
+            sqlx::query_scalar("SELECT max(seq) FROM disaggregation_documents")
+                .fetch_one(&mut *conn)
+                .await?;
+        floors.disaggregation_seq = floors.disaggregation_seq.max(highest);
     }
     if tables.contains("audit_log") {
         let newest: Option<i64> = sqlx::query_scalar("SELECT max(id) FROM audit_log")
@@ -2525,6 +2544,18 @@ async fn raise_in(
             from,
             to,
         });
+    }
+    // The office's document numbers, as the shift numbers: one printed on an
+    // act after the copy must never be issued a second time.
+    if let Some(floor) = copy_floors
+        .disaggregation_seq
+        .max(known.disaggregation_seq)
+        .filter(|seq| *seq > 0)
+    {
+        sqlx::query("UPDATE disaggregation_doc_counters SET last_seq = ?1 WHERE id = 1")
+            .bind(floor + SHIFT_NUMBER_MARGIN)
+            .execute(&mut *tx)
+            .await?;
     }
     let carried = match revoked {
         Some(revoked) => Some(carry_revocations(&mut *tx, revoked, revision).await?),
