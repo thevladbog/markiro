@@ -132,8 +132,8 @@ export const INSERT_JOB_SQL =
   "template_rev, fields, operator_id, created_at, updated_at) " +
   "VALUES (?, ?, ?, ?, ?, ?, 1, 'prepared', ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-/** A job as the station keeps it (`floor_unit_labels`), its label's bytes included. */
-export interface UnitLabelJob {
+/** A job as the station keeps it (`floor_unit_labels`), without its label's bytes («История этикеток»). */
+export interface UnitLabelEntry {
   id: string;
   shiftId: string;
   /** The code's `kmHash`, without its crypto tail. */
@@ -150,7 +150,6 @@ export interface UnitLabelJob {
   /** The printer language of RAW bytes; `null` for a Windows driver's page. */
   language: PrinterLanguage | null;
   dpi: PrinterDpi;
-  bytesBase64: string;
   bytesDigest: string;
   payloadDigest: string;
   templateId: string;
@@ -162,7 +161,12 @@ export interface UnitLabelJob {
   updatedAt: string;
 }
 
-const jobRow = z.object({
+/** A job with its label's bytes (a send, a reprint and the recovery need them). */
+export interface UnitLabelJob extends UnitLabelEntry {
+  bytesBase64: string;
+}
+
+const entryRow = z.object({
   id: z.string(),
   shift_id: z.string(),
   code_hash: z.string(),
@@ -184,12 +188,13 @@ const jobRow = z.object({
   operator_id: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
-  bytes_base64: z.string(),
 });
+
+const jobRow = entryRow.extend({ bytes_base64: z.string() });
 
 const fieldsSchema = z.record(z.string(), z.string());
 
-function toJob(row: z.infer<typeof jobRow>): UnitLabelJob {
+function toEntry(row: z.infer<typeof entryRow>): UnitLabelEntry {
   return {
     id: row.id,
     shiftId: row.shift_id,
@@ -204,7 +209,6 @@ function toJob(row: z.infer<typeof jobRow>): UnitLabelJob {
     printMode: row.print_mode,
     language: row.language,
     dpi: row.dpi,
-    bytesBase64: row.bytes_base64,
     bytesDigest: row.bytes_digest,
     payloadDigest: row.payload_digest,
     templateId: row.template_id,
@@ -214,6 +218,10 @@ function toJob(row: z.infer<typeof jobRow>): UnitLabelJob {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function toJob(row: z.infer<typeof jobRow>): UnitLabelJob {
+  return { ...toEntry(row), bytesBase64: row.bytes_base64 };
 }
 
 /** One job of the pairing, or `null`. */
@@ -233,6 +241,21 @@ export async function readUnresolvedUnitLabel(
 ): Promise<UnitLabelJob | null> {
   const [row] = await local.query(UNRESOLVED_JOB_SQL, [pairing.hostId, pairing.deviceId], jobRow);
   return row === undefined ? null : toJob(row);
+}
+
+/** The shift's jobs for «История этикеток», newest first, at most `limit`, without their bytes. */
+export async function readShiftUnitLabels(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+  limit: number,
+): Promise<UnitLabelEntry[]> {
+  const rows = await local.query(
+    SHIFT_JOBS_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId, limit],
+    entryRow,
+  );
+  return rows.map(toEntry);
 }
 
 /** The pairing's jobs left in `sending`. */

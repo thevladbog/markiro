@@ -29,7 +29,11 @@ import {
   SHIFT_STOCK_SQL,
   UNSENT_COUNT_SQL,
 } from "../src/floor/outbox-status.js";
-import { CLOSE_SUMMARY_SQL, REFUSED_CLOSES_SQL } from "../src/floor/close/shift-close.js";
+import {
+  CLOSE_SUMMARY_SQL,
+  REFUSED_CLOSES_SQL,
+  SHIFT_UNRESOLVED_UNIT_LABEL_SQL,
+} from "../src/floor/close/shift-close.js";
 import {
   BOX_ONTO_PALLET_SQL,
   CLOSE_PALLET_SQL,
@@ -2117,6 +2121,9 @@ describe("the unit label jobs' statements (migration 0015)", () => {
     // The recovery at start: the pairing's sending jobs, through their own partial index.
     [SENDING_JOBS_SQL, "floor_unit_labels_sending (host_id=? AND device_id=?)"],
     [UNIT_LABEL_MOVE_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
+    // The close's summary (task B6): the shift's unresolved label, asked through the pairing's
+    // one unresolved job (`INDEXED BY`), never the shift's every job.
+    [SHIFT_UNRESOLVED_UNIT_LABEL_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=?)"],
   ];
 
   it("search an index, never a whole table, and sort nothing of their own", () => {

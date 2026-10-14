@@ -597,9 +597,12 @@ export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
 
 /**
  * The body of every shift entry this station sends (`shift-enter.json`, plan
- * РЕЖ): it works validation shifts, so the host lets it enter one.
+ * РЕЖ): it works validation shifts, and prints their Data Matrix duplicate
+ * (part B, task B6), so the host lets it enter both.
  */
-export const STATION_SHIFT_ENTER: ShiftEnter = { supports: [SHIFT_SUPPORTS.validation] };
+export const STATION_SHIFT_ENTER: ShiftEnter = {
+  supports: [SHIFT_SUPPORTS.validation, SHIFT_SUPPORTS.validationDmDuplicate],
+};
 
 /** What a station's new shift carries: the operator's choices and the request's id. */
 export interface DeviceShiftInput {

@@ -1,4 +1,4 @@
-import { formatSsccHri, type ShiftCloseReasonCode } from "@markiro/domain";
+import { formatSsccHri, type ReprintReason, type ShiftCloseReasonCode } from "@markiro/domain";
 import type { TFunction } from "i18next";
 import {
   useCallback,
@@ -93,10 +93,37 @@ import {
 import type { PrintRuntime } from "../print/print-runtime.js";
 import { shiftLabelRender } from "../print/shift-render.js";
 import type { ScanSource } from "../scan-source.js";
-import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import { readWorkstationSettings, resolvePrinter } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
+import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
+import {
+  readShiftUnitLabels,
+  readUnitLabelJob,
+  readUnresolvedUnitLabel,
+  type UnitLabelEntry,
+  type UnitLabelJob,
+} from "../unit-labels/unit-label-store.js";
+import {
+  canAcceptNext,
+  recoverUnitLabels,
+  reprintUnitLabel,
+  sendUnitLabel,
+  skipVerification,
+  StaleUnitLabelError,
+  UnitLabelRefusedError,
+  UnitLabelStateError,
+  verifyUnitLabel,
+  type UnitLabelPrintContext,
+} from "../unit-labels/unit-label-work.js";
+import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
+import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
+import {
+  UnitLabelVerification,
+  type UnitLabelNote,
+  type UnitLabelWindow,
+} from "../unit-labels/UnitLabelVerification.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
 import {
   BOX_EXTENSION,
@@ -245,6 +272,11 @@ export interface WorkScreenProps {
   onSetup?: () => void;
   /** How a label is rendered; the app's rasterizer by default. */
   render?: RenderLabel;
+  /**
+   * How a unit's Data Matrix duplicate is rendered (plan РЕЖ part B); the
+   * app's own (`unitLabelRender`, from the shift's snapshot) by default.
+   */
+  unitLabelRender?: RenderUnitLabel;
   /** The label panel's clock (milliseconds, never going back); tests drive it. */
   labelClock?: () => number;
   /**
@@ -321,7 +353,28 @@ type Stop =
       attempt: number;
     }
   /** The shift is closed on this station: the end of its work screen, no scan is taken again. */
-  | { kind: "closed"; record: ClosedNumbers };
+  | { kind: "closed"; record: ClosedNumbers }
+  /**
+   * The station's unit label waits (plan РЕЖ part B, task B6): its window over
+   * the work, as long as the label is unresolved, another shift's label stands
+   * in the way, no duplicate printer is assigned, or the label could not be
+   * read. A scan goes to the printed label's check, or is refused.
+   */
+  | { kind: "unit_label"; view: UnitView }
+  /**
+   * «История этикеток» of a shift that prints the duplicate, in place of the
+   * exceptions: `entries` once read; `failed` — not read, or a reprint not done;
+   * `blocked` — an unresolved label waits, and no other is printed again.
+   */
+  | {
+      kind: "unit_history";
+      entries: readonly UnitLabelEntry[] | null;
+      failed: boolean;
+      blocked: boolean;
+    };
+
+/** The window of a unit label, its job read whole (a check, a skip and a send need it). */
+type UnitView = { kind: "job"; job: UnitLabelJob } | Exclude<UnitLabelWindow, { kind: "job" }>;
 
 /** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
 function outcomeOf(error: unknown): ExceptionOutcome {
@@ -349,7 +402,13 @@ type Last =
   | ScanOutcome
   | { kind: "paused"; leaving: boolean }
   | { kind: "shift_closed" }
-  | { kind: "office_closed" };
+  | { kind: "office_closed" }
+  /**
+   * A unit of a shift that prints the duplicate, refused before anything was
+   * written (plan РЕЖ part B): its code has no crypto tail to duplicate, or its
+   * label does not render for the duplicate printer.
+   */
+  | { kind: "unit_refused"; reason: "incomplete_km" | "render_failed" };
 
 /** How long the coloured flash of a refusal covers the screen (an accepted scan has none). */
 export const SIGNAL_MS = 700;
@@ -414,6 +473,12 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
       return t("floor.work.last.closed");
     case "office_closed":
       return t("floor.work.last.officeClosed");
+    case "unit_refused":
+      return t(
+        last.reason === "incomplete_km"
+          ? "floor.unitLabels.invalid"
+          : "floor.unitLabels.renderFailed",
+      );
   }
 }
 
@@ -429,6 +494,7 @@ function lastTone(last: Last | null): LastTone {
     case "duplicate":
     case "wrong_gtin":
     case "invalid":
+    case "unit_refused":
       return "error";
     case "paused":
     case "shift_closed":
@@ -466,6 +532,7 @@ interface Live {
   printing: PrintRuntime;
   operatorName: string;
   render: RenderLabel | undefined;
+  unitLabelRender: RenderUnitLabel | undefined;
   t: TFunction;
 }
 
@@ -517,8 +584,33 @@ function scanContextOf(live: LiveRef): ScanContext {
     online: () => live.current.online,
     checkCode: now.checkCode,
     onHostError: (error) => live.current.onHostError(error),
+    // A unit's label (plan РЕЖ part B) prints the operator who accepted it.
+    unitLabel: {
+      operatorName: now.operatorName,
+      ...(now.unitLabelRender === undefined ? {} : { render: now.unitLabelRender }),
+    },
   };
 }
+
+/** The context of a unit label's send, check, skip, reprint and recovery (plan РЕЖ part B). */
+function unitContextOf(live: LiveRef): UnitLabelPrintContext {
+  const now = live.current;
+  return {
+    local: now.local,
+    pairing: pairingOf(now),
+    runtime: now.printing,
+    now: () => new Date(),
+    newId: () => crypto.randomUUID(),
+  };
+}
+
+/** Whether `shift` is a validation shift that prints the Data Matrix duplicate (plan РЕЖ part B). */
+function printsUnitLabels(shift: WorkShift): boolean {
+  return shift.copy.mode === "validation" && shift.snapshot.validationPrint !== null;
+}
+
+/** How many of a shift's labels «История этикеток» lists, newest first. */
+const HISTORY_ROWS = 100;
 
 /**
  * The context of one of the screen's block supplies — the box's (extension 0)
@@ -731,6 +823,16 @@ export function WorkScreen(props: WorkScreenProps) {
   // takes its codes without a box, so it has no box, pallet, label, exceptions or SSCC serials;
   // its panel stands where the box does. The mode never changes once the shift is open.
   const validation = shift.copy.mode === "validation";
+  // A validation shift that prints the Data Matrix duplicate (plan РЕЖ part B): its label panel
+  // under the validation panel, the window of its label, and «История этикеток» in place of the
+  // exceptions. The policy is the snapshot's, frozen when the shift opened.
+  const printPolicy = validation ? shift.snapshot.validationPrint : null;
+  const printing = printPolicy !== null;
+  // The shift's current unit label (the unresolved one, else the newest) and what its window says.
+  const [unitJob, setUnitJob] = useState<UnitLabelEntry | null>(null);
+  const [unitNote, setUnitNote] = useState<UnitLabelNote | null>(null);
+  const [unitBusy, setUnitBusy] = useState(false);
+  const unitDeciding = useRef(false);
   // The shift's pallets (plan ПЛ-Ц): what its copy and snapshot give. A shift that
   // works with pallets and gives none is a stop from the first render, never boxes alone.
   const pallets = validation ? null : shiftPallets(shift);
@@ -787,6 +889,7 @@ export function WorkScreen(props: WorkScreenProps) {
     printing: props.printing,
     operatorName: props.operator.name,
     render,
+    unitLabelRender: props.unitLabelRender,
     t,
   };
   const live = useRef(latest);
@@ -1035,6 +1138,268 @@ export function WorkScreen(props: WorkScreenProps) {
       setStop({ kind: "system_error", cause: "label" });
     }
   }, [settleLabel, setStop]);
+
+  /**
+   * What the station's unit labels need (plan РЕЖ part B, task B6) — on entry,
+   * after a unit's label went, after its check and after every decision on it:
+   * the label panel's job (this shift's unresolved one, else its newest) and
+   * the window, which stands while the station's unresolved label waits (one
+   * of another shift stands in the way, as the cloud's `PRODUCT_LABEL_BUSY`),
+   * or while no duplicate printer is assigned where a new unit would need one
+   * (not in a shift the office closed: it takes no unit). `recover`: the sends
+   * a stop of the app cut become unknown first (`recoverUnitLabels`, which must
+   * never run beside a send of this app: only from the work queue). Nothing
+   * here sends a label. It replaces no stop but its own window.
+   */
+  const settleUnit = useCallback(
+    async (recover: boolean): Promise<void> => {
+      const now = live.current;
+      const pairing = pairingOf(now);
+      const shiftId = now.shift.copy.id;
+      if (recover) {
+        const recovered = await recoverUnitLabels(unitContextOf(live), now.operatorId);
+        if (recovered.length > 0) now.onRecorded();
+      }
+      const waiting = await readUnresolvedUnitLabel(now.local, pairing);
+      const [newest] = await readShiftUnitLabels(now.local, pairing, shiftId, 1);
+      const gate = canAcceptNext(waiting, shiftId);
+      let view: UnitView | null = null;
+      if (gate.kind === "another_shift") view = { kind: "another_shift" };
+      else if (gate.kind !== "accept") view = { kind: "job", job: gate.job };
+      else if (
+        !live.current.officeClosed &&
+        resolvePrinter(await readWorkstationSettings(now.local), "duplicate") === null
+      ) {
+        view = { kind: "printer" };
+      }
+      if (alive.current) {
+        setUnitJob(waiting !== null && waiting.shiftId === shiftId ? waiting : (newest ?? null));
+      }
+      const stopped = stopRef.current;
+      if (view !== null) {
+        if (stopped === null || stopped.kind === "unit_label")
+          setStop({ kind: "unit_label", view });
+      } else if (stopped?.kind === "unit_label") {
+        setStop(null);
+      }
+    },
+    [setStop],
+  );
+
+  /** `settleUnit`, whose failure stops the line with the window's own words. */
+  const settleUnitSafely = useCallback(
+    async (recover: boolean): Promise<void> => {
+      try {
+        await settleUnit(recover);
+      } catch {
+        setStop({ kind: "unit_label", view: { kind: "storage" } });
+      }
+    },
+    [settleUnit, setStop],
+  );
+
+  /**
+   * The send of a unit's label that is `prepared` — the one an accepted unit
+   * made, the operator's reprint, or one saved before a restart that the
+   * operator sends: one send, `sending` written before the bytes go (B5's
+   * `sendUnitLabel`). A job that moved on meanwhile is read again by the
+   * settling that follows; any other failure is the caller's. Only from the
+   * work queue.
+   */
+  const sendUnit = useCallback(async (job: UnitLabelJob): Promise<void> => {
+    if (alive.current) {
+      setSending(true);
+      setUnitJob(job);
+    }
+    try {
+      const sent = await sendUnitLabel(unitContextOf(live), job, live.current.operatorId);
+      live.current.onRecorded();
+      if (alive.current) setUnitJob(sent);
+    } catch (error) {
+      if (!(error instanceof StaleUnitLabelError || error instanceof UnitLabelStateError)) {
+        throw error;
+      }
+    } finally {
+      if (alive.current) setSending(false);
+    }
+  }, []);
+
+  /**
+   * A scan while the unit label's check waits (a required check after the
+   * send, or an unknown outcome): the printed label's code against the job's
+   * (B5's `verifyUnitLabel`). The label's own code resolves it, and the window
+   * goes; another code or an unreadable one is said in the window and by tone,
+   * the check still waiting. It never reaches the pipeline and journals no
+   * scan. Only from the work queue.
+   */
+  const verifyUnit = useCallback(
+    async (job: UnitLabelJob, raw: string): Promise<void> => {
+      const say = live.current.t;
+      let result: Awaited<ReturnType<typeof verifyUnitLabel>>;
+      try {
+        result = await verifyUnitLabel(unitContextOf(live), job, raw, live.current.operatorId);
+      } catch (error) {
+        if (!(error instanceof StaleUnitLabelError || error instanceof UnitLabelStateError)) {
+          throw error;
+        }
+        // Not this check's label any more: the label as it is now.
+        setUnitNote(null);
+        await settleUnit(false);
+        return;
+      }
+      live.current.onRecorded();
+      if (result.kind === "verified") {
+        setUnitNote(null);
+        show("ok", say("floor.unitLabels.verified"), null);
+        await settleUnit(false);
+        return;
+      }
+      setUnitNote(result.kind);
+      show("error", say(`floor.unitLabels.${result.kind}`), null);
+      if (stopRef.current?.kind === "unit_label") {
+        setStop({ kind: "unit_label", view: { kind: "job", job: result.job } });
+      }
+    },
+    [settleUnit, show, setStop],
+  );
+
+  /**
+   * A decision on the unit label, as the line's next piece of work handed to
+   * the gate before it starts (as `decide` for a box's label): the window
+   * waits while it runs; then the label is read again and its window shows
+   * where it ended. A job that moved on, or another label in the way, writes
+   * nothing and is read again (in «История этикеток» it is said there); any
+   * other failure is said in the window as the label is read again. A second
+   * press while one runs, and any press once the leave began, does nothing.
+   */
+  const decideUnit = (work: () => Promise<void>) => {
+    if (unitDeciding.current || leavingNow()) return;
+    unitDeciding.current = true;
+    setUnitBusy(true);
+    setUnitNote(null);
+    void live.current
+      .track(
+        queue.run(async () => {
+          let failed = false;
+          try {
+            await work();
+          } catch (error) {
+            const refused =
+              error instanceof StaleUnitLabelError ||
+              error instanceof UnitLabelStateError ||
+              error instanceof UnitLabelRefusedError;
+            const stopped = stopRef.current;
+            if (stopped?.kind === "unit_history") setStop({ ...stopped, failed: true });
+            else failed = !refused;
+          } finally {
+            unitDeciding.current = false;
+            if (alive.current) setUnitBusy(false);
+          }
+          await settleUnitSafely(false);
+          if (failed && stopRef.current?.kind === "unit_label") setUnitNote("failed");
+          await refreshQuietly();
+        }),
+      )
+      // The focus is the window's while it stands (it moves it itself when a view drops the
+      // button pressed) and goes somewhere safe when it goes (the effect over `unitStop`).
+      .catch(() => setStop({ kind: "unit_label", view: { kind: "storage" } }));
+  };
+
+  /** The unit label's job, read whole and fresh in the queue's turn. */
+  const unitJobNow = async (jobId: string): Promise<UnitLabelJob> => {
+    const now = live.current;
+    const job = await readUnitLabelJob(now.local, pairingOf(now), jobId);
+    if (job === null) throw new StaleUnitLabelError(jobId);
+    return job;
+  };
+
+  /** The window's job, or nothing to decide on. */
+  const windowJob = (): UnitLabelJob | null => {
+    const stopped = stopRef.current;
+    return stopped?.kind === "unit_label" && stopped.view.kind === "job" ? stopped.view.job : null;
+  };
+
+  /** «Пропустить проверку»: only after the label went to the printer (B5's `skipVerification`). */
+  const skipUnit = () => {
+    const job = windowJob();
+    if (job === null) return;
+    decideUnit(async () => {
+      await skipVerification(
+        unitContextOf(live),
+        await unitJobNow(job.id),
+        live.current.operatorId,
+      );
+      live.current.onRecorded();
+    });
+  };
+
+  /** «Отправить сохранённую этикетку»: the first send of a label prepared before a restart. */
+  const sendPreparedUnit = () => {
+    const job = windowJob();
+    if (job === null) return;
+    decideUnit(async () => sendUnit(await unitJobNow(job.id)));
+  };
+
+  /**
+   * The label `jobId` printed again with the operator's reason: a new attempt
+   * of the same bytes (B5's `reprintUnitLabel`), sent at once as the cloud's
+   * reprint is; «История этикеток» closes once it is written.
+   */
+  const reprintUnit = (jobId: string, reason: ReprintReason) =>
+    decideUnit(async () => {
+      const prepared = await reprintUnitLabel(
+        unitContextOf(live),
+        await unitJobNow(jobId),
+        reason,
+        live.current.operatorId,
+      );
+      live.current.onRecorded();
+      if (stopRef.current?.kind === "unit_history") setStop(null);
+      await sendUnit(prepared);
+    });
+
+  /** «Повторить»: the label read again; a send this app lost becomes unknown first, nothing sent. */
+  const retryUnit = () =>
+    decideUnit(async () => {
+      const recovered = await recoverUnitLabels(unitContextOf(live), live.current.operatorId);
+      if (recovered.length > 0) live.current.onRecorded();
+    });
+
+  /** «Пауза»: out of the shift; the label is kept for the next entry, where its window opens. */
+  const pauseUnit = () => {
+    if (!leavingNow()) onLeave();
+  };
+
+  /**
+   * «История этикеток», opened while nothing stops the work, as the line's
+   * next piece of work: the shift's labels, newest first, and whether an
+   * unresolved label holds every reprint back.
+   */
+  const openHistory = () => {
+    if (leavingNow() || stopRef.current !== null) return;
+    setStop({ kind: "unit_history", entries: null, failed: false, blocked: false });
+    void live.current
+      .track(
+        queue.run(async () => {
+          const now = live.current;
+          const entries = await readShiftUnitLabels(
+            now.local,
+            pairingOf(now),
+            now.shift.copy.id,
+            HISTORY_ROWS,
+          );
+          const blocked = (await readUnresolvedUnitLabel(now.local, pairingOf(now))) !== null;
+          if (stopRef.current?.kind === "unit_history") {
+            setStop({ kind: "unit_history", entries, failed: false, blocked });
+          }
+        }),
+      )
+      .catch(() => {
+        if (stopRef.current?.kind === "unit_history") {
+          setStop({ kind: "unit_history", entries: [], failed: true, blocked: true });
+        }
+      });
+  };
 
   /**
    * The full open pallet's close (`closePalletIfFull`, plan ПЛ-Ц), a serial
@@ -1303,22 +1668,26 @@ export function WorkScreen(props: WorkScreenProps) {
     setPendingClose,
   ]);
 
+  /** One outcome of a validation shift's scan into its panel's list (plan РЕЖ), newest first. */
+  const sayOutcome = useCallback((scannedAt: string, text: string, tone: LastTone) => {
+    if (live.current.shift.copy.mode !== "validation" || !alive.current) return;
+    outcomeId.current += 1;
+    const said: ValidationOutcome = {
+      id: outcomeId.current,
+      time: scanTime(scannedAt),
+      text,
+      tone,
+    };
+    setOutcomes((before) => [said, ...before].slice(0, VALIDATION_OUTCOMES));
+  }, []);
+
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
       const say = live.current.t;
       const boxCapacity = live.current.shift.copy.boxCapacity;
       const text = lastText(outcome, say, boxCapacity);
       setLast(outcome);
-      if (live.current.shift.copy.mode === "validation" && alive.current) {
-        outcomeId.current += 1;
-        const said: ValidationOutcome = {
-          id: outcomeId.current,
-          time: scanTime(outcome.scannedAt),
-          text,
-          tone: lastTone(outcome),
-        };
-        setOutcomes((before) => [said, ...before].slice(0, VALIDATION_OUTCOMES));
-      }
+      sayOutcome(outcome.scannedAt, text, lastTone(outcome));
       if (outcome.kind === "accepted") {
         show("ok", say("floor.work.signal.ok"), text);
         if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
@@ -1348,7 +1717,7 @@ export function WorkScreen(props: WorkScreenProps) {
       // A validation shift's panel counts the refused scans too (plan РЕЖ).
       if (live.current.shift.copy.mode === "validation") await refreshQuietly();
     },
-    [closeBox, refreshQuietly, show],
+    [closeBox, refreshQuietly, show, sayOutcome],
   );
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
@@ -1364,6 +1733,30 @@ export function WorkScreen(props: WorkScreenProps) {
       show("error", say("floor.work.signal.paused"), lastText(refused, say, 0));
     },
     [show],
+  );
+
+  /**
+   * A unit refused by its label before anything was written (B5's
+   * `UnitLabelRefusedError`): a code without its crypto tail, or a label that
+   * does not render for the duplicate printer, is said as the scan's outcome;
+   * the station's label in the way (this shift's or another's) or no duplicate
+   * printer is refused in words, and the label's window opens.
+   */
+  const unitRefused = useCallback(
+    async (error: UnitLabelRefusedError): Promise<void> => {
+      if (error.code === "incomplete_km" || error.code === "render_failed") {
+        const say = live.current.t;
+        const refused: Last = { kind: "unit_refused", reason: error.code };
+        const text = lastText(refused, say, 0);
+        setLast(refused);
+        sayOutcome(new Date().toISOString(), text, "error");
+        show("error", say("floor.work.signal.invalid"), text);
+        return;
+      }
+      refuse(false);
+      await settleUnitSafely(false);
+    },
+    [refuse, show, sayOutcome, settleUnitSafely],
   );
 
   /**
@@ -1451,6 +1844,27 @@ export function WorkScreen(props: WorkScreenProps) {
         }
         return;
       }
+      // The unit label's window takes the printed label's scan while its check waits (plan РЕЖ
+      // part B) — in a shift the office closed too, whose label is finished — and refuses any
+      // other scan in words: nothing reaches the pipeline, nothing is journalled.
+      if (stopped?.kind === "unit_label") {
+        const view = stopped.view;
+        if (
+          view.kind === "job" &&
+          !unitDeciding.current &&
+          canAcceptNext(view.job, live.current.shift.copy.id).kind === "verify"
+        ) {
+          try {
+            await verifyUnit(view.job, raw);
+          } catch {
+            setStop({ kind: "unit_label", view: { kind: "storage" } });
+            show("error", live.current.t("floor.work.signal.systemError"), null);
+          }
+          return;
+        }
+        refuse(false);
+        return;
+      }
       if (stopped !== null) {
         refuse(false, stopped.kind === "closed");
         return;
@@ -1471,7 +1885,12 @@ export function WorkScreen(props: WorkScreenProps) {
       let outcome: ScanOutcome;
       try {
         outcome = await processScan(scanContextOf(live), raw);
-      } catch {
+      } catch (error) {
+        // A unit of a shift that prints the duplicate, refused before anything was written.
+        if (error instanceof UnitLabelRefusedError) {
+          await unitRefused(error);
+          return;
+        }
         setStop({ kind: "system_error", cause: "write" });
         const say = live.current.t;
         show("error", say("floor.work.signal.systemError"), null);
@@ -1479,8 +1898,29 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       live.current.onRecorded();
       await settle(outcome);
+      // The accepted unit's label goes at once (its first send), and its window follows it.
+      if (outcome.kind === "accepted" && outcome.boxId === null && outcome.label !== undefined) {
+        try {
+          await sendUnit(outcome.label);
+        } catch {
+          // The label as it is now is read next; the window says the send was not saved.
+          setUnitNote("failed");
+        }
+        await settleUnitSafely(false);
+      }
     },
-    [check, closeBox, refuse, settle, setStop, show],
+    [
+      check,
+      closeBox,
+      refuse,
+      settle,
+      setStop,
+      show,
+      verifyUnit,
+      sendUnit,
+      settleUnitSafely,
+      unitRefused,
+    ],
   );
 
   /**
@@ -1930,13 +2370,30 @@ export function WorkScreen(props: WorkScreenProps) {
     exceptionsWere.current = exceptionsOpen;
   }, [exceptionsOpen, stop, exceptionsFrom]);
 
+  // «Назад» from «История этикеток»: the focus returns to its button. The unit label's window
+  // gone (resolved, or the work went on): the focus goes somewhere safe, as after any answer.
+  const unitStop = stop?.kind === "unit_history" || stop?.kind === "unit_label" ? stop.kind : null;
+  const unitStopWas = useRef<typeof unitStop>(null);
+  useEffect(() => {
+    const was = unitStopWas.current;
+    unitStopWas.current = unitStop;
+    if (was === null || unitStop !== null || stop !== null) return;
+    if (was === "unit_history") {
+      actionsRef.current
+        ?.querySelector<HTMLButtonElement>('[data-action="unit-history"]:not(:disabled)')
+        ?.focus();
+    } else refocus();
+  }, [unitStop, stop, refocus]);
+
   /** The work goes on, after the label that may wait is read again (its panel takes the screen). */
   const resumeWork = () => {
     if (leavingNow()) return;
     void live.current
       .track(
         queue.run(async () => {
-          await settleSafely();
+          // A shift that prints the duplicate has unit labels, never a box's (plan РЕЖ part B).
+          if (printsUnitLabels(live.current.shift)) await settleUnitSafely(false);
+          else await settleSafely();
           await refreshQuietly();
         }),
       )
@@ -1981,9 +2438,13 @@ export function WorkScreen(props: WorkScreenProps) {
           await refresh();
           // Pallets that are missing stop the work before anything is written.
           if (stopRef.current?.kind === "pallets_missing") return;
-          // A validation shift prints nothing and has no box (plan РЕЖ): nothing to recover,
-          // settle or close.
-          if (live.current.shift.copy.mode === "validation") return;
+          // A validation shift has no box (plan РЕЖ): nothing of a box to recover, settle or
+          // close. One that prints the duplicate (part B) recovers its unit labels' sends the
+          // app lost, and opens the window of the station's label that waits, at once.
+          if (live.current.shift.copy.mode === "validation") {
+            if (printsUnitLabels(live.current.shift)) await settleUnitSafely(true);
+            return;
+          }
           try {
             await recoverInterruptedJobs(printContextOf(live));
           } catch {
@@ -2003,6 +2464,7 @@ export function WorkScreen(props: WorkScreenProps) {
     refresh,
     refreshQuietly,
     settleSafely,
+    settleUnitSafely,
     settlePalletSafely,
     closeBox,
     failSystem,
@@ -2137,7 +2599,9 @@ export function WorkScreen(props: WorkScreenProps) {
     stop?.kind === "exceptions" ||
     stop?.kind === "close" ||
     stop?.kind === "closed" ||
-    stop?.kind === "label";
+    stop?.kind === "label" ||
+    stop?.kind === "unit_label" ||
+    stop?.kind === "unit_history";
   const planFact = {
     term: t("floor.work.plan"),
     value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
@@ -2210,13 +2674,22 @@ export function WorkScreen(props: WorkScreenProps) {
           <div className="work-screen__instruments">
             <div className="work-screen__primary">
               {validation ? (
-                <ValidationPanel
-                  accepted={totals?.accepted ?? 0}
-                  duplicates={counts?.duplicates ?? 0}
-                  errors={counts?.errors ?? 0}
-                  plannedQty={plannedQty}
-                  outcomes={outcomes}
-                />
+                <>
+                  <ValidationPanel
+                    accepted={totals?.accepted ?? 0}
+                    duplicates={counts?.duplicates ?? 0}
+                    errors={counts?.errors ?? 0}
+                    plannedQty={plannedQty}
+                    outcomes={outcomes}
+                  />
+                  {printPolicy !== null && (
+                    <UnitLabelPanel
+                      job={unitJob}
+                      busy={sending || unitBusy}
+                      verification={printPolicy.verification}
+                    />
+                  )}
+                </>
               ) : (
                 <BoxFill
                   items={items}
@@ -2304,9 +2777,26 @@ export function WorkScreen(props: WorkScreenProps) {
         </div>
       </div>
       <FloorFooter
-        className={validation ? "work-footer work-footer--two" : "work-footer"}
-        ariaLabel={t(validation ? "floor.validation.actions" : "floor.work.layout.actions")}
+        className={validation && !printing ? "work-footer work-footer--two" : "work-footer"}
+        ariaLabel={t(
+          printing
+            ? "floor.unitLabels.actions"
+            : validation
+              ? "floor.validation.actions"
+              : "floor.work.layout.actions",
+        )}
       >
+        {/* A shift that prints the duplicate has its labels' history there (plan РЕЖ part B). */}
+        {printing && (
+          <FooterAction
+            variant="secondary"
+            data-action="unit-history"
+            disabled={stop !== null || leaving}
+            onClick={openHistory}
+          >
+            {t("floor.unitLabels.history")}
+          </FooterAction>
+        )}
         {/* A validation shift has no exceptions (plan РЕЖ, Р9: the cloud's are its boxes'). */}
         {!validation && (
           <FooterAction
@@ -2479,6 +2969,19 @@ export function WorkScreen(props: WorkScreenProps) {
             />
           </div>
         )}
+        {stop?.kind === "unit_history" && (
+          <div className="work-screen__stage">
+            <UnitLabelHistory
+              entries={stop.entries}
+              failed={stop.failed}
+              busy={unitBusy || leaving}
+              blocked={stop.blocked}
+              onReprint={reprintUnit}
+              onBack={() => setStop(null)}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          </div>
+        )}
         {stop?.kind === "close" && (
           <div className="work-screen__stage" data-centred="true">
             <ShiftClosePanel
@@ -2605,6 +3108,30 @@ export function WorkScreen(props: WorkScreenProps) {
             </div>
           )}
         </div>
+      )}
+      {/*
+        The unit label's window (plan РЕЖ part B): a full-screen dialog over the work and the
+        status bar, outside the polite region (the dialog is announced as a dialog), which takes
+        the focus and keeps it until the label is resolved or the operator pauses.
+      */}
+      {stop?.kind === "unit_label" && (
+        <UnitLabelVerification
+          view={stop.view}
+          note={unitNote}
+          busy={unitBusy || sending || leaving}
+          pauseHeld={unitBusy || sending}
+          closed={officeClosed}
+          onPause={pauseUnit}
+          onSkip={skipUnit}
+          onReprint={(reason) => {
+            const job = windowJob();
+            if (job !== null) reprintUnit(job.id, reason);
+          }}
+          onSendPrepared={sendPreparedUnit}
+          onRetry={retryUnit}
+          {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
+          {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+        />
       )}
       {/* Always on the screen, so that the text put into it is announced. */}
       <p className="work-screen__leaving" aria-live="polite">

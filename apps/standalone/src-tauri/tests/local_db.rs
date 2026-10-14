@@ -4203,7 +4203,7 @@ async fn the_unit_label_reads_search_an_index() {
         .await
         .unwrap();
     // (the statement, what its plan must name)
-    let reads: [(&str, &str); 5] = [
+    let reads: [(&str, &str); 6] = [
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
              verification_policy, verification, reason, error_code, print_mode, language, dpi, \
@@ -4243,6 +4243,14 @@ async fn the_unit_label_reads_search_an_index() {
              AND device_id = ? AND id = ? AND attempt_no = ? AND attempt_state = ? \
              AND verification = ?",
             "sqlite_autoindex_floor_unit_labels_1 (id=?)",
+        ),
+        // The close's summary (plan РЕЖ, B6): the shift's unresolved label, through the
+        // pairing's one unresolved job (`INDEXED BY`), never the shift's every job.
+        (
+            "SELECT count(*) AS n FROM floor_unit_labels INDEXED BY floor_unit_labels_unresolved \
+             WHERE host_id = ? AND device_id = ? AND shift_id = ? AND (verification = 'pending' \
+             OR (verification = 'not_required' AND attempt_state <> 'sent'))",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
         ),
     ];
     for (sql, index) in reads {

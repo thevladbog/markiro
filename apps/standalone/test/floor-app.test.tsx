@@ -48,6 +48,9 @@ import { enteredShift } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
 
+/** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
+const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
+
 // The tones are the work screen's; the floor only gives them a level.
 vi.mock("../src/floor/work/signal-sound.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -325,7 +328,7 @@ describe("the floor after an operator signed in", () => {
     const view = render(floorOf(await floorCopies(), handlers));
     await enterPlanned();
     expect(await screen.findByRole("region", { name: "Проверка" })).toBeTruthy();
-    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, { supports: ["validation-v1"] });
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     await settle();
     expect(screen.queryByText("Открытый короб")).toBeNull();
     expect(screen.queryByRole("button", { name: "Исключения" })).toBeNull();

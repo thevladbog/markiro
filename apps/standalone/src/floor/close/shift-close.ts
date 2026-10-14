@@ -12,6 +12,7 @@ import { outboxStatement, shiftClosedRecord } from "../facts.js";
 import { LIVE_BOXES } from "../pallets/pallets.js";
 import { OPEN_JOB_SQL } from "../print/print-jobs.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
+import { UNRESOLVED_UNIT_LABEL_SQL } from "../unit-labels/unit-label-store.js";
 import type { BoxContext } from "../work/box-close.js";
 
 /**
@@ -21,11 +22,15 @@ import type { BoxContext } from "../work/box-close.js";
  * `shiftLabelsSettled`: a label decided after the close would reach the host
  * after `shift_closed` and mark the station's own shift late); an open
  * pallet with boxes (plan ПЛ-Ц), which «Закрыть паллету и смену» closes
- * first; or this station has closed it already.
+ * first; a unit label of the shift that is not resolved (plan РЕЖ part B,
+ * the cloud station's `PRODUCT_LABEL_UNRESOLVED`: its outcome may be
+ * unknown, and the retention keeps a shift with one); or this station has
+ * closed it already.
  */
 export type CloseBlocker =
   | { kind: "open_box"; items: number }
   | { kind: "label" }
+  | { kind: "label_unresolved" }
   | { kind: "open_pallet"; boxes: number }
   | { kind: "closed" };
 
@@ -75,6 +80,30 @@ export const CLOSE_SUMMARY_SQL =
   "FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND s.id = ?";
 
 /**
+ * The shift's unresolved unit label (plan РЕЖ part B): the pairing's one
+ * unresolved job asked through its unique index, as the retention asks it
+ * (`INDEXED BY`: the planner would walk the shift's every job through
+ * `floor_unit_labels_shift`, one per accepted unit). Parameters: host id,
+ * device id, shift id. Pinned with the summary in both lists of plans.
+ */
+export const SHIFT_UNRESOLVED_UNIT_LABEL_SQL =
+  "SELECT count(*) AS n FROM floor_unit_labels INDEXED BY floor_unit_labels_unresolved " +
+  `WHERE host_id = ? AND device_id = ? AND shift_id = ? AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
+
+/**
+ * The close's own refusal of a shift with an unresolved unit label, as a term
+ * of the statement that marks it `closing` (`s` — that shift), so a label
+ * written after the summary was read keeps the shift open: nothing is
+ * written, the close is `stale`, and the summary read again names the label.
+ */
+const UNIT_LABELS_SETTLED =
+  "NOT EXISTS (SELECT 1 FROM floor_unit_labels u INDEXED BY floor_unit_labels_unresolved " +
+  "WHERE u.host_id = s.host_id AND u.device_id = s.device_id AND u.shift_id = s.id " +
+  `AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
+
+const unresolvedRow = z.object({ n: z.number().int().nonnegative() });
+
+/**
  * Reads the summary of the shift's close: the plan from this station's copy
  * now, the actual quantity and the closed boxes from its own records, and
  * what keeps it from closing. Every label is counted, not read: a waiting
@@ -92,6 +121,11 @@ export async function readCloseSummary(
     [pairing.hostId, pairing.deviceId, shiftId],
     summaryRow,
   );
+  const [unresolved] = await local.query(
+    SHIFT_UNRESOLVED_UNIT_LABEL_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId],
+    unresolvedRow,
+  );
   if (copy === null || row === undefined) {
     return {
       plannedQty: null,
@@ -108,9 +142,11 @@ export async function readCloseSummary(
         ? { kind: "open_box", items: row.open_items }
         : row.waiting > 0
           ? { kind: "label" }
-          : row.pallet_boxes > 0
-            ? { kind: "open_pallet", boxes: row.pallet_boxes }
-            : null;
+          : (unresolved?.n ?? 0) > 0
+            ? { kind: "label_unresolved" }
+            : row.pallet_boxes > 0
+              ? { kind: "open_pallet", boxes: row.pallet_boxes }
+              : null;
   return {
     plannedQty: copy.plannedQty,
     actualQty: row.actual,
@@ -141,7 +177,8 @@ export type CloseResult =
  * the codes it holds, its closed boxes, the reason, the moment — goes into
  * the outbox as the shift's last record; and the shift is marked `closing`,
  * but only while nothing changed since the summary: the plan is the one
- * read, no label waits, no open box is left (what the first statement did
+ * read, no label waits, no unit label of the shift is unresolved (plan РЕЖ
+ * part B), no open box is left (what the first statement did
  * not remove holds codes), and the counts of codes and closed boxes are the
  * same (a code scanned, taken out or freed since changes them). From then on
  * the shift takes no record (`outboxStatement`). The receipt `accepted` of
@@ -206,6 +243,7 @@ export async function closeShift(
           "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.closed_at IS NULL) " +
           "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
           `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) ` +
+          `AND ${UNIT_LABELS_SETTLED} ` +
           "AND (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id " +
           "AND c.device_id = s.device_id AND c.shift_id = s.id) = ? " +
           "AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = s.host_id " +

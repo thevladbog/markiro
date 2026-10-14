@@ -881,6 +881,10 @@ const BLOCKED_WORDS: Record<CloseBlocker["kind"], { blocker: CloseBlocker; words
     blocker: { kind: "label" },
     words: "Этикетка короба ещё ждёт решения. Решите её, затем закройте смену.",
   },
+  label_unresolved: {
+    blocker: { kind: "label_unresolved" },
+    words: "Сначала завершите сохранённые задания печати этой смены.",
+  },
   open_pallet: {
     blocker: { kind: "open_pallet", boxes: 2 },
     words: "Коробов на открытой паллете: 2. Сначала закройте её.",

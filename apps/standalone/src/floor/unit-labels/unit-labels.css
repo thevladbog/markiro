@@ -1,0 +1,199 @@
+/*
+ * The unit labels of a validation shift that prints the Data Matrix duplicate (plan РЕЖ part
+ * B, task B6), after the cloud station's product label instrument, verification dialog and
+ * history (apps/station/src/ui/work/ProductLabel*.tsx, station.css .work-product-label,
+ * .print-verification*, .product-label-history*). Tokens from @markiro/ui only.
+ */
+
+/* The validation panel keeps the flexible row; the label panel takes its content height. */
+.work-screen__primary:has(> .work-unit-label) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.work-unit-label {
+  display: grid;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+}
+
+.work-unit-label h2 {
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+/* The state in words, the code's end beside it in the counter's face. */
+.work-unit-label__readout {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: baseline;
+  font: var(--floor-body-strong);
+}
+
+.work-unit-label__readout code,
+.unit-label-history__row code,
+.unit-label-window__code {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-unit-label__hint {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+/* The window: its words in the middle, large enough to read from the line. */
+.unit-label-window__body {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: safe center;
+  justify-items: center;
+  gap: var(--sp-4);
+  font: var(--floor-body);
+  text-align: center;
+}
+
+.unit-label-window__body > * {
+  width: min(900px, 100%);
+  margin: 0;
+}
+
+.unit-label-window__instruction {
+  font: var(--floor-title);
+}
+
+.unit-label-window__code {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.unit-label-window__skip-hint,
+.unit-label-window__waiting {
+  color: var(--fg-2);
+}
+
+/* A check that waits for the printed label, as the cloud's: the warning colour, its words on it. */
+.unit-label-window--awaiting {
+  background: var(--warn-solid) !important;
+  color: var(--fg-on-warn-solid);
+}
+
+.unit-label-window--awaiting h2,
+.unit-label-window--awaiting .unit-label-window__skip-hint,
+.unit-label-window--awaiting .unit-label-window__waiting {
+  color: var(--fg-on-warn-solid) !important;
+}
+
+/* The reasons of a reprint: floor choices, one to a row, the chosen one tinted and ticked. */
+.unit-label-reasons {
+  display: grid;
+  gap: var(--sp-3);
+  text-align: left;
+}
+
+.unit-label-reasons > p {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+.unit-label-reasons__choices {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.unit-label-reasons__choice.mk-btn {
+  min-width: 0 !important;
+  justify-content: flex-start !important;
+  gap: var(--sp-3) !important;
+  border-color: var(--line-strong) !important;
+  font: var(--floor-body) !important;
+  text-align: left;
+}
+
+.unit-label-reasons__choice.mk-btn[data-checked="true"] {
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent) 12%) !important;
+  font: var(--floor-body-strong) !important;
+}
+
+.unit-label-reasons__mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--surface-card);
+  font: 700 14px/1 var(--font-ui);
+}
+
+[data-checked="true"] > .unit-label-reasons__mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* «История этикеток» on the work screen's stage: the rows scroll, «Назад» stays under them. */
+.unit-label-history {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  gap: var(--sp-3);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.unit-label-history h2 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.unit-label-history__empty {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.unit-label-history__rows {
+  display: grid;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  gap: var(--sp-2);
+  align-content: start;
+  list-style: none;
+}
+
+.unit-label-history__rows:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.unit-label-history__row {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  font: var(--floor-body);
+}
+
+.unit-label-history__row code {
+  font-weight: 700;
+}
+
+.unit-label-history__actions {
+  display: flex;
+  justify-content: flex-start;
+}

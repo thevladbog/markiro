@@ -78,6 +78,9 @@ function blockerText(blocker: CloseBlocker, waitingSscc: string | null, t: TFunc
       return waitingSscc === null
         ? t("floor.close.blocked.labelUnknown")
         : t("floor.close.blocked.label", { sscc: waitingSscc });
+    case "label_unresolved":
+      // A unit label of a shift that prints the duplicate (plan РЕЖ part B): the cloud's words.
+      return t("floor.unitLabels.closeBlocked");
     case "open_pallet":
       return t("floor.close.blocked.open_pallet", { quantity: formatQuantity(blocker.boxes) });
     case "closed":
@@ -231,7 +234,7 @@ export function ShiftClosePanel({
           </Alert>
           <div className="shift-close__actions">
             {back}
-            {blocker.kind === "label" && (
+            {(blocker.kind === "label" || blocker.kind === "label_unresolved") && (
               <Button size="floor" {...press(onLabel)}>
                 {t("floor.close.toLabel")}
               </Button>

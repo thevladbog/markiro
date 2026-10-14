@@ -1415,10 +1415,10 @@ entered only by a station that names both `validation-v1` and
 `validation-dm-duplicate-v1` (`station_update` otherwise), and it reads
 `unit_label` records («Facts»). `ShiftTotals.unitLabels`
 (`markiro_proto::UnitLabelTotals`, `{ sent, verified, skipped, unresolved,
-reprints }`) is set only for a shift that prints. The station keeps entering
-with `STATION_SHIFT_ENTER` = `["validation-v1"]`, so it cannot enter a shift
-that prints until it names `validation-dm-duplicate-v1`, once it prints unit
-labels (B5/B6); it says why for `duplicate_template_not_fit`.
+reprints }`) is set only for a shift that prints. Since task B6 the station
+enters with `STATION_SHIFT_ENTER` = `["validation-v1",
+"validation-dm-duplicate-v1"]` (`shift-enter.json`): it prints unit labels
+(«Floor work»); it says why for `duplicate_template_not_fit`.
 The host does not look at the protocol of a station that enters a shift (it
 records it at pairing only), so a station of protocol 2 could enter a shift
 the office planned with pallets and produce boxes without them. The pilot
@@ -3952,11 +3952,58 @@ crypto tail (`parseDuplicateKm`, `incomplete_km`) or its label does not render
 `unit_label` `prepared` record after the `scan` record, so the host knows the
 unit before its label (`subject_unknown`). Every refusal rejects with
 `UnitLabelRefusedError` (`code`, and the job in the way); the outcome of an
-accepted unit carries its job (`label`). The work screen's handling of these
-(the label panel, the check of a printed label, history) is task B6, which also
-names `validation-dm-duplicate-v1` on entry: until then the host lets this
-station into no printing shift. The parity of every station step with the
-domain's machine is `test/unit-label-work.test.ts`.
+accepted unit carries its job (`label`). The parity of every station step with
+the domain's machine is `test/unit-label-work.test.ts`.
+
+The screen of such a shift (task B6, `src/floor/unit-labels/*.tsx`; the cloud
+station's `ProductLabelInstrument`, `ProductLabelVerification` and
+`ProductLabelHistory`, its `productLabels.*` texts word for word under
+`floor.unitLabels.*`, `attempt` with `{{number}}`) is the validation screen
+with three additions, chosen in the same one place by the snapshot's policy.
+`UnitLabelPanel` stands under `ValidationPanel`: the current label's state in
+words (none yet, «Отправлено на принтер», «Этикетка подтверждена», «Проверка
+пропущена», «Печать требует уточнения», «Этикетка не отправлена», «Печать
+этикетки») with its serial's last six characters, and the check — the job's,
+or the snapshot's before any job (`requiredHint` / `noneHint`: the cloud's
+acceptance found its panel said nothing before the first scan). An accepted
+unit's label is sent at once in the scan's turn (`sendUnitLabel`, its first
+send); then `settleUnit` reads the station's one unresolved label and, while
+there is one, `Stop` `unit_label` opens `UnitLabelVerification`, a
+`FullScreenDialog` (dialog semantics, the focus taken and kept, back to the
+window itself when a view drops the pressed button; outside the polite
+region) over the work and the status bar. Its views: the check after the send
+(«Отсканируйте напечатанную этикетку», «Проблема с этикеткой», «Пропустить
+проверку» only after `sent` and never in finish mode, with `skipHint`), an
+unknown outcome and a send that failed before it left («Напечатать повторно»,
+and «Настройки принтера» for the latter), a label prepared before a restart
+(«Отправить сохранённую этикетку»: nothing is sent on entry), a send this app
+lost (`sending`: «Повторить» recovers it to unknown, nothing sent), another
+shift's label (`anotherShift`, no unit), no duplicate printer (on entry, not
+in finish mode: «Повторить», «Настройки принтера» — the workstation, by
+`onSetup`) and a failed read (`storageError`, «Повторить»). «Пауза» is the
+way out of the shift, the label kept; it stays on the keyboard while the leave
+waits. A reprint asks the reason first (`UnitLabelReprintReason`: three floor
+choices marked by a sign, «Напечатать повторно» held until one is chosen),
+writes the new attempt (`reprintUnitLabel`) and sends it at once, as the
+cloud's. The scanner stays the screen's: while the window stands a scan goes
+to `verifyUnitLabel` when the check is open (a required check after the
+send, or an unknown outcome — in finish mode too), its mismatch or
+unreadable code said in the window and by tone; any other scan is refused in
+words and nothing is journalled. Every decision is one turn of the work queue,
+handed to the gate, with the view's double-tap guard (`VIEW_GUARD_MS`). A
+unit's own refusal (`incomplete_km`, `render_failed`) is said as its outcome
+(«Не удалось прочитать полный Data Matrix», or the label not prepared for the
+duplicate printer); the label in the way or no printer opens the window. The
+entry recovers the sends the app lost (`recoverUnitLabels`) and opens the
+window of a label left unresolved at once. «История этикеток» replaces
+«Исключения» in the footer (three columns again): the shift's labels newest
+first (`readShiftUnitLabels` over the pinned `SHIFT_JOBS_SQL`, 100 rows), each
+with its state, «Попытка N» and «Напечатать повторно» (with a reason; held
+while a label is unresolved or on its way; in finish mode too, a deliberate
+difference from the cloud, which holds it in a closed shift), the empty text,
+and «Назад» back to its button. The close is refused while a label of the
+shift is unresolved («Floor exceptions and close»). The screen's tests are
+`test/unit-label-screen.test.tsx`.
 
 ## Floor printing
 
@@ -4300,7 +4347,17 @@ closed boxes, the reason, the moment) and marks the copy `closing`, but only
 while nothing changed since the summary (no waiting label, the same plan as
 the copy's now, no code in the open box it drops, the same counts of codes and
 closed boxes, which a code scanned or taken out since changes; else `stale`,
-and the summary is read again). From then on the
+and the summary is read again). A unit label of the shift that is not
+resolved (plan РЕЖ part B, task B6; the cloud's `PRODUCT_LABEL_UNRESOLVED`)
+is a blocker too, `label_unresolved`: the summary says «Сначала завершите
+сохранённые задания печати этой смены.» with «Перейти к этикетке», which opens
+its window, and the statement that marks the copy `closing` holds the same
+rule itself (`NOT EXISTS` through `INDEXED BY floor_unit_labels_unresolved`),
+so a label that becomes unresolved after the summary's read leaves the close
+`stale` and never lets a closed shift stand with such a label, which the
+retention would keep forever. The summary's read of it
+(`SHIFT_UNRESOLVED_UNIT_LABEL_SQL`) is pinned in both lists of plans with the
+unit label reads. From then on the
 shift takes no record: `outboxStatement` inserts a record only while its
 shift has no `local_state`, so its whole transaction is refused otherwise
 and `shift_closed` is always the shift's last record (the host marks the

@@ -75,7 +75,14 @@ fn a_station_enters_a_validation_shift_with_its_snapshot() {
 #[test]
 fn the_entry_names_what_the_station_can_work() {
     let enter: ShiftEnter = round_trip("shift-enter.json");
-    assert_eq!(enter.supports, [shift_supports::VALIDATION]);
+    // Part B (task B6): the station also prints the Data Matrix duplicate.
+    assert_eq!(
+        enter.supports,
+        [
+            shift_supports::VALIDATION,
+            shift_supports::VALIDATION_DM_DUPLICATE
+        ]
+    );
     // An entry without a body, as a station of protocol 3 sends it, and one
     // with an empty object, both read as a station that names nothing.
     let empty: ShiftEnter = round_trip("shift-enter-empty.json");
