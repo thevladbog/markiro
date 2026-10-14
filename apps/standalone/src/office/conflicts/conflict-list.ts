@@ -35,15 +35,12 @@ export function conflictQuery(
 }
 
 /**
- * Where the loser's box is shown. Until plan КРТ gives a box its card, the
- * box's shift's card, its boxes filtered by the SSCC (`?box=`); a box still
- * open opens the shift's card only. A scan with no box at all (a validation
- * shift, plan РЕЖ) has no such link: the page does not offer it.
+ * Where the loser's box is shown: its card (plan КРТ). A scan that went into
+ * no box (a validation shift's, plan РЕЖ) opens its shift's card instead; the
+ * page itself offers no «box» link for it.
  */
 export function loserBoxLink(scan: OfficeConflictScan): string {
-  return scan.boxSscc === null
-    ? `/shifts/${scan.shiftId}`
-    : `/shifts/${scan.shiftId}?box=${scan.boxSscc}`;
+  return scan.boxId === null ? `/shifts/${scan.shiftId}` : `/codes/box/${scan.boxId}`;
 }
 
 /**

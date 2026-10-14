@@ -12,6 +12,7 @@ import {
   ssccTail,
 } from "../src/office/shifts/shift-card.js";
 import { ORG_PROFILE, renderOffice, type FakeOfficeSession } from "./support/office.js";
+import { BOX_CARD, PALLET_CARD } from "./support/pack-cards.js";
 import {
   ACTIVE,
   CLOSED,
@@ -570,6 +571,44 @@ describe("the card of a shift (plan О-Ф)", () => {
       "—",
       "Паллеты не загружены",
     ]);
+  });
+
+  it("links a box's and a pallet's SSCC to their cards (plan КРТ)", async () => {
+    const session = cardSession(WITH_PALLETS);
+    session.api.getBoxCard.mockResolvedValue(BOX_CARD);
+    session.api.getPalletCard.mockResolvedValue(PALLET_CARD);
+    await openCard(session, "OCT26-004");
+    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(5));
+    const boxLink = within(section("Короба")).getByRole("link", { name: "(00)046006820000015001" });
+    expect(boxLink.getAttribute("href")).toBe("/codes/box/b0000000-0000-4000-8000-000000000001");
+    const palletLinks = within(section("Короба")).getAllByRole("link", {
+      name: "(00)146006820000000409",
+    });
+    expect(palletLinks[0]?.getAttribute("href")).toBe(
+      "/codes/pallet/a0000000-0000-4000-8000-000000000001",
+    );
+    const own = within(section("Паллеты")).getByRole("link", { name: "(00)146006820000000409" });
+    expect(own.getAttribute("href")).toBe("/codes/pallet/a0000000-0000-4000-8000-000000000001");
+    fireEvent.click(boxLink);
+    await screen.findByRole("heading", { name: "Короб (00)046006820000015000" });
+    expect(session.api.getBoxCard).toHaveBeenCalledWith(
+      "office-session-token",
+      "b0000000-0000-4000-8000-000000000001",
+    );
+  });
+
+  it("opens a pallet's card from the pallet's SSCC, not the box's (plan КРТ)", async () => {
+    const session = cardSession(WITH_PALLETS);
+    session.api.getPalletCard.mockResolvedValue(PALLET_CARD);
+    await openCard(session, "OCT26-004");
+    fireEvent.click(
+      await within(section("Паллеты")).findByRole("link", { name: "(00)146006820000000409" }),
+    );
+    await screen.findByRole("heading", { name: "Паллета (00)146006820000000409" });
+    expect(session.api.getPalletCard).toHaveBeenCalledWith(
+      "office-session-token",
+      "a0000000-0000-4000-8000-000000000001",
+    );
   });
 
   it("names the pallet of a box, says when it is not among the shift's pallets, and says it is not read yet", async () => {

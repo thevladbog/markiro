@@ -19,8 +19,10 @@ pub const BOXES_SQL: &str = "SELECT b.id, b.device_id, b.sscc, b.opened_at, b.cl
      b.disassembled_at, b.pallet_id, \
      (SELECT COUNT(*) FROM box_items i WHERE i.box_id = b.id \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units, \
-     b.item_count_reported, b.digest_matches, b.print_verified_at, b.print_skipped_at \
-     FROM boxes b WHERE b.shift_id = ? ORDER BY b.opened_at, b.id";
+     b.item_count_reported, b.digest_matches, b.print_verified_at, b.print_skipped_at, \
+     op.name AS operator_name \
+     FROM boxes b LEFT JOIN operators op ON op.id = b.operator_id \
+     WHERE b.shift_id = ? ORDER BY b.opened_at, b.id";
 
 /// Every pallet of the shift, opened first first, with what stands on it:
 /// its closed boxes not taken apart and their live items.
@@ -49,6 +51,7 @@ struct BoxRow {
     digest_matches: Option<bool>,
     print_verified_at: Option<String>,
     print_skipped_at: Option<String>,
+    operator_name: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -111,6 +114,7 @@ pub async fn list_boxes(
                 digest_matches: row.digest_matches,
                 print_verified_at: row.print_verified_at,
                 print_skipped_at: row.print_skipped_at,
+                operator_name: row.operator_name,
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()

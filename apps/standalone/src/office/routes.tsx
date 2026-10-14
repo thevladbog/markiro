@@ -1,7 +1,12 @@
 import { Navigate, type RouteObject } from "react-router";
 
 import { BackupsPage } from "./backups/BackupsPage.js";
+import { BoxCardPage } from "./codes/BoxCardPage.js";
+import { BoxesTab } from "./codes/BoxesTab.js";
 import { CodeSearchPage } from "./codes/CodeSearchPage.js";
+import { CodesSection } from "./codes/CodesSection.js";
+import { PalletCardPage } from "./codes/PalletCardPage.js";
+import { PalletsTab } from "./codes/PalletsTab.js";
 import { ConflictsPage } from "./conflicts/ConflictsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
@@ -43,7 +48,18 @@ export const officeRoutes: RouteObject[] = [
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
       { path: "conflicts", element: <ConflictsPage /> },
-      { path: "codes", element: <CodeSearchPage /> },
+      // «Поиск кодов» is one section: the codes, the boxes and the pallets, and the cards of the last two.
+      {
+        path: "codes",
+        element: <CodesSection />,
+        children: [
+          { index: true, element: <CodeSearchPage /> },
+          { path: "boxes", element: <BoxesTab /> },
+          { path: "pallets", element: <PalletsTab /> },
+          { path: "box/:id", element: <BoxCardPage /> },
+          { path: "pallet/:id", element: <PalletCardPage /> },
+        ],
+      },
       {
         path: "employees",
         element: (

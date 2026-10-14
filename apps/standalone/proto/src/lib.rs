@@ -209,6 +209,7 @@ pub mod cloud_import;
 pub mod code_search;
 pub mod disaggregation;
 pub mod license;
+pub mod pack_cards;
 pub mod pairing;
 pub mod review;
 pub mod trust;
@@ -2959,6 +2960,9 @@ pub struct OfficeBox {
     pub digest_matches: Option<bool>,
     pub print_verified_at: Option<String>,
     pub print_skipped_at: Option<String>,
+    /// The operator who closed the box (plan КРТ, П-14), `null` without one.
+    #[serde(default)]
+    pub operator_name: Option<String>,
 }
 
 /// A pallet of a shift as the office lists it (`GET

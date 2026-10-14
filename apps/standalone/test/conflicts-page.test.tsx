@@ -136,14 +136,12 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     }
   });
 
-  it("links the loser's box in its shift's card by its SSCC, and only the shift without one", async () => {
+  it("links the loser's box to its card (plan КРТ), and only the shift without one", async () => {
     await openConflicts(session());
     const named = screen.getByRole("link", {
-      name: "Короб проигравшего с кодом S000007 в карточке смены OCT26-004",
+      name: "Короб проигравшего с кодом S000007, карточка короба",
     });
-    expect(named.getAttribute("href")).toBe(
-      "/shifts/5a0c9e1e-3d4f-4b8a-9c2d-1e0f9a8b7c6d?box=046006820000015001",
-    );
+    expect(named.getAttribute("href")).toBe("/codes/box/b0000000-0000-4000-8000-000000000001");
     // A scan with no box (a validation shift's, plan РЕЖ) has no box to link: the shift's own
     // link in the scan's cell is the way to its card, and the cell says «Без короба».
     const bare = within(cell(1, "Проигравший скан"));
@@ -152,20 +150,6 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     expect(bare.getByRole("link", { name: "Смена OCT26-005/S" }).getAttribute("href")).toBe(
       "/shifts/6b1d0f2f-4e5a-4c9b-8d3e-2f1a0b9c8d7e",
     );
-  });
-
-  it("links the loser's still open box to its shift's card without an SSCC", async () => {
-    const [first, ...rest] = PAGE.items;
-    if (first === undefined) throw new Error("the fixture has no conflicts");
-    const open: OfficeConflictPage = {
-      ...PAGE,
-      items: [{ ...first, loser: { ...first.loser, boxSscc: null } }, ...rest],
-    };
-    await openConflicts(session(open));
-    const link = within(cell(0, "Проигравший скан")).getByRole("link", {
-      name: /Короб проигравшего/,
-    });
-    expect(link.getAttribute("href")).toBe(`/shifts/${first.loser.shiftId}`);
   });
 
   it("says who reviewed a conflict and when, and offers the review only for an unreviewed one", async () => {
