@@ -188,11 +188,9 @@ describe("office operators", () => {
     expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
       "Сменить PIN оператора «Анна Кузнецова»",
       "Бейджи оператора «Анна Кузнецова»",
-      "Сотрудник оператора «Анна Кузнецова»",
       "Выключить оператора «Анна Кузнецова»",
     ]);
     expect(items.map((item) => item.getAttribute("data-destructive"))).toEqual([
-      null,
       null,
       null,
       "true",
@@ -222,8 +220,7 @@ describe("office operators", () => {
       "Конфликты",
       // «Дезагрегация» (plan ДЗГ-О) follows «Конфликты»: «Смены» and «Конфликты» stay together.
       "Дезагрегация",
-      // «Сотрудники» (owner feedback on the first beta) sits right before «Операторы».
-      "Сотрудники",
+      // «Сотрудники» was removed after beta 3: «Операторы» follows «Дезагрегация» directly.
       "Операторы",
       "Устройства",
     ]);

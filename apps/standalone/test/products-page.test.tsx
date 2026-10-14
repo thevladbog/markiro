@@ -99,7 +99,7 @@ function rows(): HTMLElement[] {
 /** The names column, top to bottom: each product's name, without its print name. */
 function names(): (string | null | undefined)[] {
   return rows().map(
-    (row) => within(row).getAllByRole("cell")[1]?.firstElementChild?.firstElementChild?.textContent,
+    (row) => within(row).getAllByRole("cell")[2]?.firstElementChild?.firstElementChild?.textContent,
   );
 }
 
@@ -164,12 +164,27 @@ describe("office products", () => {
     expect(screen.getAllByText(/^Для печати:/)).toHaveLength(1);
   });
 
-  it("says in words which products have a photo (plan ТОВ)", async () => {
+  it("shows the photo of a product that has one as a thumbnail in its row (plan ТОВ, beta 3)", async () => {
     const photo = "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd";
-    await openProducts(session([{ ...MILK, photoChecksum: photo }, WATER_2]));
-    expect(within(rowOf(MILK.name)).getByText("Есть фото")).toBeTruthy();
-    expect(within(rowOf(WATER_2.name)).queryByText("Есть фото")).toBeNull();
-    expect(screen.getAllByText("Есть фото")).toHaveLength(1);
+    const fake = session([{ ...MILK, photoChecksum: photo }, WATER_2]);
+    fake.api.getProductPhoto.mockResolvedValue({
+      photo: {
+        width: 2,
+        height: 1,
+        dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        checksum: photo,
+        updatedAt: "2026-10-13T09:00:00.000Z",
+      },
+    });
+    await openProducts(fake);
+    const thumbnail = await within(rowOf(MILK.name)).findByRole("img", {
+      name: `Фото товара ${MILK.name}`,
+    });
+    expect(thumbnail.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==");
+    expect(within(rowOf(WATER_2.name)).queryByRole("img")).toBeNull();
+    // Only the product that has a photo is read.
+    expect(fake.api.getProductPhoto).toHaveBeenCalledTimes(1);
+    expect(fake.api.getProductPhoto).toHaveBeenCalledWith("office-session-token", MILK.id);
   });
 
   it("finds products by name, print name or GTIN, without case and with spaces in a GTIN", async () => {

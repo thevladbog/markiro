@@ -596,6 +596,17 @@ describe("Select", () => {
     expect(getComputedStyle(optionText!).whiteSpace).toBe("nowrap");
   });
 
+  it("keeps the full text of a long value as a tooltip of the closed control and its items", async () => {
+    const user = userEvent.setup();
+    const longLabel = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    render(<Select label="Группа" options={[{ value: "15", label: longLabel }]} value="15" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    expect(trigger.getAttribute("title")).toBe(longLabel);
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: longLabel }).getAttribute("title")).toBe(longLabel);
+  });
+
   it("selects the next enabled option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

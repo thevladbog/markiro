@@ -89,6 +89,8 @@ export function Select<TValue extends string = string>({
     option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
   );
   const customValue = value === "" && emptyOptionLabel !== undefined ? EMPTY_OPTION_VALUE : value;
+  // The ellipsized value in the closed control keeps its full text as a tooltip.
+  const selectedLabel = itemOptions.find((option) => option.value === customValue)?.label;
   const visibleItemOptions = searchable
     ? itemOptions.filter((option) =>
         option.label.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
@@ -250,6 +252,7 @@ export function Select<TValue extends string = string>({
           onFocus={handleFocus}
           onBlur={handleBlur}
           className="mk-select__control"
+          {...(selectedLabel === undefined ? {} : { title: selectedLabel })}
           style={{
             appearance: "none",
             WebkitAppearance: "none",
@@ -369,6 +372,7 @@ export function Select<TValue extends string = string>({
                   value={option.value}
                   {...(option.disabled ? { disabled: true } : {})}
                   className="mk-select__item"
+                  title={option.label}
                   style={{
                     position: "relative",
                     display: "flex",

@@ -22,7 +22,8 @@ import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
-import { ProductDialog } from "./ProductDialog.js";
+import { ProductDrawer } from "./ProductDrawer.js";
+import { ProductThumb } from "./ProductThumb.js";
 import {
   findProducts,
   groupLabel,
@@ -60,7 +61,7 @@ export function ProductsPage() {
   const [filter, setFilter] = useState<ProductFilter>("all");
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<ProductsDialog | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const open = (next: ProductsDialog) => {
     setNotice(null);
@@ -68,6 +69,11 @@ export function ProductsPage() {
   };
 
   const columns: TableColumn<OfficeProduct>[] = [
+    {
+      key: "photo",
+      title: t("office.products.table.photo"),
+      render: (product) => <ProductThumb product={product} />,
+    },
     {
       key: "gtin14",
       title: t("office.products.table.gtin"),
@@ -86,10 +92,6 @@ export function ProductsPage() {
             <span className="product-name__print">
               {t("office.products.printNameShort", { name: product.printName })}
             </span>
-          )}
-          {/* In words, not a colour or an icon alone (plan ТОВ). */}
-          {product.photoChecksum !== null && (
-            <span className="product-name__photo">{t("office.products.table.hasPhoto")}</span>
           )}
         </span>
       ),
@@ -219,7 +221,7 @@ export function ProductsPage() {
           ) : null
         }
       />
-      {notice && <Alert tone="ok">{notice}</Alert>}
+      {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
       {/* About the list's group column: with no list on screen the products' error stands alone. */}
       {groups.isError && products.isSuccess && (
         <Alert
@@ -235,16 +237,22 @@ export function ProductsPage() {
       )}
       {content()}
       {canEdit && dialog !== null && (
-        <ProductDialog
+        <ProductDrawer
           product={dialog.kind === "edit" ? dialog.product : null}
           onClose={() => setDialog(null)}
-          onSaved={(product) => {
+          onSaved={(product, photoFailed) => {
             store(product);
             setDialog(null);
             setNotice(
-              dialog.kind === "create"
-                ? t("office.products.created", { name: product.name })
-                : t("office.common.saved"),
+              photoFailed
+                ? { tone: "warn", text: t("office.products.photoFailed", { name: product.name }) }
+                : {
+                    tone: "ok",
+                    text:
+                      dialog.kind === "create"
+                        ? t("office.products.created", { name: product.name })
+                        : t("office.common.saved"),
+                  },
             );
           }}
           onReload={() => {
