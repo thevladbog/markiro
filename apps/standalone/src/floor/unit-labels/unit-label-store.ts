@@ -84,6 +84,16 @@ const JOB_COLUMNS = `SELECT ${COLUMNS}, bytes_base64 FROM floor_unit_labels`;
  */
 export const UNRESOLVED_JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
 
+/**
+ * The light gate of the pairing's one unresolved job (the same index, the
+ * same predicate): what a scan and a reprint ask before anything is written,
+ * without the job's fields — the full code — nor its bytes, so the reference
+ * a refusal carries holds neither. Parameters: host id, device id.
+ */
+export const UNRESOLVED_REF_SQL =
+  "SELECT id, shift_id, attempt_no, attempt_state, verification_policy, verification " +
+  `FROM floor_unit_labels WHERE host_id = ? AND device_id = ? AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
+
 /** One job by its key; parameters: host id, device id, job id. */
 export const JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND id = ?`;
 
@@ -166,6 +176,29 @@ export interface UnitLabelJob extends UnitLabelEntry {
   bytesBase64: string;
 }
 
+/**
+ * A job by its light reference: its key, its shift and where its attempt and
+ * check stand — what the station's gate decides by (`canAcceptNext`), and all
+ * that a scan's outcome and a refusal carry: never the fields (the full code
+ * is in `km.code`) nor the bytes.
+ */
+export type UnitLabelRef = Pick<
+  UnitLabelEntry,
+  "id" | "shiftId" | "attemptNo" | "attemptState" | "verificationPolicy" | "verification"
+>;
+
+/** `job`'s light reference: a copy of those fields alone, whatever `job` holds besides. */
+export function unitLabelRef(job: UnitLabelRef): UnitLabelRef {
+  return {
+    id: job.id,
+    shiftId: job.shiftId,
+    attemptNo: job.attemptNo,
+    attemptState: job.attemptState,
+    verificationPolicy: job.verificationPolicy,
+    verification: job.verification,
+  };
+}
+
 const entryRow = z.object({
   id: z.string(),
   shift_id: z.string(),
@@ -241,6 +274,33 @@ export async function readUnresolvedUnitLabel(
 ): Promise<UnitLabelJob | null> {
   const [row] = await local.query(UNRESOLVED_JOB_SQL, [pairing.hostId, pairing.deviceId], jobRow);
   return row === undefined ? null : toJob(row);
+}
+
+const refRow = z.object({
+  id: z.string(),
+  shift_id: z.string(),
+  attempt_no: z.number().int().positive(),
+  attempt_state: z.enum(UNIT_LABEL_ATTEMPT_STATES),
+  verification_policy: z.enum(UNIT_LABEL_POLICIES),
+  verification: z.enum(UNIT_LABEL_VERIFICATIONS),
+});
+
+/** The light reference of the pairing's one unresolved job, whatever its shift, or `null`. */
+export async function readUnresolvedUnitLabelRef(
+  local: LocalExecutor,
+  pairing: Pairing,
+): Promise<UnitLabelRef | null> {
+  const [row] = await local.query(UNRESOLVED_REF_SQL, [pairing.hostId, pairing.deviceId], refRow);
+  return row === undefined
+    ? null
+    : {
+        id: row.id,
+        shiftId: row.shift_id,
+        attemptNo: row.attempt_no,
+        attemptState: row.attempt_state,
+        verificationPolicy: row.verification_policy,
+        verification: row.verification,
+      };
 }
 
 /** The shift's jobs for «История этикеток», newest first, at most `limit`, without their bytes. */

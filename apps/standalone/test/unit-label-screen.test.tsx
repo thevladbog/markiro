@@ -589,6 +589,39 @@ describe("«История этикеток»", () => {
     // Back at the work: the history closed with the reprint.
     expect(screen.queryByRole("region", { name: "История этикеток" })).toBeNull();
   });
+
+  it("says a reprint refused because this station closed the shift, in its own words", async () => {
+    const at = await station({ verification: "none" });
+    const work = open(at);
+    await ready(work);
+    await work.scan(km("C00001", { tail: "Zf8K" }));
+    await work.press("История этикеток");
+    const history = within(screen.getByRole("region", { name: "История этикеток" }));
+    const [row] = history.getAllByRole("listitem");
+    if (row === undefined) throw new Error("no row");
+    // The shift is closed on this station meanwhile: its outbox takes no record any more.
+    at.db.prepare("UPDATE floor_shifts SET local_state = 'closing'").run();
+    const before = jobs(at);
+    await act(async () => {
+      work.pause();
+      fireEvent.click(within(row).getByRole("button", { name: "Напечатать повторно" }));
+      await work.gate.drain();
+    });
+    await work.press("Этикетка повреждена");
+    await work.press("Напечатать повторно");
+    expect(
+      await screen.findByText(
+        "Смена закрыта на этой станции. Этикетки этой смены больше не печатаются повторно.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Не удалось повторить печать. Обновите список и проверьте состояние задания.",
+      ),
+    ).toBeNull();
+    expect(jobs(at)).toEqual(before);
+    expect(work.shell.sends).toHaveLength(1);
+  });
 });
 
 describe("the close of a shift with an unresolved label", () => {

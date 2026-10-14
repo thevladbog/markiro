@@ -104,6 +104,7 @@ import {
   SENDING_JOBS_SQL,
   SHIFT_JOBS_SQL,
   UNRESOLVED_JOB_SQL,
+  UNRESOLVED_REF_SQL,
 } from "../src/floor/unit-labels/unit-label-store.js";
 import { openLocalDb } from "./support/local-db.js";
 
@@ -2115,6 +2116,9 @@ describe("the unit label jobs' statements (migration 0015)", () => {
     // The pairing's one unresolved job, whatever its shift: the unique partial index, by its
     // predicate.
     [UNRESOLVED_JOB_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=?)"],
+    // Its light gate, which every scan of a printing shift and every reprint asks (review B5):
+    // the same index, without the fields or the bytes.
+    [UNRESOLVED_REF_SQL, "floor_unit_labels_unresolved (host_id=? AND device_id=?)"],
     [UNIT_LABEL_JOB_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
     // «История этикеток»: the shift's jobs newest first, in the index's own rowid order.
     [SHIFT_JOBS_SQL, "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)"],

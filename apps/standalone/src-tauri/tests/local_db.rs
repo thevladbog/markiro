@@ -4188,7 +4188,8 @@ async fn the_warehouse_reads_search_an_index() {
 
 /// The unit label jobs (plan РЕЖ part B, migration `0015`,
 /// `src/floor/unit-labels/unit-label-store.ts`): the pairing's one unresolved job through the
-/// unique partial index (its predicate named word for word), a job by its key, «История
+/// unique partial index (its predicate named word for word), whole and by its light gate, a
+/// job by its key, «История
 /// этикеток» through the shift's index in its rowid order, the recovery's sending jobs of the
 /// pairing through their partial index and a job's step by its key. No statement scans a table or sorts on
 /// its own. `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite and
@@ -4203,12 +4204,21 @@ async fn the_unit_label_reads_search_an_index() {
         .await
         .unwrap();
     // (the statement, what its plan must name)
-    let reads: [(&str, &str); 6] = [
+    let reads: [(&str, &str); 7] = [
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
              verification_policy, verification, reason, error_code, print_mode, language, dpi, \
              bytes_digest, payload_digest, template_id, template_rev, fields, operator_id, \
              created_at, updated_at, bytes_base64 FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
+             AND (verification = 'pending' OR (verification = 'not_required' \
+             AND attempt_state <> 'sent'))",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
+        ),
+        // Its light gate (review of B5): every scan of a printing shift and every reprint ask it,
+        // without the job's fields or bytes.
+        (
+            "SELECT id, shift_id, attempt_no, attempt_state, verification_policy, verification \
+             FROM floor_unit_labels WHERE host_id = ? AND device_id = ? \
              AND (verification = 'pending' OR (verification = 'not_required' \
              AND attempt_state <> 'sent'))",
             "floor_unit_labels_unresolved (host_id=? AND device_id=?)",

@@ -102,6 +102,7 @@ import {
   readShiftUnitLabels,
   readUnitLabelJob,
   readUnresolvedUnitLabel,
+  readUnresolvedUnitLabelRef,
   type UnitLabelEntry,
   type UnitLabelJob,
 } from "../unit-labels/unit-label-store.js";
@@ -113,6 +114,7 @@ import {
   skipVerification,
   StaleUnitLabelError,
   UnitLabelRefusedError,
+  UnitLabelShiftClosedError,
   UnitLabelStateError,
   verifyUnitLabel,
   type UnitLabelPrintContext,
@@ -363,15 +365,25 @@ type Stop =
   | { kind: "unit_label"; view: UnitView }
   /**
    * «История этикеток» of a shift that prints the duplicate, in place of the
-   * exceptions: `entries` once read; `failed` — not read, or a reprint not done;
-   * `blocked` — an unresolved label waits, and no other is printed again.
+   * exceptions: `entries` once read; `failure` — not read or a reprint not done
+   * (`failed`), or a reprint refused because this station closed the shift
+   * (`shift_closed`); `blocked` — an unresolved label waits, and no other is
+   * printed again.
    */
   | {
       kind: "unit_history";
       entries: readonly UnitLabelEntry[] | null;
-      failed: boolean;
+      failure: UnitLabelFailure | null;
       blocked: boolean;
     };
+
+/** Why a decision on a unit label was not saved, as the window and the history say it. */
+type UnitLabelFailure = "failed" | "shift_closed";
+
+/** A decision's failure on a unit label in words: this station closed its shift, or anything else. */
+function unitFailureOf(error: unknown): UnitLabelFailure {
+  return error instanceof UnitLabelShiftClosedError ? "shift_closed" : "failed";
+}
 
 /** The window of a unit label, its job read whole (a check, a skip and a send need it). */
 type UnitView = { kind: "job"; job: UnitLabelJob } | Exclude<UnitLabelWindow, { kind: "job" }>;
@@ -1147,9 +1159,9 @@ export function WorkScreen(props: WorkScreenProps) {
    * of another shift stands in the way, as the cloud's `PRODUCT_LABEL_BUSY`),
    * or while no duplicate printer is assigned where a new unit would need one
    * (not in a shift the office closed: it takes no unit). `recover`: the sends
-   * a stop of the app cut become unknown first (`recoverUnitLabels`, which must
-   * never run beside a send of this app: only from the work queue). Nothing
-   * here sends a label. It replaces no stop but its own window.
+   * a stop of the app cut become unknown first (`recoverUnitLabels`, which
+   * leaves every send of this app run alone, so it may run at any load).
+   * Nothing here sends a label. It replaces no stop but its own window.
    */
   const settleUnit = useCallback(
     async (recover: boolean): Promise<void> => {
@@ -1280,7 +1292,7 @@ export function WorkScreen(props: WorkScreenProps) {
     void live.current
       .track(
         queue.run(async () => {
-          let failed = false;
+          let failed: UnitLabelFailure | null = null;
           try {
             await work();
           } catch (error) {
@@ -1289,14 +1301,17 @@ export function WorkScreen(props: WorkScreenProps) {
               error instanceof UnitLabelStateError ||
               error instanceof UnitLabelRefusedError;
             const stopped = stopRef.current;
-            if (stopped?.kind === "unit_history") setStop({ ...stopped, failed: true });
-            else failed = !refused;
+            if (stopped?.kind === "unit_history") {
+              setStop({ ...stopped, failure: unitFailureOf(error) });
+            } else if (!refused) {
+              failed = unitFailureOf(error);
+            }
           } finally {
             unitDeciding.current = false;
             if (alive.current) setUnitBusy(false);
           }
           await settleUnitSafely(false);
-          if (failed && stopRef.current?.kind === "unit_label") setUnitNote("failed");
+          if (failed !== null && stopRef.current?.kind === "unit_label") setUnitNote(failed);
           await refreshQuietly();
         }),
       )
@@ -1352,6 +1367,7 @@ export function WorkScreen(props: WorkScreenProps) {
         await unitJobNow(jobId),
         reason,
         live.current.operatorId,
+        live.current.shift.copy.id,
       );
       live.current.onRecorded();
       if (stopRef.current?.kind === "unit_history") setStop(null);
@@ -1377,7 +1393,7 @@ export function WorkScreen(props: WorkScreenProps) {
    */
   const openHistory = () => {
     if (leavingNow() || stopRef.current !== null) return;
-    setStop({ kind: "unit_history", entries: null, failed: false, blocked: false });
+    setStop({ kind: "unit_history", entries: null, failure: null, blocked: false });
     void live.current
       .track(
         queue.run(async () => {
@@ -1388,15 +1404,15 @@ export function WorkScreen(props: WorkScreenProps) {
             now.shift.copy.id,
             HISTORY_ROWS,
           );
-          const blocked = (await readUnresolvedUnitLabel(now.local, pairingOf(now))) !== null;
+          const blocked = (await readUnresolvedUnitLabelRef(now.local, pairingOf(now))) !== null;
           if (stopRef.current?.kind === "unit_history") {
-            setStop({ kind: "unit_history", entries, failed: false, blocked });
+            setStop({ kind: "unit_history", entries, failure: null, blocked });
           }
         }),
       )
       .catch(() => {
         if (stopRef.current?.kind === "unit_history") {
-          setStop({ kind: "unit_history", entries: [], failed: true, blocked: true });
+          setStop({ kind: "unit_history", entries: [], failure: "failed", blocked: true });
         }
       });
   };
@@ -1898,13 +1914,17 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       live.current.onRecorded();
       await settle(outcome);
-      // The accepted unit's label goes at once (its first send), and its window follows it.
+      // The accepted unit's label goes at once (its first send), read whole by the reference the
+      // scan answered, and its window follows it.
       if (outcome.kind === "accepted" && outcome.boxId === null && outcome.label !== undefined) {
         try {
-          await sendUnit(outcome.label);
-        } catch {
+          const now = live.current;
+          const job = await readUnitLabelJob(now.local, pairingOf(now), outcome.label.id);
+          // Gone or moved meanwhile: the settling below reads the label as it is now.
+          if (job !== null) await sendUnit(job);
+        } catch (error) {
           // The label as it is now is read next; the window says the send was not saved.
-          setUnitNote("failed");
+          setUnitNote(unitFailureOf(error));
         }
         await settleUnitSafely(false);
       }
@@ -2973,7 +2993,7 @@ export function WorkScreen(props: WorkScreenProps) {
           <div className="work-screen__stage">
             <UnitLabelHistory
               entries={stop.entries}
-              failed={stop.failed}
+              failure={stop.failure}
               busy={unitBusy || leaving}
               blocked={stop.blocked}
               onReprint={reprintUnit}

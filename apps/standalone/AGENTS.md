@@ -490,8 +490,10 @@ and that the unique index's predicate (`floor_unit_labels_unresolved`,
 `UNRESOLVED_UNIT_LABEL_SQL`) is exactly «not completed» of the status the walk
 reached. A station has one unresolved job whatever its shift
 (`floor_unit_labels_unresolved` on `(host_id, device_id)`, as the cloud's
-`PRODUCT_LABEL_BUSY` across shifts; `UNRESOLVED_JOB_SQL` reads it for entering
-any shift) and one job per accepted unit (`floor_unit_labels_scan`). An id's
+`PRODUCT_LABEL_BUSY` across shifts; `UNRESOLVED_JOB_SQL` reads it whole for
+entering any shift, `UNRESOLVED_REF_SQL` only its gate — no fields, no bytes —
+for every scan of a printing shift and every reprint) and one job per accepted
+unit (`floor_unit_labels_scan`). An id's
 shape is not checked, as in every table of the station.
 `floor_unit_labels_shift` serves the history and the retention's delete, the
 partial `floor_unit_labels_sending` the recovery at start; the retention's
@@ -500,7 +502,8 @@ floor_unit_labels_unresolved` (one row at most), where the planner would walk
 the shift's every job through `floor_unit_labels_shift`. The statements of
 `src/floor/unit-labels/unit-label-store.ts` are pinned in both lists of plans
 (`the_unit_label_reads_search_an_index`). The full code lives only in the
-job's `fields` and bytes; the retention deletes the whole row with its shift
+job's `fields` and bytes (no `unit_label` record carries it; the unit's own
+`scan` record carries `code.canonical` by design); the retention deletes the whole row with its shift
 and keeps a shift while a unit label of it is unresolved (its outcome may be
 unknown), as it does for a waiting label of `floor_print_jobs`.
 
@@ -3951,8 +3954,12 @@ crypto tail (`parseDuplicateKm`, `incomplete_km`) or its label does not render
 `floor_scans` row, its `scan` record, the job `prepared` and the job's
 `unit_label` `prepared` record after the `scan` record, so the host knows the
 unit before its label (`subject_unknown`). Every refusal rejects with
-`UnitLabelRefusedError` (`code`, and the job in the way); the outcome of an
-accepted unit carries its job (`label`). The parity of every station step with
+`UnitLabelRefusedError` (`code` — the gate's kind for a job in the way — and
+that job's `UnitLabelRef`); the outcome of an accepted unit carries its job's
+`UnitLabelRef` (`label`): neither ever holds the job's fields (the full code)
+nor its bytes, and the screen reads the job whole by its id to send it. Such a
+scan needs the operator's name for the label (`unitLabel.operatorName`, not
+blank): without it `processScan` throws before anything is read. The parity of every station step with
 the domain's machine is `test/unit-label-work.test.ts`.
 
 The screen of such a shift (task B6, `src/floor/unit-labels/*.tsx`; the cloud
@@ -4276,9 +4283,10 @@ their print identity for good. Each step is one transaction of the guarded
 `MOVE_JOB_SQL` and its `unit_label` record (`StaleUnitLabelError` when the job
 moved meanwhile, nothing written): `sendUnitLabel` sends a prepared attempt only —
 the duplicate printer assigned now must have the job's way of printing,
-language (RAW) and resolution, else `failed_before_send` (`printer_unconfigured`
-without a printer, `printer_changed` otherwise) and nothing leaves; `sending` is
-written before the bytes go, then `sent` on the shell's `{ sent: true }` and
+language (RAW) and resolution, and a driver page needs a computer that prints
+through drivers (`supportsWindowsDriver`), else `failed_before_send`
+(`printer_unconfigured` without a printer, `printer_changed` otherwise) and
+nothing leaves; `sending` is written before the bytes go, then `sent` on the shell's `{ sent: true }` and
 `delivery_unknown` `transport_failed` on any other answer, a timeout or `busy`
 (the domain has no failure after `sending`, and the cloud records a failed send
 so); `verifyUnitLabel` compares the scanned label with the job's code
@@ -4288,13 +4296,26 @@ open after `sent` or the outcome is unknown: `verified`, or
 so a check of an attempt that moved on is journalled neither way;
 `skipVerification` only after `sent` of a pending required check, with the
 operator; `reprintUnitLabel` a new attempt with the operator's reason and the
-same bytes and date, not while the attempt is prepared or sending nor beside
-another unresolved job; `recoverUnitLabels` at start makes a job left in
-`sending` whose bytes no send of this run holds `delivery_unknown` `interrupted`
-(the record may name no operator) and sends nothing. Nothing sends a label by
+same bytes and date, from the shift the operator works: not while the attempt
+is prepared or sending, not another shift's completed label (`shift_mismatch`,
+the cloud's `PRODUCT_LABEL_SHIFT_MISMATCH`; another shift's unresolved one may
+be), nor beside another unresolved job (its gate's kind). A step whose job did
+not move but whose record the outbox refused — this station closed the shift —
+is `UnitLabelShiftClosedError` («Смена закрыта на этой станции…» in the window
+and the history), never `StaleUnitLabelError`. A send is held in memory per
+print runtime (`isUnitLabelSendActive`, the cloud's `activeSends`) from before
+its `sending` write to its last write; a second send of it is stale.
+`recoverUnitLabels` — at start, on «Повторить», at any load — makes a job left
+in `sending` that no send of this run holds (neither active nor in the
+runtime) `delivery_unknown` `interrupted` (the record may name no operator) and
+sends nothing; a job whose step fails stops none of the others, the first such
+failure thrown after them. Nothing sends a label by
 itself: only a prepared attempt is sent, by the operator's screen. A `prepared`
 record of a reprint and a skip name their operator (`factRecordSchema`). No full
-code reaches a record or a log line.
+code reaches a record or a log line. The logo follows the station's rule
+(`renderLogoLabel`, as the warehouse reprint of a unit), not the cloud's
+duplicate, which prints none: only a layout with an `organization_logo` box
+prints one.
 
 ## Floor exceptions and close
 

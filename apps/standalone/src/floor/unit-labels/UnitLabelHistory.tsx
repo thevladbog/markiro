@@ -15,8 +15,11 @@ const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 export interface UnitLabelHistoryProps {
   /** The shift's labels, newest first; `null` while they are read. */
   entries: readonly UnitLabelEntry[] | null;
-  /** The list could not be read, or a reprint was not done. */
-  failed: boolean;
+  /**
+   * The list could not be read or a reprint was not done (`failed`), or a reprint was refused
+   * because this station closed the shift (`shift_closed`); `null` — nothing failed.
+   */
+  failure: "failed" | "shift_closed" | null;
   /** A decision is being saved. */
   busy: boolean;
   /**
@@ -38,7 +41,7 @@ export interface UnitLabelHistoryProps {
  */
 export function UnitLabelHistory({
   entries,
-  failed,
+  failure,
   busy,
   blocked,
   onReprint,
@@ -63,10 +66,18 @@ export function UnitLabelHistory({
   return (
     <section className="unit-label-history" aria-labelledby="unit-label-history-title">
       <h2 id="unit-label-history-title">{t("floor.unitLabels.history")}</h2>
-      {failed && (
-        <Alert tone="error" role="presentation" title={t("floor.unitLabels.reprintFailed")} />
+      {failure !== null && (
+        <Alert
+          tone="error"
+          role="presentation"
+          title={t(
+            failure === "shift_closed"
+              ? "floor.unitLabels.shiftClosed"
+              : "floor.unitLabels.reprintFailed",
+          )}
+        />
       )}
-      {entries !== null && entries.length === 0 && !failed && (
+      {entries !== null && entries.length === 0 && failure === null && (
         <p className="unit-label-history__empty">{t("floor.unitLabels.emptyHistory")}</p>
       )}
       {entries !== null && entries.length > 0 && (

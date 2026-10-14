@@ -8,7 +8,7 @@ import { outboxStatement, scanRecord, scannedCode, type RecordHead } from "../fa
 import type { ShiftRenderDeps } from "../print/shift-render.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
-import type { UnitLabelJob } from "../unit-labels/unit-label-store.js";
+import type { UnitLabelRef } from "../unit-labels/unit-label-store.js";
 import { acceptWithLabel, checkUnitAcceptance } from "../unit-labels/unit-label-work.js";
 import { readOpenBox, SHIFT_CODES_SQL } from "./work-reads.js";
 
@@ -60,12 +60,12 @@ export interface ScanContext {
   newId: () => string;
   /**
    * What a unit's label needs in a validation shift that prints the Data
-   * Matrix duplicate (plan РЕЖ part B): the name it prints as the operator,
-   * and the render replaced (tests). Left out, the label prints no operator
-   * and the app's render draws it.
+   * Matrix duplicate (plan РЕЖ part B): the name it prints as the operator —
+   * required: such a shift takes no scan without it — and the render replaced
+   * (tests; left out, the app's render draws it).
    */
   unitLabel?: {
-    operatorName: string | null;
+    operatorName: string;
     render?: RenderUnitLabel;
     labelDeps?: ShiftRenderDeps;
   };
@@ -84,8 +84,11 @@ export type ScanOutcome = { scannedAt: string } & (
       kind: "accepted";
       boxId: null;
       acceptedCount: number;
-      /** The unit's label job, `prepared`, in a shift that prints the duplicate (plan РЕЖ part B). */
-      label?: UnitLabelJob;
+      /**
+       * The unit's label job, `prepared`, in a shift that prints the duplicate
+       * (plan РЕЖ part B), by its light reference: never its code nor its bytes.
+       */
+      label?: UnitLabelRef;
     }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
   | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
@@ -187,6 +190,12 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
 export async function processScan(context: ScanContext, raw: string): Promise<ScanOutcome> {
   const { local, pairing, shift } = context;
   const printing = shift.copy.mode === "validation" && shift.snapshot.validationPrint !== null;
+  // A label prints the operator who accepted its unit: never a label without one (a caller's
+  // fault, before anything is read or written).
+  const operatorName = context.unitLabel?.operatorName ?? "";
+  if (printing && operatorName.trim() === "") {
+    throw new Error("processScan: a unit label needs its operator's name");
+  }
   if (printing) await checkUnitAcceptance(context);
   const scannedAt = context.now().toISOString();
   const head: RecordHead = {
@@ -269,7 +278,7 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
           pairing,
           shift,
           operatorId: context.operatorId,
-          operatorName: context.unitLabel?.operatorName ?? null,
+          operatorName,
           now: context.now,
           newId: context.newId,
           ...(context.unitLabel?.render === undefined ? {} : { render: context.unitLabel.render }),

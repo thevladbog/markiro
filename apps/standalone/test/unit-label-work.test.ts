@@ -12,6 +12,8 @@ import {
 } from "@markiro/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { closeShift } from "../src/floor/close/shift-close.js";
+import { scannedCode } from "../src/floor/facts.js";
 import { base64ToBytes } from "../src/floor/print/print-jobs.js";
 import { createPrintRuntime, type PrintRuntime } from "../src/floor/print/print-runtime.js";
 import {
@@ -27,10 +29,13 @@ import {
 import {
   readUnitLabelJob,
   readUnresolvedUnitLabel,
+  SENDING_JOBS_SQL,
   type UnitLabelJob,
 } from "../src/floor/unit-labels/unit-label-store.js";
 import {
+  acceptWithLabel,
   canAcceptNext,
+  isUnitLabelSendActive,
   recoverUnitLabels,
   reprintUnitLabel,
   sendUnitLabel,
@@ -38,17 +43,19 @@ import {
   StaleUnitLabelError,
   unitLabelStatus,
   UnitLabelRefusedError,
+  UnitLabelShiftClosedError,
   UnitLabelStateError,
   verifyUnitLabel,
   type UnitLabelPrintContext,
 } from "../src/floor/unit-labels/unit-label-work.js";
 import { processScan, type ScanContext } from "../src/floor/work/scan-pipeline.js";
-import type { PrintResult, PrintTarget } from "../src/hardware/hardware.js";
+import type { PrintResult, PrintTarget, WindowsPrinting } from "../src/hardware/hardware.js";
 import {
   enteredShiftSchema,
   factRecordSchema,
   type EnteredShift,
   type FactRecord,
+  UNIT_LABEL_ERROR_CODES,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import {
@@ -201,13 +208,74 @@ function counts(db: Station["db"]) {
   };
 }
 
-/** Accepts `raw` as a unit with its label: the job it made. */
+/** Accepts `raw` as a unit with its label: the job it made, read whole. */
 async function accept(at: Station, raw = RAW): Promise<UnitLabelJob> {
   const outcome = await processScan(at.scan, raw);
   if (outcome.kind !== "accepted" || outcome.boxId !== null || outcome.label === undefined) {
     throw new Error(`the unit was not accepted with a label: ${JSON.stringify(outcome)}`);
   }
-  return outcome.label;
+  const job = await readUnitLabelJob(at.local, PAIRING, outcome.label.id);
+  if (job === null) throw new Error("the job is gone");
+  return job;
+}
+
+/** What a job's light reference carries: its gate, never its fields nor its bytes. */
+const REF_KEYS = [
+  "attemptNo",
+  "attemptState",
+  "id",
+  "shiftId",
+  "verification",
+  "verificationPolicy",
+].sort();
+
+/** A send that never answers: the job stays `sending` while the runtime holds its bytes. */
+async function hangingSend(at: Station, job: UnitLabelJob): Promise<UnitLabelJob> {
+  at.printBytes.mockImplementationOnce(() => new Promise<PrintResult>(() => undefined));
+  void sendUnitLabel(at.print, job, OPERATOR_ID).catch(() => undefined);
+  await vi.waitFor(async () => expect((await current(at, job)).attemptState).toBe("sending"));
+  return current(at, job);
+}
+
+type Reached =
+  | "prepared"
+  | "sending"
+  | "sent"
+  | "delivery_unknown"
+  | "failed_before_send"
+  | "verified"
+  | "skipped";
+
+/** A new unit's job brought to `state` by the station's own steps. */
+async function reach(at: Station, state: Reached): Promise<UnitLabelJob> {
+  const job = await accept(at);
+  if (state === "prepared") return job;
+  if (state === "sending") return hangingSend(at, job);
+  if (state === "failed_before_send") {
+    await assign(at.local, null);
+    const failed = await sendUnitLabel(at.print, job, OPERATOR_ID);
+    await assign(at.local, ZEBRA);
+    return failed;
+  }
+  const unknown =
+    state === "delivery_unknown" || (state === "verified" && job.verificationPolicy === "none");
+  if (unknown) at.printBytes.mockResolvedValueOnce({ sent: false, code: "outcome_unknown" });
+  const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
+  if (state === "verified") return (await verifyUnitLabel(at.print, sent, RAW, OPERATOR_ID)).job;
+  if (state === "skipped") return skipVerification(at.print, sent, OPERATOR_ID);
+  return sent;
+}
+
+/** The context of the shift's close at `at`, through `local` (the station's own by default). */
+function closeContext(at: Station, local: LocalExecutor = at.local) {
+  return {
+    local,
+    pairing: PAIRING,
+    shift: at.shift,
+    operatorId: OPERATOR_ID,
+    now: () => new Date("2026-10-08T09:00:00.000Z"),
+    newId: () => crypto.randomUUID(),
+  };
 }
 
 async function current(at: Station, job: UnitLabelJob): Promise<UnitLabelJob> {
@@ -219,6 +287,13 @@ async function current(at: Station, job: UnitLabelJob): Promise<UnitLabelJob> {
 const ATTEMPT_IDS = (attemptNo: number) =>
   `00000000-0000-4000-a000-${String(attemptNo).padStart(12, "0")}`;
 const REVISION = "66666666-6666-4666-8666-666666666666";
+
+/** `code` as one of the domain's codes `allowed`; any other is the station's error, never coerced. */
+function known<T extends string>(allowed: readonly T[], code: string | null): T {
+  const found = allowed.find((each) => each === code);
+  if (found === undefined) throw new Error(`an error code the domain does not know: ${code}`);
+  return found;
+}
 
 /**
  * The domain's events for a job's records, in the outbox's order: the fields the station has
@@ -256,19 +331,18 @@ function domainEvents(job: UnitLabelJob, records: readonly FactRecord[]): Produc
             dpi: job.dpi,
             bytesDigest: data.bytesDigest,
           };
-          return [
-            job.printMode === "windows_driver"
-              ? { ...prepared, printFormat: "mono-raster-v1" as const }
-              : { ...prepared, language: job.language ?? "zpl" },
-          ];
+          if (job.printMode === "windows_driver") {
+            return [{ ...prepared, printFormat: "mono-raster-v1" as const }];
+          }
+          if (job.language === null) throw new Error("a RAW job without its language");
+          return [{ ...prepared, language: job.language }];
         }
         case "failed_before_send":
           return [
             {
               ...base,
               kind: "failed_before_send",
-              errorCode:
-                data.errorCode === "printer_changed" ? "printer_changed" : "printer_unconfigured",
+              errorCode: known(UNIT_LABEL_ERROR_CODES.failed_before_send, data.errorCode),
             },
           ];
         case "delivery_unknown":
@@ -276,12 +350,7 @@ function domainEvents(job: UnitLabelJob, records: readonly FactRecord[]): Produc
             {
               ...base,
               kind: "delivery_unknown",
-              errorCode:
-                data.errorCode === "interrupted"
-                  ? "interrupted"
-                  : data.errorCode === "persistence_failed"
-                    ? "persistence_failed"
-                    : "transport_failed",
+              errorCode: known(UNIT_LABEL_ERROR_CODES.delivery_unknown, data.errorCode),
             },
           ];
         case "verified":
@@ -291,7 +360,7 @@ function domainEvents(job: UnitLabelJob, records: readonly FactRecord[]): Produc
             {
               ...base,
               kind: "verification_rejected",
-              reason: data.errorCode === "invalid" ? "invalid" : "mismatch",
+              reason: known(UNIT_LABEL_ERROR_CODES.verification_rejected, data.errorCode),
             },
           ];
         default:
@@ -394,6 +463,66 @@ describe("accepting a unit with its label", () => {
     await expectParity(at, job);
   });
 
+  it("answers the job by its light reference: never its fields, its code nor its bytes", async () => {
+    const at = await station();
+    const outcome = await processScan(at.scan, RAW);
+    if (outcome.kind !== "accepted" || outcome.boxId !== null || outcome.label === undefined) {
+      throw new Error("no label");
+    }
+    expect(Object.keys(outcome.label).sort()).toEqual(REF_KEYS);
+    expect(outcome.label).toMatchObject({
+      shiftId: at.shift.copy.id,
+      attemptNo: 1,
+      attemptState: "prepared",
+      verificationPolicy: "required",
+      verification: "pending",
+    });
+    expect(JSON.stringify(outcome)).not.toContain("Zf8K");
+  });
+
+  it("needs the operator's name on a printing shift: nothing is read or written without it", async () => {
+    const at = await station();
+    const before = counts(at.db);
+    for (const unitLabel of [undefined, { operatorName: "" }, { operatorName: "   " }]) {
+      const { unitLabel: _drop, ...rest } = at.scan;
+      void _drop;
+      const context = unitLabel === undefined ? rest : { ...rest, unitLabel };
+      await expect(processScan(context, RAW), JSON.stringify(unitLabel)).rejects.toThrow(
+        "operator",
+      );
+    }
+    expect(counts(at.db)).toEqual(before);
+    expect(at.render).not.toHaveBeenCalled();
+  });
+
+  it("never prints a code other than the one accepted: a forged hash is refused, nothing written", async () => {
+    const at = await station();
+    const before = counts(at.db);
+    const code = scannedCode(canonicalizeKm(RAW));
+    await expect(
+      acceptWithLabel(
+        {
+          local: at.local,
+          pairing: PAIRING,
+          shift: at.shift,
+          operatorId: OPERATOR_ID,
+          operatorName: "Анна Кузнецова",
+          now: () => new Date("2026-10-08T06:15:00.000Z"),
+          newId: () => crypto.randomUUID(),
+          render: at.render,
+        },
+        {
+          scanId: crypto.randomUUID(),
+          code: { ...code, codeHash: "0".repeat(64) },
+          scannedAt: "2026-10-08T06:15:00.000Z",
+          statements: [],
+        },
+      ),
+    ).rejects.toThrow("another code");
+    expect(counts(at.db)).toEqual(before);
+    expect(at.render).not.toHaveBeenCalled();
+  });
+
   it("refuses a code without its crypto tail before anything is written", async () => {
     const at = await station();
     const before = counts(at.db);
@@ -462,7 +591,7 @@ describe("accepting a unit with its label", () => {
       ZEBRA,
     ]);
     const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
-    await reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID);
+    await reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID, at.shift.copy.id);
     await sendUnitLabel(at.print, await current(at, job), OPERATOR_ID);
     expect(at.render).toHaveBeenCalledTimes(1);
     const sends = at.printBytes.mock.calls.map(([, bytes]) => bytes);
@@ -559,12 +688,40 @@ describe("sending a unit label", () => {
     const at = await station({ printer: GODEX_DRIVER });
     const job = await accept(at);
     expect(job).toMatchObject({ printMode: "windows_driver", language: null, dpi: 203 });
-    const records = labelRecords(at.db);
-    expect(records).toHaveLength(1);
-    // No driver in this runtime: the send is answered `unsupported` and stays unknown.
-    await expect(sendUnitLabel(at.print, job, OPERATOR_ID)).resolves.toMatchObject({
-      attemptState: "delivery_unknown",
+    const printWindowsRaster = vi.fn<WindowsPrinting["printWindowsRaster"]>(async () => ({
+      sent: true,
+    }));
+    const windows: WindowsPrinting = {
+      supportsWindowsPrinting: async () => true,
+      printWindowsRaster,
+      getWindowsPrintJob: async () => ({ state: "unavailable" }),
+    };
+    const print = { ...at.print, runtime: createPrintRuntime(at.printBytes, { windows }) };
+    await expect(sendUnitLabel(print, job, OPERATOR_ID)).resolves.toMatchObject({
+      attemptState: "sent",
     });
+    expect(printWindowsRaster).toHaveBeenCalledWith(
+      "Godex G500",
+      base64ToBytes(job.bytesBase64),
+      expect.stringMatching(/^Markiro:/),
+    );
+    expect(at.printBytes).not.toHaveBeenCalled();
+    await expectParity(at, job);
+  });
+
+  it("fails a driver label before sending where this computer prints through no driver", async () => {
+    const at = await station({ printer: GODEX_DRIVER });
+    const job = await accept(at);
+    // No driver in this runtime (not Windows): nothing could leave, so nothing is `sending` and
+    // nothing is left unknown — the domain's `printer_changed`, as for a printer that changed.
+    await expect(sendUnitLabel(at.print, job, OPERATOR_ID)).resolves.toMatchObject({
+      attemptState: "failed_before_send",
+      errorCode: "printer_changed",
+    });
+    expect(labelRecords(at.db).map((record) => record.data.event)).toEqual([
+      "prepared",
+      "failed_before_send",
+    ]);
     expect(at.printBytes).not.toHaveBeenCalled();
     await expectParity(at, job);
   });
@@ -588,9 +745,16 @@ describe("the next unit", () => {
     const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
     expect(canAcceptNext(sent, at.shift.copy.id)).toEqual({ kind: "verify", job: sent });
     const before = counts(at.db);
-    await expect(processScan(at.scan, km("NEXT1"))).rejects.toMatchObject({
-      code: "unresolved",
-    });
+    const refusal: unknown = await processScan(at.scan, km("NEXT1")).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    // The gate in words, and the job in the way by its light reference: no code, no bytes.
+    if (!(refusal instanceof UnitLabelRefusedError)) throw new Error("not refused");
+    expect(refusal.code).toBe("verify");
+    expect(refusal.job).toMatchObject({ id: job.id, attemptState: "sent" });
+    expect(Object.keys(refusal.job ?? {}).sort()).toEqual(REF_KEYS);
+    expect(JSON.stringify(refusal.job)).not.toContain("Zf8K");
     expect(counts(at.db)).toEqual(before);
     // The full content of the new label matches, and the check is saved here: the next unit may come.
     const verified = await verifyUnitLabel(at.print, sent, RAW, OPERATOR_ID);
@@ -609,7 +773,7 @@ describe("the next unit", () => {
       kind: "wait",
       status: "prepared",
     });
-    await expect(processScan(at.scan, km("NEXT2"))).rejects.toMatchObject({ code: "unresolved" });
+    await expect(processScan(at.scan, km("NEXT2"))).rejects.toMatchObject({ code: "wait" });
     const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
     expect(sent.verification).toBe("not_required");
     expect(unitLabelStatus(sent)).toBe("completed");
@@ -680,7 +844,7 @@ describe("the check of a printed label", () => {
   it("of an attempt that moved on is stale: nothing is journalled", async () => {
     const at = await station({ verification: "required" });
     const sent = await sendUnitLabel(at.print, await accept(at), OPERATOR_ID);
-    await reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID);
+    await reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID, at.shift.copy.id);
     const before = counts(at.db);
     await expect(verifyUnitLabel(at.print, sent, km("OTHER"), OPERATOR_ID)).rejects.toBeInstanceOf(
       StaleUnitLabelError,
@@ -752,7 +916,7 @@ describe("printing a unit's label again", () => {
     const at = await station({ verification: "required" });
     const job = await accept(at);
     const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
-    const again = await reprintUnitLabel(at.print, sent, "lost", OTHER_OPERATOR);
+    const again = await reprintUnitLabel(at.print, sent, "lost", OTHER_OPERATOR, at.shift.copy.id);
     expect(again).toMatchObject({
       attemptNo: 2,
       attemptState: "prepared",
@@ -774,18 +938,152 @@ describe("printing a unit's label again", () => {
   it("is refused while its attempt is prepared or sending, and beside another unresolved job", async () => {
     const at = await station({ verification: "none" });
     const job = await accept(at);
-    await expect(reprintUnitLabel(at.print, job, "damaged", OPERATOR_ID)).rejects.toBeInstanceOf(
-      UnitLabelStateError,
-    );
+    await expect(
+      reprintUnitLabel(at.print, job, "damaged", OPERATOR_ID, at.shift.copy.id),
+    ).rejects.toBeInstanceOf(UnitLabelStateError);
     const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
     const next = await accept(at, km("NEXT3"));
     const before = counts(at.db);
-    await expect(reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID)).rejects.toMatchObject({
+    await expect(
+      reprintUnitLabel(at.print, sent, "damaged", OPERATOR_ID, at.shift.copy.id),
+    ).rejects.toMatchObject({
       name: "UnitLabelRefusedError",
-      code: "unresolved",
+      // The gate of the job in the way: this shift's, waiting for its send.
+      code: "wait",
+      job: { id: next.id },
     });
     expect(counts(at.db)).toEqual(before);
     expect(next.attemptState).toBe("prepared");
+  });
+
+  it("never reopens another shift's completed label, and takes another shift's unresolved one", async () => {
+    const at = await station({ verification: "none" });
+    const done = await sendUnitLabel(at.print, await accept(at), OPERATOR_ID);
+    expect(unitLabelStatus(done)).toBe("completed");
+    const before = counts(at.db);
+    // From the second shift: the first shift's completed label is not this shift's to reopen
+    // (the cloud's `PRODUCT_LABEL_SHIFT_MISMATCH`).
+    const mismatch: unknown = await reprintUnitLabel(
+      at.print,
+      done,
+      "lost",
+      OPERATOR_ID,
+      SECOND_SHIFT_ID,
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    if (!(mismatch instanceof UnitLabelRefusedError)) throw new Error("not refused");
+    expect(mismatch.code).toBe("shift_mismatch");
+    // Handed the whole job, the refusal keeps its light reference only.
+    expect(Object.keys(mismatch.job ?? {}).sort()).toEqual(REF_KEYS);
+    expect(counts(at.db)).toEqual(before);
+    // The first shift's label the printer failed before sending holds the station: it may be
+    // printed again from wherever the operator stands, so the line is never stuck behind it.
+    const other = await station({ verification: "none" });
+    const failing = await accept(other);
+    await assign(other.local, null);
+    const failed = await sendUnitLabel(other.print, failing, OPERATOR_ID);
+    await assign(other.local, ZEBRA);
+    await expect(
+      reprintUnitLabel(other.print, failed, "not_printed", OPERATOR_ID, SECOND_SHIFT_ID),
+    ).resolves.toMatchObject({ attemptNo: 2, attemptState: "prepared", reason: "not_printed" });
+    await expectParity(other, failed);
+  });
+
+  it("of a shift this station closed is refused in its own words, nothing written", async () => {
+    const at = await station({ verification: "none" });
+    const done = await sendUnitLabel(at.print, await accept(at), OPERATOR_ID);
+    await expect(closeShift(closeContext(at), "material_shortage")).resolves.toMatchObject({
+      kind: "closed",
+    });
+    const before = counts(at.db);
+    // The job has not moved: the outbox takes no record of a closed shift, and that is said as
+    // such — not as a job that moved on, which a read again would never settle.
+    await expect(
+      reprintUnitLabel(at.print, done, "damaged", OPERATOR_ID, at.shift.copy.id),
+    ).rejects.toBeInstanceOf(UnitLabelShiftClosedError);
+    expect(counts(at.db)).toEqual(before);
+    expect(await current(at, done)).toEqual(done);
+  });
+});
+
+describe("the close of a shift with its unit labels", () => {
+  /** The error code a state carries on the row (its CHECK). */
+  const ERROR_OF: Partial<Record<Reached, string>> = {
+    failed_before_send: "printer_changed",
+    delivery_unknown: "interrupted",
+  };
+  const UNRESOLVED: Record<"none" | "required", readonly Reached[]> = {
+    none: ["prepared", "sending", "failed_before_send", "delivery_unknown"],
+    required: ["prepared", "sending", "sent", "failed_before_send", "delivery_unknown"],
+  };
+
+  for (const policy of ["none", "required"] as const) {
+    for (const state of UNRESOLVED[policy]) {
+      it(`${policy}: is blocked while a label is ${state}, by its summary`, async () => {
+        const at = await station({ verification: policy });
+        await reach(at, state);
+        await expect(closeShift(closeContext(at), "material_shortage")).resolves.toEqual({
+          kind: "blocked",
+          blocker: { kind: "label_unresolved" },
+        });
+        expect(rows(at.db, "SELECT local_state FROM floor_shifts")).toEqual([
+          { local_state: null },
+        ]);
+      });
+
+      it(`${policy}: is refused by its own write when the label turns ${state} after its read`, async () => {
+        const at = await station({ verification: policy });
+        // Resolved at the read: sent with no check, or verified.
+        await reach(at, policy === "none" ? "sent" : "verified");
+        let injected = false;
+        const local: LocalExecutor = {
+          query: (sql, params, row) => at.local.query(sql, params, row),
+          transaction: async (statements) => {
+            if (
+              !injected &&
+              statements.some((s) => s.sql.includes("SET local_state = 'closing'"))
+            ) {
+              injected = true;
+              at.db
+                .prepare(
+                  "UPDATE floor_unit_labels SET attempt_state = ?, verification = ?, error_code = ?",
+                )
+                .run(
+                  state,
+                  policy === "required" ? "pending" : "not_required",
+                  ERROR_OF[state] ?? null,
+                );
+            }
+            return at.local.transaction(statements);
+          },
+        };
+        await expect(closeShift(closeContext(at, local), "material_shortage")).resolves.toEqual({
+          kind: "stale",
+        });
+        expect(injected).toBe(true);
+        expect(rows(at.db, "SELECT local_state FROM floor_shifts")).toEqual([
+          { local_state: null },
+        ]);
+      });
+    }
+  }
+
+  it("goes ahead once every label of the shift is resolved", async () => {
+    for (const [policy, state] of [
+      ["none", "sent"],
+      ["none", "verified"],
+      ["required", "verified"],
+      ["required", "skipped"],
+    ] as const) {
+      const at = await station({ verification: policy });
+      await reach(at, state);
+      await expect(
+        closeShift(closeContext(at), "material_shortage"),
+        `${policy}/${state}`,
+      ).resolves.toMatchObject({ kind: "closed" });
+    }
   });
 });
 
@@ -835,6 +1133,78 @@ describe("the recovery at start", () => {
     expect(again).toEqual(sent);
     expect(canAcceptNext(again, at.shift.copy.id)).toEqual({ kind: "verify", job: sent });
   });
+
+  it("leaves a send of this app run alone between its `sending` write and the runtime's send", async () => {
+    const at = await station({ verification: "none" });
+    const job = await accept(at);
+    // The recovery runs (the panel loads) right after `sending` is committed, before the bytes
+    // are handed to the runtime: the runtime does not hold them yet, but this app run sends them.
+    let recovered: unknown[] | null = null;
+    const local: LocalExecutor = {
+      query: (sql, params, row) => at.local.query(sql, params, row),
+      transaction: async (statements) => {
+        const result = await at.local.transaction(statements);
+        if (recovered === null && statements.some((s) => s.values?.includes("sending"))) {
+          recovered = await recoverUnitLabels({ ...at.print, local }, null);
+        }
+        return result;
+      },
+    };
+    const sent = await sendUnitLabel({ ...at.print, local }, job, OPERATOR_ID);
+    expect(recovered).toEqual([]);
+    expect(sent).toMatchObject({ attemptState: "sent" });
+    expect(labelRecords(at.db).map((record) => record.data.event)).toEqual([
+      "prepared",
+      "sending",
+      "sent",
+    ]);
+    await expectParity(at, job);
+    // Once the send's last write is done, it holds the job no more.
+    await expect(recoverUnitLabels(at.print, null)).resolves.toEqual([]);
+  });
+
+  it("refuses a second send of a job whose send runs, and keeps that send held", async () => {
+    const at = await station({ verification: "required" });
+    const job = await accept(at);
+    const sending = await hangingSend(at, job);
+    expect(sending.attemptState).toBe("sending");
+    const before = counts(at.db);
+    // The same prepared job, sent again from a stale read of it: nothing written, nothing sent,
+    // and the first send stays this app run's (the recovery still leaves it alone).
+    await expect(sendUnitLabel(at.print, job, OPERATOR_ID)).rejects.toBeInstanceOf(
+      StaleUnitLabelError,
+    );
+    expect(counts(at.db)).toEqual(before);
+    expect(at.printBytes).toHaveBeenCalledTimes(1);
+    expect(isUnitLabelSendActive(at.print, job.id)).toBe(true);
+  });
+
+  it("recovers every job it can when one of them fails, then says the failure", async () => {
+    const at = await station({ verification: "required" });
+    const job = await hangingSend(at, await accept(at));
+    const restarted = at.restart();
+    // A job only one unresolved per pairing allows on disk, served first by the read: its
+    // write fails, and the next job is recovered all the same.
+    const ghost = "6f5e4d3c-2b1a-4c9d-8e7f-a0b1c2d3e4f5";
+    const local: LocalExecutor = {
+      query: async (sql, params, row) => {
+        const found = await at.local.query(sql, params, row);
+        const [first] = found;
+        if (sql !== SENDING_JOBS_SQL || first === undefined) return found;
+        return [{ ...first, id: ghost }, ...found];
+      },
+      transaction: async (statements) => {
+        if (statements.some((s) => s.values?.includes(ghost))) throw new Error("disk I/O error");
+        return at.local.transaction(statements);
+      },
+    };
+    await expect(recoverUnitLabels({ ...restarted, local }, null)).rejects.toThrow("disk I/O");
+    expect(await current(at, job)).toMatchObject({
+      attemptState: "delivery_unknown",
+      errorCode: "interrupted",
+    });
+    await expectParity(at, job);
+  });
 });
 
 describe("the full code", () => {
@@ -855,6 +1225,7 @@ describe("the full code", () => {
       await current(at, job),
       "not_printed",
       OPERATOR_ID,
+      at.shift.copy.id,
     );
     const sent = await sendUnitLabel(at.print, again, OPERATOR_ID);
     await skipVerification(at.print, sent, OPERATOR_ID);
@@ -874,32 +1245,22 @@ describe("the full code", () => {
  * domain's projection — or is refused by the station exactly where the domain refuses its event.
  */
 describe("the station's machine against the domain's", () => {
-  type Reached =
-    "prepared" | "sent" | "delivery_unknown" | "failed_before_send" | "verified" | "skipped";
   type Action = "send" | "verify" | "reject" | "skip" | "reprint";
+  // `sending`: the bytes are with the runtime (a send that never answers), so every action
+  // there — the reprint's own guard among them — meets the domain's refusal.
   const REACHED: Record<"none" | "required", readonly Reached[]> = {
-    none: ["prepared", "sent", "delivery_unknown", "failed_before_send", "verified"],
-    required: ["prepared", "sent", "delivery_unknown", "failed_before_send", "verified", "skipped"],
+    none: ["prepared", "sending", "sent", "delivery_unknown", "failed_before_send", "verified"],
+    required: [
+      "prepared",
+      "sending",
+      "sent",
+      "delivery_unknown",
+      "failed_before_send",
+      "verified",
+      "skipped",
+    ],
   };
   const ACTIONS: readonly Action[] = ["send", "verify", "reject", "skip", "reprint"];
-
-  async function reach(at: Station, state: Reached): Promise<UnitLabelJob> {
-    const job = await accept(at);
-    if (state === "prepared") return job;
-    if (state === "failed_before_send") {
-      await assign(at.local, null);
-      const failed = await sendUnitLabel(at.print, job, OPERATOR_ID);
-      await assign(at.local, ZEBRA);
-      return failed;
-    }
-    const unknown =
-      state === "delivery_unknown" || (state === "verified" && job.verificationPolicy === "none");
-    if (unknown) at.printBytes.mockResolvedValueOnce({ sent: false, code: "outcome_unknown" });
-    const sent = await sendUnitLabel(at.print, job, OPERATOR_ID);
-    if (state === "verified") return (await verifyUnitLabel(at.print, sent, RAW, OPERATOR_ID)).job;
-    if (state === "skipped") return skipVerification(at.print, sent, OPERATOR_ID);
-    return sent;
-  }
 
   /** The domain's event of `action` from `projection`, as the station would record it. */
   function eventOf(
@@ -955,7 +1316,7 @@ describe("the station's machine against the domain's", () => {
       case "skip":
         return skipVerification(at.print, job, OPERATOR_ID);
       case "reprint":
-        return reprintUnitLabel(at.print, job, "damaged", OPERATOR_ID);
+        return reprintUnitLabel(at.print, job, "damaged", OPERATOR_ID, at.shift.copy.id);
     }
   }
 

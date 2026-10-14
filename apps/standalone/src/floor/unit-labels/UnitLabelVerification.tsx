@@ -22,8 +22,11 @@ export type UnitLabelWindow =
   | { kind: "printer" }
   | { kind: "storage" };
 
-/** What the window says under the label: a scan that is not its label, a decision not saved. */
-export type UnitLabelNote = "mismatch" | "invalid" | "failed";
+/**
+ * What the window says under the label: a scan that is not its label, a decision not saved
+ * (`failed`), or not saved because this station closed the label's shift (`shift_closed`).
+ */
+export type UnitLabelNote = "mismatch" | "invalid" | "failed" | "shift_closed";
 
 /** A button that waits for a decision's answer: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
@@ -240,11 +243,13 @@ export function UnitLabelVerification({
   const alert =
     view.kind === "printer"
       ? t("floor.unitLabels.failedHint")
-      : view.kind === "storage" || note === "failed"
-        ? t("floor.unitLabels.storageError")
-        : view.kind === "another_shift"
-          ? t("floor.unitLabels.anotherShift")
-          : null;
+      : note === "shift_closed"
+        ? t("floor.unitLabels.shiftClosed")
+        : view.kind === "storage" || note === "failed"
+          ? t("floor.unitLabels.storageError")
+          : view.kind === "another_shift"
+            ? t("floor.unitLabels.anotherShift")
+            : null;
 
   let main: ReactNode;
   if (job === null || job.attemptState === "sending") {

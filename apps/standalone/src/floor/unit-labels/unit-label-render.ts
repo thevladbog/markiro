@@ -70,6 +70,12 @@ export function unitLabelFields(
  * (`kmDataMatrix: "raster"`, as the cloud's duplicate, the office's preview of
  * a product duplicate and the warehouse reprint of a unit draw it), or a
  * `mono-raster-v1` page for a printer through the Windows driver.
+ *
+ * The logo (review of B5): the cloud's duplicate prints none (its renderer
+ * takes no logo), but this station's warehouse reprint of a unit does
+ * (`warehouseLabelRender`, the same `renderLogoLabel`), so a unit's label
+ * follows the station's own rule, not the cloud's. A duplicate layout
+ * without an `organization_logo` box prints and loads no logo either way.
  */
 export function unitLabelRender(shift: WorkShift, deps: ShiftRenderDeps = {}): RenderUnitLabel {
   return (spec, fields, printer) =>

@@ -8,11 +8,13 @@ import {
   generateZpl,
   renderMonoLabel,
   withPrinterDpi,
+  type LabelTemplateSpec,
+  type MonoBitmap,
 } from "@markiro/domain";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { latin1ToBytes } from "../src/floor/print/label-render.js";
+import { latin1ToBytes, renderLabel } from "../src/floor/print/label-render.js";
 import type { PrinterProfile } from "../src/floor/setup/workstation-settings.js";
 import { readStoredWork } from "../src/floor/shifts/shift-copies.js";
 import { checkShiftSnapshot } from "../src/floor/shifts/shift-snapshot.js";
@@ -163,6 +165,93 @@ describe("the bytes of a unit label", () => {
       logo: null,
     });
     expect(bytes).toEqual(encodeMonoRaster(page));
+  });
+});
+
+describe("the logo of a unit label", () => {
+  const LOGO: MonoBitmap = {
+    width: 16,
+    height: 8,
+    stride: 2,
+    pixels: new Uint8Array(16).fill(0xff),
+  };
+  const MARKIRO: MonoBitmap = {
+    width: 8,
+    height: 2,
+    stride: 1,
+    pixels: new Uint8Array([0xf0, 0x0f]),
+  };
+  const ZPL_203: PrinterProfile = RAW_PRINTERS[0] ?? raise("no printer");
+
+  function raise(message: string): never {
+    throw new Error(message);
+  }
+
+  /** The shift's duplicate layout with an `organization_logo` box beside its code. */
+  function withLogoBox(spec: LabelTemplateSpec): LabelTemplateSpec {
+    return {
+      ...spec,
+      elements: [
+        ...spec.elements,
+        {
+          id: "logo",
+          kind: "organization_logo",
+          xMm: 19,
+          yMm: 10,
+          widthMm: 8,
+          heightMm: 6,
+          source: "organization",
+          fallback: "markiro",
+        },
+      ],
+    };
+  }
+
+  // The duplicate prints a logo by the shift labels' own rule (#703), as the warehouse reprint of
+  // a unit does (plan СКЛ × А4, `warehouseLabelRender`): the organization logo the shift froze,
+  // else the bundled Markiro logo — never another logo than the station's other labels print.
+  it("prints the organization logo the shift froze, in a layout with a logo box", async () => {
+    const shift = await printingShift();
+    const template = shift.snapshot.validationPrint?.template ?? raise("no duplicate template");
+    const frozen = {
+      ...shift,
+      snapshot: {
+        ...shift.snapshot,
+        organization: { name: "ООО «Пример»", inn: null, logo: LOGO },
+      },
+    };
+    const spec = withLogoBox(template.spec);
+    const fields = unitLabelFields(frozen, RAW, ACCEPTED_AT, null);
+    const fallbackLogo = vi.fn(async () => MARKIRO);
+    const bytes = await unitLabelRender(frozen, { rasterize: fakeRaster, fallbackLogo })(
+      spec,
+      fields,
+      ZPL_203,
+    );
+    expect(bytes).toEqual(
+      await renderLabel(spec, fields, ZPL_203, fakeRaster, LOGO, { kmDataMatrix: "raster" }),
+    );
+    expect(bytes).not.toEqual(
+      await renderLabel(spec, fields, ZPL_203, fakeRaster, null, { kmDataMatrix: "raster" }),
+    );
+    expect(fallbackLogo).not.toHaveBeenCalled();
+  });
+
+  it("prints the Markiro logo when the shift froze none, and loads none without a logo box", async () => {
+    const shift = await printingShift();
+    expect(shift.snapshot.organization).toBeNull();
+    const template = shift.snapshot.validationPrint?.template ?? raise("no duplicate template");
+    const spec = withLogoBox(template.spec);
+    const fields = unitLabelFields(shift, RAW, ACCEPTED_AT, null);
+    const fallbackLogo = vi.fn(async () => MARKIRO);
+    const render = unitLabelRender(shift, { rasterize: fakeRaster, fallbackLogo });
+    expect(await render(spec, fields, ZPL_203)).toEqual(
+      await renderLabel(spec, fields, ZPL_203, fakeRaster, MARKIRO, { kmDataMatrix: "raster" }),
+    );
+    expect(fallbackLogo).toHaveBeenCalledTimes(1);
+    fallbackLogo.mockClear();
+    await render(template.spec, fields, ZPL_203);
+    expect(fallbackLogo).not.toHaveBeenCalled();
   });
 });
 
