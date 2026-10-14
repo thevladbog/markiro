@@ -494,6 +494,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_cards::box_card),
         )
         .route(
+            "/v1/office/pallets",
+            get(crate::routes::office_pallets::list_pallets),
+        )
+        .route(
             "/v1/office/pallets/{id}",
             get(crate::routes::office_cards::pallet_card),
         )
