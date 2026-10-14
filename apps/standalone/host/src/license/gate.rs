@@ -159,6 +159,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/disaggregation-reasons"),
     ("POST", "/v1/office/disaggregation-reasons"),
     ("PUT", "/v1/office/disaggregation-reasons/{id}"),
+    ("GET", "/v1/office/boxes/{id}"),
     ("GET", "/v1/office/codes"),
     ("GET", "/v1/office/codes/{code_hash}"),
     ("GET", "/v1/office/backups"),
