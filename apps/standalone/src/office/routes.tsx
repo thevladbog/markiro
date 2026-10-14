@@ -5,6 +5,9 @@ import { CodeSearchPage } from "./codes/CodeSearchPage.js";
 import { ConflictsPage } from "./conflicts/ConflictsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
+import { DisaggregationDocumentPage } from "./disaggregation/DisaggregationDocumentPage.js";
+import { DisaggregationPage } from "./disaggregation/DisaggregationPage.js";
+import { DisaggregationReasonsPage } from "./disaggregation/DisaggregationReasonsPage.js";
 import { EmployeesPage } from "./employees/EmployeesPage.js";
 import { AboutPage } from "./info/AboutPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
@@ -42,6 +45,10 @@ export const officeRoutes: RouteObject[] = [
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
       { path: "shifts/:id", element: <ShiftCardPage /> },
+      { path: "disaggregation", element: <DisaggregationPage /> },
+      // A static segment ranks above `:id`, so «reasons» is never a document.
+      { path: "disaggregation/reasons", element: <DisaggregationReasonsPage /> },
+      { path: "disaggregation/:id", element: <DisaggregationDocumentPage /> },
       { path: "conflicts", element: <ConflictsPage /> },
       { path: "codes", element: <CodeSearchPage /> },
       {

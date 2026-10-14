@@ -3,11 +3,15 @@ import { readFileSync } from "node:fs";
 import { renderGismtDisaggregationXml } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 
-import { disaggregationReportRowsSchema } from "../src/host/disaggregation.js";
+import {
+  disaggregationReportRowsSchema,
+  type DisaggregationReportRows,
+} from "../src/host/disaggregation.js";
 import {
   disaggregationXmlFileName,
   disaggregationXmlFolder,
   formDisaggregationXml,
+  type DisaggregationXmlRefusal,
 } from "../src/office/disaggregation/disaggregation-xml.js";
 
 const testModuleUrl = import.meta.url;
@@ -44,13 +48,13 @@ describe("ГИС МТ «Расформирование упаковки» of a d
     expect(result.ok && result.file.packingCount).toBe(2);
   });
 
-  it.each([
-    [{ ...applied, status: "draft" as const }, "DOCUMENT_NOT_APPLIED"],
+  it.each<[DisaggregationReportRows, DisaggregationXmlRefusal]>([
+    [{ ...applied, status: "draft" }, "DOCUMENT_NOT_APPLIED"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: null } }, "ORG_INN_MISSING"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: "  " } }, "ORG_INN_MISSING"],
     [{ ...applied, organization: { name: "ООО «Атолл»", inn: "0000000000" } }, "INVALID_ORG_INN"],
     [{ ...applied, lines: [] }, "NO_PACKINGS"],
-  ] as const)("refuses %#: %s", (rows, refusal) => {
+  ])("refuses %#: %s", (rows, refusal) => {
     expect(formDisaggregationXml(rows)).toEqual({ ok: false, refusal });
   });
 
