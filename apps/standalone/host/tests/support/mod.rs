@@ -7,6 +7,7 @@
 pub mod app;
 pub mod backup;
 pub mod conflicts;
+pub mod disaggregation;
 pub mod license;
 
 use std::sync::Arc;
