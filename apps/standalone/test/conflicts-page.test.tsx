@@ -119,7 +119,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
   it("links the loser's box to its card (plan КРТ), and only the shift without one", async () => {
     await openConflicts(session());
     const named = screen.getByRole("link", {
-      name: "Карточка короба проигравшего с кодом S000007",
+      name: "Короб проигравшего с кодом S000007, карточка короба",
     });
     expect(named.getAttribute("href")).toBe("/codes/box/b0000000-0000-4000-8000-000000000001");
     const bare = within(cell(1, "Проигравший скан")).getByRole("link", {

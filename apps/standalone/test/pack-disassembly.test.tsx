@@ -128,6 +128,8 @@ describe.each([
     const link = within(alert).getByRole("link", { name: "Открыть документ DSG-26-0001" });
     expect(link.getAttribute("href")).toBe(`/disaggregation/${DOC_ID}`);
     expect(navigate).not.toHaveBeenCalled();
+    // A second press would make another empty draft.
+    expect(screen.queryByRole("button", { name: "Расформировать" })).toBeNull();
   });
 });
 

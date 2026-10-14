@@ -43,7 +43,8 @@ import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
 const COUNT = new Intl.NumberFormat("ru");
 
 export function isNotFound(error: unknown): boolean {
-  return error instanceof HostError && error.code === "not_found";
+  // An address that is no id never reached the host (`getBoxCard` refuses it): it names nothing here.
+  return error instanceof RangeError || (error instanceof HostError && error.code === "not_found");
 }
 
 /** «Назад» of a card: the page before, else the last part of «Поиск кодов». */

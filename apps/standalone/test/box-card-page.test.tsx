@@ -212,6 +212,14 @@ describe("the card of a box (plan КРТ)", () => {
     expect(screen.getByText(/Хост знает только то, что собрали станции/)).toBeTruthy();
   });
 
+  it("says an address that is no id names no box, without a retry", async () => {
+    const value = packSession();
+    value.api.getBoxCard.mockRejectedValue(new RangeError("not a box id"));
+    renderOffice(value, { initialPath: "/codes/box/not-an-id" });
+    await screen.findByText("Короб не найден");
+    expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+  });
+
   it("is open to a technologist", async () => {
     await boxCard(packSession(undefined, TECHNOLOGIST));
   });

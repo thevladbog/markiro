@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { HostError } from "../src/host/client.js";
 import type { OfficePalletPage } from "../src/host/pack-cards.js";
 import { TECHNOLOGIST } from "./support/office.js";
 import { openCodes, packSession, PALLET_PAGE } from "./support/pack-cards.js";
@@ -34,7 +35,7 @@ describe("«Паллеты» (plan КРТ)", () => {
     const value = await palletsOf();
     expect(value.api.listPallets).toHaveBeenCalledWith("office-session-token", {}, null);
     expect(rows()).toHaveLength(3);
-    expect(rows()[0]?.textContent).toContain("Без SSCC");
+    expect(rows()[0]?.textContent).toContain("Открытая");
     expect(rows()[0]?.textContent).toContain("Открыта");
     expect(screen.getByText("Показано: 3")).toBeTruthy();
   });
@@ -71,6 +72,50 @@ describe("«Паллеты» (plan КРТ)", () => {
     );
     expect(screen.queryByRole("button", { name: "Показать ещё" })).toBeNull();
     expect(screen.getByText("Показано: 4")).toBeTruthy();
+  });
+
+  it("keeps the stations to choose from while a narrower list is read, and shows no stale rows", async () => {
+    const value = packSession();
+    value.api.listPallets
+      .mockResolvedValueOnce(PALLET_PAGE)
+      .mockReturnValueOnce(new Promise(() => undefined));
+    await palletsOf(value);
+    chooseText("Товар", "Молоко 3,2% 0,9 л");
+    await waitFor(() => expect(value.api.listPallets).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("table")).toBeNull();
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Станция" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+    expect(
+      within(screen.getByRole("listbox")).getByText("Станция на линии 2 (отозвана)"),
+    ).toBeTruthy();
+  });
+
+  it("keeps the rows it has when the next hundred cannot be read, and offers it again", async () => {
+    const value = packSession();
+    value.api.listPallets
+      .mockResolvedValueOnce(PALLET_PAGE)
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "host down" }),
+      )
+      .mockResolvedValueOnce(SECOND);
+    await palletsOf(value);
+    fireEvent.click(screen.getByRole("button", { name: "Показать ещё" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Нет связи с хостом");
+    expect(rows()).toHaveLength(3);
+    fireEvent.click(within(alert).getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(rows()).toHaveLength(4));
+  });
+
+  it("says nothing of a count while the period asked is backwards", async () => {
+    const value = packSession();
+    await openCodes(value, "/codes/pallets?from=2026-10-09&to=2026-10-08");
+    expect(screen.queryByText(/^Показано:/)).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("refuses an SSCC that is not 18 digits without asking the host", async () => {

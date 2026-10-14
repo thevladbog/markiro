@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   QueryClient,
   useInfiniteQuery,
   useMutation,
@@ -165,6 +166,9 @@ export function useOfficeInfiniteQuery<T>(
     queryFn: ({ pageParam }) => call((token) => read(api, token, pageParam)),
     initialPageParam: null,
     getNextPageParam: (last) => nextCursor(last) ?? undefined,
+    // A page of another filter keeps the last answer until its own arrives (`isPlaceholderData`),
+    // so what the filters were read from (the stations of the list) does not vanish meanwhile.
+    placeholderData: keepPreviousData,
     staleTime: 0,
     enabled: options.enabled ?? true,
   });

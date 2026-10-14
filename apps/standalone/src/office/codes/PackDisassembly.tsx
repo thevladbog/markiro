@@ -60,24 +60,26 @@ export function usePackDisassembly({
       ? ""
       : t(errorMessageKey(failure instanceof PackDraftWithoutLine ? failure.cause : failure));
   return {
-    button: (
-      <Button
-        variant="secondary"
-        loading={start.isPending}
-        onClick={() => {
-          if (running.current) return;
-          running.current = true;
-          start.mutate(sscc, {
-            onSuccess: (document) => void navigate(`/disaggregation/${document.id}`),
-            onSettled: () => {
-              running.current = false;
-            },
-          });
-        }}
-      >
-        {t("office.packs.disassemble")}
-      </Button>
-    ),
+    // After a draft was made without its line, a second press would make another empty one.
+    button:
+      failure instanceof PackDraftWithoutLine ? null : (
+        <Button
+          variant="secondary"
+          loading={start.isPending}
+          onClick={() => {
+            if (running.current) return;
+            running.current = true;
+            start.mutate(sscc, {
+              onSuccess: (document) => void navigate(`/disaggregation/${document.id}`),
+              onSettled: () => {
+                running.current = false;
+              },
+            });
+          }}
+        >
+          {t("office.packs.disassemble")}
+        </Button>
+      ),
     notice:
       failure === null ? null : failure instanceof PackDraftWithoutLine ? (
         <Alert

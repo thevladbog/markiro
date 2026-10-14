@@ -26,7 +26,7 @@ import { searchableSelect } from "../select-search.js";
 import { packState, palletCountDiffers } from "../shifts/shift-card.js";
 import { datePickerTexts } from "../shifts/shift-text.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
-import { PackStateChip, PalletLink } from "./PackLinks.js";
+import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
 import {
   EMPTY_PALLET_FILTERS,
   palletFiltersOf,
@@ -67,7 +67,12 @@ export function PalletsTab() {
     (page) => page.nextCursor,
     { enabled: zoneReady && query !== null },
   );
-  const rows = useMemo(() => pages.data?.pages.flatMap((page) => page.items) ?? [], [pages.data]);
+  // A query that cannot be asked (a backwards period) shows nothing of what an earlier one cached.
+  const listed = query !== null && pages.data !== undefined;
+  const rows = useMemo(
+    () => (listed ? (pages.data?.pages.flatMap((page) => page.items) ?? []) : []),
+    [listed, pages.data],
+  );
   const stations = pages.data?.pages[0]?.stations ?? [];
   const periodError = filters.from !== "" && filters.to !== "" && filters.to < filters.from;
 
@@ -103,7 +108,7 @@ export function PalletsTab() {
       key: "sscc",
       title: t("office.palletList.table.sscc"),
       mono: true,
-      render: (pallet) => <PalletLink id={pallet.id} sscc={pallet.sscc} />,
+      render: (pallet) => <PalletLinkOrOpen id={pallet.id} sscc={pallet.sscc} />,
     },
     {
       key: "state",
@@ -162,8 +167,8 @@ export function PalletsTab() {
 
   const content = () => {
     if (query === null) return null;
-    if (pages.isPending) return <PageLoading />;
-    if (pages.isError)
+    if (pages.isPending || pages.isPlaceholderData) return <PageLoading />;
+    if (pages.isError && pages.data === undefined)
       return <LoadError error={pages.error} onRetry={() => void pages.refetch()} />;
     if (rows.length === 0) return <EmptyState title={t("office.palletList.empty")} />;
     return (
@@ -175,6 +180,9 @@ export function PalletsTab() {
           onRowClick={(pallet) => void navigate(`/codes/pallet/${pallet.id}`)}
           scrollLabel={t("office.palletList.table.label")}
         />
+        {pages.isFetchNextPageError && (
+          <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
+        )}
         {pages.hasNextPage && (
           <Button
             variant="secondary"
