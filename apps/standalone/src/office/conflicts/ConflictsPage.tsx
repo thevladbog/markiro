@@ -19,7 +19,7 @@ import { errorMessageKey } from "../../host/errors.js";
 import type { OfficeConflict, OfficeConflictScan } from "../../host/review.js";
 import { useCan } from "../access.js";
 import { instantFormat, type FormatInstant } from "../codes/CodeCard.js";
-import { DraftWithoutLine, startDisassembly } from "../codes/disassemble.js";
+import { PackDraftWithoutLine, startPackDisassembly } from "../codes/pack-disassembly.js";
 import { alertFailure, type AlertFailure } from "../form-errors.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -71,7 +71,7 @@ export function ConflictsPage() {
   const canDisassemble = useCan("planShifts");
   const navigate = useNavigate();
   const disassemble = useOfficeMutation((api, token, sscc: string) =>
-    startDisassembly(api, token, sscc),
+    startPackDisassembly(api, token, sscc),
   );
   // «Расформировать короб» refused, or a draft made without its SSCC (plan ДЗГ-О).
   const [disassembleAlert, setDisassembleAlert] = useState<
@@ -129,7 +129,7 @@ export function ConflictsPage() {
       },
       onError: (error) =>
         setDisassembleAlert(
-          error instanceof DraftWithoutLine
+          error instanceof PackDraftWithoutLine
             ? {
                 kind: "draft",
                 id: error.document.id,

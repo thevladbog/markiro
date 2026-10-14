@@ -333,6 +333,15 @@ export function DisaggregationDocumentPage() {
             };
         }
       }
+      if (error.code === "validation_failed" && error.field?.startsWith("lines.")) {
+        // One token of the part the host cannot take (over 64 characters, or a control character).
+        return {
+          stale: false,
+          tone: "warn",
+          text: t("office.disaggregation.detail.badToken"),
+          reread: false,
+        };
+      }
       if (error.code === "validation_failed" && error.field === "lines") {
         return {
           stale: false,

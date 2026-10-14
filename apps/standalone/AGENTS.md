@@ -5074,8 +5074,8 @@ boxes|full` (every office role) reads in one snapshot (rolled-back transaction, 
   applied document; `host/tests/office_shift_review.rs` forbids a table scan in the plan.
 - **From the conflicts page.** `OfficeConflictScan` got `shiftClosed` and `boxDisassembled`;
   the loser's closed box of a closed shift has «Расформировать короб», which makes a draft
-  with its SSCC through `src/office/codes/disassemble.ts` (`startDisassembly`; plan КРТ's
-  cards use the same helper) and opens it. The conditions are a hint: the host checks.
+  with its SSCC through plan КРТ's helper `src/office/codes/pack-disassembly.ts`
+  (`startPackDisassembly`, the same as the cards' «Расформировать») and opens it. The conditions are a hint: the host checks.
 - **Not checked.** Everything here ran under jsdom, fake hosts and `TestApp`: never the
   print dialog of WebView2, an A4 printer, the DataMatrix of the full act read by a scanner,
   a 200-box full act's time, the acceptance of the XML by the Честный знак cabinet (for a box

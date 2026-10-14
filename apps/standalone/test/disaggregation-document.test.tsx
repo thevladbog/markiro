@@ -472,6 +472,17 @@ describe("office «Дезагрегация»: a draft document", () => {
     await expectFocusedNotice("В документе не может быть больше 10 000 строк.");
   });
 
+  it("explains a token the host cannot take, apart from a full document", async () => {
+    const { session } = fake();
+    session.api.addDisaggregationLines.mockRejectedValue(validation("lines.3.input"));
+    await openDocument(session);
+    paste("MRK-1");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить строки" }));
+    await expectFocusedNotice(
+      "Хост не принял одну из строк: SSCC длиннее 64 символов или с управляющим символом. Исправьте её и добавьте снова.",
+    );
+  });
+
   it("does not send a file of 10 001 SSCCs", async () => {
     const { session } = fake();
     await openDocument(session);
@@ -663,7 +674,7 @@ describe("office «Дезагрегация»: a draft document", () => {
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Провести" }),
     );
     await expectFocusedNotice(
-      "Хост восстановлен из копии: документы нельзя проводить, пока администратор не возобновит работу станций («Копии» → «Возобновить»). Черновик сохранён.",
+      "Хост восстановлен из копии: документы нельзя проводить, пока администратор не возобновит работу станций («Резервные копии» → «Возобновить приём данных станций»). Черновик сохранён.",
     );
     // The document is as it was: it is not read again as if it were invalid.
     expect(session.api.getDisaggregation.mock.calls.length).toBe(reads);
