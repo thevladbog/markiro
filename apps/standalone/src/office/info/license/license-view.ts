@@ -30,9 +30,22 @@ export function stateText(license: OfficeLicense): LicenseText {
   if (license.state === "active" && license.license?.plan === "demo") {
     return { key: "office.about.license.state.demo" };
   }
+  // The host opens new shifts again for the extension: the word says so,
+  // not «не открываются» above the extension's own line.
+  if (
+    emergencyRuns(license) &&
+    (license.state === "restricted" || license.state === "trial_expired")
+  ) {
+    return { key: `office.about.license.state.${license.state}Emergency` };
+  }
   return KNOWN_STATES.has(license.state)
     ? { key: `office.about.license.state.${license.state}` }
     : { key: "office.about.license.state.unknown", values: { state: license.state } };
+}
+
+/** Whether the emergency extension runs: the host opens new shifts by it now. */
+function emergencyRuns(license: OfficeLicense): boolean {
+  return license.emergency.until !== null && license.opensNewShifts;
 }
 
 /** The tone of the state: an error where no new shift opens or soon will not. */
@@ -120,7 +133,9 @@ export function licenseTerms(license: OfficeLicense, zone: string | null): Licen
     case "restricted":
     case "trial_expired":
     case "inn_mismatch":
-      // `since` is the moment the state began: no new shift opens from then.
+      // `since` is the moment the state began: no new shift opens from then,
+      // unless the extension runs (its own line says until when).
+      if (emergencyRuns(license)) break;
       terms.push({
         key: "office.about.license.terms.blockedSince",
         values: { date: licenseDay(license.since, zone) },
@@ -134,7 +149,9 @@ export function licenseTerms(license: OfficeLicense, zone: string | null): Licen
   }
   if (license.emergency.until !== null) {
     terms.push({
-      key: "office.about.license.terms.emergency",
+      key: emergencyRuns(license)
+        ? "office.about.license.terms.emergency"
+        : "office.about.license.terms.emergencyOver",
       values: { until: licenseMinute(license.emergency.until, zone) },
     });
   }

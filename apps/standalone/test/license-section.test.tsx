@@ -560,6 +560,8 @@ describe("the activation request and the emergency extension", () => {
     const session = sessionWith(RESTRICTED);
     session.api.enableLicenseEmergency.mockResolvedValue({
       ...RESTRICTED,
+      // The host's answer: the extension runs, so new shifts open (ЛЦ-2).
+      opensNewShifts: true,
       emergency: { available: false, until: "2027-11-23T06:00:00Z" },
     });
     const card = await openLicense(session);
@@ -576,6 +578,10 @@ describe("the activation request and the emergency extension", () => {
     expect(
       within(card).getByText("Аварийное продление: новые смены открываются до 23.11 09:00."),
     ).toBeTruthy();
+    expect(
+      within(card).getByText("Ограничена: новые смены открываются по аварийному продлению"),
+    ).toBeTruthy();
+    expect(within(card).queryByText(/не открываются/)).toBeNull();
     expect(
       within(card).queryByRole("button", { name: "Открыть новые смены ещё 3 дня" }),
     ).toBeNull();

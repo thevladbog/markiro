@@ -124,8 +124,43 @@ describe("the license as the office reads it", () => {
         emergency: { available: false, until: "2027-11-23T06:00:00Z" },
       }),
     ).toEqual([
-      "Новые смены не открываются с 15.11.2027.",
+      // While the extension runs, «не открываются» would contradict it (controller's fix).
       "Аварийное продление: новые смены открываются до 23.11 09:00.",
+      FREE_RENEWAL,
+    ]);
+  });
+
+  it("names the state by the running emergency extension, never «не открываются» beside it", () => {
+    const extended = (license: OfficeLicense) =>
+      licenseOf({
+        ...license,
+        opensNewShifts: true,
+        emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+      });
+    expect(said(stateText(extended(RESTRICTED)))).toBe(
+      "Ограничена: новые смены открываются по аварийному продлению",
+    );
+    expect(said(stateText(extended(TRIAL_EXPIRED)))).toBe(
+      "Пробный период закончился: новые смены открываются по аварийному продлению",
+    );
+    expect(said(stateText(extended(INN_MISMATCH)))).toBe(
+      "ИНН организации не совпадает с лицензией",
+    );
+    for (const license of [RESTRICTED, TRIAL_EXPIRED, INN_MISMATCH]) {
+      const lines = licenseTerms(extended(license), MSK).map(said);
+      expect(lines.some((line) => line.includes("не открываются"))).toBe(false);
+      expect(lines).toContain("Аварийное продление: новые смены открываются до 23.11 09:00.");
+    }
+    // The extension over: the host says no new shift opens again, and so does the page.
+    const over = licenseOf({
+      ...RESTRICTED,
+      opensNewShifts: false,
+      emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+    });
+    expect(said(stateText(over))).toBe("Ограничена: новые смены не открываются");
+    expect(licenseTerms(over, MSK).map(said)).toEqual([
+      "Новые смены не открываются с 15.11.2027.",
+      "Аварийное продление закончилось 23.11 09:00.",
       FREE_RENEWAL,
     ]);
   });
