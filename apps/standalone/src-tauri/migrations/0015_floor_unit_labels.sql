@@ -52,8 +52,11 @@
 -- while it is not completed in the domain's words (`productLabelStatus`):
 -- its check is pending, or it needs none and its attempt was not sent. A
 -- station has at most one unresolved job whatever its shift, as the cloud
--- (`PRODUCT_LABEL_BUSY` across shifts; entering any shift opens it), and one
--- job per accepted unit (`scan_id`).
+-- (`PRODUCT_LABEL_BUSY` across shifts; entering a shift that prints the
+-- duplicate opens it), and one job per accepted unit (`scan_id`). Only that
+-- entry reads it and recovers a cut `sending`, as the cloud: a job a crash
+-- left `sending` stays so while the station works shifts that print nothing;
+-- the host's card counts it unresolved and the retention keeps its shift.
 --
 -- The full code never leaves `fields` (the label's fields as rendered, which
 -- the check compares the scanned label with) and the bytes; `code_hash` is
@@ -120,8 +123,8 @@ CREATE TABLE floor_unit_labels (
 );
 
 -- At most one job of a pairing is unresolved, whatever its shift: the next
--- unit of a required check waits for it, and a station enters any shift on
--- it. Word for word `UNRESOLVED_UNIT_LABEL_SQL`
+-- unit of a required check waits for it, and a station entering a shift that
+-- prints the duplicate opens it. Word for word `UNRESOLVED_UNIT_LABEL_SQL`
 -- (`src/floor/unit-labels/unit-label-store.ts`), so its reads search this
 -- index: the pairing's unresolved job, and the retention's «no unresolved job
 -- of this shift» (one row at most to look at).
@@ -136,8 +139,9 @@ CREATE UNIQUE INDEX floor_unit_labels_scan ON floor_unit_labels (host_id, device
 -- keeps in order within a shift), and the retention's delete by shift.
 CREATE INDEX floor_unit_labels_shift ON floor_unit_labels (host_id, device_id, shift_id);
 
--- The recovery at start: the pairing's jobs left in `sending` (a handful at
--- most, none in a quiet start), without walking the pairing's every job.
+-- The recovery on entering a printing shift: the pairing's jobs left in
+-- `sending` (a handful at most, none after a quiet stop), without walking the
+-- pairing's every job.
 CREATE INDEX floor_unit_labels_sending ON floor_unit_labels (host_id, device_id)
   WHERE attempt_state = 'sending';
 

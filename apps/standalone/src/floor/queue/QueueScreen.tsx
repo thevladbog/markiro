@@ -6,7 +6,7 @@ import { Alert, Button, StatusChip } from "@markiro/ui";
 
 import { HostStatusLine } from "../../app/HostStatusLine.js";
 import type { FloorSession } from "../../app/shell.js";
-import { FACT_RECEIPT_CODES, type HostStatus } from "../../host/protocol.js";
+import { FACT_KINDS, FACT_RECEIPT_CODES, type HostStatus } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { waitUnits } from "../outbox-status.js";
@@ -60,16 +60,7 @@ interface Notice {
   id: number;
 }
 
-const KINDS: ReadonlySet<string> = new Set([
-  "scan",
-  "box_closed",
-  "box_label",
-  "box_exception",
-  "shift_closed",
-  "pallet_closed",
-  "pallet_label",
-  "pallet_exception",
-]);
+const KINDS: ReadonlySet<string> = new Set(FACT_KINDS);
 const CODES: ReadonlySet<string> = new Set(FACT_RECEIPT_CODES);
 /** Day, month, hours and minutes on this computer's clock. */
 const MOMENT = new Intl.DateTimeFormat("ru-RU", {

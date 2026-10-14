@@ -78,9 +78,12 @@ const JOB_COLUMNS = `SELECT ${COLUMNS}, bytes_base64 FROM floor_unit_labels`;
 /**
  * The pairing's one unresolved job, whatever its shift, as the cloud's
  * station has one (`PRODUCT_LABEL_BUSY` across shifts): the next unit waits
- * for it while its check is required, and entering any shift opens it — the
- * caller compares its `shift_id` with the shift entered. Parameters: host id,
- * device id.
+ * for it while its check is required, and entering a shift that prints the
+ * duplicate opens it — the caller compares its `shift_id` with the shift
+ * entered. Only that entry reads it (and recovers a cut `sending`), as the
+ * cloud: while the station works shifts that print nothing, a job a crash left
+ * `sending` stays so, the host's card counts it unresolved and the retention
+ * keeps its shift. Parameters: host id, device id.
  */
 export const UNRESOLVED_JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND ${UNRESOLVED_UNIT_LABEL_SQL}`;
 

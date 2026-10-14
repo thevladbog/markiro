@@ -2002,6 +2002,10 @@ export const factRecordSchema = z.discriminatedUnion("kind", [
 ]);
 export type FactRecord = z.infer<typeof factRecordSchema>;
 export type FactKind = FactRecord["kind"];
+/** Every kind of record the outbox keeps, read from `factRecordSchema`: a new kind is listed here by itself. */
+export const FACT_KINDS: readonly FactKind[] = factRecordSchema.options.map(
+  (option) => option.shape.kind.value,
+);
 
 /** `POST /v1/device/facts` (`markiro_proto::FactBatch`): 1-100 records, in the outbox's order. */
 export const MAX_FACT_BATCH = 100;

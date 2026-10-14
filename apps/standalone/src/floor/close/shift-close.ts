@@ -101,6 +101,27 @@ const UNIT_LABELS_SETTLED =
   "WHERE u.host_id = s.host_id AND u.device_id = s.device_id AND u.shift_id = s.id " +
   `AND ${UNRESOLVED_UNIT_LABEL_SQL})`;
 
+/**
+ * The close's last statement: the shift marked `closing` only while the summary
+ * it was read from still holds — no open box, no open print job, no unresolved
+ * unit label, the same plan, codes and closed boxes. Parameters: host id,
+ * device id, shift id, planned quantity, actual quantity, closed boxes. Pinned
+ * with the unit label reads in both lists of plans.
+ */
+export const MARK_CLOSING_SQL =
+  "UPDATE floor_shifts AS s SET local_state = 'closing' WHERE s.host_id = ? " +
+  "AND s.device_id = ? AND s.id = ? AND s.local_state IS NULL AND s.planned_qty IS ? " +
+  "AND NOT EXISTS (SELECT 1 FROM floor_boxes o WHERE o.host_id = s.host_id " +
+  "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.closed_at IS NULL) " +
+  "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
+  `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) ` +
+  `AND ${UNIT_LABELS_SETTLED} ` +
+  "AND (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id " +
+  "AND c.device_id = s.device_id AND c.shift_id = s.id) = ? " +
+  "AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = s.host_id " +
+  "AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NOT NULL " +
+  "AND b.disassembled_at IS NULL) = ?";
+
 const unresolvedRow = z.object({ n: z.number().int().nonnegative() });
 
 /**
@@ -236,19 +257,7 @@ export async function closeShift(
       },
       outboxStatement(record, pairing, closedAt),
       {
-        sql:
-          "UPDATE floor_shifts AS s SET local_state = 'closing' WHERE s.host_id = ? " +
-          "AND s.device_id = ? AND s.id = ? AND s.local_state IS NULL AND s.planned_qty IS ? " +
-          "AND NOT EXISTS (SELECT 1 FROM floor_boxes o WHERE o.host_id = s.host_id " +
-          "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.closed_at IS NULL) " +
-          "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
-          `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) ` +
-          `AND ${UNIT_LABELS_SETTLED} ` +
-          "AND (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id " +
-          "AND c.device_id = s.device_id AND c.shift_id = s.id) = ? " +
-          "AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = s.host_id " +
-          "AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NOT NULL " +
-          "AND b.disassembled_at IS NULL) = ?",
+        sql: MARK_CLOSING_SQL,
         values: [...scope, summary.plannedQty, summary.actualQty, summary.closedBoxes],
         expectedChanges: 1,
       },

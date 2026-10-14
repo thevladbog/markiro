@@ -137,6 +137,16 @@ WAL grows by about the rebuilt tables, plus the temporary copies of the
 children). Owner check: its time and disk on the client's Windows hardware
 with a year of facts.
 
+Since `0021_validation_print.sql` a trigger on another table reads `scans`:
+`shifts_mode_frozen` on `shifts` (`EXISTS (SELECT 1 FROM scans …)`), so
+`0020`'s «nothing else refers to these four tables» no longer holds. A future
+migration that rebuilds `scans` must `DROP TRIGGER shifts_mode_frozen` before
+it and re-create it word for word after the rename: with
+`legacy_alter_table=OFF` (SQLite's default) the `DROP TABLE scans` + `ALTER
+TABLE … RENAME TO scans` pair fails with «error in trigger shifts_mode_frozen:
+no such table: main.scans». Check `sqlite_master` for every trigger or view
+whose SQL names a rebuilt table, not only its foreign keys.
+
 ## Local database
 
 `src-tauri/src/local_db.rs` keeps `standalone-station.db` in the app's local
@@ -490,13 +500,19 @@ and that the unique index's predicate (`floor_unit_labels_unresolved`,
 `UNRESOLVED_UNIT_LABEL_SQL`) is exactly «not completed» of the status the walk
 reached. A station has one unresolved job whatever its shift
 (`floor_unit_labels_unresolved` on `(host_id, device_id)`, as the cloud's
-`PRODUCT_LABEL_BUSY` across shifts; `UNRESOLVED_JOB_SQL` reads it whole for
-entering any shift, `UNRESOLVED_REF_SQL` only its gate — no fields, no bytes —
-for every scan of a printing shift and every reprint) and one job per accepted
-unit (`floor_unit_labels_scan`). An id's
+`PRODUCT_LABEL_BUSY` across shifts; `UNRESOLVED_JOB_SQL` reads it whole, and
+the recovery turns a `sending` the app's stop cut into `delivery_unknown`, only
+on entering a shift that prints the duplicate, as the cloud's station does;
+`UNRESOLVED_REF_SQL` only its gate — no fields, no bytes — for every scan of a
+printing shift and every reprint) and one job per accepted unit
+(`floor_unit_labels_scan`). So a job a crash left `sending` stays `sending`
+while the station works aggregation shifts (or validation shifts without the
+duplicate): the host's shift card counts it unresolved, and the retention
+keeps its shift, until a printing shift is entered. An id's
 shape is not checked, as in every table of the station.
 `floor_unit_labels_shift` serves the history and the retention's delete, the
-partial `floor_unit_labels_sending` the recovery at start; the retention's
+partial `floor_unit_labels_sending` the recovery on entering a printing shift;
+the retention's
 «no unresolved label of this shift» names `INDEXED BY
 floor_unit_labels_unresolved` (one row at most), where the planner would walk
 the shift's every job through `floor_unit_labels_shift`. The statements of
@@ -3408,9 +3424,10 @@ map, «Unit labels», below.
   validation owner, no `box_items` row). The office's code search shows such
   a placement as «Принят без короба» (`checked`, `OfficeCodeItem.boxId`
   null; `routes/office_codes.rs`, `office-code-card-validation.json`).
-- A validation shift has no exceptions (Р9): no box, pallet or label facts
-  (`facts::admits`, `invalid_record` on `shift_mode`), no «Исключения» on the
-  station, no SSCC blocks.
+- A validation shift has no exceptions (Р9): no box or pallet facts, their
+  labels included (`facts::admits`, `invalid_record` on `shift_mode`), no
+  «Исключения» on the station, no SSCC blocks. One that prints the duplicate
+  takes `unit_label` facts and has «История этикеток» («Unit labels»).
 - Its close counts codes: `actualQty` is the shift's codes, `closedBoxCount`
   is 0 (the host refuses any other), no open box can block it («Floor work»,
   «Facts»); the office's totals are «Принято кодов» from
@@ -4303,8 +4320,9 @@ station's own shift late on the host (`late_data_at`).
 The workstation setup (`WorkstationSetup.tsx`, one screen, from the list of
 shifts and from a label's recovery; any signed-in operator may open it) stores the
 printers (`{ id, name, target, language, dpi }`, one per address) and the printer
-of each purpose — `box`, `pallet`, `duplicate`; `box` prints, and `pallet` in a
-shift with pallets (plan ПЛ-Ц) — the COM scanners, the tones' level and the label check (one setting for all
+of each purpose — `box`, `pallet`, `duplicate`; `box` prints, `pallet` in a
+shift with pallets (plan ПЛ-Ц), and `duplicate` a unit's warehouse reprint
+(plan СКЛ) and the unit labels of a validation shift that prints them (plan РЕЖ) — the COM scanners, the tones' level and the label check (one setting for all
 labels), all at once on «Сохранить»: the four keys of `workstation_settings` in
 one transaction, then the whole set of scanners to the shell (also when the app
 starts, `applySavedScanners`). What would not read back is refused before

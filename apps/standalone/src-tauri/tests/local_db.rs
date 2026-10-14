@@ -4204,7 +4204,7 @@ async fn the_unit_label_reads_search_an_index() {
         .await
         .unwrap();
     // (the statement, what its plan must name)
-    let reads: [(&str, &str); 7] = [
+    let reads: [(&str, &str); 8] = [
         (
             "SELECT id, shift_id, code_hash, scan_id, attempt_no, attempt_state, \
              verification_policy, verification, reason, error_code, print_mode, language, dpi, \
@@ -4260,6 +4260,31 @@ async fn the_unit_label_reads_search_an_index() {
             "SELECT count(*) AS n FROM floor_unit_labels INDEXED BY floor_unit_labels_unresolved \
              WHERE host_id = ? AND device_id = ? AND shift_id = ? AND (verification = 'pending' \
              OR (verification = 'not_required' AND attempt_state <> 'sent'))",
+            "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
+        ),
+        // The close's own refusal (final review of plan РЕЖ): the statement that marks the
+        // shift `closing` asks for its unresolved label as a correlated subquery, through the
+        // pairing's one unresolved job (`INDEXED BY`), never the shift's every job
+        // (`MARK_CLOSING_SQL`, `src/floor/close/shift-close.ts`).
+        (
+            "UPDATE floor_shifts AS s SET local_state = 'closing' WHERE s.host_id = ? \
+             AND s.device_id = ? AND s.id = ? AND s.local_state IS NULL AND s.planned_qty IS ? \
+             AND NOT EXISTS (SELECT 1 FROM floor_boxes o WHERE o.host_id = s.host_id \
+             AND o.device_id = s.device_id AND o.shift_id = s.id AND o.closed_at IS NULL) \
+             AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id \
+             AND j.device_id = s.device_id AND j.shift_id = s.id \
+             AND (state IN ('prepared', 'sending', 'failed', 'unknown') \
+             OR (state = 'sent' AND verify = 1))) \
+             AND NOT EXISTS (SELECT 1 FROM floor_unit_labels u \
+             INDEXED BY floor_unit_labels_unresolved WHERE u.host_id = s.host_id \
+             AND u.device_id = s.device_id AND u.shift_id = s.id \
+             AND (verification = 'pending' OR (verification = 'not_required' \
+             AND attempt_state <> 'sent'))) \
+             AND (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id \
+             AND c.device_id = s.device_id AND c.shift_id = s.id) = ? \
+             AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = s.host_id \
+             AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NOT NULL \
+             AND b.disassembled_at IS NULL) = ?",
             "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
         ),
     ];

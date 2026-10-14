@@ -31,6 +31,7 @@ import {
 } from "../src/floor/outbox-status.js";
 import {
   CLOSE_SUMMARY_SQL,
+  MARK_CLOSING_SQL,
   REFUSED_CLOSES_SQL,
   SHIFT_UNRESOLVED_UNIT_LABEL_SQL,
 } from "../src/floor/close/shift-close.js";
@@ -2122,7 +2123,8 @@ describe("the unit label jobs' statements (migration 0015)", () => {
     [UNIT_LABEL_JOB_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
     // «История этикеток»: the shift's jobs newest first, in the index's own rowid order.
     [SHIFT_JOBS_SQL, "floor_unit_labels_shift (host_id=? AND device_id=? AND shift_id=?)"],
-    // The recovery at start: the pairing's sending jobs, through their own partial index.
+    // The recovery on entering a printing shift: the pairing's sending jobs, through their own
+    // partial index.
     [SENDING_JOBS_SQL, "floor_unit_labels_sending (host_id=? AND device_id=?)"],
     [UNIT_LABEL_MOVE_SQL, "sqlite_autoindex_floor_unit_labels_1 (id=?)"],
     // The close's summary (task B6): the shift's unresolved label, asked through the pairing's
@@ -2149,11 +2151,34 @@ describe("the unit label jobs' statements (migration 0015)", () => {
     }
   });
 
+  // The close's own refusal (final review): the statement that marks the shift `closing` asks
+  // for the shift's unresolved label as a correlated subquery, through the pairing's one
+  // unresolved job (`INDEXED BY`), never the shift's every job.
+  it("the close's mark asks for an unresolved label through its unique index", () => {
+    const { db } = openLocalDb();
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${MARK_CLOSING_SQL}`)
+      .all(...Array.from({ length: MARK_CLOSING_SQL.split("?").length - 1 }, () => "x"))
+      .map((step) => String(step["detail"]));
+    const labels = plan.filter((step) => step.includes("floor_unit_labels"));
+    expect(labels.length, plan.join("\n")).toBeGreaterThan(0);
+    for (const step of labels) {
+      expect(step, plan.join("\n")).toContain(
+        "floor_unit_labels_unresolved (host_id=? AND device_id=?)",
+      );
+    }
+    expect(
+      plan.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP")),
+      plan.join("\n"),
+    ).toEqual([]);
+  });
+
   it("are pinned on the shell's SQLite with the same texts", () => {
     const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
       // A line continuation of a Rust string drops the newline and the next line's indent.
       .replace(/\\\n\s*/g, "");
     for (const [sql] of STATEMENTS) expect(source, sql).toContain(`"${sql}"`);
+    expect(source, MARK_CLOSING_SQL).toContain(`"${MARK_CLOSING_SQL}"`);
   });
 });
 
