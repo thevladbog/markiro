@@ -105,7 +105,26 @@ export function PalletsTab() {
       mono: true,
       render: (pallet) => <PalletLink id={pallet.id} sscc={pallet.sscc} />,
     },
-    { key: "productName", title: t("office.palletList.table.product") },
+    {
+      key: "state",
+      title: t("office.palletList.table.state"),
+      wrap: true,
+      minWidth: 200,
+      render: (pallet) => (
+        <span className="shift-cell">
+          <PackStateChip state={packState(pallet)} kind="pallet" />
+          {pallet.disassembledAt !== null && (
+            <span className="shift-cell__quiet">
+              {t("office.palletList.disassembledAt", { at: format(pallet.disassembledAt) })}
+            </span>
+          )}
+          {palletCountDiffers(pallet) && (
+            <StatusChip phase="attention" wrap label={t("office.palletList.changedAfterClose")} />
+          )}
+        </span>
+      ),
+    },
+    { key: "productName", title: t("office.palletList.table.product"), wrap: true, minWidth: 120 },
     {
       key: "shift",
       title: t("office.palletList.table.shift"),
@@ -113,8 +132,8 @@ export function PalletsTab() {
         <ShiftLink item={{ shiftId: pallet.shiftId, shiftNumber: pallet.shiftNumber }} />
       ),
     },
-    { key: "lineName", title: t("office.palletList.table.line") },
-    { key: "deviceName", title: t("office.palletList.table.station") },
+    { key: "lineName", title: t("office.palletList.table.line"), wrap: true, minWidth: 80 },
+    { key: "deviceName", title: t("office.palletList.table.station"), wrap: true, minWidth: 110 },
     {
       key: "boxes",
       title: t("office.palletList.table.boxes"),
@@ -138,25 +157,6 @@ export function PalletsTab() {
       minWidth: 150,
       render: (pallet) =>
         pallet.closedAt === null ? t("office.common.none") : format(pallet.closedAt),
-    },
-    {
-      key: "state",
-      title: t("office.palletList.table.state"),
-      wrap: true,
-      minWidth: 200,
-      render: (pallet) => (
-        <span className="shift-cell">
-          <PackStateChip state={packState(pallet)} kind="pallet" />
-          {pallet.disassembledAt !== null && (
-            <span className="shift-cell__quiet">
-              {t("office.palletList.disassembledAt", { at: format(pallet.disassembledAt) })}
-            </span>
-          )}
-          {palletCountDiffers(pallet) && (
-            <StatusChip phase="attention" wrap label={t("office.palletList.changedAfterClose")} />
-          )}
-        </span>
-      ),
     },
   ];
 
