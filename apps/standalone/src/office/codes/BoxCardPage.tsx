@@ -35,6 +35,7 @@ import {
   type FormatInstant,
 } from "./CodeCard.js";
 import { useBackToRegistry } from "./CodesSection.js";
+import { usePackDisassembly } from "./PackDisassembly.js";
 import { PackDocuments } from "./PackDocuments.js";
 import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
 
@@ -74,6 +75,12 @@ export function BoxCardPage() {
     { enabled: card.isSuccess },
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const disassembly = usePackDisassembly({
+    sscc: card.data?.sscc ?? null,
+    closed: card.data?.closedAt != null,
+    disassembled: card.data?.disassembledAt != null,
+    shiftStatus: card.data?.shift.status ?? "planned",
+  });
   const zone = formTimeZone(org.data);
   const format = instantFormat(zone);
   const at = (instant: string | null) =>
@@ -121,9 +128,11 @@ export function BoxCardPage() {
             >
               {t("office.boxCard.contents")}
             </Button>
+            {disassembly.button}
           </RowActions>
         }
       />
+      {disassembly.notice}
       <div className="shift-cell">
         <PackStateChip state={state} kind="box" />
         {state === "closed" && box.digestMatches === false && (

@@ -29,6 +29,7 @@ import { civilDateLabel } from "../shifts/shift-list.js";
 import { labelState, packState, palletCountDiffers, ssccText } from "../shifts/shift-card.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
 import { CardBack, isNotFound } from "./BoxCardPage.js";
+import { usePackDisassembly } from "./PackDisassembly.js";
 import { PackDocuments } from "./PackDocuments.js";
 import { BoxLink, PackStateChip } from "./PackLinks.js";
 
@@ -63,6 +64,12 @@ export function PalletCardPage() {
     { enabled: card.isSuccess },
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const disassembly = usePackDisassembly({
+    sscc: card.data?.sscc ?? null,
+    closed: card.data?.closedAt != null,
+    disassembled: card.data?.disassembledAt != null,
+    shiftStatus: card.data?.shift.status ?? "planned",
+  });
   const zone = formTimeZone(org.data);
   const format = instantFormat(zone);
   const at = (instant: string | null) =>
@@ -126,9 +133,11 @@ export function PalletCardPage() {
                 {t("office.palletCard.xml")}
               </Button>
             )}
+            {disassembly.button}
           </RowActions>
         }
       />
+      {disassembly.notice}
       <div className="shift-cell">
         <PackStateChip state={state} kind="pallet" />
         {palletCountDiffers(pallet) && (

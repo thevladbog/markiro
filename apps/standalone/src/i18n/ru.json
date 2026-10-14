@@ -3318,7 +3318,11 @@
         "appliedAt": "проведён {{at}}",
         "byDocument": "по документу {{docNo}}",
         "open": "Открыть документ {{docNo}}"
-      }
+      },
+      "disassemble": "Расформировать",
+      "disassembleAfterClose": "Расформировать можно после закрытия смены",
+      "disassembleFailed": "Не удалось создать документ дезагрегации: {{reason}}",
+      "disassembleLineFailed": "Документ {{docNo}} создан, но SSCC не добавлен: {{reason}}"
     },
     "boxCard": {
       "back": "← Назад",
