@@ -9773,6 +9773,8 @@ EOF
   читается мягко (`device_license_or_none`, Zod `.optional().catch(undefined)`).
 - Задача 3: замена ИНН мастера `7701234567` → `7707083893` — 17 строк (тесты хоста, две фикстуры
   `proto`, `no_secrets_in_logs.rs`, `test/support/wizard.ts`); значения профиля и снимков не менялись.
+  Тест оболочки `src-tauri/tests/device.rs` слал мастеру тело без ИНН — ИНН `7707083893` добавлен
+  (найдено итоговым прогоном `cargo test -p markiro-standalone`).
   Мастер проверяет `rows_affected() == 1` у `UPDATE license_clock`; начало пробного периода до мастера
   переживает мастер (`coalesce`).
 
