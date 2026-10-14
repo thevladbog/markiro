@@ -121,7 +121,7 @@ describe("the license's band above the office's pages", () => {
     );
     expect(
       await within(band()).findByText(
-        /Пробный период заканчивается 24\.10\. После этого новые смены не будут открываться без файла лицензии\./,
+        /Пробный период заканчивается 24\.10 12:00\. После этого новые смены не будут открываться без файла лицензии\./,
       ),
     ).toBeTruthy();
     expect(band().querySelector(".mk-alert--warn")).not.toBeNull();

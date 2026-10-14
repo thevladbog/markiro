@@ -90,10 +90,12 @@ export function licenseTerms(license: OfficeLicense, zone: string | null): Licen
   const terms: LicenseText[] = [];
   switch (license.state) {
     case "trial":
+      // The trial ends 14 days after the wizard began, at that time of day,
+      // not at a midnight: its end is a moment, never «… включительно».
       if (license.trial !== null) {
         terms.push({
           key: "office.about.license.terms.trial",
-          values: { date: day(license.trial.endsAt) },
+          values: { until: licenseMinute(license.trial.endsAt, zone) },
         });
       }
       break;
@@ -288,7 +290,13 @@ export function noticeText(
     case "trial":
       return { key, values: { n: license.daysLeft ?? 0 } };
     case "trialEnding":
-      return { key, values: { date: dayMonth(license.trial?.endsAt) } };
+      // A moment (the wizard's time of day), not a last day.
+      return {
+        key,
+        values: {
+          until: license.trial === null ? "—" : licenseMinute(license.trial.endsAt, zone),
+        },
+      };
     case "expiring":
     case "expiringDemo":
       return {

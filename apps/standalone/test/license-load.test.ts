@@ -147,7 +147,8 @@ describe("«было → станет»", () => {
       rows.map((row) => [row.id, [said(row.before), said(row.after)]]),
     );
     expect(words["plan"]).toEqual(["Пробный период", "Подписка"]);
-    expect(words["validUntil"]).toEqual(["20.10.2026", "20.10.2027"]);
+    // The trial ends at a moment, not at midnight: its time is written; a file's last day is not.
+    expect(words["validUntil"]).toEqual(["20.10 10:00", "20.10.2027"]);
     expect(words["quotas.stations"]).toEqual(["без ограничения", "3"]);
     expect(words["features.publicApi"]).toEqual(["включено", "выключено"]);
   });

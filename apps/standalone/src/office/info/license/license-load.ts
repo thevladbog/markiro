@@ -8,7 +8,7 @@ import {
   type LicenseTerms,
   type OfficeLicense,
 } from "../../../host/protocol.js";
-import { lastMomentBefore, licenseDay } from "../../../lib/license-dates.js";
+import { lastMomentBefore, licenseDay, licenseMinute } from "../../../lib/license-dates.js";
 import { planText, SHOWN_QUOTAS, type LicenseText } from "./license-view.js";
 
 /** What the picker offers. */
@@ -103,12 +103,19 @@ function featureText(on: boolean): LicenseText {
  * answers the trial's terms (`plan: "trial"`, no limits, every feature).
  */
 export function comparisonRows(preview: LicensePreview, zone: string | null): ComparisonRow[] {
-  const day = (end: string | null): LicenseText =>
-    end === null
+  // A file's end is a midnight: its last day is written. The trial's is the
+  // wizard's time of day 14 days on: that moment is written instead.
+  const end = (until: string | null, plan: string): LicenseText =>
+    until === null
       ? DASH
       : {
           key: "office.about.license.load.value",
-          values: { value: licenseDay(lastMomentBefore(end), zone) },
+          values: {
+            value:
+              plan === "trial"
+                ? licenseMinute(until, zone)
+                : licenseDay(lastMomentBefore(until), zone),
+          },
         };
   const grace = (n: number): LicenseText => ({
     key: "office.about.license.load.days",
@@ -116,7 +123,7 @@ export function comparisonRows(preview: LicensePreview, zone: string | null): Co
   });
   const columns = (terms: LicenseTerms) => ({
     plan: planText(terms.plan),
-    validUntil: day(terms.validUntil),
+    validUntil: end(terms.validUntil, terms.plan),
     graceDays: grace(terms.graceDays),
   });
   const before = columns(preview.before);
