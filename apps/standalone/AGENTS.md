@@ -5013,12 +5013,21 @@ and the XML «Расформирование упаковки» are plan ДЗГ-
   The same for a pallet through `pallet_exceptions` and `l.pallet_id`. Today the shift
   review's «Исключения» (plan КНФ) and the code card do NOT list the office's
   disassembly: its wire names a device and an operator; ДЗГ-О (or КРТ) adds a source and a
-  document number there.
+  document number there. The shift card's «Данные после закрытия» chip and its warning
+  also appear after an office disassembly (the shift is marked late); ДЗГ-О may reword them.
 
 - **Station.** `code_releases` of the feed (see «Change feed» and «Reference sync»): the
   station deletes its `floor_codes` of the box, so a code freed by a document is accepted
   in a new shift on the same station. Without it the code stays «Дубль (локальный)» for the
-  30 days a closed shift's codes are kept.
+  30 days a closed shift's codes are kept. Only `floor_codes` change: the station's
+  `floor_boxes.disassembled_at` stays empty, so while its copy of the shift is still active
+  (the office closed it offline) the work totals and the close summary count the box with
+  fewer codes, and reprint and disassemble are still offered; the host answers them with
+  `box_state`, visible in the queue. Rolling out: `ENTITY_SET` changes, so a station that
+  starts on the new build syncs from zero before its reference copies are ready (nobody
+  signs in until then): upgrade stations while the host is reachable. A restore's hold
+  (`site.facts_held_since`) keeps device facts out but not an office apply: during it an
+  apply works on a copy that lacks later facts, so do not apply while the hold lasts.
 - **Not done.** A document of 10 000 boxes holds the write lock for as long as the apply
   takes; stations' fact batches wait up to the 5 s `busy_timeout` and then retry from their
   queue. Measure it on a real volume (the plan's owner check 5).

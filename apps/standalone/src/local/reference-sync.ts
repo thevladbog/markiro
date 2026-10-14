@@ -288,7 +288,11 @@ const SYNC_SCHEMA_VERSION = 4;
  * stops counting as its own. Part of `ENTITY_SET`: a build that starts
  * acting on one syncs from zero once and meets every release it skipped.
  */
-const ACTION_ENTITIES = ["code_releases"] as const;
+const CODE_RELEASES = "code_releases";
+const ACTION_ENTITIES = [CODE_RELEASES] as const;
+
+/** A release's box id, read once per module and not once per item. */
+const releaseBoxId = z.uuid();
 
 /**
  * This build's copies and actions, in `sync_state.entity_set`: the feed
@@ -534,9 +538,10 @@ export async function copiesReady(local: LocalExecutor, pairing: Pairing): Promi
  * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 + 1 (the
  * releases) = 3E + 7 statements — 31 for the eight kept today, the most
  * within the shell's 32: a ninth kept entity would need 34 (the next one must
- * take the way of `ACTION_ENTITIES`, which costs one statement for all). A revision larger than a page's byte bound
- * still comes whole, as one JSON parameter per entity: the shell bounds SQL
- * text and the number of values, not a value's size.
+ * take the way of `ACTION_ENTITIES`, which costs one statement for all). A
+ * revision larger than a page's byte bound still comes whole, as one JSON
+ * parameter per entity: the shell bounds SQL text and the number of values,
+ * not a value's size.
  */
 function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number): LocalStatement[] {
   const statements: LocalStatement[] = [];
@@ -570,7 +575,7 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
   // The feed entities this build acts on without a copy (`ACTION_ENTITIES`).
   const releases: Array<{ id: string; shiftId: string }> = [];
   for (const item of page.items) {
-    if (item.entity !== "code_releases") continue;
+    if (item.entity !== CODE_RELEASES) continue;
     const key = { id: item.id, rev: item.rev };
     // The host never deletes a release; a tombstone would only settle.
     if (item.deleted) {
@@ -578,7 +583,7 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
       continue;
     }
     const record = codeReleaseRecordSchema.safeParse(item.data);
-    const id = z.uuid().safeParse(item.id);
+    const id = releaseBoxId.safeParse(item.id);
     if (!record.success) {
       quarantined.push({ entity: item.entity, ...key, reason: quarantineReason(record.error) });
     } else if (!id.success) {
