@@ -83,6 +83,12 @@ function renewsFree(license: OfficeLicense): boolean {
   return license.license?.plan === "subscription";
 }
 
+/**
+ * The states where a subscription's term is the matter, as on the band: a
+ * file for another host or for another INN is not renewed for its term.
+ */
+const TERM_STATES: ReadonlySet<string> = new Set(["active", "expiring", "grace", "restricted"]);
+
 /** The lines under the state: the term, the days left, the emergency (spec §9.2). */
 export function licenseTerms(license: OfficeLicense, zone: string | null): LicenseText[] {
   const day = (end: string) => licenseDay(lastMomentBefore(end), zone);
@@ -157,7 +163,9 @@ export function licenseTerms(license: OfficeLicense, zone: string | null): Licen
       values: { until: licenseMinute(license.emergency.until, zone) },
     });
   }
-  if (renewsFree(license)) terms.push({ key: "office.about.license.terms.freeRenewal" });
+  if (renewsFree(license) && TERM_STATES.has(license.state)) {
+    terms.push({ key: "office.about.license.terms.freeRenewal" });
+  }
   return terms;
 }
 

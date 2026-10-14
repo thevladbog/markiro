@@ -216,6 +216,8 @@ describe("«Лицензия» on «Информация»", () => {
     [EXPIRING, true],
     [GRACE, true],
     [RESTRICTED, true],
+    [WRONG_HOST, false],
+    [INN_MISMATCH, false],
     [TRIAL, false],
     [TRIAL_EXPIRED, false],
     [DEMO, false],

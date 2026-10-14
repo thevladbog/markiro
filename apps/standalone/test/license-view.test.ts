@@ -115,9 +115,8 @@ describe("the license as the office reads it", () => {
     expect(terms(TRIAL_EXPIRED)).toEqual(["Новые смены не открываются с 24.10.2026."]);
     expect(terms(WRONG_HOST)).toEqual([
       "Всё работает до 19.11.2026 включительно; затем новые смены не будут открываться.",
-      FREE_RENEWAL,
     ]);
-    expect(terms(INN_MISMATCH)).toEqual(["Новые смены не открываются с 18.10.2026.", FREE_RENEWAL]);
+    expect(terms(INN_MISMATCH)).toEqual(["Новые смены не открываются с 18.10.2026."]);
     expect(
       terms({
         ...RESTRICTED,
@@ -174,6 +173,12 @@ describe("the license as the office reads it", () => {
       expect(renewal(license)).toEqual([]);
     }
     expect(renewal(TRIAL_EXPIRED)).toEqual([]);
+    // Another host's file or a changed INN: a new file is not about the term (as the band).
+    expect(renewal(WRONG_HOST)).toEqual([]);
+    expect(renewal(INN_MISMATCH)).toEqual([]);
+    for (const license of [EXPIRING, GRACE, RESTRICTED]) {
+      expect(renewal(license)).toEqual([{ key: "office.about.license.terms.freeRenewal" }]);
+    }
     // A newer cloud's plan is not a subscription: the promise is the subscription's alone.
     expect(
       renewal(licenseOf({ license: { ...ACTIVE_LICENSE.license!, plan: "enterprise" } })),
