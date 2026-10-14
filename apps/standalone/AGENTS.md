@@ -3742,8 +3742,7 @@ map:
 - Deliberate differences from the cloud, each said where it acts: the label
   prints the organization logo the shift froze, else the Markiro logo, in a
   layout with an `organization_logo` box (the cloud's duplicate prints none);
-  the standalone catalog has no EGAIS code, so the field prints empty; the
-  host takes the label of a displaced or conflicting scan (the cloud
+  the host takes the label of a displaced or conflicting scan (the cloud
   quarantines it as `ownership_conflict`); an operator is required only on a
   skip and a reprint's `prepared` (the recovery after a restart writes
   `delivery_unknown` with nobody signed in); the check is off by default (the
@@ -4660,7 +4659,8 @@ that fails keeps the operator out as `layout`/unreadable) with the cloud's
 `duplicateLabelFields` (`unitLabelFields`: the box label's fields of one unit —
 `qty` 1, no SSCC — the full canonical code in `km.code`, the shift's number and
 production date, the acceptance moment as the label's instant, the operator's
-name), rendered by `unitLabelRender` (the shift labels' logo rule, the code as
+name, the EGAIS code the snapshot froze as the box labels take it, plan ТОВ),
+rendered by `unitLabelRender` (the shift labels' logo rule, the code as
 the GS1 raster, `kmDataMatrix: "raster"`; a driver page for a printer through
 the Windows driver) for the printer assigned to `duplicate` at the acceptance;
 `test/unit-label-render.test.ts` holds its bytes to the domain's ZPL and TSPL at

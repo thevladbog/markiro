@@ -50,7 +50,8 @@ export function unitLabelFields(
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
-    egaisCode: null,
+    // As the shift froze it (plan ТОВ), as its box labels take it; none from an older host.
+    egaisCode: product.egaisCode ?? null,
     shelfLifeDays: product.shelfLifeDays,
     operatorName,
     counterpartyName,

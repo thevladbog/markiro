@@ -126,6 +126,8 @@ describe("the fields of a unit label", () => {
       "counterparty.name": "ООО «Северный берег»",
     });
     expect(CANONICAL).toContain("\u001d93");
+    // The EGAIS code the snapshot froze (plan ТОВ), as on the shift's box labels.
+    expect(unitLabelFields(withEgais(shift), RAW, ACCEPTED_AT, null)["product.egais"]).toBe(EGAIS);
   });
 
   it("refuse a code without its crypto tail and a code of another product", async () => {
@@ -265,8 +267,9 @@ describe("the logo of a unit label", () => {
  * One difference is deliberate (review of B5): in a layout with an `organization_logo` box
  * the station prints the logo the shift froze, else the Markiro logo, as its warehouse reprint
  * of a unit does; the cloud's duplicate passes the emitters no logo, so the box stays blank.
- * Without a logo box the bytes are the cloud's byte for byte. The standalone catalog has no
- * EGAIS code, so the cloud's context below carries none (the field prints empty in both).
+ * Without a logo box the bytes are the cloud's byte for byte. The EGAIS code is the one the
+ * shift's snapshot froze (plan ТОВ), as the cloud takes it from its frozen grant and as the
+ * station's box labels take it; a snapshot without one prints the field empty in both.
  * The state machine of a job is compared with the domain's in `unit-label-work.test.ts`
  * (`canApplyProductLabelEvent`/`applyProductLabelEvent`) and `unit-label-schema.test.ts`.
  */
@@ -316,7 +319,7 @@ function cloudContext(shift: EnteredWork, operatorName: string | null): CloudLab
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
-    egaisCode: null,
+    egaisCode: product.egaisCode ?? null,
     shelfLifeDays: product.shelfLifeDays,
     operatorName,
     counterpartyName,
@@ -326,6 +329,17 @@ function cloudContext(shift: EnteredWork, operatorName: string | null): CloudLab
 }
 
 type EnteredWork = Awaited<ReturnType<typeof printingShift>>;
+
+/** An EGAIS code of 19 digits, as a product of ЧЗ group 15 has (plan ТОВ). */
+const EGAIS = "0150320000003486925";
+
+/** `shift` with its snapshot's product carrying an EGAIS code, as a host since plan ТОВ freezes it. */
+function withEgais(shift: EnteredWork): EnteredWork {
+  return {
+    ...shift,
+    snapshot: { ...shift.snapshot, product: { ...shift.snapshot.product, egaisCode: EGAIS } },
+  };
+}
 
 describe("a unit label against the cloud station's duplicate", () => {
   const LOGO: MonoBitmap = {
@@ -349,6 +363,7 @@ describe("a unit label against the cloud station's duplicate", () => {
     return [
       ["the fixture's shift", shift],
       ["a shift without a print name, a shelf life or a counterparty", bare],
+      ["a shift whose product froze an EGAIS code", withEgais(shift)],
     ];
   }
 
@@ -377,7 +392,7 @@ describe("a unit label against the cloud station's duplicate", () => {
         organization: { name: "ООО «Пример»", inn: null, logo: LOGO },
       },
     };
-    for (const work of [shift, frozen]) {
+    for (const work of [shift, frozen, withEgais(shift)]) {
       const fallbackLogo = vi.fn(async () => LOGO);
       const render = unitLabelRender(work, { rasterize: fakeRaster, fallbackLogo });
       const fields = unitLabelFields(work, RAW, ACCEPTED_AT, "Анна Кузнецова");
