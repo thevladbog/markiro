@@ -88,6 +88,19 @@ async fn conflicts(admin: &Admin) -> Vec<Value> {
         .collect()
 }
 
+/// How each conflict's loser lost (plan КНФ's `code_conflicts.kind`): `displaced` when an earlier
+/// scan took the code from its owner, `late` when the loser arrived after the owner's scan. A
+/// validation scan (no box) takes part on both sides.
+async fn conflict_kinds(admin: &Admin) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT l.record_id, c.kind FROM code_conflicts c \
+         JOIN scans l ON l.id = c.loser_scan_id ORDER BY l.record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
 /// `GET /v1/device/codes/{hash}` of code `n`, asked with `key`.
 async fn check_code(admin: &Admin, key: &str, n: u32) -> (StatusCode, Value) {
     admin
@@ -271,6 +284,11 @@ async fn a_code_a_validation_shift_accepted_is_not_free_for_an_aggregation_shift
         conflicts(&admin).await,
         vec![json!([code_hash(7), record_id(1), record_id(2)])]
     );
+    // The box scan came after the validation owner's: it lost late.
+    assert_eq!(
+        conflict_kinds(&admin).await,
+        vec![(record_id(2), "late".to_owned())]
+    );
     assert_eq!(
         owners(&admin).await,
         vec![json!([
@@ -350,6 +368,11 @@ async fn an_earlier_validation_scan_takes_the_code_out_of_a_box() {
     assert_eq!(
         conflicts(&admin).await,
         vec![json!([code_hash(7), record_id(2), record_id(1)])]
+    );
+    // The box's item lost to an earlier validation scan that arrived after it: displaced.
+    assert_eq!(
+        conflict_kinds(&admin).await,
+        vec![(record_id(1), "displaced".to_owned())]
     );
     // The aggregation shift's box holds nothing live now; the validation
     // shift counts the code.
