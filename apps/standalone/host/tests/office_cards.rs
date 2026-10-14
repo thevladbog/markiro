@@ -379,3 +379,146 @@ async fn every_card_query_searches_by_an_index() {
         }
     }
 }
+
+/// The pallet's card: the station counted two boxes, one stands (box 2 was
+/// taken apart after the close) and both are on the list; its reprint.
+#[tokio::test]
+async fn a_pallet_card_lists_every_box_that_joined_it() {
+    let yard = yard().await;
+    let (status, card) = yard
+        .get(&format!("/v1/office/pallets/{}", pallet_id(1)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    assert_eq!(card["sscc"], pallet_sscc(40));
+    assert_eq!(
+        (card["boxes"].clone(), card["boxCountReported"].clone()),
+        (json!(1), json!(2))
+    );
+    assert_eq!(
+        card["units"], 1,
+        "box 1's code 1; code 2 is the colleague's now"
+    );
+    let members: Vec<(&str, bool)> = card["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["sscc"].as_str().unwrap(), b["disassembledAt"].is_null()))
+        .collect();
+    // Closed newest first: box 2 (closed at 40 s, taken apart), box 1.
+    assert_eq!(
+        members,
+        [(sscc(1501).as_str(), false), (sscc(1500).as_str(), true)]
+    );
+    assert_eq!(card["membersCapped"], false);
+    assert_eq!(card["exceptions"][0]["kind"], "reprint");
+    assert_eq!(card["exceptions"][0]["reasonCode"], "damaged_label");
+    assert_eq!(card["exceptions"][0]["deviceName"].is_string(), true);
+    assert_eq!(card["shift"]["number"], yard.floor.number);
+    assert_eq!(
+        card["shift"]["lineName"], "Линия 1",
+        "the shift's line (`shift_setup`)"
+    );
+    assert_eq!(card["deviceId"], yard.floor.station);
+    assert_eq!(card["closedAt"], instant(41, 0));
+    assert_eq!(card["documents"], json!([]));
+}
+
+/// The colleague's open pallet 3 has no SSCC yet and one closed box; its
+/// card is read like any other.
+#[tokio::test]
+async fn an_open_pallet_has_no_sscc_and_its_closed_box() {
+    let yard = yard().await;
+    let (status, card) = yard
+        .get(&format!("/v1/office/pallets/{}", pallet_id(3)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    assert_eq!(card["sscc"], Value::Null);
+    assert_eq!(card["closedAt"], Value::Null);
+    assert_eq!(card["boxCountReported"], Value::Null);
+    assert_eq!(card["members"].as_array().unwrap().len(), 1);
+    assert_eq!(card["members"][0]["sscc"], sscc(3501));
+    assert_eq!(
+        (card["boxes"].clone(), card["units"].clone()),
+        (json!(1), json!(1))
+    );
+    assert_eq!(card["shift"]["lineName"], "Линия 2");
+}
+
+#[tokio::test]
+async fn an_unknown_pallet_is_not_found_and_a_malformed_id_is_refused() {
+    let yard = yard().await;
+    let (status, body) = yard
+        .get("/v1/office/pallets/a0000000-0000-4000-8000-000000000099")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let (status, body) = yard
+        .get("/v1/office/pallets/A0000000-0000-4000-8000-000000000001")
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "id");
+    let (status, body) = yard.get("/v1/office/pallets/not-an-id").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+/// A pallet's card refuses what a box's does, and its refusal tells nothing
+/// of the pallet; a read writes nothing.
+#[tokio::test]
+async fn only_an_office_session_reads_a_pallet_card_and_a_read_writes_nothing() {
+    let yard = yard().await;
+    let app = &yard.admin.app;
+    let (_, other) = pair_device(app, "station").await;
+    let facts_before = fact_rows(app).await;
+    let audit_before = audit_rows(app).await;
+    let pallets_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pallets")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let exceptions_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pallet_exceptions")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let path = format!("/v1/office/pallets/{}", pallet_id(1));
+    for (who, builder) in [
+        (
+            "the station's key",
+            with_device(request("GET", &path), &yard.floor.key),
+        ),
+        (
+            "another device with the admin's session",
+            with_session(request("GET", &path), &other, &yard.admin_token),
+        ),
+        (
+            "a made-up session",
+            with_session(request("GET", &path), &yard.floor.key, "operator-pin-4821"),
+        ),
+        ("nothing", request("GET", &path)),
+    ] {
+        let (status, body) = app.send(empty(builder)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{who}: {body}");
+        let text = body.to_string();
+        for secret in [pallet_sscc(40).as_str(), sscc(1500).as_str(), "Кузнецова"] {
+            assert!(!text.contains(secret), "{who} leaked {secret}: {text}");
+        }
+    }
+    let (status, _) = yard
+        .admin
+        .call_as(&yard.admin_token, "GET", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = yard.get(&path).await; // the technologist
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fact_rows(app).await, facts_before);
+    assert_eq!(audit_rows(app).await, audit_before);
+    let pallets_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pallets")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    let exceptions_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pallet_exceptions")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (pallets_after, exceptions_after),
+        (pallets_before, exceptions_before)
+    );
+}
