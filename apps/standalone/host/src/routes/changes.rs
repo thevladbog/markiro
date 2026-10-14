@@ -57,6 +57,8 @@ const FEED_KEYS: &str = "\
     UNION ALL SELECT 'operators', id, rev, 0 FROM operators WHERE rev > ?1 AND active = 1 \
     UNION ALL SELECT 'operator_badges', id, rev, 0 FROM operator_badges WHERE rev > ?1 AND revoked_at IS NULL \
     UNION ALL SELECT 'products', id, rev, 0 FROM products WHERE rev > ?1 \
+    UNION ALL SELECT 'products', id, photo_rev, 0 FROM products \
+        WHERE photo_rev > ?1 AND photo_rev <> rev \
     UNION ALL SELECT 'label_templates', id, rev, 0 FROM label_templates WHERE rev > ?1 \
     UNION ALL SELECT 'category_template_defaults', chz_group_code || ':' || purpose, rev, 0 \
         FROM category_template_defaults WHERE rev > ?1 \
@@ -110,6 +112,7 @@ struct ProductFeedRow {
     default_pallet_template_id: Option<String>,
     archived: bool,
     status: String,
+    photo_checksum: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -335,7 +338,9 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
             let row: ProductFeedRow = sqlx::query_as(
                 "SELECT gtin14, name, print_name, chz_group_code, box_capacity, \
                  pallet_box_capacity, shelf_life_days, default_box_template_id, \
-                 default_pallet_template_id, archived, status FROM products WHERE id = ?",
+                 default_pallet_template_id, archived, status, \
+                 (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = products.id) \
+                 AS photo_checksum FROM products WHERE id = ?",
             )
             .bind(&key.id)
             .fetch_one(&mut *conn)
@@ -353,6 +358,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 default_pallet_template_id: row.default_pallet_template_id,
                 archived: row.archived,
                 status: row.status.parse().map_err(ApiError::internal)?,
+                photo_checksum: row.photo_checksum,
             })
         }
         entities::LABEL_TEMPLATES => {

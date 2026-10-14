@@ -2186,7 +2186,7 @@ describe("the operator on the floor", () => {
    * hub's own «Вошёл: …» line is gone, as on the cloud station). Gone again
    * once the operator is signed out — the bar then says nobody is in.
    */
-  const SIGNED_IN = "Анна Кузнецова, табельный номер 0042";
+  const SIGNED_IN = "Анна Кузнецова";
   /** The hub of the line: its title, under the status bar that names the operator. */
   const onTheList = async () => {
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
@@ -2237,7 +2237,7 @@ describe("the operator on the floor", () => {
     await onTheList();
     expect(
       within(screen.getByRole("region", { name: "Строка состояния цеха" })).getByText(
-        "Анна Кузнецова, табельный номер 0042",
+        "Анна Кузнецова",
       ),
     ).toBeTruthy();
   });
@@ -2932,7 +2932,7 @@ describe("the operator on the floor", () => {
     );
     await link.revision(43);
     const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
-    expect(await within(bar).findByText("Анна Петрова, табельный номер 0042")).toBeTruthy();
+    expect(await within(bar).findByText("Анна Петрова")).toBeTruthy();
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
   });
 
@@ -4543,5 +4543,190 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(device.changeAddress).not.toHaveBeenCalled();
     expect(screen.getByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
     expect(document.activeElement).toBe(open);
+  });
+});
+
+describe("the floor's own controls in the status bar (beta 3)", () => {
+  const ANNA = "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b";
+  /** The PIN 4821 and the badge «MRK-000742» under the site's salt (`proto/fixtures`). */
+  const PIN_PHC =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+  const BADGE_PHC =
+    "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+  const PEOPLE: ChangeItem[] = [
+    {
+      entity: "site",
+      id: "1",
+      rev: 40,
+      deleted: false,
+      data: { badgeSalt: "AAECAwQFBgcICQoLDA0ODw==", boxBlockSize: 2000, palletBlockSize: 200 },
+    },
+    {
+      entity: "operators",
+      id: ANNA,
+      rev: 41,
+      deleted: false,
+      data: { login: "0042", name: "Анна Кузнецова", role: null, pinPhc: PIN_PHC },
+    },
+    {
+      entity: "operator_badges",
+      id: "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d",
+      rev: 42,
+      deleted: false,
+      data: { operatorId: ANNA, badgePhc: BADGE_PHC, label: null },
+    },
+  ];
+
+  function scan(text: string) {
+    act(() => {
+      for (const key of text) fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key: "Enter" });
+    });
+  }
+
+  async function station(options: Partial<Parameters<typeof renderApp>[0]> = {}) {
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      hardware: fakeHardware().hardware,
+      ...options,
+    });
+    await screen.findByText("Отсканируйте бейдж для входа");
+    return { device, host };
+  }
+
+  it("leaves the full-screen mode after the operator proved who they are, and goes back with one press", async () => {
+    const kiosk = recordingLockdown();
+    await station({ lockdown: kiosk.lockdown });
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    scan("MRK-000742");
+    await screen.findByRole("heading", { name: "Смены линии" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(await screen.findByText("Выйти из полноэкранного режима?")).toBeTruthy();
+    // A press alone changes nothing.
+    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+    // The badge asked for here is not taken for anything on the floor behind.
+    scan("MRK-000742");
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    expect(screen.queryByText("Выйти из полноэкранного режима?")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться в полноэкранный режим" }));
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Выйти из полноэкранного режима" }),
+    ).toBeTruthy();
+  });
+
+  it("offers the same control on the sign-in screen, where any operator's proof will do", async () => {
+    const kiosk = recordingLockdown();
+    await station({ lockdown: kiosk.lockdown });
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(await screen.findByText("Выйти из полноэкранного режима?")).toBeTruthy();
+    scan("MRK-000742");
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    // The proof signed nobody in.
+    expect(screen.queryByRole("heading", { name: "Смены линии" })).toBeNull();
+  });
+
+  it("does not offer it where the window is never locked (development, and so a host or office PC)", async () => {
+    await station({
+      lockdown: createLockdownLifecycle({ dev: true, invoke: async () => undefined }),
+    });
+    expect(screen.queryByRole("button", { name: "Выйти из полноэкранного режима" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Вернуться в полноэкранный режим" })).toBeNull();
+    // The sync button is not tied to the window.
+    expect(screen.getByRole("button", { name: "Синхронизация" })).toBeTruthy();
+  });
+
+  it("fetches the photos the feed's products name once the sync is done, with the device key only", async () => {
+    const MILK = "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b";
+    const SUM = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    const { db, executor } = openLocalDb();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(
+      feedPage(43, [
+        ...PEOPLE,
+        {
+          entity: "products",
+          id: MILK,
+          rev: 43,
+          deleted: false,
+          data: {
+            gtin14: "04600682000013",
+            name: "Молоко 3,2% 0,9 л",
+            printName: null,
+            chzProductGroupCode: 8,
+            boxCapacity: 12,
+            palletBoxCapacity: null,
+            shelfLifeDays: 10,
+            defaultBoxTemplateId: null,
+            defaultPalletTemplateId: null,
+            archived: false,
+            status: "active",
+            photoChecksum: SUM,
+          },
+        },
+      ]),
+    );
+    host.getDeviceProductPhoto.mockResolvedValue({
+      photo: {
+        width: 2,
+        height: 1,
+        dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        checksum: SUM,
+        updatedAt: "2026-10-14T10:00:00.000Z",
+      },
+    });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      local: executor,
+      hardware: fakeHardware().hardware,
+    });
+    await waitFor(() =>
+      expect(
+        Array.from(
+          db.prepare("SELECT product_id, checksum FROM ref_product_photos").all(),
+          (row) => ({
+            ...row,
+          }),
+        ),
+      ).toEqual([{ product_id: MILK, checksum: SUM }]),
+    );
+    expect(host.getDeviceProductPhoto).toHaveBeenCalledWith(MILK);
+  });
+
+  it("asks the existing retries to run from «Синхронизация», and shows when the catalog last arrived", async () => {
+    const { host } = await station();
+    const before = host.getChanges.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизация" }));
+    expect(await screen.findByText(/Последнее обновление:/, { selector: "p" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить сейчас" }));
+    await waitFor(() => expect(host.getChanges.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("unpairs the station from «Рабочее место» only after the operator's proof, with the shell's forget", async () => {
+    const { device } = await station();
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Отвязать станцию" }));
+    expect(await screen.findByText("Отвязать станцию?")).toBeTruthy();
+    const next = await screen.findByRole("button", { name: "Подтвердите, что это вы" });
+    await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(next);
+    expect(device.forget).not.toHaveBeenCalled();
+    scan("MRK-000742");
+    await waitFor(() => expect(device.forget).toHaveBeenCalledTimes(1));
+    // Nothing waited to be sent: no `keepUnsent`.
+    expect(device.forget).toHaveBeenCalledWith(undefined);
   });
 });

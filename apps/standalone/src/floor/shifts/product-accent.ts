@@ -2,8 +2,9 @@
  * The product's accent on the shift card, forked from the cloud station
  * (apps/station/src/lib/product-accent.ts, `hueFromGtin`, and
  * apps/station/src/ui/work/ShiftBand.tsx, `productMonogram`): the colour is
- * derived from the product, never assigned by hand. The standalone keeps no
- * product photos, so the hue always comes from the GTIN.
+ * derived from the product, never assigned by hand. The hue always comes from
+ * the GTIN; the product's photo (beta 3, `ProductPhoto`) shows over this panel
+ * when the station holds one, and the monogram stands in without it.
  */
 
 /**

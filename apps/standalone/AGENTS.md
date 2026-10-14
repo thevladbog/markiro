@@ -252,9 +252,14 @@ copy (sqlx decides as before). A copy that fails runs no migration: the open
 fails as `OpenFailure::Other` (the file stays, the app starts without its
 local database), except damage the copy met in the database, which stays
 `Corrupt`; a failure to read the migrations goes back as it is, so a corrupt
-file stays `Corrupt`. Nothing else reads or removes the copy: a forget leaves
-it, with the PIN and badge hashes it held at the upgrade, and only the next
-upgrade that brings migrations replaces it (carried to the owner, Д9).
+file stays `Corrupt`. A forget removes the copy (beta 3, the owner accepted
+the open question Д9): `device_forget` deletes every `standalone-station.pre-*.db`
+and `.db.partial` with their `-wal`, `-shm` and `-journal` files
+(`LocalDbState::remove_pre_upgrade_copies`) once the database itself is
+cleared, since the copy holds the PIN and badge hashes the database held at the
+upgrade. A file that cannot go makes the forget answer `storage` and keeps
+`device.json`, so it can be tried again; nothing else reads or removes the copy,
+and the next upgrade that brings migrations makes a new one.
 
 A forget (`clear_copies`) empties every disposable table (see below),
 `floor_sign_in_failures` included, so it resets every lockout counter of the
@@ -1145,9 +1150,26 @@ length and the JPEG signature `FF D8 FF` (`validate::product_photo`) and
 parses no picture, as the logo. `GET/PUT/DELETE /v1/office/products/{id}/photo`:
 every office role reads, administrators and technologists write (the roles
 read again inside the write transaction), an unknown product is
-`not_found`; the photo takes no revision and rides no feed, the same photo
-again writes nothing, and the list names it by `photoChecksum` (SHA-256 of
-the bytes) without the bytes. The dialog writes it at once by its own
+`not_found`; the same photo again writes nothing, and the list names it by
+`photoChecksum` (SHA-256 of the bytes) without the bytes. A change takes one
+host revision (beta 3: the station shows the photo) but not the product's
+`rev`, which is the office's `expectedRev` (the dialog uploads a photo and
+saves the product after it): host migration `0027` adds `products.photo_rev`,
+the feed re-sends the product at that revision (`FEED_KEYS`: `photo_rev > ?1
+AND photo_rev <> rev`) with `photoChecksum` in its record (`ProductRecord`, a
+record from an older host reads as none), and a station fetches the bytes
+with `GET /v1/device/products/{id}/photo` (a device key, `photo: null`
+without one; in the license gate's `NEVER`). The station keeps them as
+base64 text in `ref_product_photos` (shell migration `0017`, `Disposable`:
+a forget empties it; at most 400 000 characters a row), beside
+`ref_products.photo_checksum`: `syncProductPhotos` (`src/local/product-photos.ts`)
+runs after every successful reference sync, fetches up to 25 photos whose
+stored checksum differs from the record's, drops those of products that have
+none and never fails the sync (a failed pass is tried again with the sync's
+backoff). `ProductPhoto` shows it on the shift card and the new-shift product
+card, and falls back to the colour panel's monogram while there is none, on a
+failed read and when the picture does not decode. `SYNC_SCHEMA_VERSION` is 5
+since then. The dialog writes it at once by its own
 buttons, not by «Сохранить». A backup copies the whole database file, so it
 holds the photos (a thousand products — up to 300 MB).
 
@@ -1493,7 +1515,7 @@ nothing new. An unreadable release is quarantined like any record (the code
 stays a local duplicate, fail closed). Its statement is pinned on the shell's
 SQLite in `tests/local_db.rs`.
 `ENTITY_SET` names the kept entities, the acted-on ones and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v4"`):
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v5"`):
 raise the version whenever a record schema or the meaning of a copy table
 changes, so every device syncs from zero once and gets back what an older
 build quarantined or kept differently.
@@ -2310,6 +2332,36 @@ hears the shell's COM scanners (`comScans`, `createComScanSource`; only on the
 scan form and while nothing is being sent): before, a COM scanner's frame went
 nowhere there, since only the focused field took a scan. Its controls are the
 floor's 64 px.
+
+The floor's own window control (beta 3, owner decisions): the status bar's rail
+holds «Оконный режим» / «Полноэкранный режим» (`FloorWindowControl`, a 64 px icon
+button, as on the cloud station) wherever the table locks this PC (`due`, so
+never on a host or office PC, in development or on an unconfigured station).
+This supersedes «an operator cannot leave kiosk mode» of plan 1f2: an operator
+may, but only after a fresh proof of identity (`Reconfirm`), the sign-in's own —
+the badge scanned, or the personnel number and the PIN on the keypad
+(`signInWithBadge`, `signInWithPin`), so a wrong attempt counts against the same
+lockouts and a locked operator or station is refused here too. With an operator
+signed in, only their own proof counts; on the sign-in screen any operator's
+does. The proof signs nobody in. While the dialog is open the floor's screens are
+muted (`createGatedScanSource`: the dialog reads the unmuted source), so a badge is
+never taken for a product's code. The way back to full screen needs no proof. An
+office administrator's sign-in on this PC opens an ordinary window by itself, as
+before, and the office's «Оконный режим» stays. The control sends the same
+`enter_lockdown` / `exit_lockdown` as the table's effect; `due` does not change
+by it, so the window stays as the person set it until the table decides again.
+The same proof guards «Отвязать станцию» in the footer of «Рабочее место»
+(`UnpairStation`, mounted there through `UnpairContext`): no shift open, the
+dialog says what is lost — the copies with the operators' PIN and badge hashes,
+the records not yet sent (they stay on the disk, `keepUnsent`, and never reach
+the host) and the blocks a restored host is still owed — and only then the
+shell's `device_forget` runs, which now also removes the upgrade's copy of the
+database. «Синхронизация» in the same rail (`SyncPanel`) is the cloud's sync
+details: the link, when the catalog last arrived since the app started, the
+records waiting, the refused, conflicting and displaced ones with the host's
+reason in words (the queue screen's own reads and texts), «Повторить сейчас»
+(only `requestSync` and `requestFacts`, no protocol of its own) and the same
+as plain text to copy.
 
 The trust boundary of the exit is the webview's: the administrator check lives
 in `App` and `WindowModeButton`, and `exit_lockdown` itself has no guard in

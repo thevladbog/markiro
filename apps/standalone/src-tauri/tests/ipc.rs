@@ -17,7 +17,7 @@ use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
 use markiro_standalone_lib::installation::{InstallRole, InstallationFile};
 use markiro_standalone_lib::local_db::{
-    LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
+    pre_upgrade_file, LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
 use markiro_standalone_lib::lockdown::LockdownState;
 use markiro_standalone_lib::office_files::OfficeFilesState;
@@ -364,6 +364,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
     let config = app_dir.path().join("device.json");
     std::fs::write(&config, "{").unwrap();
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    // The copy an upgrade made holds the hashes of that moment (beta 3): it
+    // stays while the clearing fails, and goes with the pairing.
+    let upgrade_copy = app_dir.path().join(pre_upgrade_file("0.9.0"));
+    std::fs::write(&upgrade_copy, b"hashes").unwrap();
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
     invoke(
         &webview,
@@ -407,6 +411,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         Err(json!("storage"))
     );
     assert!(config.exists(), "the pairing stays for another try");
+    assert!(
+        upgrade_copy.exists(),
+        "the upgrade's copy waits for the clearing"
+    );
     assert_eq!(
         copies(),
         json!([{ "n": 2 }]),
@@ -419,6 +427,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         Ok(Value::Null)
     );
     assert!(!config.exists());
+    assert!(
+        !upgrade_copy.exists(),
+        "the upgrade's copy goes with the pairing"
+    );
     assert_eq!(copies(), json!([{ "n": 0 }]));
     assert!(
         app_dir.path().join(FILE_NAME).exists(),

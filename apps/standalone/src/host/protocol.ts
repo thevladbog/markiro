@@ -446,6 +446,8 @@ export const operatorBadgeRecordSchema = z.strictObject({
 });
 export type OperatorBadgeRecord = z.infer<typeof operatorBadgeRecordSchema>;
 
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
 /**
  * `data` of a `products` item. The catalog grants no access, so its records
  * are read with `z.object`, as `org_profile` and `lines` are: a key a newer
@@ -465,6 +467,12 @@ export const productRecordSchema = z.object({
   defaultPalletTemplateId: z.uuid().nullable(),
   archived: z.boolean(),
   status: productStatusSchema,
+  /**
+   * SHA-256 of the product's photo, `null` without one (beta 3); the station
+   * fetches the bytes with `GET /v1/device/products/{id}/photo` when its copy
+   * differs. Read as none from an older host.
+   */
+  photoChecksum: sha256HexSchema.nullable().default(null),
 });
 export type ProductRecord = z.infer<typeof productRecordSchema>;
 
@@ -722,7 +730,6 @@ export type ProductGroup = z.infer<typeof productGroupSchema>;
 export const egaisCodeSchema = z.string().min(1).max(64);
 
 /** SHA-256 in lower-case hex. */
-const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 
 /** Standard base64 with padding (a photo's JPEG, plan ТОВ). */
 const base64Schema = z

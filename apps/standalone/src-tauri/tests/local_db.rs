@@ -86,6 +86,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "ref_operator_badges",
             "ref_operators",
             "ref_org",
+            "ref_product_photos",
             "ref_products",
             "ref_site",
             "ref_template_defaults",
@@ -873,10 +874,30 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// got the column `office_reviewed_at` appended to its text, is replaced by its text in
 /// `before`. The migration's own shape is pinned in `migration_0016_*` and
 /// `test/floor-conflict-notices-migration.test.ts`.
+///
+/// The same function sets aside migration `0017` (beta 3, the products' photos), which they do
+/// not examine either: the table `ref_product_photos`, and `ref_products`, which got
+/// `photo_checksum` appended to its text.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
+        .filter(|row| row["tbl_name"] != "ref_product_photos")
         .map(|mut row| {
+            if row["type"] == "table" && row["name"] == "ref_products" {
+                let old = before
+                    .iter()
+                    .find(|old| old["type"] == "table" && old["name"] == "ref_products")
+                    .expect("the products table was there before");
+                let (old_sql, new_sql) =
+                    (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
+                const COLUMN: &str = ", photo_checksum TEXT";
+                assert_eq!(
+                    new_sql.replacen(COLUMN, "", 1),
+                    old_sql,
+                    "0017 only adds its column to ref_products"
+                );
+                row["sql"] = old["sql"].clone();
+            }
             if row["type"] == "table" && row["name"] == "outbox" {
                 let old = before
                     .iter()
@@ -5205,5 +5226,41 @@ async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
     assert_eq!(
         upgraded.query(journal, vec![]).await.unwrap(),
         fresh.query(journal, vec![]).await.unwrap()
+    );
+}
+
+/// Beta 3: a forget takes the upgrade's copy of the database with it, side files
+/// included, and nothing else in the directory.
+#[tokio::test]
+async fn removing_the_upgrade_copies_takes_every_pre_file_and_only_those() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = LocalDbState::open(dir.path()).await;
+    let pre = pre_upgrade_file("0.9.0");
+    let files = [
+        pre.clone(),
+        format!("{pre}-wal"),
+        format!("{pre}-shm"),
+        format!("{pre}-journal"),
+        format!("{pre}.partial"),
+        format!("{PRE_UPGRADE_PREFIX}0.8.0.db"),
+    ];
+    for name in &files {
+        std::fs::write(dir.path().join(name), b"hashes").unwrap();
+    }
+    std::fs::write(dir.path().join("device.json"), b"{}").unwrap();
+    assert_eq!(local.remove_pre_upgrade_copies().unwrap(), files.len());
+    for name in &files {
+        assert!(!dir.path().join(name).exists(), "{name} stays");
+    }
+    // The database and the pairing file are not touched.
+    assert!(dir.path().join(FILE_NAME).exists());
+    assert!(dir.path().join("device.json").exists());
+    // Nothing left to remove is no error.
+    assert_eq!(local.remove_pre_upgrade_copies().unwrap(), 0);
+    assert_eq!(
+        LocalDbState::unavailable()
+            .remove_pre_upgrade_copies()
+            .unwrap(),
+        0
     );
 }

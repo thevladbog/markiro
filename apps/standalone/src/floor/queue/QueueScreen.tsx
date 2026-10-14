@@ -81,11 +81,11 @@ const MOMENT = new Intl.DateTimeFormat("ru-RU", {
 });
 const realClock = () => performance.now();
 
-function kindText(t: TFunction, kind: string): string {
+export function kindText(t: TFunction, kind: string): string {
   return KINDS.has(kind) ? t(`floor.queue.kind.${kind}`) : kind;
 }
 
-function reasonText(t: TFunction, record: SettledRecord): string {
+export function reasonText(t: TFunction, record: SettledRecord): string {
   if (record.outcome === "conflict") return t("floor.queue.conflictReason");
   if (record.code !== null && CODES.has(record.code)) return t(`floor.queue.code.${record.code}`);
   return t("floor.queue.code.other", { code: record.code ?? "—" });
@@ -98,7 +98,7 @@ function waitText(t: TFunction, ms: number): string {
     : parts.map((part) => t(`floor.status.wait.${part.unit}`, { n: part.n })).join(" ");
 }
 
-function recordText(t: TFunction, record: SettledRecord): string {
+export function recordText(t: TFunction, record: SettledRecord): string {
   const kind = kindText(t, record.kind);
   const time = MOMENT.format(new Date(record.createdAt));
   return record.sscc === null
@@ -107,7 +107,7 @@ function recordText(t: TFunction, record: SettledRecord): string {
 }
 
 /** A displaced code's box and when the host saw it, on this computer's clock. */
-function displacedText(t: TFunction, record: DisplacedRecord): string {
+export function displacedText(t: TFunction, record: DisplacedRecord): string {
   const time = MOMENT.format(new Date(record.detectedAt));
   if (!record.boxed) return t("floor.queue.displacedRecordUnboxed", { time });
   return record.sscc === null
