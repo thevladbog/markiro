@@ -182,6 +182,7 @@ const NONE = {
   floor_print_jobs: 0,
   floor_boxes: 0,
   floor_pallets: 0,
+  floor_unit_labels: 0,
   outbox: 0,
 };
 const WHOLE = {
@@ -193,6 +194,7 @@ const WHOLE = {
   floor_print_jobs: 1,
   floor_boxes: 1,
   floor_pallets: 0,
+  floor_unit_labels: 0,
   outbox: 5,
 };
 
@@ -321,6 +323,108 @@ describe("the retention of a shift's records on the station", () => {
     expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
     expect(kept(at, ENTERED.id)).toEqual(WHOLE);
     expect(kept(at, SECOND.id)).toEqual(WHOLE);
+  });
+
+  // The unit label jobs of a shift that prints duplicates (plan РЕЖ part B, migration `0015`)
+  // keep the full code in their fields and bytes: they go with the shift, whole rows, while the
+  // same shift's labels under another pairing and another shift's stay.
+  const FULL_CODE = "0104600682000013215abc\u001d93Zz";
+  function unitLabel(
+    at: Station,
+    shiftId: string,
+    id: string,
+    verification: "verified" | "pending",
+    pairing: Pair = PAIRING,
+  ): void {
+    at.db
+      .prepare(
+        "INSERT INTO floor_unit_labels (id, host_id, device_id, shift_id, code_hash, scan_id, " +
+          "attempt_no, attempt_state, verification_policy, verification, print_mode, language, dpi, " +
+          "bytes_base64, bytes_digest, payload_digest, template_id, template_rev, fields, " +
+          "operator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'sent', 'required', " +
+          "?, 'raw', 'zpl', 203, 'XlhB', ?, ?, 'template-1', 1, ?, 'operator-1', ?, ?)",
+      )
+      .run(
+        id,
+        pairing.hostId,
+        pairing.deviceId,
+        shiftId,
+        "a".repeat(64),
+        `scan-${id}`,
+        verification,
+        "b".repeat(64),
+        "c".repeat(64),
+        JSON.stringify({ "km.full": FULL_CODE }),
+        CUTOFF,
+        CUTOFF,
+      );
+  }
+  const fullCodes = (at: Station): unknown[] =>
+    rows(
+      at.db,
+      "SELECT host_id, device_id, shift_id FROM floor_unit_labels " +
+        "WHERE instr(fields, ?) > 0 ORDER BY shift_id, device_id",
+      JSON.stringify(FULL_CODE).slice(1, -1),
+    );
+
+  it("deletes a shift's unit labels with it, the full code they keep included, and no one else's", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    await finished(at, SECOND, "B", "2026-11-08T11:00:00.000Z");
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    unitLabel(at, SECOND.id, "label-2", "verified");
+    unitLabel(at, ENTERED.id, "label-3", "verified", OTHER_PAIRING);
+    expect(fullCodes(at)).toHaveLength(3);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 2 });
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(NONE);
+    expect(fullCodes(at)).toEqual([
+      { host_id: OTHER_PAIRING.hostId, device_id: OTHER_PAIRING.deviceId, shift_id: ENTERED.id },
+      { host_id: PAIRING.hostId, device_id: PAIRING.deviceId, shift_id: SECOND.id },
+    ]);
+  });
+
+  it("keeps a shift while a unit label of it is unresolved, and purges it once it is", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    unitLabel(at, ENTERED.id, "label-2", "pending");
+    expect(await dueIds(at)).toEqual([]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 2 });
+    // Another pairing's unresolved label of the same shift id keeps nothing of this one.
+    at.db
+      .prepare("UPDATE floor_unit_labels SET verification = 'verified' WHERE id = ?")
+      .run("label-2");
+    unitLabel(at, ENTERED.id, "label-3", "pending", OTHER_PAIRING);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual({ ...NONE, floor_unit_labels: 1 });
+  });
+
+  it("keeps a shift a unit label of which turned unresolved between its reading and its delete", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    let first = true;
+    const racing = {
+      query: at.local.query.bind(at.local),
+      transaction: async (statements: Parameters<typeof at.local.transaction>[0]) => {
+        if (first) {
+          first = false;
+          // A reprint lands first: the label's next attempt, its check pending again.
+          at.db
+            .prepare(
+              "UPDATE floor_unit_labels SET attempt_no = 2, attempt_state = 'prepared', " +
+                "reason = 'lost', verification = 'pending' WHERE id = ?",
+            )
+            .run("label-1");
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 1 });
   });
 
   it("leaves another pairing's rows alone, the same shift ids included", async () => {

@@ -6,7 +6,7 @@ import { ThemeProvider } from "@markiro/ui";
 import type { FloorSession } from "../src/app/shell.js";
 import { QueueScreen } from "../src/floor/queue/QueueScreen.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
-import { FACT_RECEIPT_CODES, type HostStatus } from "../src/host/protocol.js";
+import { FACT_KINDS, FACT_RECEIPT_CODES, type HostStatus } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import ru from "../src/i18n/ru.json";
 import {
@@ -739,16 +739,9 @@ describe("the queue screen", () => {
 
   it("has words for every kind of record the station keeps", () => {
     const kinds: Record<string, unknown> = ru.floor.queue.kind;
-    expect(Object.keys(kinds).sort()).toEqual([
-      "box_closed",
-      "box_exception",
-      "box_label",
-      "pallet_closed",
-      "pallet_exception",
-      "pallet_label",
-      "scan",
-      "shift_closed",
-    ]);
+    expect(Object.keys(kinds).sort()).toEqual([...FACT_KINDS].sort());
+    expect(FACT_KINDS).toContain("unit_label");
+    for (const kind of FACT_KINDS) expect(kinds[kind], kind).toEqual(expect.any(String));
   });
 });
 
@@ -1008,7 +1001,8 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
     const { db, local } = await station();
     closedBox(db);
     displaced(db, "c-1", { boxId: "box-1" });
-    displaced(db, "c-2", { sameDevice: true });
+    // A box the host still had open: its id is known, its SSCC is not.
+    displaced(db, "c-2", { boxId: "box-open", sameDevice: true });
     view(local);
     const section = await screen.findByRole("region", { name: "Вытесненные коды" });
     // 07:12 UTC on this computer's clock as the screen writes every record's time.
@@ -1033,6 +1027,28 @@ describe("the displaced codes on the queue screen (plan КНФ)", () => {
       within(section).getByText(/раньше отсканирован этой станцией в смене OCT26-005\/S/),
     ).toBeTruthy();
     expect(within(section).getAllByRole("button", { name: "Разобрано" })).toHaveLength(2);
+  });
+
+  // A validation shift's scan names no box (plan РЕЖ): the words speak of the product, never of a
+  // box the person has nowhere to look for.
+  it("words the displaced code of a validation shift without a box", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    displaced(db, "c-2", { sameDevice: true });
+    view(local);
+    const section = await screen.findByRole("region", { name: "Вытесненные коды" });
+    expect(within(section).getAllByText(/^Смена .+ · Без короба · /)).toHaveLength(2);
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован этой станцией в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(within(section).queryByText(/проверьте короб/)).toBeNull();
   });
 
   it("settles a displaced code on confirmation, guarded the same 400 ms, and tells the status bar", async () => {

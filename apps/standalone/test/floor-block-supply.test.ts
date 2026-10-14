@@ -48,6 +48,7 @@ function supplyContext(local: LocalExecutor, overrides: Partial<BlockContext> = 
     local,
     pairing: PAIRING,
     issuerPrefix: PREFIX,
+    mode: "aggregation",
     online: () => true,
     requestBlock: vi.fn(async (request: SsccBlockRequest) => blockFor(request)),
     onHostError: vi.fn(),
@@ -227,6 +228,40 @@ describe("the supply of SSCC serials", () => {
     await expect(createBlockSupply(context).topUp()).resolves.toEqual({ kind: "offline" });
     expect(context.requestBlock).not.toHaveBeenCalled();
     expect(requests(db)).toEqual([]);
+  });
+
+  it("asks nothing for a validation shift, whose codes go in no box (plan РЕЖ), by its live copy", async () => {
+    const { db, executor } = openLocalDb();
+    // A request that waits from before: it stays as it is, neither sent nor dropped.
+    db.prepare(
+      "INSERT INTO floor_block_requests (request_id, host_id, device_id, issuer_prefix, " +
+        "extension, requested_at) VALUES (?, ?, ?, ?, 0, ?)",
+    ).run(SECOND_REQUEST, PAIRING.hostId, PAIRING.deviceId, PREFIX, "2026-10-08T06:00:00.000Z");
+    // The validation snapshot carries a real issuer prefix, and no block is kept: the half
+    // rule alone would ask for one of each extension.
+    let mode: BlockContext["mode"] = "validation";
+    const live = (extension: number) => {
+      const context = supplyContext(executor, { extension });
+      Object.defineProperty(context, "mode", { get: () => mode });
+      return context;
+    };
+    const boxes = live(0);
+    const pallets = live(1);
+    await expect(createBlockSupply(boxes).topUp()).resolves.toEqual({ kind: "enough" });
+    await expect(createBlockSupply(pallets).topUp()).resolves.toEqual({ kind: "enough" });
+    expect(boxes.requestBlock).not.toHaveBeenCalled();
+    expect(pallets.requestBlock).not.toHaveBeenCalled();
+    expect(requests(db)).toEqual([
+      { request_id: SECOND_REQUEST, issuer_prefix: PREFIX, extension: 0 },
+    ]);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_sscc_blocks")).toEqual([{ n: 0 }]);
+    // The mode is read at each top-up: the same supply of an aggregation shift asks.
+    mode = "aggregation";
+    await expect(createBlockSupply(boxes).topUp()).resolves.toEqual({
+      kind: "stored",
+      blockId: BLOCK_ID,
+    });
+    expect(boxes.requestBlock).toHaveBeenCalledTimes(1);
   });
 
   it("repeats the same request after a failure, even when no block is wanted any more", async () => {

@@ -3,12 +3,19 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { Checkbox, DatePicker, Input, Select } from "@markiro/ui";
+import { Alert, Checkbox, DatePicker, Input, RadioGroup, Select } from "@markiro/ui";
 
-import type { OfficeShift, ShiftCreate, ShiftUpdate } from "../../host/protocol.js";
+import {
+  shiftModeSchema,
+  type LabelTemplateSummary,
+  type OfficeShift,
+  type ShiftCreate,
+  type ShiftUpdate,
+} from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
@@ -16,7 +23,7 @@ import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { PageLoading, StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
-import { templateOptions } from "../template-options.js";
+import { fittingTemplates, templateOptions } from "../template-options.js";
 import {
   newShiftFields,
   SHIFT_CONFLICTS,
@@ -54,6 +61,24 @@ export interface ShiftDialogProps {
  * dialog waits for the organization's profile; when the profile does not
  * load, or names a zone this PC does not know, it starts as this PC's date
  * and says so. A changed shift needs no "today": it starts on its own values.
+ *
+ * «Режим работы» (plan РЕЖ, Р2, Р16) comes right after the product:
+ * «Проверка» or «Агрегация», aggregation unless chosen. A validation shift
+ * keeps its box template, with a word that it prints no box label (Р4), and
+ * hides the box capacity and the pallets, whose values the form keeps for an
+ * aggregation chosen again. The mode of a shift that is no longer planned is
+ * shown, never changed (Р1): the page opens this dialog for planned shifts
+ * only, so that is a guard.
+ *
+ * «Проверка» offers «Печатать дубликат Data Matrix» (part B, Р16, the cloud
+ * station's flag). Turned on, it opens «Печать дубликата» after the line and
+ * the counterparty: the duplicate template (enabled, of the purpose
+ * `product_duplicate`, covering the product's group) and «Обязательная
+ * проверка этикетки», off unless chosen (the owner's default). «Агрегация»
+ * drops all three; the flag turned off drops the template. The fields come
+ * in the cloud's order (Р16): the product, the mode and its flag, the date
+ * and the plan, the line and the counterparty, «Печать дубликата», the box
+ * template, then the box capacity and the pallets.
  */
 export function ShiftDialog(props: ShiftDialogProps) {
   const { t } = useTranslation();
@@ -144,6 +169,7 @@ function ShiftForm({
     handleSubmit,
     setError,
     setValue,
+    getValues,
     clearErrors,
     watch,
     formState: { errors, isDirty, isSubmitting },
@@ -166,11 +192,17 @@ function ShiftForm({
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
   const palletsEnabled = watch("palletsEnabled");
-  // The A4 sheets matter only with pallets; they are read when the pallets are on.
+  const validation = watch("mode") === "validation";
+  const printDuplicate = watch("printDuplicate");
+  const verificationRequired = watch("verificationRequired");
+  const duplicateTitleId = `${ids}-duplicate-title`;
+  // An open or closed shift's mode is fixed (Р1).
+  const modeFixed = shift !== null && shift.status !== "planned";
+  // The A4 sheets matter only with pallets, which a validation shift has none of.
   const palletSheets = useOfficeQuery(
     officeKeys.palletSheets,
     (api, token) => api.listPalletSheets(token),
-    { enabled: palletsEnabled },
+    { enabled: palletsEnabled && !validation },
   );
   const product = products.data?.find((each) => each.id === productId);
   // Pallets need the product's pallet capacity, as the cloud's switch does.
@@ -238,6 +270,59 @@ function ShiftForm({
           },
         ];
 
+  // The duplicate templates the product takes (Р16): enabled, of the purpose, covering its group.
+  const duplicateFitting =
+    product === undefined
+      ? []
+      : fittingTemplates(templates.data, "product_duplicate", product.chzProductGroupCode);
+  /** A duplicate template as the cloud offers one: its name, size and density. */
+  const duplicateLabel = (template: LabelTemplateSummary): string =>
+    template.widthMm === null || template.heightMm === null || template.dpi === null
+      ? template.name
+      : t("office.shifts.duplicate.templateOption", {
+          name: template.name,
+          widthMm: template.widthMm,
+          heightMm: template.heightMm,
+          dpi: template.dpi,
+        });
+  /**
+   * The choices of the duplicate template. A shift that is no longer planned
+   * shows its own, frozen at the opening, by the name the office knows
+   * («Шаблон зафиксирован при открытии смены» when it is gone). A planned
+   * one offers what fits; its own or the form's choice that no longer fits
+   * stays, disabled, as «Шаблон недоступен — обновите данные» (the cloud's
+   * words). Without the product's record only the form's choice is named.
+   */
+  const duplicateOptions = (value: string) => {
+    const known = templates.data?.find((each) => each.id === value);
+    if (modeFixed) {
+      return value === ""
+        ? []
+        : [{ value, label: known?.name ?? t("office.shifts.duplicate.frozenTemplate") }];
+    }
+    if (product === undefined) {
+      return value === ""
+        ? []
+        : [
+            {
+              value,
+              label: known?.name ?? t("office.templateChoice.id", { id: value.slice(0, 8) }),
+            },
+          ];
+    }
+    const options: { value: string; label: string; disabled?: boolean }[] = duplicateFitting.map(
+      (template) => ({ value: template.id, label: duplicateLabel(template) }),
+    );
+    if (value !== "" && !options.some((option) => option.value === value)) {
+      options.push({
+        value,
+        label: t("office.shifts.duplicate.templateUnavailable"),
+        disabled: true,
+      });
+    }
+    return options;
+  };
+
   /** The pallets' capacity and template from `chosen`, as a new choice of pallets takes them. */
   const palletsFrom = (chosen: NonNullable<typeof product>) => {
     setValue(
@@ -282,6 +367,51 @@ function ShiftForm({
     } else if (palletsEnabled) {
       palletsFrom(chosen);
     }
+    // A duplicate template the new product does not take is dropped; one it takes stays.
+    const duplicateId = getValues("duplicateTemplateId");
+    const duplicate = templates.data?.find((each) => each.id === duplicateId);
+    if (
+      duplicateId !== "" &&
+      (duplicate === undefined ||
+        !templateFitsSlot(duplicate, {
+          purpose: "product_duplicate",
+          chzProductGroupCode: chosen.chzProductGroupCode,
+        }))
+    ) {
+      setValue("duplicateTemplateId", "", { shouldDirty: true });
+      clearErrors("duplicateTemplateId");
+    }
+  };
+
+  const chooseMode = (value: string, onChange: (mode: ShiftFields["mode"]) => void) => {
+    const next = shiftModeSchema.safeParse(value);
+    if (!next.success) return;
+    onChange(next.data);
+    // What «Проверка» hides is not checked, so a refusal of it does not stay behind.
+    if (next.data === "validation") {
+      clearErrors([
+        "boxCapacity",
+        "palletBoxCapacity",
+        "palletTemplateId",
+        "palletSheetTemplateId",
+      ]);
+    } else {
+      // «Агрегация» prints no duplicate: the flag, its template and the check go back to
+      // their defaults (Р16), so «Проверка» chosen again starts from them.
+      setValue("printDuplicate", false, { shouldDirty: true });
+      setValue("duplicateTemplateId", "", { shouldDirty: true });
+      setValue("verificationRequired", false, { shouldDirty: true });
+      clearErrors("duplicateTemplateId");
+    }
+  };
+
+  const choosePrint = (on: boolean, onChange: (on: boolean) => void) => {
+    onChange(on);
+    // The check stays until the mode changes, as in the cloud's form; the template goes.
+    if (!on) {
+      setValue("duplicateTemplateId", "", { shouldDirty: true });
+      clearErrors("duplicateTemplateId");
+    }
   };
 
   const choosePallets = (on: boolean, onChange: (on: boolean) => void) => {
@@ -293,7 +423,8 @@ function ShiftForm({
   const submit = handleSubmit(
     async (values) => {
       setFailure(null);
-      const update = shift === null ? null : shiftUpdate(shift, toShiftChange(values));
+      const update =
+        shift === null ? null : shiftUpdate(shift, toShiftChange(values, shift.status));
       // The form is changed but the shift is not (blanks typed, a value written as it was):
       // there is nothing to send, and nothing was saved.
       if (update !== null && Object.keys(update).length === 1) {
@@ -326,7 +457,11 @@ function ShiftForm({
           // no longer offered, or shows as marked, once its list is read again.
           if (outcome.field === "productId") void products.refetch();
           if (outcome.field === "lineId") void lines.refetch();
-          if (outcome.field === "boxTemplateId" || outcome.field === "palletTemplateId") {
+          if (
+            outcome.field === "boxTemplateId" ||
+            outcome.field === "palletTemplateId" ||
+            outcome.field === "duplicateTemplateId"
+          ) {
             void templates.refetch();
           }
           if (outcome.field === "palletSheetTemplateId") void palletSheets.refetch();
@@ -410,22 +545,48 @@ function ShiftForm({
       )}
       <Controller
         control={control}
-        name="lineId"
+        name="mode"
         render={({ field }) => (
-          <Select
-            {...searchableSelect(t)}
-            label={t("office.shifts.fields.line")}
-            placeholder={t("office.shifts.fields.linePlaceholder")}
-            options={lineOptions}
+          <RadioGroup
+            label={t("office.shifts.fields.mode")}
+            // The cloud's order: «Проверка», then «Агрегация».
+            options={[
+              { value: "validation", label: t("office.shifts.modes.validation") },
+              { value: "aggregation", label: t("office.shifts.modes.aggregation") },
+            ]}
             value={field.value}
-            onValueChange={field.onChange}
-            id={fieldId("lineId")}
-            disabled={locked || !lines.isSuccess}
-            {...(lines.isError ? { hint: t("office.shifts.fields.linesUnavailable") } : {})}
-            {...fieldError(errors.lineId?.message)}
+            onValueChange={(value) => chooseMode(value, field.onChange)}
+            id={fieldId("mode")}
+            disabled={locked || modeFixed}
           />
         )}
       />
+      {validation && (
+        <Controller
+          control={control}
+          name="printDuplicate"
+          render={({ field }) => (
+            <Checkbox
+              label={t("office.shifts.duplicate.print")}
+              // While it is off, what it would do (or, once the shift is opened, that it is
+              // fixed); on, the section says it.
+              {...(field.value
+                ? {}
+                : {
+                    hint: t(
+                      modeFixed
+                        ? "office.shifts.duplicate.frozen"
+                        : "office.shifts.duplicate.copyHint",
+                    ),
+                  })}
+              checked={field.value}
+              onCheckedChange={(on) => choosePrint(on, field.onChange)}
+              id={fieldId("printDuplicate")}
+              disabled={locked || modeFixed}
+            />
+          )}
+        />
+      )}
       <Controller
         control={control}
         name="productionDate"
@@ -458,16 +619,108 @@ function ShiftForm({
         {...fieldError(errors.plannedQty?.message)}
         {...register("plannedQty")}
       />
-      <Input
-        label={t("office.shifts.fields.boxCapacity")}
-        hint={t("office.shifts.fields.boxCapacityHint")}
-        inputMode="numeric"
-        mono
-        id={fieldId("boxCapacity")}
-        disabled={locked}
-        {...fieldError(errors.boxCapacity?.message)}
-        {...register("boxCapacity")}
+      <Controller
+        control={control}
+        name="lineId"
+        render={({ field }) => (
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.shifts.fields.line")}
+            placeholder={t("office.shifts.fields.linePlaceholder")}
+            options={lineOptions}
+            value={field.value}
+            onValueChange={field.onChange}
+            id={fieldId("lineId")}
+            disabled={locked || !lines.isSuccess}
+            {...(lines.isError ? { hint: t("office.shifts.fields.linesUnavailable") } : {})}
+            {...fieldError(errors.lineId?.message)}
+          />
+        )}
       />
+      <Controller
+        control={control}
+        name="counterpartyId"
+        render={({ field }) => (
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.shifts.fields.counterparty")}
+            hint={t(
+              counterparties.isError
+                ? shift === null
+                  ? "office.shifts.fields.counterpartiesUnavailable"
+                  : "office.shifts.fields.counterpartiesUnavailableEdit"
+                : // A validation shift prints no box label: its counterparty goes on the
+                  // duplicate, when it prints one.
+                  !validation
+                  ? "office.shifts.fields.counterpartyHint"
+                  : printDuplicate
+                    ? "office.shifts.fields.counterpartyHintDuplicate"
+                    : "office.shifts.fields.counterpartyHintValidation",
+            )}
+            options={counterpartyOptions}
+            value={field.value}
+            onValueChange={field.onChange}
+            id={fieldId("counterpartyId")}
+            disabled={locked || !counterparties.isSuccess}
+            {...fieldError(errors.counterpartyId?.message)}
+          />
+        )}
+      />
+      {validation && printDuplicate && (
+        <section className="shift-duplicate" aria-labelledby={duplicateTitleId}>
+          <h3 id={duplicateTitleId}>{t("office.shifts.duplicate.title")}</h3>
+          <Controller
+            control={control}
+            name="duplicateTemplateId"
+            render={({ field }) => (
+              <Select
+                {...searchableSelect(t)}
+                label={t("office.shifts.duplicate.template")}
+                placeholder={t("office.shifts.duplicate.templatePlaceholder")}
+                options={duplicateOptions(field.value)}
+                value={field.value}
+                onValueChange={(id) => {
+                  field.onChange(id);
+                  clearErrors("duplicateTemplateId");
+                }}
+                id={fieldId("duplicateTemplateId")}
+                disabled={locked || modeFixed || !templates.isSuccess || product === undefined}
+                {...(templates.isError
+                  ? { hint: t("office.shifts.fields.templatesUnavailable") }
+                  : {})}
+                {...fieldError(errors.duplicateTemplateId?.message)}
+              />
+            )}
+          />
+          {!modeFixed &&
+            templates.isSuccess &&
+            product !== undefined &&
+            duplicateFitting.length === 0 && (
+              <Alert tone="info">{t("office.shifts.duplicate.noTemplates")}</Alert>
+            )}
+          <Controller
+            control={control}
+            name="verificationRequired"
+            render={({ field }) => (
+              <Checkbox
+                label={t("office.shifts.duplicate.verification")}
+                hint={t(
+                  verificationRequired
+                    ? "office.shifts.duplicate.requiredHint"
+                    : "office.shifts.duplicate.noneHint",
+                )}
+                checked={field.value}
+                onCheckedChange={field.onChange}
+                id={fieldId("verificationRequired")}
+                disabled={locked || modeFixed}
+              />
+            )}
+          />
+          <p className="shift-duplicate__note">
+            {t(modeFixed ? "office.shifts.duplicate.frozen" : "office.shifts.duplicate.copyHint")}
+          </p>
+        </section>
+      )}
       <Controller
         control={control}
         name="boxTemplateId"
@@ -504,31 +757,47 @@ function ShiftForm({
                 ? { hint: t("office.shifts.fields.productsUnavailable") }
                 : shift === null && defaults.isError
                   ? { hint: t("office.shifts.fields.defaultsUnavailable") }
-                  : {})}
+                  : validation
+                    ? { hint: t("office.shifts.fields.boxTemplateValidationHint") }
+                    : {})}
             {...fieldError(errors.boxTemplateId?.message)}
           />
         )}
       />
-      <Controller
-        control={control}
-        name="palletsEnabled"
-        render={({ field }) => (
-          <Checkbox
-            label={t("office.shifts.fields.pallets")}
-            hint={t(
-              product !== undefined && !palletsPossible
-                ? "office.shifts.fields.palletsUnavailable"
-                : "office.shifts.fields.palletsHint",
-            )}
-            checked={field.value}
-            onCheckedChange={(on) => choosePallets(on, field.onChange)}
-            id={fieldId("palletsEnabled")}
-            // A changed shift's own pallets can always be turned off.
-            disabled={locked || ((!palletsPossible || !templates.isSuccess) && !field.value)}
-          />
-        )}
-      />
-      {palletsEnabled && (
+      {!validation && (
+        <Input
+          label={t("office.shifts.fields.boxCapacity")}
+          hint={t("office.shifts.fields.boxCapacityHint")}
+          inputMode="numeric"
+          mono
+          id={fieldId("boxCapacity")}
+          disabled={locked}
+          {...fieldError(errors.boxCapacity?.message)}
+          {...register("boxCapacity")}
+        />
+      )}
+      {!validation && (
+        <Controller
+          control={control}
+          name="palletsEnabled"
+          render={({ field }) => (
+            <Checkbox
+              label={t("office.shifts.fields.pallets")}
+              hint={t(
+                product !== undefined && !palletsPossible
+                  ? "office.shifts.fields.palletsUnavailable"
+                  : "office.shifts.fields.palletsHint",
+              )}
+              checked={field.value}
+              onCheckedChange={(on) => choosePallets(on, field.onChange)}
+              id={fieldId("palletsEnabled")}
+              // A changed shift's own pallets can always be turned off.
+              disabled={locked || ((!palletsPossible || !templates.isSuccess) && !field.value)}
+            />
+          )}
+        />
+      )}
+      {palletsEnabled && !validation && (
         <>
           <Input
             label={t("office.shifts.fields.palletBoxCapacity")}
@@ -595,29 +864,6 @@ function ShiftForm({
           />
         </>
       )}
-      <Controller
-        control={control}
-        name="counterpartyId"
-        render={({ field }) => (
-          <Select
-            {...searchableSelect(t)}
-            label={t("office.shifts.fields.counterparty")}
-            hint={t(
-              counterparties.isError
-                ? shift === null
-                  ? "office.shifts.fields.counterpartiesUnavailable"
-                  : "office.shifts.fields.counterpartiesUnavailableEdit"
-                : "office.shifts.fields.counterpartyHint",
-            )}
-            options={counterpartyOptions}
-            value={field.value}
-            onValueChange={field.onChange}
-            id={fieldId("counterpartyId")}
-            disabled={locked || !counterparties.isSuccess}
-            {...fieldError(errors.counterpartyId?.message)}
-          />
-        )}
-      />
     </FormDialog>
   );
 }

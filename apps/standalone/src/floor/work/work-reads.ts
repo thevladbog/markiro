@@ -36,13 +36,21 @@ export async function readOpenBox(
 /** What the work screen shows of the shift, from this station's own records. */
 export interface WorkTotals {
   openBox: OpenBox | null;
-  /** Codes this station holds in the shift's boxes: the shift's actual quantity. */
+  /** Codes this station holds in the shift, in its boxes or in none (a validation shift's): its actual quantity. */
   accepted: number;
   /** Boxes of the shift closed and not taken apart. */
   closedBoxes: number;
   /** The SSCC of the box closed last, or `null`. */
   lastSscc: string | null;
 }
+
+/**
+ * The codes this station holds in a shift: the work screen's accepted count, of a validation
+ * shift too, whose codes have no box (plan РЕЖ, migration `0014`). Searches `floor_codes_shift`;
+ * pinned with this exact text in `test/floor-schema.test.ts` and `src-tauri/tests/local_db.rs`.
+ */
+export const SHIFT_CODES_SQL =
+  "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?";
 
 const countRow = z.object({ n: z.number().int().nonnegative() });
 const ssccRow = z.object({ sscc: z.string() });
@@ -55,11 +63,7 @@ export async function readWorkTotals(
   const scope = [pairing.hostId, pairing.deviceId, shiftId];
   const [openBox, accepted, closed, last] = await Promise.all([
     readOpenBox(local, pairing, shiftId),
-    local.query(
-      "SELECT count(*) AS n FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
-      scope,
-      countRow,
-    ),
+    local.query(SHIFT_CODES_SQL, scope, countRow),
     local.query(
       "SELECT count(*) AS n FROM floor_boxes WHERE host_id = ? AND device_id = ? " +
         "AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
@@ -79,4 +83,41 @@ export async function readWorkTotals(
     closedBoxes: closed[0]?.n ?? 0,
     lastSscc: last[0]?.sscc ?? null,
   };
+}
+
+/** A validation shift's refused scans on this station (plan РЕЖ): its panel's figures. */
+export interface ValidationCounts {
+  /** Codes refused as taken already, here or on the host. */
+  duplicates: number;
+  /** Codes of another product and scans that are no code of marking. */
+  errors: number;
+}
+
+/**
+ * The refused scans of a shift on this station, by kind, from its journal (`floor_scans`); one
+ * row, searched through `floor_scans_shift`. Pinned with this exact text in
+ * `test/floor-schema.test.ts` and `src-tauri/tests/local_db.rs`. Parameters: host id, device id,
+ * shift id.
+ */
+export const VALIDATION_COUNTS_SQL =
+  "SELECT coalesce(sum(verdict = 'duplicate'), 0) AS duplicates, " +
+  "coalesce(sum(verdict IN ('wrong_gtin', 'invalid')), 0) AS errors FROM floor_scans " +
+  "WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
+const countsRow = z.object({
+  duplicates: z.number().int().nonnegative(),
+  errors: z.number().int().nonnegative(),
+});
+
+export async function readValidationCounts(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+): Promise<ValidationCounts> {
+  const [row] = await local.query(
+    VALIDATION_COUNTS_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId],
+    countsRow,
+  );
+  return { duplicates: row?.duplicates ?? 0, errors: row?.errors ?? 0 };
 }

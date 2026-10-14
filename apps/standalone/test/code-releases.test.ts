@@ -16,6 +16,7 @@ import {
   scanContext,
   SECOND,
   SHIFT_ID,
+  VALIDATION_ENTERED,
 } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 
@@ -89,6 +90,8 @@ async function oneBox(local: LocalExecutor) {
   const raw = km("5Yq'Ct;");
   const accepted = await processScan(scanContext(local, first), raw);
   if (accepted.kind !== "accepted") throw new Error(accepted.kind);
+  // An aggregation shift's scan is in a box (a validation shift's is in none, plan РЕЖ).
+  if (accepted.boxId === null) throw new Error("the scan is in no box");
   return { first, raw, boxId: accepted.boxId };
 }
 
@@ -148,6 +151,20 @@ describe("code releases on the station (plan ДЗГ)", () => {
       sync(executor, [release("b0000000-0000-4000-8000-000000000099", SHIFT_ID)]),
     ).resolves.toMatchObject({ kind: "synced", quarantined: 0 });
     expect(codeRows(db, SHIFT_ID)).toHaveLength(1);
+  });
+
+  it("never frees a code of a validation shift: its codes are in no box (plan РЕЖ)", async () => {
+    const { db, executor } = openLocalDb();
+    const shift = await enteredShift(executor, VALIDATION_ENTERED);
+    const raw = km("5Yq'Ct;");
+    await expect(processScan(scanContext(executor, shift), raw)).resolves.toMatchObject({
+      kind: "accepted",
+      boxId: null,
+    });
+    expect(codeRows(db, VALIDATION_ENTERED.id)).toHaveLength(1);
+    // A release names a box; nothing here is in one, whatever the release says.
+    await sync(executor, [release("b0000000-0000-4000-8000-000000000099", VALIDATION_ENTERED.id)]);
+    expect(codeRows(db, VALIDATION_ENTERED.id)).toHaveLength(1);
   });
 
   it("leaves the codes this station holds under another pairing", async () => {

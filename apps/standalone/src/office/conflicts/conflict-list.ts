@@ -1,6 +1,7 @@
 import {
   CONFLICT_MAX_PAGE,
   type ConflictQuery,
+  type OfficeConflict,
   type OfficeConflictScan,
 } from "../../host/review.js";
 
@@ -35,8 +36,19 @@ export function conflictQuery(
 
 /**
  * Where the loser's box is shown: its card (plan КРТ). A scan that went into
- * no box (a validation shift's) opens its shift's card instead.
+ * no box (a validation shift's, plan РЕЖ) opens its shift's card instead; the
+ * page itself offers no «box» link for it.
  */
 export function loserBoxLink(scan: OfficeConflictScan): string {
   return scan.boxId === null ? `/shifts/${scan.shiftId}` : `/codes/box/${scan.boxId}`;
+}
+
+/**
+ * The translation key of what happened to the loser. A displacement says the
+ * code left the loser's box; a validation shift's scan (plan РЕЖ) had none.
+ */
+export function conflictKindKey(conflict: OfficeConflict): string {
+  return conflict.kind === "displaced" && conflict.loser.boxId === null
+    ? "office.conflicts.kinds.displacedUnboxed"
+    : `office.conflicts.kinds.${conflict.kind}`;
 }

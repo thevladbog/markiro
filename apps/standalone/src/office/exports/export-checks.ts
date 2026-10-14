@@ -5,7 +5,7 @@ import {
   type ShiftExportFormatDescriptor,
 } from "@markiro/domain";
 
-import type { OfficePallet, ShiftExportRows } from "../../host/protocol.js";
+import type { OfficePallet, ShiftExportRows, ShiftMode } from "../../host/protocol.js";
 import {
   palletExportSnapshot,
   shiftExportSnapshot,
@@ -79,17 +79,29 @@ export function conflictWarnings(unreviewed: number): ExportWarning[] {
 /**
  * The formats the cloud's dialog offers this shift (`ShiftExportsDialog`:
  * the pallets formats only for a shift with pallets), each with its
- * source's refusal now.
+ * source's refusal now. A validation shift (plan РЕЖ, Р11) is offered the
+ * flat TXT and CSV alone: it has no box, so a format with boxes or pallets
+ * would only be refused (the cloud offers them and fails later).
  */
-export function formatOffers(rows: ShiftExportRows, formedAt: string): FormatOffer[] {
-  return offeredFormats(rows).map((format) => {
+export function formatOffers(
+  rows: ShiftExportRows,
+  formedAt: string,
+  mode: ShiftMode,
+): FormatOffer[] {
+  return offeredFormats(rows, mode).map((format) => {
     const snapshot = shiftExportSnapshot(rows, format, formedAt);
     return { format, refusal: snapshot.ok ? null : snapshot.refusal };
   });
 }
 
 /** The formats of `formatOffers`, without the work of checking them. */
-export function offeredFormats(rows: ShiftExportRows): ShiftExportFormatDescriptor[] {
+export function offeredFormats(
+  rows: ShiftExportRows,
+  mode: ShiftMode,
+): ShiftExportFormatDescriptor[] {
+  if (mode === "validation") {
+    return SHIFT_EXPORT_FORMATS.filter((format) => format.boxMode === "flat");
+  }
   return SHIFT_EXPORT_FORMATS.filter(
     (format) => rows.shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
   );

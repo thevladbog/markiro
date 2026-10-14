@@ -159,6 +159,7 @@ import {
   type ProductUpdate,
   type ShiftClose,
   type ShiftCreate,
+  type ShiftEnter,
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
@@ -448,9 +449,11 @@ export interface HostApi {
   createDeviceShift: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /**
    * Opens a planned shift or enters again the active one this station opened;
-   * the answer carries the frozen snapshot.
+   * the answer carries the frozen snapshot. `enter` names what the station
+   * can work (`STATION_SHIFT_ENTER`, protocol 4): the host refuses a
+   * validation shift to a station that does not name `validation-v1`.
    */
-  enterShift: (id: string) => Promise<EnteredShift>;
+  enterShift: (id: string, enter: ShiftEnter) => Promise<EnteredShift>;
   /**
    * A block of SSCC serials for this station; the same `requestId` answers the
    * same block, and the same id with another prefix is `validation_failed` on
@@ -856,8 +859,11 @@ export function createHostApi(client: HostClient): HostApi {
       (await client.request("GET", "/v1/device/shifts", { schema: deviceShiftsSchema })).shifts,
     createDeviceShift: (create) =>
       client.request("POST", "/v1/device/shifts", { body: create, schema: deviceShiftSchema }),
-    enterShift: (id) =>
-      client.request("POST", `/v1/device/shifts/${id}/enter`, { schema: enteredShiftSchema }),
+    enterShift: (id, enter) =>
+      client.request("POST", `/v1/device/shifts/${id}/enter`, {
+        body: enter,
+        schema: enteredShiftSchema,
+      }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
     checkCode: (codeHash) =>

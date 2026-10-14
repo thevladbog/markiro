@@ -153,6 +153,24 @@
   font: var(--text-body);
 }
 
+/* «Печать дубликата» of the shift dialog (plan РЕЖ part B): a titled group of its fields. */
+.shift-duplicate {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-duplicate h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+/* The section's closing note, in the size and tone of a field's hint. */
+.shift-duplicate__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
 /*
  * A row of buttons: each label stays on one line (a 64px floor button with two
  * lines of text looks broken), and a row that does not fit wraps by whole buttons.

@@ -164,13 +164,17 @@ export function waitUnits(ms: number): { unit: "day" | "hour" | "minute"; n: num
 
 /**
  * The issuer prefix of a shift this pairing entered (`NULL` for a shift it only
- * listed) and whether it has pallets.
+ * listed), whether it has pallets, and its mode (a validation shift has no stock, plan РЕЖ).
  */
 export const SHIFT_STOCK_SQL =
-  "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts " +
+  "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled, mode FROM floor_shifts " +
   "WHERE host_id = ? AND device_id = ? AND id = ?";
 
-const stockRow = z.object({ prefix: z.string().nullable(), pallets_enabled: z.number().int() });
+const stockRow = z.object({
+  prefix: z.string().nullable(),
+  pallets_enabled: z.number().int(),
+  mode: z.string(),
+});
 const newestRow = z.object({
   from_serial: z.number().int(),
   to_serial: z.number().int(),
@@ -229,7 +233,7 @@ async function serialStock(
  * The SSCC serials this pairing has left for a shift it entered, counted the
  * way a close takes them (`remainingSerials`): its boxes', and its pallets'
  * when it has pallets, each with its level; `null` for a shift without a
- * snapshot.
+ * snapshot, and for a validation shift, which numbers neither (plan РЕЖ).
  */
 export async function readShiftStock(
   local: LocalExecutor,
@@ -241,7 +245,8 @@ export async function readShiftStock(
     [pairing.hostId, pairing.deviceId, shiftId],
     stockRow,
   );
-  if (row === undefined || row.prefix === null) return null;
+  // A validation shift numbers no box and no pallet (plan РЕЖ): it has no stock to show.
+  if (row === undefined || row.prefix === null || row.mode === "validation") return null;
   const boxes = await serialStock(local, pairing, row.prefix, BOX_EXTENSION);
   const pallets =
     row.pallets_enabled === 1

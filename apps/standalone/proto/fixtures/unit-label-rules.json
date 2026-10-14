@@ -1,0 +1,102 @@
+{
+  "events": [
+    "prepared",
+    "sending",
+    "sent",
+    "failed_before_send",
+    "delivery_unknown",
+    "verified",
+    "verification_rejected",
+    "verification_skipped"
+  ],
+  "errorCodes": {
+    "prepared": [],
+    "sending": [],
+    "sent": [],
+    "failed_before_send": ["printer_unconfigured", "printer_changed"],
+    "delivery_unknown": ["transport_failed", "persistence_failed", "interrupted"],
+    "verified": [],
+    "verification_rejected": ["invalid", "mismatch"],
+    "verification_skipped": []
+  },
+  "reasons": ["not_printed", "damaged", "lost"],
+  "base": {
+    "jobId": "2e7f4a9c-6b1d-4c3e-9a5f-8d0b1c2e3f4a",
+    "codeHash": "3f6c0f1e2d8b4a5c9e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f",
+    "attemptNo": 1,
+    "event": "sent",
+    "reason": null,
+    "errorCode": null,
+    "payloadDigest": "8c1f0e2d3b4a59687766554433221100ffeeddccbbaa99887766554433221100",
+    "bytesDigest": "1d2c3b4a5f6e7d8c9bafbecddcebfa0918273645546372819a0b1c2d3e4f5061",
+    "at": "2026-10-08T06:15:03.017Z"
+  },
+  "cases": [
+    { "change": {}, "field": null },
+    { "change": { "event": "prepared" }, "field": null },
+    { "change": { "event": "prepared", "attemptNo": 2, "reason": "damaged" }, "field": null },
+    { "change": { "event": "prepared", "attemptNo": 3, "reason": "not_printed" }, "field": null },
+    { "change": { "event": "prepared", "attemptNo": 2 }, "field": "reason" },
+    { "change": { "event": "prepared", "reason": "lost" }, "field": "reason" },
+    { "change": { "attemptNo": 2, "reason": "lost" }, "field": "reason" },
+    { "change": { "attemptNo": 2 }, "field": null },
+    { "change": { "event": "verified", "attemptNo": 4 }, "field": null },
+    { "change": { "event": "verification_skipped" }, "field": null },
+    { "change": { "event": "sending" }, "field": null },
+    {
+      "change": { "event": "failed_before_send", "errorCode": "printer_unconfigured" },
+      "field": null
+    },
+    { "change": { "event": "failed_before_send", "errorCode": "printer_changed" }, "field": null },
+    { "change": { "event": "failed_before_send" }, "field": "errorCode" },
+    {
+      "change": { "event": "failed_before_send", "errorCode": "interrupted" },
+      "field": "errorCode"
+    },
+    {
+      "change": { "event": "failed_before_send", "errorCode": "printer_offline" },
+      "field": "errorCode"
+    },
+    { "change": { "event": "delivery_unknown", "errorCode": "transport_failed" }, "field": null },
+    { "change": { "event": "delivery_unknown", "errorCode": "persistence_failed" }, "field": null },
+    { "change": { "event": "delivery_unknown", "errorCode": "interrupted" }, "field": null },
+    { "change": { "event": "delivery_unknown" }, "field": "errorCode" },
+    { "change": { "event": "delivery_unknown", "errorCode": "mismatch" }, "field": "errorCode" },
+    { "change": { "event": "verification_rejected", "errorCode": "invalid" }, "field": null },
+    { "change": { "event": "verification_rejected", "errorCode": "mismatch" }, "field": null },
+    { "change": { "event": "verification_rejected" }, "field": "errorCode" },
+    { "change": { "event": "verification_rejected", "errorCode": "" }, "field": "errorCode" },
+    { "change": { "errorCode": "interrupted" }, "field": "errorCode" },
+    { "change": { "event": "verified", "errorCode": "mismatch" }, "field": "errorCode" },
+    { "change": { "attemptNo": 0 }, "field": "attemptNo" },
+    {
+      "change": { "codeHash": "3F6C0F1E2D8B4A5C9E7F1A2B3C4D5E6F708192A3B4C5D6E7F8091A2B3C4D5E6F" },
+      "field": "codeHash"
+    },
+    { "change": { "codeHash": "3f6c" }, "field": "codeHash" },
+    {
+      "change": {
+        "payloadDigest": "8c1f0e2d3b4a59687766554433221100ffeeddccbbaa9988776655443322110"
+      },
+      "field": "payloadDigest"
+    },
+    {
+      "change": {
+        "payloadDigest": "8c1f0e2d3b4a59687766554433221100ffeeddccbbaa99887766554433221100a"
+      },
+      "field": "payloadDigest"
+    },
+    {
+      "change": {
+        "bytesDigest": "1d2c3b4a5f6e7d8c9bafbecddcebfa0918273645546372819a0b1c2d3e4f506g"
+      },
+      "field": "bytesDigest"
+    },
+    {
+      "change": {
+        "bytesDigest": "1d2c3b4a5f6e7d8c9bafbecddcebfa0918273645546372819a0b1c2d3e4f506 "
+      },
+      "field": "bytesDigest"
+    }
+  ]
+}

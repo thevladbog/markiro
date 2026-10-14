@@ -1,8 +1,10 @@
 //! Code search in the office (the owner's beta feedback «Поиск кодов», the
 //! cloud's `code-search` for a single site): `GET /v1/office/codes` lists the
 //! placements of codes in boxes — one row for every accepted scan that put
-//! a code into a box — by the hash of a code, a GTIN, the SSCC of a box or a
-//! pallet, a shift's number and a period of scan instants; `GET
+//! a code into a box, and since plan РЕЖ for every accepted scan of a
+//! validation shift that took its code without a box — by the hash of a
+//! code, a GTIN, the SSCC of a box or a pallet, a shift's number and a period
+//! of scan instants; `GET
 //! /v1/office/codes/{codeHash}` is one code's card with its history. Only
 //! what the facts of this host hold is found: the cloud's history does not
 //! move with the cloud import. `proto/fixtures/office-code-*.json` hold the
@@ -19,8 +21,9 @@ pub const CODE_PAGE_SIZE: u32 = 50;
 pub const CODE_SEARCH_CAP: u32 = 10_000;
 
 /// Where a placement stands now: in a box still open, in a closed box,
-/// taken out by an exception (`undo`, `clear`, a disassembly), or taken by
-/// an earlier scan of the same code elsewhere.
+/// taken out by an exception (`undo`, `clear`, a disassembly), taken by an
+/// earlier scan of the same code elsewhere, or accepted by a validation
+/// shift without a box and still its own (`checked`, plan РЕЖ).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CodePlacementState {
@@ -28,12 +31,15 @@ pub enum CodePlacementState {
     Packed,
     Removed,
     Displaced,
+    Checked,
 }
 
 /// One placement of a code in a box: the accepted scan that put it there,
 /// the box and its pallet, the shift with its number, product and line, the
 /// station and its operator. `leftAt` is the instant the code left the box
-/// (`removed` the station's, `displaced` the host's), else `null`.
+/// (`removed` the station's, `displaced` the host's), else `null`. An
+/// accepted scan of a validation shift has no box: `boxId` and every box and
+/// pallet field are `null`, its state `checked` or `displaced`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeCodeItem {
@@ -44,7 +50,7 @@ pub struct OfficeCodeItem {
     pub scanned_at: String,
     pub state: CodePlacementState,
     pub left_at: Option<String>,
-    pub box_id: String,
+    pub box_id: Option<String>,
     pub box_sscc: Option<String>,
     pub box_closed_at: Option<String>,
     pub box_disassembled_at: Option<String>,
@@ -83,8 +89,9 @@ pub struct OfficeCodePage {
 )]
 pub enum OfficeCodeEvent {
     /// A scan of the code on the work screen, whatever the verdict.
-    /// `placed` says an accepted scan took the code into its box; an
-    /// accepted scan that lost the code to an earlier one did not.
+    /// `placed` says an accepted scan took the code (into its box, or
+    /// without one in a validation shift); an accepted scan that lost the
+    /// code to an earlier one did not.
     Scan {
         at: String,
         scan_id: String,
@@ -114,11 +121,12 @@ pub enum OfficeCodeEvent {
         document_no: Option<String>,
         office_user_name: Option<String>,
     },
-    /// The code taken from its box by an earlier scan elsewhere (`at` is
-    /// the host's instant).
+    /// The code taken from its box, or from a validation shift's scan
+    /// (`boxId` `null`), by an earlier scan elsewhere (`at` is the host's
+    /// instant).
     Displaced {
         at: String,
-        box_id: String,
+        box_id: Option<String>,
         box_sscc: Option<String>,
     },
     /// The unit's code printed again on a warehouse station (plan СКЛ).

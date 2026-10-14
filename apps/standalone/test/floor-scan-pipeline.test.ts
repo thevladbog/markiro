@@ -149,6 +149,7 @@ describe("a scan of the work screen", () => {
       kind: "accepted",
       boxId,
       itemCount: 1,
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     const code = {
       codeHash: codeHashOf(raw),
@@ -224,6 +225,7 @@ describe("a scan of the work screen", () => {
       kind: "accepted",
       boxId: first.kind === "accepted" ? first.boxId : "",
       itemCount: 2,
+      scannedAt: "2026-10-08T06:15:01.000Z",
     });
     expect(rows(db, "SELECT item_count FROM floor_boxes")).toEqual([{ item_count: 2 }]);
   });
@@ -234,8 +236,13 @@ describe("a scan of the work screen", () => {
     await expect(processScan(context, "MRK-000742")).resolves.toEqual({
       kind: "invalid",
       rawKind: "unknown",
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
-    await expect(processScan(context, GTIN)).resolves.toEqual({ kind: "invalid", rawKind: "gtin" });
+    await expect(processScan(context, GTIN)).resolves.toEqual({
+      kind: "invalid",
+      rawKind: "gtin",
+      scannedAt: "2026-10-08T06:15:01.000Z",
+    });
     expect(
       rows(
         db,
@@ -272,6 +279,7 @@ describe("a scan of the work screen", () => {
     ).resolves.toEqual({
       kind: "wrong_gtin",
       gtin14: OTHER_GTIN,
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     expect(rows(db, "SELECT verdict, box_id, gtin14 FROM floor_scans")).toEqual([
       { verdict: "wrong_gtin", box_id: null, gtin14: OTHER_GTIN },
@@ -288,6 +296,7 @@ describe("a scan of the work screen", () => {
       kind: "duplicate",
       source: "local",
       firstScannedAt: "2026-10-08T06:15:00.000Z",
+      scannedAt: "2026-10-08T06:15:01.000Z",
     });
     expect(checkCode).toHaveBeenCalledTimes(1);
     expect(
@@ -310,6 +319,7 @@ describe("a scan of the work screen", () => {
       source: "host",
       firstScannedAt: "2026-10-08T05:58:41.090Z",
       shiftNumber: "OCT26-003",
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     expect(checkCode).toHaveBeenCalledWith(codeHashOf(raw));
     expect(rows(db, "SELECT verdict, duplicate_source FROM floor_scans")).toEqual([
@@ -480,6 +490,7 @@ describe("a scan of the work screen", () => {
       kind: "accepted",
       boxId: first.kind === "accepted" ? first.boxId : "",
       itemCount: 2,
+      scannedAt: "2026-10-08T06:15:01.000Z",
     });
     expect(rows(after.db, "SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")).toEqual([
       { n: 3 },
@@ -623,12 +634,18 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     await expect(processScan(context, badge)).resolves.toEqual({
       kind: "invalid",
       rawKind: "unknown",
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     await expect(processScan(context, `]C100${sscc}`)).resolves.toEqual({
       kind: "invalid",
       rawKind: "sscc",
+      scannedAt: "2026-10-08T06:15:01.000Z",
     });
-    await expect(processScan(context, GTIN)).resolves.toEqual({ kind: "invalid", rawKind: "gtin" });
+    await expect(processScan(context, GTIN)).resolves.toEqual({
+      kind: "invalid",
+      rawKind: "gtin",
+      scannedAt: "2026-10-08T06:15:02.000Z",
+    });
     // The host is not asked about a scan that is no code.
     expect(context.checkCode).not.toHaveBeenCalled();
     const stored = everythingStored(db);
@@ -663,6 +680,7 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     await expect(processScan(onOther, km("W1"))).resolves.toEqual({
       kind: "wrong_gtin",
       gtin14: GTIN,
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     expect(checkCode).not.toHaveBeenCalled();
     expect(
@@ -687,6 +705,7 @@ describe("a scan of the work screen, beyond the accepted one", () => {
       kind: "duplicate",
       source: "local",
       firstScannedAt: "2026-10-08T06:15:00.000Z",
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     expect(rows(db, "SELECT shift_id, verdict FROM floor_scans ORDER BY rowid")).toEqual([
       { shift_id: SHIFT_ID, verdict: "ok" },
@@ -727,6 +746,7 @@ describe("a scan of the work screen, beyond the accepted one", () => {
       kind: "accepted",
       boxId,
       itemCount: 1,
+      scannedAt: "2026-10-08T06:15:00.000Z",
     });
     expect(checkCode).toHaveBeenCalledTimes(1);
     expect(

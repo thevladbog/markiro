@@ -14,6 +14,7 @@
     "no_pallets",
     "pallet_unknown",
     "pallet_already_closed",
-    "pallet_state"
+    "pallet_state",
+    "subject_unknown"
   ]
 }

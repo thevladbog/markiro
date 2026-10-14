@@ -13,14 +13,23 @@ export const CODE_SEARCH_CAP = 10_000;
 /** The last page a search reaches (`office_codes::MAX_PAGE`). */
 export const CODE_MAX_PAGE = CODE_SEARCH_CAP / CODE_PAGE_SIZE;
 
-/** Where a placement stands now (`markiro_proto::code_search::CodePlacementState`). */
-export const CODE_PLACEMENT_STATES = ["open_box", "packed", "removed", "displaced"] as const;
+/**
+ * Where a placement stands now (`markiro_proto::code_search::CodePlacementState`);
+ * `checked` is a validation shift's accepted scan, which holds its code without a box (plan РЕЖ).
+ */
+export const CODE_PLACEMENT_STATES = [
+  "open_box",
+  "packed",
+  "removed",
+  "displaced",
+  "checked",
+] as const;
 export type CodePlacementState = (typeof CODE_PLACEMENT_STATES)[number];
 
 const instant = z.iso.datetime();
 const codeHash = z.string().regex(/^[0-9a-f]{64}$/);
 
-/** One placement of a code in a box (`OfficeCodeItem`). */
+/** One placement of a code in a box, or a validation shift's scan without one (`OfficeCodeItem`). */
 export const officeCodeItemSchema = z.object({
   scanId: z.string(),
   codeHash,
@@ -29,7 +38,7 @@ export const officeCodeItemSchema = z.object({
   scannedAt: instant,
   state: z.enum(CODE_PLACEMENT_STATES),
   leftAt: instant.nullable(),
-  boxId: z.string(),
+  boxId: z.string().nullable(),
   boxSscc: z.string().nullable(),
   boxClosedAt: instant.nullable(),
   boxDisassembledAt: instant.nullable(),
@@ -90,7 +99,7 @@ export const officeCodeEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("displaced"),
     at: instant,
-    boxId: z.string(),
+    boxId: z.string().nullable(),
     boxSscc: z.string().nullable(),
   }),
   z.object({

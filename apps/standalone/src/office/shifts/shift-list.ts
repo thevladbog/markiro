@@ -47,18 +47,27 @@ export function recordLabel(
 
 /** Why a planned shift will not open on a station (`shift.open` refuses it). */
 export type OpenBlocker =
-  "product_archived" | "product_draft" | "template_unfit" | "pallet_template_unfit";
+  | "product_archived"
+  | "product_draft"
+  | "template_unfit"
+  | "pallet_template_unfit"
+  | "duplicate_template_unfit";
 
 /**
  * Why a planned shift would be refused when a station opens it, by the lists
  * the office read: its product archived or a draft (`product_inactive`), its
  * box template switched off, narrowed or no longer of the product's group
  * (`template_not_fit`), its pallet template so too (`pallet_template_not_fit`,
- * plan О-Ф). `null` when it opens, or while a list it needs is not loaded or
- * lacks the record: then nothing is claimed.
+ * plan О-Ф), the template of the duplicate it prints so too
+ * (`duplicate_template_not_fit`, plan РЕЖ part B), in the host's order.
+ * `null` when it opens, or while a list it needs is not loaded or lacks the
+ * record: then nothing is claimed.
  */
 export function openBlocker(
-  shift: Pick<OfficeShift, "status" | "productId" | "boxTemplateId" | "palletTemplateId">,
+  shift: Pick<
+    OfficeShift,
+    "status" | "productId" | "boxTemplateId" | "palletTemplateId" | "validationPrint"
+  >,
   products: readonly OfficeProduct[] | undefined,
   templates: readonly LabelTemplateSummary[] | undefined,
 ): OpenBlocker | null {
@@ -75,12 +84,24 @@ export function openBlocker(
   });
   if (!fits) return "template_unfit";
   const pallet = templates?.find((each) => each.id === shift.palletTemplateId);
-  if (pallet === undefined) return null;
-  const palletFits = templateFitsSlot(pallet, {
-    purpose: "pallet",
+  if (
+    pallet !== undefined &&
+    !templateFitsSlot(pallet, {
+      purpose: "pallet",
+      chzProductGroupCode: product.chzProductGroupCode,
+    })
+  ) {
+    return "pallet_template_unfit";
+  }
+  const print = shift.validationPrint;
+  if (print?.mode !== "duplicate_dm") return null;
+  const duplicate = templates?.find((each) => each.id === print.templateId);
+  if (duplicate === undefined) return null;
+  const duplicateFits = templateFitsSlot(duplicate, {
+    purpose: "product_duplicate",
     chzProductGroupCode: product.chzProductGroupCode,
   });
-  return palletFits ? null : "pallet_template_unfit";
+  return duplicateFits ? null : "duplicate_template_unfit";
 }
 
 /** What the filters of the list hold. */

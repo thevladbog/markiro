@@ -64,6 +64,43 @@ describe("pallets taken apart in a shift's export (plan ЧЗ)", () => {
   });
 });
 
+describe("the source of a validation shift (plan РЕЖ, Р11)", () => {
+  /** What the host sends for a validation shift: its codes, and no box, item or pallet. */
+  function validationRows(): ShiftExportRows {
+    return { ...rows(), boxes: [], items: [], pallets: [] };
+  }
+
+  it("renders its codes flat, by scan instant and then hash", () => {
+    const snapshot = shiftExportSnapshot(
+      validationRows(),
+      { boxMode: "flat", extension: "txt" },
+      FORMED_AT,
+    );
+    if (!snapshot.ok) throw new Error(snapshot.refusal);
+    expect(snapshot.value.source).toEqual({
+      mode: "flat",
+      codes: [...rows().codes]
+        .sort(
+          (left, right) =>
+            Date.parse(left.scannedAt) - Date.parse(right.scannedAt) ||
+            (left.codeHash < right.codeHash ? -1 : 1),
+        )
+        .map((code) => code.canonical),
+    });
+  });
+
+  it("refuses every format with boxes or pallets rather than write empty groups", () => {
+    for (const boxMode of ["boxes", "pallets"] as const) {
+      for (const extension of ["txt", "csv", "xml"] as const) {
+        expect(shiftExportSnapshot(validationRows(), { boxMode, extension }, FORMED_AT)).toEqual({
+          ok: false,
+          refusal: "BOX_COVERAGE_INCOMPLETE",
+        });
+      }
+    }
+  });
+});
+
 describe("an export run (plan ЧЗ)", () => {
   const run = {
     maxLines: null,

@@ -5,7 +5,12 @@ import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
 
 import type { LabelTemplateSpec } from "@markiro/domain";
 
-import type { DeviceShift, DeviceShiftCreate, EnteredShift } from "../../host/protocol.js";
+import type {
+  DeviceShift,
+  DeviceShiftCreate,
+  EnteredShift,
+  ShiftEnter,
+} from "../../host/protocol.js";
 import type { DeviceShiftInput } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
@@ -47,7 +52,7 @@ export interface NewShiftProps {
   /** `HostApi.createDeviceShift`. */
   create: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /** `HostApi.enterShift`. */
-  enter: (shiftId: string) => Promise<EnteredShift>;
+  enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   onEntered: (shift: WorkShift) => void;
   /** A refused key or a changed certificate: the shell's to route. */
   onHostError: (error: unknown) => void;

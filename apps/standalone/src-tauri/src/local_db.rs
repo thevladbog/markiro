@@ -98,6 +98,8 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_shifts", TableClass::DeviceData),
     ("floor_sign_in_failures", TableClass::Disposable),
     ("floor_sscc_blocks", TableClass::DeviceData),
+    // The unit label jobs (plan РЕЖ part B, migration `0015`): this device's records.
+    ("floor_unit_labels", TableClass::DeviceData),
     ("outbox", TableClass::DeviceData),
     ("ref_lines", TableClass::Disposable),
     ("ref_operator_badges", TableClass::Disposable),

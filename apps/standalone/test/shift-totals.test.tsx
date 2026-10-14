@@ -366,4 +366,39 @@ describe("office shifts: a shift's figures", () => {
     fireEvent.click(buttons[1] as HTMLElement);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  it("shows a validation shift's accepted codes and no box figures, in the dialog and in the list (plan РЕЖ, Р11)", async () => {
+    // The host counts a validation shift's codes in no box; its box counts are 0.
+    const validation: OfficeShift = {
+      ...ACTIVE,
+      mode: "validation",
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 1300,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+        deviceIds: [STATION.id],
+      },
+    };
+    const session = shiftsSession([validation]);
+    session.api.getShift.mockResolvedValue(validation);
+    session.api.listDevices.mockResolvedValue([STATION]);
+    await openShifts(session);
+    // «Выпуск»: the codes it accepted, never «0 шт · 0 кор.».
+    expect(
+      within(shiftRow(validation.number))
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent),
+    ).toContain("1\u00a0300 шт");
+    fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
+    await screen.findByRole("dialog", { name: "Итоги смены OCT26-004" });
+    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(4));
+    expect(figures()).toEqual({
+      "План, шт": "1\u00a0200",
+      "Принято кодов": "1\u00a0300",
+      "Последние данные со станции": expect.stringMatching(/^08\.10\.2026, \d\d:41$/),
+      "Устройства смены": "Станция линии 2",
+    });
+  });
 });

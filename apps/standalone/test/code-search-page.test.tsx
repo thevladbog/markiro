@@ -23,6 +23,7 @@ function fixture<T>(name: string): T {
 
 const PAGE = fixture<OfficeCodePage>("office-code-page.json");
 const CARD = fixture<OfficeCodeCard>("office-code-card.json");
+const VALIDATION_CARD = fixture<OfficeCodeCard>("office-code-card-validation.json");
 const GS = "\u001d";
 const KM = `010460068200001321S000002${GS}93Tail`;
 
@@ -96,9 +97,10 @@ describe("«Поиск кодов» in the office", () => {
       .map((item) => item.textContent);
     expect(items).toHaveLength(7);
     expect(items[0]).toContain("Скан: чужой товар");
-    expect(items[2]).toContain("повтор, код уже в коробе по данным хоста");
+    // Neither text says where the earlier scan put the code: the event does not carry it.
+    expect(items[2]).toContain("Скан: повтор, код уже принят по данным хоста");
     expect(items[3]).toContain("Изъят: отмена последнего скана");
-    expect(items[4]).toContain("Забран из короба");
+    expect(items[4]).toContain("Забран из короба: тот же код раньше принят другим сканом");
     // An office disassembly (plan ДЗГ-О): the document and its user, not a station.
     expect(items[5]).toContain("Изъят: короб расформирован (Повреждена упаковка)");
     expect(items[5]).toContain("документ DSG-26-0007");
@@ -106,6 +108,63 @@ describe("«Поиск кодов» in the office", () => {
     expect(items[6]).toContain(
       "Перепечатка на складе: напечатана и проверена, причина — Повреждена",
     );
+  });
+
+  it("says a boxed scan lost its code to an earlier scan without saying that scan was in a box", async () => {
+    // The earlier scan may be a validation shift's, which put the code in no box (plan РЕЖ).
+    const value = session();
+    const [, accepted] = CARD.events;
+    if (accepted?.type !== "scan") throw new Error("the fixture's second event is a scan");
+    value.api.getCodeCard.mockResolvedValue({
+      ...CARD,
+      events: [{ ...accepted, placed: false }],
+    });
+    await openSearch(value);
+    search(KM);
+    const history = (await screen.findByRole("heading", { name: "История" })).parentElement;
+    if (history === null) throw new Error("no history");
+    const items = within(history)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toContain("Скан: принят, но код уже был принят раньше другим сканом");
+    expect(items[0]).not.toContain("короб");
+  });
+
+  it("shows a validation shift's code without a box (plan РЕЖ): «—» for the box, no open box", async () => {
+    const value = session();
+    value.api.getCodeCard.mockResolvedValue(VALIDATION_CARD);
+    await openSearch(value);
+    search(KM);
+    await screen.findByText("010460068200001321S000017<GS>93Tail");
+    expect(screen.queryByText(/Открыт, без SSCC/)).toBeNull();
+    expect(screen.getAllByText("Принят без короба").length).toBeGreaterThan(0);
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    const boxColumn = within(table)
+      .getAllByRole("columnheader")
+      .findIndex((cell) => cell.textContent === "Короб");
+    for (const row of rows) {
+      const boxCell = within(row).getAllByRole("cell")[boxColumn];
+      expect(boxCell?.textContent).toBe("—");
+      // No box, no card to open (plan КРТ links a box by its id): a link would be dead.
+      expect(boxCell?.querySelector("a")).toBeNull();
+    }
+    // Nor does the «Сейчас» line of the card link to a box that is not there.
+    expect(document.querySelector('a[href^="/codes/box/"]')).toBeNull();
+    expect(rows[0]?.textContent).toContain("Забран другим сканом");
+    expect(rows[1]?.textContent).toContain("Принят без короба");
+    const history = screen.getByRole("heading", { name: "История" }).parentElement;
+    if (history === null) throw new Error("no history");
+    const items = within(history)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toContain("Скан: принят");
+    expect(items[0]).not.toContain("в другом коробе");
+    expect(items[2]).toContain("Забран: тот же код раньше принят другим сканом");
+    expect(items[2]).not.toContain("короб");
   });
 
   it("says a code the host never saw is not here, with why", async () => {

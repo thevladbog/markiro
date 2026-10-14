@@ -31,6 +31,13 @@ export const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
 /** The active shift of milk this station entered (`device-shift-entered.json`): 12 to a box, 1 200 planned. */
 export const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 export const SHIFT_ID = ENTERED.id;
+/**
+ * The active validation shift of the same milk (`device-shift-entered-validation.json`, plan
+ * РЕЖ): 1 200 planned, no pallets; its codes are taken without a box.
+ */
+export const VALIDATION_ENTERED: EnteredShift = enteredShiftSchema.parse(
+  fixture("device-shift-entered-validation.json"),
+);
 /** The shift's GTIN and its issuer prefix. */
 export const GTIN = "04600682000013";
 export const PREFIX = "460068200";

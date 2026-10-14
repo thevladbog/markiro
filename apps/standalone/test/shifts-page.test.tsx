@@ -706,7 +706,7 @@ describe("office shifts: the list, boundaries and states", () => {
       counterpartyId: NORTH.id,
     };
     await openShifts(shiftsSession([validation, ACTIVE]));
-    expect(within(shiftRow("V-1")).getByText("Валидация").className).toContain("mk-badge--violet");
+    expect(within(shiftRow("V-1")).getByText("Проверка").className).toContain("mk-badge--violet");
     expect(within(shiftRow("OCT26-004")).getByText("Агрегация").className).toContain(
       "mk-badge--teal",
     );

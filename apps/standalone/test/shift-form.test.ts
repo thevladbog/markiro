@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HostError } from "../src/host/client.js";
 import { shiftCreate, shiftUpdate } from "../src/host/requests.js";
 import {
+  newShiftFields,
   SHIFT_CONFLICTS,
   SHIFT_FIELD_ORDER,
   SHIFT_FIELDS,
@@ -12,7 +13,8 @@ import {
   toShiftChange,
   toShiftInput,
 } from "../src/office/shifts/shift-form.js";
-import { ACTIVE, PALLET, PLANNED } from "./support/shifts.js";
+import type { OfficeShift } from "../src/host/protocol.js";
+import { ACTIVE, DUPLICATE_58, MILK_DUPLICATE, PALLET, PLANNED } from "./support/shifts.js";
 
 function api(code: string, details: Record<string, unknown> = {}): HostError {
   return new HostError({ kind: "api", code, status: 409, message: code, details });
@@ -34,6 +36,10 @@ describe("a shift's form", () => {
       palletTemplateId: "",
       palletSheetTemplateId: "",
       counterpartyId: ACTIVE.counterpartyId,
+      mode: "aggregation",
+      printDuplicate: false,
+      duplicateTemplateId: "",
+      verificationRequired: false,
     });
     const withPallets = {
       ...PLANNED,
@@ -69,6 +75,8 @@ describe("a shift's form", () => {
       plannedQty: 900,
       counterpartyId: null,
       pallets: null,
+      mode: "aggregation",
+      validationPrint: { mode: "none" },
     });
     expect(
       toShiftInput({
@@ -119,6 +127,291 @@ describe("a shift's form", () => {
         }).success,
       ).toBe(true);
     }
+  });
+
+  it("starts a new shift as aggregation, and takes a planned shift's own mode (plan РЕЖ)", () => {
+    expect(newShiftFields("2026-10-09").mode).toBe("aggregation");
+    expect(shiftFields({ ...PLANNED, mode: "validation" }).mode).toBe("validation");
+    expect(SHIFT_FIELD_ORDER.indexOf("mode")).toBe(SHIFT_FIELD_ORDER.indexOf("productId") + 1);
+    expect(shiftFieldsSchema.safeParse({ ...shiftFields(PLANNED), mode: "manual" }).success).toBe(
+      false,
+    );
+  });
+
+  it("sends a validation shift without pallets and without checking its hidden counts (plan РЕЖ, Р4)", () => {
+    const validation = {
+      ...shiftFields(PLANNED),
+      mode: "validation" as const,
+      // What the hidden pallet fields still hold, from an aggregation chosen before.
+      palletsEnabled: true,
+      palletBoxCapacity: "сорок",
+      palletTemplateId: "",
+    };
+    expect(shiftFieldsSchema.safeParse(validation).success).toBe(true);
+    const input = toShiftInput(validation);
+    expect(input).toMatchObject({ mode: "validation", pallets: null, boxCapacity: 24 });
+    expect(shiftCreate(input)).toStrictEqual({
+      productId: PLANNED.productId,
+      lineId: PLANNED.lineId,
+      productionDate: "2026-10-09",
+      boxTemplateId: PLANNED.boxTemplateId,
+      boxCapacity: 24,
+      plannedQty: null,
+      counterpartyId: null,
+      mode: "validation",
+      palletsEnabled: false,
+      validationPrint: { mode: "none" },
+    });
+    // The box capacity is hidden too: one the rule refuses is not checked and not sent,
+    // so the host keeps the product's on a create and the shift's own on a change.
+    for (const capacity of ["", "0", "сорок"]) {
+      const hidden = { ...validation, boxCapacity: capacity };
+      expect(shiftFieldsSchema.safeParse(hidden).success).toBe(true);
+      expect(toShiftInput(hidden)).not.toHaveProperty("boxCapacity");
+      expect(shiftCreate(toShiftInput(hidden))).not.toHaveProperty("boxCapacity");
+      expect(toShiftChange(hidden)).not.toHaveProperty("boxCapacity");
+    }
+    // Aggregation checks both, and reports them with the other refused fields.
+    const refused = shiftFieldsSchema.safeParse({
+      ...validation,
+      mode: "aggregation",
+      productId: "",
+      boxCapacity: "0",
+    });
+    expect(refused.error?.issues.map((issue) => issue.path.join("."))).toEqual([
+      "productId",
+      "boxCapacity",
+      "palletBoxCapacity",
+      "palletTemplateId",
+    ]);
+  });
+
+  it("sends a mode only when it changed (plan РЕЖ)", () => {
+    expect(
+      shiftUpdate(PLANNED, toShiftChange({ ...shiftFields(PLANNED), mode: "validation" })),
+    ).toStrictEqual({ mode: "validation", expectedRev: PLANNED.rev });
+    const validation = { ...PLANNED, mode: "validation" as const };
+    expect(shiftUpdate(validation, toShiftChange(shiftFields(validation)))).toStrictEqual({
+      expectedRev: validation.rev,
+    });
+    expect(
+      shiftUpdate(validation, toShiftChange({ ...shiftFields(validation), mode: "aggregation" })),
+    ).toStrictEqual({ mode: "aggregation", expectedRev: validation.rev });
+    // A planned aggregation with pallets that becomes a validation turns its pallets off.
+    const withPallets = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    expect(
+      shiftUpdate(withPallets, toShiftChange({ ...shiftFields(withPallets), mode: "validation" })),
+    ).toStrictEqual({ mode: "validation", palletsEnabled: false, expectedRev: withPallets.rev });
+  });
+
+  describe("the duplicate print under «Проверка» (plan РЕЖ part B, Р16)", () => {
+    const validation = { ...shiftFields(PLANNED), mode: "validation" as const };
+    const printing = {
+      ...validation,
+      printDuplicate: true,
+      duplicateTemplateId: DUPLICATE_58.id,
+    };
+    /** A planned validation shift that prints with `verification`. */
+    const printingShift = (verification: "none" | "required"): OfficeShift => ({
+      ...PLANNED,
+      mode: "validation",
+      validationPrint: { mode: "duplicate_dm", templateId: DUPLICATE_58.id, verification },
+    });
+
+    it("starts with the flag off, no template and the check not required (the owner's default)", () => {
+      expect(newShiftFields("2026-10-09")).toMatchObject({
+        printDuplicate: false,
+        duplicateTemplateId: "",
+        verificationRequired: false,
+      });
+      expect(shiftFields(PLANNED)).toMatchObject({
+        printDuplicate: false,
+        duplicateTemplateId: "",
+        verificationRequired: false,
+      });
+    });
+
+    it("takes a planned shift's own policy back into the three fields", () => {
+      expect(shiftFields(printingShift("required"))).toMatchObject({
+        mode: "validation",
+        printDuplicate: true,
+        duplicateTemplateId: DUPLICATE_58.id,
+        verificationRequired: true,
+      });
+      expect(shiftFields(printingShift("none"))).toMatchObject({
+        printDuplicate: true,
+        duplicateTemplateId: DUPLICATE_58.id,
+        verificationRequired: false,
+      });
+      // A host before protocol 5 sends no policy: none.
+      expect(
+        shiftFields({ ...PLANNED, mode: "validation", validationPrint: { mode: "none" } }),
+      ).toMatchObject({ printDuplicate: false, duplicateTemplateId: "" });
+    });
+
+    it("requires the template only for «Проверка» with the flag on", () => {
+      expect(shiftFieldsSchema.safeParse(validation).success).toBe(true);
+      const refused = shiftFieldsSchema.safeParse({ ...printing, duplicateTemplateId: "" });
+      expect(refused.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([
+        ["duplicateTemplateId", "office.shifts.duplicate.templateRequired"],
+      ]);
+      expect(shiftFieldsSchema.safeParse(printing).success).toBe(true);
+      // Aggregation ignores whatever the hidden flag holds.
+      expect(
+        shiftFieldsSchema.safeParse({
+          ...printing,
+          mode: "aggregation",
+          duplicateTemplateId: "",
+        }).success,
+      ).toBe(true);
+    });
+
+    it("orders the fields as the dialog shows them (Р16): the first refused takes the focus", () => {
+      expect(SHIFT_FIELD_ORDER).toEqual([
+        "productId",
+        "mode",
+        "printDuplicate",
+        "productionDate",
+        "plannedQty",
+        "lineId",
+        "counterpartyId",
+        "duplicateTemplateId",
+        "verificationRequired",
+        "boxTemplateId",
+        "boxCapacity",
+        "palletsEnabled",
+        "palletBoxCapacity",
+        "palletTemplateId",
+        "palletSheetTemplateId",
+      ]);
+    });
+
+    it("sends the policy of each state: none for aggregation and for «Проверка» without the flag, the template and the check with it", () => {
+      expect(
+        toShiftInput({ ...printing, mode: "aggregation", verificationRequired: true })
+          .validationPrint,
+      ).toEqual({ mode: "none" });
+      expect(toShiftInput(validation).validationPrint).toEqual({ mode: "none" });
+      expect(
+        toShiftInput({
+          ...validation,
+          duplicateTemplateId: DUPLICATE_58.id,
+          verificationRequired: true,
+        }).validationPrint,
+      ).toEqual({ mode: "none" });
+      expect(toShiftInput(printing).validationPrint).toEqual({
+        mode: "duplicate_dm",
+        templateId: DUPLICATE_58.id,
+        verification: "none",
+      });
+      expect(toShiftInput({ ...printing, verificationRequired: true }).validationPrint).toEqual({
+        mode: "duplicate_dm",
+        templateId: DUPLICATE_58.id,
+        verification: "required",
+      });
+      // The create carries it as the shared fixture does.
+      expect(shiftCreate(toShiftInput(printing))).toMatchObject({
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: DUPLICATE_58.id,
+          verification: "none",
+        },
+      });
+    });
+
+    it("sends the policy of a planned shift only when it changed", () => {
+      // Turned on.
+      expect(
+        shiftUpdate(PLANNED, toShiftChange({ ...printing, mode: "validation" })),
+      ).toStrictEqual({
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: DUPLICATE_58.id,
+          verification: "none",
+        },
+        expectedRev: PLANNED.rev,
+      });
+      const shift = printingShift("none");
+      // Unchanged: nothing.
+      expect(shiftUpdate(shift, toShiftChange(shiftFields(shift)))).toStrictEqual({
+        expectedRev: shift.rev,
+      });
+      // Another template, the check required, the flag off: each alone.
+      expect(
+        shiftUpdate(
+          shift,
+          toShiftChange({ ...shiftFields(shift), duplicateTemplateId: MILK_DUPLICATE.id }),
+        ),
+      ).toStrictEqual({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: MILK_DUPLICATE.id,
+          verification: "none",
+        },
+        expectedRev: shift.rev,
+      });
+      expect(
+        shiftUpdate(shift, toShiftChange({ ...shiftFields(shift), verificationRequired: true })),
+      ).toStrictEqual({
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: DUPLICATE_58.id,
+          verification: "required",
+        },
+        expectedRev: shift.rev,
+      });
+      expect(
+        shiftUpdate(
+          shift,
+          toShiftChange({ ...shiftFields(shift), printDuplicate: false, duplicateTemplateId: "" }),
+        ),
+      ).toStrictEqual({ validationPrint: { mode: "none" }, expectedRev: shift.rev });
+      // A printing shift turned into an aggregation says `none` in the same request (the host
+      // refuses the mode alone).
+      expect(
+        shiftUpdate(shift, toShiftChange({ ...shiftFields(shift), mode: "aggregation" })),
+      ).toStrictEqual({
+        mode: "aggregation",
+        validationPrint: { mode: "none" },
+        expectedRev: shift.rev,
+      });
+      // A validation shift without print that becomes an aggregation sends the mode alone.
+      const plain = { ...PLANNED, mode: "validation" as const };
+      expect(
+        shiftUpdate(plain, toShiftChange({ ...shiftFields(plain), mode: "aggregation" })),
+      ).toStrictEqual({ mode: "aggregation", expectedRev: plain.rev });
+    });
+
+    it("never sends the policy of a shift that is no longer planned", () => {
+      const active = { ...printingShift("none"), status: "active" as const };
+      const change = toShiftChange(
+        { ...shiftFields(active), verificationRequired: true },
+        active.status,
+      );
+      expect(change).not.toHaveProperty("validationPrint");
+      expect(shiftUpdate(active, change)).toStrictEqual({ expectedRev: active.rev });
+      expect(
+        toShiftChange({ ...shiftFields(active), verificationRequired: true }, "planned"),
+      ).toHaveProperty("validationPrint");
+    });
+
+    it("puts a refused duplicate template under its select", () => {
+      expect(sort(api("validation_failed", { field: "validationPrint.templateId" }))).toEqual({
+        failure: {
+          kind: "field",
+          field: "duplicateTemplateId",
+          message: "office.shifts.errors.duplicateTemplateRejected",
+        },
+        outdated: false,
+      });
+    });
   });
 
   it("puts a refused pallet template under its select and a refused pallet capacity under its field", () => {

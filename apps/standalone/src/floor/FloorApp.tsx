@@ -26,6 +26,7 @@ import type {
   DeviceStatus,
   EnteredShift,
   HostStatus,
+  ShiftEnter,
   SsccBlock,
   SsccBlockRequest,
 } from "../host/protocol.js";
@@ -100,7 +101,7 @@ export interface FloorAppProps {
    */
   rejectionPending: boolean;
   /** `HostApi.enterShift`. */
-  enter: (shiftId: string) => Promise<EnteredShift>;
+  enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   /** `HostApi.createDeviceShift`. */
   create: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /** `HostApi.checkCode`: the work screen's check of a code on the host. */

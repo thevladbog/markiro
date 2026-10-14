@@ -107,7 +107,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const unreviewed = useOfficeQuery(officeKeys.conflictList(conflictQuery), (api, token) =>
     api.listConflicts(token, conflictQuery),
   );
-  const plan = useExportPlan(rows);
+  const plan = useExportPlan(rows, shift.mode);
   const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
     api.recordShiftExport(token, shift.id, body),
   );

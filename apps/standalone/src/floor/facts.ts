@@ -12,6 +12,7 @@ import {
   type ScanFact,
   type ScannedCode,
   type ShiftClosedFact,
+  type UnitLabelFact,
 } from "../host/protocol.js";
 import type { LocalStatement } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
@@ -64,6 +65,14 @@ export function palletLabelRecord(head: RecordHead, data: PalletLabelFact): Fact
 /** A `pallet_exception` record: a pallet's reprint or disassembly (plan ПЛ-Ц). */
 export function palletExceptionRecord(head: RecordHead, data: PalletExceptionFact): FactRecord {
   return { ...head, kind: "pallet_exception", data };
+}
+
+/**
+ * A `unit_label` record: one event of a unit label job (plan РЕЖ part B,
+ * protocol 5) — the code's hash and the digests, never the full code.
+ */
+export function unitLabelRecord(head: RecordHead, data: UnitLabelFact): FactRecord {
+  return { ...head, kind: "unit_label", data };
 }
 
 /**

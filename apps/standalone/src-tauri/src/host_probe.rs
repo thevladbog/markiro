@@ -169,8 +169,9 @@ mod tests {
             Err(ProbeError::HostTooOld)
         );
         // A host of stage 1 speaks protocol 1 only, a host of stage 2a up to
-        // 2: a station that knows pallets (protocol 3, plan ПЛ-Х) asks for
-        // an update of the host.
+        // 2, a host of pallets (plan ПЛ-Х) up to 3, a host of shift modes
+        // (plan РЕЖ part A) up to 4: a station that knows the duplicate print
+        // (protocol 5, part B) asks for an update of the host.
         assert_eq!(
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 1, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
@@ -179,12 +180,20 @@ mod tests {
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 2, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
         );
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
+            Err(ProbeError::HostTooOld)
+        );
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 4, "minProtocol": 1})),
+            Err(ProbeError::HostTooOld)
+        );
     }
 
     #[test]
     fn an_app_older_than_the_host_accepts_is_rejected() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5})),
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 6})),
             Err(ProbeError::AppTooOld)
         );
     }
@@ -192,7 +201,9 @@ mod tests {
     #[test]
     fn a_compatible_envelope_with_an_unreadable_body_is_invalid() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
+            classify_hello(
+                json!({"product": HOST_PRODUCT, "protocol": PROTOCOL_VERSION, "minProtocol": 1})
+            ),
             Err(ProbeError::InvalidResponse)
         );
     }
@@ -202,12 +213,12 @@ mod tests {
         // A host this build could not talk to still names its versions.
         assert_eq!(
             read_versions(&json!({
-                "product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5, "version": "0.9.0"
+                "product": HOST_PRODUCT, "protocol": 9, "minProtocol": 6, "version": "0.9.0"
             })),
             Ok(HostVersions {
                 version: Some("0.9.0".into()),
                 protocol: 9,
-                min_protocol: 5
+                min_protocol: 6
             })
         );
         assert_eq!(
@@ -230,7 +241,7 @@ mod tests {
     fn a_compatible_hello_is_read() {
         let hello = classify_hello(json!({
             "product": "markiro-host",
-            "protocol": 3,
+            "protocol": PROTOCOL_VERSION,
             "minProtocol": 1,
             "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
             "version": "0.1.0",

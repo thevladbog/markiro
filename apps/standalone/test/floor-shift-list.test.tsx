@@ -147,7 +147,9 @@ describe("the shifts of the station's line", () => {
     const { handlers } = renderList(executor);
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
-    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id);
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, {
+      supports: ["validation-v1", "validation-dm-duplicate-v1"],
+    });
     const [shift] = handlers.onEntered.mock.calls[0] ?? [];
     expect(shift).toMatchObject({
       copy: { id: PLANNED.id, status: "active", entered: true },
@@ -215,6 +217,16 @@ describe("the shifts of the station's line", () => {
     [
       "pallet_template_not_fit",
       "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
+    // The template of a validation shift's duplicate (plan РЕЖ, part B).
+    [
+      "duplicate_template_not_fit",
+      "Шаблон дубликата Data Matrix выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
+    // A mode this build does not name in its entry (plan РЕЖ, Р5).
+    [
+      "station_update",
+      "Эту смену приложение этой станции открыть не может. Обновите приложение станции.",
     ],
   ])("says why the host refused the entry (%s) and keeps the list", async (constraint, text) => {
     const { executor } = await copiesOf([PLANNED]);

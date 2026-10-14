@@ -45,6 +45,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftEnterSchema,
   shiftExportRecordSchema,
   shiftUpdateSchema,
   ssccBlockRequestSchema,
@@ -896,6 +897,7 @@ describe("HostApi device shifts", () => {
   const list = fixture("device-shifts.json");
   const entered = fixture("device-shift-entered.json");
   const CREATE = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+  const ENTER = shiftEnterSchema.parse(fixture("shift-enter.json"));
 
   it("reads, creates and enters shifts with the device key only, no office session", async () => {
     const reading = recording(list);
@@ -908,7 +910,7 @@ describe("HostApi device shifts", () => {
       number: "OCT26-005/S",
     });
     const entering = recording(entered);
-    await expect(entering.api.enterShift(SHIFT_ID)).resolves.toMatchObject({
+    await expect(entering.api.enterShift(SHIFT_ID, ENTER)).resolves.toMatchObject({
       status: "active",
       snapshot: { issuerPrefix: "460068200" },
     });
@@ -918,7 +920,7 @@ describe("HostApi device shifts", () => {
       {
         method: "POST",
         path: `/v1/device/shifts/${SHIFT_ID}/enter`,
-        body: undefined,
+        body: ENTER,
         officeToken: undefined,
       },
     ]);
@@ -933,7 +935,7 @@ describe("HostApi device shifts", () => {
     ).rejects.toThrow();
     const withoutSnapshot = { ...(entered as Record<string, unknown>) };
     delete withoutSnapshot["snapshot"];
-    await expect(recording(withoutSnapshot).api.enterShift(SHIFT_ID)).rejects.toThrow();
+    await expect(recording(withoutSnapshot).api.enterShift(SHIFT_ID, ENTER)).rejects.toThrow();
     await expect(recording(withoutSnapshot).api.createDeviceShift(CREATE)).resolves.toMatchObject({
       id: SHIFT_ID,
     });
@@ -971,11 +973,20 @@ describe("HostApi device shifts", () => {
       officeToken: null,
     });
     const entering = overShell(200, entered);
-    await entering.api.enterShift(SHIFT_ID);
+    await entering.api.enterShift(SHIFT_ID, ENTER);
     expect(entering.call).toHaveBeenCalledWith("host_request", {
       method: "POST",
       path: `/v1/device/shifts/${SHIFT_ID}/enter`,
-      body: null,
+      body: ENTER,
+      officeToken: null,
+    });
+    // The body goes as the caller names it: an entry naming nothing is `{ supports: [] }`.
+    const naming = overShell(200, entered);
+    await naming.api.enterShift(SHIFT_ID, { supports: [] });
+    expect(naming.call).toHaveBeenCalledWith("host_request", {
+      method: "POST",
+      path: `/v1/device/shifts/${SHIFT_ID}/enter`,
+      body: { supports: [] },
       officeToken: null,
     });
   });
@@ -995,7 +1006,7 @@ describe("HostApi device shifts", () => {
           : fixture(file);
       const { api } = overShell(status, body);
       const error: unknown = await (
-        what === "entering" ? api.enterShift(SHIFT_ID) : api.createDeviceShift(CREATE)
+        what === "entering" ? api.enterShift(SHIFT_ID, ENTER) : api.createDeviceShift(CREATE)
       ).then(
         () => undefined,
         (caught: unknown) => caught,
@@ -1024,7 +1035,7 @@ describe("HostApi device shifts", () => {
       kind: "transport",
       code: "unreachable",
     });
-    await expect(lost.enterShift(SHIFT_ID)).rejects.toMatchObject({ code: "unreachable" });
+    await expect(lost.enterShift(SHIFT_ID, ENTER)).rejects.toMatchObject({ code: "unreachable" });
     await expect(lost.createDeviceShift(CREATE)).rejects.toMatchObject({ code: "unreachable" });
   });
 
@@ -1034,7 +1045,9 @@ describe("HostApi device shifts", () => {
     await expect(fake.createDeviceShift(CREATE)).rejects.toThrow(
       "unexpected HostApi.createDeviceShift call",
     );
-    await expect(fake.enterShift(SHIFT_ID)).rejects.toThrow("unexpected HostApi.enterShift call");
+    await expect(fake.enterShift(SHIFT_ID, ENTER)).rejects.toThrow(
+      "unexpected HostApi.enterShift call",
+    );
     // A test that stubs the list gets its own answer, not the empty one.
     const shifts = await recording(list).api.getDeviceShifts();
     const stubbed = fakeHostApi({ getDeviceShifts: vi.fn(async () => shifts) });

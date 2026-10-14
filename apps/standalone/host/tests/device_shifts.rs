@@ -709,6 +709,262 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     );
 }
 
+/// `POST /v1/device/shifts/{id}/enter` with `key` and the JSON body `body`
+/// (a station of protocol 4 or later; `enter` is one of protocol 3).
+async fn enter_with(admin: &Admin, key: &str, shift: &Value, body: Value) -> (StatusCode, Value) {
+    let path = format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap());
+    device_call(admin, key, "POST", &path, Some(body)).await
+}
+
+/// A validation shift (plan РЕЖ, Р5) opens only for a station that names
+/// `validation-v1` in its entry; any other is `conflict` on
+/// `station_update`, before anything is frozen or written, and that holds
+/// for entering again too (a station rolled back to an older build). An
+/// aggregation shift opens with or without a body, as before; the body's
+/// list is bounded like the webview's schema.
+#[tokio::test]
+async fn only_a_station_that_names_validation_enters_a_validation_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let mut body = shift_body(&setup);
+    body["mode"] = json!("validation");
+    let validation = plan_shift(&admin, body).await;
+    let aggregation = plan_shift(&admin, shift_body(&setup)).await;
+    // The station's list holds the validation shift with its mode.
+    let (status, list) = device_call(&admin, &admin.key, "GET", "/v1/device/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let mut expected = device_shift(
+        validation["id"].as_str().unwrap(),
+        validation["number"].as_str().unwrap(),
+        &setup,
+    );
+    expected["mode"] = json!("validation");
+    assert_eq!(list["shifts"][0], expected);
+
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let station_update = (
+        StatusCode::CONFLICT,
+        json!("conflict"),
+        json!({ "constraint": "station_update" }),
+    );
+    let refusal = |(status, body): (StatusCode, Value)| {
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"].clone(),
+        )
+    };
+    assert_eq!(
+        refusal(enter(&admin, &admin.key, &validation).await),
+        station_update,
+        "no body"
+    );
+    for supports in [
+        json!({}),
+        json!({ "supports": [] }),
+        json!({ "supports": ["validation-dm-duplicate-v1", "scanner"] }),
+        json!({ "supports": ["VALIDATION-V1", "validation-v1 "] }),
+    ] {
+        assert_eq!(
+            refusal(enter_with(&admin, &admin.key, &validation, supports.clone()).await),
+            station_update,
+            "{supports}"
+        );
+    }
+    // The list is bounded like the webview's: at most 32 names of 1-64
+    // UTF-16 code units (Zod's string length), so 33 astral characters (66
+    // units) are too long.
+    let field = (
+        StatusCode::BAD_REQUEST,
+        json!("validation_failed"),
+        json!({ "field": "supports" }),
+    );
+    let many: Vec<String> = (0..33).map(|n| format!("cap-{n}")).collect();
+    for supports in [
+        json!({ "supports": ["validation-v1", ""] }),
+        json!({ "supports": ["validation-v1", "я".repeat(65)] }),
+        json!({ "supports": ["validation-v1", "😀".repeat(33)] }),
+        json!({ "supports": many }),
+    ] {
+        assert_eq!(
+            refusal(enter_with(&admin, &admin.key, &validation, supports.clone()).await),
+            field,
+            "{supports}"
+        );
+    }
+    let (status, unknown) = enter_with(
+        &admin,
+        &admin.key,
+        &validation,
+        json!({ "supports": ["validation-v1"], "mode": "validation" }),
+    )
+    .await;
+    assert_eq!(
+        (status, unknown["error"]["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("validation_failed"))
+    );
+    // Nothing was frozen or written: still planned, no owner, no revision,
+    // no row, no participant.
+    let (status, office) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", validation["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{office}");
+    assert_eq!(office, validation);
+    let snapshot: Option<String> = sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(validation["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(snapshot, None);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert!(participants(&admin, &validation).await.is_empty());
+
+    // A station that names it opens the shift and gets its snapshot.
+    let opened_at = admin.app.state.timestamp();
+    let names: Vec<String> = (0..31)
+        .map(|n| format!("cap-{n}"))
+        .chain(["validation-v1".to_owned()])
+        .collect();
+    let (status, entered) = enter_with(
+        &admin,
+        &admin.key,
+        &validation,
+        json!({ "supports": names }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(
+        [
+            entered["status"].clone(),
+            entered["mode"].clone(),
+            entered["ownerDeviceId"].clone(),
+            entered["snapshot"]["boxTemplate"]["id"].clone(),
+        ],
+        [
+            json!("active"),
+            json!("validation"),
+            json!(station),
+            json!(setup.template)
+        ]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.open").await,
+        vec![device_row(
+            &station,
+            "shift.open",
+            validation["id"].as_str().unwrap(),
+            json!({
+                "number": validation["number"], "templateId": setup.template, "templateRev": 2
+            })
+        )]
+    );
+    // Entering again: refused without the name (and the entry is not
+    // marked), answered with it.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(
+        refusal(enter(&admin, &admin.key, &validation).await),
+        station_update,
+        "again, no body"
+    );
+    assert_eq!(
+        participants(&admin, &validation).await,
+        vec![(station.clone(), opened_at.clone(), opened_at.clone())]
+    );
+    let (status, again) = enter_with(
+        &admin,
+        &admin.key,
+        &validation,
+        json!({ "supports": ["validation-v1"] }),
+    )
+    .await;
+    assert_eq!(
+        (status, again["snapshot"].clone()),
+        (StatusCode::OK, entered["snapshot"].clone())
+    );
+    assert_eq!(
+        participants(&admin, &validation).await,
+        vec![(station.clone(), opened_at, admin.app.state.timestamp())]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+
+    // An aggregation shift opens without a body, and again with any list
+    // within the bounds; past them it is refused like any body.
+    let (status, opened) = enter(&admin, &admin.key, &aggregation).await;
+    assert_eq!(
+        (status, opened["status"].clone(), opened["mode"].clone()),
+        (StatusCode::OK, json!("active"), json!("aggregation")),
+        "{opened}"
+    );
+    for supports in [
+        json!({}),
+        json!({ "supports": ["validation-v1"] }),
+        json!({ "supports": ["я".repeat(64)] }),
+        json!({ "supports": ["😀".repeat(32)] }),
+    ] {
+        let (status, again) = enter_with(&admin, &admin.key, &aggregation, supports.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{supports}: {again}");
+    }
+    let many: Vec<String> = (0..33).map(|n| format!("cap-{n}")).collect();
+    assert_eq!(
+        refusal(
+            enter_with(
+                &admin,
+                &admin.key,
+                &aggregation,
+                json!({ "supports": many })
+            )
+            .await
+        ),
+        field
+    );
+
+    // The shift's own refusals come first: a station without the name (no
+    // body) hears why the shift is not its own, not that it must update.
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let (_, elsewhere) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &elsewhere, &setup.other_line).await;
+    let constraint = |(status, body): (StatusCode, Value)| {
+        (status, body["error"]["details"]["constraint"].clone())
+    };
+    assert_eq!(
+        constraint(enter(&admin, &colleague, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_busy")),
+        "owned by another station"
+    );
+    assert_eq!(
+        constraint(enter(&admin, &elsewhere, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_line")),
+        "on another line"
+    );
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
+         closed_by = ? WHERE id = ?",
+    )
+    .bind(admin.app.state.timestamp())
+    .bind(&station)
+    .bind(validation["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        constraint(enter(&admin, &admin.key, &validation).await),
+        (StatusCode::CONFLICT, json!("shift_status")),
+        "closed"
+    );
+}
+
 #[tokio::test]
 async fn a_shift_takes_one_station_of_its_line_and_never_opens_once_closed() {
     let admin = admin().await;
@@ -1259,6 +1515,7 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
             kind: DeviceKind::Station,
         },
         ApiPath(id.clone()),
+        None,
     ));
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(200), &mut entry)
@@ -1350,6 +1607,7 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
             kind: DeviceKind::Station,
         },
         ApiPath(id.clone()),
+        None,
     );
     let create: DeviceShiftCreate = serde_json::from_value(device_create(&setup, REQUEST)).unwrap();
     let create_handler = create_device_shift(

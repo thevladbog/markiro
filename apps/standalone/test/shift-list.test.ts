@@ -14,11 +14,14 @@ import {
   AYRAN_ARCHIVED,
   BOX_58,
   CLOSED,
+  DUPLICATE_58,
   KEFIR_DRAFT,
   LINE_10,
   MILK,
   MILK_BOX,
+  MILK_DUPLICATE,
   OLD_BOX,
+  OLD_DUPLICATE,
   PALLET,
   PLANNED,
   WATER,
@@ -73,6 +76,40 @@ describe("the shifts list's rules", () => {
     expect(openBlocker({ ...unfit, productId: KEFIR_DRAFT.id }, products, undefined)).toBe(
       "product_draft",
     );
+  });
+
+  it("marks a shift that prints a duplicate whose template is off or not of the product's group, after the box template (plan РЕЖ, B7)", () => {
+    const products = [MILK, WATER];
+    const templates = [BOX_58, MILK_BOX, DUPLICATE_58, MILK_DUPLICATE, OLD_DUPLICATE];
+    const printing = (templateId: string) => ({
+      ...PLANNED,
+      mode: "validation" as const,
+      validationPrint: { mode: "duplicate_dm" as const, templateId, verification: "none" as const },
+    });
+    expect(openBlocker(printing(DUPLICATE_58.id), products, templates)).toBeNull();
+    expect(openBlocker(printing(OLD_DUPLICATE.id), products, templates)).toBe(
+      "duplicate_template_unfit",
+    );
+    // Water is of group 13: a duplicate for milk does not fit it; a box template is no duplicate.
+    expect(openBlocker(printing(MILK_DUPLICATE.id), products, templates)).toBe(
+      "duplicate_template_unfit",
+    );
+    expect(openBlocker(printing(BOX_58.id), products, templates)).toBe("duplicate_template_unfit");
+    // Unknown to the list, or the shift no longer planned: nothing claimed.
+    expect(openBlocker(printing(OLD_DUPLICATE.id), products, [BOX_58])).toBeNull();
+    expect(
+      openBlocker({ ...printing(OLD_DUPLICATE.id), status: "active" }, products, templates),
+    ).toBeNull();
+    // The box template is named first, as the host checks it first.
+    expect(
+      openBlocker({ ...printing(OLD_DUPLICATE.id), boxTemplateId: OLD_BOX.id }, products, [
+        ...templates,
+        OLD_BOX,
+      ]),
+    ).toBe("template_unfit");
+    expect(
+      openBlocker({ ...PLANNED, validationPrint: { mode: "none" } }, products, templates),
+    ).toBeNull();
   });
 
   // Added by the task 8 implementer: the pallet template is judged by purpose, switch and group.

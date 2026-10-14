@@ -24,7 +24,9 @@ import type {
   ProductUpdate,
   ShiftClose,
   ShiftCreate,
+  ShiftEnter,
   ShiftExportRecord,
+  ShiftMode,
   ShiftUpdate,
   TemplateCreate,
   TemplateDefaultsUpdate,
@@ -32,7 +34,9 @@ import type {
   TemplateSpec,
   TemplateUpdate,
   UpdateStarted,
+  ValidationPrint,
 } from "./protocol.js";
+import { SHIFT_SUPPORTS } from "./protocol.js";
 
 // The office's request bodies, each built field by field and never spread
 // from form values: a field reaches the host only when its builder names it,
@@ -436,15 +440,21 @@ export interface ShiftInput {
   lineId: string;
   productionDate: string;
   boxTemplateId: string;
-  boxCapacity: number;
+  /** Left out only by a validation shift whose hidden capacity the form refuses: the product's. */
+  boxCapacity?: number;
   plannedQty: number | null;
   counterpartyId: string | null;
   pallets: ShiftPallets | null;
+  /** The shift's mode (plan РЕЖ); left out, aggregation. */
+  mode?: ShiftMode;
+  /** The print policy (plan РЕЖ part B); left out, the host's `none`. */
+  validationPrint?: ValidationPrint;
 }
 
 /**
- * `POST /v1/office/shifts` (`shift-create.json`, `shift-create-pallets.json`):
- * every field, `null` for none, the mode and whether pallets are collected,
+ * `POST /v1/office/shifts` (`shift-create.json`, `shift-create-pallets.json`,
+ * `shift-create-validation.json`): every field, `null` for none, the mode
+ * (aggregation unless the input names one) and whether pallets are collected,
  * so the host's defaults never decide what was planned; a shift with pallets
  * names their capacity and template, one without names neither.
  */
@@ -454,10 +464,11 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     lineId: shift.lineId,
     productionDate: shift.productionDate,
     boxTemplateId: shift.boxTemplateId,
-    boxCapacity: shift.boxCapacity,
+    ...(shift.boxCapacity === undefined ? {} : { boxCapacity: shift.boxCapacity }),
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,
-    mode: "aggregation",
+    mode: shift.mode ?? "aggregation",
+    ...(shift.validationPrint === undefined ? {} : { validationPrint: shift.validationPrint }),
     ...(shift.pallets === null
       ? { palletsEnabled: false }
       : {
@@ -483,6 +494,16 @@ export interface ShiftChange {
   plannedQty?: number | null;
   counterpartyId?: string | null;
   pallets?: ShiftPallets | null;
+  /** The mode (plan РЕЖ); a planned shift's alone changes (Р1). */
+  mode?: ShiftMode;
+  /** The print policy (plan РЕЖ part B); a planned shift's alone changes. */
+  validationPrint?: ValidationPrint;
+}
+
+/** Whether two print policies say the same: the mode, and a duplicate's template and check. */
+function samePrint(a: ValidationPrint, b: ValidationPrint): boolean {
+  if (a.mode === "none" || b.mode === "none") return a.mode === b.mode;
+  return a.templateId === b.templateId && a.verification === b.verification;
 }
 
 /**
@@ -504,11 +525,21 @@ export function shiftUpdate(
     | "palletBoxCapacity"
     | "palletTemplateId"
     | "palletSheetTemplateId"
+    | "mode"
+    | "validationPrint"
     | "rev"
   >,
   next: ShiftChange,
 ): ShiftUpdate {
   const update: ShiftUpdate = { expectedRev: shift.rev };
+  if (next.mode !== undefined && next.mode !== shift.mode) update.mode = next.mode;
+  // A shift without a policy (a host before protocol 5) prints none.
+  if (
+    next.validationPrint !== undefined &&
+    !samePrint(next.validationPrint, shift.validationPrint ?? { mode: "none" })
+  ) {
+    update.validationPrint = next.validationPrint;
+  }
   if (next.lineId !== undefined && next.lineId !== shift.lineId) update.lineId = next.lineId;
   if (next.productionDate !== undefined && next.productionDate !== shift.productionDate) {
     update.productionDate = next.productionDate;
@@ -593,6 +624,15 @@ export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
     openPalletSuppressedBoxCount: written.openPalletSuppressedBoxCount,
   };
 }
+
+/**
+ * The body of every shift entry this station sends (`shift-enter.json`, plan
+ * РЕЖ): it works validation shifts, and prints their Data Matrix duplicate
+ * (part B, task B6), so the host lets it enter both.
+ */
+export const STATION_SHIFT_ENTER: ShiftEnter = {
+  supports: [SHIFT_SUPPORTS.validation, SHIFT_SUPPORTS.validationDmDuplicate],
+};
 
 /** What a station's new shift carries: the operator's choices and the request's id. */
 export interface DeviceShiftInput {

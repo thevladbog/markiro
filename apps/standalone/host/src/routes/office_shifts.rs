@@ -11,6 +11,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
     OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftTotals, ShiftUpdate,
+    UnitLabelTotals, ValidationPrint,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -27,16 +28,22 @@ use crate::validate;
 
 /// The columns of an office shift, its totals (plan 2a2, pallets plan ПЛ-Х)
 /// included: each a subquery over the shift's facts, served by the indexes
-/// of `0010` and `0012`.
+/// of `0010` and `0012`. A validation shift (plan РЕЖ, Р11) accepts its
+/// units without boxes: they are the codes it owns, each without a box
+/// (`code_owners_shift_unboxed` of `0020`); it has no boxes and no pallets.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, \
-     pallet_sheet_template_id, owner_device_id, \
+     pallet_sheet_template_id, validation_print_mode, validation_print_verification, \
+     validation_print_template_id, owner_device_id, \
      opened_at, closed_at, close_reason_code, \
      close_reason_text, late_data_at, created_at, rev, \
-     (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
-      WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
-      AS accepted_units, \
+     CASE mode WHEN 'validation' \
+      THEN (SELECT COUNT(*) FROM code_owners o WHERE o.shift_id = shifts.id \
+            AND o.box_id IS NULL) \
+      ELSE (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
+            WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
+      END AS accepted_units, \
      (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
       WHERE b.shift_id = shifts.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units_in_closed_boxes, \
@@ -53,7 +60,32 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
       AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL) AS closed_pallets, \
      (SELECT COUNT(*) FROM pallets p WHERE p.shift_id = shifts.id AND p.closed_at IS NULL \
       AND EXISTS (SELECT 1 FROM boxes b WHERE b.pallet_id = p.id \
-                  AND b.disassembled_at IS NULL)) AS open_pallets \
+                  AND b.disassembled_at IS NULL)) AS open_pallets, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'sent') AS labels_sent, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'verified') AS labels_verified, \
+     (SELECT COUNT(DISTINCT e.job_id) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'verification_skipped') AS labels_skipped, \
+     (SELECT COUNT(DISTINCT e.job_id || ':' || e.attempt_no) FROM unit_label_events e \
+      WHERE e.shift_id = shifts.id AND e.event = 'prepared' AND e.attempt_no > 1) \
+      AS labels_reprinted, \
+     (SELECT COUNT(*) FROM unit_label_events e WHERE e.shift_id = shifts.id \
+      AND NOT (e.event IN ('verified', 'verification_skipped') \
+               OR (e.event = 'sent' AND shifts.validation_print_verification = 'none')) \
+      AND NOT EXISTS (SELECT 1 FROM unit_label_events later \
+                      WHERE later.shift_id = e.shift_id AND later.job_id = e.job_id \
+                      AND (later.attempt_no, \
+                           CASE later.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
+                            WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, \
+                           later.at, later.record_id, later.device_id) \
+                          > (e.attempt_no, \
+                           CASE e.event WHEN 'prepared' THEN 0 WHEN 'sending' THEN 1 \
+                            WHEN 'verification_rejected' THEN 3 WHEN 'verified' THEN 4 \
+                            WHEN 'verification_skipped' THEN 4 ELSE 2 END, \
+                           e.at, e.record_id, e.device_id))) \
+      AS labels_unresolved \
      FROM shifts";
 
 #[derive(sqlx::FromRow)]
@@ -75,6 +107,9 @@ struct ShiftRow {
     pallet_box_capacity: Option<u32>,
     pallet_template_id: Option<String>,
     pallet_sheet_template_id: Option<String>,
+    validation_print_mode: String,
+    validation_print_verification: Option<String>,
+    validation_print_template_id: Option<String>,
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
@@ -92,10 +127,28 @@ struct ShiftRow {
     device_ids: String,
     closed_pallets: i64,
     open_pallets: i64,
+    labels_sent: i64,
+    labels_verified: i64,
+    labels_skipped: i64,
+    labels_reprinted: i64,
+    labels_unresolved: i64,
 }
 
 fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
     let created_from = row.created_from.parse().map_err(ApiError::internal)?;
+    let count = |value: i64| u64::try_from(value).map_err(ApiError::internal);
+    // Only a shift that prints has label totals (plan РЕЖ, part B).
+    let unit_labels = if row.validation_print_mode == "duplicate_dm" {
+        Some(UnitLabelTotals {
+            sent: count(row.labels_sent)?,
+            verified: count(row.labels_verified)?,
+            skipped: count(row.labels_skipped)?,
+            unresolved: count(row.labels_unresolved)?,
+            reprints: count(row.labels_reprinted)?,
+        })
+    } else {
+        None
+    };
     Ok(OfficeShift {
         number: shifts::format_number(&row.number_month_key, row.number_seq, created_from),
         id: row.id,
@@ -113,6 +166,12 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         pallet_box_capacity: row.pallet_box_capacity,
         pallet_template_id: row.pallet_template_id,
         pallet_sheet_template_id: row.pallet_sheet_template_id,
+        // Left out when it is `none` (plan РЕЖ, part B).
+        validation_print: shifts::stored_print(
+            &row.validation_print_mode,
+            row.validation_print_verification.as_deref(),
+            row.validation_print_template_id.as_deref(),
+        )?,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -131,6 +190,7 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
             device_ids: serde_json::from_str(&row.device_ids).map_err(ApiError::internal)?,
             closed_pallets: u32::try_from(row.closed_pallets).map_err(ApiError::internal)?,
             open_pallets: u32::try_from(row.open_pallets).map_err(ApiError::internal)?,
+            unit_labels,
         },
     })
 }
@@ -221,28 +281,46 @@ pub async fn get_shift(
         .ok_or_else(|| ApiError::not_found("no such shift"))
 }
 
-/// Only aggregation is taken (spec decision 6), with or without pallets
-/// (plan ПЛ-Х): validation (stage 3) needs no new shape.
-pub fn check_mode(mode: ShiftMode) -> Result<(), ApiError> {
-    if mode != ShiftMode::Aggregation {
+/// The rules of a shift's mode (plan РЕЖ, Р1): aggregation, with or without
+/// pallets (plan ПЛ-Х), or validation, which puts codes in no box and so in
+/// no pallet: a validation shift with pallets is `validation_failed` on
+/// `palletsEnabled`. Without pallets a shift has neither pallet field nor an
+/// A4 sheet (`shifts::pallet_request`, `shifts::pallets`), so a validation
+/// shift never takes the default sheet either. Its box template and box
+/// capacity stay (Р4): the shift's columns need them, and a validation shift
+/// prints no box label.
+pub fn check_mode_rules(mode: ShiftMode, pallets_enabled: bool) -> Result<(), ApiError> {
+    if mode == ShiftMode::Validation && pallets_enabled {
         return Err(ApiError::validation(
-            "mode",
-            "only aggregation shifts are taken for now",
+            "palletsEnabled",
+            "a validation shift has no pallets",
         ));
     }
     Ok(())
 }
 
+/// A shift's print policy as an answer leaves it out: `none` for `None`.
+fn policy_of(policy: Option<&ValidationPrint>) -> ValidationPrint {
+    policy.cloned().unwrap_or(ValidationPrint::None {})
+}
+
 /// `POST /v1/office/shifts`: a planned shift of an active product on an
 /// active line, with a box template that fits the product, and with pallets
-/// a pallet template that fits it too (`shifts::pallet_request`).
+/// a pallet template that fits it too (`shifts::pallet_request`). A
+/// validation shift may print a duplicate (`validationPrint`, plan РЕЖ part
+/// B): `validation_failed` on `validationPrint` for another mode (after the
+/// mode's own rules), on `validationPrint.templateId` unless the template
+/// fits the product (`shifts::check_duplicate_template`, after the box
+/// template). Left out or `null`, the policy is `none`.
 pub async fn create_shift(
     State(state): State<AppState>,
     context: OfficeContext,
     ApiJson(create): ApiJson<ShiftCreate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(create.mode)?;
+    check_mode_rules(create.mode, create.pallets_enabled)?;
+    let validation_print = policy_of(create.validation_print.as_ref());
+    shifts::check_print_mode(create.mode, &validation_print)?;
     let pallet_request = shifts::pallet_request(
         create.pallets_enabled,
         create.pallet_box_capacity,
@@ -274,6 +352,9 @@ pub async fn create_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
+        shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
+    }
     let pallets = shifts::pallets(
         &mut tx,
         pallet_request,
@@ -287,6 +368,7 @@ pub async fn create_shift(
         &mut tx,
         &NewShift {
             origin: markiro_proto::ShiftOrigin::Office,
+            mode: create.mode,
             created_by: &context.user.id,
             request_id: None,
             product_id: &create.product_id,
@@ -297,6 +379,7 @@ pub async fn create_shift(
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
             pallets,
+            validation_print: &validation_print,
         },
         &at,
         rev,
@@ -315,6 +398,15 @@ pub async fn create_shift(
     // one keep their shape.
     if let Some(sheet_id) = &created.pallet_sheet_template_id {
         details["palletSheetTemplateId"] = json!(sheet_id);
+    }
+    // Named only by a validation shift (plan РЕЖ), for the same reason: a row
+    // without a mode is an aggregation shift's.
+    if created.mode != ShiftMode::Aggregation {
+        details["mode"] = json!(created.mode);
+    }
+    // And the policy only by a shift that prints a duplicate.
+    if let Some(policy) = &created.validation_print {
+        details["validationPrint"] = json!(policy);
     }
     audit::record(
         &mut tx,
@@ -348,6 +440,24 @@ pub async fn create_shift(
 /// edit (plan А4; the product's, its category's or the organization's sheet,
 /// `default_sheet_for_product`): a later change of a default does not reach
 /// the shift.
+///
+/// The mode (plan РЕЖ, Р1) changes only while the shift is planned, and a
+/// validation shift has no pallets (`check_mode_rules`: `validation_failed`
+/// on `palletsEnabled`, before either pallet field is checked). An active
+/// shift that sends another mode, or pallets its mode cannot have, is
+/// `conflict` on `shift_status` like any other fixed field. The pallet
+/// fields' own shape (`shifts::pallet_request`, e.g. pallets turned on with
+/// no template: `palletTemplateId`) is checked before the status, for any
+/// shift, as it was before the mode existed.
+///
+/// The print policy (part B) is a fixed field too: left out (or `null`) it is
+/// kept, so a printing shift turned to aggregation must send
+/// `validationPrint: { "mode": "none" }` in the same edit, else
+/// `validation_failed` on `validationPrint` (`shifts::check_print_mode`, after
+/// the mode's rules, only for a planned shift); a changed template is checked
+/// as at planning (`validationPrint.templateId`), a kept one is not. The mode
+/// and the three policy columns are written in one `UPDATE`, which the
+/// triggers of `0021` check together.
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -355,7 +465,6 @@ pub async fn update_shift(
     ApiJson(update): ApiJson<ShiftUpdate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(update.mode.unwrap_or_default())?;
     validate::count(
         "palletBoxCapacity",
         update.pallet_box_capacity,
@@ -402,6 +511,21 @@ pub async fn update_shift(
     // Pallets that stay on keep what the edit does not send; turned off, the
     // edit sends neither field.
     let pallets_enabled = update.pallets_enabled.unwrap_or(current.pallets_enabled);
+    // The mode the shift would have and its pallets, checked together before
+    // either pallet field is, so the refusal names the flag (plan РЕЖ). Only
+    // a planned shift changes them: an active or closed one that sends a
+    // change is refused on its status below, not on the rules of a mode it
+    // cannot take (and one that sends none already keeps them).
+    let mode = update.mode.unwrap_or(current.mode);
+    let current_print = policy_of(current.validation_print.as_ref());
+    let validation_print = update
+        .validation_print
+        .clone()
+        .unwrap_or_else(|| current_print.clone());
+    if current.status == ShiftStatus::Planned {
+        check_mode_rules(mode, pallets_enabled)?;
+        shifts::check_print_mode(mode, &validation_print)?;
+    }
     let pallet_request = if pallets_enabled {
         shifts::pallet_request(
             true,
@@ -452,7 +576,8 @@ pub async fn update_shift(
         }
         None
     };
-    let fixed_changed = line_id != current.line_id
+    let fixed_changed = mode != current.mode
+        || line_id != current.line_id
         || production_date != current.production_date
         || box_template_id != current.box_template_id
         || box_capacity != current.box_capacity
@@ -460,7 +585,8 @@ pub async fn update_shift(
         || pallets_enabled != current.pallets_enabled
         || pallet_box_capacity != current.pallet_box_capacity
         || pallet_template_id != current.pallet_template_id
-        || pallet_sheet_template_id != current.pallet_sheet_template_id;
+        || pallet_sheet_template_id != current.pallet_sheet_template_id
+        || validation_print != current_print;
     match current.status {
         ShiftStatus::Planned => {
             // Pallets turned on in a plan ask the license (plan ЛЦ-2 Д8); a
@@ -502,6 +628,18 @@ pub async fn update_shift(
                 let product = shifts::shift_product(&mut tx, &current.product_id).await?;
                 shifts::check_box_template(&mut tx, &box_template_id, product.group).await?;
             }
+            // A duplicate template that changes is checked, after the box
+            // template as at planning; a kept one stays.
+            if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
+                let kept = matches!(
+                    &current_print,
+                    ValidationPrint::DuplicateDm { template_id: current, .. } if current == template_id
+                );
+                if !kept {
+                    let product = shifts::shift_product(&mut tx, &current.product_id).await?;
+                    shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
+                }
+            }
             if let Some(counterparty_id) = &counterparty_id {
                 if current.counterparty_id.as_ref() != Some(counterparty_id) {
                     shifts::check_counterparty(&mut tx, counterparty_id).await?;
@@ -534,6 +672,7 @@ pub async fn update_shift(
             json!(current.counterparty_id),
             json!(counterparty_id),
         ),
+        ("mode", json!(current.mode), json!(mode)),
         (
             "palletsEnabled",
             json!(current.pallets_enabled),
@@ -554,17 +693,25 @@ pub async fn update_shift(
             json!(current.pallet_sheet_template_id),
             json!(pallet_sheet_template_id),
         ),
+        (
+            "validationPrint",
+            json!(current_print),
+            json!(validation_print),
+        ),
     ]) else {
         // Nothing actually changed: report the shift as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
         return Ok(Json(current));
     };
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    let (print_mode, print_verification, print_template_id) =
+        shifts::print_columns(&validation_print);
     sqlx::query(
         "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
-         box_capacity = ?, planned_qty = ?, counterparty_id = ?, pallets_enabled = ?, \
-         pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, rev = ? \
-         WHERE id = ?",
+         box_capacity = ?, planned_qty = ?, counterparty_id = ?, mode = ?, pallets_enabled = ?, \
+         pallet_box_capacity = ?, pallet_template_id = ?, pallet_sheet_template_id = ?, \
+         validation_print_mode = ?, validation_print_verification = ?, \
+         validation_print_template_id = ?, rev = ? WHERE id = ?",
     )
     .bind(&line_id)
     .bind(&production_date)
@@ -572,10 +719,14 @@ pub async fn update_shift(
     .bind(box_capacity)
     .bind(planned_qty)
     .bind(&counterparty_id)
+    .bind(mode.as_str())
     .bind(pallets_enabled)
     .bind(pallet_box_capacity)
     .bind(&pallet_template_id)
     .bind(&pallet_sheet_template_id)
+    .bind(print_mode)
+    .bind(print_verification)
+    .bind(print_template_id)
     .bind(rev)
     .bind(&id)
     .execute(&mut *tx)
@@ -758,6 +909,58 @@ mod tests {
                 .filter(|line| line.starts_with("SCAN") && !line.starts_with("SCAN shifts"))
                 .collect();
             assert!(scans.is_empty(), "{filter}: {scans:?}");
+        }
+    }
+
+    /// A validation shift's units (plan РЕЖ, Р11) are the codes it owns
+    /// without a box, read through the partial `code_owners_shift_unboxed`
+    /// of `0020`, for one shift and for the list alike.
+    #[tokio::test]
+    async fn the_units_of_a_validation_shift_run_on_the_index_of_0020() {
+        for filter in [
+            "WHERE id = ?",
+            "WHERE status <> 'closed' OR production_date >= ?",
+        ] {
+            let plan = plan(filter).await;
+            let found = plan
+                .iter()
+                .filter(|line| line.contains("code_owners"))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                found,
+                ["SEARCH o USING INDEX code_owners_shift_unboxed (shift_id=?)"],
+                "{filter}: {plan:#?}"
+            );
+        }
+    }
+
+    /// A printing shift's label totals (plan РЕЖ, part B) read its events
+    /// through `unit_label_events_shift` of `0021`, each of the six reads
+    /// (the last event of a job included), for one shift and for the list
+    /// alike, and never scan the table.
+    #[tokio::test]
+    async fn the_label_totals_run_on_the_index_of_0021() {
+        for filter in [
+            "WHERE id = ?",
+            "WHERE status <> 'closed' OR production_date >= ?",
+        ] {
+            let plan = plan(filter).await;
+            let found: Vec<&String> = plan
+                .iter()
+                .filter(|line| {
+                    line.contains("unit_label_events")
+                        || line.contains(" e ")
+                        || line.contains(" later ")
+                })
+                .collect();
+            assert_eq!(found.len(), 6, "{filter}: {plan:#?}");
+            for line in &found {
+                assert!(
+                    line.starts_with("SEARCH")
+                        && line.contains("USING INDEX unit_label_events_shift"),
+                    "{filter}: {line}"
+                );
+            }
         }
     }
 }

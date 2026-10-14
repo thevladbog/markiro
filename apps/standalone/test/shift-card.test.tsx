@@ -101,9 +101,15 @@ function cardSession(
 
 /** Opens the shift's card from its number in the list. */
 async function openCard(session: FakeOfficeSession, number: string): Promise<void> {
-  await openShifts(session);
+  await openCardView(session, number);
+}
+
+/** `openCard`, with the rendered office to unmount. */
+async function openCardView(session: FakeOfficeSession, number: string) {
+  const view = await openShifts(session);
   fireEvent.click(screen.getByRole("link", { name: `Карточка смены ${number}` }));
   await screen.findByRole("heading", { name: `Смена ${number}` });
+  return view;
 }
 
 function section(name: string): HTMLElement {
@@ -294,6 +300,129 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(cardSession({ ...ACTIVE, counterpartyId: null }), "OCT26-004");
     expect(facts()["Паллеты"]).toBe("Не собираются");
     expect(facts()["Контрагент"]).toBe("—");
+  });
+
+  it("shows a validation shift as «Проверка» with the codes it accepted, and without boxes or pallets (plan РЕЖ, Р11)", async () => {
+    const validation: OfficeShift = {
+      ...ACTIVE,
+      mode: "validation",
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 1300,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+      },
+    };
+    const session = cardSession(validation, []);
+    await openCard(session, "OCT26-004");
+    await waitFor(() => expect(session.api.getShift).toHaveBeenCalled());
+    expect(facts()["Режим"]).toBe("Проверка");
+    expect(facts()["Выпуск"]).toBe("1\u00a0300 шт");
+    expect(facts()).not.toHaveProperty("Вместимость короба, шт");
+    expect(facts()).not.toHaveProperty("Паллеты");
+    expect(screen.queryByRole("region", { name: "Короба" })).toBeNull();
+    expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
+    // Its figures and exports stay.
+    expect(screen.getByRole("button", { name: "Итоги" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выгрузка" })).toBeTruthy();
+  });
+
+  describe("a validation shift that prints a duplicate (plan РЕЖ part B, B7)", () => {
+    const printing = (verification: "none" | "required"): OfficeShift => ({
+      ...ACTIVE,
+      mode: "validation",
+      validationPrint: {
+        mode: "duplicate_dm",
+        templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+        verification,
+      },
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 318,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+        unitLabels: { sent: 321, verified: 300, skipped: 4, unresolved: 2, reprints: 3 },
+      },
+    });
+
+    /** «Контроль печати»'s figures as term to description. */
+    function printFacts(): Record<string, string> {
+      return Object.fromEntries(
+        within(section("Контроль печати"))
+          .getAllByRole("term")
+          .map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? ""]),
+      );
+    }
+
+    it("says the duplicate is printed and whether its check is required", async () => {
+      await openCard(cardSession(printing("required"), []), "OCT26-004");
+      expect(facts()["Печать дубликата"]).toBe("Включена, проверка обязательна");
+    });
+
+    it("counts the labels in «Контроль печати», in the cloud's words, and says when some need finishing", async () => {
+      await openCard(cardSession(printing("none"), []), "OCT26-004");
+      expect(facts()["Печать дубликата"]).toBe("Включена, проверка необязательна");
+      expect(printFacts()).toEqual({
+        "Отправки на принтер": "321",
+        "Проверенные этикетки": "300",
+        "Пропущенные проверки": "4",
+        "Требуют завершения": "2",
+        "Повторные попытки": "3",
+      });
+      expect(
+        within(section("Контроль печати")).getByText(
+          "Отправка на принтер не подтверждает физическую печать. Проверка учитывается только после сканирования этикетки.",
+        ),
+      ).toBeTruthy();
+      expect(
+        within(section("Контроль печати")).getByText("Есть этикетки, которые требуют внимания"),
+      ).toBeTruthy();
+    });
+
+    it("says nothing needs finishing when every label is resolved", async () => {
+      const shift = printing("none");
+      const resolved: OfficeShift = {
+        ...shift,
+        totals: {
+          ...shift.totals,
+          unitLabels: { sent: 10, verified: 0, skipped: 0, unresolved: 0, reprints: 0 },
+        },
+      };
+      await openCard(cardSession(resolved, []), "OCT26-004");
+      expect(printFacts()["Требуют завершения"]).toBe("0");
+      expect(
+        within(section("Контроль печати")).queryByText("Есть этикетки, которые требуют внимания"),
+      ).toBeNull();
+    });
+
+    it("has no «Контроль печати» for a planned shift, nor for one that does not print, which says so", async () => {
+      const planned: OfficeShift = {
+        ...PLANNED,
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+          verification: "none",
+        },
+      };
+      const session = cardSession(planned, []);
+      session.api.listShifts.mockResolvedValue([planned]);
+      await openCard(session, PLANNED.number);
+      expect(facts()["Печать дубликата"]).toBe("Включена, проверка необязательна");
+      expect(screen.queryByRole("region", { name: "Контроль печати" })).toBeNull();
+    });
+
+    it("says a validation shift without the duplicate prints none, and an aggregation has no such row", async () => {
+      const validation: OfficeShift = { ...ACTIVE, mode: "validation" };
+      const view = await openCardView(cardSession(validation, []), "OCT26-004");
+      expect(facts()["Печать дубликата"]).toBe("Выключена");
+      expect(screen.queryByRole("region", { name: "Контроль печати" })).toBeNull();
+      view.unmount();
+      await openCard(cardSession(ACTIVE), "OCT26-004");
+      expect(facts()).not.toHaveProperty("Печать дубликата");
+    });
   });
 
   it("has no pallets of a planned shift, whatever it plans", async () => {

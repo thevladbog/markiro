@@ -65,6 +65,9 @@ import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
+/** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
+const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
+
 /**
  * What `onSignOut` each mount of the signed-in floor was given, in order, so
  * a test can call an earlier session's callback late. The real screen is
@@ -2868,7 +2871,7 @@ describe("the operator on the floor", () => {
 
   it("shows the shifts the host lists for the line and opens one into its work screen", async () => {
     const { host } = await inTheShift();
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     isOnTheList();
@@ -3205,7 +3208,7 @@ describe("the operator on the floor", () => {
       plannedQty: null,
       counterpartyId: null,
     });
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     // A refusal that comes now waits for the operator to leave this shift.
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));

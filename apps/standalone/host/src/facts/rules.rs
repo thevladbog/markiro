@@ -84,12 +84,10 @@ pub fn device_text(at: OffsetDateTime) -> String {
 }
 
 /// A code's hash as the domain's `kmHash` writes it: 64 lower-case hex
-/// digits.
+/// digits (`markiro_proto::is_sha256_hex`, the rule of a unit label's
+/// digests too).
 pub fn is_code_hash(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    markiro_proto::is_sha256_hex(text)
 }
 
 /// Whether `sscc` is the SSCC of `serial` under `issuer_prefix` and the

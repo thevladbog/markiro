@@ -44,6 +44,8 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
   DeviceShift,
   DeviceShift,
 ];
+/** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
+const ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 /**
  * The shift the host makes of `CREATED_BODY` (the form as it starts on `NOW`):
@@ -738,7 +740,7 @@ describe("a new shift on the station", () => {
     createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls).toEqual([[CREATED_BODY]]);
-    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
+    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id, ENTRY]]);
     expect(handlers.onEntered.mock.calls[0]?.[0]).toMatchObject({
       copy: { id: PLANNED.id, entered: true },
       snapshot: { issuerPrefix: "460068200" },
@@ -1795,7 +1797,7 @@ describe("a request to create a shift", () => {
     next();
     fireEvent.click(await screen.findByRole("button", { name: "Открыть смену OCT26-005/S" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
-    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
+    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id, ENTRY]]);
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
@@ -1878,7 +1880,10 @@ describe("a request to create a shift", () => {
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     // The second press made nothing: it entered the shift that was kept.
     expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(enter.mock.calls).toEqual([[PLANNED.id], [PLANNED.id]]);
+    expect(enter.mock.calls).toEqual([
+      [PLANNED.id, ENTRY],
+      [PLANNED.id, ENTRY],
+    ]);
     expect(screen.queryByText(/создана, но не открыта/)).toBeNull();
   });
   it("freezes the choice of a template too once the shift is made", async () => {

@@ -978,7 +978,6 @@ export function WorkstationSetup({
               label={t(`floor.setup.printers.purposes.${purpose}`)}
               value={draft.assignments[purpose] ?? ""}
               options={purposeOptions(purpose)}
-              {...(purpose === "box" ? {} : { hint: t("floor.setup.printers.purposes.later") })}
               onValueChange={(id) => assign(purpose, id)}
             />
           ))}

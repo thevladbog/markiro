@@ -178,12 +178,15 @@ export interface TaskFormInputs {
  * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The standalone shift has one date
  * (stage 2a spec, question В3), so it is both the shift's date and its
  * production date; the product's photo is printed from its own bytes (a
- * `data:` URL, plan ТОВ), as the cloud links its image; the standalone neither prints
- * duplicates nor issues SSCCs under a counterparty's prefix yet.
+ * `data:` URL, plan ТОВ), as the cloud links its image; a validation shift's
+ * duplicate print is its own policy (plan РЕЖ part B: none when the host
+ * sends none); the standalone neither reprocesses earlier codes nor issues
+ * SSCCs under a counterparty's prefix yet.
  */
 export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTaskFormData | null {
   const { shift, product, line, counterparty, organization, photo } = inputs;
   if (shift.status === "closed") return null;
+  const duplicate = shift.validationPrint?.mode === "duplicate_dm" ? shift.validationPrint : null;
   return {
     shiftId: shift.id,
     shiftNumber: shift.number,
@@ -205,8 +208,8 @@ export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTa
     palletBoxCapacity: shift.palletBoxCapacity,
     counterpartyName: counterparty?.name ?? null,
     ssccIssuerName: null,
-    validationPrintMode: "none",
-    validationPrintVerification: "none",
+    validationPrintMode: duplicate === null ? "none" : "duplicate_dm",
+    validationPrintVerification: duplicate?.verification ?? "none",
     allowPreviouslyAcceptedCodes: false,
     generatedAt,
   };

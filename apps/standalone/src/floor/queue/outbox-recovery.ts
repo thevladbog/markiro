@@ -126,7 +126,7 @@ export const STRANDED_COUNT_SQL =
  */
 export const QUEUE_DISPLACED_SQL =
   "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, " +
-  "coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, " +
+  "coalesce(d.box_sscc, b.sscc) AS sscc, d.box_id, d.detected_at, " +
   "d.winner_shift_number, d.winner_same_device FROM floor_displacements d " +
   "LEFT JOIN floor_shifts s ON s.host_id = d.host_id AND s.device_id = d.device_id " +
   "AND s.id = d.shift_id LEFT JOIN floor_boxes b ON b.id = d.box_id " +
@@ -194,6 +194,8 @@ export interface DisplacedRecord {
   shiftNumber: string | null;
   /** The SSCC of the box the code left; `null` while it is open or unknown here. */
   sscc: string | null;
+  /** `false` for a validation shift's scan (plan РЕЖ): it names no box, so there is none to check. */
+  boxed: boolean;
   /** The host's instant. */
   detectedAt: string;
   winnerShiftNumber: string;
@@ -242,6 +244,7 @@ const displacedRow = z.object({
   shift_id: z.string(),
   shift_number: z.string().nullable(),
   sscc: z.string().nullable(),
+  box_id: z.string().nullable(),
   detected_at: z.string(),
   winner_shift_number: z.string(),
   winner_same_device: z.number().int(),
@@ -309,6 +312,7 @@ export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise
       shiftId: row.shift_id,
       shiftNumber: row.shift_number,
       sscc: row.sscc,
+      boxed: row.box_id !== null,
       detectedAt: row.detected_at,
       winnerShiftNumber: row.winner_shift_number,
       winnerSameDevice: row.winner_same_device === 1,

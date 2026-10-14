@@ -24,9 +24,11 @@ pub mod registry;
 pub mod rules;
 pub mod scan;
 pub mod shift_closed;
+pub mod unit_label;
 
 use markiro_proto::{
-    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftOrigin, ShiftStatus,
+    receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftMode, ShiftOrigin,
+    ShiftStatus,
 };
 use serde_json::Value;
 use sqlx::SqliteConnection;
@@ -120,12 +122,17 @@ pub struct FactShift {
     pub id: String,
     pub number: String,
     pub status: ShiftStatus,
+    /// Aggregation or validation (plan РЕЖ); fixed once open.
+    pub mode: ShiftMode,
     /// The GTIN the shift's snapshot froze.
     pub gtin14: String,
     /// The SSCC issuer prefix the shift's snapshot froze.
     pub issuer_prefix: String,
     /// Whether the shift works with pallets (plan ПЛ-Х); fixed once open.
     pub pallets_enabled: bool,
+    /// Whether a validation shift prints a Data Matrix duplicate of each
+    /// accepted code (plan РЕЖ, part B); fixed once open.
+    pub prints_duplicate: bool,
 }
 
 /// What every kind's handler knows of its record.
@@ -328,6 +335,13 @@ async fn apply(
             Reject::new(receipt_codes::NOT_ENTERED),
         ));
     };
+    if !admits(shift.mode, record.kind) {
+        return Ok(Applying {
+            kind,
+            shift_id: Some(shift.id.clone()),
+            answer: Err(Reject::field("shift_mode")),
+        });
+    }
     let context = Context {
         device_id,
         record_id: &record.id,
@@ -344,6 +358,7 @@ async fn apply(
         FactKind::PalletClosed => pallet_closed::apply(conn, &context, &record.data).await,
         FactKind::PalletLabel => pallet_label::apply(conn, &context, &record.data).await,
         FactKind::PalletException => pallet_exception::apply(conn, &context, &record.data).await,
+        FactKind::UnitLabel => unit_label::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
         Ok(applied) => {
@@ -368,6 +383,25 @@ async fn apply(
     })
 }
 
+/// Whether a shift of `mode` takes facts of `kind`: a validation shift
+/// (plan РЕЖ, Р7) has no boxes and no pallets, so a box or pallet fact of it
+/// is `invalid_record` on `shift_mode` whatever its content, before anything
+/// of it is read; its scans and its close are its own (`scan.rs`,
+/// `shift_closed.rs`), and so are its unit labels (part B; `unit_label.rs`
+/// refuses them in a validation shift that prints nothing).
+fn admits(mode: ShiftMode, kind: FactKind) -> bool {
+    match kind {
+        FactKind::Scan | FactKind::ShiftClosed => true,
+        FactKind::BoxClosed
+        | FactKind::BoxLabel
+        | FactKind::BoxException
+        | FactKind::PalletClosed
+        | FactKind::PalletLabel
+        | FactKind::PalletException => mode == ShiftMode::Aggregation,
+        FactKind::UnitLabel => mode == ShiftMode::Validation,
+    }
+}
+
 /// The shift `id` as the device entered it: `None` when there is no such
 /// shift, `Some(None)` when the device never entered it.
 async fn entered_shift(
@@ -378,17 +412,19 @@ async fn entered_shift(
     type ShiftRow = (
         String,
         String,
+        String,
         i64,
         String,
         Option<String>,
         Option<String>,
         bool,
         bool,
+        bool,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
-        "SELECT s.status, s.number_month_key, s.number_seq, s.created_from, \
+        "SELECT s.status, s.mode, s.number_month_key, s.number_seq, s.created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
-         s.pallets_enabled, \
+         s.pallets_enabled, s.validation_print_mode = 'duplicate_dm', \
          EXISTS (SELECT 1 FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
          FROM shifts s WHERE s.id = ?",
     )
@@ -399,12 +435,14 @@ async fn entered_shift(
     .map_err(ApiError::internal)?;
     let Some((
         status,
+        mode,
         month_key,
         seq,
         created_from,
         gtin14,
         issuer_prefix,
         pallets_enabled,
+        prints_duplicate,
         entered,
     )) = row
     else {
@@ -420,9 +458,11 @@ async fn entered_shift(
         id: id.to_owned(),
         number: shifts::format_number(&month_key, seq, origin),
         status: status.parse().map_err(ApiError::internal)?,
+        mode: mode.parse().map_err(ApiError::internal)?,
         gtin14: gtin14.ok_or_else(snapshot)?,
         issuer_prefix: issuer_prefix.ok_or_else(snapshot)?,
         pallets_enabled,
+        prints_duplicate,
     })))
 }
 

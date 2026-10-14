@@ -1,0 +1,11 @@
+{
+  "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+  "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  "productionDate": "2026-10-08",
+  "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  "boxCapacity": 12,
+  "plannedQty": 1200,
+  "counterpartyId": "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+  "mode": "validation",
+  "palletsEnabled": false
+}

@@ -367,6 +367,59 @@ describe("the blank's data (plan О-Ф)", () => {
     });
   });
 
+  it("heads a validation shift's blank «Проверка», as the cloud's, and an aggregation's «Агрегация» (plan РЕЖ)", () => {
+    const html = (mode: "aggregation" | "validation") =>
+      renderForm({
+        kind: "task",
+        inputs: { ...inputs, shift: { ...PLANNED, mode } },
+        generatedAt: at,
+      })?.html ?? "";
+    expect(html("validation")).toContain(`<p class="subtitle">Проверка · `);
+    expect(html("aggregation")).toContain(`<p class="subtitle">Агрегация · `);
+  });
+
+  it("passes a validation shift's duplicate print as it is, and prints its row as the cloud's blank (plan РЕЖ, B7)", () => {
+    const printing = (verification: "none" | "required") => ({
+      ...PLANNED,
+      mode: "validation" as const,
+      validationPrint: {
+        mode: "duplicate_dm" as const,
+        templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+        verification,
+      },
+    });
+    expect(taskFormData({ ...inputs, shift: printing("required") }, at)).toMatchObject({
+      validationPrintMode: "duplicate_dm",
+      validationPrintVerification: "required",
+    });
+    expect(taskFormData({ ...inputs, shift: printing("none") }, at)).toMatchObject({
+      validationPrintMode: "duplicate_dm",
+      validationPrintVerification: "none",
+    });
+    // No policy (a host before protocol 5) and `none` print nothing.
+    for (const shift of [
+      { ...PLANNED, mode: "validation" as const },
+      { ...PLANNED, mode: "validation" as const, validationPrint: { mode: "none" as const } },
+    ]) {
+      expect(taskFormData({ ...inputs, shift }, at)).toMatchObject({
+        validationPrintMode: "none",
+        validationPrintVerification: "none",
+      });
+    }
+    const html = (shift: typeof PLANNED) =>
+      renderForm({ kind: "task", inputs: { ...inputs, shift }, generatedAt: at })?.html ?? "";
+    const row = (text: string) =>
+      `<div class="parameter"><dt>ПЕЧАТЬ ЭТИКЕТКИ</dt><dd>${text}</dd></div>`;
+    expect(html(printing("required"))).toContain(
+      row("Дубликат Data Matrix · обязательная проверка"),
+    );
+    expect(html(printing("none"))).toContain(row("Дубликат Data Matrix"));
+    expect(html(printing("none"))).toContain(
+      "На внешнюю упаковку переносится полный код с продукции",
+    );
+    expect(html({ ...PLANNED, mode: "validation" })).toContain(row("Без печати"));
+  });
+
   it("passes the pallet switch and the capacity as two facts: a capacity left behind a switch turned off stays", () => {
     const off = taskFormData(
       { ...inputs, shift: { ...ACTIVE, palletsEnabled: false, palletBoxCapacity: 40 } },
