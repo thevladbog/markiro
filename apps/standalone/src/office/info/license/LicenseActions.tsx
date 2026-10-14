@@ -30,7 +30,11 @@ export interface LicenseActionsProps {
  * `Документы\Markiro\Лицензия` without a file dialog) and, where no new
  * shift opens and the host allows it, «Открыть новые смены ещё 3 дня»
  * (spec §3.5), asked first, once per license. A second press while the
- * request is fetched or saved sends nothing.
+ * request is fetched or saved sends nothing; the button is busy all along.
+ * The question reads the license afresh first, so «до …» counts from the
+ * host's time now (the last known one if the host does not answer); a
+ * refusal because the extension was used or is not needed reads it again, so
+ * the offer goes when the host no longer makes it.
  */
 export function LicenseActions({ license, zone }: LicenseActionsProps) {
   const { t } = useTranslation();
@@ -43,6 +47,8 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
     gcTime: 0,
   });
   const saving = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const opening = useRef(false);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [asking, setAsking] = useState(false);
   const [notice, setNotice] = useState<LicenseText | null>(null);
@@ -52,6 +58,7 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
   const save = async () => {
     if (saving.current) return;
     saving.current = true;
+    setBusy(true);
     setSaved(null);
     setNotice(null);
     try {
@@ -72,7 +79,21 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
       // The request names the organization and its INN: once saved (or not), no copy stays.
       request.reset();
       saving.current = false;
+      setBusy(false);
     }
+  };
+
+  const ask = async () => {
+    if (opening.current) return;
+    opening.current = true;
+    // A message leaves with the next action, the saved request's too.
+    setSaved(null);
+    setNotice(null);
+    // The host's time now, for «до …»; a failed read keeps the last answer (no throw).
+    await queryClient.refetchQueries({ queryKey: officeKeys.license, exact: true });
+    opening.current = false;
+    const fresh = queryClient.getQueryData<OfficeLicense>(officeKeys.license) ?? license;
+    if (fresh.emergency.available) setAsking(true);
   };
 
   return (
@@ -80,19 +101,11 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
       <h3 id={titleId}>{t("office.about.license.actionsTitle")}</h3>
       <p className="office-note">{t("office.about.license.activation.hint")}</p>
       <div className="standalone-form__actions">
-        <Button variant="secondary" loading={request.isPending} onClick={() => void save()}>
+        <Button variant="secondary" loading={busy} onClick={() => void save()}>
           {t("office.about.license.activation.save")}
         </Button>
         {emergencyOffered && (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              // A message leaves with the next action, the saved request's too.
-              setSaved(null);
-              setNotice(null);
-              setAsking(true);
-            }}
-          >
+          <Button variant="secondary" onClick={() => void ask()}>
             {t("office.about.license.emergency.open")}
           </Button>
         )}
@@ -131,6 +144,7 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
           license={license}
           zone={zone}
           onClose={() => setAsking(false)}
+          onRefused={() => void queryClient.invalidateQueries({ queryKey: officeKeys.license })}
           onEnabled={(next) => {
             setAsking(false);
             queryClient.setQueryData(officeKeys.license, next);
@@ -148,16 +162,17 @@ export function LicenseActions({ license, zone }: LicenseActionsProps) {
   );
 }
 
-function emergencyFailure(error: unknown): LicenseText {
+/** A refusal in words, and whether it says the host's state moved on (the license is read again). */
+function emergencyFailure(error: unknown): { text: LicenseText; stale: boolean } {
   if (error instanceof HostError && error.code === "conflict") {
     if (error.details.constraint === "emergency_used") {
-      return { key: "office.about.license.emergency.used" };
+      return { text: { key: "office.about.license.emergency.used" }, stale: true };
     }
     if (error.details.constraint === "emergency_not_needed") {
-      return { key: "office.about.license.emergency.notNeeded" };
+      return { text: { key: "office.about.license.emergency.notNeeded" }, stale: true };
     }
   }
-  return { key: errorMessageKey(error) };
+  return { text: { key: errorMessageKey(error) }, stale: false };
 }
 
 function EmergencyDialog({
@@ -165,11 +180,14 @@ function EmergencyDialog({
   zone,
   onClose,
   onEnabled,
+  onRefused,
 }: {
   license: OfficeLicense;
   zone: string | null;
   onClose: () => void;
   onEnabled: (next: OfficeLicense) => void;
+  /** The host refused because the extension was used or is not needed: its state moved on. */
+  onRefused: () => void;
 }) {
   const { t } = useTranslation();
   const [failure, setFailure] = useState<LicenseText | null>(null);
@@ -185,7 +203,9 @@ function EmergencyDialog({
     try {
       next = await enable.mutateAsync(null);
     } catch (error) {
-      setFailure(emergencyFailure(error));
+      const refusal = emergencyFailure(error);
+      setFailure(refusal.text);
+      if (refusal.stale) onRefused();
       return;
     }
     onEnabled(next);

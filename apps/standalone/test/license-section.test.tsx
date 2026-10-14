@@ -309,6 +309,7 @@ describe("«Лицензия» on «Информация»", () => {
     await within(card).findByRole("region", { name: "Было → станет" });
     fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
     await screen.findByRole("dialog");
+    const reads = session.api.getLicense.mock.calls.length;
     // A new revision reads the license again (`Office`), and the host does not answer it.
     session.api.getLicense.mockRejectedValue(
       new HostError({ kind: "transport", code: "unreachable", message: "down" }),
@@ -324,7 +325,7 @@ describe("«Лицензия» on «Информация»", () => {
         />
       </ThemeProvider>,
     );
-    await waitFor(() => expect(session.api.getLicense).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(session.api.getLicense).toHaveBeenCalledTimes(reads + 1));
     // The failure says so above the last answer, which stays with what the person was doing.
     expect(await within(card).findByRole("button", { name: "Повторить" })).toBeTruthy();
     expect(within(card).getByRole("region", { name: "Было → станет" })).toBeTruthy();
@@ -800,6 +801,94 @@ describe("the activation request and the emergency extension", () => {
         "Аварийное продление не нужно: новые смены и так открываются.",
       ),
     ).toBeTruthy();
+  });
+
+  it.each(["emergency_used", "emergency_not_needed"])(
+    "reads the license again when the host refuses the extension as %s",
+    async (constraint) => {
+      const session = sessionWith(RESTRICTED);
+      session.api.enableLicenseEmergency.mockRejectedValue(
+        new HostError({
+          kind: "api",
+          code: "conflict",
+          status: 409,
+          message: "refused",
+          details: { constraint },
+        }),
+      );
+      const card = await openLicense(session);
+      fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+      const dialog = await screen.findByRole("dialog");
+      // The host's state has moved on under the page: the extension is no longer offered.
+      session.api.getLicense.mockResolvedValue(
+        licenseOf({ ...RESTRICTED, emergency: { available: false, until: null } }),
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Открыть на 3 дня" }));
+      await within(dialog).findByText(/^Аварийное продление/);
+      await waitFor(() =>
+        expect(
+          within(card).queryByRole("button", {
+            name: "Открыть новые смены ещё 3 дня",
+            hidden: true,
+          }),
+        ).toBeNull(),
+      );
+    },
+  );
+
+  it("asks with the host's time read afresh, not the time the page was opened at", async () => {
+    const session = sessionWith(RESTRICTED);
+    const card = await openLicense(session);
+    // A day later by the host's clock: the extension would end a day later too.
+    session.api.getLicense.mockResolvedValue(
+      licenseOf({ ...RESTRICTED, effectiveAt: "2027-11-21T06:00:00Z" }),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/^Открывать новые смены ещё 3 дня, до 24\.11 09:00\?/),
+    ).toBeTruthy();
+  });
+
+  it("asks with the last known time when the host does not answer the fresh read", async () => {
+    const session = sessionWith(RESTRICTED);
+    const card = await openLicense(session);
+    const reads = session.api.getLicense.mock.calls.length;
+    session.api.getLicense.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/^Открывать новые смены ещё 3 дня, до 23\.11 09:00\?/),
+    ).toBeTruthy();
+    expect(session.api.getLicense.mock.calls.length).toBe(reads + 1);
+  });
+
+  it("stays busy while the request is saved, not only while it is fetched", async () => {
+    const session = sessionWith();
+    session.api.getActivationRequest.mockResolvedValue(ACTIVATION_REQUEST);
+    const files = fakeOfficeFiles();
+    let finish: () => void = () => undefined;
+    files.save.mockImplementation(
+      (segments, saved) =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              segments: [...segments],
+              path: `C:\\Markiro\\${segments.join("\\")}`,
+              files: saved.map((file) => file.name),
+            });
+        }),
+    );
+    const card = await openLicense(session, files);
+    const button = within(card).getByRole("button", { name: "Сохранить запрос на активацию" });
+    fireEvent.click(button);
+    await waitFor(() => expect(files.save).toHaveBeenCalledTimes(1));
+    expect(button).toHaveProperty("disabled", true);
+    finish();
+    await within(card).findByText(/^Запрос сохранён/);
+    expect(button).toHaveProperty("disabled", false);
   });
 
   it("offers the technologist neither the extension nor the request", async () => {
