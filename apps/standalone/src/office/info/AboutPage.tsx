@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router";
 
 import { PageHeader } from "@markiro/ui";
 
@@ -14,6 +16,13 @@ export function AboutPage() {
   const { t } = useTranslation();
   const role = useOfficeSession().user.role;
   const sections = ABOUT_SECTIONS.filter((section) => section.roles.includes(role));
+  const location = useLocation();
+  useEffect(() => {
+    // A link to a section's anchor (the license band, plan ЛЦ-3) brings that
+    // section into view with the focus, so a keyboard and a screen reader start there.
+    if (location.hash === "") return;
+    document.getElementById(decodeURIComponent(location.hash.slice(1)))?.focus();
+  }, [location.hash, location.key]);
   return (
     <>
       <PageHeader title={t("office.about.title")} />
@@ -27,7 +36,7 @@ export function AboutPage() {
         </ul>
       </nav>
       {sections.map(({ id, Component }) => (
-        <div key={id} id={id}>
+        <div key={id} id={id} tabIndex={-1}>
           <Component />
         </div>
       ))}

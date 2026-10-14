@@ -452,6 +452,24 @@
   justify-content: space-between;
 }
 
+/*
+  The license's band above the office's pages (plan ЛЦ-3): a polite region on
+  the screen from the start; empty, it takes no room.
+*/
+.office-banner {
+  display: grid;
+  gap: 8px;
+  padding: 12px 24px 0;
+}
+
+.office-banner:empty {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 /* A product's name, and its print name on a quieter second line when it differs. */
 .product-name {
   display: grid;
