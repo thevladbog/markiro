@@ -241,6 +241,10 @@ describe("the license as the office reads it", () => {
     expect(text(TRIAL)).toEqual([
       "Пробный период: осталось 12 дн. Загрузите файл лицензии в разделе «Информация».",
     ]);
+    // A trial whose days the host does not count: no «осталось 0 дн.».
+    expect(text(licenseOf({ ...TRIAL, daysLeft: null }))).toEqual([
+      "Пробный период. Загрузите файл лицензии в разделе «Информация».",
+    ]);
     expect(text(TRIAL_ENDING)).toEqual([
       "Пробный период заканчивается 24.10 12:00. После этого новые смены не будут открываться без файла лицензии.",
     ]);
@@ -356,6 +360,7 @@ describe("the license as the office reads it", () => {
       }
     }
     for (const kind of [
+      "trialNoDays",
       "clockBehind",
       "clockAhead",
       "trialExpired",

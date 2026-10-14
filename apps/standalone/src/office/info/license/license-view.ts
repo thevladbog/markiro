@@ -296,7 +296,10 @@ export function noticeText(
     end === null || end === undefined ? "—" : licenseDayMonth(lastMomentBefore(end), zone);
   switch (notice.kind) {
     case "trial":
-      return { key, values: { n: license.daysLeft ?? 0 } };
+      // Without the host's count of days, no number: «осталось 0 дн.» would be false.
+      return license.daysLeft === null
+        ? { key: "office.banner.license.trialNoDays" }
+        : { key, values: { n: license.daysLeft } };
     case "trialEnding":
       // A moment (the wizard's time of day), not a last day.
       return {
