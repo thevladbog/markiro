@@ -467,6 +467,11 @@ export interface HostApi {
    */
   checkCode: (codeHash: string) => Promise<CodeCheck>;
   /**
+   * A product's photo for the station's copy (beta 3): the device key only,
+   * `photo: null` without one; `not_found` for an unknown product.
+   */
+  getDeviceProductPhoto: (productId: string) => Promise<ProductPhotoState>;
+  /**
    * What a label is printed again from (plan СКЛ): a unit by its code's hash,
    * a box or a pallet by its SSCC, of any station and any shift of this site.
    * The full code comes only in the answer's body.
@@ -870,6 +875,10 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/device/codes/${encodeURIComponent(codeHash)}`, {
         timeoutMs: CODE_CHECK_TIMEOUT_MS,
         schema: codeCheckSchema,
+      }),
+    getDeviceProductPhoto: (productId) =>
+      client.request("GET", `/v1/device/products/${encodeURIComponent(productId)}/photo`, {
+        schema: productPhotoStateSchema,
       }),
     warehouseLookup: (lookup) =>
       client.request("POST", "/v1/device/warehouse/lookup", {

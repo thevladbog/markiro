@@ -678,6 +678,36 @@ describe("a new shift on the station", () => {
     expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
   });
 
+  it("shows the product's photo on the product card when the station holds it, and the monogram when it does not (beta 3)", async () => {
+    const local = await copiesOf(CATALOG);
+    const [milk] = await local.query(
+      "SELECT id FROM ref_products WHERE gtin14 = ?",
+      ["04600682000013"],
+      z.object({ id: z.string() }),
+    );
+    // Without a photo: the monogram on the colour panel.
+    const first = renderNew(local);
+    await chooseMilk();
+    expect(document.querySelector(".new-shift__product-monogram")?.textContent).toBe("М");
+    expect(document.querySelector(".new-shift__product-photo img")).toBeNull();
+    first.view.unmount();
+
+    await local.transaction([
+      {
+        sql: "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64) VALUES (?, ?, 2, 1, ?)",
+        values: [milk?.id, "a".repeat(64), "/9j/4AAQSkZJRgABAQ=="],
+      },
+    ]);
+    renderNew(local);
+    await chooseMilk();
+    await waitFor(() =>
+      expect(document.querySelector(".new-shift__product-photo img")?.getAttribute("src")).toBe(
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==",
+      ),
+    );
+    expect(document.querySelector(".new-shift__product-monogram")).toBeNull();
+  });
+
   it("chooses the product a scan names, by its barcode or its code of marking", async () => {
     const local = await copiesOf(CATALOG);
     for (const raw of ["4600682000013", KM]) {
@@ -1232,6 +1262,21 @@ describe("the search of a product", () => {
       target: { value: "сыр" },
     });
     expect(productButtons()).toEqual([1, 2, 3, 4, 5].map((n) => `Сыр ${n} — ${GTINS[n - 1]}`));
+  });
+
+  it("cuts a long product name with an ellipsis instead of widening the row: the name is its own element, the full text the button's title (beta 3)", async () => {
+    const long =
+      "Молоко питьевое ультрапастеризованное 3,2% 0,9 л в упаковке Tetra Pak с крышкой Premium Edition";
+    renderNew(await copiesOf([...CATALOG, productItem(9, long, GTINS[1] ?? GTINS[0])]));
+    fireEvent.change(await screen.findByLabelText("Название товара"), {
+      target: { value: "молоко питьевое" },
+    });
+    const [button] = screen.getAllByRole("button", { name: /—/ });
+    expect(button?.getAttribute("title")).toBe(`${long} — ${GTINS[1] ?? GTINS[0]}`);
+    expect(button?.querySelector(".new-shift__result-name")?.textContent).toBe(long);
+    expect(button?.querySelector(".new-shift__result-gtin")?.textContent).toBe(
+      ` — ${GTINS[1] ?? GTINS[0]}`,
+    );
   });
 
   it("starts at two letters, whatever the case or the spaces, and does not count digits as letters", async () => {

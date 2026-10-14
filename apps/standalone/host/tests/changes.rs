@@ -748,7 +748,8 @@ async fn catalog_records_ride_the_feed_with_their_flags() {
                 "data": {
                     "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л", "printName": "Молоко 3,2%",
                     "chzProductGroupCode": 8, "boxCapacity": 12, "palletBoxCapacity": 40, "shelfLifeDays": 10,
-                    "defaultBoxTemplateId": milk, "defaultPalletTemplateId": null, "archived": false, "status": "active"
+                    "defaultBoxTemplateId": milk, "defaultPalletTemplateId": null, "archived": false, "status": "active",
+                    "photoChecksum": null
                 }
             }),
             // An archived product stays, with its flag; without a group and
@@ -758,7 +759,8 @@ async fn catalog_records_ride_the_feed_with_their_flags() {
                 "data": {
                     "gtin14": "04600682000020", "name": "Кефир 1% 0,9 л", "printName": null,
                     "chzProductGroupCode": null, "boxCapacity": null, "palletBoxCapacity": null, "shelfLifeDays": null,
-                    "defaultBoxTemplateId": null, "defaultPalletTemplateId": null, "archived": true, "status": "draft"
+                    "defaultBoxTemplateId": null, "defaultPalletTemplateId": null, "archived": true, "status": "draft",
+                    "photoChecksum": null
                 }
             }),
         ])

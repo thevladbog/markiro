@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
@@ -36,6 +43,8 @@ import {
 import type { WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
+import { hueFromGtin, productMonogram } from "./product-accent.js";
+import { ProductPhoto } from "./ProductPhoto.js";
 import { TemplatePreview } from "./TemplatePreview.js";
 
 /** At most this many products answer a search by name. */
@@ -506,9 +515,18 @@ export function NewShift({
                 size="floor"
                 variant="secondary"
                 fullWidth
+                className="new-shift__result"
+                title={t("floor.newShift.result", { name: product.name, gtin: product.gtin14 })}
+                aria-label={t("floor.newShift.result", {
+                  name: product.name,
+                  gtin: product.gtin14,
+                })}
                 onClick={() => choose(product)}
               >
-                {t("floor.newShift.result", { name: product.name, gtin: product.gtin14 })}
+                {/* A long name is cut with an ellipsis, never a sideways scroll;
+                    the full text is the button's title. */}
+                <span className="new-shift__result-name">{product.name}</span>
+                <span className="new-shift__result-gtin">{` — ${product.gtin14}`}</span>
               </Button>
             ))
           )}
@@ -526,8 +544,24 @@ export function NewShift({
     return (
       <>
         <Card className="new-shift__product" padding="var(--sp-3)">
-          <h3>{form.product.name}</h3>
-          <div className="new-shift__code">{form.product.gtin14}</div>
+          <div
+            className="new-shift__product-photo"
+            style={{ "--product-hue": String(hueFromGtin(form.product.gtin14)) } as CSSProperties}
+          >
+            <ProductPhoto
+              local={local}
+              productId={form.product.id}
+              fallback={
+                <span className="new-shift__product-monogram" aria-hidden="true">
+                  {productMonogram(form.product.name)}
+                </span>
+              }
+            />
+          </div>
+          <div className="new-shift__product-text">
+            <h3 title={form.product.name}>{form.product.name}</h3>
+            <div className="new-shift__code">{form.product.gtin14}</div>
+          </div>
         </Card>
         {/* Plan РЕЖ puts the shift's mode and the duplicate print here, as the
             cloud's two-column `new-shift__modes` rows under the product. */}
@@ -660,7 +694,9 @@ export function NewShift({
                         )
                       }
                     >
-                      {template.name}
+                      <span className="new-shift__ellipsis" title={template.name}>
+                        {template.name}
+                      </span>
                     </Button>
                   ))}
                 </div>

@@ -772,6 +772,12 @@ pub struct ProductRecord {
     pub default_pallet_template_id: Option<String>,
     pub archived: bool,
     pub status: ProductStatus,
+    /// SHA-256 of the product's photo in lower-case hex, `null` without one
+    /// (beta 3): the station fetches the bytes from
+    /// `GET /v1/device/products/{id}/photo` when its copy differs. A record
+    /// from an older host has none.
+    #[serde(default)]
+    pub photo_checksum: Option<String>,
 }
 
 /// `data` of a `label_templates` item. A disabled template stays in the feed

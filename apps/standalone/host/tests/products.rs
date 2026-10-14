@@ -137,6 +137,8 @@ async fn an_administrator_creates_lists_and_updates_products() {
         data.as_object_mut().unwrap().remove(office_only);
     }
     data["status"] = json!("active");
+    // Beta 3: the record names the product's photo by its checksum, none here.
+    data["photoChecksum"] = Value::Null;
     assert_eq!(
         admin.feed(1).await,
         json!([{ "entity": "products", "id": id, "rev": 2, "deleted": false, "data": data }])

@@ -86,6 +86,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "ref_operator_badges",
             "ref_operators",
             "ref_org",
+            "ref_product_photos",
             "ref_products",
             "ref_site",
             "ref_template_defaults",
@@ -873,10 +874,30 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 /// got the column `office_reviewed_at` appended to its text, is replaced by its text in
 /// `before`. The migration's own shape is pinned in `migration_0016_*` and
 /// `test/floor-conflict-notices-migration.test.ts`.
+///
+/// The same function sets aside migration `0017` (beta 3, the products' photos), which they do
+/// not examine either: the table `ref_product_photos`, and `ref_products`, which got
+/// `photo_checksum` appended to its text.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
+        .filter(|row| row["tbl_name"] != "ref_product_photos")
         .map(|mut row| {
+            if row["type"] == "table" && row["name"] == "ref_products" {
+                let old = before
+                    .iter()
+                    .find(|old| old["type"] == "table" && old["name"] == "ref_products")
+                    .expect("the products table was there before");
+                let (old_sql, new_sql) =
+                    (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
+                const COLUMN: &str = ", photo_checksum TEXT";
+                assert_eq!(
+                    new_sql.replacen(COLUMN, "", 1),
+                    old_sql,
+                    "0017 only adds its column to ref_products"
+                );
+                row["sql"] = old["sql"].clone();
+            }
             if row["type"] == "table" && row["name"] == "outbox" {
                 let old = before
                     .iter()

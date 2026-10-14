@@ -1145,9 +1145,26 @@ length and the JPEG signature `FF D8 FF` (`validate::product_photo`) and
 parses no picture, as the logo. `GET/PUT/DELETE /v1/office/products/{id}/photo`:
 every office role reads, administrators and technologists write (the roles
 read again inside the write transaction), an unknown product is
-`not_found`; the photo takes no revision and rides no feed, the same photo
-again writes nothing, and the list names it by `photoChecksum` (SHA-256 of
-the bytes) without the bytes. The dialog writes it at once by its own
+`not_found`; the same photo again writes nothing, and the list names it by
+`photoChecksum` (SHA-256 of the bytes) without the bytes. A change takes one
+host revision (beta 3: the station shows the photo) but not the product's
+`rev`, which is the office's `expectedRev` (the dialog uploads a photo and
+saves the product after it): host migration `0027` adds `products.photo_rev`,
+the feed re-sends the product at that revision (`FEED_KEYS`: `photo_rev > ?1
+AND photo_rev <> rev`) with `photoChecksum` in its record (`ProductRecord`, a
+record from an older host reads as none), and a station fetches the bytes
+with `GET /v1/device/products/{id}/photo` (a device key, `photo: null`
+without one; in the license gate's `NEVER`). The station keeps them as
+base64 text in `ref_product_photos` (shell migration `0017`, `Disposable`:
+a forget empties it; at most 400 000 characters a row), beside
+`ref_products.photo_checksum`: `syncProductPhotos` (`src/local/product-photos.ts`)
+runs after every successful reference sync, fetches up to 25 photos whose
+stored checksum differs from the record's, drops those of products that have
+none and never fails the sync (a failed pass is tried again with the sync's
+backoff). `ProductPhoto` shows it on the shift card and the new-shift product
+card, and falls back to the colour panel's monogram while there is none, on a
+failed read and when the picture does not decode. `SYNC_SCHEMA_VERSION` is 5
+since then. The dialog writes it at once by its own
 buttons, not by «Сохранить». A backup copies the whole database file, so it
 holds the photos (a thousand products — up to 300 MB).
 
@@ -1493,7 +1510,7 @@ nothing new. An unreadable release is quarantined like any record (the code
 stays a local duplicate, fail closed). Its statement is pinned on the shell's
 SQLite in `tests/local_db.rs`.
 `ENTITY_SET` names the kept entities, the acted-on ones and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v4"`):
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults,code_releases;v5"`):
 raise the version whenever a record schema or the meaning of a copy table
 changes, so every device syncs from zero once and gets back what an older
 build quarantined or kept differently.

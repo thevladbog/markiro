@@ -105,6 +105,8 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("ref_operator_badges", TableClass::Disposable),
     ("ref_operators", TableClass::Disposable),
     ("ref_org", TableClass::Disposable),
+    // A product's photo as the host sent it (beta 3, migration `0017`): derived from the copies.
+    ("ref_product_photos", TableClass::Disposable),
     ("ref_products", TableClass::Disposable),
     ("ref_site", TableClass::Disposable),
     ("ref_template_defaults", TableClass::Disposable),

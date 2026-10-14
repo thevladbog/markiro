@@ -341,6 +341,7 @@ export function App({
     sendWarehouseRecords: hostApi.sendWarehouseRecords,
     conflictStatus: hostApi.conflictStatus,
     listDisplacements: hostApi.listDisplacements,
+    deviceProductPhoto: hostApi.getDeviceProductPhoto,
     dispatch,
   });
 

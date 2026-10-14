@@ -130,6 +130,7 @@ describe("local database on node:sqlite", () => {
       "ref_operator_badges",
       "ref_operators",
       "ref_org",
+      "ref_product_photos",
       "ref_products",
       "ref_site",
       "ref_template_defaults",

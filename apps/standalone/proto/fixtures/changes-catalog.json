@@ -113,7 +113,8 @@
         "defaultBoxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
         "defaultPalletTemplateId": null,
         "archived": false,
-        "status": "active"
+        "status": "active",
+        "photoChecksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
       }
     },
     {
@@ -132,7 +133,8 @@
         "defaultBoxTemplateId": null,
         "defaultPalletTemplateId": null,
         "archived": true,
-        "status": "draft"
+        "status": "draft",
+        "photoChecksum": null
       }
     },
     { "entity": "category_template_defaults", "id": "15:pallet", "rev": 67, "deleted": true },
