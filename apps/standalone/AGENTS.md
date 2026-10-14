@@ -3966,15 +3966,20 @@ The screen of such a shift (task B6, `src/floor/unit-labels/*.tsx`; the cloud
 station's `ProductLabelInstrument`, `ProductLabelVerification` and
 `ProductLabelHistory`, its `productLabels.*` texts word for word under
 `floor.unitLabels.*`, `attempt` with `{{number}}`) is the validation screen
-with three additions, chosen in the same one place by the snapshot's policy.
-`UnitLabelPanel` stands under `ValidationPanel`: the current label's state in
+with three additions, chosen in the same one place by the snapshot's policy
+(`unitLabelPolicy` / `printsUnitLabels`). The work on the labels — their state,
+the window's settling, sends, checks, decisions and history — is the hook
+`useUnitLabelWork` (`src/floor/unit-labels/use-unit-label-work.ts`, as the
+cloud's `use-product-label-work.ts`), over the screen's queue, stops and gate;
+the screen keeps the scanner and hands it the window's scans (`scanInWindow`)
+and the accepted unit's label (`sendAccepted`). `UnitLabelPanel` stands under `ValidationPanel`: the current label's state in
 words (none yet, «Отправлено на принтер», «Этикетка подтверждена», «Проверка
 пропущена», «Печать требует уточнения», «Этикетка не отправлена», «Печать
 этикетки») with its serial's last six characters, and the check — the job's,
 or the snapshot's before any job (`requiredHint` / `noneHint`: the cloud's
 acceptance found its panel said nothing before the first scan). An accepted
 unit's label is sent at once in the scan's turn (`sendUnitLabel`, its first
-send); then `settleUnit` reads the station's one unresolved label and, while
+send); then `settle` reads the station's one unresolved label and, while
 there is one, `Stop` `unit_label` opens `UnitLabelVerification`, a
 `FullScreenDialog` (dialog semantics, the focus taken and kept, back to the
 window itself when a view drops the pressed button; outside the polite
