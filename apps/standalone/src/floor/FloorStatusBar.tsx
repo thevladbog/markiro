@@ -380,7 +380,7 @@ export function FloorStatusBar({
   const operatorValue =
     operator === null
       ? t("floor.status.nobody")
-      : t("floor.status.operatorValue", { name: operator.name, login: operator.login });
+      : operator.name;
   return (
     <section className="station-status-bar floor-status" aria-label={t("floor.status.label")}>
       {/*

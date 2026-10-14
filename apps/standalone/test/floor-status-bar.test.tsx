@@ -128,7 +128,19 @@ describe("the floor's status bar", () => {
         operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
       }),
     );
-    expect(await screen.findByText("Анна Кузнецова, табельный номер 0042")).toBeTruthy();
+    expect(await screen.findByText("Анна Кузнецова")).toBeTruthy();
+  });
+
+  it("shows the operator's name only: the personnel number is for the sign-in, not the bar", async () => {
+    const view = render(
+      bar({
+        local: await synced([ORG]),
+        operator: { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null },
+      }),
+    );
+    await screen.findByText("Анна Кузнецова");
+    expect(view.container.textContent).not.toContain("0042");
+    expect(view.container.textContent).not.toContain("табельный");
   });
 
   it("shows the operator's name as text, whatever characters it holds", async () => {
@@ -139,7 +151,7 @@ describe("the floor's status bar", () => {
         operator: { id: "op-1", login: "0042", name, role: null },
       }),
     );
-    expect(await screen.findByText(`${name}, табельный номер 0042`)).toBeTruthy();
+    expect(await screen.findByText(name)).toBeTruthy();
     expect(view.container.querySelector("img, b")).toBeNull();
   });
 

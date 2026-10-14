@@ -2186,7 +2186,7 @@ describe("the operator on the floor", () => {
    * hub's own «Вошёл: …» line is gone, as on the cloud station). Gone again
    * once the operator is signed out — the bar then says nobody is in.
    */
-  const SIGNED_IN = "Анна Кузнецова, табельный номер 0042";
+  const SIGNED_IN = "Анна Кузнецова";
   /** The hub of the line: its title, under the status bar that names the operator. */
   const onTheList = async () => {
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
@@ -2237,7 +2237,7 @@ describe("the operator on the floor", () => {
     await onTheList();
     expect(
       within(screen.getByRole("region", { name: "Строка состояния цеха" })).getByText(
-        "Анна Кузнецова, табельный номер 0042",
+        "Анна Кузнецова",
       ),
     ).toBeTruthy();
   });
@@ -2932,7 +2932,7 @@ describe("the operator on the floor", () => {
     );
     await link.revision(43);
     const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
-    expect(await within(bar).findByText("Анна Петрова, табельный номер 0042")).toBeTruthy();
+    expect(await within(bar).findByText("Анна Петрова")).toBeTruthy();
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
   });
 

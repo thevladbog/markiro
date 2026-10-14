@@ -116,7 +116,6 @@
       "line": "Линия",
       "operator": "Оператор",
       "nobody": "Никто не вошёл",
-      "operatorValue": "{{name}}, табельный номер {{login}}",
       "device": "Устройство",
       "shift": "Смена",
       "serials": "Номеров SSCC",
