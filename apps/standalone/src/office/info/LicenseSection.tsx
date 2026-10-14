@@ -38,19 +38,27 @@ import {
  * used of what the license gives, the features, and what binds the file to
  * this site. Every role reads it; the actions are the administrator's. A
  * host that does not answer is this section's error alone: the page stands.
+ * A failed re-read (each host revision reads the license again) keeps the
+ * last answer on screen under the error, so a checked file, a message or an
+ * open dialog stays with what the person was doing.
  */
 export function LicenseSection() {
   const { t } = useTranslation();
   const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
-  const time = useBackupTime(license.isSuccess);
+  const data = license.data;
+  const time = useBackupTime(data !== undefined);
+  const failure = license.isError ? (
+    <LoadError error={license.error} onRetry={() => void license.refetch()} />
+  ) : null;
   return (
     <Card title={t("office.about.license.title")} titleAs="h2">
-      {license.isError ? (
-        <LoadError error={license.error} onRetry={() => void license.refetch()} />
-      ) : license.isSuccess && time.ready ? (
-        <LicenseBody license={license.data} zone={time.zone} />
+      {data !== undefined && time.ready ? (
+        <>
+          {failure}
+          <LicenseBody license={data} zone={time.zone} />
+        </>
       ) : (
-        <PageLoading />
+        (failure ?? <PageLoading />)
       )}
     </Card>
   );

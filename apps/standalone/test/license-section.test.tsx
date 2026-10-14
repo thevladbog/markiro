@@ -4,10 +4,12 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { standaloneActivationRequestSchema } from "@markiro/domain";
+import { ThemeProvider } from "@markiro/ui";
 
 import { HostError } from "../src/host/client.js";
 import type { LicensePreview, LicenseTerms, OfficeLicense } from "../src/host/protocol.js";
 import { OfficeFilesError } from "../src/office/exports/office-files.js";
+import { Office } from "../src/office/Office.js";
 import { HOST_ID } from "./support/fixtures.js";
 import {
   ACTIVE_LICENSE,
@@ -27,6 +29,7 @@ import {
   fakeHostApi,
   fakeOfficeSession,
   ORG_PROFILE,
+  quietLabelRendering,
   renderOffice,
   TECHNOLOGIST,
   type FakeOfficeSession,
@@ -64,6 +67,11 @@ async function openLicense(
   renderOffice(session, { files });
   const nav = await screen.findByRole("navigation", { name: "Разделы офиса" });
   fireEvent.click(within(nav).getByRole("link", { name: "Информация" }));
+  return licenseCard();
+}
+
+/** The license card of «Информация» once it has loaded. */
+async function licenseCard(): Promise<HTMLElement> {
   const heading = await screen.findByRole("heading", { name: "Лицензия", level: 2 });
   const card = heading.closest(".mk-card");
   if (!(card instanceof HTMLElement)) throw new Error("no license card");
@@ -261,6 +269,39 @@ describe("«Лицензия» on «Информация»", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Скопировать идентификатор хоста" }));
     expect(await within(card).findByText("Идентификатор хоста скопирован.")).toBeTruthy();
     expect(writeText).toHaveBeenCalledWith(HOST_ID);
+  });
+
+  it("keeps the checked file and an open dialog when a re-read of the license fails", async () => {
+    const session = sessionWith(RESTRICTED);
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    const files = fakeOfficeFiles();
+    const view = renderOffice(session, { files, hostRevision: 1, initialPath: "/about" });
+    const card = await licenseCard();
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    await within(card).findByRole("region", { name: "Было → станет" });
+    fireEvent.click(within(card).getByRole("button", { name: "Открыть новые смены ещё 3 дня" }));
+    await screen.findByRole("dialog");
+    // A new revision reads the license again (`Office`), and the host does not answer it.
+    session.api.getLicense.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    view.rerender(
+      <ThemeProvider defaultTheme="dark">
+        <Office
+          session={session}
+          labels={quietLabelRendering()}
+          files={files}
+          hostRevision={2}
+          initialPath="/about"
+        />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(session.api.getLicense).toHaveBeenCalledTimes(2));
+    // The failure says so above the last answer, which stays with what the person was doing.
+    expect(await within(card).findByRole("button", { name: "Повторить" })).toBeTruthy();
+    expect(within(card).getByRole("region", { name: "Было → станет" })).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(within(stateOf(card)).getByText("Ограничена: новые смены не открываются")).toBeTruthy();
   });
 
   it("explains a host that does not answer in the section alone, and reads again", async () => {
