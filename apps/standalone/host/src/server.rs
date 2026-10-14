@@ -313,6 +313,15 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::counterparties::update_counterparty),
         )
         .route(
+            "/v1/office/disaggregation-reasons",
+            get(crate::routes::disaggregation_reasons::list_reasons)
+                .post(crate::routes::disaggregation_reasons::create_reason),
+        )
+        .route(
+            "/v1/office/disaggregation-reasons/{id}",
+            put(crate::routes::disaggregation_reasons::update_reason),
+        )
+        .route(
             "/v1/office/lines",
             get(crate::routes::lines::list_lines).post(crate::routes::lines::create_line),
         )

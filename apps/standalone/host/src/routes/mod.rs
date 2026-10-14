@@ -10,6 +10,7 @@ pub mod counterparties;
 pub mod device_conflicts;
 pub mod device_shifts;
 pub mod devices;
+pub mod disaggregation_reasons;
 pub mod employees;
 pub mod facts;
 pub mod known_blocks;
