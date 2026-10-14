@@ -1090,10 +1090,10 @@ mod tests {
         }
     }
 
-    /// Both roots the office writes into are open, and the folder is the
+    /// Every root the office writes into is open, and the folder is the
     /// documents folder's `Markiro`.
     #[test]
-    fn both_roots_are_open_and_the_folder_is_markiro_under_documents() {
+    fn every_root_is_open_and_the_folder_is_markiro_under_documents() {
         // Plan ЛЦ-3 adds the license's root for the activation request.
         assert_eq!(ROOTS, ["Выгрузки", "Формы", "Лицензия"]);
         let root = tempfile::tempdir().unwrap();
@@ -1148,6 +1148,17 @@ mod tests {
                 &saved.segments,
                 "markiro-activation-request.json"
             ),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        // Not even an HTML file is opened from the license's root: forms only.
+        let html = save_files(
+            root.path(),
+            &segments(&["Лицензия", "run"]),
+            &[file("Бланк.html", b"<p>")],
+        )
+        .unwrap();
+        assert_eq!(
+            existing_form(root.path(), &html.segments, "Бланк.html"),
             Err(OfficeFilesError::InvalidRequest)
         );
         assert_eq!(LICENSE_ROOT, "Лицензия");
