@@ -240,6 +240,14 @@ fn item_state(row: &ItemRow, box_closed: bool) -> (CodePlacementState, Option<St
     }
 }
 
+/// The rows a card keeps and whether there were more than `limit` of them
+/// (a query asks for one row beyond the limit to tell).
+fn take_capped<T>(mut rows: Vec<T>, limit: usize) -> (Vec<T>, bool) {
+    let capped = rows.len() > limit;
+    rows.truncate(limit);
+    (rows, capped)
+}
+
 /// The id of a box or a pallet in a path: the station's lower-case UUID.
 pub(crate) fn pack_id(id: &str) -> Result<(), ApiError> {
     validate::client_uuid("id", id)
@@ -258,14 +266,13 @@ async fn read_box(
     else {
         return Ok(None);
     };
-    let mut items: Vec<ItemRow> = sqlx::query_as(BOX_ITEMS_SQL)
+    let items: Vec<ItemRow> = sqlx::query_as(BOX_ITEMS_SQL)
         .bind(id)
         .bind(limit + 1)
         .fetch_all(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-    let items_capped = items.len() > CARD_ROW_LIMIT as usize;
-    items.truncate(CARD_ROW_LIMIT as usize);
+    let (items, items_capped) = take_capped(items, CARD_ROW_LIMIT as usize);
     let exceptions: Vec<ExceptionRow> = sqlx::query_as(BOX_EXCEPTIONS_SQL)
         .bind(id)
         .bind(limit)
@@ -381,14 +388,13 @@ async fn read_pallet(
     else {
         return Ok(None);
     };
-    let mut members: Vec<MemberRow> = sqlx::query_as(PALLET_BOXES_SQL)
+    let members: Vec<MemberRow> = sqlx::query_as(PALLET_BOXES_SQL)
         .bind(id)
         .bind(limit + 1)
         .fetch_all(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
-    let members_capped = members.len() > CARD_ROW_LIMIT as usize;
-    members.truncate(CARD_ROW_LIMIT as usize);
+    let (members, members_capped) = take_capped(members, CARD_ROW_LIMIT as usize);
     let exceptions: Vec<PalletExceptionRow> = sqlx::query_as(PALLET_EXCEPTIONS_SQL)
         .bind(id)
         .bind(limit)
@@ -477,4 +483,16 @@ pub async fn pallet_card(
     card?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("no such pallet"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_capped;
+
+    #[test]
+    fn a_card_keeps_the_limit_and_says_when_there_was_more() {
+        assert_eq!(take_capped(vec![1, 2, 3], 3), (vec![1, 2, 3], false));
+        assert_eq!(take_capped(vec![1, 2, 3, 4], 3), (vec![1, 2, 3], true));
+        assert_eq!(take_capped(Vec::<u8>::new(), 3), (vec![], false));
+    }
 }

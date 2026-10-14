@@ -90,6 +90,21 @@ async fn yard() -> Yard {
     });
     let mut closed1_fact = fact(&record_id(5), "box_closed", &shift, closed1);
     closed1_fact["operatorId"] = json!(operator);
+    // The operator who closed pallet 1 is on its card and in the list.
+    let mut pallet_closed_fact = fact(
+        &record_id(9),
+        "pallet_closed",
+        &shift,
+        pallet_closed(
+            &pallet_id(1),
+            &pallets,
+            40,
+            2,
+            &instant(20, 0),
+            &instant(41, 0),
+        ),
+    );
+    pallet_closed_fact["operatorId"] = json!(operator);
     accept(
         &admin,
         &floor,
@@ -102,19 +117,7 @@ async fn yard() -> Yard {
             scan(6, 4, 2, 30),
             scan(7, 5, 2, 31),
             fact(&record_id(8), "box_closed", &shift, closed2),
-            fact(
-                &record_id(9),
-                "pallet_closed",
-                &shift,
-                pallet_closed(
-                    &pallet_id(1),
-                    &pallets,
-                    40,
-                    2,
-                    &instant(20, 0),
-                    &instant(41, 0),
-                ),
-            ),
+            pallet_closed_fact,
             fact(&record_id(10), "box_exception", &shift, taken_apart),
             fact(&record_id(11), "pallet_exception", &shift, reprint),
         ],
@@ -410,6 +413,19 @@ async fn a_pallet_card_lists_every_box_that_joined_it() {
         [(sscc(1501).as_str(), false), (sscc(1500).as_str(), true)]
     );
     assert_eq!(card["membersCapped"], false);
+    assert_eq!(card["operatorName"], "Анна Кузнецова");
+    let units: Vec<Value> = card["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["units"].clone())
+        .collect();
+    assert_eq!(
+        units,
+        [json!(0), json!(1)],
+        "box 2 was taken apart; box 1 keeps code 1 (code 2 is the colleague's now)"
+    );
+    assert_eq!(card["exceptions"].as_array().unwrap().len(), 1);
     assert_eq!(card["exceptions"][0]["kind"], "reprint");
     assert_eq!(card["exceptions"][0]["reasonCode"], "damaged_label");
     assert_eq!(card["exceptions"][0]["deviceName"].is_string(), true);
@@ -437,6 +453,12 @@ async fn an_open_pallet_has_no_sscc_and_its_closed_box() {
     assert_eq!(card["boxCountReported"], Value::Null);
     assert_eq!(card["members"].as_array().unwrap().len(), 1);
     assert_eq!(card["members"][0]["sscc"], sscc(3501));
+    assert_eq!(
+        card["exceptions"],
+        json!([]),
+        "pallet 1's reprint is not this pallet's"
+    );
+    assert_eq!(card["operatorName"], Value::Null);
     assert_eq!(
         (card["boxes"].clone(), card["units"].clone()),
         (json!(1), json!(1))

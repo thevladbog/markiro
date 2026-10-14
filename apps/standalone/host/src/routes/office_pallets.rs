@@ -258,3 +258,47 @@ pub async fn list_pallets(
             .collect(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_cursor, next_cursor, OPEN_KEY};
+
+    const ID: &str = "a0000000-0000-4000-8000-000000000002";
+
+    #[test]
+    fn an_open_pallets_cursor_is_o_and_its_id_and_comes_back_as_the_open_key() {
+        assert_eq!(next_cursor(ID, None).unwrap(), format!("o~{ID}"));
+        assert_eq!(
+            decode_cursor(&format!("o~{ID}")).unwrap(),
+            (OPEN_KEY.to_owned(), ID.to_owned())
+        );
+    }
+
+    #[test]
+    fn a_closed_pallets_cursor_is_its_closing_in_milliseconds_and_comes_back_as_the_instant() {
+        let cursor = next_cursor(ID, Some("2026-10-08T06:00:09.123Z")).unwrap();
+        assert_eq!(cursor, format!("1791439209123~{ID}"));
+        assert_eq!(
+            decode_cursor(&cursor).unwrap(),
+            ("2026-10-08T06:00:09.123Z".to_owned(), ID.to_owned())
+        );
+    }
+
+    #[test]
+    fn a_cursor_this_list_did_not_give_is_refused() {
+        for bad in [
+            "",
+            "o",
+            "o~",
+            "o~nope",
+            &format!("x~{ID}"),
+            &format!("-1~{ID}"),
+            &format!("1e3~{ID}"),
+            &format!("O~{ID}"),
+            &format!("2026-10-08~{ID}"),
+            &format!("1791439209123~{}", ID.to_uppercase()),
+        ] {
+            assert!(decode_cursor(bad).is_err(), "{bad} was accepted");
+        }
+    }
+}

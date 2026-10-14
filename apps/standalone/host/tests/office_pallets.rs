@@ -96,6 +96,21 @@ async fn yard() -> Yard {
     });
     let mut closed1_fact = fact(&record_id(5), "box_closed", &shift, closed1);
     closed1_fact["operatorId"] = json!(operator);
+    // The operator who closed pallet 1 is on its card and in the list.
+    let mut pallet_closed_fact = fact(
+        &record_id(9),
+        "pallet_closed",
+        &shift,
+        pallet_closed(
+            &pallet_id(1),
+            &pallets,
+            40,
+            2,
+            &instant(20, 0),
+            &instant(41, 0),
+        ),
+    );
+    pallet_closed_fact["operatorId"] = json!(operator);
     accept(
         &admin,
         &floor,
@@ -108,19 +123,7 @@ async fn yard() -> Yard {
             scan(6, 4, 2, 30),
             scan(7, 5, 2, 31),
             fact(&record_id(8), "box_closed", &shift, closed2),
-            fact(
-                &record_id(9),
-                "pallet_closed",
-                &shift,
-                pallet_closed(
-                    &pallet_id(1),
-                    &pallets,
-                    40,
-                    2,
-                    &instant(20, 0),
-                    &instant(41, 0),
-                ),
-            ),
+            pallet_closed_fact,
             fact(&record_id(10), "box_exception", &shift, taken_apart),
             fact(&record_id(11), "pallet_exception", &shift, reprint),
         ],
