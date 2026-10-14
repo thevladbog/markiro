@@ -491,6 +491,29 @@ fn protected_routes() -> Router<AppState> {
                 .post(crate::routes::office_exports::record_export),
         )
         .route(
+            "/v1/office/export-files",
+            get(crate::routes::office_export_files::list)
+                .post(crate::routes::office_export_files::begin),
+        )
+        .route(
+            "/v1/office/export-files/settings",
+            get(crate::routes::office_export_files::get_settings)
+                .put(crate::routes::office_export_files::put_settings),
+        )
+        .route(
+            "/v1/office/export-files/{id}/chunks/{seq}",
+            get(crate::routes::office_export_files::get_chunk)
+                .put(crate::routes::office_export_files::put_chunk),
+        )
+        .route(
+            "/v1/office/export-files/{id}/complete",
+            post(crate::routes::office_export_files::complete),
+        )
+        .route(
+            "/v1/office/export-files/{id}/download",
+            post(crate::routes::office_export_files::open_download),
+        )
+        .route(
             "/v1/office/shifts/{id}/pallet-report-data",
             get(crate::routes::office_reports::pallet_report),
         )

@@ -141,21 +141,36 @@ pub async fn list_exports(
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let read = async {
         require_shift(&mut tx, &id).await?;
-        sqlx::query_as::<_, HistoryRow>(EXPORT_HISTORY_SQL)
+        let rows = sqlx::query_as::<_, HistoryRow>(EXPORT_HISTORY_SQL)
             .bind(&id)
             .bind(i64::from(SHIFT_EXPORT_HISTORY_LIMIT))
             .fetch_all(&mut *tx)
             .await
-            .map_err(ApiError::internal)
+            .map_err(ApiError::internal)?;
+        // The files each export stored on the host (migration `0029`), by the
+        // export's `documentId`; an export from before they were stored has none.
+        let batches = rows
+            .iter()
+            .filter_map(|row| {
+                serde_json::from_str::<ShiftExportRecord>(&row.details)
+                    .ok()
+                    .map(|record| record.document_id)
+            })
+            .collect::<Vec<_>>();
+        let files =
+            crate::routes::office_export_files::files_of_batches(&mut tx, &id, &batches).await?;
+        Ok::<_, ApiError>((rows, files))
     }
     .await;
     tx.rollback().await.map_err(ApiError::internal)?;
-    let items = read?
+    let (rows, files) = read?;
+    let items = rows
         .into_iter()
         .map(|row| {
             let record: ShiftExportRecord =
                 serde_json::from_str(&row.details).map_err(ApiError::internal)?;
             Ok(OfficeShiftExport {
+                files: files.get(&record.document_id).cloned().unwrap_or_default(),
                 id: row.id,
                 recorded_at: row.at,
                 user_name: row.user_name,

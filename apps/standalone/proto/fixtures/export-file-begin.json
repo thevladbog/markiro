@@ -1,0 +1,15 @@
+{
+  "id": "7a1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8",
+  "batchId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+  "partNo": 1,
+  "kind": "shift_export",
+  "targetType": "shift",
+  "targetId": "c0000000-0000-4000-8000-000000000001",
+  "formatId": "shift_xml_gismt_aggregation_pallets",
+  "formatVersion": 1,
+  "fileName": "Отчет об агрегации паллет_1.xml",
+  "sizeBytes": 5,
+  "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+  "generator": "markiro-autonom 0f3a9c1b2",
+  "contentBase64": "aGVsbG8="
+}

@@ -82,6 +82,19 @@ pub mod actions {
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";
+    /// The office stored a file it generated on the host (migration `0029`):
+    /// a part of an export, a disaggregation file or a printed form. The
+    /// target is what the file belongs to; the details name the file, never
+    /// its bytes.
+    pub const SHIFT_EXPORT_STORE: &str = "shift.export.store";
+    /// A stored file was downloaded again; `failed` (with `reason`
+    /// `corrupted`) when its bytes no longer matched their SHA-256 and the
+    /// host served nothing.
+    pub const SHIFT_EXPORT_DOWNLOAD: &str = "shift.export.download";
+    /// Stored files deleted by the retention setting; the details count them.
+    pub const SHIFT_EXPORT_PURGE: &str = "shift.export.purge";
+    /// An administrator changed how long stored files are kept.
+    pub const SHIFT_EXPORT_RETENTION: &str = "shift.export.retention";
     /// The office marked a code conflict reviewed (plan КНФ); the details name
     /// its kind, the losing shift and device and the winning shift, never the
     /// code or its hash. A conflict reviewed already writes no row.

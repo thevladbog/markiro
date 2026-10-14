@@ -64,6 +64,14 @@ pub mod codes {
     /// code checks) until an administrator resumes them (plan РК): a station
     /// sends them again later, as after a lost connection.
     pub const RESTORE_PENDING: &str = "restore_pending";
+    /// The host's store of generated files is full (host migration `0029`);
+    /// a retention setting or a smaller export makes room.
+    pub const EXPORT_STORE_FULL: &str = "export_store_full";
+    /// A generated file is larger than the host stores.
+    pub const EXPORT_FILE_TOO_LARGE: &str = "export_file_too_large";
+    /// A stored file no longer matches the SHA-256 it was stored with: the
+    /// host serves nothing of it.
+    pub const EXPORT_FILE_CORRUPTED: &str = "export_file_corrupted";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -85,6 +93,9 @@ pub mod codes {
         PAIRING_CODE_EXPIRED,
         SSCC_EXHAUSTED,
         RESTORE_PENDING,
+        EXPORT_STORE_FULL,
+        EXPORT_FILE_TOO_LARGE,
+        EXPORT_FILE_CORRUPTED,
     ];
 }
 
@@ -208,6 +219,7 @@ pub mod backup;
 pub mod cloud_import;
 pub mod code_search;
 pub mod disaggregation;
+pub mod export_files;
 pub mod license;
 pub mod pack_cards;
 pub mod pairing;
