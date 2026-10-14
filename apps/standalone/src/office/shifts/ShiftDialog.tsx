@@ -682,7 +682,7 @@ function ShiftForm({
               />
             )}
           />
-          <p className="office-note">
+          <p className="shift-duplicate__note">
             {t(modeFixed ? "office.shifts.duplicate.frozen" : "office.shifts.duplicate.copyHint")}
           </p>
         </section>

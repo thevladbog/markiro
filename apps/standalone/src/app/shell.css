@@ -158,6 +158,13 @@
   font: var(--text-h3);
 }
 
+/* The section's closing note, in the size and tone of a field's hint. */
+.shift-duplicate__note {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
 .standalone-form__actions {
   display: flex;
   justify-content: flex-end;
