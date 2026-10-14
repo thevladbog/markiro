@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -51,7 +52,10 @@ function renderAbout(
           <OfficeLinkProvider value={{ status: link, sync: null }}>
             <OfficeFilesProvider value={files}>
               <AboutProvider value={about}>
-                <AboutPage />
+                {/* «Лицензия» links to the organization's profile (plan ЛЦ-3). */}
+                <MemoryRouter>
+                  <AboutPage />
+                </MemoryRouter>
               </AboutProvider>
             </OfficeFilesProvider>
           </OfficeLinkProvider>
@@ -134,11 +138,12 @@ describe("Информация", () => {
     await waitFor(() => expect(paired.hello).toHaveBeenCalledWith("https://192.168.0.7:45710"));
   });
 
-  it("keeps the license a placeholder: no license logic, only the empty state", async () => {
-    renderAbout(fakeAbout());
+  it("shows the license the host computed in its section, no longer a placeholder", async () => {
+    const { session } = renderAbout(fakeAbout());
     const license = card("Лицензия");
-    expect(within(license).getByText("Лицензирование ещё не подключено")).toBeTruthy();
-    expect(within(license).queryAllByRole("button")).toHaveLength(0);
+    expect(await within(license).findByText("Действует")).toBeTruthy();
+    expect(within(license).queryByText("Лицензирование ещё не подключено")).toBeNull();
+    expect(session.api.getLicense).toHaveBeenCalled();
     expect(within(license).queryAllByRole("textbox")).toHaveLength(0);
   });
 
