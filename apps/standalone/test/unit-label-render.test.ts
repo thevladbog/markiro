@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 
 import {
+  boxLabelFields,
   canonicalizeKm,
   DomainError,
   encodeMonoRaster,
   generateTspl,
   generateZpl,
+  parseDuplicateKm,
   renderMonoLabel,
   withPrinterDpi,
   type LabelTemplateSpec,
@@ -82,6 +84,26 @@ const RAW_PRINTERS: PrinterProfile[] = [
     dpi: 300,
   },
 ];
+
+/** The shift's duplicate layout with an `organization_logo` box beside its code. */
+function withLogoBox(spec: LabelTemplateSpec): LabelTemplateSpec {
+  return {
+    ...spec,
+    elements: [
+      ...spec.elements,
+      {
+        id: "logo",
+        kind: "organization_logo",
+        xMm: 19,
+        yMm: 10,
+        widthMm: 8,
+        heightMm: 6,
+        source: "organization",
+        fallback: "markiro",
+      },
+    ],
+  };
+}
 
 describe("the fields of a unit label", () => {
   it("are one unit's label with its full code, from the snapshot, the shift and the moment", async () => {
@@ -183,30 +205,6 @@ describe("the logo of a unit label", () => {
   };
   const ZPL_203: PrinterProfile = RAW_PRINTERS[0] ?? raise("no printer");
 
-  function raise(message: string): never {
-    throw new Error(message);
-  }
-
-  /** The shift's duplicate layout with an `organization_logo` box beside its code. */
-  function withLogoBox(spec: LabelTemplateSpec): LabelTemplateSpec {
-    return {
-      ...spec,
-      elements: [
-        ...spec.elements,
-        {
-          id: "logo",
-          kind: "organization_logo",
-          xMm: 19,
-          yMm: 10,
-          widthMm: 8,
-          heightMm: 6,
-          source: "organization",
-          fallback: "markiro",
-        },
-      ],
-    };
-  }
-
   // The duplicate prints a logo by the shift labels' own rule (#703), as the warehouse reprint of
   // a unit does (plan СКЛ × А4, `warehouseLabelRender`): the organization logo the shift froze,
   // else the bundled Markiro logo — never another logo than the station's other labels print.
@@ -254,6 +252,200 @@ describe("the logo of a unit label", () => {
     expect(fallbackLogo).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * Parity with the cloud station (plan РЕЖ, B8). The cloud's duplicate
+ * (`apps/station/src/lib/product-labels/fields.ts`: `duplicateLabelFields`, then
+ * `renderLabelBytes` of `print-label.ts`) is not imported; it is restated below through the
+ * shared domain, call for call: the box label's fields of one unit from the cloud's label
+ * context, the canonical code in `km.code`, and the domain's emitters at the printer's
+ * resolution with the code as the GS1 raster and no logo. The station's labels are compared
+ * with it end to end (`unitLabelFields` + `unitLabelRender`), not emitter to emitter.
+ *
+ * One difference is deliberate (review of B5): in a layout with an `organization_logo` box
+ * the station prints the logo the shift froze, else the Markiro logo, as its warehouse reprint
+ * of a unit does; the cloud's duplicate passes the emitters no logo, so the box stays blank.
+ * Without a logo box the bytes are the cloud's byte for byte. The standalone catalog has no
+ * EGAIS code, so the cloud's context below carries none (the field prints empty in both).
+ * The state machine of a job is compared with the domain's in `unit-label-work.test.ts`
+ * (`canApplyProductLabelEvent`/`applyProductLabelEvent`) and `unit-label-schema.test.ts`.
+ */
+interface CloudLabelContext {
+  productName: string;
+  productPrintName: string | null;
+  gtin14: string;
+  egaisCode: string | null;
+  shelfLifeDays: number | null;
+  operatorName: string | null;
+  counterpartyName: string | null;
+  productionDate: string | null;
+  shiftNumber: string | null;
+}
+
+/** The cloud's `duplicateLabelFields`, restated through the domain. */
+function cloudDuplicateFields(
+  context: CloudLabelContext,
+  canonicalRaw: string,
+  acceptedAt: string,
+): Record<string, string> {
+  const code = parseDuplicateKm(canonicalRaw);
+  if (code.gtin14 !== context.gtin14) throw new Error("another product's code");
+  const base = boxLabelFields({ ...context, sscc: "", itemCount: 1, closedAt: acceptedAt });
+  return { ...base, "km.code": code.raw, qty: "1", sscc: "" };
+}
+
+/** The cloud's `renderLabelBytes(spec, fields, language, rasterize, { kmDataMatrix: "raster", dpi })`. */
+async function cloudDuplicateBytes(
+  spec: LabelTemplateSpec,
+  fields: Record<string, string>,
+  printer: PrinterProfile,
+): Promise<Uint8Array> {
+  const printSpec = withPrinterDpi(spec, printer.dpi);
+  const options = { rasterizeText: fakeRaster, kmDataMatrix: "raster" as const };
+  return latin1ToBytes(
+    printer.language === "tspl"
+      ? await generateTspl(printSpec, fields, options)
+      : await generateZpl(printSpec, fields, options),
+  );
+}
+
+/** The cloud's label context of `shift`: what the cloud station passes from the same shift. */
+function cloudContext(shift: EnteredWork, operatorName: string | null): CloudLabelContext {
+  const { product, counterpartyName } = shift.snapshot;
+  return {
+    productName: product.name,
+    productPrintName: product.printName,
+    gtin14: product.gtin14,
+    egaisCode: null,
+    shelfLifeDays: product.shelfLifeDays,
+    operatorName,
+    counterpartyName,
+    productionDate: shift.copy.productionDate,
+    shiftNumber: shift.copy.number,
+  };
+}
+
+type EnteredWork = Awaited<ReturnType<typeof printingShift>>;
+
+describe("a unit label against the cloud station's duplicate", () => {
+  const LOGO: MonoBitmap = {
+    width: 16,
+    height: 8,
+    stride: 2,
+    pixels: new Uint8Array(16).fill(0xff),
+  };
+
+  /** The fixture's shift, and the same shift with every optional value of the label left out. */
+  async function shifts(): Promise<[string, EnteredWork][]> {
+    const shift = await printingShift();
+    const bare: EnteredWork = {
+      ...shift,
+      snapshot: {
+        ...shift.snapshot,
+        product: { ...shift.snapshot.product, printName: null, shelfLifeDays: null },
+        counterpartyName: null,
+      },
+    };
+    return [
+      ["the fixture's shift", shift],
+      ["a shift without a print name, a shelf life or a counterparty", bare],
+    ];
+  }
+
+  it("has the cloud's fields, for every optional value given or left out", async () => {
+    for (const [label, shift] of await shifts()) {
+      for (const operator of ["Анна Кузнецова", null]) {
+        for (const at of [ACCEPTED_AT, "2026-10-08T23:59:59.000Z"]) {
+          expect(unitLabelFields(shift, RAW, at, operator), `${label}, ${operator}, ${at}`).toEqual(
+            cloudDuplicateFields(cloudContext(shift, operator), CANONICAL, at),
+          );
+        }
+      }
+    }
+  });
+
+  it("is the cloud's ZPL and TSPL at 203 and 300 dpi byte for byte, for a layout without a logo box", async () => {
+    const shift = await printingShift();
+    const template = shift.snapshot.validationPrint?.template;
+    if (template === undefined) throw new Error("the shift froze no duplicate template");
+    expect(template.spec.elements.some((each) => each.kind === "organization_logo")).toBe(false);
+    // The organization logo the shift froze changes nothing without a box to print it in.
+    const frozen: EnteredWork = {
+      ...shift,
+      snapshot: {
+        ...shift.snapshot,
+        organization: { name: "ООО «Пример»", inn: null, logo: LOGO },
+      },
+    };
+    for (const work of [shift, frozen]) {
+      const fallbackLogo = vi.fn(async () => LOGO);
+      const render = unitLabelRender(work, { rasterize: fakeRaster, fallbackLogo });
+      const fields = unitLabelFields(work, RAW, ACCEPTED_AT, "Анна Кузнецова");
+      const cloudFields = cloudDuplicateFields(
+        cloudContext(work, "Анна Кузнецова"),
+        CANONICAL,
+        ACCEPTED_AT,
+      );
+      for (const printer of RAW_PRINTERS) {
+        expect(await render(template.spec, fields, printer), printer.id).toEqual(
+          await cloudDuplicateBytes(template.spec, cloudFields, printer),
+        );
+      }
+      expect(fallbackLogo).not.toHaveBeenCalled();
+    }
+  });
+
+  it("differs from the cloud's in a layout with a logo box only by the logo it prints there", async () => {
+    const shift = await printingShift();
+    const template = shift.snapshot.validationPrint?.template;
+    if (template === undefined) throw new Error("the shift froze no duplicate template");
+    const frozen: EnteredWork = {
+      ...shift,
+      snapshot: {
+        ...shift.snapshot,
+        organization: { name: "ООО «Пример»", inn: null, logo: LOGO },
+      },
+    };
+    const spec = withLogoBox(template.spec);
+    const fields = unitLabelFields(frozen, RAW, ACCEPTED_AT, null);
+    const cloudFields = cloudDuplicateFields(cloudContext(frozen, null), CANONICAL, ACCEPTED_AT);
+    const render = unitLabelRender(frozen, { rasterize: fakeRaster });
+    for (const printer of RAW_PRINTERS) {
+      const ours = await render(spec, fields, printer);
+      const cloud = await cloudDuplicateBytes(spec, cloudFields, printer);
+      expect(ours, printer.id).not.toEqual(cloud);
+      // The cloud leaves the box blank: its bytes are the layout's without the box.
+      expect(cloud, printer.id).toEqual(
+        await cloudDuplicateBytes(template.spec, cloudFields, printer),
+      );
+      // The station's are the cloud's emitters' with the frozen logo in the box, nothing else.
+      const deps = { rasterizeText: fakeRaster, kmDataMatrix: "raster" as const, logo: LOGO };
+      const printSpec = withPrinterDpi(spec, printer.dpi);
+      expect(ours, printer.id).toEqual(
+        latin1ToBytes(
+          printer.language === "tspl"
+            ? await generateTspl(printSpec, cloudFields, deps)
+            : await generateZpl(printSpec, cloudFields, deps),
+        ),
+      );
+    }
+    // In ZPL the difference is one graphic field at the box's origin.
+    const zplOf = async (bytes: Promise<Uint8Array>) =>
+      new TextDecoder("latin1").decode(await bytes).split("\n");
+    const ours = await zplOf(render(spec, fields, RAW_PRINTERS[0] ?? raise("no printer")));
+    const cloud = await zplOf(
+      cloudDuplicateBytes(spec, cloudFields, RAW_PRINTERS[0] ?? raise("no printer")),
+    );
+    const extra = ours.filter((line) => !cloud.includes(line));
+    expect(extra).toHaveLength(1);
+    expect(extra[0]).toMatch(/^\^FO\d+,\d+\^GFA,/);
+    expect(ours.filter((line) => !extra.includes(line))).toEqual(cloud);
+  });
+});
+
+function raise(message: string): never {
+  throw new Error(message);
+}
 
 describe("a snapshot that prints the duplicate", () => {
   it("is read with its duplicate layout and check", async () => {
