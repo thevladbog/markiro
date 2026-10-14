@@ -474,6 +474,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_boxes::list_pallets),
         )
         .route(
+            "/v1/office/shifts/{id}/scans",
+            get(crate::routes::office_scan_history::list_scans),
+        )
+        .route(
             "/v1/office/shifts/{id}/exceptions",
             get(crate::routes::office_shift_review::list_exceptions),
         )

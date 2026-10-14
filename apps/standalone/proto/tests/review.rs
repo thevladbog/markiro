@@ -1,8 +1,9 @@
 use markiro_proto::review::{
     ConflictKind, ConflictStatusRequest, ConflictStatusResponse, DeviceDisplacements,
-    ExceptionSource, ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions,
-    OfficeShiftExports, OfficeShiftRejections, CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE,
-    DISPLACEMENT_PAGE_SIZE, MAX_CONFLICT_STATUS_RECORDS, SHIFT_REVIEW_LIMIT,
+    ExceptionSource, ExceptionSubject, OfficeConflictPage, OfficeScanHistoryPage,
+    OfficeShiftExceptions, OfficeShiftExports, OfficeShiftRejections, ScanHistoryVerdict,
+    CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, DISPLACEMENT_PAGE_SIZE, MAX_CONFLICT_STATUS_RECORDS,
+    SHIFT_REVIEW_LIMIT,
 };
 use markiro_proto::{ExceptionKind, FactKind};
 use serde::{de::DeserializeOwned, Serialize};
@@ -86,4 +87,29 @@ fn a_status_request_with_a_field_it_does_not_know_is_refused() {
     let mut request = fixture("conflict-status-request.json");
     request["extra"] = serde_json::json!(1);
     assert!(serde_json::from_value::<ConflictStatusRequest>(request).is_err());
+}
+
+#[test]
+fn a_page_of_a_shifts_scans_round_trips_and_carries_no_whole_code() {
+    let page: OfficeScanHistoryPage = round_trip("office-shift-scans.json");
+    assert_eq!(
+        page.items.iter().map(|i| i.verdict).collect::<Vec<_>>(),
+        vec![
+            ScanHistoryVerdict::Duplicate,
+            ScanHistoryVerdict::Ok,
+            ScanHistoryVerdict::Invalid
+        ]
+    );
+    assert!(page.next_cursor.is_some());
+    // Only the GTIN and at most four characters of the serial.
+    assert!(page.items.iter().all(|i| i
+        .serial_tail
+        .as_deref()
+        .map_or(true, |t| t.chars().count() <= 4)));
+    let text = fixture("office-shift-scans.json").to_string();
+    assert!(!text.contains('\u{1d}') && !text.contains("canonical"));
+    assert_eq!(
+        "wrong_gtin".parse::<ScanHistoryVerdict>(),
+        Ok(ScanHistoryVerdict::WrongGtin)
+    );
 }

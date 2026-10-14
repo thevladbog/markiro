@@ -178,6 +178,82 @@ pub struct OfficeShiftRejections {
     pub total: u32,
 }
 
+/// The most scans one page of a shift's scan history lists.
+pub const SCAN_HISTORY_PAGE_SIZE: u32 = 50;
+/// The most a client may ask for in one page.
+pub const SCAN_HISTORY_MAX_PAGE_SIZE: u32 = 100;
+
+/// What the journal says about a scan of the work screen: `ok` — accepted
+/// into a box (or a validation shift's list); `duplicate` — the code was
+/// scanned before (`duplicateSource` says where); `wrong_gtin` — the code is
+/// another product's; `invalid` — not a readable code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanHistoryVerdict {
+    Ok,
+    Duplicate,
+    WrongGtin,
+    Invalid,
+}
+
+impl ScanHistoryVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanHistoryVerdict::Ok => "ok",
+            ScanHistoryVerdict::Duplicate => "duplicate",
+            ScanHistoryVerdict::WrongGtin => "wrong_gtin",
+            ScanHistoryVerdict::Invalid => "invalid",
+        }
+    }
+}
+
+impl std::str::FromStr for ScanHistoryVerdict {
+    type Err = String;
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text {
+            "ok" => Ok(ScanHistoryVerdict::Ok),
+            "duplicate" => Ok(ScanHistoryVerdict::Duplicate),
+            "wrong_gtin" => Ok(ScanHistoryVerdict::WrongGtin),
+            "invalid" => Ok(ScanHistoryVerdict::Invalid),
+            other => Err(format!("unknown scan verdict {other}")),
+        }
+    }
+}
+
+/// One scan of a shift's history, as the office reads it
+/// (`GET /v1/office/shifts/{id}/scans`). The code never travels whole: only
+/// its GTIN and the last characters of its serial (`serialTail`, at most
+/// four), and `null` for both when the scan was no readable code. A box and a
+/// pallet come with their SSCC (`null` while open or not yet closed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeScanHistoryItem {
+    pub id: String,
+    pub scanned_at: String,
+    pub received_at: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub operator_name: Option<String>,
+    pub verdict: ScanHistoryVerdict,
+    /// `local` — the station's own journal knew the code; `host` — the host's.
+    pub duplicate_source: Option<String>,
+    pub gtin14: Option<String>,
+    pub serial_tail: Option<String>,
+    pub box_id: Option<String>,
+    pub box_sscc: Option<String>,
+    pub pallet_id: Option<String>,
+    pub pallet_sscc: Option<String>,
+}
+
+/// A page of a shift's scans, newest first. `nextCursor` is opaque: send it
+/// back as `cursor` for the next page; `null` on the last one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeScanHistoryPage {
+    pub items: Vec<OfficeScanHistoryItem>,
+    pub next_cursor: Option<String>,
+}
+
 /// An export of a shift the office saved (`shift.export` in the audit trail), as
 /// `GET /v1/office/shifts/{id}/exports` lists it: when, by whom (the office user's
 /// name now, `None` when the user is gone), and the record of `ShiftExportRecord`.
