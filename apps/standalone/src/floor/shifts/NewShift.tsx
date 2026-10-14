@@ -85,6 +85,8 @@ interface Form {
   /** The rule chose the template, or only one fits: nothing to choose. */
   templateFixed: boolean;
   productionDate: string;
+  /** «Дата смены»: the working day, today in the organization's zone until the operator moves it. */
+  plannedDate: string;
   plannedQty: string;
   boxCapacity: string;
   /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
@@ -233,6 +235,7 @@ export function NewShift({
           templateId: fixed,
           templateFixed: fixed !== null,
           productionDate: civilToday(ready.timeZone, current.current.now()),
+          plannedDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
           pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
@@ -421,8 +424,8 @@ export function NewShift({
       productId: form.product.id,
       boxTemplateId: form.templateId,
       productionDate: form.productionDate,
-      // The working day: today in the organization's zone, whatever production date was chosen.
-      plannedDate: civilToday(ready?.timeZone ?? null, current.current.now()),
+      // The working day: today in the organization's zone unless the operator moved it.
+      plannedDate: form.plannedDate,
       boxCapacity: checked.boxCapacity,
       plannedQty: checked.plannedQty,
       ...(pallets.kind === "pallets" ? { pallets: pallets.pallets } : {}),
@@ -614,6 +617,21 @@ export function NewShift({
               // The production date is required: clearing it keeps the date shown.
               onValueChange={(value) => {
                 if (value !== undefined) update({ productionDate: value });
+              }}
+            />
+          </div>
+          <div className="new-shift__date">
+            <DatePicker
+              label={t("floor.newShift.plannedDate")}
+              value={form.plannedDate}
+              locale="ru-RU"
+              calendarLabel={t("floor.newShift.calendar")}
+              previousMonthLabel={t("floor.newShift.previousMonth")}
+              nextMonthLabel={t("floor.newShift.nextMonth")}
+              disabled={frozen}
+              // The shift date is required too: clearing it keeps the date shown.
+              onValueChange={(value) => {
+                if (value !== undefined) update({ plannedDate: value });
               }}
             />
           </div>

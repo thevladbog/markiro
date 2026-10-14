@@ -116,6 +116,11 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
             <span className="shift-card__date-part">
               {t("floor.shifts.productionDate", { date: formatCivilDate(copy.productionDate) })}
             </span>
+            {copy.plannedDate === null ? null : (
+              <span className="shift-card__date-part">
+                {t("floor.shifts.plannedDate", { date: formatCivilDate(copy.plannedDate) })}
+              </span>
+            )}
           </div>
           <div className="shift-card__mode">
             <Badge className="shift-card__mode-badge" size="office">

@@ -346,6 +346,17 @@
   row-gap: var(--sp-1);
 }
 
+/*
+ * 1024×600: the production date and the shift date stand one above the other
+ * in the narrow column, so the card's rows are packed closer to keep the
+ * 72 px action and every fact on the card.
+ */
+@media (max-height: 700px) {
+  .shift-hub .shift-card__details {
+    gap: var(--sp-1);
+  }
+}
+
 .shift-hub .shift-card__date-part {
   min-width: 0;
   overflow: hidden;
@@ -674,7 +685,7 @@
   display: grid;
   min-width: 0;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1.3fr)) repeat(2, minmax(0, 1fr));
   align-items: start;
 }
 

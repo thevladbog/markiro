@@ -877,7 +877,8 @@ async fn master_rows(raw: &mut sqlx::SqliteConnection, tables: &str) -> Vec<Valu
 ///
 /// The same function sets aside migration `0017` (beta 3, the products' photos), which they do
 /// not examine either: the table `ref_product_photos`, and `ref_products`, which got
-/// `photo_checksum` appended to its text.
+/// `photo_checksum` appended to its text, and migration `0018` (beta 3, the shift date on the
+/// station): `floor_shifts`, which got `planned_date` appended to its text.
 fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
     rows.into_iter()
         .filter(|row| row["tbl_name"] != "floor_displacements")
@@ -897,6 +898,23 @@ fn without_0016(rows: Vec<Value>, before: &[Value]) -> Vec<Value> {
                     "0017 only adds its column to ref_products"
                 );
                 row["sql"] = old["sql"].clone();
+            }
+            if row["type"] == "table" && row["name"] == "floor_shifts" {
+                if let Some(old) = before
+                    .iter()
+                    .find(|old| old["type"] == "table" && old["name"] == "floor_shifts")
+                {
+                    let (old_sql, new_sql) =
+                        (old["sql"].as_str().unwrap(), row["sql"].as_str().unwrap());
+                    // SQLite puts the column after the last one, before the table's constraints.
+                    const COLUMN: &str = ", planned_date TEXT\n  CHECK (planned_date IS NULL\n    OR planned_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')";
+                    assert_eq!(
+                        new_sql.replacen(COLUMN, "", 1),
+                        old_sql,
+                        "0018 only adds its column to floor_shifts"
+                    );
+                    row["sql"] = old["sql"].clone();
+                }
             }
             if row["type"] == "table" && row["name"] == "outbox" {
                 let old = before
@@ -5167,6 +5185,13 @@ async fn migration_0016_keeps_the_outbox_and_adds_the_conflict_notices() {
     assert!(MIGRATOR.iter().any(|migration| migration.version == 16));
 }
 
+/// A shift copy as a station before migration `0018` wrote it (no `planned_date` column).
+const FLOOR_SHIFT_BEFORE_0018: &str = "INSERT INTO floor_shifts (host_id, device_id, id, number, \
+    status, mode, pallets_enabled, created_from, line_id, product_id, product_name, \
+    product_gtin14, production_date, box_capacity, box_template_id, seen_at) VALUES \
+    ('host-1', 'device-1', 'shift-old', 'OCT26-001', 'active', 'aggregation', 0, 'office', \
+    'line-1', 'product-1', 'Молоко', '04600682000013', '2026-10-08', 12, 'template-1', 1)";
+
 /// A station database of the first beta (beta 2, commit `0aac2b1af`) had the shell
 /// migrations `0001`–`0010`, `0012` and `0013`. The application's start applies the rest,
 /// lowest first, and the result is the schema a new database has: the same tables, indexes and
@@ -5194,9 +5219,25 @@ async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
     .run(&mut raw)
     .await
     .unwrap();
+    // A shift copy of the first beta: it has no shift date (migration `0018`, beta 3).
+    sqlx::query(FLOOR_SHIFT_BEFORE_0018)
+        .execute(&mut raw)
+        .await
+        .unwrap();
     raw.close().await.unwrap();
 
     let upgraded = LocalDb::open(dir.path()).await.unwrap();
+    let kept = upgraded
+        .query(
+            "SELECT id, production_date, planned_date FROM floor_shifts",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(kept.into_iter().map(Value::Object).collect()),
+        json!([{ "id": "shift-old", "production_date": "2026-10-08", "planned_date": null }])
+    );
     let (_fresh_dir, fresh) = open().await;
     let objects = "SELECT type, name, tbl_name FROM sqlite_master \
                    WHERE name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' \
@@ -5354,6 +5395,85 @@ fn shell_migration_versions_are_unique() {
     prefixes.dedup();
     assert_eq!(prefixes.len(), files, "two files share a version number");
     assert_eq!(files, versions.len());
+}
+
+/// A station database of the third beta (migrations `0001`–`0017`, before the shift date) gets
+/// `planned_date` (migration `0018`): the copies stay, the column is NULL for them, and a copy
+/// written after takes a civil date and nothing else.
+#[tokio::test]
+async fn a_beta3_station_database_gets_the_shift_date_and_keeps_its_shifts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    let old: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 17)
+        .cloned()
+        .collect();
+    assert!(old.iter().any(|migration| migration.version == 17));
+    assert!(!old.iter().any(|migration| migration.version == 18));
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(old),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(FLOOR_SHIFT_BEFORE_0018)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let shifts = db
+        .query("SELECT id, planned_date FROM floor_shifts", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(shifts.into_iter().map(Value::Object).collect()),
+        json!([{ "id": "shift-old", "planned_date": null }])
+    );
+    let column = db
+        .query(
+            "SELECT \"notnull\" AS required, dflt_value AS dflt FROM pragma_table_info('floor_shifts') \
+             WHERE name = 'planned_date'",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(column.into_iter().map(Value::Object).collect()),
+        json!([{ "required": 0, "dflt": null }])
+    );
+    // A copy written by this build names the date; a malformed one is refused by the column.
+    let write = |date: &str| {
+        format!(
+            "{} ",
+            FLOOR_SHIFT_BEFORE_0018
+                .replace("shift-old", &format!("shift-{date}"))
+                .replace("seen_at)", "seen_at, planned_date)")
+                .replace("template-1', 1)", &format!("template-1', 1, '{date}')"))
+        )
+    };
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query(&write("2026-10-12"))
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    assert!(sqlx::query(&write("12.10.2026"))
+        .execute(&mut raw)
+        .await
+        .is_err());
+    raw.close().await.unwrap();
 }
 
 /// Beta 3: a forget takes the upgrade's copy of the database with it, side files

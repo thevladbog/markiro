@@ -37,6 +37,12 @@ export interface ShiftCopy {
   productGtin14: string;
   counterpartyName: string | null;
   productionDate: string;
+  /**
+   * The shift's own date («Дата смены», the cloud's `plannedDate`, beta 3):
+   * `null` for a copy a host before beta 3 sent, which the screens show
+   * nothing extra for.
+   */
+  plannedDate: string | null;
   plannedQty: number | null;
   boxCapacity: number;
   boxTemplateId: string;
@@ -70,6 +76,8 @@ const HOST_FIELDS = [
   ["product_gtin14", "productGtin14"],
   ["counterparty_name", "counterpartyName"],
   ["production_date", "productionDate"],
+  // Absent from a host before beta 3 (migration `0018`): `->>` yields NULL.
+  ["planned_date", "plannedDate"],
   ["planned_qty", "plannedQty"],
   ["box_capacity", "boxCapacity"],
   ["box_template_id", "boxTemplateId"],
@@ -246,6 +254,7 @@ const copyRow = z.object({
   product_gtin14: z.string(),
   counterparty_name: z.string().nullable(),
   production_date: z.string(),
+  planned_date: z.string().nullable(),
   planned_qty: z.number().nullable(),
   box_capacity: z.number(),
   box_template_id: z.string(),
@@ -259,7 +268,7 @@ const copyRow = z.object({
 
 const COPY_COLUMNS =
   "id, number, status, local_state, mode, pallets_enabled, created_from, line_id, product_id, " +
-  "product_name, product_gtin14, counterparty_name, production_date, planned_qty, " +
+  "product_name, product_gtin14, counterparty_name, production_date, planned_date, planned_qty, " +
   "box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, " +
   "opened_at, closed_at, " +
   "entered_at IS NOT NULL AS entered";
@@ -279,6 +288,7 @@ function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
     productGtin14: row.product_gtin14,
     counterpartyName: row.counterparty_name,
     productionDate: row.production_date,
+    plannedDate: row.planned_date,
     plannedQty: row.planned_qty,
     boxCapacity: row.box_capacity,
     boxTemplateId: row.box_template_id,

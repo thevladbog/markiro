@@ -6919,9 +6919,15 @@ names `plannedDate` only when it differs from the production date, the update ro
 as any changed field. The office list has a «Дата смены» column and a shift-date
 period (`plannedFrom`/`plannedTo`, both ends, narrowing the production-date period)
 served by `shifts_planned_date`; the card shows it and the task form prints it. The
-station (`NewShift`) sends today in the organization's zone (`civilToday`); it keeps
-no copy of the date yet (no `floor_shifts` column, no shell migration), so its shift
-card still shows the production date alone.
+station keeps the date: shell migration `0018` adds the nullable
+`floor_shifts.planned_date` (`ShiftCopy.plannedDate`, `null` for a copy a host before
+beta 3 sent or one made before the migration; no default, a refresh fills it). The
+hub's shift card shows «Дата смены» beside the production date when it has one and
+nothing extra when it has none. The new-shift form (`NewShift`) has a second DatePicker,
+«Дата смены», today in the organization's zone to begin with (`civilToday`) and editable
+like the production date (cleared, it keeps the date shown); `isShiftOfRequest` compares
+it only when both the host's answer and the body name one. The work screen shows neither
+date, and the station prints no shift task form, so nothing else shows it.
 
 ## Usage statistics in the support text (beta 3)
 

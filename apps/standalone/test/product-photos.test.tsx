@@ -220,6 +220,7 @@ const COPY: ShiftCopy = {
   productGtin14: "04600682000013",
   counterpartyName: null,
   productionDate: "2026-10-14",
+  plannedDate: null,
   plannedQty: 1200,
   boxCapacity: 12,
   boxTemplateId: "44444444-4444-4444-8444-444444444444",
