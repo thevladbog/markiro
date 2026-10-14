@@ -42,6 +42,11 @@ pub const FORM_EXTENSION: &str = "html";
 /// The folder under the documents folder.
 pub const APP_FOLDER: &str = "Markiro";
 
+/// The folder under [`APP_FOLDER`] where an administrator puts update
+/// packages (plan ОБН-2, spec §10.5). The office never writes into it, so it
+/// is not one of [`ROOTS`]; `update_open_folder` makes it and shows it.
+pub const UPDATES_ROOT: &str = "Обновления";
+
 /// The most files one call writes, and their most bytes in all.
 pub const MAX_FILES: usize = 100_000;
 pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
@@ -533,6 +538,12 @@ fn launch_explorer(_target: &Path, _what: &str) -> Result<(), OfficeFilesError> 
 
 fn show_in_explorer(folder: &Path) -> Result<(), OfficeFilesError> {
     launch_explorer(folder, "open_office_folder")
+}
+
+/// Shows a folder of the app other than the office's (the updates folder,
+/// plan ОБН-2) in Windows Explorer, started as for the office's folders.
+pub(crate) fn show_folder(folder: &Path) -> Result<(), OfficeFilesError> {
+    launch_explorer(folder, "update_open_folder")
 }
 
 /// Opens a form's `.html` (found by [`existing_form`]) with the program

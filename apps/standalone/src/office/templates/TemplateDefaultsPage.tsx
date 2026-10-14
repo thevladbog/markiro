@@ -25,6 +25,7 @@ import type {
 import { templateDefaultsUpdate } from "../../host/requests.js";
 import { errorProp } from "../../lib/form-error.js";
 import { useCan } from "../access.js";
+import { searchableSelect } from "../select-search.js";
 import {
   usePalletSheets,
   useProductGroups,
@@ -370,6 +371,7 @@ function TemplateDefaultsForm({
       key: "category",
       title: t("office.templateDefaults.table.category"),
       wrap: true,
+      minWidth: 180,
       render: (row) => groupName(groups.data, row.code, t),
     },
     {
@@ -387,7 +389,7 @@ function TemplateDefaultsForm({
       render: (row) =>
         row.kind === "label" ? (
           <Select
-            native
+            {...searchableSelect(t)}
             id={rowId(row.key)}
             aria-label={t("office.templateDefaults.templateNamed", named(row))}
             // A category default always has a template: «Убрать» clears it, not «Не выбран».
@@ -405,7 +407,7 @@ function TemplateDefaultsForm({
           />
         ) : (
           <Select
-            native
+            {...searchableSelect(t)}
             id={rowId(row.key)}
             aria-label={t("office.templateDefaults.templateNamed", named(row))}
             options={sheetChoices(
@@ -456,7 +458,7 @@ function TemplateDefaultsForm({
             {ORG_DEFAULTS.map(({ field, purpose }) => (
               <Fragment key={field}>
                 <Select
-                  native
+                  {...searchableSelect(t)}
                   id={orgId(field)}
                   label={t(`office.templateDefaults.fields.${field}`)}
                   hint={t("office.templateDefaults.orgHint")}
@@ -476,7 +478,7 @@ function TemplateDefaultsForm({
                 {purpose === "pallet" && (
                   <>
                     <Select
-                      native
+                      {...searchableSelect(t)}
                       id={orgId(ORG_SHEET_FIELD)}
                       label={t(`office.templateDefaults.fields.${ORG_SHEET_FIELD}`)}
                       hint={t("office.templateDefaults.sheetHint")}

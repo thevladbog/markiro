@@ -1,5 +1,5 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "tenant": {
     "id": "imp-test-atoll",
     "name": "ООО «Атолл»"
@@ -201,6 +201,8 @@
       "shelfLifeDays": 10,
       "archived": false,
       "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000002",
+      "egaisCode": null,
+      "defaultCounterpartyId": "0c0c0000-0000-4000-8000-000000000002",
       "lost": ["price"]
     },
     {
@@ -214,6 +216,8 @@
       "shelfLifeDays": 5000,
       "archived": false,
       "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000003",
+      "egaisCode": null,
+      "defaultCounterpartyId": null,
       "lost": ["externalRef"]
     },
     {
@@ -227,7 +231,9 @@
       "shelfLifeDays": null,
       "archived": true,
       "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000004",
-      "lost": ["egaisCode"]
+      "egaisCode": "0123",
+      "defaultCounterpartyId": null,
+      "lost": []
     },
     {
       "id": "0e0e0000-0000-4000-8000-000000000004",
@@ -240,6 +246,23 @@
       "shelfLifeDays": null,
       "archived": false,
       "defaultLabelTemplateId": null,
+      "egaisCode": null,
+      "defaultCounterpartyId": null,
+      "lost": []
+    },
+    {
+      "id": "0e0e0000-0000-4000-8000-000000000005",
+      "gtin14": "04607001234562",
+      "name": "Пиво светлое 0,5 л",
+      "printName": null,
+      "chzProductGroupCode": 15,
+      "boxCapacity": 20,
+      "palletBoxCapacity": 60,
+      "shelfLifeDays": 180,
+      "archived": false,
+      "defaultLabelTemplateId": null,
+      "egaisCode": "0150320000001234567",
+      "defaultCounterpartyId": "0c0c0000-0000-4000-8000-000000000001",
       "lost": []
     }
   ],

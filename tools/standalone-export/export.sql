@@ -35,7 +35,7 @@ last_close AS (
   SELECT max(closed_at) AS at FROM shifts WHERE tenant_id = :'tenant_id'
 )
 SELECT json_build_object(
-  'formatVersion', 1,
+  'formatVersion', 2,
   'tenant', (SELECT json_build_object('id', o.id, 'name', o.name)
     FROM organization o WHERE o.id = :'tenant_id'),
   'orgProfile', (SELECT json_build_object(
@@ -71,9 +71,8 @@ SELECT json_build_object(
       'chzProductGroupCode', p.chz_product_group_code, 'boxCapacity', p.box_capacity,
       'palletBoxCapacity', p.pallet_box_capacity, 'shelfLifeDays', p.shelf_life_days,
       'archived', p.archived, 'defaultLabelTemplateId', p.default_label_template_id,
+      'egaisCode', p.egais_code, 'defaultCounterpartyId', p.default_counterparty_id,
       'lost', to_json(array_remove(ARRAY[
-        CASE WHEN p.default_counterparty_id IS NOT NULL THEN 'defaultCounterparty' END,
-        CASE WHEN p.egais_code IS NOT NULL THEN 'egaisCode' END,
         CASE WHEN p.external_ref IS NOT NULL THEN 'externalRef' END,
         CASE WHEN EXISTS (SELECT 1 FROM product_images i
           WHERE i.tenant_id = p.tenant_id AND i.product_id = p.id) THEN 'photo' END,

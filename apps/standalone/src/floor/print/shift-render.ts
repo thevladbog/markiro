@@ -5,7 +5,7 @@ import { rasterizeSheetText } from "../../labels/rasterizer.js";
 import { renderSheetBytes } from "../../labels/sheet-render.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { renderLabel, type LabelFields, type LabelPrinter } from "./label-render.js";
-import type { RenderLabel } from "./print-jobs.js";
+import type { PrintJob, RenderLabel } from "./print-jobs.js";
 
 /**
  * The one line a label without its logo leaves (the cloud station's
@@ -13,6 +13,40 @@ import type { RenderLabel } from "./print-jobs.js";
  * label prints with the box empty, and nothing of the shift or the logo is in it.
  */
 export const LOGO_UNAVAILABLE_LINE = "station: label logo unavailable, printing without it";
+
+/**
+ * The diagnostic line of an A4 sheet printed without the shift's EGAIS code
+ * (plan ТОВ): the sheet's renderer takes only 19 digits, while a product may
+ * carry 1 to 64 characters (as in the cloud), and a frozen code can no longer
+ * be fixed for the running shift.
+ */
+export const EGAIS_NOT_ON_SHEET_LINE =
+  "station: the EGAIS code is not 19 digits, the A4 sheet prints without it";
+
+/** The sheet renderer's form of an EGAIS code (`pallet-sheet-render.ts`). */
+const SHEET_EGAIS_CODE = /^\d{19}$/u;
+
+/** Whether a shift's frozen EGAIS code is left off its A4 sheets: there is one, not of 19 digits. */
+export function egaisLeftOffSheet(product: { egaisCode?: string | null | undefined }): boolean {
+  const frozen = product.egaisCode ?? null;
+  return frozen !== null && !SHEET_EGAIS_CODE.test(frozen);
+}
+
+/**
+ * Whether `job` is a pallet's A4 sheet that goes without the shift's EGAIS code
+ * (the job's printer prints sheets): the work screen and the label panel say so,
+ * without stopping anything.
+ */
+export function sheetWithoutEgais(
+  job: Pick<PrintJob, "purpose" | "printer">,
+  shift: WorkShift,
+): boolean {
+  return (
+    job.purpose === "pallet" &&
+    job.printer?.paper === "a4" &&
+    egaisLeftOffSheet(shift.snapshot.product)
+  );
+}
 
 /** What a shift's render may be given instead of the app's own; tests give their own. */
 export interface ShiftRenderDeps {
@@ -60,13 +94,21 @@ export async function renderShiftSheet(
   }
   const own = organization.logo;
   const bitmap = own ?? (await (deps.loadMarkiro ?? loadBundledMarkiroLogo)());
+  // A frozen code of another form never stops the pallet's sheet: the sheet
+  // prints without it and one diagnostic line says so; the thermal label,
+  // whose renderer takes any text, still prints it.
+  const frozen = product.egaisCode ?? null;
+  const egaisCode = egaisLeftOffSheet(product) ? null : frozen;
+  if (frozen !== null && egaisCode === null) {
+    (deps.report ?? ((line: string) => console.error(line)))(EGAIS_NOT_ON_SHEET_LINE);
+  }
   return renderSheetBytes(
     palletSheet.spec,
     {
       sscc: fields.sscc,
       productPrintName: fields["product.printName"],
       gtin14: product.gtin14,
-      egaisCode: null,
+      egaisCode,
       productionDate: shift.copy.productionDate,
       shelfLifeDays: product.shelfLifeDays,
       boxCount: count(fields["qty.boxes"]),

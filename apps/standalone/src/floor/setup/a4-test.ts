@@ -57,6 +57,7 @@ export async function a4TestSheet(
       sscc,
       productPrintName: text.product,
       gtin14: "04600000000015",
+      // A sample: no EGAIS code (plan ТОВ prints one only from a shift).
       egaisCode: null,
       productionDate: null,
       shelfLifeDays: null,

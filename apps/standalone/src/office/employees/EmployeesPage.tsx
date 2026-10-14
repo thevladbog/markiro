@@ -189,12 +189,11 @@ export function EmployeesPage() {
         >
           <Input
             label={t("office.employees.search")}
-            hint={t("office.employees.searchHint")}
+            placeholder={t("office.employees.searchHint")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           <Select
-            native
             label={t("office.employees.linkFilter")}
             options={EMPLOYEE_FILTERS.map((value) => ({
               value,

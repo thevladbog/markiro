@@ -411,6 +411,11 @@ pub type AuditRow = (
 
 /// Every audit row of `action`, oldest first.
 pub async fn audit_trail(app: &TestApp, action: &str) -> Vec<AuditRow> {
+    audit_trail_in(&app.state.pool, action).await
+}
+
+/// [`audit_trail`] of any pool: a database a test opened itself (plan ОБН-1).
+pub async fn audit_trail_in(pool: &sqlx::SqlitePool, action: &str) -> Vec<AuditRow> {
     let rows: Vec<(
         String,
         Option<String>,
@@ -424,7 +429,7 @@ pub async fn audit_trail(app: &TestApp, action: &str) -> Vec<AuditRow> {
          FROM audit_log WHERE action = ? ORDER BY id",
     )
     .bind(action)
-    .fetch_all(&app.state.pool)
+    .fetch_all(pool)
     .await
     .unwrap();
     rows.into_iter()

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { EmployeeRecord, OfficeOperator } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
+import { chooseValue, optionTexts } from "./support/select.js";
 
 const ANNA_OP: OfficeOperator = {
   id: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
@@ -92,14 +93,13 @@ describe("office operators: the linked employee", () => {
         name: "Сотрудник оператора «Борис Орлов»",
       }),
     );
-    const select = screen.getByLabelText("Сотрудник");
     // Анна is linked already and Ольга is archived: neither is offered.
-    expect([...select.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+    expect(optionTexts("Сотрудник")).toEqual([
       "Выберите сотрудника",
       "Новый сотрудник «Борис Орлов»",
       "Пётр Иванов",
     ]);
-    fireEvent.change(select, { target: { value: PETR.id } });
+    chooseValue("Сотрудник", PETR.id);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Связать" }));
     await screen.findByText("Оператор «Борис Орлов» связан с сотрудником «Пётр Иванов».");
     expect(session.api.updateEmployee).toHaveBeenCalledWith(expect.any(String), PETR.id, {
@@ -130,7 +130,7 @@ describe("office operators: the linked employee", () => {
         name: "Сотрудник оператора «Борис Орлов»",
       }),
     );
-    fireEvent.change(screen.getByLabelText("Сотрудник"), { target: { value: "new" } });
+    chooseValue("Сотрудник", "new");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Создать сотрудника" }));
     await screen.findByText(
       "Сотрудник «Борис Орлов» добавлен и связан с оператором «Борис Орлов».",

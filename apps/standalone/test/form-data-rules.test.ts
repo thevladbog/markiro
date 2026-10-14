@@ -309,6 +309,7 @@ describe("the blank's data (plan О-Ф)", () => {
     line: LINE_2,
     counterparty: NORTH,
     organization: ORG_PROFILE,
+    photo: null,
   };
 
   it("maps every field of a planned shift, with what the standalone has not as the cloud's neutral value", () => {
@@ -397,6 +398,7 @@ describe("the forms' files (plan О-Ф)", () => {
           line: LINE_2,
           counterparty: null,
           organization: ORG_PROFILE,
+          photo: null,
         },
         generatedAt: new Date("2026-10-09T09:00:00Z"),
       })?.fileName,

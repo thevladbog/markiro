@@ -1,10 +1,11 @@
-import { gtinMatchesPrefix } from "@markiro/domain";
+import { gtinMatchesPrefix, isEgaisApplicable } from "@markiro/domain";
 import { z } from "zod";
 
 import type { CounterpartyRecord, OfficeProduct } from "../../host/protocol.js";
 import type { ProductInput } from "../../host/requests.js";
 import {
   boxCapacityRule,
+  egaisCodeRule,
   gtinRule,
   palletBoxCapacityRule,
   printNameRule,
@@ -20,21 +21,36 @@ import { activeFirstByName } from "../records.js";
 
 /**
  * A product as the form holds it: text as typed, and the group, the two
- * templates and the A4 sheet as their selects hold them (`""` for none).
+ * templates, the A4 sheet and the default counterparty as their selects hold
+ * them (`""` for none). The EGAIS code is kept while the field is hidden (the
+ * group may come back to 15) and sent only with group 15.
  */
-export const productFieldsSchema = z.object({
-  gtin14: gtinRule,
-  name: productNameRule,
-  printName: printNameRule,
-  chzProductGroupCode: productGroupRule,
-  boxCapacity: boxCapacityRule,
-  palletBoxCapacity: palletBoxCapacityRule,
-  shelfLifeDays: shelfLifeDaysRule,
-  defaultBoxTemplateId: z.string(),
-  defaultPalletTemplateId: z.string(),
-  defaultPalletSheetId: z.string(),
-  archived: z.boolean(),
-});
+export const productFieldsSchema = z
+  .object({
+    gtin14: gtinRule,
+    name: productNameRule,
+    printName: printNameRule,
+    chzProductGroupCode: productGroupRule,
+    boxCapacity: boxCapacityRule,
+    palletBoxCapacity: palletBoxCapacityRule,
+    shelfLifeDays: shelfLifeDaysRule,
+    defaultBoxTemplateId: z.string(),
+    defaultPalletTemplateId: z.string(),
+    defaultPalletSheetId: z.string(),
+    egaisCode: z.string(),
+    defaultCounterpartyId: z.string(),
+    archived: z.boolean(),
+  })
+  // The EGAIS code is checked only while it shows (ЧЗ group 15): a code left in
+  // the hidden field is not sent, so it never blocks a save it cannot show.
+  .superRefine((values, context) => {
+    if (!showsEgais(values.chzProductGroupCode)) return;
+    const checked = egaisCodeRule.safeParse(values.egaisCode);
+    if (checked.success) return;
+    for (const issue of checked.error.issues) {
+      context.addIssue({ code: "custom", path: ["egaisCode"], message: issue.message });
+    }
+  });
 export type ProductFields = z.input<typeof productFieldsSchema>;
 
 /** The host names a product's fields as the form does (`routes/products.rs`). */
@@ -46,7 +62,25 @@ export const PRODUCT_FIELDS = {
   boxCapacity: "boxCapacity",
   palletBoxCapacity: "palletBoxCapacity",
   shelfLifeDays: "shelfLifeDays",
+  egaisCode: "egaisCode",
+  defaultCounterpartyId: "defaultCounterpartyId",
 } as const;
+
+/** The EGAIS field shows only for ЧЗ group 15 (the cloud's `isEgaisApplicable`). */
+export function showsEgais(groupCode: string): boolean {
+  return isEgaisApplicable(toGroupCode(groupCode));
+}
+
+/**
+ * Whether a typed EGAIS code would print on an A4 pallet sheet, whose renderer
+ * takes only 19 digits (the domain's `pallet-sheet-render.ts`); a code of
+ * another form is kept and prints on the thermal labels, and the dialog says
+ * the sheet goes without it. A blank code is none.
+ */
+export function egaisPrintsOnSheet(code: string): boolean {
+  const trimmed = code.trim();
+  return trimmed === "" || /^\d{19}$/u.test(trimmed);
+}
 
 /** Another product in use has the GTIN (`products_active_gtin14`). */
 export const PRODUCT_CONFLICTS = {
@@ -83,6 +117,8 @@ export function productFields(product: OfficeProduct | null): ProductFields {
     defaultBoxTemplateId: product?.defaultBoxTemplateId ?? "",
     defaultPalletTemplateId: product?.defaultPalletTemplateId ?? "",
     defaultPalletSheetId: product?.defaultPalletSheetId ?? "",
+    egaisCode: product?.egaisCode ?? "",
+    defaultCounterpartyId: product?.defaultCounterpartyId ?? "",
     archived: product?.archived ?? false,
   };
 }
@@ -104,6 +140,9 @@ export function toProductInput(values: ProductFields): ProductInput {
     defaultPalletTemplateId:
       values.defaultPalletTemplateId === "" ? null : values.defaultPalletTemplateId,
     defaultPalletSheetId: values.defaultPalletSheetId === "" ? null : values.defaultPalletSheetId,
+    egaisCode: showsEgais(values.chzProductGroupCode) ? toOptionalText(values.egaisCode) : null,
+    defaultCounterpartyId:
+      values.defaultCounterpartyId === "" ? null : values.defaultCounterpartyId,
   };
 }
 

@@ -47,6 +47,7 @@ export function sampleSheetContext(
     sscc: "199990000000000012",
     productPrintName: "Молоко питьевое ультрапастеризованное 3,2 %, 0,9 л",
     gtin14: "04600000000015",
+    // A sample: no EGAIS code (plan ТОВ prints one only from a shift).
     egaisCode: null,
     productionDate: "2026-10-11",
     shelfLifeDays: 10,

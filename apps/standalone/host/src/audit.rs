@@ -13,6 +13,14 @@ pub mod actions {
     pub const HOST_RESTORE: &str = "host.restore";
     /// An administrator resumed the stations' facts a restore held.
     pub const HOST_RESTORE_RESUME: &str = "host.restore.resume";
+    /// The host copied its database before this build's pending migrations
+    /// (plan ОБН-1); `failed` when the copy or the migrations failed. The
+    /// host is the actor, the copy its target.
+    pub const HOST_UPGRADE: &str = "host.upgrade";
+    /// The office started an installer on its PC (plan ОБН-2): the session's
+    /// device is the target, and the row records what the office reported,
+    /// as `shift.export` does.
+    pub const APP_UPDATE_START: &str = "app.update.start";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";
@@ -43,6 +51,10 @@ pub mod actions {
     pub const DEVICE_REVOKE: &str = "device.revoke";
     pub const PRODUCT_CREATE: &str = "product.create";
     pub const PRODUCT_UPDATE: &str = "product.update";
+    /// A product's photo set or replaced, and cleared (plan ТОВ); the
+    /// details name the size, never the bytes.
+    pub const PRODUCT_PHOTO_SET: &str = "product.photo.set";
+    pub const PRODUCT_PHOTO_CLEAR: &str = "product.photo.clear";
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";

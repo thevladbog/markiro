@@ -1230,6 +1230,8 @@ test("a product needs a 14-digit GTIN and a name; its text is plain; lost fields
 test("a capacity that is no whole number is cleared with a note; an empty one needs none", () => {
   const file = build((source) => {
     const [first] = source.products;
+    // Its default counterparty is one the file leaves out: not this test's note.
+    first.defaultCounterpartyId = null;
     source.products = [
       { ...first, boxCapacity: 1.5, palletBoxCapacity: "40", shelfLifeDays: null },
       {
@@ -1414,7 +1416,7 @@ test("notes about SSCC of counterparties, planned shifts and non-operator badges
 test("the file names its format, version, tool and moment", () => {
   const file = build(() => {});
   assert.equal(file.format, "markiro-cloud-export");
-  assert.equal(file.formatVersion, 1);
+  assert.equal(file.formatVersion, 2);
   assert.equal(file.tool, "standalone-export/1");
   assert.equal(file.exportedAt, EXPORTED_AT);
   assert.deepEqual(Object.keys(file), [
@@ -1604,11 +1606,11 @@ test("an output that lacks a list or a count stops the export instead of failing
     );
   }
   assert.throws(
-    () => buildExportFile({ ...raw(), formatVersion: 2 }, { exportedAt: EXPORTED_AT }),
+    () => buildExportFile({ ...raw(), formatVersion: 3 }, { exportedAt: EXPORTED_AT }),
     (error) =>
       error instanceof ExportError &&
       error.code === "export_output_invalid" &&
-      error.message === "the export output is not format version 1",
+      error.message === "the export output is not format version 1 or 2",
   );
   // A missing tenant is still its own refusal: its lists are all there.
   assert.throws(
@@ -1893,5 +1895,98 @@ test("the cut-over table always has both extensions of the organization's prefix
       ["460068200", 0, 1, 1_000_001],
       ["460068200", 1, 0, 100_000],
     ],
+  );
+});
+
+test("a beer product's EGAIS code and a kept default counterparty move over; others are cleared with a note (plan ТОВ)", () => {
+  const file = build(() => {});
+  const byId = new Map(file.payload.products.map((each) => [each.id.slice(-2), each]));
+  // The beer (ЧЗ group 15) keeps its code and its counterparty.
+  assert.deepEqual(
+    [byId.get("05")?.egaisCode, byId.get("05")?.defaultCounterpartyId],
+    ["0150320000001234567", "0c0c0000-0000-4000-8000-000000000001"],
+  );
+  // A code of another group and a counterparty the file left out are cleared.
+  assert.equal(byId.get("03")?.egaisCode, null);
+  assert.equal(byId.get("01")?.defaultCounterpartyId, null);
+  assert.deepEqual(
+    notesOf(file, "product_value_cleared")
+      .filter((note) => note.field === "egaisCode" || note.field === "defaultCounterpartyId")
+      .map((note) => [note.id.slice(-2), note.field]),
+    [
+      ["01", "defaultCounterpartyId"],
+      ["03", "egaisCode"],
+    ],
+  );
+  // Neither is a lost field any more; a photo still is.
+  assert.ok(
+    !notesOf(file, "product_fields_lost").some(
+      (note) => note.field === "egaisCode" || note.field === "defaultCounterparty",
+    ),
+  );
+  // A code is never changed: blanks around it go, and a code with a
+  // control character, a blank one or one past 64 characters is cleared.
+  const beerOf = (file) => file.payload.products.find((each) => each.id.endsWith("05"));
+  const egaisNotes = (file) =>
+    file.notes
+      .filter((note) => note.field === "egaisCode" && note.id?.endsWith("05"))
+      .map(({ code, reason }) => [code, reason ?? null]);
+  const trimmed = build((source) => {
+    source.products[4].egaisCode = " 0150320000001234567 ";
+  });
+  assert.equal(beerOf(trimmed)?.egaisCode, "0150320000001234567");
+  assert.deepEqual(egaisNotes(trimmed), []);
+  const controlled = build((source) => {
+    source.products[4].egaisCode = "01503\u000720000001234567";
+  });
+  assert.equal(beerOf(controlled)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(controlled), [["product_value_cleared", null]]);
+  // A 64-character code followed by more text is no 64-character code.
+  const followed = build((source) => {
+    source.products[4].egaisCode = `${"1".repeat(64)} 2`;
+  });
+  assert.equal(beerOf(followed)?.egaisCode, null);
+  const blank = build((source) => {
+    source.products[4].egaisCode = "   ";
+  });
+  assert.equal(beerOf(blank)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(blank), [["product_value_cleared", null]]);
+  // 64 characters stay; 65 are cleared, never cut.
+  const longest = build((source) => {
+    source.products[4].egaisCode = "1".repeat(64);
+  });
+  assert.equal(beerOf(longest)?.egaisCode, "1".repeat(64));
+  const over = build((source) => {
+    source.products[4].egaisCode = "1".repeat(65);
+  });
+  assert.equal(beerOf(over)?.egaisCode, null);
+  assert.deepEqual(egaisNotes(over), [["product_value_cleared", null]]);
+  // Another group's code is cleared for its group.
+  assert.deepEqual(
+    notesOf(
+      build(() => {}),
+      "product_value_cleared",
+    )
+      .filter((note) => note.field === "egaisCode")
+      .map((note) => [note.id.slice(-2), note.reason]),
+    [["03", "group"]],
+  );
+});
+
+test("the raw output of an older export.sql (format 1) is still read, its products without a code or a counterparty", () => {
+  const file = build((source) => {
+    source.formatVersion = 1;
+    for (const each of source.products) {
+      delete each.egaisCode;
+      delete each.defaultCounterpartyId;
+    }
+    source.products[2].lost = ["egaisCode"];
+  });
+  assert.equal(file.formatVersion, 2);
+  assert.ok(file.payload.products.every((each) => each.egaisCode === null));
+  assert.ok(file.payload.products.every((each) => each.defaultCounterpartyId === null));
+  assert.deepEqual(
+    notesOf(file, "product_fields_lost").find((note) => note.field === "egaisCode"),
+    { code: "product_fields_lost", field: "egaisCode", count: 1 },
   );
 });

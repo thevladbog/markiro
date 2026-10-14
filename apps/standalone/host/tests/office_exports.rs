@@ -359,7 +359,7 @@ async fn displaced_and_disassembled_items_leave_the_source_and_an_office_close_h
     let (status, product) = admin.call("GET", "/v1/office/products", None).await;
     assert_eq!(status, StatusCode::OK, "{product}");
     let mut renamed = product[0].clone();
-    for field in ["id", "status", "rev"] {
+    for field in ["id", "status", "rev", "photoChecksum"] {
         renamed.as_object_mut().unwrap().remove(field);
     }
     renamed["name"] = json!("Молоко 2,5% 0,9 л");

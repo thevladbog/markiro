@@ -353,6 +353,12 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::products::update_product),
         )
         .route(
+            "/v1/office/products/{id}/photo",
+            get(crate::routes::product_photos::get_photo)
+                .put(crate::routes::product_photos::put_photo)
+                .delete(crate::routes::product_photos::delete_photo),
+        )
+        .route(
             "/v1/office/templates",
             get(crate::routes::templates::list_templates)
                 .post(crate::routes::templates::create_template),
@@ -440,6 +446,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/backups/resume",
             post(crate::routes::backups::resume_facts),
+        )
+        .route(
+            "/v1/office/updates/started",
+            post(crate::routes::app_updates::record_started),
         )
         .route(
             "/v1/office/import",

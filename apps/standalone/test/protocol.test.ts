@@ -75,6 +75,9 @@ import {
   passwordChangeSchema,
   passwordSetSchema,
   productCreateSchema,
+  productPhotoPutSchema,
+  productPhotoStateSchema,
+  shiftSnapshotProductSchema,
   productGroupSchema,
   productRecordSchema,
   productUpdateSchema,
@@ -96,6 +99,7 @@ import {
   templateDefaultsUpdateSchema,
   templateSpecSchema,
   templateUpdateSchema,
+  updateStartedSchema,
 } from "../src/host/protocol.js";
 import {
   badgeCreate,
@@ -119,6 +123,7 @@ import {
   templateCreate,
   templateDefaultsUpdate,
   templateUpdate,
+  updateStarted,
 } from "../src/host/requests.js";
 
 // Vite statically rewrites the literal pattern `new URL(..., import.meta.url)`
@@ -175,7 +180,17 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
       kind: "station",
       lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
       revokedAt: null,
+      protocol: 3,
+      versionSeenAt: "2026-09-26T10:40:00Z",
     });
+    // A host before plan ОБН-1 (same protocol) sends neither field.
+    const legacy = deviceRecordSchema.parse(fixture("device-record-legacy.json"));
+    expect(legacy.protocol).toBeUndefined();
+    expect(legacy.versionSeenAt).toBeUndefined();
+    expect(
+      deviceRecordSchema.safeParse({ ...(fixture("device-record.json") as object), protocol: 0 })
+        .success,
+    ).toBe(false);
   });
 
   it("change feed", () => {
@@ -267,6 +282,7 @@ describe("feed records that grant access", () => {
 const RESPONSES = [
   ["device-info.json", deviceInfoSchema],
   ["device-record.json", deviceRecordSchema],
+  ["device-record-legacy.json", deviceRecordSchema],
   ["office-user.json", officeUserSchema],
   ["office-session.json", officeSessionSchema],
   ["bootstrap-response.json", bootstrapResponseSchema],
@@ -286,6 +302,8 @@ const RESPONSES = [
   ["badge-salt.json", badgeSaltSchema],
   ["product-group.json", productGroupSchema],
   ["office-product.json", officeProductSchema],
+  ["office-product-egais.json", officeProductSchema],
+  ["product-photo-state.json", productPhotoStateSchema],
   ["template-summary.json", labelTemplateSummarySchema],
   ["label-template.json", labelTemplateSchema],
   ["template-defaults.json", templateDefaultsSchema],
@@ -312,6 +330,7 @@ const REQUESTS = [
   ["bootstrap-request.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
+  ["product-photo-put.json", productPhotoPutSchema],
   ["pallet-sheet-create.json", palletSheetCreateSchema],
   ["pallet-sheet-update.json", palletSheetUpdateSchema],
   ["pallet-sheet-default-update.json", palletSheetDefaultUpdateSchema],
@@ -345,6 +364,7 @@ const REQUESTS = [
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["shift-export-record.json", shiftExportRecordSchema],
+  ["update-started.json", updateStartedSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
   ["device-shift-create-pallets.json", deviceShiftCreateSchema],
   ["sscc-block-request.json", ssccBlockRequestSchema],
@@ -656,6 +676,8 @@ describe("request builders produce their fixtures exactly", () => {
       defaultBoxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
       defaultPalletTemplateId: null,
       defaultPalletSheetId: null,
+      egaisCode: null,
+      defaultCounterpartyId: null,
       gtin: "4600682000013",
     };
     expect(productCreate(typed)).toStrictEqual(fixture("product-create.json"));
@@ -1737,6 +1759,77 @@ describe("catalog shapes", () => {
     expect(officeProductSchema.parse(product).defaultPalletSheetId).toBeNull();
   });
 
+  it("a beer product's EGAIS code and default counterparty go as typed (plan ТОВ)", () => {
+    const beer = officeProductSchema.parse(fixture("office-product-egais.json"));
+    expect(beer.egaisCode).toBe("0150320000001234567");
+    const body = productCreate({
+      ...beer,
+      egaisCode: "0150320000001234567",
+      defaultCounterpartyId: null,
+    });
+    expect(body).toStrictEqual({
+      gtin14: "04607001234562",
+      name: "Пиво светлое фильтрованное 0,5 л",
+      printName: "Пиво светлое 0,5",
+      chzProductGroupCode: 15,
+      boxCapacity: 20,
+      palletBoxCapacity: 60,
+      shelfLifeDays: 180,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      defaultPalletSheetId: null,
+      egaisCode: "0150320000001234567",
+      defaultCounterpartyId: null,
+    });
+    expect(productCreateSchema.parse(body)).toStrictEqual(body);
+    const update = productUpdate(beer, false, beer.rev);
+    expect([update.egaisCode, update.defaultCounterpartyId]).toStrictEqual([
+      "0150320000001234567",
+      "0b9e7c1a-2d3f-4a5b-9c8d-7e6f5a4b3c2d",
+    ]);
+    // A code longer than the cloud's 64 characters, or empty, is no code.
+    expect(productCreateSchema.safeParse({ ...body, egaisCode: "1".repeat(65) }).success).toBe(
+      false,
+    );
+    expect(productCreateSchema.safeParse({ ...body, egaisCode: "" }).success).toBe(false);
+    // An answer reads the code as any text: a bound counted otherwise never fails the list.
+    expect(
+      officeProductSchema.parse({ ...beer, egaisCode: "1".repeat(65) }).egaisCode,
+    ).toHaveLength(65);
+    expect(officeProductSchema.safeParse({ ...beer, photoChecksum: "ABC" }).success).toBe(false);
+    expect(officeProductSchema.safeParse({ ...beer, defaultCounterpartyId: "x" }).success).toBe(
+      false,
+    );
+  });
+
+  it("a product from a host before plan ТОВ reads as having no code, counterparty or photo", () => {
+    const product = { ...(fixture("office-product.json") as Record<string, unknown>) };
+    delete product["egaisCode"];
+    delete product["defaultCounterpartyId"];
+    delete product["photoChecksum"];
+    const read = officeProductSchema.parse(product);
+    expect([read.egaisCode, read.defaultCounterpartyId, read.photoChecksum]).toStrictEqual([
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("a snapshot of a host before plan ТОВ reads without an EGAIS code, and a photo put is strict", () => {
+    const entered = fixture("device-shift-entered.json") as {
+      snapshot: { product: Record<string, unknown> };
+    };
+    const older = { ...entered.snapshot.product };
+    delete older["egaisCode"];
+    expect(shiftSnapshotProductSchema.parse(older).egaisCode).toBeUndefined();
+    expect(
+      shiftSnapshotProductSchema.parse({ ...older, egaisCode: "0150320000001234567" }).egaisCode,
+    ).toBe("0150320000001234567");
+    const put = fixture("product-photo-put.json") as Record<string, unknown>;
+    expect(productPhotoPutSchema.safeParse({ ...put, mime: "image/png" }).success).toBe(false);
+    expect(productPhotoPutSchema.safeParse({ ...put, width: 641 }).success).toBe(false);
+  });
+
   it("whole bodies name every field: leave one out and the schema refuses", () => {
     for (const [name, schema] of [
       ["product-create.json", productCreateSchema],
@@ -2358,8 +2451,18 @@ describe("a station's shifts", () => {
       (value) => enteredShiftSchema.safeParse({ ...answer, snapshot: value }),
       "snapshot",
     );
+    // The EGAIS code is the one optional part (plan ТОВ): a snapshot frozen by
+    // a host before it has none and still reads.
+    const { egaisCode, ...required } = answer.snapshot.product;
+    expect(egaisCode).toBeNull();
+    expect(
+      enteredShiftSchema.safeParse({
+        ...answer,
+        snapshot: { ...answer.snapshot, product: required },
+      }).success,
+    ).toBe(true);
     withoutEach(
-      answer.snapshot.product,
+      required,
       (value) =>
         enteredShiftSchema.safeParse({
           ...answer,
@@ -3139,5 +3242,42 @@ describe("the A4 pallet sheets (plan А4)", () => {
     expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: null }).success).toBe(true);
     expect(palletSheetDefaultUpdateSchema.safeParse({}).success).toBe(false);
     expect(palletSheetDefaultUpdateSchema.safeParse({ templateId: "x" }).success).toBe(false);
+  });
+});
+
+describe("the report of a started update (plan ОБН-2)", () => {
+  const record = fixture("update-started.json") as Record<string, unknown>;
+
+  it("is built field by field, the source named, and no device: the host takes the session's", () => {
+    expect(
+      updateStarted(
+        {
+          from: "0.1.0",
+          to: "0.2.0",
+          installerSha256: "9f2b5c0e6d1a4b8c7e3f2a1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b",
+        },
+        "file",
+      ),
+    ).toStrictEqual(record);
+    expect(updateStartedSchema.parse({ ...record, source: "host" }).source).toBe("host");
+  });
+
+  it("takes only plain versions, a lower-case SHA-256 and a known source", () => {
+    for (const change of [
+      { from: "0.1" },
+      { to: "v0.2.0" },
+      { to: "0.2.0-beta.1" },
+      { from: "01.1.0" },
+      { to: "4294967296.0.0" },
+      { from: "1.2.3\n" },
+      { installerSha256: String(record.installerSha256).toUpperCase() },
+      { installerSha256: "ab" },
+      { source: "usb" },
+    ]) {
+      expect(
+        updateStartedSchema.safeParse({ ...record, ...change }).success,
+        JSON.stringify(change),
+      ).toBe(false);
+    }
   });
 });

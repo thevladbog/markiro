@@ -18,8 +18,12 @@ import { canonicalSaltSchema, templatePurposeSchema, templateSpecSchema } from "
  * its kind, and for a shape problem the path of the field, never the value.
  */
 
-/** Mirrors `markiro_proto::cloud_import::CLOUD_IMPORT_FORMAT_VERSION`. */
-export const CLOUD_EXPORT_FORMAT_VERSION = 1;
+/**
+ * Mirrors `markiro_proto::cloud_import::CLOUD_IMPORT_FORMAT_VERSIONS`: the
+ * tool writes 2 since plan ТОВ, and a file of format 1, made before it, stays
+ * good; its products carry no EGAIS code or default counterparty.
+ */
+export const CLOUD_EXPORT_FORMAT_VERSIONS: readonly number[] = [1, 2];
 export const CLOUD_EXPORT_FORMAT = "markiro-cloud-export";
 
 const idSchema = z.uuid();
@@ -79,6 +83,9 @@ export const cloudImportPayloadSchema = z.strictObject({
       shelfLifeDays: countSchema,
       defaultBoxTemplateId: idSchema.nullable(),
       defaultPalletTemplateId: idSchema.nullable(),
+      // Format 2 (plan ТОВ); a file of format 1 reads them as `null` (`withoutTovFields`).
+      egaisCode: z.string().nullable(),
+      defaultCounterpartyId: idSchema.nullable(),
       archived: z.boolean(),
     }),
   ),
@@ -138,7 +145,10 @@ export type ExportNote = z.infer<typeof exportNoteSchema>;
 
 export const cloudExportFileSchema = z.strictObject({
   format: z.literal(CLOUD_EXPORT_FORMAT),
-  formatVersion: z.literal(CLOUD_EXPORT_FORMAT_VERSION),
+  formatVersion: z
+    .number()
+    .int()
+    .refine((version) => CLOUD_EXPORT_FORMAT_VERSIONS.includes(version)),
   tool: z.string(),
   exportedAt: z.iso.datetime(),
   rehearsal: z.boolean(),
@@ -256,12 +266,16 @@ export async function readCloudExportFile(text: string): Promise<CloudFileRead> 
   }
   const record = value as Record<string, unknown>;
   if (record.format !== CLOUD_EXPORT_FORMAT) return { kind: "problem", problem: "format" };
-  if (record.formatVersion !== CLOUD_EXPORT_FORMAT_VERSION) {
+  if (
+    typeof record.formatVersion !== "number" ||
+    !CLOUD_EXPORT_FORMAT_VERSIONS.includes(record.formatVersion)
+  ) {
     return { kind: "problem", problem: "version" };
   }
   if ((await fileChecksum(record)) !== record.checksum) {
     return { kind: "problem", problem: "checksum" };
   }
+  if (record.formatVersion === 1) withoutTovFields(record);
   const parsed = cloudExportFileSchema.safeParse(record);
   if (parsed.success) return { kind: "ok", file: parsed.data };
   // Only the path of the first issue: its message and input would quote the value.
@@ -269,6 +283,25 @@ export async function readCloudExportFile(text: string): Promise<CloudFileRead> 
   return path === undefined || path === ""
     ? { kind: "problem", problem: "format" }
     : { kind: "problem", problem: "format", path };
+}
+
+/**
+ * A file of format 1 (before plan ТОВ) names no product's EGAIS code or
+ * default counterparty: after its checksum is checked, each product gets both
+ * as `null`, so the strict schema reads it as format 2 does and the host keeps
+ * none. Anything that is not a product object is left for the schema to refuse.
+ */
+function withoutTovFields(record: Record<string, unknown>): void {
+  const payload = record.payload;
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return;
+  const products = (payload as Record<string, unknown>).products;
+  if (!Array.isArray(products)) return;
+  for (const product of products) {
+    if (product === null || typeof product !== "object" || Array.isArray(product)) continue;
+    const fields = product as Record<string, unknown>;
+    fields.egaisCode ??= null;
+    fields.defaultCounterpartyId ??= null;
+  }
 }
 
 /**

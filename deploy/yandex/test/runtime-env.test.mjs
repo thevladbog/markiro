@@ -17,6 +17,7 @@ import {
 
 const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOINT=\n`;
 const OPTIONAL_OFFLINE_GRANT_INVENTORY = `${INVENTORY}OFFLINE_GRANT_ORIGIN=\nOFFLINE_GRANT_KID=\nOFFLINE_GRANT_PRIVATE_KEY_PEM=\nOFFLINE_GRANT_KEYSET_JSON=\n`;
+const OPTIONAL_STANDALONE_LICENSE_INVENTORY = `${INVENTORY}STANDALONE_LICENSE_ISSUER=\nSTANDALONE_LICENSE_KID=\nSTANDALONE_LICENSE_PRIVATE_KEY_PEM=\nSTANDALONE_LICENSE_KEYSET_JSON=\n`;
 const VALUES = {
   DATABASE_URL: "postgres://markiro:password@db.example.test/markiro",
   SMTP_PASSWORD: "mail-password",
@@ -197,6 +198,31 @@ test("rejects a partially configured offline grant group", () => {
   const entries = [
     ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
     { key: "OFFLINE_GRANT_ORIGIN", textValue: "https://api.example.test" },
+  ];
+
+  assert.throws(
+    () => runtimeInventoryKeyNames(keys, entries),
+    (error) => error.message === INVENTORY_FAILURE,
+  );
+});
+
+test("allows the disabled standalone license group to be entirely absent (plan ЛЦ-0)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_LICENSE_INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, entries), /STANDALONE_LICENSE_/u);
+});
+
+test("rejects a partially configured standalone license group (plan ЛЦ-0)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_LICENSE_INVENTORY);
+  const entries = [
+    ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    { key: "STANDALONE_LICENSE_KID", textValue: "lic-1" },
   ];
 
   assert.throws(
@@ -429,8 +455,12 @@ test("uses every and only the production environment example keys", async () => 
     "OFFLINE_GRANT_KID",
     "OFFLINE_GRANT_PRIVATE_KEY_PEM",
     "OFFLINE_GRANT_KEYSET_JSON",
+    "STANDALONE_LICENSE_ISSUER",
+    "STANDALONE_LICENSE_KID",
+    "STANDALONE_LICENSE_PRIVATE_KEY_PEM",
+    "STANDALONE_LICENSE_KEYSET_JSON",
   ]);
-  assert.equal(inventory.length, 52);
+  assert.equal(inventory.length, 56);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

@@ -64,7 +64,7 @@ fn the_golden_file_passes_whole() {
             valid.sscc_counters.len(),
             valid.shift_number_counters.len(),
         ),
-        (2, 5, 2, 3, 3, 3, 4, 3)
+        (2, 5, 2, 4, 3, 3, 4, 3)
     );
     // The archived product keeps the GTIN of a product in use.
     assert_eq!(valid.products[0].gtin14, valid.products[2].gtin14);
@@ -84,6 +84,7 @@ fn the_golden_file_passes_whole() {
             ("payload.products.0.chzProductGroupCode".to_owned(), 8),
             ("payload.products.1.chzProductGroupCode".to_owned(), 13),
             ("payload.products.2.chzProductGroupCode".to_owned(), 8),
+            ("payload.products.3.chzProductGroupCode".to_owned(), 15),
         ]
     );
 }
@@ -95,7 +96,7 @@ fn the_envelope_is_checked() {
         "importId"
     );
     assert_eq!(
-        refused(|body| body["formatVersion"] = json!(2)),
+        refused(|body| body["formatVersion"] = json!(3)),
         "formatVersion"
     );
     assert_eq!(
@@ -568,7 +569,7 @@ fn the_golden_files_values_reach_the_import_as_written() {
             .iter()
             .map(|each| each.archived)
             .collect::<Vec<_>>(),
-        [false, false, true]
+        [false, false, true, false]
     );
     let first = &valid.products[0];
     assert_eq!(first.print_name.as_deref(), Some("Молоко 3,2%"));
@@ -935,4 +936,74 @@ fn a_month_key_is_three_capitals_of_a_month_and_two_digits() {
         body["payload"]["shiftNumberCounters"][0]["lastSeq"] = json!(u32::MAX);
     });
     accepted(|body| body["payload"]["shiftNumberCounters"] = json!([]));
+}
+
+/// Plan ТОВ: the file of format 2 brings a beer product's EGAIS code and a
+/// default counterparty of the file; format 1 (no such fields) still reads.
+#[test]
+fn a_products_egais_code_and_default_counterparty_follow_the_hosts_rules() {
+    let valid = check(&typed(request())).unwrap();
+    let beer = valid
+        .products
+        .iter()
+        .find(|each| each.id == "0e0e0000-0000-4000-8000-000000000005")
+        .unwrap();
+    assert_eq!(beer.egais_code.as_deref(), Some("0150320000001234567"));
+    assert_eq!(
+        beer.default_counterparty_id.as_deref(),
+        Some("0c0c0000-0000-4000-8000-000000000001")
+    );
+    // A code is kept trimmed, and a blank one is none whatever the group.
+    let mut body = request();
+    body["payload"]["products"][3]["egaisCode"] = json!(" 0150320000001234567 ");
+    body["payload"]["products"][0]["egaisCode"] = json!("   ");
+    let valid = check(&typed(body)).unwrap();
+    assert_eq!(
+        valid.products[3].egais_code.as_deref(),
+        Some("0150320000001234567")
+    );
+    assert_eq!(valid.products[0].egais_code, None);
+    // A code outside group 15, an overlong one and one with a control
+    // character are refused where they stand.
+    assert_eq!(
+        refused(|body| body["payload"]["products"][0]["egaisCode"] = json!("0150320000001234567")),
+        "payload.products.0.egaisCode"
+    );
+    assert_eq!(
+        refused(|body| body["payload"]["products"][3]["egaisCode"] = json!("1".repeat(65))),
+        "payload.products.3.egaisCode"
+    );
+    assert_eq!(
+        refused(|body| body["payload"]["products"][3]["egaisCode"] = json!("01\u{7}5")),
+        "payload.products.3.egaisCode"
+    );
+    // A counterparty the file does not carry (the tool drops one it cannot
+    // keep), or no UUID at all.
+    assert_eq!(
+        refused(|body| {
+            body["payload"]["products"][0]["defaultCounterpartyId"] =
+                json!("0c0c0000-0000-4000-8000-000000000002")
+        }),
+        "payload.products.0.defaultCounterpartyId"
+    );
+    assert_eq!(
+        refused(|body| body["payload"]["products"][0]["defaultCounterpartyId"] = json!("x")),
+        "payload.products.0.defaultCounterpartyId"
+    );
+}
+
+#[test]
+fn a_file_of_format_1_is_still_read_without_the_new_fields() {
+    let mut body = request();
+    body["formatVersion"] = json!(1);
+    for product in body["payload"]["products"].as_array_mut().unwrap() {
+        let object = product.as_object_mut().unwrap();
+        object.remove("egaisCode");
+        object.remove("defaultCounterpartyId");
+    }
+    let valid = check(&typed(body)).unwrap();
+    assert!(valid
+        .products
+        .iter()
+        .all(|each| each.egais_code.is_none() && each.default_counterparty_id.is_none()));
 }

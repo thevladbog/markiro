@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use markiro_host::backup::copy::{
-    make_copy, make_copy_with_identity, manifest_path, sha256_file, Manifest,
+    make_copy, make_copy_tagged, make_copy_with_identity, manifest_path, sha256_file, Manifest,
 };
 use markiro_host::backup::identity::{identity_path, platform_guard, HostIdentity};
 use markiro_host::clock::ManualClock;
@@ -3183,4 +3183,50 @@ async fn a_renewal_loaded_after_the_copy_is_carried_and_in_force() {
         (support::license::license_id(2), 2)
     );
     assert_eq!(snapshot.evaluation.quotas.stations, Some(5));
+}
+
+/// A copy before an upgrade (plan ОБН-1) is restored like any copy (spec
+/// §4.4, Д12 of plan ЛЦ-2): the license loaded after it is carried with the
+/// clock, and the summary and the audit row count it.
+#[tokio::test]
+async fn a_copy_before_an_upgrade_carries_the_license_loaded_after_it() {
+    let admin = admin().await;
+    let folder = admin.app.dir().join("backups");
+    std::fs::create_dir_all(&folder).unwrap();
+    let tag = markiro_host::upgrade::Pending {
+        from: 30,
+        to: 31,
+        migrations: 1,
+    }
+    .tag();
+    let mut conn = worker_conn(&admin.app).await;
+    let manifest = make_copy_tagged(
+        &mut conn,
+        &folder,
+        admin.app.state.now(),
+        BackupTrigger::Scheduled,
+        &admin.app.state.host_id,
+        &tag,
+    )
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+    assert!(markiro_host::upgrade::is_pre_upgrade(&manifest.file));
+    let copy_path = folder.join(&manifest.file);
+    let host = admin.app.state.host_id.clone();
+    support::license::load_ok(&admin, &support::license::file(&host, |_| {})).await;
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.licenses_carried, Some(1));
+    assert!(summary(&report)
+        .contains(&"license files carried over from the previous database: 1".to_owned()));
+    let pool = reopen(&paths).await;
+    let files: Vec<(String, i64)> = sqlx::query_as("SELECT license_id, sequence FROM licenses")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(files, [(support::license::license_id(1), 1)]);
+    assert_eq!(restore_details(&pool).await["licensesCarried"], 1);
 }

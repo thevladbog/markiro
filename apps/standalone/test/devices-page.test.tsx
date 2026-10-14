@@ -15,6 +15,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { chooseValue, optionTexts, valueOf } from "./support/select.js";
 
 // The dialog's countdown re-renders every second (fix round 1, item 3):
 // `PairingDataMatrix` must not re-encode the DataMatrix on every tick.
@@ -116,11 +117,6 @@ function names(): (string | null | undefined)[] {
   return rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
 }
 
-/** The labels of a select's options, top to bottom. */
-function optionLabels(select: HTMLElement): (string | null)[] {
-  return Array.from(select.querySelectorAll("option"), (option) => option.textContent);
-}
-
 const COUNTDOWN = /^Код действует ещё (\d{2}):(\d{2})$/;
 
 /**
@@ -180,6 +176,22 @@ describe("office devices", () => {
     expect(within(retired).queryByRole("button")).toBeNull();
   });
 
+  it("shows the version each device reported with its protocol, and the pairing's for one that reported none", async () => {
+    const session = adminSession();
+    session.api.listDevices.mockResolvedValue([
+      { ...HOST_PC, appVersion: "0.3.0", protocol: 3, versionSeenAt: "2026-10-13T09:00:00Z" },
+      PACKING,
+      { ...OFFICE_PC, protocol: 3, versionSeenAt: null },
+      RETIRED,
+    ]);
+    await openDevices(session);
+    expect(screen.getByRole("columnheader", { name: "Версия" })).toBeTruthy();
+    expect(within(rowOf("Рабочее место хоста")).getByText("0.3.0, протокол 3")).toBeTruthy();
+    // An app before plan ОБН-1, or a host before it: the version named at pairing.
+    expect(within(rowOf("Станция упаковки")).getByText("0.1.0 (при подключении)")).toBeTruthy();
+    expect(within(rowOf("Офис бухгалтерии")).getByText("0.1.0 (при подключении)")).toBeTruthy();
+  });
+
   it("renames a station and moves it to another line, sending only what changed", async () => {
     const session = adminSession();
     const other = LINES[2];
@@ -192,7 +204,7 @@ describe("office devices", () => {
     const save = within(dialog()).getByRole("button", { name: "Сохранить" });
     expect(save).toHaveProperty("disabled", true);
     fireEvent.change(screen.getByLabelText("Имя"), { target: { value: " Станция 1 " } });
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    chooseValue("Линия", other.id);
     fireEvent.click(save);
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
     expect(session.api.updateDevice.mock.calls).toStrictEqual([
@@ -220,12 +232,12 @@ describe("office devices", () => {
       expect(session.api.listShifts).toHaveBeenCalledWith("office-session-token"),
     );
     expect(within(dialog()).queryByText(warning)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    chooseValue("Линия", other.id);
     expect(await within(dialog()).findByText(warning)).toBeTruthy();
     // Back on its own line: nothing happens to the shift.
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_ID } });
+    chooseValue("Линия", LINE_ID);
     expect(within(dialog()).queryByText(warning)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    chooseValue("Линия", other.id);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
   });
@@ -246,10 +258,10 @@ describe("office devices", () => {
       "На станции идёт смена OCT26-004. После перевода станция доделает начатую работу, выведет оператора и покажет смены новой линии; смена останется открытой, закрыть её можно на странице «Смены».";
     const noLine =
       "На станции идёт смена OCT26-004. Если убрать линию, станция доделает начатую работу, выведет оператора и попросит выбрать линию; смена останется открытой, закрыть её можно на странице «Смены».";
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    chooseValue("Линия", "");
     expect(await within(dialog()).findByText(noLine)).toBeTruthy();
     expect(within(dialog()).queryByText(toLine)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    chooseValue("Линия", other.id);
     expect(await within(dialog()).findByText(toLine)).toBeTruthy();
     expect(within(dialog()).queryByText(noLine)).toBeNull();
   });
@@ -264,7 +276,7 @@ describe("office devices", () => {
     ]);
     await openDevices(session);
     fireEvent.click(screen.getByRole("button", { name: "Изменить устройство «Станция упаковки»" }));
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_ID } });
+    chooseValue("Линия", LINE_ID);
     // The packing station's own shift: the control that the list has been read.
     const warning = await within(dialog()).findByText(/^На станции идёт смена OCT26-004\./);
     // Said in a live region, so a screen reader hears it appear.
@@ -275,7 +287,7 @@ describe("office devices", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINES[2]?.id ?? "" } });
+    chooseValue("Линия", LINES[2]?.id ?? "");
     expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
   });
 
@@ -301,7 +313,7 @@ describe("office devices", () => {
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(1));
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    chooseValue("Линия", other.id);
     expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
     expect(within(dialog()).queryByRole("alert")).toBeNull();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
@@ -316,7 +328,7 @@ describe("office devices", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    chooseValue("Линия", "");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await screen.findByText("Изменения сохранены.");
     expect(session.api.updateDevice.mock.calls).toStrictEqual([
@@ -329,15 +341,14 @@ describe("office devices", () => {
     session.api.updateDevice.mockResolvedValue({ ...PACKING, name: "Упаковка" });
     await openDevices(session);
     fireEvent.click(screen.getByRole("button", { name: "Изменить устройство «Станция упаковки»" }));
-    const line = screen.getByLabelText("Линия");
-    expect(optionLabels(line)).toEqual([
+    expect(optionTexts("Линия")).toEqual([
       "Не выбрана",
       "Линия 1",
       "Линия 2",
       "Линия 10",
       "Линия 5 (в архиве)",
     ]);
-    expect(line).toHaveProperty("value", ARCHIVED_LINE_ID);
+    expect(valueOf("Линия")).toBe(ARCHIVED_LINE_ID);
     fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Упаковка" } });
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     await screen.findByText("Изменения сохранены.");
@@ -389,7 +400,7 @@ describe("office devices", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
     );
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINES[1]?.id ?? "" } });
+    chooseValue("Линия", LINES[1]?.id ?? "");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
     const message = await screen.findByText(
       "Хост не принял эту линию: её могли убрать в архив. Выберите другую.",

@@ -33,6 +33,13 @@ test("only the installer build bundles the host: cargo and the debug build need 
   });
 });
 
+test("an older installer never goes over a newer one: a rollback is an uninstall and the older installer (plan ОБН-1)", () => {
+  // Tauri's default is `true` (config.schema.json of @tauri-apps/cli 2.11.4).
+  assert.equal(overlay.bundle.windows.allowDowngrades, false);
+  // The base config never turns it back on for another build.
+  assert.equal(base.bundle.windows?.allowDowngrades, undefined);
+});
+
 test("the hooks file is UTF-8 with a byte order mark, or NSIS garbles the Russian text", () => {
   assert.deepEqual([...hooksBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
   assert.match(hooks, /[а-я]/);
@@ -255,4 +262,21 @@ test("blocks balance in each macro (makensis is not available where these tests 
       assert.ok(depth >= 0, name);
     }
   }
+});
+
+test("an update the app starts asks nothing: the network question belongs to the first installation", () => {
+  // `/P /UPDATE` (plan ОБН-2) is passive, not silent: a question would wait
+  // for a click while the app that started the update has already left.
+  const postinstall = macro("NSIS_HOOK_POSTINSTALL");
+  const question = postinstall.slice(
+    postinstall.indexOf('${If} $0 == "3"'),
+    postinstall.indexOf("markiro_keep_profile:"),
+  );
+  assert.match(
+    question,
+    /\$\{IfNot\} \$\{Silent\}\n\s+\$\{AndIf\} \$UpdateMode <> 1\n\s+MessageBox MB_YESNO/,
+  );
+  // The check itself still runs and is logged on every installation.
+  assert.match(postinstall, /"\$INSTDIR\\markiro-host\.exe" network-check'\n\s+Pop \$0/);
+  assert.match(question, /DetailPrint "Сеть отнесена к общедоступным/);
 });

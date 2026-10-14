@@ -26,12 +26,48 @@ pub fn options(path: &Path) -> SqliteConnectOptions {
         .busy_timeout(Duration::from_secs(5))
 }
 
+/// The master database, migrated, with no copy before the migrations: for a
+/// new database and the restore's own staging, where nothing needs
+/// protecting. The host's start uses [`open_upgrading`].
 pub async fn open(path: &Path) -> Result<SqlitePool, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
         .connect_with(options(path).create_if_missing(true))
         .await?;
     MIGRATOR.run(&pool).await?;
+    Ok(pool)
+}
+
+/// The master database for the host's start (plan ОБН-1, spec §10.6): the
+/// pool opens without migrations, and when this build brings migrations the
+/// database lacks, `upgrade::prepare` copies it first. A copy that fails
+/// runs no migration (`upgrade::OpenError::Copy`); one `host.upgrade` row
+/// says what happened.
+pub async fn open_upgrading(
+    path: &Path,
+    pre: &crate::upgrade::PreUpgrade,
+) -> Result<SqlitePool, crate::upgrade::OpenError> {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(4)
+        .connect_with(options(path).create_if_missing(true))
+        .await?;
+    let prepared = match crate::upgrade::prepare(&pool, &MIGRATOR, pre).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            pool.close().await;
+            return Err(error);
+        }
+    };
+    if let Err(error) = MIGRATOR.run(&pool).await {
+        if let Some(prepared) = &prepared {
+            crate::upgrade::record_failed_migration(&pool, prepared, pre).await;
+        }
+        pool.close().await;
+        return Err(crate::upgrade::OpenError::Database(error.into()));
+    }
+    if let Some(prepared) = &prepared {
+        crate::upgrade::record_done(&pool, prepared, pre).await;
+    }
     Ok(pool)
 }
 

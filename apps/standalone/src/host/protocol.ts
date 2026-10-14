@@ -339,6 +339,14 @@ export const deviceRecordSchema = z.object({
   name: z.string(),
   lineId: z.uuid().nullable(),
   appVersion: z.string(),
+  /**
+   * The protocol the device spoke when it last reported its version, or at
+   * pairing (plan ОБН-1). Optional: a host before ОБН-1 of the same protocol
+   * does not send it.
+   */
+  protocol: z.number().int().positive().optional(),
+  /** When the host first heard the device report its current version; `null` while it has not. */
+  versionSeenAt: z.iso.datetime().nullable().optional(),
   pairedAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime().nullable(),
   revokedAt: z.iso.datetime().nullable(),
@@ -701,12 +709,32 @@ export const productGroupSchema = z.object({
 export type ProductGroup = z.infer<typeof productGroupSchema>;
 
 /**
+ * A product's EGAIS code as the office sends it (plan ТОВ, the cloud's
+ * `egaisCode`): 1 to 64 characters after trimming; only a product of ЧЗ
+ * group 15 carries one (the host's rule). Answers read it as any text, as
+ * every other text of an answer, so a bound counted otherwise never fails
+ * the products list or a shift's snapshot.
+ */
+export const egaisCodeSchema = z.string().min(1).max(64);
+
+/** SHA-256 in lower-case hex. */
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/** Standard base64 with padding (a photo's JPEG, plan ТОВ). */
+const base64Schema = z
+  .string()
+  .min(4)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/u);
+
+/**
  * `GET /v1/office/products`: a product as the office sees it, archived ones
  * included. `gtin14` is the 14 digits the office saved; the two templates are
  * preferences, which the host checks only for their purpose, and so is the
  * A4 sheet its pallets print on (`defaultPalletSheetId`, a sheet of
  * `GET /v1/office/pallet-sheets`, never a label template; absent from a host
- * before it, read as none).
+ * before it, read as none). Plan ТОВ adds the EGAIS code, the default
+ * counterparty and the photo's checksum (`null` without a photo; the bytes
+ * come from `getProductPhoto`), each read as none from an older host.
  */
 export const officeProductSchema = z.object({
   id: z.uuid(),
@@ -720,11 +748,42 @@ export const officeProductSchema = z.object({
   defaultBoxTemplateId: z.uuid().nullable(),
   defaultPalletTemplateId: z.uuid().nullable(),
   defaultPalletSheetId: z.uuid().nullable().default(null),
+  egaisCode: z.string().nullable().default(null),
+  defaultCounterpartyId: z.uuid().nullable().default(null),
+  photoChecksum: sha256HexSchema.nullable().default(null),
   archived: z.boolean(),
   status: productStatusSchema,
   rev: z.number().int(),
 });
 export type OfficeProduct = z.infer<typeof officeProductSchema>;
+
+/**
+ * Mirrors `markiro_proto::ProductPhoto` (plan ТОВ): a JPEG the office made, at
+ * most 640 × 640 and 300 000 bytes, in standard base64; `checksum` is SHA-256
+ * of the bytes.
+ */
+export const productPhotoSchema = z.object({
+  width: z.number().int().min(1).max(640),
+  height: z.number().int().min(1).max(640),
+  dataBase64: base64Schema,
+  checksum: sha256HexSchema,
+  updatedAt: z.string(),
+});
+export type ProductPhoto = z.infer<typeof productPhotoSchema>;
+
+/** Mirrors `markiro_proto::ProductPhotoState`: `GET`/`PUT`/`DELETE /v1/office/products/{id}/photo`. */
+export const productPhotoStateSchema = z.object({ photo: productPhotoSchema.nullable() });
+export type ProductPhotoState = z.infer<typeof productPhotoStateSchema>;
+
+/** Mirrors `markiro_proto::ProductPhotoPut`: the whole photo, replacing any. */
+export const productPhotoPutSchema = z
+  .object({
+    width: z.number().int().min(1).max(640),
+    height: z.number().int().min(1).max(640),
+    dataBase64: base64Schema,
+  })
+  .strict();
+export type ProductPhotoPut = z.infer<typeof productPhotoPutSchema>;
 
 /**
  * `GET /v1/office/templates`: a label template without its layout. The size,
@@ -1041,6 +1100,8 @@ export const shiftSnapshotProductSchema = z.object({
   printName: z.string().nullable(),
   chzProductGroupCode: z.number().int().nonnegative(),
   shelfLifeDays: z.number().int().positive().nullable(),
+  /** As the shift froze it (plan ТОВ); a snapshot of an older host has none. */
+  egaisCode: z.string().nullable().optional(),
 });
 
 /**
@@ -1523,6 +1584,8 @@ export const productCreateSchema = z
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
     defaultPalletSheetId: z.uuid().nullable(),
+    egaisCode: egaisCodeSchema.nullable(),
+    defaultCounterpartyId: z.uuid().nullable(),
   })
   .strict();
 export type ProductCreate = z.infer<typeof productCreateSchema>;
@@ -1530,8 +1593,8 @@ export type ProductCreate = z.infer<typeof productCreateSchema>;
 /**
  * `PUT /v1/office/products/{id}`: the whole record with `archived` and the
  * loaded revision, as a counterparty's; `null` clears a field. The office
- * always sends `defaultPalletSheetId` (the host keeps it when an older office
- * leaves it out).
+ * always sends `defaultPalletSheetId`, `egaisCode` and `defaultCounterpartyId`
+ * (the host keeps each when an older office leaves it out).
  */
 export const productUpdateSchema = z
   .object({
@@ -1545,6 +1608,8 @@ export const productUpdateSchema = z
     defaultBoxTemplateId: z.uuid().nullable(),
     defaultPalletTemplateId: z.uuid().nullable(),
     defaultPalletSheetId: z.uuid().nullable(),
+    egaisCode: egaisCodeSchema.nullable(),
+    defaultCounterpartyId: z.uuid().nullable(),
     archived: z.boolean(),
     expectedRev: z.number().int(),
   })
@@ -1688,6 +1753,28 @@ export const shiftExportRecordSchema = z
   })
   .strict();
 export type ShiftExportRecord = z.infer<typeof shiftExportRecordSchema>;
+
+/** `MAJOR.MINOR.PATCH` as `markiro_proto::update::AppVersion` reads it: no leading zeros, nothing around it. */
+export const appVersionSchema = z
+  .string()
+  .regex(/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/)
+  // Each part is a `u32` on the Rust side.
+  .refine((text) => text.split(".").every((part) => Number(part) <= 4_294_967_295));
+
+/**
+ * Mirrors `markiro_proto::update::UpdateStarted`: `POST /v1/office/updates/started`
+ * (plan ОБН-2), the office starts an installer on its PC. No device: the host
+ * takes the session's.
+ */
+export const updateStartedSchema = z
+  .object({
+    from: appVersionSchema,
+    to: appVersionSchema,
+    installerSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    source: z.enum(["file", "host"]),
+  })
+  .strict();
+export type UpdateStarted = z.infer<typeof updateStartedSchema>;
 
 /**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's

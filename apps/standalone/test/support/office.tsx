@@ -26,7 +26,8 @@ function unexpected(name: keyof HostApi): Promise<never> {
 
 /**
  * Every method a test did not stub fails loudly; `officeLogout` succeeds,
- * `getOrgLogo` answers no logo (a label preview reads it, #703) and
+ * `getOrgLogo` answers no logo (a label preview reads it, #703),
+ * `getProductPhoto` no photo (a shift task form reads it, plan ТОВ) and
  * `getDeviceShifts` answers no shifts.
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
@@ -43,6 +44,11 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(async () => ({ logo: null })),
     putOrgLogo: vi.fn<HostApi["putOrgLogo"]>(() => unexpected("putOrgLogo")),
     deleteOrgLogo: vi.fn<HostApi["deleteOrgLogo"]>(() => unexpected("deleteOrgLogo")),
+    getProductPhoto: vi.fn<HostApi["getProductPhoto"]>(async () => ({ photo: null })),
+    putProductPhoto: vi.fn<HostApi["putProductPhoto"]>(() => unexpected("putProductPhoto")),
+    deleteProductPhoto: vi.fn<HostApi["deleteProductPhoto"]>(() =>
+      unexpected("deleteProductPhoto"),
+    ),
     listPalletSheets: vi.fn<HostApi["listPalletSheets"]>(() => unexpected("listPalletSheets")),
     createPalletSheet: vi.fn<HostApi["createPalletSheet"]>(() => unexpected("createPalletSheet")),
     updatePalletSheet: vi.fn<HostApi["updatePalletSheet"]>(() => unexpected("updatePalletSheet")),
@@ -149,6 +155,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     ),
     enableLicenseEmergency: vi.fn<HostApi["enableLicenseEmergency"]>(() =>
       unexpected("enableLicenseEmergency"),
+    ),
+    recordUpdateStarted: vi.fn<HostApi["recordUpdateStarted"]>(() =>
+      unexpected("recordUpdateStarted"),
     ),
     ...overrides,
   };

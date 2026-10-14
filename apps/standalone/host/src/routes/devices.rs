@@ -129,8 +129,8 @@ pub async fn select_line(
     Ok(Json(info))
 }
 
-const DEVICES: &str = "SELECT id, kind, name, line_id, app_version, paired_at, last_seen_at, \
-     revoked_at FROM devices";
+const DEVICES: &str = "SELECT id, kind, name, line_id, app_version, protocol, version_seen_at, \
+     paired_at, last_seen_at, revoked_at FROM devices";
 
 #[derive(sqlx::FromRow)]
 struct DeviceRow {
@@ -139,6 +139,8 @@ struct DeviceRow {
     name: String,
     line_id: Option<String>,
     app_version: String,
+    protocol: i64,
+    version_seen_at: Option<String>,
     paired_at: String,
     last_seen_at: Option<String>,
     revoked_at: Option<String>,
@@ -152,6 +154,8 @@ fn record(row: DeviceRow) -> Result<DeviceRecord, ApiError> {
         name: row.name,
         line_id: row.line_id,
         app_version: row.app_version,
+        protocol: u32::try_from(row.protocol).map_err(ApiError::internal)?,
+        version_seen_at: row.version_seen_at,
         paired_at: row.paired_at,
         last_seen_at: row.last_seen_at,
         revoked_at: row.revoked_at,

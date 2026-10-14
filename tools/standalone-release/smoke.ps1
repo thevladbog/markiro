@@ -4,8 +4,9 @@
   УСТ): the roles, the MarkiroHost service with its account and restart
   policy, the firewall rule, the data directory's access list and owner, a
   verified copy of the database in backups with that access list, a restart
-  after a crash, a reinstall that keeps the host, a reinstall over an
-  unfinished restore (the host's exit code 4), a refused role change, and
+  after a crash, a reinstall that keeps the host, the passive update the app
+  starts (/P /UPDATE, plan ОБН-2), a reinstall over an unfinished restore
+  (the host's exit code 4), a refused role change, and
   uninstalls that keep the data, one of them with the host running. The
   standalone-windows-build job runs it on GitHub's runner, which has
   administrator rights. Never run it on a site's PC: it installs and removes
@@ -181,6 +182,18 @@ Check (@(Get-NetFirewallRule -Name 'MarkiroHost').Count -eq 1) 'still one firewa
 Check ((Install @('/S', '/ROLE=HOST')) -eq 0) 'the same role in capitals is the same role'
 Check (RoleFileIs 'host') 'and is written in lower case'
 WaitFor { HostAnswers } 60 'the host answers after that reinstall too'
+
+Step 'an update the app starts (/P /UPDATE) keeps the role, the host and its data'
+# The arguments update/launch.rs gives the installer, without /R: on this
+# runner the app must not be opened. Passive is not silent: a hook's question
+# would hang here, which the 600 s bound of Install turns into a failure.
+Check ((Install @('/P', '/UPDATE')) -eq 0) 'the passive update succeeds without a role'
+Check (RoleFileIs 'host') 'the role stays host'
+Check ((RegValue $roleKey 'Role') -ceq 'host') 'the registry keeps the role'
+Check ((Get-Content -Raw (Join-Path $dataDir 'host.json')) -eq $hostJson) 'the host identity is the same'
+Check (@(Get-NetFirewallRule -Name 'MarkiroHost').Count -eq 1) 'still one firewall rule'
+WaitFor { HostAnswers } 120 'the host answers after the update'
+Check ($null -ne (RunValue)) 'the station still opens at sign-in'
 
 Step 'a reinstall over an unfinished restore ends with exit 4: a warning, not a failure'
 # `start` refuses while this file exists (host/src/restore.rs): the service

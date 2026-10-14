@@ -58,6 +58,11 @@ export interface LabelPanelProps {
   checkQueue?: () => Promise<WindowsQueueCheck>;
   /** Milliseconds from a clock that does not go back; the guard after a view change reads it. */
   clock?: () => number;
+  /**
+   * The job is a pallet's A4 sheet that goes without the shift's EGAIS code (plan
+   * ТОВ, `sheetWithoutEgais`): the panel says so in every view; it decides nothing.
+   */
+  egaisOffSheet?: boolean;
 }
 
 /**
@@ -164,6 +169,7 @@ export function LabelPanel({
   onRecover,
   checkQueue,
   clock = realClock,
+  egaisOffSheet = false,
 }: LabelPanelProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>({ kind: "main" });
@@ -326,6 +332,11 @@ export function LabelPanel({
       </header>
       <div className="label-panel__body">
         {pallet && <Alert tone={view.tone} role="presentation" title={view.title} />}
+        {egaisOffSheet && (
+          <Alert tone="warn" role="presentation" title={t("floor.print.egaisOffSheet.title")}>
+            {t("floor.print.egaisOffSheet.body")}
+          </Alert>
+        )}
         {view.children}
       </div>
       {view.footer === undefined ? null : (

@@ -5,6 +5,7 @@ import { ContactsSection } from "./ContactsSection.js";
 import { LicenseSection } from "./LicenseSection.js";
 import { ProgramSection } from "./ProgramSection.js";
 import { SupportSection } from "./SupportSection.js";
+import { UpdateSection } from "./UpdateSection.js";
 
 /** One section of «Информация». */
 export interface AboutSection {
@@ -38,6 +39,12 @@ export const ABOUT_SECTIONS: readonly AboutSection[] = [
     titleKey: "office.about.license.title",
     roles: BOTH_ROLES,
     Component: LicenseSection,
+  },
+  {
+    id: "update",
+    titleKey: "office.about.update.title",
+    roles: BOTH_ROLES,
+    Component: UpdateSection,
   },
   {
     id: "contacts",

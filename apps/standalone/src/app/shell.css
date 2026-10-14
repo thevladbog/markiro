@@ -13,6 +13,11 @@
   width: min(560px, 100%);
 }
 
+/* A card whose row of floor buttons needs the room of three labels (the network pairing). */
+.standalone-card--wide {
+  width: min(800px, 100%);
+}
+
 .standalone-card p {
   margin: 0 0 16px;
 }
@@ -145,12 +150,22 @@
 
 .standalone-form p {
   margin: 0;
+  font: var(--text-body);
 }
 
+/*
+ * A row of buttons: each label stays on one line (a 64px floor button with two
+ * lines of text looks broken), and a row that does not fit wraps by whole buttons.
+ */
 .standalone-form__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.standalone-form__actions > button {
+  white-space: nowrap;
 }
 
 .standalone-wizard__step,
@@ -158,11 +173,20 @@
   color: var(--fg-2);
 }
 
+/*
+ * A line's name and its remove button: the button stays level with the field
+ * even when an error or a hint grows under the field, which `align-items: end`
+ * would follow. 22px is the field's label (16px) and the gap under it (6px).
+ */
 .standalone-wizard__line {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: end;
+  align-items: start;
   gap: 8px;
+}
+
+.standalone-wizard__line > .mk-icon-button {
+  margin-top: 22px;
 }
 
 .standalone-wizard__review {
@@ -194,6 +218,18 @@
   font-family: var(--font-ui);
 }
 
+/*
+ * The menu stays in view while the page scrolls, and scrolls by itself when the
+ * window is lower than the list (the minimum window is 960 x 600).
+ */
+.office-shell > .mk-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+
 .office-shell__main {
   flex: 1;
   display: flex;
@@ -201,11 +237,13 @@
   min-width: 0;
 }
 
+/* The header's identity, link and buttons wrap onto a second line in a narrow window. */
 .office-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--line);
 }
@@ -225,15 +263,32 @@
 
 .office-header__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
+/*
+ * The page's one column is as wide as the window leaves it, never as wide as its
+ * widest child: an implicit `auto` column would grow to a table's full width and
+ * push the page sideways. A table scrolls inside its own card instead.
+ */
 .office-shell__content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 16px;
   padding: 24px;
+}
+
+/* A page header's title and buttons wrap; the buttons stay together at the right. */
+.office-shell__content .mk-page-header {
+  flex-wrap: wrap;
+}
+
+.office-shell__content .mk-page-header > div {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* Focus lands on the page container only programmatically, after a menu navigation. */
@@ -244,6 +299,114 @@
 .office-note {
   margin: 0;
   color: var(--fg-2);
+  font: var(--text-body);
+}
+
+/*
+ * The rhythm of the office page. The page's own parts (header, notices, filter
+ * bar, cards) sit one sp-4 apart (`.office-shell__content`); the parts of a card
+ * sit the same distance apart, so a note above a table, the table, its pager
+ * and the note under it never touch, and every card reads alike.
+ */
+.office-shell__content .mk-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+/*
+ * The buttons of a table row start where their column's heading starts (the
+ * columns are left-aligned), instead of hugging the card's right edge while
+ * the heading stays on the left.
+ */
+.office-shell__content .mk-table .mk-row-actions {
+  justify-content: flex-start;
+}
+
+/*
+ * Four or more actions in a row are a block of equal buttons, two to a line,
+ * not a ragged stack of one button per line: a row of five is three lines tall
+ * instead of five, and the table keeps the width of its other columns.
+ */
+.office-shell__content .mk-table .mk-row-actions:has(> :nth-child(4)) {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  width: max-content;
+}
+
+/*
+ * The operators' five actions: the table has eight other columns, so how the
+ * buttons lie depends on the room the table has (the scroll region is a size
+ * container). Narrow: one column of equal buttons; wider: two, three, and at
+ * last a single row. The thresholds are the other columns' width plus the
+ * actions' own, measured at each shape.
+ */
+.office-shell__content .mk-table__scroll {
+  container: office-table / inline-size;
+}
+
+.office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: max-content;
+}
+
+@container office-table (min-width: 1090px) {
+  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@container office-table (min-width: 1220px) {
+  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@container office-table (min-width: 1410px) {
+  .office-shell__content .mk-table .mk-row-actions.office-row-actions--many {
+    display: flex;
+    flex-wrap: nowrap;
+  }
+}
+
+/* A paragraph of a card has no browser margin on top of the card's gap. */
+.office-shell__content .mk-card__body > p {
+  margin: 0;
+  font: var(--text-body);
+}
+
+/* A table in a card: the card's own gap is the space around it. */
+.office-shell__content .mk-card__body > .mk-table {
+  min-width: 0;
+}
+
+/*
+ * A filter bar: one row of controls of one height on one line, their tops
+ * together (a hint under one field hangs below the row and moves nothing). A
+ * select or a date has the width of its content otherwise.
+ */
+.office-shell__content .mk-filter-bar__controls {
+  align-items: flex-start;
+}
+
+.office-shell__content .mk-filter-bar__controls > .mk-field {
+  min-width: 168px;
+}
+
+/*
+ * A button beside the fields starts level with their inputs, not with the
+ * bottom of the tallest field (a hint under one would pull it down): 22px is
+ * a label (16px) and the gap under it (6px).
+ */
+.office-shell__content .mk-filter-bar__controls > .mk-btn {
+  margin-top: 22px;
+}
+
+/* The search field, the one text input of a bar, gets the room its placeholder needs. */
+.office-shell__content .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  flex: 1 1 200px;
+  max-width: 420px;
 }
 
 /* A page's table of contents: plain links to its sections' anchors in a row. */
@@ -266,7 +429,8 @@
   display: grid;
 }
 
-.product-name__print {
+.product-name__print,
+.product-name__photo {
   color: var(--fg-2);
 }
 
@@ -281,6 +445,21 @@
   color: var(--fg-2);
 }
 
+/* A warning of a cell: a sentence that wraps by words, with its mark; never a tall chip. */
+.shift-cell__warn {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--warn-fg);
+  font: var(--text-body-sm);
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.shift-cell__warn > :first-child {
+  font-weight: 700;
+}
+
 /* The note under the close reason: the hint, or the refusal in the error tone, as `Input` writes them. */
 .shift-note {
   font: var(--text-body-sm);
@@ -291,8 +470,12 @@
   color: var(--err-fg);
 }
 
-/* The card of a shift (plan О-Ф): its parts one under another. */
-.shift-card {
+/*
+ * The parts of an office page that is not one card (the card of a shift, the
+ * code search): one under another. It had been `.shift-card`, a name the
+ * station's shift card (below) also takes, with its own padding and gap.
+ */
+.office-stack {
   display: grid;
   gap: 16px;
 }
@@ -311,12 +494,12 @@
   font: var(--text-h3);
 }
 
+/* Apart from the table by its container's gap, not by a margin of its own. */
 .office-pager {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  padding: 12px 0 0;
 }
 
 /* A template's name, and the «Типовой» tag of a stock template beside it. */
@@ -374,6 +557,36 @@
   gap: 8px;
   max-height: 280px;
   overflow-y: auto;
+}
+
+/* A product's photo in its dialog (plan ТОВ): the JPEG the host keeps, shrunk to fit. */
+.product-photo-field {
+  display: grid;
+  gap: 8px;
+}
+
+/* The section's title and hint as a field's label and hint (`@markiro/ui` Field). */
+.product-photo-field__title {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+
+.product-photo-field__hint {
+  margin: 0;
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.product-photo-field__preview {
+  display: block;
+  max-width: 160px;
+  max-height: 160px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
 }
 
 /* The GTIN field, and under it what the dialog says about a valid GTIN. */

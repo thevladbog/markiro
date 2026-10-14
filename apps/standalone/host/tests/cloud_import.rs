@@ -81,7 +81,7 @@ async fn the_import_writes_every_row_at_one_revision_and_writes_one_audit_row() 
             }),
         )]
     );
-    assert_eq!(imported_rows(&admin).await, [3, 3, 3, 2, 5, 2]);
+    assert_eq!(imported_rows(&admin).await, [4, 3, 3, 2, 5, 2]);
     assert_eq!(site_salt(&admin).await, FILE_SALT);
 
     let (_, lines) = admin.call("GET", "/v1/office/lines", None).await;
@@ -219,6 +219,7 @@ async fn the_feed_carries_every_imported_record_at_the_import_revision() {
         at("products", "0e0e0000-0000-4000-8000-000000000001"),
         at("products", "0e0e0000-0000-4000-8000-000000000002"),
         at("products", "0e0e0000-0000-4000-8000-000000000003"),
+        at("products", "0e0e0000-0000-4000-8000-000000000005"),
         at("site", "1"),
     ];
     expected.sort();
@@ -1589,4 +1590,45 @@ async fn category_defaults_keep_their_own_group_and_purpose() {
         )
     });
     assert_eq!(stored, expected);
+}
+
+/// Plan ТОВ: the import writes a product's EGAIS code and its default
+/// counterparty, and a product without either keeps none.
+#[tokio::test]
+async fn the_import_keeps_a_products_egais_code_and_default_counterparty() {
+    let admin = admin().await;
+    let (status, summary) = admin
+        .call("POST", IMPORT, Some(cloud_import_request(IMPORT_ID, false)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let rows: Vec<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT id, egais_code, default_counterparty_id FROM products ORDER BY id")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        [
+            (
+                "0e0e0000-0000-4000-8000-000000000001".to_owned(),
+                None,
+                None
+            ),
+            (
+                "0e0e0000-0000-4000-8000-000000000002".to_owned(),
+                None,
+                None
+            ),
+            (
+                "0e0e0000-0000-4000-8000-000000000003".to_owned(),
+                None,
+                None
+            ),
+            (
+                "0e0e0000-0000-4000-8000-000000000005".to_owned(),
+                Some("0150320000001234567".to_owned()),
+                Some("0c0c0000-0000-4000-8000-000000000001".to_owned())
+            ),
+        ]
+    );
 }

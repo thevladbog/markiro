@@ -29,6 +29,7 @@ import {
   shiftsSession,
   WATER,
 } from "./support/shifts.js";
+import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const SESSION_TOKEN = "office-session-token";
 
@@ -221,6 +222,12 @@ describe("office shifts: the list", () => {
     );
     expect(cells("A-8")[6]).toBe("◷Запланирована");
     expect(cells("A-6")[6]).toBe("▸Активна");
+    // A warning is a sentence of its own under the status chip, never a chip: a long warning in
+    // a chip is a tall box in a narrow column.
+    const warning = screen.getByText("Не откроется: товар в архиве");
+    expect(warning.closest(".shift-cell__warn")).not.toBeNull();
+    expect(warning.closest(".mk-chip")).toBeNull();
+    expect(warning.closest(".shift-cell")?.querySelectorAll(".mk-chip")).toHaveLength(1);
   });
 
   it("keeps the list when a list of names does not load, names records by their ids and claims no mark it cannot check", async () => {
@@ -278,12 +285,12 @@ describe("office shifts: the list", () => {
     await openShifts(shiftsSession());
     const numbers = () =>
       shiftRows().map((row) => within(row).getAllByRole("cell")[0]?.textContent);
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "active" } });
+    chooseText("Статус", "Активна");
     expect(numbers()).toEqual(["OCT26-004"]);
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "all" } });
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_10.id } });
+    chooseText("Статус", "Все статусы");
+    chooseText("Линия", LINE_10.name);
     expect(numbers()).toEqual(["OCT26-005"]);
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    chooseText("Линия", "Все линии");
     fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
       target: { value: "мОЛОКО" },
     });
@@ -448,14 +455,14 @@ describe("office shifts: the list, boundaries and states", () => {
       expect(within(pager()).getByText("Страница 2 из 3")).toBeTruthy();
     };
     second();
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "planned" } });
+    chooseText("Статус", "Запланирована");
     expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "all" } });
+    chooseText("Статус", "Все статусы");
     expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     second();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_10.id } });
+    chooseText("Линия", LINE_10.name);
     expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    chooseText("Линия", "Все линии");
     second();
     fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
       target: { value: "OCT26" },
@@ -474,7 +481,7 @@ describe("office shifts: the list, boundaries and states", () => {
   it("goes back to the first page of the whole list when «Сбросить» clears a filter", async () => {
     await openShifts(shiftsSession(sixty()));
     const pager = () => screen.getByRole("navigation", { name: "Страницы списка смен" });
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "planned" } });
+    chooseText("Статус", "Запланирована");
     fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
     expect(within(pager()).getByText("Страница 2 из 2")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
@@ -484,10 +491,10 @@ describe("office shifts: the list, boundaries and states", () => {
   it("keeps a shift only when the status, the line and the search all keep it, and finds a number without case", async () => {
     await openShifts(shiftsSession());
     const search = screen.getByLabelText("Поиск по номеру и товару");
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "closed" } });
+    chooseText("Статус", "Закрыта");
     fireEvent.change(search, { target: { value: "молоко" } });
     expect(numbersOnScreen()).toEqual(["OCT26-001/S"]);
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_10.id } });
+    chooseText("Линия", LINE_10.name);
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
     fireEvent.change(search, { target: { value: "oct26-005" } });
@@ -504,13 +511,13 @@ describe("office shifts: the list, boundaries and states", () => {
     fireEvent.change(search, { target: { value: "   " } });
     expect(reset()).toBeNull();
     fireEvent.change(search, { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "active" } });
+    chooseText("Статус", "Активна");
     expect(reset()).not.toBeNull();
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "all" } });
+    chooseText("Статус", "Все статусы");
     expect(reset()).toBeNull();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_2.id } });
+    chooseText("Линия", LINE_2.name);
     expect(reset()).not.toBeNull();
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    chooseText("Линия", "Все линии");
     fireEvent.change(search, { target: { value: "x" } });
     expect(reset()).not.toBeNull();
     fireEvent.change(search, { target: { value: "" } });
@@ -524,15 +531,15 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(reset()).toBeNull();
 
     // Everything at once, then back to the host's own list.
-    fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "closed" } });
-    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_2.id } });
+    chooseText("Статус", "Закрыта");
+    chooseText("Линия", LINE_2.name);
     fireEvent.change(search, { target: { value: "молоко" } });
     pickDate("Дата производства с", "1 сентября 2026", 1);
     pickDate("Дата производства по", "8 октября 2026");
     await screen.findByText("Показаны смены с датой производства с 01.09.2026 по 08.10.2026.");
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
-    expect((screen.getByLabelText("Статус") as HTMLSelectElement).value).toBe("all");
-    expect((screen.getByLabelText("Линия") as HTMLSelectElement).value).toBe("");
+    expect(shownIn("Статус")).toBe("Все статусы");
+    expect(shownIn("Линия")).toBe("Все линии");
     expect((search as HTMLInputElement).value).toBe("");
     for (const label of ["Дата производства с", "Дата производства по"]) {
       expect(screen.getByRole("button", { name: label }).textContent).toContain("Не выбрана");
@@ -667,12 +674,7 @@ describe("office shifts: the list, boundaries and states", () => {
     session.api.listLines.mockResolvedValue([LINE_10, OLD_LINE]);
     await openShifts(session);
     expect(cells("OCT26-004")[2]).toBe("Линия 5f0c6a52…");
-    const options = within(screen.getByLabelText("Линия")).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "Все линии",
-      "Линия 10",
-      "Линия 1 (в архиве)",
-    ]);
+    expect(optionTexts("Линия")).toEqual(["Все линии", "Линия 10", "Линия 1 (в архиве)"]);
   });
 
   it("says in words every reason a station closes a shift for", async () => {
@@ -747,8 +749,7 @@ describe("office shifts: the list, boundaries and states", () => {
     const session = shiftsSession();
     session.api.listLines.mockResolvedValue([OLD_LINE, LINE_10, LINE_2]);
     await openShifts(session);
-    const options = within(screen.getByLabelText("Линия")).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
+    expect(optionTexts("Линия")).toEqual([
       "Все линии",
       "Линия 2",
       "Линия 10",

@@ -96,6 +96,40 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     ]);
   });
 
+  it("prints the product's photo on the blank from its own bytes, and no photo box without one (plan ТОВ)", () => {
+    const photo = {
+      width: 2,
+      height: 1,
+      dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
+      updatedAt: "2026-10-13T09:00:00.000Z",
+    };
+    const inputs = {
+      shift: PLANNED,
+      product: { ...MILK, photoChecksum: photo.checksum },
+      line: LINE_2,
+      counterparty: NORTH,
+      organization: ORG_PROFILE,
+      photo,
+    };
+    const at = new Date("2026-10-09T09:00:00Z");
+    expect(taskFormData(inputs, at)).toMatchObject({
+      imageChecksum: photo.checksum,
+      imageSrc: `data:image/jpeg;base64,${photo.dataBase64}`,
+    });
+    const html = renderForm({ kind: "task", inputs, generatedAt: at })?.html ?? "";
+    expect(html).toContain(`src="data:image/jpeg;base64,${photo.dataBase64}"`);
+    expect(html).not.toContain("../../products/");
+    expect(html).not.toContain('class="product product--no-photo"');
+    const bare = renderForm({
+      kind: "task",
+      inputs: { ...inputs, photo: null },
+      generatedAt: at,
+    })?.html;
+    expect(bare).toContain('class="product product--no-photo"');
+    expect(bare).not.toContain("<img");
+  });
+
   it("draws the blank of a planned or an active shift, with its one date as both dates, and none of a closed one", () => {
     const inputs = {
       shift: PLANNED,
@@ -103,6 +137,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
       line: LINE_2,
       counterparty: NORTH,
       organization: ORG_PROFILE,
+      photo: null,
     };
     const at = new Date("2026-10-09T09:00:00Z");
     const blank = taskFormData(inputs, at);

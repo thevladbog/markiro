@@ -87,7 +87,6 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
       }
     >
       <Select
-        native
         label={t("office.templateEditor.sizeDialog.preset")}
         options={[
           ...SIZE_PRESETS.map((each) => ({
@@ -131,7 +130,6 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
         />
       </div>
       <Select
-        native
         label={t("office.templateEditor.sizeDialog.dpi")}
         hint={t("office.templateEditor.sizeDialog.dpiHint")}
         options={DPI_CHOICES.map((value) => ({

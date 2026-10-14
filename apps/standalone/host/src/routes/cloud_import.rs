@@ -240,7 +240,8 @@ async fn write(
         sqlx::query(
             "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
              pallet_box_capacity, shelf_life_days, default_box_template_id, \
-             default_pallet_template_id, archived, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             default_pallet_template_id, egais_code, default_counterparty_id, archived, rev) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&each.id)
         .bind(&each.gtin14)
@@ -252,6 +253,8 @@ async fn write(
         .bind(each.shelf_life_days)
         .bind(&each.default_box_template_id)
         .bind(&each.default_pallet_template_id)
+        .bind(&each.egais_code)
+        .bind(&each.default_counterparty_id)
         .bind(each.archived)
         .bind(rev)
         .execute(&mut *conn)

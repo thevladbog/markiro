@@ -134,7 +134,10 @@ Var MarkiroRole
     Pop $0
     ${If} $0 == "3"
       DetailPrint "Сеть отнесена к общедоступным: порт хоста на ней закрыт."
+      ; An update the app started (/P /UPDATE, plan ОБН-2) asks nothing: the
+      ; question belongs to the first installation, and the office warns.
       ${IfNot} ${Silent}
+      ${AndIf} $UpdateMode <> 1
         MessageBox MB_YESNO|MB_ICONEXCLAMATION "Windows относит сеть этого компьютера к общедоступным, и порт хоста 45710 в ней закрыт: ПК офиса не подключится.$\n$\nПеревести сеть в частную?" IDNO markiro_keep_profile
         nsExec::ExecToLog '"$INSTDIR\markiro-host.exe" network-check --make-private'
         Pop $0

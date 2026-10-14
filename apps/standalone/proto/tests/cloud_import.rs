@@ -6,6 +6,7 @@
 
 use markiro_proto::cloud_import::{
     CloudImportRequest, CloudImportSummary, CLOUD_IMPORT_FORMAT_VERSION,
+    CLOUD_IMPORT_FORMAT_VERSIONS,
 };
 use serde_json::{json, Value};
 
@@ -63,13 +64,15 @@ fn the_request_of_the_golden_file_round_trips() {
             payload.sscc_counters.len(),
             payload.shift_number_counters.len(),
         ),
-        (3, 2, 5, 3, 3, 3, 4, 3)
+        (3, 2, 5, 4, 3, 3, 4, 3)
     );
 }
 
+/// The tool writes format 2 since plan ТОВ; a file of format 1 stays good.
 #[test]
-fn the_format_version_this_build_reads_is_one() {
-    assert_eq!(CLOUD_IMPORT_FORMAT_VERSION, 1);
+fn the_format_versions_this_build_reads_are_one_and_two() {
+    assert_eq!(CLOUD_IMPORT_FORMAT_VERSION, 2);
+    assert_eq!(CLOUD_IMPORT_FORMAT_VERSIONS, [1, 2]);
 }
 
 #[test]
