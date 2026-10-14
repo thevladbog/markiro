@@ -15,6 +15,7 @@ import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
 import { HEALTHY_BACKUPS } from "./backups.js";
+import { ACTIVE_LICENSE } from "./license.js";
 import { SESSION } from "./fixtures.js";
 
 /** A `HostApi` of mocks. */
@@ -147,7 +148,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
-    getLicense: vi.fn<HostApi["getLicense"]>(() => unexpected("getLicense")),
+    // The banner and «Обзор» read the license on every office test: a valid one warns of nothing.
+    getLicense: vi.fn<HostApi["getLicense"]>(async () => ACTIVE_LICENSE),
     previewLicense: vi.fn<HostApi["previewLicense"]>(() => unexpected("previewLicense")),
     loadLicense: vi.fn<HostApi["loadLicense"]>(() => unexpected("loadLicense")),
     getActivationRequest: vi.fn<HostApi["getActivationRequest"]>(() =>
