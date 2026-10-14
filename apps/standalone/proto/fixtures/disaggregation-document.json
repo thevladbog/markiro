@@ -1,0 +1,20 @@
+{
+  "id": "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c",
+  "docNo": "DSG-26-0001",
+  "status": "applied",
+  "reasonId": "d15a0000-0000-4000-8000-000000000003",
+  "reasonName": "Повреждена упаковка",
+  "comment": "Короб помят при погрузке",
+  "source": "manual",
+  "lineCount": 1,
+  "codeCount": 12,
+  "createdBy": "2f4e6a8c-1b3d-4f5a-9c7e-0d2b4f6a8c1e",
+  "createdByName": "Ирина Смирнова",
+  "createdAt": "2026-10-13T09:00:00Z",
+  "appliedAt": "2026-10-13T09:05:00Z",
+  "appliedBy": "2f4e6a8c-1b3d-4f5a-9c7e-0d2b4f6a8c1e",
+  "appliedByName": "Ирина Смирнова",
+  "cancelledAt": null,
+  "cancelledBy": null,
+  "rev": 44
+}

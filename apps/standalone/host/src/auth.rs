@@ -339,6 +339,29 @@ impl OfficeContext {
         }
     }
 
+    /// The early check of a disaggregation document or reason write (plan
+    /// ДЗГ): administrators and technologists, as shifts and exports.
+    pub fn require_disaggregation(&self) -> Result<(), ApiError> {
+        if disaggregates(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a disaggregation role is required"))
+        }
+    }
+
+    /// Re-check the disaggregation right inside the caller's write
+    /// transaction, as [`Self::require_shift_planning_in`] does for shifts.
+    pub async fn require_disaggregation_in(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ApiError> {
+        if disaggregates(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a disaggregation role is required"))
+        }
+    }
+
     /// The early check of a conflict's review (plan КНФ): administrators and
     /// technologists, as the shift's own actions.
     pub fn require_conflict_review(&self) -> Result<(), ApiError> {
@@ -370,6 +393,15 @@ impl OfficeContext {
 /// §4.9: administrators and technologists). No wildcard arm: a new role does
 /// not compile until it is placed here.
 pub fn plans_shifts(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
+}
+
+/// Whether a role keeps disaggregation documents and their reasons (plan
+/// ДЗГ: administrators and technologists, as shifts and exports). No
+/// wildcard arm: a new role does not compile until it is placed here.
+pub fn disaggregates(role: OfficeRole) -> bool {
     match role {
         OfficeRole::Admin | OfficeRole::Technologist => true,
     }
