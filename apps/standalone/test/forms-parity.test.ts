@@ -230,4 +230,51 @@ describe("«Бланк смены» of a validation shift, the office's and the 
     expect(drawn?.kind).toBe("task");
     expect(drawn?.html).toBe(expected);
   });
+
+  // Part B (B7): the same cases printing a duplicate, with the check required and not; the
+  // host's shift carries the policy as the host answers it, the cloud's as its loader maps it.
+  const printing = cloudTasks.flatMap(([name, cloud]) =>
+    (["none", "required"] as const).map((verification) => [name, verification, cloud] as const),
+  );
+  it.each(printing)(
+    "%s as a validation shift printing a duplicate, check %s",
+    (name, verification, cloud) => {
+      const parityCase = cases.find((each) => each.name === name);
+      if (parityCase?.form !== "task") throw new Error(`${name} is a task case`);
+      const host = {
+        ...parityCase.host,
+        shift: {
+          ...parityCase.host.shift,
+          mode: "validation" as const,
+          palletsEnabled: false,
+          palletBoxCapacity: null,
+          palletTemplateId: null,
+          validationPrint: {
+            mode: "duplicate_dm" as const,
+            templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+            verification,
+          },
+        },
+      };
+      const cloudData: ShiftTaskFormData = {
+        ...cloud,
+        mode: "validation",
+        boxCapacity: null,
+        palletsEnabled: false,
+        palletBoxCapacity: null,
+        validationPrintMode: "duplicate_dm",
+        validationPrintVerification: verification,
+        allowPreviouslyAcceptedCodes: false,
+        generatedAt: new Date(cloud.generatedAt),
+      };
+      const drawn = renderForm({
+        kind: "task",
+        inputs: host,
+        generatedAt: new Date(parityCase.generatedAt),
+      });
+      const expected = renderShiftTaskFormHtml(cloudData);
+      expect(expected).toContain("Дубликат Data Matrix");
+      expect(drawn?.html).toBe(expected);
+    },
+  );
 });

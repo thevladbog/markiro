@@ -80,7 +80,9 @@ type CardDialog = "totals" | "export" | "close";
  * «Состав паллеты» and «Ярлык паллеты» of a pallet, «Ярлыки паллет смены»
  * (pilot spec §5.5). Every role reads it and prints; closing stays with
  * `planShifts`. Times are written in the organization's zone, as the forms
- * write them.
+ * write them. A validation shift says whether it prints a duplicate and
+ * whether its check is required, and one that prints counts its labels in
+ * «Контроль печати» once a station opened it (plan РЕЖ part B).
  */
 export function ShiftCardPage() {
   const { t } = useTranslation();
@@ -145,6 +147,8 @@ export function ShiftCardPage() {
 
   const current = shift.data;
   const validation = current.mode === "validation";
+  const duplicate =
+    current.validationPrint?.mode === "duplicate_dm" ? current.validationPrint : null;
   const zone = formTimeZone(org.data);
   const time = new Intl.DateTimeFormat("ru", {
     dateStyle: "short",
@@ -238,6 +242,23 @@ export function ShiftCardPage() {
             term: t("office.shifts.table.mode"),
             description: t(`office.shifts.modes.${current.mode}`),
           },
+          // The duplicate print is a validation shift's alone (plan РЕЖ part B).
+          ...(validation
+            ? [
+                {
+                  id: "duplicate",
+                  term: t("office.shiftCard.duplicate"),
+                  description:
+                    duplicate === null
+                      ? t("office.shiftCard.duplicateOff")
+                      : t(
+                          duplicate.verification === "required"
+                            ? "office.shiftCard.duplicateRequired"
+                            : "office.shiftCard.duplicateOptional",
+                        ),
+                },
+              ]
+            : []),
           {
             id: "plannedQty",
             term: t("office.shifts.table.plannedQty"),
@@ -287,6 +308,9 @@ export function ShiftCardPage() {
           },
         ]}
       />
+      {current.status !== "planned" && current.totals.unitLabels !== undefined && (
+        <UnitLabelControl figures={current.totals.unitLabels} />
+      )}
       {current.status !== "planned" && !validation && (
         <ShiftBoxes shift={current} at={at} onForm={setForm} />
       )}
@@ -357,6 +381,63 @@ function ShiftStatusLine({ shift }: { shift: OfficeShift }) {
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * «Контроль печати» (the cloud's `pages.shifts.productLabels`): what the host
+ * counts of a printing shift's unit labels from its facts — attempts sent,
+ * attempts verified, checks skipped, jobs not finished yet, reprints — with
+ * the cloud's warning that a send is not a print, and a word, not a colour,
+ * when some labels still need finishing.
+ */
+function UnitLabelControl({
+  figures,
+}: {
+  figures: NonNullable<OfficeShift["totals"]["unitLabels"]>;
+}) {
+  const { t } = useTranslation();
+  const titleId = useId();
+  return (
+    <section className="shift-card__section" aria-labelledby={titleId}>
+      <h2 id={titleId}>{t("office.shiftCard.unitLabels.title")}</h2>
+      <Card>
+        <p className="office-note">{t("office.shiftCard.unitLabels.hint")}</p>
+        {figures.unresolved > 0 && (
+          <StatusChip phase="attention" wrap label={t("office.shiftCard.unitLabels.attention")} />
+        )}
+        <DefinitionGrid
+          items={[
+            { id: "sent", term: t("office.shiftCard.unitLabels.sent"), value: figures.sent },
+            {
+              id: "verified",
+              term: t("office.shiftCard.unitLabels.verified"),
+              value: figures.verified,
+            },
+            {
+              id: "skipped",
+              term: t("office.shiftCard.unitLabels.skipped"),
+              value: figures.skipped,
+            },
+            {
+              id: "unresolved",
+              term: t("office.shiftCard.unitLabels.unresolved"),
+              value: figures.unresolved,
+            },
+            {
+              id: "reprints",
+              term: t("office.shiftCard.unitLabels.reprints"),
+              value: figures.reprints,
+            },
+          ].map(({ id, term, value }) => ({
+            id,
+            term,
+            description: UNITS.format(value),
+            mono: true,
+          }))}
+        />
+      </Card>
+    </section>
   );
 }
 

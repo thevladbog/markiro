@@ -5036,7 +5036,15 @@ mapping; the bytes are the acceptance rule.
   from the boxes standing is marked, never fixed). «Итоги» opens
   `ShiftTotalsDialog`, «Выгрузка» `ExportDialog` (plan ЧЗ) and «Закрыть»
   `CloseShiftDialog` (`planShifts`), all as the list opens them; a close
-  reads the card and every list again. Every role prints. The card does not
+  reads the card and every list again. A validation shift's card says
+  «Печать дубликата»: «Выключена», «Включена, проверка обязательна» or
+  «Включена, проверка необязательна» (plan РЕЖ part B, B7); one that prints,
+  once open, has «Контроль печати» with what the host counts of its unit
+  labels (`ShiftTotals.unitLabels`): «Отправки на принтер», «Проверенные
+  этикетки», «Пропущенные проверки» (the standalone's own words: the cloud's
+  card does not count them), «Требуют завершения», «Повторные попытки», the
+  cloud's warning that a send is not a print, and «Есть этикетки, которые
+  требуют внимания» while some are unfinished. Every role prints. The card does not
   refresh itself: an active shift's lists are as of opening, and the pallet
   list is not paged (fine at hundreds; page it at about a thousand).
 - The host only reads, one snapshot a route, each query by an index
@@ -5068,7 +5076,10 @@ mapping; the bytes are the acceptance rule.
   with an SSCC (one taken apart prints with the watermark), «Ярлыки паллет
   смены» print the closed standing pallets closed first and need one, «Бланк
   смены» is for a planned or an active shift and takes the shift's one date as
-  both its dates (stage 2a spec, question В3).
+  both its dates (stage 2a spec, question В3). Its row «ПЕЧАТЬ ЭТИКЕТКИ» of a
+  validation shift is the shift's own policy (`validationPrintMode`,
+  `validationPrintVerification`; none without one), held against the cloud's
+  renderer for both checks in `test/forms-parity.test.ts`.
 - Parity: `packages/domain/test/fixtures/print-forms-parity/cases.json` holds
   each case's input as the cloud's loader returns it (`cloud`) and the same
   facts as the host answers them (`host`); `golden.json` the HTML the cloud's
