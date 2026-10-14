@@ -15,7 +15,7 @@ import {
 
 import type { OfficeLicense } from "../../host/protocol.js";
 import { useCan } from "../access.js";
-import { useBackupTime } from "../backups/backup-time.js";
+import { useBackupTime, type BackupTimeNote } from "../backups/backup-time.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { copyText } from "./clipboard.js";
@@ -55,7 +55,7 @@ export function LicenseSection() {
       {data !== undefined && time.ready ? (
         <>
           {failure}
-          <LicenseBody license={data} zone={time.zone} />
+          <LicenseBody license={data} zone={time.zone} note={time.note} />
         </>
       ) : (
         (failure ?? <PageLoading />)
@@ -64,12 +64,22 @@ export function LicenseSection() {
   );
 }
 
-function LicenseBody({ license, zone }: { license: OfficeLicense; zone: string | null }) {
+function LicenseBody({
+  license,
+  zone,
+  note,
+}: {
+  license: OfficeLicense;
+  zone: string | null;
+  /** Why the dates are this PC's, not the organization's zone: the words «Резервные копии» use. */
+  note: BackupTimeNote | null;
+}) {
   const { t } = useTranslation();
   const admin = useCan("manageLicense");
   const state = stateText(license);
   return (
     <div className="standalone-form">
+      {note !== null && <p className="office-note">{t(`office.backups.${note}`)}</p>}
       <Alert
         className="license-state"
         tone={stateTone(license.state)}

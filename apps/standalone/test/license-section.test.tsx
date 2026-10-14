@@ -292,6 +292,33 @@ describe("«Лицензия» on «Информация»", () => {
     expect(within(card).getByText(/может администратор/)).toBeTruthy();
   });
 
+  it.each([
+    [
+      "names a zone this PC lacks",
+      (session: FakeOfficeSession) =>
+        session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Mars/Olympus_Mons" }),
+      "Часовой пояс организации неизвестен этому компьютеру: время указано по его часам.",
+    ],
+    [
+      "does not load",
+      (session: FakeOfficeSession) => session.api.getOrg.mockRejectedValue(new Error("down")),
+      "Профиль организации не загрузился: время указано по часам этого компьютера.",
+    ],
+  ] as const)(
+    "says the dates are this PC's when the organization's profile %s, as «Резервные копии»",
+    async (_, arrange, note) => {
+      const session = sessionWith();
+      arrange(session);
+      const card = await openLicense(session);
+      expect(within(card).getByText(note)).toBeTruthy();
+    },
+  );
+
+  it("says nothing of the zone when the dates are the organization's", async () => {
+    const card = await openLicense(sessionWith());
+    expect(within(card).queryByText(/время указано по/)).toBeNull();
+  });
+
   it("copies the host's id whole, and says so", async () => {
     const card = await openLicense(sessionWith());
     fireEvent.click(within(card).getByRole("button", { name: "Скопировать идентификатор хоста" }));
