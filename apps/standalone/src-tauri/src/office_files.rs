@@ -1,5 +1,6 @@
-//! Files the office saves on this computer (plan ЧЗ): the parts of an export
-//! and a printed form's HTML (plan О-Ф). Everything goes under
+//! Files the office saves on this computer (plan ЧЗ): the parts of an export,
+//! a printed form's HTML (plan О-Ф) and the license's activation request
+//! (plan ЛЦ-3). Everything goes under
 //! `Документы\Markiro` (the system's documents folder, `document_dir`), in a
 //! first folder of [`ROOTS`] and the segments the webview names: no file
 //! dialog, so no plugin and no new dependency (pilot spec, question П16).
@@ -29,8 +30,13 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 /// The first folders under `Документы\Markiro` the office writes into:
-/// exports (plan ЧЗ) and forms (plan О-Ф).
-pub const ROOTS: [&str; 2] = ["Выгрузки", "Формы"];
+/// exports (plan ЧЗ), forms (plan О-Ф) and the license's activation request
+/// (plan ЛЦ-3, license spec §6.3).
+pub const ROOTS: [&str; 3] = ["Выгрузки", "Формы", LICENSE_ROOT];
+
+/// The root the activation request is saved under (plan ЛЦ-3). Nothing is
+/// opened from it: `open_office_file` opens forms only.
+pub const LICENSE_ROOT: &str = "Лицензия";
 
 /// The root a form is opened from: `open_office_file` takes a file of no
 /// other (the parts of an export are data, not documents to start).
@@ -64,10 +70,11 @@ const SUFFIX_CHARS: usize = 5;
 /// 1С can open what was written.
 pub const MAX_PATH_UNITS: usize = 240;
 
-/// The extensions of the files the office writes: the parts of an export
-/// and a form's HTML. A file of another kind (a script, a shortcut, a
-/// program) is never written, whatever the webview asks.
-pub const FILE_EXTENSIONS: [&str; 4] = ["csv", "txt", "xml", "html"];
+/// The extensions of the files the office writes: the parts of an export,
+/// a form's HTML and the license's activation request (`json`, plan ЛЦ-3).
+/// A file of another kind (a script, a shortcut, a program) is never
+/// written, whatever the webview asks.
+pub const FILE_EXTENSIONS: [&str; 5] = ["csv", "txt", "xml", "html", "json"];
 
 /// The most segments of one path, the root among them.
 pub const MAX_SEGMENTS: usize = 8;
@@ -1087,7 +1094,8 @@ mod tests {
     /// documents folder's `Markiro`.
     #[test]
     fn both_roots_are_open_and_the_folder_is_markiro_under_documents() {
-        assert_eq!(ROOTS, ["Выгрузки", "Формы"]);
+        // Plan ЛЦ-3 adds the license's root for the activation request.
+        assert_eq!(ROOTS, ["Выгрузки", "Формы", "Лицензия"]);
         let root = tempfile::tempdir().unwrap();
         for first in ROOTS {
             let path = segments(&[first, "OCT26-004", "run"]);
@@ -1107,6 +1115,42 @@ mod tests {
             OfficeFilesState::unavailable().root(),
             Err(OfficeFilesError::DocumentsUnavailable)
         );
+    }
+
+    /// The activation request goes under `Лицензия` as JSON (plan ЛЦ-3), and
+    /// nothing is opened from there: a form is opened from `Формы` only.
+    #[test]
+    fn the_license_root_takes_the_activation_request_and_opens_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let path = segments(&["Лицензия", "Запрос на активацию 2026-10-20_09-00-00"]);
+        let saved = save_files(
+            root.path(),
+            &path,
+            &[file("markiro-activation-request.json", b"{}\n")],
+        )
+        .unwrap();
+        assert_eq!(saved.segments, path);
+        assert_eq!(saved.files, ["markiro-activation-request.json"]);
+        assert_eq!(
+            fs::read(
+                root.path()
+                    .join("Лицензия")
+                    .join("Запрос на активацию 2026-10-20_09-00-00")
+                    .join("markiro-activation-request.json")
+            )
+            .unwrap(),
+            b"{}\n"
+        );
+        assert!(existing_folder(root.path(), &saved.segments).is_ok());
+        assert_eq!(
+            existing_form(
+                root.path(),
+                &saved.segments,
+                "markiro-activation-request.json"
+            ),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        assert_eq!(LICENSE_ROOT, "Лицензия");
     }
 
     /// The IPC shape is closed: a file with a field of another name is not a
@@ -1193,15 +1237,18 @@ mod tests {
     /// double extension counts by its last part, and a stem is needed.
     #[test]
     fn a_file_name_ends_in_an_extension_the_office_writes() {
-        assert_eq!(FILE_EXTENSIONS, ["csv", "txt", "xml", "html"]);
+        assert_eq!(FILE_EXTENSIONS, ["csv", "txt", "xml", "html", "json"]);
         for name in [
             "a.csv",
             "a.txt",
             "a.xml",
             "a.html",
+            "a.json",
             "A.TXT",
+            "A.JSON",
             "a.Xml",
             "Молоко (2).csv",
+            "markiro-activation-request.json",
         ] {
             assert!(is_plain_file_name(name), "{name}");
         }
@@ -1215,6 +1262,8 @@ mod tests {
             "a.js",
             "a.csv.bat",
             "Молоко.csv.exe",
+            "a.json.exe",
+            "a.jsonl",
             "a.txt.lnk",
             "a. txt",
             "a.htm",
