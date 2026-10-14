@@ -60,3 +60,31 @@ export function testLabelSpec(code: string, language: PrinterLanguage): LabelTem
 export function scannedTestCode(raw: string): string {
   return raw.trim().replace(/^\][A-Za-z][0-9]/, "");
 }
+
+/**
+ * The scanner self-test's DataMatrix on a label (owner feedback, beta 3): the symbol is the label
+ * model's own GS1 DataMatrix (`km.code`, framed in GS1 with FNC1 as the product labels are), «TEST»
+ * beside it, all ASCII. The code goes in the label data's `km.code`, not in the spec.
+ */
+export function selfTestDataMatrixSpec(language: PrinterLanguage): LabelTemplateSpec {
+  return {
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203,
+    language,
+    elements: [
+      { id: "title", kind: "text", text: "MARKIRO TEST", xMm: 4, yMm: 3, fontSizePt: 10 },
+      {
+        id: "code",
+        kind: "barcode",
+        format: "datamatrix",
+        data: "km.code",
+        xMm: 4,
+        yMm: 9,
+        sizeMm: 26,
+      },
+      { id: "word", kind: "text", text: "TEST", xMm: 33, yMm: 14, fontSizePt: 18 },
+      { id: "note", kind: "text", text: "NOT A PRODUCT", xMm: 33, yMm: 24, fontSizePt: 7 },
+    ],
+  };
+}
