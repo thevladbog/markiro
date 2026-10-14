@@ -20,6 +20,7 @@ pub mod office_auth;
 pub mod office_boxes;
 pub mod office_codes;
 pub mod office_conflicts;
+pub mod office_disaggregation_reports;
 pub mod office_exports;
 pub mod office_reports;
 pub mod office_shift_review;
