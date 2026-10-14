@@ -5145,3 +5145,65 @@ async fn migration_0016_keeps_the_outbox_and_adds_the_conflict_notices() {
     );
     assert!(MIGRATOR.iter().any(|migration| migration.version == 16));
 }
+
+/// A station database of the first beta (beta 2, commit `0aac2b1af`) had the shell
+/// migrations `0001`–`0010`, `0012` and `0013`. The application's start applies the rest,
+/// lowest first, and the result is the schema a new database has: the same tables, indexes and
+/// triggers (`outbox_unsent` among them) and every migration journaled once.
+#[tokio::test]
+async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
+    let beta2 = |version: i64| (1..=10).contains(&version) || version == 12 || version == 13;
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    let old: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| beta2(migration.version))
+        .cloned()
+        .collect();
+    assert_eq!(old.len(), 12);
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(old),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+
+    let upgraded = LocalDb::open(dir.path()).await.unwrap();
+    let (_fresh_dir, fresh) = open().await;
+    let objects = "SELECT type, name, tbl_name FROM sqlite_master \
+                   WHERE name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' \
+                   ORDER BY type, name";
+    let upgraded_objects = upgraded.query(objects, vec![]).await.unwrap();
+    assert_eq!(
+        upgraded_objects,
+        fresh.query(objects, vec![]).await.unwrap()
+    );
+    for expected in ["outbox_unsent", "wh_outbox_unsent"] {
+        assert!(
+            upgraded_objects
+                .iter()
+                .any(|row| row["name"].as_str() == Some(expected)),
+            "no {expected}"
+        );
+    }
+    let columns = "SELECT m.name AS tbl, c.name, c.type, c.\"notnull\" AS required, \
+                   c.dflt_value AS dflt, c.pk FROM sqlite_master m, pragma_table_info(m.name) c \
+                   WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \
+                   AND m.name <> '_sqlx_migrations' ORDER BY m.name, c.name";
+    assert_eq!(
+        upgraded.query(columns, vec![]).await.unwrap(),
+        fresh.query(columns, vec![]).await.unwrap()
+    );
+    let journal = "SELECT version, success FROM _sqlx_migrations ORDER BY version";
+    assert_eq!(
+        upgraded.query(journal, vec![]).await.unwrap(),
+        fresh.query(journal, vec![]).await.unwrap()
+    );
+}
