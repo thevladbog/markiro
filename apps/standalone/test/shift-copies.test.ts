@@ -122,8 +122,9 @@ describe("the station's copies of its shifts", () => {
       { id: moved.id, productionDate: "2026-10-09", plannedDate: "2026-10-12" },
     ]);
     // A later list from a host that names no date clears it rather than keeping a stale one.
-    const { plannedDate: _dropped, ...bare } = moved;
-    await replaceShiftCopies(executor, PAIRING, [bare], SEEN + 1);
+    const bare: Partial<DeviceShift> = { ...moved };
+    delete bare.plannedDate;
+    await replaceShiftCopies(executor, PAIRING, [bare as DeviceShift], SEEN + 1);
     expect((await readShiftCopy(executor, PAIRING, moved.id))?.plannedDate).toBeNull();
   });
 

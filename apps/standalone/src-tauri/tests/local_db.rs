@@ -5228,7 +5228,10 @@ async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
 
     let upgraded = LocalDb::open(dir.path()).await.unwrap();
     let kept = upgraded
-        .query("SELECT id, production_date, planned_date FROM floor_shifts", vec![])
+        .query(
+            "SELECT id, production_date, planned_date FROM floor_shifts",
+            vec![],
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -5335,8 +5338,14 @@ async fn a_beta3_station_database_gets_the_shift_date_and_keeps_its_shifts() {
         .connect()
         .await
         .unwrap();
-    sqlx::query(&write("2026-10-12")).execute(&mut raw).await.unwrap();
-    assert!(sqlx::query(&write("12.10.2026")).execute(&mut raw).await.is_err());
+    sqlx::query(&write("2026-10-12"))
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    assert!(sqlx::query(&write("12.10.2026"))
+        .execute(&mut raw)
+        .await
+        .is_err());
     raw.close().await.unwrap();
 }
 
