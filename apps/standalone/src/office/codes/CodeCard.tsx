@@ -195,9 +195,7 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
       key: "box",
       title: t("office.codeSearch.table.box"),
       mono: true,
-      render: (item) => (
-        <BoxText item={item} />
-      ),
+      render: (item) => <BoxText item={item} />,
     },
     {
       key: "pallet",
