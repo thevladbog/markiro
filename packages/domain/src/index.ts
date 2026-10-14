@@ -258,6 +258,12 @@ export {
   InventoryDocumentGenerationError,
   isParticipantInn,
 } from "./inventory/index.js";
+export { GismtDisaggregationError, renderGismtDisaggregationXml } from "./gismt-disaggregation.js";
+export type {
+  GismtDisaggregationErrorCode,
+  GismtDisaggregationInput,
+  RenderedGismtDisaggregation,
+} from "./gismt-disaggregation.js";
 export type {
   InventoryDocumentGeneratedPart,
   InventoryDocumentGenerationErrorCode,
