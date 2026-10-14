@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OfficeFilesError } from "../src/office/exports/office-files.js";
 import {
+  actFolder,
   formFileName,
   formFolder,
   openInBrowser,
@@ -10,6 +11,17 @@ import {
 } from "../src/office/forms/print-form.js";
 import type { RenderedForm } from "../src/office/forms/render-form.js";
 import { fakeOfficeFiles } from "./support/office-files.js";
+
+describe("an act's folder (plan ДЗГ-О)", () => {
+  it("is Формы\\Дезагрегация\\<номер>\\<дата_время>_act_<вариант> in the organization's time", () => {
+    expect(actFolder("DSG-26-0007", "full", "2026-10-12T21:30:00.000Z", "Europe/Moscow")).toEqual([
+      "Формы",
+      "Дезагрегация",
+      "DSG-26-0007",
+      "2026-10-13_00-30-00_act_full",
+    ]);
+  });
+});
 
 const FORM: RenderedForm = {
   kind: "placard",
