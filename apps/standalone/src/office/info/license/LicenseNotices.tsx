@@ -82,9 +82,29 @@ export type LicenseNoticesProps = ShownNotices;
  * file after its own words where it applies, and a link to «Лицензия». They
  * live inside a polite region their caller keeps on the screen, so they lose
  * their own `alert` role (`presentation`): each is heard once, quietly.
+ * «Скрыть» removes its own button, so the focus moves to the «Скрыть» of the
+ * warning that takes its place (the next, else the previous), else to the
+ * office's `main` (focusable by code, as after a menu navigation), never to
+ * the document's body.
  */
 export function LicenseNotices({ license, notices, zone, onDismiss }: LicenseNoticesProps) {
   const { t } = useTranslation();
+  const hide = (
+    notice: LicenseNotice,
+    button: HTMLElement,
+    dismiss: (notice: LicenseNotice) => void,
+  ) => {
+    // Before the button goes: the last warning hidden unmounts these alerts altogether.
+    const dismissible = notices.filter((other) => other.dismissible);
+    const at = dismissible.findIndex((other) => other.kind === notice.kind);
+    const next = dismissible[at + 1] ?? dismissible[at - 1];
+    const target =
+      next === undefined
+        ? null
+        : button.ownerDocument.querySelector<HTMLElement>(`[data-license-dismiss="${next.kind}"]`);
+    (target ?? button.ownerDocument.querySelector<HTMLElement>("main"))?.focus();
+    dismiss(notice);
+  };
   return (
     <>
       {notices.map((notice) => {
@@ -97,7 +117,12 @@ export function LicenseNotices({ license, notices, zone, onDismiss }: LicenseNot
             role="presentation"
             action={
               onDismiss !== undefined && notice.dismissible ? (
-                <Button variant="secondary" size="compact" onClick={() => onDismiss(notice)}>
+                <Button
+                  variant="secondary"
+                  size="compact"
+                  data-license-dismiss={notice.kind}
+                  onClick={(event) => hide(notice, event.currentTarget, onDismiss)}
+                >
                   {t("office.banner.license.dismiss")}
                 </Button>
               ) : undefined

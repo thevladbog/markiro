@@ -160,6 +160,29 @@ describe("the license's band above the office's pages", () => {
     expect(within(band()).getAllByRole("button", { name: DISMISS })).toHaveLength(2);
   });
 
+  it("moves the focus to the next warning's «Скрыть», then to the page, never to nowhere", async () => {
+    renderPage(sessionWith({ ...EXPIRING, flags: { clockBehindDays: 3, clockAhead: false } }));
+    await within(band()).findByText(/Лицензия заканчивается/);
+    const [first, second] = within(band()).getAllByRole("button", { name: DISMISS });
+    first!.focus();
+    fireEvent.click(first!);
+    await waitFor(() => expect(within(band()).queryByText(/Лицензия заканчивается/)).toBeNull());
+    expect(document.activeElement).toBe(second);
+    fireEvent.click(second!);
+    await waitFor(() => expect(band().childElementCount).toBe(0));
+    expect(document.activeElement).toBe(document.querySelector("main"));
+  });
+
+  it("moves the focus to the page when «Обзор»'s last light warning is hidden", async () => {
+    renderOffice(sessionWith(TRIAL));
+    const region = overviewAlerts();
+    const dismiss = await within(region).findByRole("button", { name: DISMISS });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    await waitFor(() => expect(within(region).queryByText(/Пробный период/)).toBeNull());
+    expect(document.activeElement).toBe(document.querySelector("main"));
+  });
+
   it.each([
     ["the end", EXPIRING, /Лицензия заканчивается 31\.10\.2027\./],
     ["the grace", GRACE, /Срок лицензии истёк 31\.10\./],
