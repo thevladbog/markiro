@@ -25,6 +25,13 @@ import {
   shiftsSession,
   WATER,
 } from "./support/shifts.js";
+import {
+  chooseValueOn,
+  isSelectTrigger,
+  settleSelect,
+  shownOn,
+  valueOn,
+} from "./support/select.js";
 
 const TOKEN = "office-session-token";
 const NEW = "Новая смена";
@@ -50,14 +57,15 @@ function field(name: string, label: string): HTMLElement {
 }
 
 function set(name: string, label: string, value: string): void {
-  fireEvent.change(field(name, label), { target: { value } });
+  const control = field(name, label);
+  if (isSelectTrigger(control)) chooseValueOn(control, value);
+  else fireEvent.change(control, { target: { value } });
 }
 
 function valueOf(name: string, label: string): string {
   const control = field(name, label);
-  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
-    throw new Error(`${label} holds no value`);
-  }
+  if (isSelectTrigger(control)) return valueOn(control);
+  if (!(control instanceof HTMLInputElement)) throw new Error(`${label} holds no value`);
   return control.value;
 }
 
@@ -344,12 +352,20 @@ function duplicateSection(name: string): HTMLElement | null {
   return within(dialog(name)).queryByRole("region", { name: "Печать дубликата" });
 }
 
-/** The options of the select labelled `label`, by text, the placeholder left out. */
+/**
+ * The options of the select labelled `label`, by text, the placeholder left
+ * out: read from the form proxy Radix mirrors them into (`test/support/select.ts`),
+ * which keeps each option's `disabled`.
+ */
 function optionsOf(name: string, label: string): { text: string; disabled: boolean }[] {
   const control = field(name, label);
-  if (!(control instanceof HTMLSelectElement)) throw new Error(`${label} is no select`);
-  return [...control.options]
-    .filter((option) => option.value !== "")
+  if (!isSelectTrigger(control)) throw new Error(`${label} is no select`);
+  const proxy = control
+    .closest(".mk-field")
+    ?.querySelector<HTMLSelectElement>("select[aria-hidden='true']");
+  if (!proxy) throw new Error(`${label} has no form proxy`);
+  return [...proxy.options]
+    .filter((option) => option.value !== "" && option.value !== "__markiro_empty_option__")
     .map((option) => ({ text: option.textContent, disabled: option.disabled }));
 }
 
@@ -458,6 +474,8 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     const session = await openCreate();
     set(NEW, "Товар", MILK.id);
     set(NEW, "Линия", LINE_2.id);
+    // Radix hands the focus back to the line's trigger a macrotask after its list closes.
+    await settleSelect();
     fireEvent.click(mode(NEW, "Проверка"));
     fireEvent.click(checkbox(NEW, PRINT));
     fireEvent.click(within(dialog(NEW)).getByRole("button", { name: "Запланировать" }));
@@ -739,7 +757,7 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     );
   });
 
-  it("is worked from the keyboard: the flag and the check are buttons in the tab order, the template a native select", async () => {
+  it("is worked from the keyboard: the flag and the check are buttons in the tab order, the template a select", async () => {
     await openCreate();
     set(NEW, "Товар", MILK.id);
     fireEvent.click(mode(NEW, "Проверка"));
@@ -752,7 +770,10 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     const check = checkbox(NEW, CHECK);
     expect(check.tagName).toBe("BUTTON");
     expect(check.tabIndex).toBe(0);
-    expect(field(NEW, TEMPLATE).tagName).toBe("SELECT");
+    // The office's own Select (integration's 0ad014941): a combobox button in the tab order.
+    const template = field(NEW, TEMPLATE);
+    expect(isSelectTrigger(template)).toBe(true);
+    expect(template.tabIndex).toBe(0);
   });
 
   it("toggles the flag and the check with Space", async () => {
@@ -796,8 +817,7 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
       expect(flag.hasAttribute("disabled")).toBe(true);
       expect((field(name, TEMPLATE) as HTMLSelectElement).disabled).toBe(true);
       expect(valueOf(name, TEMPLATE)).toBe(templateId);
-      const select = field(name, TEMPLATE) as HTMLSelectElement;
-      expect(select.selectedOptions[0]?.textContent).toBe(shown);
+      expect(shownOn(field(name, TEMPLATE))).toBe(shown);
       expect(checkbox(name, CHECK).hasAttribute("disabled")).toBe(true);
       expect(within(dialog(name)).getByText(FROZEN)).toBeTruthy();
       expect(within(dialog(name)).queryByText(COPY_HINT)).toBeNull();

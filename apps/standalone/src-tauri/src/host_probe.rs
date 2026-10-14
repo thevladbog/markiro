@@ -213,12 +213,12 @@ mod tests {
         // A host this build could not talk to still names its versions.
         assert_eq!(
             read_versions(&json!({
-                "product": HOST_PRODUCT, "protocol": 9, "minProtocol": 5, "version": "0.9.0"
+                "product": HOST_PRODUCT, "protocol": 9, "minProtocol": 6, "version": "0.9.0"
             })),
             Ok(HostVersions {
                 version: Some("0.9.0".into()),
                 protocol: 9,
-                min_protocol: 5
+                min_protocol: 6
             })
         );
         assert_eq!(

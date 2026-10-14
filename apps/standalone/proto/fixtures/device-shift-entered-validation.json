@@ -24,7 +24,8 @@
       "name": "Молоко 3,2% 0,9 л",
       "printName": "Молоко 3,2%",
       "chzProductGroupCode": 8,
-      "shelfLifeDays": 10
+      "shelfLifeDays": 10,
+      "egaisCode": null
     },
     "boxTemplate": {
       "id": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",

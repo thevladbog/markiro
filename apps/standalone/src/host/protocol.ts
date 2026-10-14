@@ -2146,8 +2146,6 @@ export const UNIT_LABEL_ERROR_CODES = {
   verification_rejected: readonly ProductLabelEventOf<"verification_rejected">["reason"][];
 };
 
-const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
-
 /**
  * `data` of a `unit_label` fact (`markiro_proto::UnitLabelFact`, protocol 5,
  * plan РЕЖ part B): one event of the job that prints the Data Matrix

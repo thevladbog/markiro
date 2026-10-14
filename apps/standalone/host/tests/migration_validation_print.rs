@@ -16,17 +16,22 @@ use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use tempfile::TempDir;
 
-/// Every migration before `0021`.
-fn through_0020() -> Migrator {
+/// Every migration up to `last`, inclusive.
+fn through(last: i64) -> Migrator {
     Migrator {
         migrations: MIGRATOR
             .iter()
-            .filter(|migration| migration.version < 21)
+            .filter(|migration| migration.version <= last)
             .cloned()
             .collect::<Vec<_>>()
             .into(),
         ..Migrator::DEFAULT
     }
+}
+
+/// Every migration before `0021`.
+fn through_0020() -> Migrator {
+    through(20)
 }
 
 /// One connection, so what a test reads follows what it wrote.
@@ -296,7 +301,9 @@ async fn the_migration_adds_the_policy_and_the_events_and_keeps_every_row() {
     );
     let schema_before = schema(&pool).await;
 
-    MIGRATOR.run(&pool).await.unwrap();
+    // `0021` alone: the later migrations of other plans (`0023` products,
+    // `0031` devices) change tables of their own, not this one's subject.
+    through(21).run(&pool).await.unwrap();
 
     assert!(applied(&pool).await.contains(&21));
     // Every row as it was, in the columns it had, its rowid with it.

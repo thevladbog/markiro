@@ -201,6 +201,8 @@ describe("«Бланк смены» of a validation shift, the office's and the 
     if (parityCase?.form !== "task") throw new Error(`${name} is a task case`);
     const host = {
       ...parityCase.host,
+      // The cloud's cases have no photo (plan ТОВ), as above.
+      photo: null,
       shift: {
         ...parityCase.host.shift,
         mode: "validation" as const,
@@ -244,6 +246,7 @@ describe("«Бланк смены» of a validation shift, the office's and the 
       if (parityCase?.form !== "task") throw new Error(`${name} is a task case`);
       const host = {
         ...parityCase.host,
+        photo: null,
         shift: {
           ...parityCase.host.shift,
           mode: "validation" as const,
