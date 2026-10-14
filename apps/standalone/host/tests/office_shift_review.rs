@@ -438,10 +438,17 @@ async fn an_unknown_shift_is_not_found_and_the_refusals_read_their_own_index() {
         ] {
             assert!(text.contains(index), "{sql}: {text}");
         }
-        assert!(
-            !text.contains("SCAN b") && !text.contains("SCAN p"),
-            "{text}"
-        );
+        // No step reads a table through: the only scans are the compound's own
+        // result being ordered and the count's constant row.
+        let scans: Vec<&str> = text
+            .lines()
+            .filter(|line| {
+                line.starts_with("SCAN")
+                    && !line.contains("(subquery")
+                    && !line.contains("CONSTANT ROW")
+            })
+            .collect();
+        assert!(scans.is_empty(), "{sql}: {scans:?}\n{text}");
         // An undo's serial is looked up by its code's hash.
         if sql.contains("serial FROM scans") {
             assert!(text.contains("scans_code_hash"), "{text}");

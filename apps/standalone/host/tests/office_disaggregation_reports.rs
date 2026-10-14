@@ -322,9 +322,11 @@ async fn every_query_of_the_act_searches_by_an_index() {
     }
 }
 
-/// Five reads, one snapshot: a write that commits between them (here a
-/// changed comment, by a second connection and past the routes) is not in
-/// the answer.
+/// Five reads, one snapshot: writes that commit between them (the
+/// organization renamed after the document was read, the box's codes taken
+/// out after its lines were read), by a second connection and past the
+/// routes, are in no part of the answer. Each write is one a LATER query of
+/// the same read would see, so a read on separate connections fails here.
 #[tokio::test]
 async fn the_act_reads_one_snapshot() {
     let admin = admin().await;
@@ -332,30 +334,26 @@ async fn the_act_reads_one_snapshot() {
     let a = sscc(1500);
     let id = document(&admin, &[(&a, Some(&a))], false).await;
     let (_, before) = report(&admin, &id, "?variant=full").await;
+    assert_eq!(before["lines"][0]["items"].as_array().unwrap().len(), 3);
     let pool = admin.app.state.pool.clone();
     let writer = pool.clone();
     let steps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = steps.clone();
-    let doc = id.clone();
     let rows = markiro_host::routes::office_disaggregation_reports::read_report_rows(
         &pool,
         &id,
         markiro_proto::disaggregation::DisaggregationReportVariant::Full,
         move |step| {
             let pool = writer.clone();
-            let doc = doc.clone();
             seen.lock().unwrap().push(step);
             async move {
-                if step == "lines" {
-                    let done = sqlx::query(
-                        "UPDATE disaggregation_documents SET comment = 'другой' WHERE id = ?",
-                    )
-                    .bind(&doc)
-                    .execute(&pool)
-                    .await
-                    .unwrap();
-                    assert_eq!(done.rows_affected(), 1);
-                }
+                let write = match step {
+                    "document" => "UPDATE org_profile SET name = 'Переименована'",
+                    "lines" => "UPDATE box_items SET removed_at = '2026-10-08T09:00:00.000Z'",
+                    _ => return,
+                };
+                let done = sqlx::query(write).execute(&pool).await.unwrap();
+                assert!(done.rows_affected() >= 1, "{write}");
             }
         },
     )
@@ -367,10 +365,9 @@ async fn the_act_reads_one_snapshot() {
         ["document", "organization", "lines", "items", "boxes"]
     );
     assert_eq!(serde_json::to_value(&rows).unwrap(), before);
-    // The document's header was read before the write: the comment is the old one.
-    assert_eq!(before["comment"], "Короба намокли");
     let (_, after) = report(&admin, &id, "?variant=full").await;
-    assert_eq!(after["comment"], "другой");
+    assert_eq!(after["organization"]["name"], "Переименована");
+    assert_eq!(after["lines"][0]["items"], json!([]));
 }
 
 async fn record(admin: &Admin, token: &str, id: &str, body: Value) -> (StatusCode, Value) {

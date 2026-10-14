@@ -68,10 +68,12 @@ pub const EXCEPTIONS_COUNT_SQL: &str = "SELECT \
      (SELECT COUNT(*) FROM pallet_exceptions WHERE shift_id = ?1) + \
      (SELECT COUNT(*) FROM boxes b CROSS JOIN disaggregation_document_lines l ON l.box_id = b.id \
         AND l.status = 'ok' CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id \
-        AND dc.status = 'applied' WHERE b.shift_id = ?1 AND b.disassembled_at IS NOT NULL) + \
+        AND dc.status = 'applied' CROSS JOIN office_users u ON u.id = dc.applied_by \
+        WHERE b.shift_id = ?1 AND b.disassembled_at IS NOT NULL) + \
      (SELECT COUNT(*) FROM pallets p CROSS JOIN disaggregation_document_lines l ON l.pallet_id = p.id \
         AND l.status = 'ok' CROSS JOIN disaggregation_documents dc ON dc.id = l.document_id \
-        AND dc.status = 'applied' WHERE p.shift_id = ?1 AND p.disassembled_at IS NOT NULL)";
+        AND dc.status = 'applied' CROSS JOIN office_users u ON u.id = dc.applied_by \
+        WHERE p.shift_id = ?1 AND p.disassembled_at IS NOT NULL)";
 
 /// The shift's refused records, newest first; ?1 the shift, ?2 the limit.
 pub const REJECTIONS_SQL: &str = "SELECT r.record_id, r.kind, r.code, r.details, r.device_id, \
