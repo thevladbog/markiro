@@ -1,4 +1,4 @@
-import { renderCode128Svg, renderDataMatrixSvg } from "@markiro/domain";
+import { renderCode128Svg, renderDataMatrixSvg } from "../barcodes/svg.js";
 
 /** One unit code inside a disassembled box — feeds `renderDataMatrixSvg` as-is. */
 export interface DisaggregationReportCode {
@@ -41,7 +41,7 @@ export interface DisaggregationReportLine {
 /**
  * Everything `renderDisaggregationReportHtml` needs to build the printed A4
  * act for one disaggregation document. Gathered by
- * `DisaggregationService.reportData`. Deliberately price-free: the act is an
+ * `DisaggregationService.reportData` in apps/api. Deliberately price-free: the act is an
  * operations document, not a commercial one.
  */
 export interface DisaggregationReportData {
@@ -57,7 +57,20 @@ export interface DisaggregationReportData {
   /** false -> "только коды упаковок"; true -> "+ содержимое каждого короба". */
   includeContents: boolean;
   lines: DisaggregationReportLine[];
+  /**
+   * The second sentence block under «Результат операции» (plan ДЗГ-О). Left out,
+   * the cloud's own text is printed, byte for byte.
+   */
+  operationNote?: string;
 }
+
+/**
+ * The standalone's second sentence under «Результат операции» (plan ДЗГ-О):
+ * «Markiro Автоном» sends nothing to ГИС МТ itself; the office forms the
+ * «Расформирование упаковки» file and a person uploads it.
+ */
+export const DISAGGREGATION_MANUAL_UPLOAD_NOTE =
+  "SSCC расформированной упаковки повторно не используется. Файл «Расформирование упаковки» для ГИС МТ формируется в офисе и загружается в личный кабинет Честного знака вручную.";
 
 const MONTHS_RU = [
   "января",
@@ -78,14 +91,38 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
 }
 
-/** "23 июля 2026 г." — UTC, so the printed act reads the same regardless of the server's local timezone. */
-function formatDateLong(d: Date): string {
-  return `${d.getUTCDate()} ${MONTHS_RU[d.getUTCMonth()]} ${d.getUTCFullYear()} г.`;
+/** The calendar fields of `d` in `timeZone`; "UTC" gives the getUTC* fields the cloud printed. */
+function zonedParts(d: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const field = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+  return {
+    year: field("year"),
+    month: field("month"),
+    day: field("day"),
+    hour: field("hour"),
+    minute: field("minute"),
+  };
 }
 
-/** "23.07.2026 14:05" — UTC (see formatDateLong). */
-function formatDateTime(d: Date): string {
-  return `${pad2(d.getUTCDate())}.${pad2(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+/** "23 июля 2026 г." in `timeZone` (UTC by default: the printed act reads the same regardless of the server's local timezone). */
+function formatDateLong(d: Date, timeZone: string): string {
+  const p = zonedParts(d, timeZone);
+  return `${p.day} ${MONTHS_RU[p.month - 1]} ${p.year} г.`;
+}
+
+/** "23.07.2026 14:05" in `timeZone` (see formatDateLong). */
+function formatDateTime(d: Date, timeZone: string): string {
+  const p = zonedParts(d, timeZone);
+  return `${pad2(p.day)}.${pad2(p.month)}.${p.year} ${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
 function escapeHtml(value: string): string {
@@ -231,7 +268,7 @@ function dataMatrix(rawKm: string): string {
   }
 }
 
-function metadataBlock(data: DisaggregationReportData): string {
+function metadataBlock(data: DisaggregationReportData, timeZone: string): string {
   const orgBlock = data.org
     ? `<span class="rep-meta-value">${escapeHtml(data.org.name)}</span>
       <span class="rep-meta-detail">${data.org.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "ИНН не указан"}</span>`
@@ -252,7 +289,7 @@ function metadataBlock(data: DisaggregationReportData): string {
     <div class="rep-meta-cell">
       <span class="rep-meta-label">${performedLabel}</span>
       <span class="rep-meta-value">${escapeHtml(performedName)}</span>
-      <span class="rep-meta-detail">${formatDateTime(performedAt)} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
+      <span class="rep-meta-detail">${formatDateTime(performedAt, timeZone)} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
     </div>
     <div class="rep-meta-cell">
       <span class="rep-meta-label">Причина</span>
@@ -264,6 +301,10 @@ function metadataBlock(data: DisaggregationReportData): string {
 
 function finalBlocks(data: DisaggregationReportData): string {
   const totalCodes = data.lines.reduce((sum, line) => sum + line.codeCount, 0);
+  const operationNote =
+    data.operationNote === undefined
+      ? "SSCC расформированной упаковки повторно не используется. Изменения агрегации передаются в ГИС МТ автоматически."
+      : escapeHtml(data.operationNote);
   const performedName =
     (data.status === "applied" ? (data.appliedByName ?? data.createdByName) : data.createdByName) ??
     "ФИО";
@@ -275,7 +316,7 @@ function finalBlocks(data: DisaggregationReportData): string {
     <div class="rep-operation">
       <span class="rep-meta-label">Результат операции</span>
       <span>Перечисленные короба расформированы: агрегация упаковок аннулирована, коды содержимого возвращены в статус свободных единиц.</span>
-      <span class="rep-operation-note">SSCC расформированной упаковки повторно не используется. Изменения агрегации передаются в ГИС МТ автоматически.</span>
+      <span class="rep-operation-note">${operationNote}</span>
     </div>
     <div class="rep-signatures">
       <div class="rep-signature">
@@ -405,12 +446,15 @@ function contentsUnits(data: DisaggregationReportData): ReportUnit[] {
 // ---- document --------------------------------------------------------------
 
 /** Pure: builds the print-ready A4 "Акт дезагрегации" document. No I/O, no `Date.now()`. */
-export function renderDisaggregationReportHtml(data: DisaggregationReportData): string {
+export function renderDisaggregationReportHtml(
+  data: DisaggregationReportData,
+  timeZone = "UTC",
+): string {
   const units = data.includeContents ? contentsUnits(data) : boxesUnits(data);
   const pages = paginateUnits(units, TABLE_HEAD_MM);
   const totalPages = pages.length;
   const logo = brandLogo(data);
-  const metadata = metadataBlock(data);
+  const metadata = metadataBlock(data, timeZone);
   const docBarcode = renderCode128Svg(data.docNo, { includeText: false });
   const variantLabel = data.includeContents
     ? "коды упаковок и содержимого"
@@ -432,7 +476,7 @@ export function renderDisaggregationReportHtml(data: DisaggregationReportData): 
       <div class="rep-title">
         <span class="rep-title-label">Акт дезагрегации</span>
         <span class="rep-title-doc">№ ${escapeHtml(data.docNo)}</span>
-        <span class="rep-title-detail">от ${formatDateLong(docDate)} · ${variantLabel} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
+        <span class="rep-title-detail">от ${formatDateLong(docDate, timeZone)} · ${variantLabel} · статус: <strong>${STATUS_LABEL[data.status]}</strong></span>
       </div>
     </header>
     ${metadata}

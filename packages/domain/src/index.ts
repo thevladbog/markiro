@@ -414,6 +414,16 @@ export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
 // and friends are generic names that should not crowd the package root, and
 // contents-report.ts has a different `escapeHtml` of its own.
 export * as taskFormChrome from "./print-forms/task-form-chrome.js";
+export {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+  renderDisaggregationReportHtml,
+} from "./print-forms/disaggregation-report.js";
+export type {
+  DisaggregationReportBox,
+  DisaggregationReportCode,
+  DisaggregationReportData,
+  DisaggregationReportLine,
+} from "./print-forms/disaggregation-report.js";
 
 export {
   createLabelRenderPlan,

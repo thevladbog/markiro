@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
   renderDisaggregationReportHtml,
   type DisaggregationReportData,
-} from "../src/modules/disaggregation/report";
+} from "../src/print-forms/disaggregation-report.js";
 
 /**
  * Characterisation lock for moving «Акт дезагрегации» into @markiro/domain
@@ -14,7 +15,7 @@ import {
  * draws the host's rows of the same facts to the same bytes.
  */
 
-const SNAPSHOTS = "../../../packages/domain/test/fixtures/print-forms";
+const SNAPSHOTS = "fixtures/print-forms";
 /** GS (ASCII 0x1D), the real KM separator byte. */
 const GS = String.fromCharCode(0x1d);
 /** Check-digit-valid GTIN; `renderDataMatrixSvg` enforces the AI-01 mod-10. */
@@ -114,5 +115,14 @@ describe("disaggregation act characterisation lock", () => {
     await expect(renderDisaggregationReportHtml(ACT_DRAFT)).toMatchFileSnapshot(
       `${SNAPSHOTS}/disaggregation-act-draft.html`,
     );
+  });
+
+  it("in the organization's zone with the standalone's note (plan ДЗГ-О)", async () => {
+    await expect(
+      renderDisaggregationReportHtml(
+        { ...ACT_FULL, operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE },
+        "Europe/Moscow",
+      ),
+    ).toMatchFileSnapshot(`${SNAPSHOTS}/disaggregation-act-full-moscow.html`);
   });
 });
