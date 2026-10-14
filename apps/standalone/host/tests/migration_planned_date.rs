@@ -1,4 +1,4 @@
-//! Migration `0027` (beta 3 feedback): every shift a host already holds takes
+//! Migration `0028` (beta 3 feedback): every shift a host already holds takes
 //! its production date as its shift date, and a shift written without one
 //! takes it too.
 
@@ -17,7 +17,7 @@ async fn the_shifts_already_there_take_their_production_date_as_the_shift_date()
     let before = Migrator {
         migrations: MIGRATOR
             .iter()
-            .filter(|migration| migration.version != 27)
+            .filter(|migration| migration.version != 28)
             .cloned()
             .collect::<Vec<_>>()
             .into(),

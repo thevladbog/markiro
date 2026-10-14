@@ -270,7 +270,7 @@ pub async fn list_shifts(
         .fetch_all(&state.pool)
         .await
     } else {
-        // Every row has a shift date (`0027` filled the old ones and a
+        // Every row has a shift date (`0028` filled the old ones and a
         // trigger fills a new one), so the plain column serves the index
         // `shifts_planned_date`.
         sqlx::query_as(&format!(

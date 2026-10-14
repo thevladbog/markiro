@@ -1,4 +1,4 @@
-//! The shift's own date (beta 3 feedback; migration `0027`): `plannedDate`,
+//! The shift's own date (beta 3 feedback; migration `0028`): `plannedDate`,
 //! the cloud's name, apart from the production date. The number keeps coming
 //! from the production date.
 
@@ -265,7 +265,7 @@ async fn a_station_creates_a_shift_with_its_shift_date_or_without() {
 }
 
 #[tokio::test]
-async fn migration_0027_gives_every_old_shift_its_production_date() {
+async fn migration_0028_gives_every_old_shift_its_production_date() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     let shift = plan_shift(&admin, shift_body(&setup)).await;

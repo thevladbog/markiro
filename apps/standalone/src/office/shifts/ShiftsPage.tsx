@@ -222,6 +222,13 @@ export function ShiftsPage() {
       render: (shift) => civilDateLabel(shift.productionDate),
     },
     {
+      // The shift's own date (beta 3), the working day, beside the production date.
+      key: "plannedDate",
+      title: t("office.shifts.table.plannedDate"),
+      mono: true,
+      render: (shift) => civilDateLabel(shift.plannedDate),
+    },
+    {
       key: "line",
       title: t("office.shifts.table.line"),
       wrap: true,
@@ -311,13 +318,6 @@ export function ShiftsPage() {
       mono: true,
       align: "right",
       render: (shift) => shiftOutput(shift, t),
-    },
-    {
-      // The shift's own date (beta 3), after the output like it, so the columns before keep their places.
-      key: "plannedDate",
-      title: t("office.shifts.table.plannedDate"),
-      mono: true,
-      render: (shift) => civilDateLabel(shift.plannedDate),
     },
     // Every role reads a shift's figures; the writes are `planShifts`.
     {

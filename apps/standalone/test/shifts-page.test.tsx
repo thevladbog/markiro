@@ -33,11 +33,23 @@ import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const SESSION_TOKEN = "office-session-token";
 
-/** The text of the cells of the shift numbered `number`, left to right. */
-function cells(number: string): (string | null)[] {
+/** Where «Дата смены» (beta 3) stands among the cells: right after the production date. */
+const SHIFT_DATE_AT = 2;
+
+/** The text of every cell of the shift numbered `number`, left to right. */
+function allCells(number: string): (string | null)[] {
   return within(shiftRow(number))
     .getAllByRole("cell")
     .map((cell) => cell.textContent);
+}
+
+/**
+ * The text of the cells of the shift numbered `number`, left to right, but the
+ * shift date's: the other columns keep the places these tests name them by, and
+ * the shift date has a test of its own (`allCells`).
+ */
+function cells(number: string): (string | null)[] {
+  return allCells(number).filter((_, at) => at !== SHIFT_DATE_AT);
 }
 
 /** `count` planned shifts numbered OCT26-001… on line 2. */
@@ -358,7 +370,7 @@ describe("office shifts: the list", () => {
     await openShifts(session);
     // The planned shift works on 10 October and is produced on 9 October.
     const row = shiftRow(PLANNED.number);
-    expect(cells(PLANNED.number)[1]).toBe("09.10.2026");
+    expect(allCells(PLANNED.number).slice(1, 3)).toEqual(["09.10.2026", "10.10.2026"]);
     expect(within(row).getByText("10.10.2026")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Дата смены" })).toBeTruthy();
     pickDate("Дата смены с", "8 октября 2026");
