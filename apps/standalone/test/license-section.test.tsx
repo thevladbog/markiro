@@ -11,6 +11,7 @@ import { HostError } from "../src/host/client.js";
 import type { LicensePreview, LicenseTerms, OfficeLicense } from "../src/host/protocol.js";
 import { OfficeFilesError } from "../src/office/exports/office-files.js";
 import { Office } from "../src/office/Office.js";
+import type * as OfficeQuery from "../src/office/office-query.js";
 import { HOST_ID } from "./support/fixtures.js";
 import {
   ACTIVE_LICENSE,
@@ -42,7 +43,7 @@ const writeText = vi.fn<(text: string) => Promise<void>>();
 // text and the activation request must not stay there (spec §9.7).
 const clients = vi.hoisted(() => ({ last: null as QueryClient | null }));
 vi.mock("../src/office/office-query.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/office/office-query.js")>();
+  const actual = await importOriginal<typeof OfficeQuery>();
   return {
     ...actual,
     createOfficeQueryClient: () => {
