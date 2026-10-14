@@ -372,8 +372,8 @@ pub async fn pallets(
 /// A new shift after the request's own checks and the references' checks.
 pub struct NewShift<'a> {
     pub origin: ShiftOrigin,
-    /// The office's choice (plan РЕЖ); a station's own shift is always
-    /// aggregation (`DeviceShiftCreate` names no mode).
+    /// The creator's choice (plan РЕЖ): the office's, or a station's own
+    /// (`DeviceShiftCreate::mode`, beta 3.2; left out, aggregation).
     pub mode: ShiftMode,
     /// The office user's id or the station's.
     pub created_by: &'a str,
@@ -390,8 +390,7 @@ pub struct NewShift<'a> {
     pub box_capacity: u32,
     pub box_template_id: &'a str,
     pub pallets: Option<Pallets>,
-    /// The print policy (plan РЕЖ, part B), checked: a station's own shift
-    /// prints nothing.
+    /// The print policy (plan РЕЖ, part B), checked.
     pub validation_print: &'a ValidationPrint,
 }
 

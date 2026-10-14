@@ -20,7 +20,7 @@ use markiro_proto::{
     ShiftClosedFact, ShiftCreate, ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin,
     ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
     SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, UnitLabelFact,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -1183,6 +1183,23 @@ fn a_shift_with_pallets_names_them_and_its_entry_freezes_the_pallet_template() {
         ),
         (false, None, None)
     );
+}
+
+#[test]
+fn a_station_names_the_mode_and_the_print_policy_of_its_shift() {
+    let bare: DeviceShiftCreate = round_trip("device-shift-create.json");
+    assert_eq!((bare.mode, bare.validation_print), (None, None));
+    let validation: DeviceShiftCreate = round_trip("device-shift-create-validation.json");
+    assert_eq!(
+        (validation.mode, validation.validation_print),
+        (Some(ShiftMode::Validation), None)
+    );
+    let printing: DeviceShiftCreate = round_trip("device-shift-create-validation-print.json");
+    assert_eq!(printing.mode, Some(ShiftMode::Validation));
+    assert!(matches!(
+        printing.validation_print,
+        Some(ValidationPrint::DuplicateDm { .. })
+    ));
 }
 
 #[test]

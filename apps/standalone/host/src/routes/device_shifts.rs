@@ -184,6 +184,16 @@ pub async fn create_device_shift(
 ) -> Result<Json<DeviceShift>, ApiError> {
     require_station(&device)?;
     validate::client_uuid("requestId", &create.request_id)?;
+    // The mode and print policy follow the office's rules (plan РЕЖ); a
+    // station before beta 3.2 names neither: an aggregation shift that prints
+    // nothing.
+    let mode = create.mode.unwrap_or(ShiftMode::Aggregation);
+    let validation_print = create
+        .validation_print
+        .clone()
+        .unwrap_or(ValidationPrint::None {});
+    crate::routes::office_shifts::check_mode_rules(mode, create.pallets_enabled)?;
+    shifts::check_print_mode(mode, &validation_print)?;
     let pallet_request = shifts::pallet_request(
         create.pallets_enabled,
         create.pallet_box_capacity,
@@ -245,6 +255,9 @@ pub async fn create_device_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    if let ValidationPrint::DuplicateDm { template_id, .. } = &validation_print {
+        shifts::check_duplicate_template(&mut tx, template_id, product.group).await?;
+    }
     let pallets = shifts::pallets(
         &mut tx,
         pallet_request,
@@ -258,7 +271,7 @@ pub async fn create_device_shift(
         &mut tx,
         &NewShift {
             origin: ShiftOrigin::Station,
-            mode: ShiftMode::Aggregation,
+            mode,
             created_by: &device.id,
             request_id: Some(&create.request_id),
             product_id: &create.product_id,
@@ -270,7 +283,7 @@ pub async fn create_device_shift(
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
             pallets,
-            validation_print: &ValidationPrint::None {},
+            validation_print: &validation_print,
         },
         &at,
         rev,
@@ -279,6 +292,19 @@ pub async fn create_device_shift(
     let created = read(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    let mut details = json!({
+        "number": created.number,
+        "productId": created.product_id,
+        "lineId": created.line_id,
+        "productionDate": created.production_date,
+    });
+    // Named only by a validation shift, as the office's row does.
+    if created.mode != ShiftMode::Aggregation {
+        details["mode"] = json!(created.mode);
+    }
+    if let Some(policy) = &created.validation_print {
+        details["validationPrint"] = json!(policy);
+    }
     audit::record(
         &mut tx,
         &at,
@@ -288,12 +314,7 @@ pub async fn create_device_shift(
             target_type: Some("shift"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({
-                "number": created.number,
-                "productId": created.product_id,
-                "lineId": created.line_id,
-                "productionDate": created.production_date,
-            }),
+            details,
         },
     )
     .await
