@@ -158,13 +158,16 @@ describe("the encrypted usage statistics (beta 3)", () => {
     });
   });
 
-  it("uses the newest key that is not retired, and the production keyset is empty until the owner adds one", () => {
+  it("uses the newest key that is not retired, and the production keyset holds only the owner's public key", () => {
     const a = pair("sup-a").key;
     const b = pair("sup-b").key;
     expect(activeSupportKey({ keys: [a, b], retiredKids: [] })?.kid).toBe("sup-b");
     expect(activeSupportKey({ keys: [a, b], retiredKids: ["sup-b"] })?.kid).toBe("sup-a");
     expect(activeSupportKey({ keys: [a], retiredKids: ["sup-a"] })).toBeNull();
-    expect(BUILT_IN_SUPPORT_KEYS).toEqual({ keys: [], retiredKids: [] });
+    // The owner's support key (public half only, added 2026-10-15).
+    expect(BUILT_IN_SUPPORT_KEYS.retiredKids).toEqual([]);
+    expect(BUILT_IN_SUPPORT_KEYS.keys.map((key) => key.kid)).toEqual(["sup-d11c3182"]);
+    expect(JSON.stringify(BUILT_IN_SUPPORT_KEYS)).not.toContain('"d"');
   });
 
   it("prints the public entry of a private key, never the private half", () => {
