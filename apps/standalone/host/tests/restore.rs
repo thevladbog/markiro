@@ -107,7 +107,10 @@ async fn stop(app: &TestApp) -> HostPaths {
                 .await
                 .unwrap();
             conn.close().await.unwrap();
-            if !wal.exists() {
+            // A lingering connection may keep an EMPTY `-wal` open after a
+            // clean checkpoint (the database is closed all the same; CI hit
+            // this on Linux): only a non-empty `-wal` means unfinished work.
+            if std::fs::metadata(&wal).map_or(true, |meta| meta.len() == 0) {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
