@@ -2917,11 +2917,13 @@ mod tests {
         let mut floors = Floors {
             counters: BTreeMap::from([(key("4600682", 0), 10), (key("4600682", 1), 50)]),
             shift_numbers: BTreeMap::from([("OCT26".to_owned(), 4)]),
+            disaggregation_seq: Some(7),
             audit_sequence: Some(9),
         };
         floors.merge(Floors {
             counters: BTreeMap::from([(key("4600682", 0), 30), (key("4600682", 1), 5)]),
             shift_numbers: BTreeMap::from([("OCT26".to_owned(), 2), ("NOV26".to_owned(), 1)]),
+            disaggregation_seq: Some(3),
             audit_sequence: Some(12),
         });
         assert_eq!(
@@ -2933,8 +2935,10 @@ mod tests {
             BTreeMap::from([("NOV26".to_owned(), 1), ("OCT26".to_owned(), 4)])
         );
         assert_eq!(floors.audit_sequence, Some(12));
+        assert_eq!(floors.disaggregation_seq, Some(7));
         floors.merge(Floors::default());
         assert_eq!(floors.audit_sequence, Some(12));
+        assert_eq!(floors.disaggregation_seq, Some(7));
     }
 
     #[test]
