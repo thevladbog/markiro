@@ -1106,6 +1106,26 @@ async fn the_earliest_scan_owns_a_code_whatever_order_the_scans_arrive_in() {
     .await
     .unwrap();
     assert_eq!(live, 1);
+    // Plan КНФ: each row says how its loser lost — taken from its box by an
+    // earlier scan, or later than the owner.
+    let kinds: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT l.record_id, w.record_id, c.kind FROM code_conflicts c \
+         JOIN scans l ON l.id = c.loser_scan_id JOIN scans w ON w.id = c.winner_scan_id \
+         ORDER BY l.record_id, w.record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kinds,
+        vec![
+            (record_id(1), record_id(2), "displaced".into()),
+            (record_id(2), record_id(6), "displaced".into()),
+            (record_id(3), record_id(2), "late".into()),
+            (record_id(4), record_id(2), "late".into()),
+            (record_id(5), record_id(2), "late".into()),
+        ]
+    );
 }
 
 /// The registry compares the scans' instants to the millisecond, not to the

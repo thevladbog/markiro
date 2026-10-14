@@ -11,6 +11,7 @@ import {
   type ShiftExportRows,
 } from "../src/host/protocol.js";
 import {
+  conflictWarnings,
   exportWarnings,
   palletWarnings,
   reportedCountWarnings,
@@ -261,5 +262,12 @@ describe("the pallets whose box count differs from the station's report (plan Ч
       reportedCountWarnings([pallet({ boxes: 0, disassembledAt: "2026-10-08T07:00:00.000Z" })]),
     ).toEqual([]);
     expect(reportedCountWarnings([])).toEqual([]);
+  });
+});
+
+describe("unreviewed conflicts (plan КНФ, ПР-12)", () => {
+  it("warn with their number and never refuse", () => {
+    expect(conflictWarnings(0)).toEqual([]);
+    expect(conflictWarnings(3)).toEqual([{ kind: "unreviewed_conflicts", conflicts: 3 }]);
   });
 });

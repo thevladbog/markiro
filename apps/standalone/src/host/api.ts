@@ -147,6 +147,24 @@ import {
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
+import {
+  conflictStatusResponseSchema,
+  conflictsPath,
+  deviceDisplacementsSchema,
+  displacementsPath,
+  officeConflictPageSchema,
+  officeConflictSchema,
+  officeShiftExceptionsSchema,
+  officeShiftRejectionsSchema,
+  type ConflictQuery,
+  type ConflictStatusRequest,
+  type ConflictStatusResponse,
+  type DeviceDisplacements,
+  type OfficeConflict,
+  type OfficeConflictPage,
+  type OfficeShiftExceptions,
+  type OfficeShiftRejections,
+} from "./review.js";
 
 /** An SSCC counter's address: its issuer prefix and extension digit (0 box, 1 pallet). */
 export interface SsccCounterKey {
@@ -284,12 +302,38 @@ export interface HostApi {
    */
   getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
   /**
+   * One page of the code conflicts the facts wrote, newest detection first,
+   * narrowed to the losing shift and to reviewed or not (plan КНФ); every
+   * office role. The code travels as its hash, GTIN and serial only.
+   */
+  listConflicts: (token: string, query: ConflictQuery) => Promise<OfficeConflictPage>;
+  /**
+   * Marks a conflict reviewed and answers it (plan КНФ); administrators and
+   * technologists. A conflict reviewed already answers as it is.
+   */
+  reviewConflict: (token: string, id: string) => Promise<OfficeConflict>;
+  /** A shift's box and pallet exceptions, newest first, up to 500 (plan КНФ); every office role. */
+  listShiftExceptions: (token: string, id: string) => Promise<OfficeShiftExceptions>;
+  /** The shift's records the host refused, newest first, up to 500 (plan КНФ); every office role. */
+  listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
+  /**
    * One page of the placements of codes the criteria find, newest scan
    * first («Поиск кодов»); every office role. At least one criterion.
    */
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
+  /**
+   * Of the station's records it names (1–200), those whose conflict the office
+   * marked reviewed (plan КНФ), with the device key only; a host before plan
+   * КНФ answers `not_found`.
+   */
+  conflictStatus: (request: ConflictStatusRequest) => Promise<ConflictStatusResponse>;
+  /**
+   * The station's scans an earlier scan elsewhere took the code from, oldest
+   * first after `after` (plan КНФ), with the device key only.
+   */
+  listDisplacements: (after: { at: string; id: string } | null) => Promise<DeviceDisplacements>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -784,6 +828,33 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: palletReportRowsSchema,
       }),
+    listConflicts: (token, query) =>
+      client.request("GET", conflictsPath(query), {
+        officeToken: token,
+        schema: officeConflictPageSchema,
+      }),
+    reviewConflict: (token, id) =>
+      client.request("POST", `/v1/office/conflicts/${id}/review`, {
+        officeToken: token,
+        schema: officeConflictSchema,
+      }),
+    listShiftExceptions: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/exceptions`, {
+        officeToken: token,
+        schema: officeShiftExceptionsSchema,
+      }),
+    listShiftRejections: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/rejections`, {
+        officeToken: token,
+        schema: officeShiftRejectionsSchema,
+      }),
+    conflictStatus: (request) =>
+      client.request("POST", "/v1/device/conflicts/status", {
+        body: request,
+        schema: conflictStatusResponseSchema,
+      }),
+    listDisplacements: (after) =>
+      client.request("GET", displacementsPath(after), { schema: deviceDisplacementsSchema }),
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
         officeToken: token,

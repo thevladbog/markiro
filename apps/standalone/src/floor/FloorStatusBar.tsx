@@ -453,6 +453,13 @@ export function FloorStatusBar({
               tone="warn"
             />
           )}
+          {outbox !== null && outbox.displaced > 0 && (
+            <StatusPill
+              label={t("floor.status.displaced")}
+              value={formatQuantity(outbox.displaced)}
+              tone="warn"
+            />
+          )}
           {stranded > 0 && (
             <StatusPill
               label={t("floor.status.stranded")}

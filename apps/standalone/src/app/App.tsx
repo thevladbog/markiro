@@ -339,6 +339,8 @@ export function App({
     sendFacts: hostApi.sendFacts,
     registerKnownBlocks: hostApi.registerKnownBlocks,
     sendWarehouseRecords: hostApi.sendWarehouseRecords,
+    conflictStatus: hostApi.conflictStatus,
+    listDisplacements: hostApi.listDisplacements,
     dispatch,
   });
 

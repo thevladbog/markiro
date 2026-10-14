@@ -209,6 +209,7 @@ pub mod cloud_import;
 pub mod code_search;
 pub mod license;
 pub mod pairing;
+pub mod review;
 pub mod trust;
 pub mod update;
 

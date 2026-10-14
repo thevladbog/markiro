@@ -2,12 +2,14 @@
 //! its earliest accepted scan since the code was last freed, whatever order
 //! the scans arrive in. A scan earlier than the owner takes the code (the
 //! owner's item leaves its box, `displaced_at`); a later one is answered
-//! `conflict` with the owner. Both write a `code_conflicts` row; telling the
-//! displaced device and the office's review come with plan 2b. Exceptions
+//! `conflict` with the owner. Both write a `code_conflicts` row; each row says
+//! how its loser lost (`kind`); the office reviews it and the device learns of
+//! it (plan КНФ). Exceptions
 //! release the codes their items owned: after a release the next scan to
 //! ARRIVE owns the code, not an earlier displaced item or conflict loser
 //! (re-electing the earliest remaining claim is a plan 2b decision).
 
+use markiro_proto::review::ConflictKind;
 use markiro_proto::{CodeOwner, FactOutcome, ShiftOrigin};
 use sqlx::SqliteConnection;
 
@@ -83,16 +85,18 @@ async fn conflict_row(
     code_hash: &str,
     winner: &str,
     loser: &str,
+    kind: ConflictKind,
     at: &str,
 ) -> Result<(), ApiError> {
     sqlx::query(
-        "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, kind, \
+         detected_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(code_hash)
     .bind(winner)
     .bind(loser)
+    .bind(kind.as_str())
     .bind(at)
     .execute(conn)
     .await
@@ -116,6 +120,7 @@ pub async fn claim(
                 claim.code_hash,
                 &owner.scan_id,
                 claim.scan_id,
+                ConflictKind::Late,
                 context.received_at,
             )
             .await?;
@@ -144,6 +149,7 @@ pub async fn claim(
                 claim.code_hash,
                 claim.scan_id,
                 &owner.scan_id,
+                ConflictKind::Displaced,
                 context.received_at,
             )
             .await?;

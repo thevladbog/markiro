@@ -2,7 +2,7 @@ import { isShiftCloseReasonCode, type PlacardFormat } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import {
   Alert,
@@ -40,6 +40,7 @@ import {
   type PackState,
 } from "./shift-card.js";
 import { civilDateLabel, recordLabel } from "./shift-list.js";
+import { ShiftConflicts, ShiftExceptions, ShiftRejections } from "./ShiftReview.js";
 import { shiftOutput } from "./shift-text.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 
@@ -130,6 +131,9 @@ export function ShiftCardPage() {
     void queryClient.invalidateQueries({ queryKey: officeKeys.shift(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftBoxes(id) });
     void queryClient.invalidateQueries({ queryKey: officeKeys.shiftPallets(id) });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.shiftExceptions(id) });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.shiftRejections(id) });
+    void queryClient.invalidateQueries({ queryKey: officeKeys.conflicts });
   };
 
   const back = (
@@ -322,11 +326,20 @@ export function ShiftCardPage() {
       {current.status !== "planned" && current.totals.unitLabels !== undefined && (
         <UnitLabelControl figures={current.totals.unitLabels} />
       )}
+      {/* Keyed by the shift: a link to another shift's card (a conflict's winner) opens this
+          page again, and its filters and pages, `?box=` included, start afresh. */}
       {current.status !== "planned" && !validation && (
-        <ShiftBoxes shift={current} at={at} onForm={setForm} />
+        <ShiftBoxes key={`boxes-${current.id}`} shift={current} at={at} onForm={setForm} />
       )}
       {current.status !== "planned" && current.palletsEnabled && (
-        <ShiftPallets shift={current} at={at} onForm={setForm} />
+        <ShiftPallets key={`pallets-${current.id}`} shift={current} at={at} onForm={setForm} />
+      )}
+      {current.status !== "planned" && (
+        <>
+          <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
+          <ShiftRejections key={`rejections-${current.id}`} shift={current} at={at} />
+          <ShiftConflicts key={`conflicts-${current.id}`} shift={current} at={at} />
+        </>
       )}
       {form !== null && (
         <PrintFormDialog
@@ -464,7 +477,9 @@ interface SectionProps {
 function ShiftBoxes({ shift, at, onForm }: SectionProps) {
   const { t } = useTranslation();
   const titleId = useId();
-  const [tail, setTail] = useState("");
+  const [params] = useSearchParams();
+  // A conflict's link names the loser's box (plan КНФ) until plan КРТ gives a box its card.
+  const [tail, setTail] = useState(() => ssccTail(params.get("box") ?? ""));
   const [page, setPage] = useState(1);
   const boxes = useOfficeQuery(officeKeys.shiftBoxes(shift.id), (api, token) =>
     api.listShiftBoxes(token, shift.id),

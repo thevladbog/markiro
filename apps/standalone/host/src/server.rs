@@ -168,6 +168,9 @@ pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
 /// What a restore holds (plan РК): a station's facts, its code checks and
 /// its warehouse reprints, whose answers depend on the shifts, blocks and
 /// codes a copy may lack.
+/// The reads of a station's conflicts (plan КНФ) are not held on purpose: a
+/// copy is an older state, so they can only tell of fewer reviews and
+/// displacements, never wrong ones.
 fn held_by_a_restore(path: &str) -> bool {
     path == "/v1/device/facts"
         || path.starts_with("/v1/device/codes/")
@@ -239,6 +242,14 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
+        )
+        .route(
+            "/v1/device/conflicts/status",
+            post(crate::routes::device_conflicts::conflict_status),
+        )
+        .route(
+            "/v1/device/displacements",
+            get(crate::routes::device_conflicts::list_displacements),
         )
         .route(
             "/v1/device/warehouse/lookup",
@@ -410,6 +421,22 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/shifts/{id}/pallets",
             get(crate::routes::office_boxes::list_pallets),
+        )
+        .route(
+            "/v1/office/shifts/{id}/exceptions",
+            get(crate::routes::office_shift_review::list_exceptions),
+        )
+        .route(
+            "/v1/office/shifts/{id}/rejections",
+            get(crate::routes::office_shift_review::list_rejections),
+        )
+        .route(
+            "/v1/office/conflicts",
+            get(crate::routes::office_conflicts::list_conflicts),
+        )
+        .route(
+            "/v1/office/conflicts/{id}/review",
+            post(crate::routes::office_conflicts::review_conflict),
         )
         .route(
             "/v1/office/shifts/{id}/export-source",

@@ -7,13 +7,19 @@ import { Alert, Button, Checkbox, Input, Modal, RadioGroup } from "@markiro/ui";
 
 import { errorMessageKey } from "../../host/errors.js";
 import type { OfficeShift, ShiftExportRecord } from "../../host/protocol.js";
+import type { ConflictQuery } from "../../host/review.js";
 import { shiftExportRecord } from "../../host/requests.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
-import { exportFolder, reportedCountWarnings, type ExportWarning } from "./export-checks.js";
+import {
+  conflictWarnings,
+  exportFolder,
+  reportedCountWarnings,
+  type ExportWarning,
+} from "./export-checks.js";
 import { useExportPlan, yieldToUi } from "./export-plan.js";
 import { OfficeFilesError, type SavedFolder } from "./office-files.js";
 import { useOfficeFiles } from "./office-files-context.js";
@@ -90,6 +96,12 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
     (api, token) => api.listShiftPallets(token, shift.id),
     { enabled: rows?.shift.palletsEnabled === true },
   );
+  // The shift's unreviewed conflicts (plan КНФ): information, so a list that does not load
+  // leaves the dialog whole and the warning out (ПР-12: never a refusal).
+  const conflictQuery: ConflictQuery = { shiftId: shift.id, reviewed: false, page: 1 };
+  const unreviewed = useOfficeQuery(officeKeys.conflictList(conflictQuery), (api, token) =>
+    api.listConflicts(token, conflictQuery),
+  );
   const plan = useExportPlan(rows, shift.mode);
   const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
     api.recordShiftExport(token, shift.id, body),
@@ -128,6 +140,7 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
       ? []
       : [
           ...selected.warnings,
+          ...conflictWarnings(unreviewed.data?.total ?? 0),
           ...(shiftExportFormatRequiresPallets(selected.format) && palletList.data !== undefined
             ? reportedCountWarnings(palletList.data)
             : []),
@@ -306,6 +319,8 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         return t("office.exports.warnings.late_boxes", { count: warning.boxes });
       case "pallet_count_mismatch":
         return t("office.exports.warnings.pallet_count_mismatch", { count: warning.pallets });
+      case "unreviewed_conflicts":
+        return t("office.exports.warnings.unreviewed_conflicts", { count: warning.conflicts });
     }
   };
 

@@ -1686,6 +1686,22 @@ async fn secrets_never_reach_the_process_log() {
         sscc_one.as_str(),
         "{pallet_forms}"
     );
+    // The office's review of the shift (plan КНФ): its exceptions (the box
+    // exceptions above name codes by hash), its refused records and the
+    // conflicts list — none reaches the log.
+    let exceptions = office_get(format!("/v1/office/shifts/{shift_id}/exceptions"))
+        .await
+        .unwrap();
+    assert_eq!(exceptions.status(), 200);
+    let exceptions: serde_json::Value = exceptions.json().await.unwrap();
+    assert!(exceptions["total"].as_u64().unwrap() > 0, "{exceptions}");
+    for path in [
+        format!("/v1/office/shifts/{shift_id}/rejections"),
+        "/v1/office/conflicts".to_owned(),
+    ] {
+        let read = office_get(path).await.unwrap();
+        assert_eq!(read.status(), 200);
+    }
 
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";

@@ -11,7 +11,7 @@ import {
   palletCountDiffers,
   ssccTail,
 } from "../src/office/shifts/shift-card.js";
-import { ORG_PROFILE, type FakeOfficeSession } from "./support/office.js";
+import { ORG_PROFILE, renderOffice, type FakeOfficeSession } from "./support/office.js";
 import {
   ACTIVE,
   CLOSED,
@@ -213,6 +213,16 @@ describe("the card of a shift (plan О-Ф)", () => {
     // A shift without pallets has no pallet column and no pallets.
     expect(screen.queryByRole("region", { name: "Паллеты" })).toBeNull();
     expect(within(section("Короба")).queryByRole("columnheader", { name: "Паллета" })).toBeNull();
+  });
+
+  it("opens with the box a conflict's link names already filtered (plan КНФ)", async () => {
+    const session = cardSession(ACTIVE);
+    renderOffice(session, { initialPath: `/shifts/${ACTIVE.id}?box=046006820000015002` });
+    await screen.findByRole("heading", { name: "Смена OCT26-004" });
+    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(2));
+    const tail = within(section("Короба")).getByLabelText("Последние цифры SSCC");
+    expect(tail instanceof HTMLInputElement && tail.value).toBe("046006820000015002");
+    expect(rowsOf("Короба").map((row) => row[0])).toEqual(["(00)046006820000015002"]);
   });
 
   it("shows the boxes fifty to a page", async () => {

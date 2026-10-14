@@ -116,6 +116,28 @@ export const STRANDED_COUNT_SQL =
   "SELECT count(*) AS n FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL " +
   "AND NOT (host_id = ? AND device_id = ?)";
 
+/**
+ * The pairing's displaced scans nobody resolved (plan КНФ: the host had
+ * accepted them, then an earlier scan elsewhere took the code), oldest first,
+ * with their shift's number and their box's SSCC — the row's own snapshot, so
+ * they outlive the shift's copy; the live copy only fills a snapshot that
+ * had none; at most 100. Parameters:
+ * host id, device id.
+ */
+export const QUEUE_DISPLACED_SQL =
+  "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, " +
+  "coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, " +
+  "d.winner_shift_number, d.winner_same_device FROM floor_displacements d " +
+  "LEFT JOIN floor_shifts s ON s.host_id = d.host_id AND s.device_id = d.device_id " +
+  "AND s.id = d.shift_id LEFT JOIN floor_boxes b ON b.id = d.box_id " +
+  "WHERE d.host_id = ? AND d.device_id = ? AND d.resolved_at IS NULL " +
+  "ORDER BY d.detected_at, d.conflict_id LIMIT 100";
+
+/** A displacement settled by a person; parameters: the instant, the operator, host id, device id, conflict id. */
+export const DISMISS_DISPLACEMENT_SQL =
+  "UPDATE floor_displacements SET resolved_at = ?, resolved_by = ? WHERE host_id = ? " +
+  "AND device_id = ? AND conflict_id = ? AND resolved_at IS NULL";
+
 /** The queue changed under the person's decision: nothing was written, the screen reads again. */
 export class StaleQueueError extends Error {
   constructor(message: string) {
@@ -165,6 +187,20 @@ export interface SettledTally {
   count: number;
 }
 
+/** A displaced scan of this station (plan КНФ), as the queue screen shows it. */
+export interface DisplacedRecord {
+  conflictId: string;
+  shiftId: string;
+  shiftNumber: string | null;
+  /** The SSCC of the box the code left; `null` while it is open or unknown here. */
+  sscc: string | null;
+  /** The host's instant. */
+  detectedAt: string;
+  winnerShiftNumber: string;
+  /** The earlier scan was this station's own (in another shift, or after a forget). */
+  winnerSameDevice: boolean;
+}
+
 export interface QueueView {
   unsent: UnsentKind[];
   /** At most `QUEUE_LISTED_PER_SHIFT` refused and as many conflicting records of each shift. */
@@ -172,6 +208,8 @@ export interface QueueView {
   /** Every unresolved refused and conflicting record, counted by shift, outcome and kind. */
   tallies: SettledTally[];
   stranded: number;
+  /** The open displacements, at most 100 (plan КНФ). */
+  displaced: DisplacedRecord[];
 }
 
 /** What a person's decision needs: the operator who makes it, new ids and the clock. */
@@ -198,6 +236,15 @@ const settledRow = z.object({
   outcome: z.enum(["rejected", "conflict"]),
   code: z.string().nullable(),
   sscc: z.string().nullable(),
+});
+const displacedRow = z.object({
+  conflict_id: z.string(),
+  shift_id: z.string(),
+  shift_number: z.string().nullable(),
+  sscc: z.string().nullable(),
+  detected_at: z.string(),
+  winner_shift_number: z.string(),
+  winner_same_device: z.number().int(),
 });
 const tallyRow = z.object({
   shift_id: z.string(),
@@ -226,11 +273,12 @@ export async function readStrandedRecords(local: LocalExecutor, pairing: Pairing
  */
 export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise<QueueView> {
   const key = [pairing.hostId, pairing.deviceId];
-  const [unsent, settled, tallies, stranded] = await Promise.all([
+  const [unsent, settled, tallies, stranded, displaced] = await Promise.all([
     local.query(QUEUE_UNSENT_SQL, key, unsentRow),
     local.query(QUEUE_SETTLED_SQL, [...key, QUEUE_LISTED_PER_SHIFT], settledRow),
     local.query(QUEUE_TALLY_SQL, key, tallyRow),
     readStrandedRecords(local, pairing),
+    local.query(QUEUE_DISPLACED_SQL, key, displacedRow),
   ]);
   return {
     unsent: unsent
@@ -256,6 +304,15 @@ export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise
       count: row.n,
     })),
     stranded,
+    displaced: displaced.map((row) => ({
+      conflictId: row.conflict_id,
+      shiftId: row.shift_id,
+      shiftNumber: row.shift_number,
+      sscc: row.sscc,
+      detectedAt: row.detected_at,
+      winnerShiftNumber: row.winner_shift_number,
+      winnerSameDevice: row.winner_same_device === 1,
+    })),
   };
 }
 
@@ -358,6 +415,38 @@ export async function dismissRecord(context: RecoveryContext, recordId: string):
   } catch (error) {
     if (error instanceof LocalDbError && error.code === "changes_mismatch") {
       throw new StaleQueueError("the record is resolved already, or a close");
+    }
+    throw error;
+  }
+}
+
+/**
+ * «Разобрано» on a displaced scan (plan КНФ): a person settled it, with who
+ * and when; it stays on this computer. Nothing reaches the host. One the
+ * office or a person resolved meanwhile is a `StaleQueueError`.
+ */
+export async function dismissDisplacement(
+  context: RecoveryContext,
+  conflictId: string,
+): Promise<void> {
+  const { local, pairing } = context;
+  try {
+    await local.transaction([
+      {
+        sql: DISMISS_DISPLACEMENT_SQL,
+        values: [
+          context.now().toISOString(),
+          context.operatorId,
+          pairing.hostId,
+          pairing.deviceId,
+          conflictId,
+        ],
+        expectedChanges: 1,
+      },
+    ]);
+  } catch (error) {
+    if (error instanceof LocalDbError && error.code === "changes_mismatch") {
+      throw new StaleQueueError("the displacement is resolved already");
     }
     throw error;
   }

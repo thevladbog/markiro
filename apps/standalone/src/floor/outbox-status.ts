@@ -8,13 +8,16 @@ import { BOX_EXTENSION } from "./work/box-close.js";
 
 /**
  * What the floor's status bar says of the outbox (stage 2a spec §5.5): this
- * pairing's records without a receipt, the ones the host refused, and the
- * scans the host found another device's scan owns.
+ * pairing's records without a receipt, the ones the host refused, the scans
+ * the host found another device's scan owns, and the scans an earlier scan
+ * elsewhere took the code from (plan КНФ).
  */
 export interface OutboxStatus {
   unsent: number;
   rejected: number;
   conflicts: number;
+  /** Displaced scans nobody resolved (plan КНФ). */
+  displaced: number;
 }
 
 /*
@@ -36,6 +39,11 @@ export const CONFLICT_COUNT_SQL =
   "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'conflict' " +
   "AND resolved_at IS NULL";
 
+// The displaced scans nobody resolved (plan КНФ), from their partial index.
+export const DISPLACED_COUNT_SQL =
+  "SELECT count(*) AS n FROM floor_displacements WHERE host_id = ? AND device_id = ? " +
+  "AND resolved_at IS NULL";
+
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
 async function count(local: LocalExecutor, pairing: Pairing, sql: string): Promise<number> {
@@ -47,12 +55,13 @@ export async function readOutboxStatus(
   local: LocalExecutor,
   pairing: Pairing,
 ): Promise<OutboxStatus> {
-  const [unsent, rejected, conflicts] = await Promise.all([
+  const [unsent, rejected, conflicts, displaced] = await Promise.all([
     count(local, pairing, UNSENT_COUNT_SQL),
     count(local, pairing, REJECTED_COUNT_SQL),
     count(local, pairing, CONFLICT_COUNT_SQL),
+    count(local, pairing, DISPLACED_COUNT_SQL),
   ]);
-  return { unsent, rejected, conflicts };
+  return { unsent, rejected, conflicts, displaced };
 }
 
 /**

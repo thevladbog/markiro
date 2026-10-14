@@ -64,7 +64,17 @@ export type ExportWarning =
    */
   | { kind: "late_boxes"; boxes: number }
   /** Pallets whose live box count differs from what the station counted at the close. */
-  | { kind: "pallet_count_mismatch"; pallets: number };
+  | { kind: "pallet_count_mismatch"; pallets: number }
+  /**
+   * Code conflicts of the shift nobody reviewed (plan КНФ): a box where a scan lost may
+   * differ from what the file writes. A warning, never a refusal (ПР-12).
+   */
+  | { kind: "unreviewed_conflicts"; conflicts: number };
+
+/** The shift's unreviewed conflicts as a warning of every shift format (plan КНФ, ПР-12). */
+export function conflictWarnings(unreviewed: number): ExportWarning[] {
+  return unreviewed > 0 ? [{ kind: "unreviewed_conflicts", conflicts: unreviewed }] : [];
+}
 
 /**
  * The formats the cloud's dialog offers this shift (`ShiftExportsDialog`:

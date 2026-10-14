@@ -70,6 +70,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
+            "floor_displacements",
             "floor_exceptions",
             "floor_pallet_exceptions",
             "floor_pallets",
@@ -1710,8 +1711,8 @@ async fn every_table_has_a_forget_class() {
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
     // This device's own records are the production tables of `0006`, the
-    // print jobs of `0007`, the pallets of `0008`, the dropped blocks of `0013` and the unit
-    // label jobs of `0015`; the sign-in lockouts
+    // print jobs of `0007`, the pallets of `0008`, the dropped blocks of `0013`, the unit
+    // label jobs of `0015` and the displaced scans of `0016` (plan КНФ); the sign-in lockouts
     // stay with the copies (an open owner question); the workstation's
     // settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
@@ -1726,6 +1727,7 @@ async fn every_table_has_a_forget_class() {
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
+            "floor_displacements",
             "floor_exceptions",
             "floor_pallet_exceptions",
             "floor_pallets",
@@ -1928,7 +1930,7 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
 }
 
 /// One row in each table of this device's own records (migrations
-/// `0006`–`0008`, `0012`, `0013` and `0015`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// `0006`–`0008`, `0012`, `0013`, `0015` and `0016`), each of the pairing `(HOST, DEVICE)`, as the floor's
 /// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -2035,6 +2037,15 @@ fn device_records() -> Vec<LocalStatement> {
             "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
              VALUES ('wh-record-1', ?, ?, 'wh-session-1', '{}', '2026-10-08T07:01:00.000Z')",
             json!([HOST, DEVICE]),
+        ),
+        // A displaced scan the host told of (plan КНФ, `0016`).
+        statement(
+            "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, \
+             shift_id, code_hash, detected_at, winner_shift_number, winner_same_device, \
+             winner_scanned_at, learned_at) VALUES (?, ?, 'conflict-1', 'record-1', 'shift-1', \
+             ?, '2026-10-08T07:12:03Z', 'OCT26-005', 0, '2026-10-08T06:00:50.000Z', \
+             '2026-10-08T07:13:00.000Z')",
+            json!([HOST, DEVICE, "7".repeat(64)]),
         ),
     ]
 }
@@ -2523,6 +2534,55 @@ const SHIFT_CODES: &str =
 const VALIDATION_COUNTS: &str = "SELECT coalesce(sum(verdict = 'duplicate'), 0) AS duplicates, \
      coalesce(sum(verdict IN ('wrong_gtin', 'invalid')), 0) AS errors FROM floor_scans \
      WHERE host_id = ? AND device_id = ? AND shift_id = ?";
+
+/// What the host tells the station of its conflicts and the queue screen's displaced codes (plan
+/// КНФ; `src/local/conflict-notices.ts`, `src/floor/queue/outbox-recovery.ts`,
+/// `src/floor/outbox-status.ts`). `test/floor-schema.test.ts` plans the same texts on the Node
+/// runtime's SQLite and checks that they appear here word for word.
+const NOTICE_OPEN_IDS: &str =
+    "SELECT id FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'conflict' AND \
+     resolved_at IS NULL UNION SELECT record_id FROM floor_displacements WHERE host_id = ? \
+     AND device_id = ? AND resolved_at IS NULL";
+const NOTICE_CURSOR: &str =
+    "SELECT detected_at, conflict_id FROM floor_displacements WHERE host_id = ? AND device_id \
+     = ? ORDER BY detected_at DESC, conflict_id DESC LIMIT 1";
+const NOTICE_APPLY_OUTBOX: &str =
+    "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = NULL, \
+     office_reviewed_at = r.value ->> 'reviewedAt' FROM json_each(?) AS r WHERE outbox.id = \
+     r.value ->> 'recordId' AND +outbox.host_id = ? AND +outbox.device_id = ? AND \
+     +outbox.outcome = 'conflict' AND outbox.resolved_at IS NULL";
+const NOTICE_APPLY_DISPLACEMENTS: &str =
+    "UPDATE floor_displacements SET resolved_at = ?, office_reviewed_at = r.value ->> \
+     'reviewedAt' FROM json_each(?) AS r WHERE floor_displacements.host_id = ? AND \
+     floor_displacements.device_id = ? AND floor_displacements.record_id = r.value ->> \
+     'recordId' AND floor_displacements.resolved_at IS NULL";
+const NOTICE_INSERT_DISPLACEMENTS: &str =
+    "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, \
+     code_hash, box_id, detected_at, winner_shift_number, winner_same_device, \
+     winner_scanned_at, learned_at, resolved_at, office_reviewed_at, shift_number, box_sscc) \
+     SELECT ?, ?, j.value ->> 'conflictId', j.value ->> 'recordId', j.value ->> 'shiftId', \
+     j.value ->> 'codeHash', j.value ->> 'boxId', j.value ->> 'detectedAt', j.value ->> \
+     '$.winner.shiftNumber', (j.value ->> '$.winner.sameDevice') = 1, j.value ->> \
+     '$.winner.scannedAt', ?, CASE WHEN j.value ->> 'reviewedAt' IS NULL THEN NULL ELSE ? \
+     END, j.value ->> 'reviewedAt', j.value ->> 'shiftNumber', coalesce(j.value ->> \
+     'boxSscc', (SELECT b.sscc FROM floor_boxes b WHERE b.id = j.value ->> 'boxId')) FROM \
+     json_each(?) AS j WHERE true ON CONFLICT (host_id, device_id, conflict_id) DO NOTHING ON \
+     CONFLICT (host_id, device_id, record_id) DO UPDATE SET conflict_id = \
+     excluded.conflict_id, detected_at = excluded.detected_at WHERE excluded.detected_at > \
+     floor_displacements.detected_at";
+const DISPLACED_COUNT: &str =
+    "SELECT count(*) AS n FROM floor_displacements WHERE host_id = ? AND device_id = ? AND \
+     resolved_at IS NULL";
+const QUEUE_DISPLACED: &str =
+    "SELECT d.conflict_id, d.shift_id, coalesce(d.shift_number, s.number) AS shift_number, \
+     coalesce(d.box_sscc, b.sscc) AS sscc, d.detected_at, d.winner_shift_number, \
+     d.winner_same_device FROM floor_displacements d LEFT JOIN floor_shifts s ON s.host_id = \
+     d.host_id AND s.device_id = d.device_id AND s.id = d.shift_id LEFT JOIN floor_boxes b ON \
+     b.id = d.box_id WHERE d.host_id = ? AND d.device_id = ? AND d.resolved_at IS NULL ORDER \
+     BY d.detected_at, d.conflict_id LIMIT 100";
+const QUEUE_DISMISS_DISPLACEMENT: &str =
+    "UPDATE floor_displacements SET resolved_at = ?, resolved_by = ? WHERE host_id = ? AND \
+     device_id = ? AND conflict_id = ? AND resolved_at IS NULL";
 
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
@@ -4831,4 +4891,215 @@ async fn a_finished_earlier_upgrades_copy_of_the_same_version_is_replaced() {
     drop(db);
 
     assert_eq!(newest_applied(&copy).await, previous);
+}
+
+/// The statements of plan КНФ on the SQLite the shell bundles: each searches an index of
+/// migration `0016` or the outbox's, never a whole table; the queue's list needs no sort.
+#[tokio::test]
+async fn the_conflict_notices_search_an_index() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    let reads: [(&str, &str); 8] = [
+        (
+            NOTICE_OPEN_IDS,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            NOTICE_OPEN_IDS,
+            "SEARCH floor_displacements USING INDEX floor_displacements_",
+        ),
+        (
+            NOTICE_CURSOR,
+            "floor_displacements_cursor (host_id=? AND device_id=?)",
+        ),
+        (NOTICE_APPLY_OUTBOX, "sqlite_autoindex_outbox_1 (id=?)"),
+        (
+            NOTICE_APPLY_DISPLACEMENTS,
+            "floor_displacements_open (host_id=? AND device_id=?)",
+        ),
+        (
+            DISPLACED_COUNT,
+            "floor_displacements_open (host_id=? AND device_id=?)",
+        ),
+        (
+            QUEUE_DISPLACED,
+            "floor_displacements_cursor (host_id=? AND device_id=?)",
+        ),
+        (
+            QUEUE_DISMISS_DISPLACEMENT,
+            "sqlite_autoindex_floor_displacements_1 (host_id=? AND device_id=? AND conflict_id=?)",
+        ),
+    ];
+    for (sql, index) in reads {
+        let placeholders = sql.matches('?').count();
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..placeholders {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{sql}\n  should search {index}, its plan is {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN ")
+                && !step.starts_with("SCAN r ")
+                && !step.starts_with("SCAN j ")),
+            "{sql}\n  scans a table: {plan:?}"
+        );
+        if sql == QUEUE_DISPLACED {
+            assert!(
+                !plan.iter().any(|step| step.contains("TEMP")),
+                "{sql}\n  sorts: {plan:?}"
+            );
+        }
+    }
+    // The insert reads only its own list.
+    let text = format!("EXPLAIN QUERY PLAN {NOTICE_INSERT_DISPLACEMENTS}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..NOTICE_INSERT_DISPLACEMENTS.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert!(
+        plan.iter()
+            .all(|step| !step.starts_with("SCAN ") || step.starts_with("SCAN j ")),
+        "{plan:?}"
+    );
+}
+
+/// Migration `0016` over a station's database of the migrations before it (plan КНФ,
+/// additive): every outbox record keeps its row with `office_reviewed_at` NULL, the table of
+/// displaced scans exists empty and is the device's own data, and the journal lists exactly the
+/// migrator's own list (`0014` and `0015` belong to plan РЕЖ and may be absent or present).
+#[tokio::test]
+async fn migration_0016_keeps_the_outbox_and_adds_the_conflict_notices() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 16)
+        .cloned()
+        .collect();
+    assert!(before.iter().any(|migration| migration.version == 13));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('record-0', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T07:59:00.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_details, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+         'shift-1', '{}', '2026-10-09T08:01:00.000Z', 'conflict', '{}', \
+         '2026-10-09T08:01:05.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let records = db
+        .query(
+            "SELECT id, outcome, resolved_at, office_reviewed_at FROM outbox ORDER BY seq",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(records.into_iter().map(Value::Object).collect()),
+        json!([
+            { "id": "record-0", "outcome": null, "resolved_at": null, "office_reviewed_at": null },
+            {
+                "id": "record-1", "outcome": "conflict", "resolved_at": null,
+                "office_reviewed_at": null
+            }
+        ])
+    );
+    assert_eq!(count(&db, "floor_displacements").await, json!(0));
+    assert_eq!(
+        table_class("floor_displacements"),
+        Some(TableClass::DeviceData)
+    );
+    // The office's review is kept only on a record the station resolved.
+    assert!(db
+        .transaction(vec![statement(
+            "UPDATE outbox SET office_reviewed_at = '2026-10-09T09:00:00Z' WHERE id = 'record-1'",
+            json!([]),
+        )])
+        .await
+        .is_err());
+    // The office's review needs the instant the station resolved the record at.
+    let displaced = |conflict: &str, record: &str, resolved: Value, reviewed: Value| {
+        statement(
+            "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, \
+             shift_id, code_hash, detected_at, winner_shift_number, winner_same_device, \
+             winner_scanned_at, learned_at, resolved_at, office_reviewed_at) VALUES ('host', \
+             'device', ?, ?, 'shift-1', ?, '2026-10-08T07:12:03Z', 'OCT26-005', 0, \
+             '2026-10-08T06:00:50.000Z', '2026-10-09T08:00:00.000Z', ?, ?)",
+            json!([conflict, record, "7".repeat(64), resolved, reviewed]),
+        )
+    };
+    db.transaction(vec![displaced("c-1", "r-1", Value::Null, Value::Null)])
+        .await
+        .unwrap();
+    assert!(db
+        .transaction(vec![displaced(
+            "c-2",
+            "r-2",
+            Value::Null,
+            json!("2026-10-09T09:00:00Z")
+        )])
+        .await
+        .is_err());
+    // One row per record, whatever conflict id a restored host gives it.
+    assert!(db
+        .transaction(vec![displaced("c-3", "r-1", Value::Null, Value::Null)])
+        .await
+        .is_err());
+    let journal = db
+        .query(
+            "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
+                .collect()
+        ),
+        "every migration there is is journaled once"
+    );
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 16));
 }
