@@ -43,6 +43,7 @@ export interface LicenseLoadProps {
 export function LicenseLoad({ license, zone }: LicenseLoadProps) {
   const { t } = useTranslation();
   const titleId = useId();
+  const previewId = useId();
   const queryClient = useQueryClient();
   // The file's text is these writes' variables: each is reset once settled,
   // and `gcTime: 0` drops it from the mutation cache at once.
@@ -148,8 +149,8 @@ export function LicenseLoad({ license, zone }: LicenseLoadProps) {
         )}
       </div>
       {staged !== null && (
-        <section className="license-part" aria-label={t("office.about.license.load.previewTitle")}>
-          <h4>{t("office.about.license.load.previewTitle")}</h4>
+        <section className="license-part" aria-labelledby={previewId}>
+          <h4 id={previewId}>{t("office.about.license.load.previewTitle")}</h4>
           <Table
             columns={columns}
             rows={comparisonRows(staged.preview, zone)}

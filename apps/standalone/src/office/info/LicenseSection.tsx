@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -123,6 +123,7 @@ function LicenseBody({
 /** «Рабочие места»: used and given by quota, «без ограничения» for none, a row over its limit in words. */
 function LicenseSeats({ rows }: { rows: QuotaRow[] }) {
   const { t } = useTranslation();
+  const titleId = useId();
   const columns: TableColumn<QuotaRow>[] = [
     {
       key: "what",
@@ -158,8 +159,8 @@ function LicenseSeats({ rows }: { rows: QuotaRow[] }) {
     },
   ];
   return (
-    <section className="license-part" aria-label={t("office.about.license.seats.title")}>
-      <h3>{t("office.about.license.seats.title")}</h3>
+    <section className="license-part" aria-labelledby={titleId}>
+      <h3 id={titleId}>{t("office.about.license.seats.title")}</h3>
       <Table
         columns={columns}
         rows={rows}
@@ -176,9 +177,10 @@ function LicenseSeats({ rows }: { rows: QuotaRow[] }) {
 /** «Возможности»: each feature of the license with «включено» or «выключено» in words. */
 function LicenseFeatures({ license }: { license: OfficeLicense }) {
   const { t } = useTranslation();
+  const titleId = useId();
   return (
-    <section className="license-part" aria-label={t("office.about.license.featuresTitle")}>
-      <h3>{t("office.about.license.featuresTitle")}</h3>
+    <section className="license-part" aria-labelledby={titleId}>
+      <h3 id={titleId}>{t("office.about.license.featuresTitle")}</h3>
       <ul className="license-features">
         {featureRows(license).map((row) => (
           <li key={row.key}>
@@ -196,6 +198,7 @@ function LicenseFeatures({ license }: { license: OfficeLicense }) {
 /** «Организация и привязка»: the file's customer and INN, the site's INN, the host and the file. */
 function LicenseBinding({ license }: { license: OfficeLicense }) {
   const { t } = useTranslation();
+  const titleId = useId();
   const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
   const file = license.license;
   const { orgInn, innMatches, hostId, fingerprint } = license.binding;
@@ -265,8 +268,8 @@ function LicenseBinding({ license }: { license: OfficeLicense }) {
     setCopied((await copyText(hostId)) ? "copied" : "failed");
   };
   return (
-    <section className="license-part" aria-label={t("office.about.license.binding.title")}>
-      <h3>{t("office.about.license.binding.title")}</h3>
+    <section className="license-part" aria-labelledby={titleId}>
+      <h3 id={titleId}>{t("office.about.license.binding.title")}</h3>
       <DefinitionGrid items={items} />
       <div className="standalone-form__actions">
         <Button variant="secondary" size="compact" onClick={() => void copy()}>

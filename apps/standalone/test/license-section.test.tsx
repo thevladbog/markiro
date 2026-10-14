@@ -314,6 +314,29 @@ describe("«Лицензия» on «Информация»", () => {
     },
   );
 
+  it("names each part of the card by its own heading, not by a copy of its words", async () => {
+    const card = await openLicense(sessionWith());
+    for (const name of ["Рабочие места", "Возможности", "Организация и привязка"]) {
+      const region = within(card).getByRole("region", { name });
+      expect(region.getAttribute("aria-label")).toBeNull();
+      const heading = document.getElementById(region.getAttribute("aria-labelledby") ?? "");
+      expect(heading?.tagName).toBe("H3");
+      expect(heading?.textContent).toBe(name);
+    }
+  });
+
+  it("names «было → станет» by its own heading too", async () => {
+    const session = sessionWith();
+    session.api.previewLicense.mockResolvedValue(upgradePreview());
+    const card = await openLicense(session);
+    pick(card, new File([FILE_TEXT], "site.mklic"));
+    const region = await within(card).findByRole("region", { name: "Было → станет" });
+    expect(region.getAttribute("aria-label")).toBeNull();
+    expect(document.getElementById(region.getAttribute("aria-labelledby") ?? "")?.tagName).toBe(
+      "H4",
+    );
+  });
+
   it("says nothing of the zone when the dates are the organization's", async () => {
     const card = await openLicense(sessionWith());
     expect(within(card).queryByText(/время указано по/)).toBeNull();
