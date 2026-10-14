@@ -5229,6 +5229,133 @@ async fn a_beta2_station_database_reaches_the_schema_a_new_one_has() {
     );
 }
 
+/// A station database as beta 3 shipped it (commit `917f92ab4`) had the shell migrations
+/// `0001`–`0010` and `0012`–`0016`. The application's start applies the later ones (`0017`, the
+/// products' photos), and the result is the schema a new database has, with the rows the
+/// database already held (`ref_products` gets its `photo_checksum` empty).
+#[tokio::test]
+async fn a_beta3_station_database_keeps_its_data_and_reaches_the_schema_a_new_one_has() {
+    let beta3 = |version: i64| (1..=10).contains(&version) || (12..=16).contains(&version);
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    let old: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| beta3(migration.version))
+        .cloned()
+        .collect();
+    assert_eq!(
+        old.len(),
+        15,
+        "the beta-3 fixture is not what beta 3 shipped"
+    );
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(old),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for statement in [
+        "INSERT INTO ref_lines (id, name, archived, rev) VALUES ('line-1', 'Линия 1', 0, 3)",
+        "INSERT INTO ref_products (id, gtin14, name, archived, status, rev) \
+         VALUES ('product-1', '04600682000013', 'Сок яблочный', 0, 'active', 4)",
+    ] {
+        sqlx::query(statement).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    let upgraded = LocalDb::open(dir.path()).await.unwrap();
+    // The data is kept.
+    let lines = upgraded
+        .query("SELECT id, name, rev FROM ref_lines", vec![])
+        .await
+        .unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["name"], json!("Линия 1"));
+    assert_eq!(lines[0]["rev"], json!(3));
+    let products = upgraded
+        .query(
+            "SELECT id, name, rev, photo_checksum FROM ref_products",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(products.len(), 1);
+    assert_eq!(products[0]["name"], json!("Сок яблочный"));
+    assert_eq!(products[0]["rev"], json!(4));
+    assert_eq!(products[0]["photo_checksum"], Value::Null);
+    // The new table is there and empty.
+    let photos = upgraded
+        .query("SELECT count(*) AS n FROM ref_product_photos", vec![])
+        .await
+        .unwrap();
+    assert_eq!(photos[0]["n"], json!(0));
+
+    let (_fresh_dir, fresh) = open().await;
+    let objects = "SELECT type, name, tbl_name FROM sqlite_master \
+                   WHERE name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' \
+                   ORDER BY type, name";
+    let upgraded_objects = upgraded.query(objects, vec![]).await.unwrap();
+    assert_eq!(
+        upgraded_objects,
+        fresh.query(objects, vec![]).await.unwrap()
+    );
+    for expected in [
+        "outbox_unsent",
+        "wh_outbox_unsent",
+        "ref_products_gtin14",
+        "ref_product_photos",
+    ] {
+        assert!(
+            upgraded_objects
+                .iter()
+                .any(|row| row["name"].as_str() == Some(expected)),
+            "no {expected}"
+        );
+    }
+    let columns = "SELECT m.name AS tbl, c.name, c.type, c.\"notnull\" AS required, \
+                   c.dflt_value AS dflt, c.pk FROM sqlite_master m, pragma_table_info(m.name) c \
+                   WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \
+                   AND m.name <> '_sqlx_migrations' ORDER BY m.name, c.name";
+    assert_eq!(
+        upgraded.query(columns, vec![]).await.unwrap(),
+        fresh.query(columns, vec![]).await.unwrap()
+    );
+    let journal = "SELECT version, success FROM _sqlx_migrations ORDER BY version";
+    assert_eq!(
+        upgraded.query(journal, vec![]).await.unwrap(),
+        fresh.query(journal, vec![]).await.unwrap()
+    );
+}
+
+/// No two shell migrations share a version: in the compiled list and in the files (sqlx would
+/// refuse the second on a database, and a rebase that renumbers one must not collide).
+#[test]
+fn shell_migration_versions_are_unique() {
+    let versions: Vec<i64> = MIGRATOR.iter().map(|migration| migration.version).collect();
+    let mut sorted = versions.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted, versions, "versions repeat or are out of order");
+    let mut prefixes: Vec<String> =
+        std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".sql"))
+            .map(|name| name.split('_').next().unwrap().to_owned())
+            .collect();
+    let files = prefixes.len();
+    prefixes.sort();
+    prefixes.dedup();
+    assert_eq!(prefixes.len(), files, "two files share a version number");
+    assert_eq!(files, versions.len());
+}
+
 /// Beta 3: a forget takes the upgrade's copy of the database with it, side files
 /// included, and nothing else in the directory.
 #[tokio::test]

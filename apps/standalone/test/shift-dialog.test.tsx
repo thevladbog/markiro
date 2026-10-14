@@ -262,7 +262,9 @@ describe("office shifts: planning a shift", () => {
     fillMilk();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Очистить дату: Дата смены" }));
     submit();
-    await waitFor(() => expect(screen.getAllByText("Укажите дату смены").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getAllByText("Укажите дату смены").length).toBeGreaterThan(0),
+    );
     expect(session.api.createShift).not.toHaveBeenCalled();
   });
 

@@ -862,11 +862,10 @@ export function createHostApi(client: HostClient): HostApi {
         schema: cloudImportSummarySchema,
       }),
     listShifts: (token, period) =>
-      client.request(
-        "GET",
-        `/v1/office/shifts${shiftPeriodQuery(period)}`,
-        { officeToken: token, schema: z.array(officeShiftSchema) },
-      ),
+      client.request("GET", `/v1/office/shifts${shiftPeriodQuery(period)}`, {
+        officeToken: token,
+        schema: z.array(officeShiftSchema),
+      }),
     getShift: (token, id) =>
       client.request("GET", `/v1/office/shifts/${id}`, {
         officeToken: token,
