@@ -22,7 +22,7 @@ import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import type { TaskFormInputs } from "./form-data.js";
 import { usePrintForm } from "./form-printer-context.js";
-import { formFolder, openInBrowser } from "./print-form.js";
+import { formFolder, openInBrowser, paint } from "./print-form.js";
 import { prepareForm, type FormRequest } from "./render-form.js";
 import { taskFormInputs } from "./task-inputs.js";
 
@@ -85,27 +85,6 @@ function formRequest(
     case "task":
       return sources.task === null ? null : { kind: "task", inputs: sources.task, generatedAt };
   }
-}
-
-/**
- * Lets the window paint what the press has said (a frame and a turn after it)
- * before the heavy work blocks it. A window that draws no frames (hidden,
- * minimised) waits no longer than 100 ms.
- */
-function paint(): Promise<void> {
-  return new Promise((resolve) => {
-    let waiting = true;
-    const finish = () => {
-      if (waiting) {
-        waiting = false;
-        resolve();
-      }
-    };
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => setTimeout(finish, 0));
-    }
-    setTimeout(finish, 100);
-  });
 }
 
 type Listed<K extends keyof HostApi> = Awaited<ReturnType<HostApi[K]>>;

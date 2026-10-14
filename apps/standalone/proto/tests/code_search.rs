@@ -71,7 +71,15 @@ fn a_card_round_trips_with_every_kind_of_event() {
         .collect();
     assert_eq!(
         kinds,
-        ["scan", "scan", "scan", "removed", "displaced", "reprint"]
+        [
+            "scan",
+            "scan",
+            "scan",
+            "removed",
+            "displaced",
+            "removed",
+            "reprint"
+        ]
     );
     assert!(matches!(
         card.events[0],

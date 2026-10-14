@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "the host was restored from a copy: documents wait until the office resumes the facts",
+    "details": {
+      "constraint": "restore_hold",
+      "since": "2026-10-13T07:00:00Z"
+    }
+  }
+}

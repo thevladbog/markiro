@@ -116,6 +116,14 @@ describe("a shift's review on its card (plan КНФ)", () => {
     await openCard(cardSession(ACTIVE), ACTIVE.number);
     expect(await rowsOf("Исключения")).toEqual([
       [
+        "08.10.2026, 10:00",
+        "РасформированиеДокумент DSG-26-0007",
+        "Короб (00)046006820000015001",
+        "Повреждена упаковка",
+        "Офис",
+        "Ирина Смирнова",
+      ],
+      [
         "08.10.2026, 09:30",
         "Расформирование",
         "Паллета (00)146006820000000409",
@@ -132,6 +140,15 @@ describe("a shift's review on its card (plan КНФ)", () => {
         "—",
       ],
     ]);
+  });
+
+  it("links an office disassembly to its document (plan ДЗГ-О)", async () => {
+    await openCard(cardSession(ACTIVE), ACTIVE.number);
+    await rowsOf("Исключения");
+    const link = within(section("Исключения")).getByRole("link", {
+      name: "Документ DSG-26-0007",
+    });
+    expect(link.getAttribute("href")).toBe("/disaggregation/6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c");
   });
 
   it("lists the refused records with the refusal in the station's words and its field", async () => {

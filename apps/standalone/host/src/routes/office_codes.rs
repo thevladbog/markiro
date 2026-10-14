@@ -213,6 +213,21 @@ pub const CARD_EXCEPTIONS_SQL: &str = "SELECT i.scan_id, e.kind, e.reason_code, 
      LEFT JOIN operators op ON op.id = e.operator_id \
      WHERE s.code_hash = ?1 ORDER BY e.received_at, e.id LIMIT ?2";
 
+/// The applied disaggregation document (plan ДЗГ-О) that took the box of
+/// each placement of a code apart at the instant the item left it: the
+/// office's counterpart of [`CARD_EXCEPTIONS_SQL`], which a document does
+/// not write a row to. A box is taken apart once, by a station or by one
+/// document, so a placement has at most one of the two.
+pub const CARD_OFFICE_RELEASES_SQL: &str = "SELECT i.scan_id, dc.id AS document_id, dc.doc_no, \
+     u.name AS office_user_name, r.name AS reason_name FROM scans s \
+     JOIN box_items i ON i.scan_id = s.id \
+     JOIN boxes b ON b.id = i.box_id AND b.disassembled_at = i.removed_at \
+     JOIN disaggregation_document_lines l ON l.box_id = b.id AND l.status = 'ok' \
+     JOIN disaggregation_documents dc ON dc.id = l.document_id AND dc.status = 'applied' \
+     JOIN office_users u ON u.id = dc.applied_by \
+     LEFT JOIN disaggregation_reasons r ON r.id = dc.reason_id \
+     WHERE s.code_hash = ?1 ORDER BY dc.applied_at, dc.id LIMIT ?2";
+
 /// The unit's warehouse reprints of a code (plan СКЛ), oldest first.
 pub const CARD_REPRINTS_SQL: &str = "SELECT w.occurred_at, w.outcome, w.reason_code, \
      d.name AS device_name, op.name AS operator_name FROM warehouse_reprints w \
@@ -232,7 +247,7 @@ pub const SHIFT_BY_NUMBER_SQL: &str =
 
 /// Every query of this module by name, for the test that each one searches
 /// by an index.
-pub const QUERIES: [(&str, &str); 19] = [
+pub const QUERIES: [(&str, &str); 20] = [
     ITEMS_SQL[0],
     ITEMS_SQL[1],
     ITEMS_SQL[2],
@@ -247,6 +262,7 @@ pub const QUERIES: [(&str, &str); 19] = [
     COUNT_SQL[5],
     ("card scans", CARD_SCANS_SQL),
     ("card exceptions", CARD_EXCEPTIONS_SQL),
+    ("card office releases", CARD_OFFICE_RELEASES_SQL),
     ("card reprints", CARD_REPRINTS_SQL),
     ("card owner", CARD_OWNER_SQL),
     ("box by sscc", BOX_BY_SSCC_SQL),
@@ -734,6 +750,15 @@ struct ExceptionRow {
 }
 
 #[derive(sqlx::FromRow)]
+struct OfficeReleaseRow {
+    scan_id: String,
+    document_id: String,
+    doc_no: String,
+    office_user_name: String,
+    reason_name: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
 struct ReprintRow {
     occurred_at: String,
     outcome: String,
@@ -808,6 +833,16 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
         // The first received is the one that took the item out.
         exception_of.entry(row.scan_id.clone()).or_insert(row);
     }
+    let office_releases: Vec<OfficeReleaseRow> = sqlx::query_as(CARD_OFFICE_RELEASES_SQL)
+        .bind(code_hash)
+        .bind(CARD_LIMIT)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    let mut office_of: HashMap<String, OfficeReleaseRow> = HashMap::new();
+    for row in office_releases {
+        office_of.entry(row.scan_id.clone()).or_insert(row);
+    }
     let reprints: Vec<ReprintRow> = sqlx::query_as(CARD_REPRINTS_SQL)
         .bind(code_hash)
         .bind(CARD_LIMIT)
@@ -846,17 +881,29 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
                     .box_id
                     .clone()
                     .ok_or_else(|| ApiError::internal("a removed placement has no box"))?;
+                let office = office_of.remove(&placement.scan_id);
                 events.push(OfficeCodeEvent::Removed {
                     at: left_at,
                     box_id,
                     box_sscc: placement.box_sscc.clone(),
-                    exception: exception
-                        .as_ref()
-                        .map(|row| stored::<ExceptionKind>(&row.kind))
-                        .transpose()?,
+                    // An office disassembly is a `disassemble` with the
+                    // document's reason; a station's exception wins if a
+                    // row of both exists (it cannot: a box is taken apart once).
+                    exception: match (&exception, &office) {
+                        (Some(row), _) => Some(stored::<ExceptionKind>(&row.kind)?),
+                        (None, Some(_)) => Some(ExceptionKind::Disassemble),
+                        (None, None) => None,
+                    },
                     reason_code: exception.as_ref().and_then(|row| row.reason_code.clone()),
-                    reason_text: exception.as_ref().and_then(|row| row.reason_text.clone()),
+                    reason_text: match (&exception, &office) {
+                        (Some(row), _) => row.reason_text.clone(),
+                        (None, Some(row)) => row.reason_name.clone(),
+                        (None, None) => None,
+                    },
                     operator_name: exception.and_then(|row| row.operator_name),
+                    document_id: office.as_ref().map(|row| row.document_id.clone()),
+                    document_no: office.as_ref().map(|row| row.doc_no.clone()),
+                    office_user_name: office.map(|row| row.office_user_name),
                 });
             }
             CodePlacementState::Displaced => events.push(OfficeCodeEvent::Displaced {

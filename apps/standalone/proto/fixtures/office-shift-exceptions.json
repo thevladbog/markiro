@@ -1,6 +1,25 @@
 {
   "items": [
     {
+      "id": "7d1e2f3a-4b5c-4d6e-8f70-0000000000a1",
+      "source": "office",
+      "subject": "box",
+      "kind": "disassemble",
+      "subjectId": "b0000000-0000-4000-8000-000000000001",
+      "sscc": "046006820000015001",
+      "serial": null,
+      "reasonCode": null,
+      "reasonText": "Повреждена упаковка",
+      "deviceId": null,
+      "deviceName": null,
+      "operatorName": null,
+      "documentId": "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c",
+      "documentNo": "DSG-26-0007",
+      "officeUserName": "Ирина Смирнова",
+      "occurredAt": "2026-10-08T07:00:00.000Z",
+      "receivedAt": "2026-10-08T07:00:00Z"
+    },
+    {
       "id": "e0000000-0000-4000-8000-000000000003",
       "subject": "pallet",
       "kind": "disassemble",
@@ -13,7 +32,11 @@
       "deviceName": "Станция А",
       "operatorName": "Анна Кузнецова",
       "occurredAt": "2026-10-08T06:30:00.000Z",
-      "receivedAt": "2026-10-08T06:30:02Z"
+      "receivedAt": "2026-10-08T06:30:02Z",
+      "source": "station",
+      "documentId": null,
+      "documentNo": null,
+      "officeUserName": null
     },
     {
       "id": "e0000000-0000-4000-8000-000000000002",
@@ -28,8 +51,12 @@
       "deviceName": "Станция А",
       "operatorName": null,
       "occurredAt": "2026-10-08T06:20:00.000Z",
-      "receivedAt": "2026-10-08T06:20:01Z"
+      "receivedAt": "2026-10-08T06:20:01Z",
+      "source": "station",
+      "documentId": null,
+      "documentNo": null,
+      "officeUserName": null
     }
   ],
-  "total": 2
+  "total": 3
 }

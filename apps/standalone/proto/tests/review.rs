@@ -1,8 +1,8 @@
 use markiro_proto::review::{
     ConflictKind, ConflictStatusRequest, ConflictStatusResponse, DeviceDisplacements,
-    ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions, OfficeShiftRejections,
-    CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, DISPLACEMENT_PAGE_SIZE, MAX_CONFLICT_STATUS_RECORDS,
-    SHIFT_REVIEW_LIMIT,
+    ExceptionSource, ExceptionSubject, OfficeConflictPage, OfficeShiftExceptions,
+    OfficeShiftRejections, CONFLICT_MAX_PAGE, CONFLICT_PAGE_SIZE, DISPLACEMENT_PAGE_SIZE,
+    MAX_CONFLICT_STATUS_RECORDS, SHIFT_REVIEW_LIMIT,
 };
 use markiro_proto::{ExceptionKind, FactKind};
 use serde::{de::DeserializeOwned, Serialize};
@@ -45,8 +45,13 @@ fn a_page_of_conflicts_round_trips_with_both_kinds() {
 #[test]
 fn a_shifts_exceptions_and_refusals_round_trip() {
     let exceptions: OfficeShiftExceptions = round_trip("office-shift-exceptions.json");
-    assert_eq!(exceptions.items[0].subject, ExceptionSubject::Pallet);
-    assert_eq!(exceptions.items[1].kind, ExceptionKind::Undo);
+    assert_eq!(exceptions.items[0].source, ExceptionSource::Office);
+    assert_eq!(exceptions.items[0].kind, ExceptionKind::Disassemble);
+    // An office disassembly names its document and user, never a station.
+    assert!(exceptions.items[0].device_id.is_none() && exceptions.items[0].document_no.is_some());
+    assert_eq!(exceptions.items[1].subject, ExceptionSubject::Pallet);
+    assert_eq!(exceptions.items[1].source, ExceptionSource::Station);
+    assert_eq!(exceptions.items[2].kind, ExceptionKind::Undo);
     let refusals: OfficeShiftRejections = round_trip("office-shift-rejections.json");
     assert_eq!(refusals.items[1].kind, Some(FactKind::Scan));
     assert_eq!(SHIFT_REVIEW_LIMIT, 500);

@@ -161,7 +161,11 @@ function eventWhere(event: OfficeCodeEvent, t: TFunction): string {
     );
   }
   if (event.type === "reprint") parts.push(event.deviceName);
+  if (event.type === "removed" && event.documentNo !== null) {
+    parts.push(t("office.codeSearch.event.document", { docNo: event.documentNo }));
+  }
   if ("operatorName" in event && event.operatorName !== null) parts.push(event.operatorName);
+  if (event.type === "removed" && event.officeUserName !== null) parts.push(event.officeUserName);
   return parts.join(" · ");
 }
 

@@ -27,6 +27,10 @@ export const officeConflictScanSchema = z.object({
   scannedAt: instant,
   boxId: z.string().nullable(),
   boxSscc: z.string().nullable(),
+  /** The scan's shift is closed: only a closed shift's box is taken apart (plan ДЗГ-О). */
+  shiftClosed: z.boolean(),
+  /** The scan's box was taken apart, by a station or a document. */
+  boxDisassembled: z.boolean(),
 });
 export type OfficeConflictScan = z.infer<typeof officeConflictScanSchema>;
 
@@ -52,8 +56,15 @@ export const officeConflictPageSchema = z.object({
 });
 export type OfficeConflictPage = z.infer<typeof officeConflictPageSchema>;
 
+/**
+ * One exception of a shift's boxes or pallets. `source: "office"` is a box or
+ * pallet an applied disaggregation document took apart (plan ДЗГ-О): it names
+ * the document and the office user and has no station or operator, and the
+ * document's reason is `reasonText`.
+ */
 export const officeShiftExceptionSchema = z.object({
   id: z.string(),
+  source: z.enum(["station", "office"]),
   subject: z.enum(["box", "pallet"]),
   kind: z.enum(["undo", "clear", "reprint", "disassemble"]),
   subjectId: z.string(),
@@ -61,9 +72,12 @@ export const officeShiftExceptionSchema = z.object({
   serial: z.string().nullable(),
   reasonCode: z.string().nullable(),
   reasonText: z.string().nullable(),
-  deviceId: z.string(),
-  deviceName: z.string(),
+  deviceId: z.string().nullable(),
+  deviceName: z.string().nullable(),
   operatorName: z.string().nullable(),
+  documentId: z.string().nullable(),
+  documentNo: z.string().nullable(),
+  officeUserName: z.string().nullable(),
   occurredAt: instant,
   receivedAt: instant,
 });

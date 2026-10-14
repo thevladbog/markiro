@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{parse_variant, UnknownVariant};
+use super::{parse_variant, BoxReportItem, ExportOrganization, UnknownVariant};
 
 /// Lines of one `POST …/lines` (the cloud's `addLinesSchema`).
 pub const MAX_LINES_PER_REQUEST: usize = 500;
@@ -32,7 +32,19 @@ pub mod constraints {
     /// An apply found lines that are not `ok`; their fresh statuses are
     /// saved, `details.invalidLines` counts them.
     pub const INVALID_LINES: &str = "invalid_lines";
-    pub const ALL: &[&str] = &[NOT_DRAFT, REASON_REQUIRED, NO_LINES, INVALID_LINES];
+    /// An apply while the host's restore hold is on (`site.facts_held_since`):
+    /// it would work on a copy that lacks the stations' later facts.
+    pub const RESTORE_HOLD: &str = "restore_hold";
+    /// The ЧЗ file of a document that is not applied (plan ДЗГ-О).
+    pub const NOT_APPLIED: &str = "document_not_applied";
+    pub const ALL: &[&str] = &[
+        NOT_DRAFT,
+        REASON_REQUIRED,
+        NO_LINES,
+        INVALID_LINES,
+        RESTORE_HOLD,
+        NOT_APPLIED,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,4 +285,81 @@ pub struct CodeReleaseRecord {
     pub document_id: String,
     pub released_at: String,
     pub code_count: u32,
+}
+
+/// What `GET /v1/office/disaggregation/{id}/report-data` reads (plan ДЗГ-О):
+/// `boxes` only the lines, `full` also each box's codes and each pallet's
+/// boxes, as the cloud's `variant=boxes|full`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisaggregationReportVariant {
+    Boxes,
+    Full,
+}
+
+/// `GET /v1/office/disaggregation/{id}/report-data` (plan ДЗГ-О): what
+/// «Акт дезагрегации» prints of a document, in one snapshot of the host, by
+/// the rules of the cloud's `DisaggregationService.reportData`: the lines
+/// with an SSCC, in the order they were added; a line's `codeCount` as the
+/// line keeps it; the product's name now; the names of the office users who
+/// made and applied it. `items` and `boxes` are filled only for `full`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisaggregationReportRows {
+    pub id: String,
+    pub doc_no: String,
+    pub status: DisaggregationStatus,
+    pub created_at: String,
+    pub applied_at: Option<String>,
+    pub created_by_name: Option<String>,
+    pub applied_by_name: Option<String>,
+    pub reason_name: Option<String>,
+    pub comment: Option<String>,
+    pub organization: ExportOrganization,
+    pub variant: DisaggregationReportVariant,
+    pub lines: Vec<DisaggregationReportLine>,
+}
+
+/// A line of [`DisaggregationReportRows`]: `sscc` the bare 18 digits; a box's
+/// line names its box, a pallet's its pallet. For `full`, a box's `items` are
+/// its codes not displaced and not taken out, or taken out by its own
+/// disassembly (the rule of «Состав короба»), by GTIN and serial; a pallet's
+/// `boxes` the boxes standing on it not taken apart, closed first, with
+/// their live units.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisaggregationReportLine {
+    pub id: String,
+    pub sscc: String,
+    pub box_id: Option<String>,
+    pub pallet_id: Option<String>,
+    pub product_name: Option<String>,
+    pub code_count: u32,
+    pub items: Vec<BoxReportItem>,
+    pub boxes: Vec<DisaggregationReportBox>,
+}
+
+/// A box standing on a pallet of the act: its bare SSCC and live units.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisaggregationReportBox {
+    pub sscc: Option<String>,
+    pub units: u32,
+}
+
+/// The one ЧЗ file a disaggregation document has (plan ДЗГ-О, owner decision
+/// ПР-2): ГИС МТ «Расформирование упаковки», `@markiro/domain`'s
+/// `renderGismtDisaggregationXml`.
+pub const DISAGGREGATION_XML_FORMAT_ID: &str = "disaggregation_xml_gismt";
+pub const DISAGGREGATION_XML_FORMAT_VERSION: u32 = 1;
+
+/// `POST /v1/office/disaggregation/{id}/exports` (plan ДЗГ-О): the office
+/// saved the document's ЧЗ file and records it, as `ShiftExportRecord` does
+/// for a shift; `packingCount` the packages the file names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DisaggregationExportRecord {
+    pub format_id: String,
+    pub format_version: u32,
+    pub packing_count: u32,
 }

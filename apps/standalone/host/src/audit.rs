@@ -99,6 +99,9 @@ pub mod actions {
     /// `ok` with what the apply took apart, `failed` when a line was not `ok`.
     pub const DISAGGREGATION_APPLY: &str = "disaggregation.apply";
     pub const DISAGGREGATION_CANCEL: &str = "disaggregation.cancel";
+    /// The office saved a document's ЧЗ file «Расформирование упаковки» and
+    /// recorded it (plan ДЗГ-О): no data changed, as `shift.export`.
+    pub const DISAGGREGATION_EXPORT: &str = "disaggregation.export";
     /// After a restore, a station gave the host back a block the copy had
     /// lost (plan РК).
     pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";

@@ -95,13 +95,17 @@ describe("«Поиск кодов» in the office", () => {
     const items = within(history)
       .getAllByRole("listitem")
       .map((item) => item.textContent);
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     expect(items[0]).toContain("Скан: чужой товар");
     // Neither text says where the earlier scan put the code: the event does not carry it.
     expect(items[2]).toContain("Скан: повтор, код уже принят по данным хоста");
     expect(items[3]).toContain("Изъят: отмена последнего скана");
     expect(items[4]).toContain("Забран из короба: тот же код раньше принят другим сканом");
-    expect(items[5]).toContain(
+    // An office disassembly (plan ДЗГ-О): the document and its user, not a station.
+    expect(items[5]).toContain("Изъят: короб расформирован (Повреждена упаковка)");
+    expect(items[5]).toContain("документ DSG-26-0007");
+    expect(items[5]).toContain("Ирина Смирнова");
+    expect(items[6]).toContain(
       "Перепечатка на складе: напечатана и проверена, причина — Повреждена",
     );
   });

@@ -348,6 +348,14 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::disaggregation::cancel_document),
         )
         .route(
+            "/v1/office/disaggregation/{id}/report-data",
+            get(crate::routes::office_disaggregation_reports::report_data),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/exports",
+            post(crate::routes::office_disaggregation_reports::record_export),
+        )
+        .route(
             "/v1/office/lines",
             get(crate::routes::lines::list_lines).post(crate::routes::lines::create_line),
         )

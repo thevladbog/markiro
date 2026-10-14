@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-query";
 
 import type { HostApi } from "../host/api.js";
+import type { DisaggregationFilter } from "../host/disaggregation.js";
 import type { PalletListQuery } from "../host/pack-cards.js";
 import type { ConflictQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
@@ -56,6 +57,28 @@ export const officeKeys = {
     query.shiftId ?? null,
     query.reviewed ?? null,
     query.page ?? 1,
+  ],
+  /** Every list of disaggregation documents (plan ДЗГ-О): a write reads them all again. */
+  disaggregation: ["office", "disaggregation"],
+  /** One filtered list (`listDisaggregations(token, filter)`). */
+  disaggregationList: (filter: DisaggregationFilter) => [
+    "office",
+    "disaggregation",
+    filter.status ?? null,
+    filter.reasonId ?? null,
+    filter.q ?? null,
+    filter.from ?? null,
+    filter.to ?? null,
+  ],
+  /** One document with its lines, read afresh at every opening. */
+  disaggregationDocument: (id: string) => ["office", "disaggregation-document", id],
+  disaggregationReasons: ["office", "disaggregation-reasons"],
+  /** What the act or the ЧЗ file of a document is drawn from. */
+  disaggregationReport: (id: string, variant: "boxes" | "full") => [
+    "office",
+    "disaggregation-report",
+    id,
+    variant,
   ],
   /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],

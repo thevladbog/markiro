@@ -181,6 +181,8 @@ describe("office operators", () => {
       "Смены",
       // «Конфликты» (plan КНФ) follows «Смены».
       "Конфликты",
+      // «Дезагрегация» (plan ДЗГ-О) follows «Конфликты»: «Смены» and «Конфликты» stay together.
+      "Дезагрегация",
       // «Сотрудники» (owner feedback on the first beta) sits right before «Операторы».
       "Сотрудники",
       "Операторы",

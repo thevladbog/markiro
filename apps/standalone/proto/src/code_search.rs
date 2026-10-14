@@ -105,7 +105,10 @@ pub enum OfficeCodeEvent {
         placed: bool,
     },
     /// The code taken out of its box by an exception; `exception` is
-    /// `null` when the host holds no exception of that instant.
+    /// `null` when the host holds no exception of that instant. An office
+    /// disassembly (plan ДЗГ-О) is `disassemble` with no operator: the
+    /// document, the office user who applied it and, as `reason_text`, the
+    /// document's reason.
     Removed {
         at: String,
         box_id: String,
@@ -114,6 +117,9 @@ pub enum OfficeCodeEvent {
         reason_code: Option<String>,
         reason_text: Option<String>,
         operator_name: Option<String>,
+        document_id: Option<String>,
+        document_no: Option<String>,
+        office_user_name: Option<String>,
     },
     /// The code taken from its box, or from a validation shift's scan
     /// (`boxId` `null`), by an earlier scan elsewhere (`at` is the host's

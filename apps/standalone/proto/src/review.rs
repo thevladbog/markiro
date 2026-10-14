@@ -68,6 +68,12 @@ pub struct OfficeConflictScan {
     pub scanned_at: String,
     pub box_id: Option<String>,
     pub box_sscc: Option<String>,
+    /// The scan's shift is closed: only a closed shift's box is taken apart
+    /// (owner decision ПР-1; plan ДЗГ-О's «Расформировать короб»).
+    pub shift_closed: bool,
+    /// The scan's box was taken apart (by a station or a document); `false`
+    /// without a box.
+    pub box_disassembled: bool,
 }
 
 /// One conflict: two accepted scans of one code; the earlier won it.
@@ -105,14 +111,27 @@ pub enum ExceptionSubject {
     Pallet,
 }
 
-/// One exception of a shift's boxes or pallets as the station sent it: the
-/// box's or pallet's SSCC (`null` for an open box), the serial of the code an
-/// undo took out, the reason code (words only with `other`), the station
-/// and its operator, the device's instant and the host's.
+/// Who made an exception: a station's operator, or the office through an
+/// applied disaggregation document (plan ДЗГ-О).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExceptionSource {
+    Station,
+    Office,
+}
+
+/// One exception of a shift's boxes or pallets: the box's or pallet's SSCC
+/// (`null` for an open box), the serial of the code an undo took out, the
+/// reason code (words only with `other`), the device's instant and the
+/// host's. A station's exception names the station and its operator; an
+/// office disassembly (`source: office`, always kind `disassemble`) names
+/// the document, the office user who applied it and, as `reasonText`, the
+/// document's reason, and has no device or operator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeShiftException {
     pub id: String,
+    pub source: ExceptionSource,
     pub subject: ExceptionSubject,
     pub kind: ExceptionKind,
     pub subject_id: String,
@@ -120,9 +139,12 @@ pub struct OfficeShiftException {
     pub serial: Option<String>,
     pub reason_code: Option<String>,
     pub reason_text: Option<String>,
-    pub device_id: String,
-    pub device_name: String,
+    pub device_id: Option<String>,
+    pub device_name: Option<String>,
     pub operator_name: Option<String>,
+    pub document_id: Option<String>,
+    pub document_no: Option<String>,
+    pub office_user_name: Option<String>,
     pub occurred_at: String,
     pub received_at: String,
 }

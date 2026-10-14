@@ -429,6 +429,7 @@ async fn the_card_tells_the_history_of_a_code() {
         json!({
             "type": "removed", "at": instant(35, 0), "boxId": box_id(2), "boxSscc": null,
             "exception": "undo", "reasonCode": null, "reasonText": null, "operatorName": null,
+            "documentId": null, "documentNo": null, "officeUserName": null,
         })
     );
     // A code the host never saw is not found.

@@ -31,14 +31,18 @@ import {
   disaggregationDocumentSchema,
   disaggregationQuery,
   disaggregationReasonSchema,
+  disaggregationReportRowsSchema,
   type DisaggregationCreate,
   type DisaggregationDetail,
   type DisaggregationDocument,
+  type DisaggregationExportRecord,
   type DisaggregationFilter,
   type DisaggregationLinesAdd,
   type DisaggregationReason,
   type DisaggregationReasonCreate,
   type DisaggregationReasonUpdate,
+  type DisaggregationReportRows,
+  type DisaggregationReportVariant,
   type DisaggregationTransition,
   type DisaggregationUpdate,
 } from "./disaggregation.js";
@@ -366,6 +370,18 @@ export interface HostApi {
    * КНФ answers `not_found`.
    */
   conflictStatus: (request: ConflictStatusRequest) => Promise<ConflictStatusResponse>;
+  /** What «Акт дезагрегации» prints of the document, in one snapshot (plan ДЗГ-О); every office role. */
+  getDisaggregationReportRows: (
+    token: string,
+    id: string,
+    variant: DisaggregationReportVariant,
+  ) => Promise<DisaggregationReportRows>;
+  /** `204`: the document's ЧЗ file is saved; the host writes its `disaggregation.export` row (plan ДЗГ-О). */
+  recordDisaggregationExport: (
+    token: string,
+    id: string,
+    record: DisaggregationExportRecord,
+  ) => Promise<void>;
   /** The disaggregation reasons, archived ones included (plan ДЗГ); administrators and technologists. */
   listDisaggregationReasons: (token: string) => Promise<DisaggregationReason[]>;
   createDisaggregationReason: (
@@ -1006,6 +1022,18 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: disaggregationDetailSchema,
       }),
+    getDisaggregationReportRows: (token, id, variant) =>
+      client.request("GET", `/v1/office/disaggregation/${id}/report-data?variant=${variant}`, {
+        officeToken: token,
+        schema: disaggregationReportRowsSchema,
+      }),
+    recordDisaggregationExport: async (token, id, record) => {
+      await client.request("POST", `/v1/office/disaggregation/${id}/exports`, {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
         officeToken: token,

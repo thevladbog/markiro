@@ -4,9 +4,11 @@
 
 use markiro_proto::disaggregation::{
     constraints, CodeReleaseRecord, DisaggregationCreate, DisaggregationDetail,
-    DisaggregationDocument, DisaggregationLineStatus, DisaggregationLinesAdd, DisaggregationReason,
-    DisaggregationReasonCreate, DisaggregationReasonUpdate, DisaggregationSource,
-    DisaggregationStatus, DisaggregationTransition, DisaggregationUpdate,
+    DisaggregationDocument, DisaggregationExportRecord, DisaggregationLineStatus,
+    DisaggregationLinesAdd, DisaggregationReason, DisaggregationReasonCreate,
+    DisaggregationReasonUpdate, DisaggregationReportRows, DisaggregationReportVariant,
+    DisaggregationSource, DisaggregationStatus, DisaggregationTransition, DisaggregationUpdate,
+    DISAGGREGATION_XML_FORMAT_ID, DISAGGREGATION_XML_FORMAT_VERSION,
 };
 use markiro_proto::{entities, ChangesResponse, ErrorBody};
 use serde::{de::DeserializeOwned, Serialize};
@@ -63,6 +65,11 @@ fn every_disaggregation_fixture_round_trips() {
     let details = error.error.details.unwrap();
     assert_eq!(details["constraint"], constraints::INVALID_LINES);
     assert!(constraints::ALL.contains(&constraints::INVALID_LINES));
+    let held: ErrorBody = round_trip("error-disaggregation-restore-hold.json");
+    assert_eq!(
+        held.error.details.unwrap()["constraint"],
+        constraints::RESTORE_HOLD
+    );
 }
 
 #[test]
@@ -142,4 +149,40 @@ fn a_nullable_key_must_be_there() {
     )
     .unwrap();
     assert_eq!((explicit.reason_id, explicit.comment), (None, None));
+}
+
+#[test]
+fn disaggregation_report_fixtures_round_trip() {
+    let full: DisaggregationReportRows = round_trip("disaggregation-report-rows-full.json");
+    assert_eq!(full.variant, DisaggregationReportVariant::Full);
+    assert_eq!(full.lines[0].items.len(), 2);
+    assert_eq!(full.lines[1].boxes.len(), 2);
+    let boxes: DisaggregationReportRows = round_trip("disaggregation-report-rows-boxes.json");
+    assert!(boxes
+        .lines
+        .iter()
+        .all(|line| line.items.is_empty() && line.boxes.is_empty()));
+    let record: DisaggregationExportRecord = round_trip("disaggregation-export-record.json");
+    assert_eq!(record.format_id, DISAGGREGATION_XML_FORMAT_ID);
+    assert_eq!(record.format_version, DISAGGREGATION_XML_FORMAT_VERSION);
+}
+
+#[test]
+fn a_disaggregation_export_record_refuses_an_unknown_field() {
+    let mut record = fixture("disaggregation-export-record.json");
+    record["fileName"] = serde_json::json!("disaggregation-DSG-26-0007.xml");
+    assert!(serde_json::from_value::<DisaggregationExportRecord>(record).is_err());
+}
+
+#[test]
+fn the_report_variant_reads_as_the_cloud_writes_it() {
+    for (text, variant) in [
+        ("\"boxes\"", DisaggregationReportVariant::Boxes),
+        ("\"full\"", DisaggregationReportVariant::Full),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<DisaggregationReportVariant>(text).unwrap(),
+            variant
+        );
+    }
 }
