@@ -78,7 +78,7 @@ export function zonedDayStartMs(civil: string, timeZone: string): number {
 }
 
 /** The civil date after `civil`. */
-function nextDay(civil: string): string {
+export function nextDay(civil: string): string {
   const [year, month, day] = civil.split("-").map(Number) as [number, number, number];
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day + 1);
