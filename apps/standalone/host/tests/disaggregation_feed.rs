@@ -168,3 +168,55 @@ async fn a_big_apply_comes_whole_in_one_page() {
         "within the page budget"
     );
 }
+
+/// A revision over the page's byte budget (plan Р6: 10 000 boxes are about
+/// 3 MB of JSON) comes whole, and the station's sync moves on.
+#[tokio::test]
+async fn a_revision_over_the_page_budget_still_comes_whole() {
+    let admin = admin().await;
+    let floor = day(&admin, true).await;
+    let block: String = sqlx::query_scalar("SELECT id FROM sscc_blocks LIMIT 1")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut ssccs = Vec::new();
+    for n in 0..5000u64 {
+        let serial = 10_000 + n;
+        sqlx::query(
+            "INSERT INTO boxes (id, shift_id, device_id, opened_at, closed_at, sscc, block_id, \
+             serial, digest_matches, received_at) \
+             VALUES (?, ?, ?, '2026-10-08T06:00:00.000Z', '2026-10-08T06:01:00.000Z', ?, ?, ?, 1, \
+             '2026-10-08T06:01:00Z')",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&floor.shift)
+        .bind(&floor.station)
+        .bind(sscc(serial))
+        .bind(&block)
+        .bind(i64::try_from(serial).unwrap())
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+        ssccs.push(sscc(serial));
+    }
+    let before = host_revision(&admin.app).await;
+    let doc = create(&admin, json!({ "reasonId": REASON })).await;
+    let id = doc["document"]["id"].as_str().unwrap().to_owned();
+    let mut last = Value::Null;
+    for chunk in ssccs.chunks(500) {
+        let lines: Vec<Value> = chunk.iter().map(|s| line(s, Some(s))).collect();
+        let (status, detail) = add(&admin, &id, Value::Array(lines)).await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        last = detail;
+    }
+    let (status, done) = support::disaggregation::apply(&admin, &last).await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    let body = feed(&admin, &format!("?since={before}")).await;
+    assert!(
+        serde_json::to_vec(&body).unwrap().len() > 1024 * 1024,
+        "the revision is over the page budget"
+    );
+    assert_eq!(releases(&body).len(), 5000);
+    assert_eq!(body["hasMore"], false);
+    assert_eq!(body["rev"], done["document"]["rev"]);
+}

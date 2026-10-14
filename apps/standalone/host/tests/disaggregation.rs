@@ -7,7 +7,8 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_row, audit_rows, audit_trail, box_id, close_from_office, empty, host_revision,
-    pallet_sscc, request, sscc, with_device, Admin,
+    login, pallet_sscc, request, seed_office_user, sscc, turn_the_user_off_at_the_next_activity,
+    with_device, Admin,
 };
 use support::disaggregation::{
     add, create, day, line, pallet_day, station_disassembles, OTHER_REASON, REASON,
@@ -617,4 +618,83 @@ async fn every_office_role_reads_and_writes_and_a_device_alone_does_not() {
             "{method} {path}"
         );
     }
+}
+
+/// A repeat is found among the lines of earlier requests, not only of this
+/// one; a line taken away gives its SSCC back.
+#[tokio::test]
+async fn a_repeat_is_found_across_requests_and_a_deleted_line_frees_its_sscc() {
+    let admin = admin().await;
+    day(&admin, true).await;
+    let doc = create(&admin, json!({ "reasonId": REASON })).await;
+    let id = id_of(&doc);
+    let (_, first) = add(&admin, &id, json!([line(&sscc(1500), Some(&sscc(1500)))])).await;
+    assert_eq!(statuses(&first), ["ok"]);
+    let (status, second) = add(
+        &admin,
+        &id,
+        json!([line(&format!("(00){}", sscc(1500)), Some(&sscc(1500)))]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(statuses(&second), ["ok", "duplicate"]);
+    assert_eq!(second["lines"][1]["sscc"], Value::Null);
+    // Take the first one away: the SSCC can be added again.
+    let first_line = first["lines"][0]["id"].as_str().unwrap();
+    let (status, _) = admin
+        .call("DELETE", &format!("{ROOT}/{id}/lines/{first_line}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, again) = add(&admin, &id, json!([line(&sscc(1500), Some(&sscc(1500)))])).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(statuses(&again), ["duplicate", "ok"]);
+}
+
+/// A header or a line that leaves a nullable key out is refused: a `PUT`
+/// without `comment` must not clear the comment.
+#[tokio::test]
+async fn a_put_without_a_nullable_key_is_refused_and_clears_nothing() {
+    let admin = admin().await;
+    let doc = create(&admin, json!({ "reasonId": REASON, "comment": "оставить" })).await;
+    let id = id_of(&doc);
+    let rows = audit_rows(&admin.app).await;
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("{ROOT}/{id}"),
+            Some(json!({ "expectedRev": doc["document"]["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (_, read) = admin.call("GET", &format!("{ROOT}/{id}"), None).await;
+    assert_eq!(read["document"]["comment"], "оставить");
+    assert_eq!(read["document"]["reasonId"], REASON);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// A user turned off after the extractor passed is found by the write's own
+/// read under the lock: nothing is written.
+#[tokio::test]
+async fn a_user_turned_off_after_the_extractor_writes_nothing() {
+    let admin = admin().await;
+    let other = seed_office_user(&admin.app, "tech2", "technologist", "second tech password").await;
+    let token = login(&admin.app, &admin.key, "tech2", "second tech password").await;
+    turn_the_user_off_at_the_next_activity(&admin.app, &other).await;
+    admin.app.clock.advance(time::Duration::minutes(2));
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, body) = admin
+        .call_as(&token, "POST", ROOT, Some(json!({ "reasonId": REASON })))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["details"]["credential"], "session");
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, list) = admin.call("GET", ROOT, None).await;
+    assert_eq!(list, json!([]));
+    let counter: i64 = sqlx::query_scalar("SELECT last_seq FROM disaggregation_doc_counters")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(counter, 0, "the number was not taken");
 }

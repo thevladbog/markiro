@@ -216,11 +216,24 @@ pub struct DisaggregationCreate {
     pub comment: Option<String>,
 }
 
+/// A field that must be present and may be `null`: a missing one is an
+/// error (serde reads a missing `Option` as `None`, which here would clear a
+/// draft's header by leaving a key out).
+fn required<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 /// The whole header of a draft over its `rev`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisaggregationUpdate {
+    #[serde(deserialize_with = "required")]
     pub reason_id: Option<String>,
+    #[serde(deserialize_with = "required")]
     pub comment: Option<String>,
     pub expected_rev: i64,
 }
@@ -229,6 +242,7 @@ pub struct DisaggregationUpdate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisaggregationLineInput {
     pub input: String,
+    #[serde(deserialize_with = "required")]
     pub sscc: Option<String>,
 }
 

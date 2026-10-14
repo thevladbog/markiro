@@ -97,8 +97,6 @@ CREATE TABLE disaggregation_document_lines (
 );
 CREATE UNIQUE INDEX disaggregation_lines_document_sscc
   ON disaggregation_document_lines (document_id, sscc) WHERE sscc IS NOT NULL;
-CREATE INDEX disaggregation_lines_sscc
-  ON disaggregation_document_lines (sscc) WHERE sscc IS NOT NULL;
 CREATE INDEX disaggregation_lines_box
   ON disaggregation_document_lines (box_id) WHERE box_id IS NOT NULL;
 CREATE INDEX disaggregation_lines_pallet
@@ -119,4 +117,3 @@ CREATE TABLE code_releases (
   rev INTEGER NOT NULL
 );
 CREATE INDEX code_releases_rev ON code_releases (rev);
-CREATE INDEX code_releases_document ON code_releases (document_id);

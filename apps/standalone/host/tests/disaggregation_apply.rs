@@ -8,8 +8,9 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_row, audit_trail, box_closed, box_exception, box_id, close_from_office, code_hash,
-    empty, fact, fact_rows, host_revision, instant, issue_block, ok_scan, open_floor, pair_device,
-    pallet_id, pallet_sscc, receipts, record_id, request, sscc, with_device, Admin,
+    empty, fact, fact_rows, host_revision, instant, issue_block, login, ok_scan, open_floor,
+    pair_device, pallet_id, pallet_sscc, receipts, record_id, request, seed_office_user, sscc,
+    turn_the_user_off_at_the_next_activity, with_device, Admin,
 };
 use support::disaggregation::{
     add, applied, apply, create, day, day_with_setup, line, pallet_day, station_disassembles,
@@ -361,6 +362,24 @@ async fn what_an_apply_refuses_before_it_touches_anything() {
     let admin = admin().await;
     day(&admin, true).await;
     let facts = fact_rows(&admin.app).await;
+    // Nothing is taken apart by any refusal below: the state to compare.
+    let untouched = || async {
+        (
+            count(
+                &admin,
+                "SELECT COUNT(*) FROM boxes WHERE disassembled_at IS NOT NULL",
+            )
+            .await,
+            count(
+                &admin,
+                "SELECT COUNT(*) FROM box_items WHERE removed_at IS NOT NULL",
+            )
+            .await,
+            count(&admin, "SELECT COUNT(*) FROM code_owners").await,
+            count(&admin, "SELECT COUNT(*) FROM code_releases").await,
+        )
+    };
+    assert_eq!(untouched().await, (0, 0, 5, 0));
     let refuses = |label: &'static str, detail: Value, constraint: &'static str| {
         let admin = &admin;
         async move {
@@ -434,12 +453,29 @@ async fn what_an_apply_refuses_before_it_touches_anything() {
     refuses("cancelled", cancelled, "document_not_draft").await;
     let done = applied(&admin, &[sscc(1500)]).await;
     refuses("applied", done, "document_not_draft").await;
-    // Only the one good apply touched the facts' tables.
-    let after = fact_rows(&admin.app).await;
-    assert_eq!(after["box_exceptions"], facts["box_exceptions"]);
-    assert_eq!(after["scans"], facts["scans"]);
-    assert_eq!(after["fact_receipts"], facts["fact_receipts"]);
+    // Only the one good apply took anything apart: box 1, once.
+    assert_eq!(
+        count(
+            &admin,
+            "SELECT COUNT(*) FROM boxes WHERE disassembled_at IS NOT NULL"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(
+            &admin,
+            "SELECT COUNT(*) FROM box_items WHERE removed_at IS NOT NULL"
+        )
+        .await,
+        3
+    );
+    assert_eq!(count(&admin, "SELECT COUNT(*) FROM code_owners").await, 2);
     assert_eq!(count(&admin, "SELECT COUNT(*) FROM code_releases").await, 1);
+    assert_eq!(
+        fact_rows(&admin.app).await["fact_receipts"],
+        facts["fact_receipts"]
+    );
 }
 
 #[tokio::test]
@@ -489,6 +525,19 @@ async fn late_facts_after_an_apply_see_its_result() {
         .await,
         1
     );
+    // Its items still left at the apply, and the freed code is free.
+    assert_eq!(
+        count(
+            &admin,
+            &format!(
+                "SELECT COUNT(*) FROM box_items WHERE box_id = '{}' AND removed_at IS NOT NULL",
+                box_id(1)
+            )
+        )
+        .await,
+        3
+    );
+    assert_eq!(code_check(&admin, &floor.key, 1).await["status"], "free");
     // Another station scans the freed code 1 in its own open shift.
     let (_, colleague_key) = pair_device(&admin.app, "station").await;
     let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
@@ -622,4 +671,125 @@ async fn a_technologist_applies() {
             json!({ "docNo": "DSG-26-0001", "boxes": 1, "pallets": 0, "codes": 3 })
         )]
     );
+}
+
+/// Every shift whose boxes or pallets changed reads as having late data,
+/// once, as a station's late exception marks it: a file saved before the
+/// apply no longer describes the shift.
+#[tokio::test]
+async fn an_apply_marks_the_shift_late_once_and_with_the_applys_revision() {
+    let admin = admin().await;
+    let floor = day(&admin, true).await;
+    let late = || async {
+        sqlx::query_as::<_, (Option<String>, i64)>(
+            "SELECT late_data_at, rev FROM shifts WHERE id = ?",
+        )
+        .bind(&floor.shift)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(late().await.0, None);
+    let done = applied(&admin, &[sscc(1500)]).await;
+    let (marked, rev) = late().await;
+    assert_eq!(
+        marked,
+        done["document"]["appliedAt"].as_str().map(str::to_owned)
+    );
+    assert_eq!(rev, done["document"]["rev"].as_i64().unwrap());
+    // A second apply on the same shift keeps the first mark.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    applied(&admin, &[sscc(1501)]).await;
+    assert_eq!(late().await.0, marked);
+}
+
+/// A failure while the second target is taken apart undoes the first: the
+/// apply is all or nothing.
+#[tokio::test]
+async fn a_failing_apply_leaves_nothing_taken_apart() {
+    let admin = admin().await;
+    day(&admin, true).await;
+    let doc = create(&admin, json!({ "reasonId": REASON })).await;
+    let (_, detail) = add(
+        &admin,
+        &id_of(&doc),
+        json!([
+            line(&sscc(1500), Some(&sscc(1500))),
+            line(&sscc(1501), Some(&sscc(1501)))
+        ]),
+    )
+    .await;
+    sqlx::query(&format!(
+        "CREATE TRIGGER fail_the_second_release BEFORE INSERT ON code_releases \
+         WHEN NEW.box_id = '{}' BEGIN SELECT RAISE(ABORT, 'no'); END",
+        box_id(2)
+    ))
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let rows = support::app::audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+
+    let (status, body) = apply(&admin, &detail).await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    for sql in [
+        "SELECT COUNT(*) FROM boxes WHERE disassembled_at IS NOT NULL",
+        "SELECT COUNT(*) FROM box_items WHERE removed_at IS NOT NULL",
+        "SELECT COUNT(*) FROM code_releases",
+        "SELECT COUNT(*) FROM shifts WHERE late_data_at IS NOT NULL",
+    ] {
+        assert_eq!(count(&admin, sql).await, 0, "{sql}");
+    }
+    assert_eq!(count(&admin, "SELECT COUNT(*) FROM code_owners").await, 5);
+    assert_eq!(support::app::audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, card) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/disaggregation/{}", id_of(&doc)),
+            None,
+        )
+        .await;
+    assert_eq!(card["document"]["status"], "draft");
+    assert_eq!(card["document"]["rev"], detail["document"]["rev"]);
+}
+
+/// A user turned off after the extractor passed is found under the lock:
+/// nothing is taken apart.
+#[tokio::test]
+async fn an_apply_by_a_user_turned_off_after_the_extractor_does_nothing() {
+    let admin = admin().await;
+    day(&admin, true).await;
+    let doc = create(&admin, json!({ "reasonId": REASON })).await;
+    let (_, detail) = add(
+        &admin,
+        &id_of(&doc),
+        json!([line(&sscc(1500), Some(&sscc(1500)))]),
+    )
+    .await;
+    let other = seed_office_user(&admin.app, "tech2", "technologist", "second tech password").await;
+    let token = login(&admin.app, &admin.key, "tech2", "second tech password").await;
+    turn_the_user_off_at_the_next_activity(&admin.app, &other).await;
+    admin.app.clock.advance(time::Duration::minutes(2));
+    let rows = support::app::audit_rows(&admin.app).await;
+    let (status, body) = admin
+        .call_as(
+            &token,
+            "POST",
+            &format!("/v1/office/disaggregation/{}/apply", id_of(&doc)),
+            Some(json!({ "expectedRev": detail["document"]["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["details"]["credential"], "session");
+    assert_eq!(
+        count(
+            &admin,
+            "SELECT COUNT(*) FROM boxes WHERE disassembled_at IS NOT NULL"
+        )
+        .await,
+        0
+    );
+    assert_eq!(support::app::audit_rows(&admin.app).await, rows);
 }

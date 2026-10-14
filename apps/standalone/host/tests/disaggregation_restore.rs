@@ -145,17 +145,20 @@ async fn the_next_document_after_a_restore_is_numbered_above_the_lost_ones() {
     let admin = admin().await;
     document(&admin).await;
     let (copy_path, _) = copy(&admin.app).await;
+    // DSG-26-0002 and DSG-26-0003 are the numbers the copy never saw.
     document(&admin).await;
     document(&admin).await;
     let paths = stop(&admin.app).await;
     restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
     let pool = reopen(&paths).await;
-    let next: i64 = sqlx::query_scalar(
-        "UPDATE disaggregation_doc_counters SET last_seq = last_seq + 1 RETURNING last_seq",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    // The two lost documents were DSG-26-0002 and DSG-26-0003.
-    assert!(next > 3, "{next}");
+    // The current database reached 3; the next number is above it by the margin.
+    assert_eq!(counter(&pool).await, 3 + SHIFT_NUMBER_MARGIN);
+    let next = markiro_host::disaggregation::next_seq(&mut pool.acquire().await.unwrap())
+        .await
+        .unwrap();
+    assert_eq!(next, 3 + SHIFT_NUMBER_MARGIN + 1);
+    assert_eq!(
+        markiro_host::disaggregation::format_doc_no(next, 2026),
+        "DSG-26-0014"
+    );
 }

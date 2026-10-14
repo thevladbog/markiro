@@ -6,6 +6,8 @@
 //! pallet of a closed shift is taken apart (owner decision ПР-1), so the
 //! office never argues with a box a station still fills.
 
+use std::collections::BTreeSet;
+
 use markiro_proto::disaggregation::DisaggregationLineStatus as LineStatus;
 use sqlx::SqliteConnection;
 
@@ -62,37 +64,48 @@ pub struct Applied {
 
 /// Take apart the `ok` lines' boxes and pallets of document `document_id`
 /// at `instant` (a device-form instant), inside the caller's write
-/// transaction, and write each box's `code_releases` row with `rev`.
+/// transaction, and write each box's `code_releases` row with `rev`. Each
+/// shift whose boxes or pallets changed is marked late at `at`, as a
+/// station's late exception marks it (`facts::mark_late`): a file saved
+/// before the apply no longer describes the shift.
+///
+/// A box costs a handful of statements however many codes it holds: a
+/// document of 10 000 boxes holds the write lock, and every station's fact
+/// batch waits behind it.
 pub async fn apply_targets(
     conn: &mut SqliteConnection,
     document_id: &str,
     targets: &[Target],
     instant: &str,
+    at: &str,
     rev: i64,
 ) -> Result<Applied, ApiError> {
     let mut applied = Applied::default();
+    let mut shifts: BTreeSet<String> = BTreeSet::new();
     for target in targets {
         if let Some(box_id) = &target.box_id {
-            // As a station's `disassemble` (facts/exception.rs): every live
-            // item leaves at the one instant the box is taken apart, and the
-            // code its scan owns is free (`registry::release`).
-            let live: Vec<String> = sqlx::query_scalar(
-                "SELECT scan_id FROM box_items WHERE box_id = ? \
-                 AND removed_at IS NULL AND displaced_at IS NULL",
+            // As a station's `disassemble` (facts/exception.rs): the code
+            // every live item's scan owns is free (what
+            // `facts::registry::release` does for one scan), and every live
+            // item leaves at the one instant the box is taken apart.
+            sqlx::query(
+                "DELETE FROM code_owners WHERE scan_id IN (SELECT scan_id FROM box_items \
+                 WHERE box_id = ? AND removed_at IS NULL AND displaced_at IS NULL)",
             )
             .bind(box_id)
-            .fetch_all(&mut *conn)
+            .execute(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
-            for scan_id in &live {
-                sqlx::query("UPDATE box_items SET removed_at = ? WHERE scan_id = ?")
-                    .bind(instant)
-                    .bind(scan_id)
-                    .execute(&mut *conn)
-                    .await
-                    .map_err(ApiError::internal)?;
-                crate::facts::registry::release(&mut *conn, scan_id).await?;
-            }
+            let taken = sqlx::query(
+                "UPDATE box_items SET removed_at = ? WHERE box_id = ? \
+                 AND removed_at IS NULL AND displaced_at IS NULL",
+            )
+            .bind(instant)
+            .bind(box_id)
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?
+            .rows_affected();
             // A box taken apart already is an error here, not a skip: under
             // the lock the lines were checked a moment ago, and the whole
             // apply rolls back.
@@ -112,29 +125,43 @@ pub async fn apply_targets(
             .bind(box_id)
             .bind(&shift_id)
             .bind(document_id)
-            .bind(i64::try_from(live.len()).map_err(ApiError::internal)?)
+            .bind(i64::try_from(taken).map_err(ApiError::internal)?)
             .bind(instant)
             .bind(rev)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+            shifts.insert(shift_id);
             applied.boxes += 1;
-            applied.codes += live.len();
+            applied.codes += usize::try_from(taken).map_err(ApiError::internal)?;
         } else if let Some(pallet_id) = &target.pallet_id {
             // As a station's pallet `disassemble`: its boxes stay as they are.
-            let updated = sqlx::query(
-                "UPDATE pallets SET disassembled_at = ? WHERE id = ? AND disassembled_at IS NULL",
+            let shift_id: Option<String> = sqlx::query_scalar(
+                "UPDATE pallets SET disassembled_at = ? WHERE id = ? AND disassembled_at IS NULL \
+                 RETURNING shift_id",
             )
             .bind(instant)
             .bind(pallet_id)
-            .execute(&mut *conn)
+            .fetch_optional(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
-            if updated.rows_affected() != 1 {
+            let Some(shift_id) = shift_id else {
                 return Err(ApiError::internal("a pallet taken apart twice"));
-            }
+            };
+            shifts.insert(shift_id);
             applied.pallets += 1;
         }
+    }
+    for shift_id in &shifts {
+        sqlx::query(
+            "UPDATE shifts SET late_data_at = ?, rev = ? WHERE id = ? AND late_data_at IS NULL",
+        )
+        .bind(at)
+        .bind(rev)
+        .bind(shift_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
     }
     Ok(applied)
 }

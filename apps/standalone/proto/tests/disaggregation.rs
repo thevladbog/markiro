@@ -118,3 +118,28 @@ fn the_requests_refuse_an_unknown_field_and_the_statuses_read_their_names() {
     assert!("written_off".parse::<DisaggregationLineStatus>().is_err());
     assert!("bogus".parse::<DisaggregationStatus>().is_err());
 }
+
+/// A header or a line that leaves a nullable key out is refused, not read as
+/// `null`: a `PUT` without `comment` would otherwise clear the comment.
+#[test]
+fn a_nullable_key_must_be_there() {
+    for body in [
+        serde_json::json!({ "reasonId": null, "expectedRev": 3 }),
+        serde_json::json!({ "comment": null, "expectedRev": 3 }),
+        serde_json::json!({ "expectedRev": 3 }),
+    ] {
+        assert!(
+            serde_json::from_value::<DisaggregationUpdate>(body.clone()).is_err(),
+            "{body}"
+        );
+    }
+    assert!(serde_json::from_value::<DisaggregationLinesAdd>(
+        serde_json::json!({ "lines": [{ "input": "x" }] })
+    )
+    .is_err());
+    let explicit: DisaggregationUpdate = serde_json::from_value(
+        serde_json::json!({ "reasonId": null, "comment": null, "expectedRev": 3 }),
+    )
+    .unwrap();
+    assert_eq!((explicit.reason_id, explicit.comment), (None, None));
+}

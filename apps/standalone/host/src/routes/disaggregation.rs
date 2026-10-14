@@ -209,7 +209,15 @@ pub(crate) struct DraftRow {
 /// A draft for a write: 404 without it, `conflict` `document_not_draft`
 /// after it is applied or cancelled.
 pub(crate) async fn draft(conn: &mut SqliteConnection, id: &str) -> Result<DraftRow, ApiError> {
-    let row: Option<(String, String, Option<String>, Option<String>, i64)> = sqlx::query_as(
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        doc_no: String,
+        status: String,
+        reason_id: Option<String>,
+        comment: Option<String>,
+        rev: i64,
+    }
+    let row: Option<Row> = sqlx::query_as(
         "SELECT doc_no, status, reason_id, comment, rev FROM disaggregation_documents \
          WHERE id = ?",
     )
@@ -217,10 +225,10 @@ pub(crate) async fn draft(conn: &mut SqliteConnection, id: &str) -> Result<Draft
     .fetch_optional(conn)
     .await
     .map_err(ApiError::internal)?;
-    let Some((doc_no, status, reason_id, comment, rev)) = row else {
+    let Some(row) = row else {
         return Err(ApiError::not_found("no such document"));
     };
-    let status: DisaggregationStatus = status.parse().map_err(ApiError::internal)?;
+    let status: DisaggregationStatus = row.status.parse().map_err(ApiError::internal)?;
     if status != DisaggregationStatus::Draft {
         return Err(ApiError::conflict(
             constraints::NOT_DRAFT,
@@ -228,10 +236,10 @@ pub(crate) async fn draft(conn: &mut SqliteConnection, id: &str) -> Result<Draft
         ));
     }
     Ok(DraftRow {
-        doc_no,
-        reason_id,
-        comment,
-        rev,
+        doc_no: row.doc_no,
+        reason_id: row.reason_id,
+        comment: row.comment,
+        rev: row.rev,
     })
 }
 
@@ -842,6 +850,22 @@ pub async fn apply_document(
     ApiJson(transition): ApiJson<DisaggregationTransition>,
 ) -> Result<Json<DisaggregationDetail>, ApiError> {
     context.require_disaggregation()?;
+    // A big document holds the write lock for seconds, and a client that
+    // gives up (the webview's own limit) drops this future: the apply runs
+    // on its own task, so a hang-up never cuts it midway and a retry finds
+    // it done instead of racing it.
+    tokio::spawn(apply(state, context, id, transition))
+        .await
+        .map_err(ApiError::internal)?
+        .map(Json)
+}
+
+async fn apply(
+    state: AppState,
+    context: OfficeContext,
+    id: String,
+    transition: DisaggregationTransition,
+) -> Result<DisaggregationDetail, ApiError> {
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
     let now = state.now();
@@ -917,7 +941,7 @@ pub async fn apply_document(
         ));
     }
     let instant = rules::device_text(now);
-    let done = disaggregation::apply_targets(&mut tx, &id, &targets, &instant, rev).await?;
+    let done = disaggregation::apply_targets(&mut tx, &id, &targets, &instant, &at, rev).await?;
     sqlx::query(
         "UPDATE disaggregation_documents SET status = 'applied', applied_at = ?, \
          applied_by = ?, updated_at = ?, rev = ? WHERE id = ?",
@@ -944,5 +968,5 @@ pub async fn apply_document(
     commit_with_revision(tx, &state.revisions, rev)
         .await
         .map_err(ApiError::internal)?;
-    Ok(Json(answer))
+    Ok(answer)
 }

@@ -6,7 +6,7 @@ mod support;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 use support::app::{admin, TestApp};
-use support::disaggregation::day;
+use support::disaggregation::{day, pallet_day};
 
 #[tokio::test]
 async fn the_migration_seeds_five_reasons_and_a_zero_counter() {
@@ -52,7 +52,11 @@ async fn refused(app: &TestApp, statement: &str) -> String {
 #[tokio::test]
 async fn the_tables_refuse_what_no_row_may_hold() {
     let admin = admin().await;
+    // A pallet with two boxes: the lines below name rows that exist, so only
+    // a CHECK can refuse them.
+    pallet_day(&admin, false).await;
     let app = &admin.app;
+    let (real_box, real_pallet) = (support::app::box_id(1), support::app::pallet_id(1));
     let user: String = sqlx::query_scalar("SELECT id FROM office_users LIMIT 1")
         .fetch_one(&app.state.pool)
         .await
@@ -120,11 +124,23 @@ async fn the_tables_refuse_what_no_row_may_hold() {
     for (what, statement) in [
         (
             "a duplicate that names a box",
-            line("l1", 1, "NULL", "box_id,|'b',", "duplicate"),
+            line(
+                "l1",
+                1,
+                "NULL",
+                &format!("box_id,|'{real_box}',"),
+                "duplicate",
+            ),
         ),
         (
             "a box and a pallet at once",
-            line("l2", 2, digits, "box_id, pallet_id,|'b', 'p',", "ok"),
+            line(
+                "l2",
+                2,
+                digits,
+                &format!("box_id, pallet_id,|'{real_box}', '{real_pallet}',"),
+                "ok",
+            ),
         ),
         (
             "a read line without a target",
@@ -135,10 +151,7 @@ async fn the_tables_refuse_what_no_row_may_hold() {
         ("position zero", line("l6", 0, digits, "|", "not_found")),
     ] {
         let error = refused(app, &statement).await;
-        assert!(
-            error.contains("CHECK") || error.contains("FOREIGN KEY"),
-            "{what}: {error}"
-        );
+        assert!(error.contains("CHECK"), "{what}: {error}");
     }
     // The same SSCC twice in one document.
     sqlx::query(&line("l7", 7, digits, "|", "not_found"))
