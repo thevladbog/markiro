@@ -13,7 +13,6 @@ import { DevicesPage } from "./devices/DevicesPage.js";
 import { DisaggregationDocumentPage } from "./disaggregation/DisaggregationDocumentPage.js";
 import { DisaggregationPage } from "./disaggregation/DisaggregationPage.js";
 import { DisaggregationReasonsPage } from "./disaggregation/DisaggregationReasonsPage.js";
-import { EmployeesPage } from "./employees/EmployeesPage.js";
 import { AboutPage } from "./info/AboutPage.js";
 import { CloudImportPage } from "./import/CloudImportPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
@@ -66,14 +65,6 @@ export const officeRoutes: RouteObject[] = [
           { path: "box/:id", element: <BoxCardPage /> },
           { path: "pallet/:id", element: <PalletCardPage /> },
         ],
-      },
-      {
-        path: "employees",
-        element: (
-          <RequireRole roles={["admin"]}>
-            <EmployeesPage />
-          </RequireRole>
-        ),
       },
       {
         path: "operators",

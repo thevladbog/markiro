@@ -2636,41 +2636,17 @@ are checked by the Windows job and by hand.
   `FormDialog` guard covers the hashing too, and the mutation's variables,
   which the query cache keeps, hold only the hash. There is no delete, and
   the page offers none.
-- «Сотрудники» (owner feedback on the first beta: «связывать сотрудника с
-  оператором, как в вебе»; administrators only, `RequireRole`, right before
-  «Операторы») is the site's register of people, as the cloud's
-  `employees`: a name, an optional role and an archive flag (host migration
-  `0018`, `GET`/`POST`/`PUT /v1/office/employees`, audit `employee.create`
-  and `employee.update`). In the cloud an operator is an employee granted
-  station access (`operator_credentials` keyed by `employee_id`); here
-  operators came first and keep their own record, so the cloud's one person
-  is an optional one-to-one link: `employees.operator_id` UNIQUE, written
-  only through the employee (`operatorId` in its whole-record `PUT`, `null`
-  unlinks; a holder already in the way is `conflict` on `operator` with
-  `details.employeeId`). The link grants nothing and is no fourth identity:
-  the operator keeps its personnel number, PIN, badges and access, the
-  operator record and its revision are never written, and the station feed,
-  `SYNC_SCHEMA_VERSION` and the stations' copies do not change. An archived
-  employee is linked to no operator (a table `CHECK`; archiving sends
-  `operatorId: null` in the same write), while a turned-off operator may
-  stay linked. Archiving an employee whose linked operator is active turns
-  that operator off in the same transaction (owner decision В1, as the cloud
-  drops an archived employee from the roster): `operators::turn_off_in`
-  stamps the operator with the write's one revision, writes its tombstone
-  and an `operator.update` row (`changed: ["active"]`) after the
-  `employee.update` row — the one office write with two audit rows — so the
-  stations lose the operator exactly as after «Выключить». An operator
-  already off is left alone. The dialog says the operator will be turned
-  off and its button reads «Сохранить и выключить оператора». The page searches the name, the role
-  and the linked operator's number and filters by the link; «Оператор» on a
-  row links a free operator, unlinks, or opens «Новый оператор» prefilled
-  with the employee's name and role and then writes the link (two writes:
-  when the second fails the page says the operator was created unlinked).
-  «Операторы» shows each operator's employee («Не связан» for none) and its
-  «Сотрудник» dialog links an operator to a free employee, creates an
-  employee from the operator in one `POST` with `operatorId`, or unlinks.
-  A cloud import refuses a site that holds employees (`site_not_empty`,
-  entity `employees`); the import itself creates none yet.
+- «Сотрудники» was removed from the office after beta 3 (owner: an employee
+  had neither a login nor a password and the operators live apart). There is
+  no navigation entry, no `/employees` route and no «Сотрудник» column or
+  dialog in «Операторы»; «Операторы» alone carries the person: name, role
+  (position), personnel number, PIN and badges. The host side stays for
+  compatibility and is not the office's concern any more: migration `0018`,
+  `GET`/`POST`/`PUT /v1/office/employees`, the `employee.*` audit rows, the
+  `operators::turn_off_in` cascade on archiving, and the client's
+  `listEmployees`/`createEmployee`/`updateEmployee`, schemas and fixtures. A
+  cloud import still refuses a site that holds employees (`site_not_empty`,
+  entity `employees`).
 - «Бейджи» on an operator's row lists that operator's badges, revoked ones
   too, dimmed and marked «Отозван»: they are the record of what was issued.
   «Добавить бейдж» reads the site's salt (`GET /v1/office/badge-salt`;
@@ -3066,6 +3042,32 @@ are checked by the Windows job and by hand.
   that is off, unreadable or gone kept as a marked choice. The shift dialog's first sheet choice is
   «По умолчанию для товара (…)», named by `defaultSheetFor` as the host resolves it. `Office`
   takes `initialPath` (tests open a page directly).
+- Beta 3 office feedback (b3-office): (1) a long selected value (a product group, a
+  counterparty) scrolled a dialog sideways because the office's one-column grids
+  (`.standalone-form` and its kin in `shell.css`) had an implicit `auto` track that grows to the
+  widest value; they now have `grid-template-columns: minmax(0, 1fr)`, so the shared Select
+  ellipsizes the value in the closed control (the whole text is its `title`, and each item's) and
+  the office's open lists wrap it (a `shell.css` override, the cloud apps keep ellipsis). A new
+  one-column grid in a dialog or drawer must join that rule. (2) «Сотрудники» is gone from the
+  office (see its note above); «Операторы» carries name, role, personnel number, PIN and badges.
+  (3) A product's create and edit form is a drawer (`ProductDrawer` on `EntityDrawer`,
+  `src/office/EntityDrawer.tsx`: a `SidePanel` with `FormDialog`'s in-flight guard and, with
+  `dirty`, a «Закрыть без сохранения?» confirmation on every way of closing; the pattern for the
+  other record forms). Its photo card sits on top: «Загрузить фото»/«Заменить фото»/«Удалить
+  фото» and the limits; a saved product's photo is written at once, a new product's is staged in
+  the drawer and written right after the create (a failed write leaves the product and a warning
+  on the page). The host has no photo rule by group. The list's first column is the thumbnail
+  (`ProductThumb`, read per row only for a product with `photoChecksum`, keyed by it). (4) The
+  pairing dialog prints and downloads a pairing card: `renderPairingCardHtml`/
+  `renderPairingCardFragment` in `@markiro/domain` (A4 or A5: the DataMatrix of the payload, the
+  code large, addresses, fingerprint, ten minutes, steps); «Печать» goes through the form printer
+  (`usePrintForm`), «Скачать PDF» rasterises the same XHTML fragment through an SVG
+  `foreignObject` onto a canvas (200 dpi JPEG) and wraps it in a one-page PDF written by hand
+  (`pairing-card.ts`; no PDF library) and saves it with `downloadFile`. The code is one-time and
+  secret-like: the card is drawn on a press from the dialog's code and handed to the print frame
+  or the download; nothing is stored or logged. Not exercised: `<a download>` and the print
+  frame in WebView2, scanning the printed DataMatrix with a real device.
+
 - «Шаблоны по умолчанию» (formerly «Умолчания шаблонов», tab of «Шаблоны») edits the one defaults document
   (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
   (`useTemplateDefaults`, `staleTime` 0), with the template list, which it reads
