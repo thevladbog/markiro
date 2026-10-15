@@ -496,8 +496,11 @@ async fn closed(
     if taken.is_some() {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }
+    // A box the production side took apart after the scan stays live in the table but is not on
+    // the pallet any more (the registry told the handheld to drop it).
     let counted: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM warehouse_pallet_boxes WHERE pallet_id = ? AND removed_at IS NULL",
+        "SELECT COUNT(*) FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc = wb.box_sscc \
+         WHERE wb.pallet_id = ? AND wb.removed_at IS NULL AND b.disassembled_at IS NULL",
     )
     .bind(&data.pallet_id)
     .fetch_one(&mut *conn)

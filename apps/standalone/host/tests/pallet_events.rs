@@ -522,3 +522,56 @@ async fn a_record_whose_id_is_not_a_uuid_is_rejected_before_it_is_applied() {
         .unwrap();
     assert_eq!(stored, 1);
 }
+
+#[tokio::test]
+async fn a_box_taken_apart_after_it_was_scanned_is_not_counted_at_the_close() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 2).await;
+    let key = pair_handheld(&admin).await;
+    let block = pallet_block(&admin, &key, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[
+                opened(1, PALLET_A, product_of(&setup), &instant(100, 0)),
+                added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+                added(3, PALLET_A, &box_sscc(1501), &instant(102, 0)),
+            ]
+        )
+        .await,
+        vec![accepted(1), accepted(2), accepted(3)]
+    );
+    // The production side takes the box apart; its row on the pallet stays live in the table.
+    sqlx::query("UPDATE boxes SET disassembled_at = ? WHERE sscc = ?")
+        .bind(instant(105, 0))
+        .bind(box_sscc(1500))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let close = |n: u32, count: u32| {
+        event(
+            n,
+            "warehouse_pallet_closed",
+            json!({
+                "palletId": PALLET_A, "sscc": pallet_sscc(40), "blockId": block["id"], "serial": 40,
+                "openedAt": instant(100, 0), "closedAt": instant(110, 0), "boxCount": count
+            }),
+        )
+    };
+    // The count that includes the taken-apart box is a mismatch naming the real one.
+    assert_eq!(
+        receipts_of(&admin, &key, &[close(4, 2)]).await,
+        vec![rejected(
+            4,
+            "pallet_count_mismatch",
+            Some(json!({ "counted": 1 }))
+        )]
+    );
+    // The handheld's count of what remains closes the pallet.
+    assert_eq!(
+        receipts_of(&admin, &key, &[close(5, 1)]).await,
+        vec![accepted(5)]
+    );
+}

@@ -69,3 +69,32 @@ async fn the_list_shows_open_pallets_first_and_counts_the_boxes_on_them() {
         (StatusCode::FORBIDDEN, json!("forbidden"))
     );
 }
+
+#[tokio::test]
+async fn a_box_taken_apart_is_not_counted_on_the_pallet() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 2).await;
+    let key = pair_handheld(&admin).await;
+    receipts_of(
+        &admin,
+        &key,
+        &[
+            opened(1, PALLET_A, product_of(&setup), &instant(100, 0)),
+            added(2, PALLET_A, &box_sscc(1500), &instant(101, 0)),
+            added(3, PALLET_A, &box_sscc(1501), &instant(102, 0)),
+        ],
+    )
+    .await;
+    sqlx::query("UPDATE boxes SET disassembled_at = ? WHERE sscc = ?")
+        .bind(instant(105, 0))
+        .bind(box_sscc(1500))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, list) = admin
+        .call("GET", "/v1/office/warehouse-pallets", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["pallets"][0]["boxes"], json!(1), "{list}");
+}

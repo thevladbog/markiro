@@ -35,7 +35,8 @@ pub async fn list(
          wp.product_id AS product_id, pr.name AS product_name, wp.opened_at AS opened_at, \
          wp.closed_at AS closed_at, wp.sscc AS sscc, wp.box_count_reported AS box_count_reported, \
          (SELECT COUNT(*) FROM warehouse_pallet_boxes wb \
-          WHERE wb.pallet_id = wp.id AND wb.removed_at IS NULL) AS boxes \
+          JOIN boxes b ON b.sscc = wb.box_sscc \
+          WHERE wb.pallet_id = wp.id AND wb.removed_at IS NULL AND b.disassembled_at IS NULL) AS boxes \
          FROM warehouse_pallets wp JOIN devices d ON d.id = wp.device_id \
          JOIN products pr ON pr.id = wp.product_id \
          ORDER BY ifnull(wp.closed_at, '~') DESC, wp.id DESC LIMIT ?",
