@@ -201,6 +201,23 @@ impl AuthDevice {
         .map_err(ApiError::internal)
     }
 
+    /// The device is still paired and not revoked, and its kind (as stored) is one of `kinds`; the
+    /// kind is returned. `forbidden` is the text for another kind. A station or a handheld works on
+    /// shifts and gets blocks (plan ТСД-Х, Х2).
+    pub async fn require_kinds_in(
+        &self,
+        conn: &mut SqliteConnection,
+        kinds: &[DeviceKind],
+        forbidden: &str,
+    ) -> Result<DeviceKind, ApiError> {
+        let kind = self.require_live_in(conn).await?;
+        if kinds.contains(&kind) {
+            Ok(kind)
+        } else {
+            Err(ApiError::forbidden(forbidden))
+        }
+    }
+
     /// The device is still a paired, unrevoked station, read inside the
     /// write transaction ([`Self::require_live_in`]): a revoked station
     /// neither creates a shift, nor enters one, nor gets serials. `forbidden`

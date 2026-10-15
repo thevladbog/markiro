@@ -13,17 +13,16 @@ use crate::error::ApiError;
 
 /// `(method, route as the router writes it, the kinds that may call it)`.
 ///
-/// Task Х1 lists a handheld only where the handler already lets it in; the shifts, `enter` and
-/// the SSCC blocks stay `Station` until task Х2 removes the handlers' own `require_station` and
-/// widens these rows in the same commit.
+/// A handheld reads and enters its line's shift and gets SSCC blocks (task Х2); it creates no
+/// shift and chooses no line: the office assigns a handheld its line.
 pub const ROUTE_KINDS: &[(&str, &str, &[DeviceKind])] = &[
     ("GET", "/v1/device", &[Station, Handheld, Office]),
     ("PUT", "/v1/device/line", &[Station]),
-    ("GET", "/v1/device/shifts", &[Station]),
+    ("GET", "/v1/device/shifts", &[Station, Handheld]),
     ("POST", "/v1/device/shifts", &[Station]),
-    ("POST", "/v1/device/shifts/{id}/enter", &[Station]),
-    ("POST", "/v1/device/sscc/blocks", &[Station]),
-    ("POST", "/v1/device/sscc/blocks/known", &[Station]),
+    ("POST", "/v1/device/shifts/{id}/enter", &[Station, Handheld]),
+    ("POST", "/v1/device/sscc/blocks", &[Station, Handheld]),
+    ("POST", "/v1/device/sscc/blocks/known", &[Station, Handheld]),
     ("POST", "/v1/device/facts", &[Station, Handheld]),
     (
         "GET",

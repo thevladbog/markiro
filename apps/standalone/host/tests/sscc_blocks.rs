@@ -630,11 +630,23 @@ async fn only_a_station_asks_whatever_the_body_says() {
     let admin = admin().await;
     let (office_id, office_pc) = pair_device(&admin.app, "office").await;
     let handheld = pair_handheld(&admin).await;
+    // A handheld gets blocks too (decision В1/Д10): it is past the kind check and meets the body.
+    let (status, answer) = ask(
+        &admin,
+        &handheld,
+        json!({ "requestId": "first", "issuerPrefix": PREFIX, "extension": 3 }),
+    )
+    .await;
+    assert_ne!(
+        answer["error"]["code"],
+        json!("forbidden"),
+        "{status} {answer}"
+    );
     let rows = audit_rows(&admin.app).await;
     let revision = host_revision(&admin.app).await;
     // The kind is checked before the body: a bad body is no reason to tell
     // another kind of device about it.
-    for key in [&office_pc, &handheld] {
+    for key in [&office_pc] {
         for body in [
             block_request(FIRST),
             json!({ "requestId": "first", "issuerPrefix": PREFIX, "extension": 3 }),
@@ -1109,11 +1121,10 @@ async fn a_pallet_block_is_cut_short_at_the_end_of_the_prefix_and_then_exhausted
 async fn a_pallet_block_is_for_a_current_station_and_a_known_pallet_counter() {
     let admin = admin().await;
     let (office_id, office_pc) = pair_device(&admin.app, "office").await;
-    let handheld = pair_handheld(&admin).await;
     let (colleague, _) = pair_device(&admin.app, "station").await;
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
-    for key in [&office_pc, &handheld] {
+    for key in [&office_pc] {
         let (status, refused) = ask(&admin, key, pallet_request(FIRST)).await;
         assert_eq!(
             (status, refused["error"]["code"].clone()),

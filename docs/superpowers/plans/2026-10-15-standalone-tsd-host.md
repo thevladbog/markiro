@@ -4192,3 +4192,14 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - **Х1.** Тест `a_handheld_key_is_refused_on_every_office_route_of_the_router` добавлен сверх плана: перебирает все
   офисные маршруты роутера (в том числе `host-network`) и требует `forbidden` для ключа ТСД.
 - **Х1.** `concrete()` в тесте подставляет любые `{...}`-сегменты, а не только `{id}`/`{code_hash}`.
+- **Х2.** Четыре строки `ROUTE_KINDS` (`GET /v1/device/shifts`, `POST .../{id}/enter`, `POST /v1/device/sscc/blocks`,
+  `.../known`) расширены до `Station, Handheld` в одном коммите со снятием `require_station` в обработчиках; создание
+  смены (`POST /v1/device/shifts`) и `PUT /v1/device/line` остаются станционными (`require_station` в
+  `create_device_shift` сохранён).
+- **Х2.** Изменённые существующие тесты (решение владельца, утверждение заменено, не ослаблено):
+  `device_shifts.rs::only_a_station_reads_and_creates_shifts` (ТСД читает список — пустой без линии, смену не создаёт),
+  `device_shifts.rs::an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift` (ТСД без линии — `shift_line`);
+  сверх плана — `sscc_blocks.rs::only_a_station_asks_whatever_the_body_says` и
+  `sscc_blocks.rs::a_pallet_block_is_for_a_current_station_and_a_known_pallet_counter`: ТСД убран из перечня отказов
+  (офисный ПК и подмена вида в транзакции проверяются по-прежнему), добавлено, что ТСД проходит проверку вида и
+  упирается в тело (не `forbidden`).

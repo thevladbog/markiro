@@ -115,6 +115,7 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<DeviceShif
 }
 
 const STATION_ONLY: &str = "only a station works on shifts";
+const WORKS_SHIFTS: &str = "only a station or a handheld works on shifts";
 
 /// Shifts are a station's: another kind of device works on none. The write
 /// routes read the device again inside their transaction
@@ -137,7 +138,6 @@ pub async fn list_device_shifts(
     State(state): State<AppState>,
     device: AuthDevice,
 ) -> Result<Json<DeviceShifts>, ApiError> {
-    require_station(&device)?;
     let cutoff = format_timestamp(state.now() - time::Duration::days(CLOSED_DAYS));
     // One read transaction: the station's line and its shifts come from one
     // WAL snapshot.
@@ -339,15 +339,25 @@ pub fn station_update() -> ApiError {
 /// aggregation, [`shift_supports::VALIDATION`] for validation, and with it
 /// [`shift_supports::VALIDATION_DM_DUPLICATE`] when the shift prints a
 /// duplicate (`prints`, part B).
-fn require_supports(mode: ShiftMode, prints: bool, enter: &ShiftEnter) -> Result<(), ApiError> {
-    let needed: &[&str] = match (mode, prints) {
-        (ShiftMode::Aggregation, _) => &[],
-        (ShiftMode::Validation, false) => &[shift_supports::VALIDATION],
-        (ShiftMode::Validation, true) => &[
+fn require_supports(
+    kind: DeviceKind,
+    mode: ShiftMode,
+    prints: bool,
+    enter: &ShiftEnter,
+) -> Result<(), ApiError> {
+    let mut needed: Vec<&str> = match (mode, prints) {
+        (ShiftMode::Aggregation, _) => Vec::new(),
+        (ShiftMode::Validation, false) => vec![shift_supports::VALIDATION],
+        (ShiftMode::Validation, true) => vec![
             shift_supports::VALIDATION,
             shift_supports::VALIDATION_DM_DUPLICATE,
         ],
     };
+    // A handheld names the capability on every entry, whatever the mode: a build that does not
+    // know the host's protocol must not work the shift (spec 6.3).
+    if kind == DeviceKind::Handheld {
+        needed.push(shift_supports::HANDHELD_HOST);
+    }
     if needed
         .iter()
         .all(|needed| enter.supports.iter().any(|name| name == needed))
@@ -405,12 +415,20 @@ pub async fn enter_shift(
     ApiPath(id): ApiPath<String>,
     enter: Option<ApiJson<ShiftEnter>>,
 ) -> Result<Json<DeviceShift>, ApiError> {
-    require_station(&device)?;
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
+        return Err(ApiError::forbidden(WORKS_SHIFTS));
+    }
     let enter = enter.map(|ApiJson(enter)| enter).unwrap_or_default();
     validate::shift_supports(&enter.supports)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    device.require_station_in(&mut tx, STATION_ONLY).await?;
+    let kind = device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            WORKS_SHIFTS,
+        )
+        .await?;
     let shift: Option<EntryRow> = sqlx::query_as(
         "SELECT status, mode, line_id, owner_device_id, product_id, box_template_id, \
          pallet_template_id, pallet_sheet_template_id, validation_print_mode, \
@@ -454,6 +472,7 @@ pub async fn enter_shift(
         Some(ValidationPrint::None {}) | None => None,
     };
     require_supports(
+        kind,
         shift.mode.parse().map_err(ApiError::internal)?,
         duplicate.is_some(),
         &enter,
