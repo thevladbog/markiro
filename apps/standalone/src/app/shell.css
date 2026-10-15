@@ -451,6 +451,52 @@
   text-decoration: underline;
 }
 
+/* The license section (plan ЛЦ-3): its parts one under another, each feature as its name and a word. */
+.license-part {
+  display: grid;
+  gap: 8px;
+}
+
+.license-part h3,
+.license-part h4 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.license-features {
+  display: grid;
+  gap: 6px;
+  max-width: 480px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.license-features li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/*
+  The license's band above the office's pages (plan ЛЦ-3): a polite region on
+  the screen from the start; empty, it takes no room.
+*/
+.office-banner {
+  display: grid;
+  gap: 8px;
+  padding: 12px 24px 0;
+}
+
+.office-banner:empty {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 /* A product's name, and its print name on a quieter second line when it differs. */
 .product-name {
   display: grid;

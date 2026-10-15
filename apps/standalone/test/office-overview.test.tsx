@@ -13,6 +13,7 @@ import {
   versionSkew,
 } from "../src/office/overview/overview-model.js";
 import { HEALTHY_BACKUPS } from "./support/backups.js";
+import { licenseOf } from "./support/license.js";
 import {
   fakeOfficeSession,
   ORG_PROFILE,
@@ -199,10 +200,27 @@ describe("«Обзор» of the office (beta 3.2)", () => {
     expect(within(card as HTMLElement).getByText(/Вторая папка не задана/)).toBeTruthy();
   });
 
-  it("holds the license placeholder of the Info page until the license is connected", async () => {
+  it("shows the state the host computed on the license card, with the way to «Информация» (plan ЛЦ-3)", async () => {
     renderOffice(overviewSession());
     const card = (await screen.findByRole("heading", { name: "Лицензия" })).closest(".mk-card");
-    expect(within(card as HTMLElement).getByText("Лицензирование ещё не подключено")).toBeTruthy();
+    expect(await within(card as HTMLElement).findByText("Действует")).toBeTruthy();
+    expect(
+      within(card as HTMLElement)
+        .getByRole("link", { name: "Открыть «Информация»" })
+        .getAttribute("href"),
+    ).toBe("/about#license");
+  });
+
+  it("says on the card that no new shift opens when the host restricts the license", async () => {
+    const session = overviewSession();
+    session.api.getLicense.mockResolvedValue(
+      licenseOf({ state: "restricted", opensNewShifts: false }),
+    );
+    renderOffice(session);
+    const card = (await screen.findByRole("heading", { name: "Лицензия" })).closest(".mk-card");
+    expect(
+      await within(card as HTMLElement).findByText("Ограничена: новые смены не открываются"),
+    ).toBeTruthy();
   });
 
   it("offers the quick actions its role may use", async () => {

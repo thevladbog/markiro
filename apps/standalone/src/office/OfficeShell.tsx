@@ -16,6 +16,7 @@ import {
 import { HostStatusDot } from "../app/HostStatusDot.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { DirtyGuardProvider, useDirtyRegistry } from "./dirty-guard.js";
+import { LicenseBanner } from "./LicenseBanner.js";
 import { isSettingsItem, OFFICE_NAV, type OfficeNavItem } from "./nav.js";
 import { useOfficeLink } from "./office-link.js";
 import { useOfficeSession } from "./office-session.js";
@@ -41,11 +42,14 @@ export function OfficeShell() {
   const shownPath = useRef(location.pathname);
   useEffect(() => {
     // After a menu navigation, move focus to the new page so a screen
-    // reader announces it; the first page keeps the browser's focus.
+    // reader announces it; the first page keeps the browser's focus. A link
+    // to an anchor (the license band's `/about#license`) leaves the focus to
+    // the page, which gives it to that section (plan ЛЦ-3).
     if (shownPath.current === location.pathname) return;
     shownPath.current = location.pathname;
+    if (location.hash !== "") return;
     mainRef.current?.focus();
-  }, [location.pathname]);
+  }, [location.pathname, location.hash]);
   // The navigation entry the password was changed on; the notice goes away
   // with the next navigation.
   const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
@@ -115,6 +119,7 @@ export function OfficeShell() {
               </Button>
             </div>
           </header>
+          <LicenseBanner />
           <main ref={mainRef} tabIndex={-1} className="office-shell__content">
             {passwordChangedAt === location.key && (
               <Alert tone="ok">{t("office.password.done")}</Alert>

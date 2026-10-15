@@ -18,6 +18,8 @@ const CAPABILITIES = {
   reviewConflicts: ["admin", "technologist"],
   /** «Сделать копию сейчас», the second folder of copies and resuming the stations' facts (plan РК); every role reads them. */
   manageBackups: ["admin"],
+  /** Loading a license file, the activation request and the emergency extension (plan ЛЦ-3); every role reads the license. */
+  manageLicense: ["admin"],
 } as const satisfies Record<string, readonly OfficeRole[]>;
 
 export type OfficeCapability = keyof typeof CAPABILITIES;

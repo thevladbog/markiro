@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -45,6 +46,7 @@ function renderAbout(
   about: FakeAbout,
   files: FakeOfficeFiles = fakeOfficeFiles(),
   link: HostStatus | null = ONLINE,
+  path = "/",
 ) {
   const session = fakeOfficeSession();
   const view = render(
@@ -54,7 +56,10 @@ function renderAbout(
           <OfficeLinkProvider value={{ status: link, sync: null }}>
             <OfficeFilesProvider value={files}>
               <AboutProvider value={about}>
-                <AboutPage />
+                {/* «Лицензия» links to the organization's profile (plan ЛЦ-3). */}
+                <MemoryRouter initialEntries={[path]}>
+                  <AboutPage />
+                </MemoryRouter>
               </AboutProvider>
             </OfficeFilesProvider>
           </OfficeLinkProvider>
@@ -87,6 +92,14 @@ beforeEach(() => {
 });
 
 describe("Информация", () => {
+  it("ignores an anchor it cannot decode instead of failing the page", async () => {
+    renderAbout(fakeAbout(), fakeOfficeFiles(), ONLINE, "/about#%E0");
+    expect(await screen.findByRole("heading", { name: "Информация", level: 1 })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Лицензия", level: 2 })).toBeTruthy(),
+    );
+  });
+
   it("shows the program, the host, the protocol, the role and the system", async () => {
     renderAbout(fakeAbout());
     await screen.findByRole("heading", { name: "Информация", level: 1 });
@@ -137,11 +150,12 @@ describe("Информация", () => {
     await waitFor(() => expect(paired.hello).toHaveBeenCalledWith("https://192.168.0.7:45710"));
   });
 
-  it("keeps the license a placeholder: no license logic, only the empty state", async () => {
-    renderAbout(fakeAbout());
+  it("shows the license the host computed in its section, no longer a placeholder", async () => {
+    const { session } = renderAbout(fakeAbout());
     const license = card("Лицензия");
-    expect(within(license).getByText("Лицензирование ещё не подключено")).toBeTruthy();
-    expect(within(license).queryAllByRole("button")).toHaveLength(0);
+    expect(await within(license).findByText("Действует")).toBeTruthy();
+    expect(within(license).queryByText("Лицензирование ещё не подключено")).toBeNull();
+    expect(session.api.getLicense).toHaveBeenCalled();
     expect(within(license).queryAllByRole("textbox")).toHaveLength(0);
   });
 
@@ -201,7 +215,11 @@ describe("Информация", () => {
     expect(text).toContain("Связь с хостом: на связи");
     expect(text).toContain("Хост: https://127.0.0.1:45710 (id 3f1c2d4e)");
     expect(text).toContain("Последняя копия (UTC): 2026-10-09T14:00:00.000Z");
-    expect(text).toContain("Лицензия: Лицензирование ещё не подключено");
+    // The license is a block of its own after the base text (plan ЛЦ-3), read through the session.
+    expect(text).toContain("\r\nЛицензия\r\nСостояние: Действует (active)\r\n");
+    expect(text).not.toContain("Лицензирование ещё не подключено");
+    expect(text).not.toContain("7707083893");
+    expect(session.api.getLicense).toHaveBeenCalled();
     expect(text).not.toContain(HOST_ID);
     expect(text).not.toContain(DEVICE_STATUS.fingerprint);
     expect(session.api.getBackups).toHaveBeenCalled();

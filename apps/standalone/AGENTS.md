@@ -3387,6 +3387,83 @@ are checked by the Windows job and by hand.
   «Данные изменились…» rather than that the shift is now active, since the
   host answers `stale_revision`.
 
+## License in the office and on the floor
+
+- Plan ЛЦ-3 (license spec §9). The host computes the license (plan ЛЦ-2);
+  the webview only shows it and never decides a state itself. Every reading
+  of the wire's form is in `src/office/info/license/license-view.ts`,
+  `license-load.ts`, `license-support.ts` and `src/floor/license.ts`.
+- «Информация» → «Лицензия» (`LicenseSection`, the second of
+  `ABOUT_SECTIONS`) reads `GET /v1/office/license` (`officeKeys.license`):
+  the state in words with the alert's glyph, the terms in the organization's
+  zone with the last day inclusive (`lastMomentBefore` of an exclusive end,
+  `src/lib/license-dates.ts`), the seats used of the license's (stations
+  and handhelds, office users, lines; kiosks are not shown while the host
+  does not apply them), the features in words (`customLogo` included), the binding (the file's
+  customer and INN, the site's INN and whether they match, the host's id
+  with «Скопировать», the certificate's fingerprint, the file's number).
+  Every role reads it; the administrator (`useCan("manageLicense")`) loads
+  a file, saves the activation request and enables the emergency.
+- A file (`.mklic`, at most 16 KiB, read in the webview, never logged or
+  cached) is checked by `POST /v1/office/license/preview` and shown as
+  «было → станет» (plan, last day, grace, seats, features; the seats a
+  smaller file leaves over their limit; a file already expired), and loaded
+  by `PUT /v1/office/license` on «Загрузить». A refusal is said in the words
+  of spec §9.7 and takes the focus. Without the organization's INN the
+  picker is off and the section links to «Профиль организации».
+- «Сохранить запрос на активацию» saves the host's request as JSON in a new
+  folder `Документы\Markiro\Лицензия\Запрос на активацию <UTC>` (the shell's
+  `LICENSE_ROOT`; `json` is one of `FILE_EXTENSIONS`; nothing is opened from
+  that root). «Открыть новые смены ещё 3 дня» shows only where the host
+  offers it (`emergency.available`: no new shift opens, and the file's or the
+  trial's extension is unused), names the host's `effectiveAt` plus 72 hours
+  (no PC clock is compared with the host's) and explains `emergency_used` and
+  `emergency_not_needed`. A state a newer host adds is named as it is.
+- The band above the office's pages (`LicenseBanner` in `OfficeShell`,
+  extension point T3) and «Обзор» (one polite region with the copies' warnings,
+  T4) show the license's warnings (`licenseNotices`): the trial (neutral, its
+  last `warnDays` in the warning tone), the end (subscription and demo), the
+  grace, the restriction, the trial's end, another host, a changed INN and the
+  host's clock. The light ones hide for the session by kind; the serious ones
+  never. The organization's profile is read only for a warning with a date.
+  Every revision of the host reads the license again (`Office`). A link to
+  `/about#license` focuses that section (`AboutPage`), and `OfficeShell`
+  leaves the focus to a page reached by an anchor.
+- The support text's «Лицензия» block (`licenseSupportBlock`, the first of
+  `SUPPORT_CONTRIBUTORS`, reading through `SupportContext.read`) carries the
+  state with its code, the clock flags, the file's short id and sequence,
+  its term and issue (UTC), its `kid`, the host's short id, the trial and the
+  emergency; never the INN, the customer, the fingerprint or the file.
+- The station reads its license with its record (`HostApi.getDevice`,
+  `useStationLicense` in `App`): once the link is online and after every
+  revision, kept in memory for the pairing (after a restart without the host
+  it knows nothing, and opening needs the host anyway). The status bar is
+  silent in the trial, while the license runs, in its last weeks and on
+  another host; it says the grace with its date (this PC's zone), the
+  emergency extension with its end (`emergencyUntil`: then shifts open), and
+  that no new shift opens in `restricted`, `trial_expired` and `inn_mismatch`. Then a
+  planned shift's card and «Новая смена» give their place to the reason, and
+  the new shift's «Создать и открыть» too; the station's own open shift, the
+  work, the boxes, the pallets and the close never change. The host's
+  refusals `license_restricted` (by `details.state`) and `feature_disabled`
+  (pallets by name) have words of their own.
+- The shell keeps a pairing's `conflict` on `seat_limit` and
+  `feature_disabled` (`license_refusal` in `device.rs`, the local pairing and
+  the claim) as codes the pairing screens explain without figures (the
+  station cannot read the license before it is paired) and do not remember
+  (the code is not spent). An office write over the license says
+  «Достигнут предел лицензии: N из M» or the feature it lacks
+  (`alertFailure`, `failureValues`).
+- Not proven by the tests: WebView2's picker and drag and drop of a `.mklic`,
+  the documents folder redirected or on OneDrive, Explorer's «Показать
+  папку», the clipboard in WebView2, a screen reader on the band and the
+  focus, the floor on the touch panel, the real host's routes (only a fake
+  `HostApi`), a real seat refusal of a pairing.
+
+- «Обзор» has a «Лицензия» card (`LicenseCard`: the state in words and the
+  link to «Информация»); its warnings share one polite region with the
+  copies'.
+
 ## Shifts
 
 Stage 2a (`docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md`;

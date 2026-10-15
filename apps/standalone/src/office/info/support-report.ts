@@ -140,7 +140,6 @@ function lines(facts: SupportFacts, t: TFunction): [string, string][] {
     ],
     [t("office.about.report.host"), host],
     [t("office.about.report.lastBackup"), known(instant(facts.lastBackupAt))],
-    [t("office.about.report.license"), t("office.about.license.notConnected")],
   ];
 }
 

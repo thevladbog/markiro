@@ -11,8 +11,9 @@ import {
   FormPrinterProvider,
   type PrintForm,
 } from "./forms/form-printer-context.js";
+import { LicenseDismissalsProvider } from "./info/license/LicenseNotices.js";
 import { OfficeLinkProvider } from "./office-link.js";
-import { createOfficeQueryClient } from "./office-query.js";
+import { createOfficeQueryClient, officeKeys } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
 import { officeRoutes } from "./routes.js";
 import {
@@ -95,7 +96,10 @@ export function Office({
     // under the user, so a form keeps what was typed and a save over a newer
     // record meets `stale_revision` instead of losing the edits silently.
     void session.refreshUser().catch(() => undefined);
-  }, [hostRevision, session]);
+    // A phase of the license changes with a revision of its own (license spec
+    // §8.2): the band, «Обзор» and «Лицензия» read it again.
+    void queryClient.invalidateQueries({ queryKey: officeKeys.license });
+  }, [hostRevision, session, queryClient]);
   const officeLink = useMemo(() => ({ status: link, sync }), [link, sync]);
   return (
     <QueryClientProvider client={queryClient}>
@@ -106,7 +110,10 @@ export function Office({
               <OfficeFilesProvider value={files}>
                 <FormPrinterProvider value={printForm}>
                   <WindowModeProvider value={windowMode}>
-                    <RouterProvider router={router} />
+                    {/* The license's warnings hidden for this session: the band's and «Обзор»'s. */}
+                    <LicenseDismissalsProvider>
+                      <RouterProvider router={router} />
+                    </LicenseDismissalsProvider>
                   </WindowModeProvider>
                 </FormPrinterProvider>
               </OfficeFilesProvider>

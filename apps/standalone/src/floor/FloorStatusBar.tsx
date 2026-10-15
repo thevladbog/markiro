@@ -6,11 +6,12 @@ import { Alert, Button } from "@markiro/ui";
 
 import type { FactsFailure, SyncState } from "../app/shell.js";
 import type { HardwareApi } from "../hardware/hardware.js";
-import type { HostStatus } from "../host/protocol.js";
+import type { DeviceLicense, HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import { emergencyEndsAt, floorLicenseLine } from "./license.js";
 import { LinkDot } from "./LinkDot.js";
 import { FloorWindowControl, type FloorWindowMode } from "./FloorWindowControl.js";
 import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
@@ -88,7 +89,15 @@ export interface FloorStatusBarProps {
   outboxVersion: number;
   /** `ShellState.factsFailure`: why the last send of the outbox failed; `null` when it did not. */
   factsFailure: FactsFailure | null;
-  /** The clock the waits are measured on; this computer's by default. */
+  /**
+   * The site's license as the station last heard it (`useStationLicense`,
+   * plan ЛЦ-3); `null` (the default) — nothing to say.
+   */
+  license?: DeviceLicense | null;
+  /**
+   * The clock the waits are measured on, and the end of the license's
+   * emergency extension; this computer's by default.
+   */
   now?: () => Date;
   /**
    * The shell's COM scanners (`HardwareApi.watchScanners`), for the scanner
@@ -149,6 +158,9 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
  * block of serials arrives without one.
  */
 export const REFRESH_MS = 10_000;
+
+/** The longest delay `setTimeout` keeps (a signed 32-bit number of milliseconds). */
+const MAX_TIMER_MS = 2_147_483_647;
 
 const systemClock = (): Date => new Date();
 
@@ -213,7 +225,10 @@ function stockAlert(t: TFunction, what: "box" | "pallet", stock: SerialStock) {
  * the serials of the boxes and, in a shift with pallets, of the pallets, warned
  * at a quarter and a tenth of the newest block, at the last serial and at none;
  * the blocks the host gave that the station did not take; and, as an item, the
- * records an older pairing left unsent. While
+ * records an older pairing left unsent. Plan ЛЦ-3: the site's license, quietly
+ * (`floorLicenseLine`): nothing while new shifts open, the grace with its last
+ * day, that no new shift opens, or the emergency extension with its end; the
+ * line never stops the work on screen. While
  * the host's refusal waits nothing is sent, so the failure of an earlier send
  * is not news. A failed read of the copies leaves the names out, and of the
  * outbox or the serials their figures; the floor works on.
@@ -232,6 +247,7 @@ export function FloorStatusBar({
   otherHostHeld = false,
   outboxVersion,
   factsFailure,
+  license = null,
   now = systemClock,
   watchScanners,
   onSwitchOperator,
@@ -401,6 +417,25 @@ export function FloorStatusBar({
     };
   }, [local, hostId, deviceId, lineId, sync.synced]);
 
+  // The license's line (plan ЛЦ-3). The emergency extension is said only
+  // while its end is ahead by this computer's clock, so the bar renders
+  // again at that end by itself: offline, no new read of the host would.
+  const [licenseTick, setLicenseTick] = useState(0);
+  const emergencyEnd = emergencyEndsAt(license);
+  useEffect(() => {
+    if (emergencyEnd === null) return;
+    const wait = emergencyEnd - now().getTime();
+    if (wait <= 0) return;
+    // A timer longer than a signed 32-bit delay fires at once: wait in steps;
+    // one that fires early renders the extension again and waits once more.
+    const timer = setTimeout(
+      () => setLicenseTick((count) => count + 1),
+      Math.min(wait + 1, MAX_TIMER_MS),
+    );
+    return () => clearTimeout(timer);
+  }, [emergencyEnd, now, licenseTick]);
+  const licenseLine = floorLicenseLine(license, now());
+
   const [syncOpen, setSyncOpen] = useState(false);
   // Something the panel could explain: not the link being down alone, which the
   // line beside it says and an offline factory lives with.
@@ -567,6 +602,11 @@ export function FloorStatusBar({
         {refusalHeld && (
           <Alert tone="error" role="presentation">
             {t(otherHostHeld ? "floor.status.otherHostHeld" : "floor.status.refusalHeld")}
+          </Alert>
+        )}
+        {licenseLine !== null && (
+          <Alert tone={licenseLine.tone} role="presentation">
+            {t(licenseLine.key, licenseLine.values ?? {})}
           </Alert>
         )}
         {deviceNotSaved && (

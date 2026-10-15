@@ -4,6 +4,7 @@ import { STATION_SHIFT_ENTER } from "../../host/requests.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { shellActionFor } from "../../app/shell.js";
+import { licenseRefusalOf, type LicenseRefusal } from "../license.js";
 import {
   keepEnteredShift,
   readStoredWork,
@@ -36,7 +37,9 @@ export type EntryRefusal =
   | "station_update"
   | "unreadable"
   | "local"
-  | "failed";
+  | "failed"
+  /** The site's license opens no new shift (plan ЛЦ-3), by the state the host names. */
+  | LicenseRefusal;
 
 export type EntryResult =
   | { kind: "entered"; shift: WorkShift; offline: boolean }
@@ -118,6 +121,9 @@ export async function enterShift(context: EntryContext, copy: ShiftCopy): Promis
     // No answer at all: the link said online, but the request found no host.
     if (error.kind === "transport") return storedWork(context, copy.id);
     if (error.code === "not_found") return { kind: "refused", reason: "not_found" };
+    if (error.code === "conflict" && error.details["constraint"] === "license_restricted") {
+      return { kind: "refused", reason: licenseRefusalOf(error.details) };
+    }
     const constraint = error.details["constraint"];
     const refusal =
       error.code === "conflict" && typeof constraint === "string"

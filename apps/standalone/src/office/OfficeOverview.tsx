@@ -16,6 +16,7 @@ import {
 import { backupWarnings } from "./backups/backup-warnings.js";
 import { useBackupTime } from "./backups/backup-time.js";
 import { BackupWarnings } from "./backups/BackupWarnings.js";
+import { LicenseNotices, useLicenseNotices } from "./info/license/LicenseNotices.js";
 import { officeKeys, useOfficeQuery } from "./office-query.js";
 import { useOfficeSession } from "./office-session.js";
 
@@ -51,7 +52,15 @@ export function OfficeOverview() {
         <span>{t("office.overview.greeting", { name: user.name })}</span>
         <span>{t("office.overview.role", { role: t(`office.roles.${user.role}`) })}</span>
       </div>
-      <OverviewBackups />
+      {/*
+        One polite region for every warning of «Обзор» (extension point T4 of
+        the license spec): the license's, then the copies'. It is on the
+        screen from the start, empty, so each warning is heard once.
+      */}
+      <div className="backup-alerts" aria-live="polite">
+        <OverviewLicense />
+        <OverviewBackups />
+      </div>
       <div className="overview-grid">
         <ShiftsCards />
         <ConflictsCard />
@@ -65,27 +74,34 @@ export function OfficeOverview() {
 }
 
 /**
+ * The license's warnings where the office opens (spec §9.5: «Обзор» repeats
+ * the band's warnings, and the band is empty here); «Скрыть» hides a light
+ * one for the session on both.
+ */
+function OverviewLicense() {
+  const shown = useLicenseNotices();
+  if (shown === null) return null;
+  return <LicenseNotices {...shown} />;
+}
+
+/**
  * The backup warnings where the office opens (plan РК: a failed copy is
  * visible, not a line in a log). Nothing while the state loads or when it
  * does not: «Резервные копии» explains a host that does not answer. The
- * region that announces them is on the screen from the start, empty. The
- * organization's profile is read only when a warning has a time to write
- * (a restore that holds the facts).
+ * region that announces them is `OfficeOverview`'s, on the screen from the
+ * start. The organization's profile is read only when a warning has a time
+ * to write (a restore that holds the facts).
  */
 function OverviewBackups() {
   const { t } = useTranslation();
   const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token));
   const time = useBackupTime(backups.isSuccess && backups.data.restoreHold !== null);
   const state = backups.isSuccess && time.ready ? backups.data : null;
-  const warned = state !== null && backupWarnings(state).length > 0;
+  if (state === null || backupWarnings(state).length === 0) return null;
   return (
-    <div className="backup-alerts" aria-live="polite">
-      {warned && (
-        <>
-          <BackupWarnings state={state} format={time.format} />
-          <Link to="/backups">{t("office.backups.overviewLink")}</Link>
-        </>
-      )}
-    </div>
+    <>
+      <BackupWarnings state={state} format={time.format} />
+      <Link to="/backups">{t("office.backups.overviewLink")}</Link>
+    </>
   );
 }

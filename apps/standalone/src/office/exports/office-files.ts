@@ -7,7 +7,8 @@ import { bytesToBase64 } from "../../hardware/hardware.js";
  * The shell's `save_office_files`, `open_office_folder` and `open_office_file`
  * (`src-tauri/src/office_files.rs`, plans ЧЗ and О-Ф): the office's files go
  * into a new folder under `Документы\Markiro\<segments…>`, the first segment
- * one of the shell's roots (`Выгрузки`, `Формы`); no file dialog.
+ * one of the shell's roots (`Выгрузки`, `Формы`, `Лицензия` — the activation
+ * request, plan ЛЦ-3); no file dialog.
  */
 
 /** The codes the shell refuses with (`OfficeFilesError::code`). */

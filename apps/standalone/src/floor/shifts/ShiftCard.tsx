@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
+import type { LicenseRefusal } from "../license.js";
 import { ProductPanel } from "./ProductPhoto.js";
 import type { ShiftCopy } from "./shift-copies.js";
 import { productMonogram } from "./product-accent.js";
@@ -20,7 +21,9 @@ export type CardAction =
   | { kind: "continue"; enabled: boolean }
   | { kind: "finish" }
   | { kind: "busy" }
-  | { kind: "closing" };
+  | { kind: "closing" }
+  /** A planned shift the site's license does not let open (plan ЛЦ-3): words in place of «Открыть». */
+  | { kind: "blocked"; refusal: LicenseRefusal };
 
 /**
  * The action of `copy` on this station (`deviceId`) with the link `online`
@@ -28,13 +31,20 @@ export type CardAction =
  * continuing an active shift of this station needs it only when this
  * station keeps no snapshot of it (a database lost since the entry).
  */
-export function cardAction(copy: ShiftCopy, deviceId: string, online: boolean): CardAction {
+export function cardAction(
+  copy: ShiftCopy,
+  deviceId: string,
+  online: boolean,
+  blocked: LicenseRefusal | null = null,
+): CardAction {
   if (copy.localState === "closing") return { kind: "closing" };
   if (copy.status === "closed") return { kind: "finish" };
   if (copy.status === "active") {
     if (copy.ownerDeviceId !== deviceId) return { kind: "busy" };
+    // Never closed by the license: the station's own shift goes on (spec §3.3).
     return { kind: "continue", enabled: online || copy.entered };
   }
+  if (blocked !== null) return { kind: "blocked", refusal: blocked };
   return { kind: "open", enabled: online };
 }
 
@@ -139,6 +149,10 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
           </div>
           <div className="shift-card__notes">
             {needsLink && <p className="shift-card__hint">{t("floor.shifts.needsLink")}</p>}
+            {action.kind === "blocked" && (
+              // In place of «Открыть» (spec §9.6): the host would refuse, and the operator is told why.
+              <p className="shift-card__hint">{t(`floor.shifts.refused.${action.refusal}`)}</p>
+            )}
             {action.kind === "finish" && (
               <p className="shift-card__hint">{t("floor.shifts.finishHint")}</p>
             )}
@@ -148,18 +162,20 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
               </p>
             )}
           </div>
-          <Button
-            className="shift-card__action"
-            size="floor"
-            fullWidth
-            variant={
-              action.kind === "continue" || action.kind === "finish" ? "primary" : "secondary"
-            }
-            disabled={busy || !enabled}
-            onClick={onAction}
-          >
-            {t(`floor.shifts.action.${action.kind}`)}
-          </Button>
+          {action.kind !== "blocked" && (
+            <Button
+              className="shift-card__action"
+              size="floor"
+              fullWidth
+              variant={
+                action.kind === "continue" || action.kind === "finish" ? "primary" : "secondary"
+              }
+              disabled={busy || !enabled}
+              onClick={onAction}
+            >
+              {t(`floor.shifts.action.${action.kind}`)}
+            </Button>
+          )}
         </div>
       </div>
     </Card>

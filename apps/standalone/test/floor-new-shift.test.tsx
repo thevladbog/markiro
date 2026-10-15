@@ -17,6 +17,7 @@ import {
   enteredShiftSchema,
   type ChangeItem,
   type ChangesResponse,
+  type DeviceLicense,
   type DeviceShift,
   type DeviceShiftCreate,
   type EnteredShift,
@@ -24,6 +25,7 @@ import {
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
+import { deviceLicense } from "./support/license.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -118,6 +120,8 @@ interface Options {
   create?: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   enter?: (id: string) => Promise<EnteredShift>;
   now?: Date;
+  /** The site's license as the station last heard it (plan ЛЦ-3). */
+  license?: DeviceLicense | null;
 }
 
 /** What a later render of the screen is given in place of what it had. */
@@ -152,6 +156,7 @@ function renderNew(local: LocalExecutor, options: Options = {}) {
         onBack={handlers.onBack}
         newRequestId={() => ids[drawn++] ?? "00000000-0000-4000-8000-000000000000"}
         now={() => options.now ?? NOW}
+        {...(options.license === undefined ? {} : { license: options.license })}
       />
     </ThemeProvider>
   );
@@ -2399,5 +2404,63 @@ describe("the creation of a shift, apart from its screen", () => {
       localState: null,
       entered: false,
     });
+  });
+});
+
+describe("a new shift and the site's license (plan ЛЦ-3)", () => {
+  function refusal(details: Record<string, unknown>): HostError {
+    return new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "refused",
+      details,
+    });
+  }
+
+  it("explains in place of «Создать и открыть» while no new shift opens, and asks the host nothing", async () => {
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), {
+      license: deviceLicense("inn_mismatch"),
+    });
+    await chooseMilk();
+    // At once, on the first step: the form is not walked to its end to be told so.
+    expect(screen.queryByRole("button", { name: "Далее" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Создать и открыть" })).toBeNull();
+    expect(
+      screen.getByText(
+        "Новые смены не открываются: ИНН организации не совпадает с лицензией. Сообщите администратору.",
+      ),
+    ).toBeTruthy();
+    expect(handlers.create).not.toHaveBeenCalled();
+  });
+
+  it("says the host's refusal to create by the state it names", async () => {
+    renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => {
+        throw refusal({ constraint: "license_restricted", state: "restricted" });
+      },
+    });
+    await chooseMilk();
+    fireEvent.click(createButton());
+    expect(
+      await screen.findByText(
+        "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says pallets are not in the license, and any other feature without its name", async () => {
+    renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => {
+        throw refusal({ constraint: "feature_disabled", feature: "pallets" });
+      },
+    });
+    await chooseMilk();
+    fireEvent.click(createButton());
+    expect(
+      await screen.findByText(
+        "Эта возможность не входит в лицензию площадки: паллеты. Создайте смену без паллет или сообщите администратору.",
+      ),
+    ).toBeTruthy();
   });
 });

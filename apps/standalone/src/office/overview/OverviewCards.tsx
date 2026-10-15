@@ -8,6 +8,7 @@ import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { useBackupTime } from "../backups/backup-time.js";
 import { backupWarnings } from "../backups/backup-warnings.js";
 import { useAboutData } from "../info/about-data.js";
+import { stateText, stateTone } from "../info/license/license-view.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -273,12 +274,26 @@ export function BackupsCard() {
   );
 }
 
-/** «Лицензия»: a placeholder until the Info page shows the license (ЛЦ-3). */
+/** «Лицензия»: the state the host computed, in words, and the way to the section (plan ЛЦ-3). */
 export function LicenseCard() {
   const { t } = useTranslation();
+  const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
   return (
     <Card title={t("office.about.license.title")} titleAs="h2">
-      <p className="office-note">{t("office.about.license.notConnected")}</p>
+      {license.isPending ? (
+        <PageLoading />
+      ) : license.isError ? (
+        <LoadError error={license.error} onRetry={() => void license.refetch()} />
+      ) : (
+        (() => {
+          const text = stateText(license.data);
+          return (
+            <Alert tone={stateTone(license.data.state)} role="presentation">
+              {t(text.key, text.values ?? {})}
+            </Alert>
+          );
+        })()
+      )}
       <Link to="/about#license">{t("office.overview.license.link")}</Link>
     </Card>
   );

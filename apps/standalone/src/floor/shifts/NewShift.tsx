@@ -6,6 +6,7 @@ import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
 import type { LabelTemplateSpec } from "@markiro/domain";
 
 import type {
+  DeviceLicense,
   DeviceShift,
   DeviceShiftCreate,
   EnteredShift,
@@ -18,6 +19,7 @@ import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { plannedQtyRule, shiftBoxCapacityRule, toCount } from "../../lib/rules.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import { opensBlocked } from "../license.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWarehouseTemplates } from "../warehouse/warehouse-templates.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
@@ -65,6 +67,8 @@ export interface NewShiftProps {
   newRequestId?: () => string;
   /** This computer's clock; tests give their own. */
   now?: () => Date;
+  /** The site's license as the station last heard it (plan ЛЦ-3); `null` — nothing known. */
+  license?: DeviceLicense | null;
 }
 
 type Choices =
@@ -195,8 +199,10 @@ export function NewShift({
   onBack,
   newRequestId = () => crypto.randomUUID(),
   now = () => new Date(),
+  license = null,
 }: NewShiftProps) {
   const { t } = useTranslation();
+  const blocked = opensBlocked(license);
   const { hostId, deviceId } = pairing;
   const [choices, setChoices] = useState<Choices>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -984,7 +990,11 @@ export function NewShift({
     const prints = form.mode === "validation" && form.printDuplicate;
     return (
       <>
-        {following !== undefined ? (
+        {blocked !== null ? (
+          // In place of «Далее» and «Создать и открыть» (spec §9.6): the host would refuse
+          // to open it, so the form is not walked to its last step to be told so.
+          <Alert tone="error">{t(`floor.newShift.refused.${blocked}`)}</Alert>
+        ) : following !== undefined ? (
           <Button
             size="floor"
             fullWidth

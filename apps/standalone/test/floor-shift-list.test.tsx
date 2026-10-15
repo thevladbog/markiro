@@ -17,11 +17,13 @@ import { HostError } from "../src/host/client.js";
 import {
   deviceShiftsSchema,
   enteredShiftSchema,
+  type DeviceLicense,
   type DeviceShift,
   type EnteredShift,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
+import { deviceLicense } from "./support/license.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -63,6 +65,8 @@ interface Options {
   onWarehouse?: () => void;
   /** The queue of what was not sent (plan ОЧ); none — no button. */
   onQueue?: () => void;
+  /** The site's license as the station last heard it (plan ЛЦ-3). */
+  license?: DeviceLicense | null;
 }
 
 function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, options: Options) {
@@ -82,6 +86,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         {...(options.onSetup === undefined ? {} : { onSetup: options.onSetup })}
         {...(options.onWarehouse === undefined ? {} : { onWarehouse: options.onWarehouse })}
         {...(options.onQueue === undefined ? {} : { onQueue: options.onQueue })}
+        {...(options.license === undefined ? {} : { license: options.license })}
       />
     </ThemeProvider>
   );
@@ -1043,5 +1048,62 @@ describe("the layout ported from the cloud station's shift selection", () => {
     renderList(executor);
     await screen.findByText("OCT26-004");
     expect(screen.queryByRole("navigation", { name: "Страницы смен" })).toBeNull();
+  });
+});
+
+describe("the shifts while the site's license opens no new shift (plan ЛЦ-3)", () => {
+  const BLOCKED = "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.";
+
+  it("explains in place of «Открыть» and «Новая смена», and still continues this station's own shift", async () => {
+    const { executor } = await copiesOf([PLANNED, MINE], [ENTERED_MINE]);
+    // Without the host, so «Продолжить» works from the stored snapshot, as in the tests above.
+    const { handlers } = renderList(executor, {
+      license: deviceLicense("restricted"),
+      online: false,
+    });
+    await screen.findByText("OCT26-005/S");
+    const planned = card("OCT26-005/S");
+    expect(within(planned).queryByRole("button")).toBeNull();
+    expect(within(planned).getByText(BLOCKED)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Новая смена" })).toBeNull();
+    expect(screen.getAllByText(BLOCKED)).toHaveLength(2);
+    const mine = card(MINE.number);
+    fireEvent.click(within(mine).getByRole("button", { name: "Продолжить" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+  });
+
+  it("opens as before in the grace", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, { license: deviceLicense("grace", "2027-11-14T21:00:00Z") });
+    expect(await screen.findByRole("button", { name: "Открыть" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(screen.getByRole("button", { name: "Новая смена" })).toBeTruthy();
+  });
+
+  it("says the host's refusal to open by the state it names", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, {
+      enter: async () => {
+        throw new HostError({
+          kind: "api",
+          code: "conflict",
+          status: 409,
+          message: "restricted",
+          details: {
+            constraint: "license_restricted",
+            state: "trial_expired",
+            since: "2026-10-24T09:00:00Z",
+          },
+        });
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(
+      await screen.findByText(
+        "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
+      ),
+    ).toBeTruthy();
   });
 });

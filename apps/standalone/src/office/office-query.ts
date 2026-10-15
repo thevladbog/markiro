@@ -21,7 +21,7 @@ import { useOfficeSession } from "./office-session.js";
 export const officeKeys = {
   org: ["office", "org"],
   orgLogo: ["office", "org-logo"],
-  /** The site's license (`GET /v1/office/license`): custom branding reads its features. */
+  /** The site's license (`GET /v1/office/license`): the license section, the band and «Обзор» (plan ЛЦ-3), and custom branding's features. */
   license: ["office", "license"],
   palletSheets: ["office", "pallet-sheets"],
   sscc: ["office", "sscc"],
@@ -188,13 +188,25 @@ export function useOfficeQuery<T>(
   });
 }
 
+export interface OfficeMutationOptions {
+  /**
+   * How long a write stays in the mutation cache, with its variables and
+   * answer, once nothing observes it (after `reset()`, the next write of the
+   * same hook, or an unmount): react-query's default (5 minutes) unless
+   * given; 0 for a write whose variables or answer must not outlive it.
+   */
+  gcTime?: number;
+}
+
 /** Writes office data through `session.call`. */
 export function useOfficeMutation<V, T>(
   write: (api: HostApi, token: string, variables: V) => Promise<T>,
+  options: OfficeMutationOptions = {},
 ): UseMutationResult<T, Error, V> {
   const { api, call } = useOfficeSession();
   return useMutation({
     mutationFn: (variables: V) => call((token) => write(api, token, variables)),
+    ...(options.gcTime === undefined ? {} : { gcTime: options.gcTime }),
   });
 }
 

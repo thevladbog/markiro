@@ -431,6 +431,15 @@ describe("NetworkPairing", () => {
   it.each([
     ["rate_limited", "Слишком много попыток подключения. Подождите минуту и попробуйте снова."],
     ["unreachable", "Хост не отвечает по этому адресу. Проверьте адрес и что ПК-хост включён."],
+    // The license refuses before the host spends the code (plan ЛЦ-2, Д9): it stays good.
+    [
+      "seat_limit",
+      "Все рабочие места лицензии заняты. Освободите место в офисе («Устройства» → «Отозвать») или расширьте лицензию.",
+    ],
+    [
+      "feature_disabled",
+      "Эта возможность не входит в лицензию площадки: подключение такого устройства. Расширьте лицензию.",
+    ],
   ] as const)(
     "does not remember a %s refusal: a second submit of the same code probes and claims again",
     async (code, text) => {

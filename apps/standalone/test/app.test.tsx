@@ -62,6 +62,7 @@ import {
 import { km, rows, unsentScans } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
+import { DEVICE_INFO, deviceLicense } from "./support/license.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
@@ -1025,6 +1026,18 @@ describe("App", () => {
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
     expect(probe.hello.mock.calls.length).toBe(helloCallsBeforeRetry + 1);
     expect(device.pairLocally).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains a local pairing the license has no seat for", async () => {
+    const device = fakeDevice(null);
+    device.pairLocally.mockRejectedValueOnce(new DeviceError("seat_limit", "no seat"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    expect(await screen.findByText("Не удалось подключиться к хосту")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Все рабочие места лицензии заняты. Освободите место в офисе («Устройства» → «Отозвать») или расширьте лицензию.",
+      ),
+    ).toBeTruthy();
   });
 
   it("recovers from a reinstalled host: rejects, reconnects, re-pairs and reaches the floor", async () => {
@@ -4777,5 +4790,83 @@ describe("the floor's own controls in the status bar (beta 3)", () => {
     await waitFor(() => expect(device.forget).toHaveBeenCalledTimes(1));
     // Nothing waited to be sent: no `keepUnsent`.
     expect(device.forget).toHaveBeenCalledWith(undefined);
+  });
+});
+
+describe("the site's license on the station (plan ЛЦ-3)", () => {
+  /** The bar's polite region of warnings. */
+  function barAlerts(): HTMLElement {
+    const found = document.querySelector(".floor-status__alerts");
+    if (!(found instanceof HTMLElement)) throw new Error("no alerts region");
+    return found;
+  }
+
+  it("says on the floor's bar what the host says, and reads it again after a revision", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDevice.mockResolvedValue({ ...DEVICE_INFO, license: deviceLicense("restricted") });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    expect(
+      await within(barAlerts()).findByText(
+        "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+      ),
+    ).toBeTruthy();
+    // The operator still signs in: the line never stops the floor.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const reads = host.getDevice.mock.calls.length;
+
+    host.getDevice.mockResolvedValue({ ...DEVICE_INFO, license: deviceLicense("active") });
+    await link.revision(43);
+    await waitFor(() => expect(host.getDevice.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() =>
+      expect(within(barAlerts()).queryByText(/Новые смены не открываются/)).toBeNull(),
+    );
+  });
+
+  it("asks nothing on an office PC, whatever pairing its disk holds", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    device.installRole.mockResolvedValue("office");
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    // The sync runs (the copies), the license is never asked.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((settle) => setTimeout(settle, 50));
+    });
+    expect(host.getDevice).not.toHaveBeenCalled();
+  });
+
+  it("waits for the shell to say the role before it asks", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    let sayRole: (role: "station") => void = () => undefined;
+    device.installRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          sayRole = resolve;
+        }),
+    );
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    // The app shows nothing but its loading until the shell has said the role
+    // (start by role): the license is not asked in the meantime.
+    await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((settle) => setTimeout(settle, 50));
+    });
+    expect(screen.queryByText("Вход оператора")).toBeNull();
+    expect(host.getDevice).not.toHaveBeenCalled();
+    await act(async () => {
+      sayRole("station");
+    });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    await waitFor(() => expect(host.getDevice).toHaveBeenCalled());
   });
 });

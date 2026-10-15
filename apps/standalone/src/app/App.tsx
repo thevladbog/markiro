@@ -70,6 +70,7 @@ import {
   type LockdownLifecycle,
 } from "./lockdown.js";
 import { NetworkPairing } from "./NetworkPairing.js";
+import { useStationLicense } from "./use-station-license.js";
 import {
   ConfigErrorScreen,
   DeviceRejectedScreen,
@@ -354,6 +355,18 @@ export function App({
     listDisplacements: hostApi.listDisplacements,
     deviceProductPhoto: hostApi.getDeviceProductPhoto,
     dispatch,
+  });
+  // The site's license as this station last heard it (plan ЛЦ-3): the floor's
+  // status bar and, on the shifts, what cannot be opened. An office PC asks
+  // nothing, nor does any PC before the shell has said its role.
+  const stationLicense = useStationLicense({
+    pairing:
+      linked !== null && role !== "unknown" && role !== "office" && linked.kind === "station"
+        ? { hostId: linked.hostId, deviceId: linked.deviceId }
+        : null,
+    read: hostApi.getDevice,
+    revision: state.hostRevision,
+    online: state.link?.state === "online",
   });
 
   useEffect(() => {
@@ -935,6 +948,7 @@ export function App({
             factsFailure={state.factsFailure}
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
+            license={stationLicense}
             watchScanners={hardwareApi.watchScanners}
             tools={floorTools}
             {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
@@ -980,6 +994,7 @@ export function App({
                 outboxVersion={state.outboxVersion}
                 lineChangePending={state.pendingDevice !== null}
                 rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
+                license={stationLicense}
                 enter={hostApi.enterShift}
                 create={hostApi.createDeviceShift}
                 checkCode={hostApi.checkCode}

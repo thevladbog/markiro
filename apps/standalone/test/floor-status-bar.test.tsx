@@ -13,8 +13,10 @@ import { enteredShiftSchema, type ChangeItem, type HostStatus } from "../src/hos
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { noteRestoreEpoch, reconcileRestore } from "../src/local/restore-reconcile.js";
+import { lastMomentBefore, licenseDayMonth, licenseMinute } from "../src/lib/license-dates.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { seedBlock, unsentScans } from "./support/floor-work.js";
+import { deviceLicense } from "./support/license.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -1564,5 +1566,96 @@ describe("the scanner on the floor's status bar", () => {
     await waitFor(() => expect(shown("Сканер")).toBe("Часть сканеров недоступна"));
     view.rerender(bar({ local, watchScanners: watching("disconnected") }));
     await waitFor(() => expect(shown("Сканер")).toBe("Нет связи"));
+  });
+});
+
+/** The bar's polite region of warnings. */
+function alerts(): HTMLElement {
+  const found = document.querySelector(".floor-status__alerts");
+  if (!(found instanceof HTMLElement)) throw new Error("no alerts region");
+  return found;
+}
+
+const GRACE_END = "2027-11-14T21:00:00Z";
+const EMERGENCY_END = "2027-11-23T06:00:00Z";
+
+describe("the license on the floor's status bar (plan ЛЦ-3)", () => {
+  it.each(["trial", "active", "expiring", "wrong_host"])(
+    "says nothing in the state %s",
+    async (state) => {
+      render(bar({ local: await synced([ORG]), license: deviceLicense(state, GRACE_END) }));
+      await screen.findByText("ООО «Атолл»");
+      expect(within(alerts()).queryByText(/лицензи|смены/i)).toBeNull();
+      expect(alerts().childElementCount).toBe(0);
+    },
+  );
+
+  it("says nothing for a host that sends no license", async () => {
+    render(bar({ local: await synced([ORG]), license: null }));
+    await screen.findByText("ООО «Атолл»");
+    expect(alerts().childElementCount).toBe(0);
+  });
+
+  it("tells everyone in the grace till when new shifts open, in a polite line, not an alert", async () => {
+    render(bar({ local: await synced([ORG]), license: deviceLicense("grace", GRACE_END) }));
+    const date = licenseDayMonth(lastMomentBefore(GRACE_END), null);
+    const shown = await within(alerts()).findByText(
+      `Лицензия площадки истекла. Новые смены откроются до ${date}. Сообщите администратору.`,
+    );
+    expect(shown.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
+    expect(alerts().getAttribute("aria-live")).toBe("polite");
+    expect(within(alerts()).queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it.each([
+    [
+      "restricted",
+      "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+    ],
+    [
+      "trial_expired",
+      "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
+    ],
+    [
+      "inn_mismatch",
+      "Новые смены не открываются: ИНН организации не совпадает с лицензией. Сообщите администратору.",
+    ],
+  ] as const)("says that no new shift opens in the state %s", async (state, text) => {
+    render(bar({ local: await synced([ORG]), license: deviceLicense(state) }));
+    const shown = await within(alerts()).findByText(text);
+    expect(shown.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    expect(within(alerts()).queryByRole("alert")).toBeNull();
+  });
+
+  it("says the running emergency extension till its end, and the plain restriction once it has passed by this PC's clock", async () => {
+    const local = await synced([ORG]);
+    const license = deviceLicense("restricted", null, EMERGENCY_END);
+    const view = render(bar({ local, license, now: () => new Date("2027-11-21T10:00:00Z") }));
+    const running = await within(alerts()).findByText(
+      `Лицензия площадки истекла: новые смены открываются по аварийному продлению до ${licenseMinute(EMERGENCY_END, null)}. Сообщите администратору.`,
+    );
+    expect(running.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
+    view.rerender(bar({ local, license, now: () => new Date("2027-11-24T10:00:00Z") }));
+    const ended = await within(alerts()).findByText(
+      "Новые смены не открываются: лицензия площадки истекла. Сообщите администратору.",
+    );
+    expect(ended.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    expect(within(alerts()).queryByText(/аварийному продлению/)).toBeNull();
+  });
+
+  it("changes the line by itself when the extension ends with the bar on screen", async () => {
+    const local = await synced([ORG]);
+    const until = new Date(Date.now() + 300).toISOString();
+    render(bar({ local, license: deviceLicense("trial_expired", null, until) }));
+    expect(await within(alerts()).findByText(/аварийному продлению/)).toBeTruthy();
+    expect(
+      await within(alerts()).findByText(
+        "Новые смены не открываются: пробный период закончился. Сообщите администратору.",
+        {},
+        { timeout: 3000 },
+      ),
+    ).toBeTruthy();
+    expect(within(alerts()).queryByText(/аварийному продлению/)).toBeNull();
   });
 });

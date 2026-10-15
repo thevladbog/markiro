@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Spinner } from "@markiro/ui";
 
 import { errorMessageKey } from "../host/errors.js";
-import { failureMessage, type AlertFailure } from "./form-errors.js";
+import { failureMessage, failureValues, type AlertFailure } from "./form-errors.js";
 
 /** An office page while its data loads. */
 export function PageLoading() {
@@ -77,5 +77,5 @@ export function WriteFailureAlert({ failure, onReload, staleMessage }: WriteFail
       />
     );
   }
-  return <Alert tone="error">{t(failureMessage(failure))}</Alert>;
+  return <Alert tone="error">{t(failureMessage(failure), failureValues(failure) ?? {})}</Alert>;
 }

@@ -2,12 +2,28 @@ import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import i18n from "i18next";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { HostApi } from "../src/host/api.js";
+import type { OfficeLicense } from "../src/host/protocol.js";
 import { decryptBlob, findBlob } from "../../../tools/standalone-support/decrypt.mjs";
 import { HostError } from "../src/host/client.js";
 import { usageStatsSchema } from "../src/host/usage-stats.js";
 import type { AboutData } from "../src/office/info/about-data.js";
+import { licenseSupportBlock } from "../src/office/info/license/license-support.js";
+import type { SupportContext } from "../src/office/info/support-blocks.js";
+import {
+  ACTIVE_LICENSE,
+  GRACE,
+  HOST_FINGERPRINT,
+  INN_MISMATCH,
+  LICENSE_ID,
+  licenseOf,
+  ORG_INN,
+  OTHER_INN,
+  TRIAL,
+} from "./support/license.js";
+import { fakeHostApi } from "./support/office.js";
 import { PROGRAM_ROWS } from "../src/office/info/ProgramSection.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "../src/office/info/support-blocks.js";
 import type { SupportKeyset } from "../src/office/info/support-keys.js";
@@ -75,7 +91,6 @@ describe("Сведения для поддержки", () => {
       "Связь с хостом: на связи",
       "Хост: https://127.0.0.1:45710 (id 3f1c2d4e)",
       "Последняя копия (UTC): 2026-10-13T08:00:00.000Z",
-      "Лицензия: Лицензирование ещё не подключено",
       "",
     ]);
   });
@@ -158,7 +173,12 @@ describe("Сведения для поддержки", () => {
 });
 
 describe("Блоки сведений для поддержки (точка расширения)", () => {
-  const context = { t: i18n.t, facts: FACTS, about: {} as AboutData };
+  const context: SupportContext = {
+    t: i18n.t,
+    facts: FACTS,
+    about: {} as AboutData,
+    read: () => Promise.reject(new Error("no host in this test")),
+  };
 
   it("appends the blocks after the base text, cleaned like every value", () => {
     const text = buildSupportReport(FACTS, i18n.t, [
@@ -200,9 +220,106 @@ describe("Блоки сведений для поддержки (точка ра
     expect(blocks.map((block) => block.title)).toEqual(["Первый", "Пятый"]);
   });
 
-  it("has the usage statistics as its one contributor and no extra program rows", () => {
-    expect(SUPPORT_CONTRIBUTORS).toHaveLength(1);
+  it("has the usage statistics after the license's contributor and no extra program rows", () => {
+    expect(SUPPORT_CONTRIBUTORS).toHaveLength(2);
+    expect(SUPPORT_CONTRIBUTORS[0]).toBe(licenseSupportBlock);
     expect(PROGRAM_ROWS).toEqual([]);
+  });
+});
+
+/** A context whose host answers `license`, or fails; and its fake host. */
+function licenseContext(license: OfficeLicense | Error): SupportContext & { api: HostApi } {
+  const api = fakeHostApi({
+    getLicense: vi.fn<HostApi["getLicense"]>(async () => {
+      if (license instanceof Error) throw license;
+      return license;
+    }),
+  });
+  return {
+    t: i18n.t,
+    facts: FACTS,
+    about: {} as AboutData,
+    read: (operation) => operation(api, "office-session-token"),
+    api,
+  };
+}
+
+describe("the license's block of the support text (plan ЛЦ-3)", () => {
+  it("says the state, the clock, the file, the term, the key, the host, the trial and the emergency", async () => {
+    const license = licenseOf({ ...GRACE, flags: { clockBehindDays: 2, clockAhead: false } });
+    expect(await licenseSupportBlock(licenseContext(license))).toEqual({
+      title: "Лицензия",
+      lines: [
+        ["Состояние", "Льготный срок (grace)"],
+        ["Часы хоста", "отстают на 2 дн."],
+        ["Файл", "№ 3, 5b1d7c2e"],
+        ["Действует до (UTC)", "2027-10-31T21:00:00Z"],
+        ["Выпущен (UTC)", "2026-10-01T08:00:00Z"],
+        ["Подписано ключом (kid)", "lic-2026-1"],
+        ["Хост", "3f1c2d4e"],
+        ["Пробный период (UTC)", "нет"],
+        ["Аварийное продление до (UTC)", "нет"],
+      ],
+    });
+  });
+
+  it("names the trial of a site without a file", async () => {
+    const block = await licenseSupportBlock(licenseContext(TRIAL));
+    expect(block?.lines).toContainEqual(["Файл", "нет"]);
+    expect(block?.lines).toContainEqual([
+      "Пробный период (UTC)",
+      "2026-10-10T09:00:00Z — 2026-10-24T09:00:00Z",
+    ]);
+  });
+
+  it("says a clock ahead and the emergency's end", async () => {
+    const license = licenseOf({
+      flags: { clockBehindDays: 3, clockAhead: true },
+      emergency: { available: false, until: "2027-11-23T06:00:00Z" },
+    });
+    const block = await licenseSupportBlock(licenseContext(license));
+    expect(block?.lines).toContainEqual(["Часы хоста", "отстают на 3 дн., ушли вперёд"]);
+    expect(block?.lines).toContainEqual(["Аварийное продление до (UTC)", "2027-11-23T06:00:00Z"]);
+  });
+
+  it.each([
+    ["a subscription", ACTIVE_LICENSE],
+    ["the trial", TRIAL],
+    ["an INN mismatch", INN_MISMATCH],
+  ] as const)(
+    "never carries the INN, the customer, the fingerprint, a whole id or the activation request (%s)",
+    async (_, license) => {
+      const context = licenseContext(license);
+      const block = await licenseSupportBlock(context);
+      const text = buildSupportReport(FACTS, i18n.t, block === null ? [] : [block]);
+      for (const secret of [
+        LICENSE_ID,
+        HOST_ID,
+        HOST_FINGERPRINT,
+        ORG_INN,
+        OTHER_INN,
+        "Атолл",
+        ACTIVE_LICENSE.license?.planVersionId ?? "planVersionId",
+      ]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(text).toMatch(/\r\nЛицензия\r\nСостояние: [^\r]+ \(\w+\)\r\n/);
+      // The request names the organization and its INN: the block never asks for it.
+      expect(context.api.getActivationRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  it("starts the subscription's block with its state word and code", async () => {
+    const block = await licenseSupportBlock(licenseContext(ACTIVE_LICENSE));
+    const text = buildSupportReport(FACTS, i18n.t, block === null ? [] : [block]);
+    expect(text).toContain("\r\nЛицензия\r\nСостояние: Действует (active)\r\n");
+  });
+
+  it("says it could not read the host, and loses nothing else", async () => {
+    expect(await licenseSupportBlock(licenseContext(new Error("down")))).toEqual({
+      title: "Лицензия",
+      lines: [["Состояние", "не удалось прочитать у хоста"]],
+    });
   });
 });
 
@@ -217,6 +334,7 @@ describe("Статистика использования в сведениях 
     t: i18n.t,
     facts: FACTS,
     about: {} as AboutData,
+    read: () => Promise.reject(new Error("the usage block reads nothing")),
     ...(usage === undefined ? {} : { usage }),
   });
   const keyset = (): { pem: string; keyset: SupportKeyset } => {

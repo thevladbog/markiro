@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import { alertFailure, failureMessage, writeFailure } from "../src/office/form-errors.js";
+import i18n from "../src/i18n/index.js";
+import {
+  alertFailure,
+  failureMessage,
+  failureValues,
+  writeFailure,
+} from "../src/office/form-errors.js";
 
 const FIELDS = { name: "orgName", gln: "gln" } as const;
 
@@ -181,5 +187,59 @@ describe("failureMessage", () => {
 
   it("falls back to the stale-revision text for anything without a message", () => {
     expect(failureMessage({ kind: "stale" })).toBe("errors.api.stale_revision");
+  });
+});
+
+describe("a write the site's license refuses (plan ЛЦ-3)", () => {
+  function licenseConflict(details: Record<string, unknown>): HostError {
+    return new HostError({ kind: "api", code: "conflict", status: 409, message: "x", details });
+  }
+
+  it("says the seats used of the limit for a user or a line over the license", () => {
+    const error = licenseConflict({
+      constraint: "seat_limit",
+      quota: "cabinetUsers",
+      used: 3,
+      limit: 3,
+    });
+    const failure = alertFailure(error);
+    expect(failure).toEqual({
+      kind: "alert",
+      message: "office.about.license.refusals.seatLimit",
+      values: { used: 3, limit: 3 },
+    });
+    expect(i18n.t(failureMessage(failure), failureValues(failure) ?? {})).toBe(
+      "Достигнут предел лицензии: 3 из 3. Выключите ненужные записи или расширьте лицензию.",
+    );
+    expect(writeFailure(error, FIELDS)).toEqual(failure);
+  });
+
+  it("names the feature the license lacks, and any other without its name", () => {
+    expect(
+      i18n.t(
+        failureMessage(
+          alertFailure(licenseConflict({ constraint: "feature_disabled", feature: "labelEditor" })),
+        ),
+      ),
+    ).toBe(
+      "Эта возможность не входит в лицензию площадки: редактор шаблонов этикеток. Печать по существующим шаблонам продолжается.",
+    );
+    expect(
+      alertFailure(
+        licenseConflict({ constraint: "feature_disabled", feature: "from_a_newer_host" }),
+      ),
+    ).toEqual({ kind: "alert", message: "office.about.license.refusals.featureDisabled" });
+  });
+
+  it("leaves a seat refusal without its figures, and any other conflict, to its code", () => {
+    expect(alertFailure(licenseConflict({ constraint: "seat_limit" }))).toEqual({
+      kind: "alert",
+      message: "errors.api.conflict",
+    });
+    expect(alertFailure(conflict("line_name"))).toEqual({
+      kind: "alert",
+      message: "errors.api.conflict",
+    });
+    expect(failureValues({ kind: "stale" })).toBeUndefined();
   });
 });
