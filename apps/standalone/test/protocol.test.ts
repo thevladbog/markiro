@@ -920,12 +920,16 @@ describe("request builders produce their fixtures exactly", () => {
     expect(deviceShiftCreate({ ...typed, mode: "validation" })).toStrictEqual(
       fixture("device-shift-create-validation.json"),
     );
-    const policy = deviceShiftCreateSchema.parse(fixture("device-shift-create-validation-print.json"));
+    const policy = deviceShiftCreateSchema.parse(
+      fixture("device-shift-create-validation-print.json"),
+    );
     expect(
       deviceShiftCreate({
         ...typed,
         mode: "validation",
-        ...(policy.validationPrint === undefined ? {} : { validationPrint: policy.validationPrint }),
+        ...(policy.validationPrint === undefined
+          ? {}
+          : { validationPrint: policy.validationPrint }),
       }),
     ).toStrictEqual(fixture("device-shift-create-validation-print.json"));
     // An aggregation shift names neither: an older host refuses a field it does not know.
@@ -939,12 +943,10 @@ describe("request builders produce their fixtures exactly", () => {
     const { boxCapacity: _hidden, ...hidden } = typed;
     expect(deviceShiftCreate({ ...hidden, mode: "validation" })).not.toHaveProperty("boxCapacity");
     // A duplicate is printed only by a validation shift.
-    expect(
-      deviceShiftCreateSchema.safeParse({ ...policy, mode: "aggregation" }).success,
-    ).toBe(false);
-    expect(
-      deviceShiftCreateSchema.safeParse({ ...plain, mode: "validation" }).success,
-    ).toBe(true);
+    expect(deviceShiftCreateSchema.safeParse({ ...policy, mode: "aggregation" }).success).toBe(
+      false,
+    );
+    expect(deviceShiftCreateSchema.safeParse({ ...plain, mode: "validation" }).success).toBe(true);
   });
 
   it("sends the capacity, the date and every id the operator chose, not the fixture's", () => {

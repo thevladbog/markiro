@@ -706,3 +706,66 @@
 .new-shift .new-shift__message p {
   margin: 0;
 }
+
+/* The verification choice beside the duplicate templates (beta 3.2). */
+.new-shift .new-shift__verification {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+/*
+ * A short panel (1024 x 600 and the like): the details keep to the height without
+ * an inner scroll. The product card shrinks, the mode, the print flag and the pallets
+ * pair up, and the explanatory lines go (the groups keep their accessible names).
+ */
+@media (max-height: 860px) {
+  .new-shift .new-shift__panel--found .new-shift__fields {
+    gap: var(--sp-2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* «Необязательно» under the plan: the label says enough; a field's error stays. */
+  .new-shift .new-shift__counts [id$="-hint"] {
+    display: none;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__product,
+  .new-shift .new-shift__panel--found .new-shift__counts {
+    grid-column: 1 / -1;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__label,
+  .new-shift .new-shift__panel--found .new-shift__hint {
+    display: none;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__message {
+    min-height: 24px;
+  }
+
+  .new-shift .new-shift__product .mk-card__body {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .new-shift .new-shift__product-photo {
+    width: 56px;
+    height: 56px;
+  }
+
+  .new-shift .new-shift__product-monogram {
+    font-size: 28px;
+  }
+
+  .new-shift .new-shift__product h3 {
+    font-size: 22px;
+    -webkit-line-clamp: 1;
+  }
+
+  .new-shift .new-shift__code {
+    margin-top: 2px;
+    font-size: 18px;
+  }
+}

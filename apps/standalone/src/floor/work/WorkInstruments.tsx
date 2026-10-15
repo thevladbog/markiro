@@ -5,7 +5,11 @@ import { Button, type ButtonProps } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import { productMonogram } from "../shifts/product-accent.js";
-import { ProductPhotoImage, useProductAccent, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
+import {
+  ProductPhotoImage,
+  useProductAccent,
+  useStoredProductPhoto,
+} from "../shifts/ProductPhoto.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 
 /*

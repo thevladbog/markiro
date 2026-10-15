@@ -672,6 +672,133 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
   });
 });
 
+/** Two duplicate templates for the milk's group (8) and one for another group (beta 3.2). */
+const DUPLICATE_TEMPLATE = "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e";
+function duplicateTemplate(id: string, name: string, codes: number[] | null): ChangeItem {
+  return item("label_templates", id, 104, {
+    name,
+    purpose: "product_duplicate",
+    enabled: true,
+    chzProductGroupCodes: codes,
+    stock: false,
+    spec: { widthMm: 40, heightMm: 30, dpi: 203, language: "zpl", elements: [] },
+  });
+}
+const DUPLICATE_COPIES = [
+  ...CATALOG,
+  duplicateTemplate(DUPLICATE_TEMPLATE, "Дубликат 40×30", [8]),
+  duplicateTemplate("c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e1f", "Дубликат 58×40", null),
+  duplicateTemplate("d9e0f1a2-b3c4-4d5e-8f6a-7b8c9d0e1f2a", "Дубликат для воды", [13]),
+];
+
+describe("the mode of a new shift on the station (beta 3.2, plan РЕЖ Р16)", () => {
+  it("offers «Проверка» and «Агрегация», starts on «Агрегация» and names no mode for it", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    const group = screen.getByRole("group", { name: "Режим работы" });
+    const [validation, aggregation] = within(group).getAllByRole("button");
+    expect([validation?.textContent, aggregation?.textContent]).toEqual(["Проверка", "Агрегация"]);
+    expect(aggregation?.getAttribute("aria-pressed")).toBe("true");
+    expect(validation?.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByRole("group", { name: "Печатать дубликат Data Matrix" })).toBeNull();
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    // An older host refuses a field it does not know: an aggregation shift sends none.
+    expect(handlers.create.mock.calls).toEqual([[CREATED_BODY]]);
+  });
+
+  it("creates a validation shift without the box and pallet choices, from the details", async () => {
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => ({ ...MADE, mode: "validation" }),
+    });
+    await chooseMilk();
+    expect(screen.getByRole("group", { name: "Паллеты" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    // No pallets and no box capacity: a validation shift puts codes in no box.
+    expect(screen.queryByRole("group", { name: "Паллеты" })).toBeNull();
+    expect(screen.queryByLabelText("В коробе, шт.")).toBeNull();
+    expect(screen.getByText("В режиме проверки этикетки коробов не печатаются.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Далее" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      mode: "validation",
+    });
+  });
+
+  it("chooses the duplicate template and the check when the shift prints a duplicate", async () => {
+    const { handlers } = renderNew(await copiesOf(DUPLICATE_COPIES), {
+      create: async () => ({
+        ...MADE,
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          verification: "required",
+          templateId: DUPLICATE_TEMPLATE,
+        },
+      }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    const flag = screen.getByRole("group", { name: "Печатать дубликат Data Matrix" });
+    fireEvent.click(within(flag).getByRole("button", { name: "Да" }));
+    // The template is chosen on a step of its own; the creation waits for it.
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+    // Only the templates that fit the product's group: not «Дубликат для воды».
+    expect(screen.getByRole("button", { name: "Дубликат 40×30" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Дубликат 58×40" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Дубликат для воды" })).toBeNull();
+    const create = screen.getByRole("button", { name: "Создать и открыть" });
+    expect((create as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Дубликат 40×30" }));
+    const check = screen.getByRole("group", { name: "Обязательная проверка этикетки" });
+    fireEvent.click(within(check).getByRole("button", { name: "Да" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      mode: "validation",
+      validationPrint: {
+        mode: "duplicate_dm",
+        verification: "required",
+        templateId: DUPLICATE_TEMPLATE,
+      },
+    });
+  });
+
+  it("gives the choice of the duplicate template back when the host refuses it", async () => {
+    const { handlers } = renderNew(await copiesOf(DUPLICATE_COPIES), {
+      create: async () => {
+        throw new HostError({
+          kind: "api",
+          status: 400,
+          code: "validation_failed",
+          message: "no",
+          details: { field: "validationPrint.templateId" },
+        });
+      },
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Печатать дубликат Data Matrix" })).getByRole(
+        "button",
+        { name: "Да" },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    fireEvent.click(screen.getByRole("button", { name: "Дубликат 40×30" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(/Шаблон этикетки продукции больше не подходит товару/),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+  });
+});
+
 describe("a new shift on the station", () => {
   it("finds a product in use by its name and starts from its template, today and its capacity", async () => {
     renderNew(await copiesOf(CATALOG));
