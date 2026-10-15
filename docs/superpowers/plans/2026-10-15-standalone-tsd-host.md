@@ -4225,3 +4225,5 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
   (ТСД обходит заново), а повторно присланные станцией факты получают новое `changed_at` и попадают в следующее окно.
 - **Х4.** `cargo clippy -D warnings` на хосте не доходит до цели: падает на `markiro-proto` (старые замечания `map_or`/`large_enum_variant`
   нового тулчейна 1.93, не из этой задачи); замечаний в тронутых файлах хоста нет.
+- **Х5.** `scrollLabel` таблицы складских паллет в плане совпадал с именем секции («Складские паллеты»): `findByRole("region")` находил два региона. Подпись таблицы — «Список складских паллет». Тест веб-части открывает `/codes/pallets` (в плане `chooseTab`) и ждёт таблицу внутри секции.
+- **Х5.** `orgPrintSchema` в `src/host/protocol.ts` не добавлялся и не нужен: приложение читает `org/print` на Kotlin, офису этот маршрут не нужен; `officeWarehousePalletsSchema` уже был (П2), `HostApi.listWarehousePallets` берёт её. Существующие тесты не менялись; `cargo clippy -D warnings` по-прежнему красный только на `markiro-proto` (до хоста не доходит).

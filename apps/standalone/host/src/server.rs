@@ -262,6 +262,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::box_registry::box_registry),
         )
         .route(
+            "/v1/device/org/print",
+            get(crate::routes::org_print::org_print),
+        )
+        .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
         )
@@ -332,6 +336,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::org_logo::get_logo)
                 .put(crate::routes::org_logo::put_logo)
                 .delete(crate::routes::org_logo::delete_logo),
+        )
+        .route(
+            "/v1/office/warehouse-pallets",
+            get(crate::routes::office_warehouse_pallets::list),
         )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(

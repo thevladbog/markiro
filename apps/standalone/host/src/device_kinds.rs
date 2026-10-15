@@ -26,6 +26,7 @@ pub const ROUTE_KINDS: &[(&str, &str, &[DeviceKind])] = &[
     ("POST", "/v1/device/facts", &[Station, Handheld]),
     ("POST", "/v1/device/pallet-events", &[Handheld]),
     ("GET", "/v1/device/box-registry", &[Handheld]),
+    ("GET", "/v1/device/org/print", &[Station, Handheld]),
     (
         "GET",
         "/v1/device/codes/{code_hash}",

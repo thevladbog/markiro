@@ -64,6 +64,7 @@ export function packSession(
   session.api.getBoxCard.mockResolvedValue(BOX_CARD);
   session.api.getPalletCard.mockResolvedValue(PALLET_CARD);
   session.api.listPallets.mockResolvedValue(PALLET_PAGE);
+  session.api.listWarehousePallets.mockResolvedValue({ pallets: [] });
   session.api.listShiftBoxes.mockResolvedValue(SHIFT_BOXES);
   session.api.listShiftPallets.mockResolvedValue([]);
   return session;

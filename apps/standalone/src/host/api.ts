@@ -109,6 +109,7 @@ import {
   pairingCodeSchema,
   productGroupSchema,
   officeShiftSchema,
+  officeWarehousePalletsSchema,
   ssccBlockSchema,
   shiftExportRowsSchema,
   boxReportRowsSchema,
@@ -197,6 +198,7 @@ import {
   type TemplateDefaultsUpdate,
   type TemplateUpdate,
   type UpdateStarted,
+  type OfficeWarehousePallets,
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
@@ -455,6 +457,8 @@ export interface HostApi {
     query: PalletListQuery,
     cursor: string | null,
   ) => Promise<OfficePalletPage>;
+  /** The pallets handhelds built outside shifts (plan ТСД-Х, Х5): open first, the latest 200. */
+  listWarehousePallets: (token: string) => Promise<OfficeWarehousePallets>;
   /**
    * Of the station's records it names (1–200), those whose conflict the office
    * marked reviewed (plan КНФ), with the device key only; a host before plan
@@ -1256,6 +1260,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", palletListPath(query, cursor), {
         officeToken: token,
         schema: officePalletPageSchema,
+      }),
+    listWarehousePallets: (token) =>
+      client.request("GET", "/v1/office/warehouse-pallets", {
+        officeToken: token,
+        schema: officeWarehousePalletsSchema,
       }),
     getBackups: (token) =>
       client.request("GET", "/v1/office/backups", {

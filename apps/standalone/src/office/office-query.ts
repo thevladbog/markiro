@@ -24,6 +24,7 @@ export const officeKeys = {
   /** The site's license (`GET /v1/office/license`): the license section, the band and «Обзор» (plan ЛЦ-3), and custom branding's features. */
   license: ["office", "license"],
   palletSheets: ["office", "pallet-sheets"],
+  warehousePallets: ["office", "warehouse-pallets"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],
   devices: ["office", "devices"],
