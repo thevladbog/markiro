@@ -1,3 +1,4 @@
+import { verifyUsDatasetCasesFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
@@ -18,7 +19,6 @@ import {
   usDatasetCasesRecordIds,
   type UsDatasetCasesResult,
 } from "./us-dataset-cases-contract.js";
-import { verifyUsDatasetCases } from "./us-dataset-cases-verify.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
 import { makeUsSixMonthRegularChain } from "./us-six-month-chains.js";
@@ -170,7 +170,7 @@ export class UsDatasetCasesSeedStore {
             return receipt;
           },
           verify: (tx, checked, intent, receipt) =>
-            verifyUsDatasetCases(
+            verifyUsDatasetCasesFinal(
               tx,
               checked,
               intent,

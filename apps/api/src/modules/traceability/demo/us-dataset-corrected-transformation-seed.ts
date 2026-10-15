@@ -1,3 +1,4 @@
+import { verifyUsDatasetCorrectedTransformationFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
@@ -23,7 +24,6 @@ import {
   usDatasetCorrectedTransformationRecordIds,
   type UsDatasetCorrectedTransformationResult,
 } from "./us-dataset-corrected-transformation-result.js";
-import { verifyUsDatasetCorrectedTransformation } from "./us-dataset-corrected-transformation-verify.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import { applyUsDatasetTransformationContent } from "./us-dataset-transformation-apply-content.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
@@ -137,7 +137,7 @@ export class UsDatasetCorrectedTransformationSeedStore {
             };
           },
           verify: (tx, checkedContext, intent, receipt) =>
-            verifyUsDatasetCorrectedTransformation(
+            verifyUsDatasetCorrectedTransformationFinal(
               tx,
               checkedContext,
               intent,

@@ -1,3 +1,4 @@
+import { verifyUsDatasetReceivingFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
@@ -27,10 +28,7 @@ import {
   type UsDatasetReceivingInput,
   type UsDatasetReceivingResult,
 } from "./us-dataset-receiving-contract.js";
-import {
-  verifyUsDatasetReceiving,
-  type UsDatasetReceivingStores,
-} from "./us-dataset-receiving-verify.js";
+import { type UsDatasetReceivingStores } from "./us-dataset-receiving-verify.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
 import { verifyUsDatasetReferences } from "./us-dataset-reference-verify.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
@@ -128,7 +126,7 @@ export class UsDatasetReceivingSeedStore {
           return this.apply(tx, checked, intent);
         },
         verify: (tx, checked, intent, receipt) =>
-          verifyUsDatasetReceiving(tx, checked, intent, receipt, this.stores),
+          verifyUsDatasetReceivingFinal(tx, checked, intent, receipt, this.stores),
       },
     );
     if (!completed.receipt)

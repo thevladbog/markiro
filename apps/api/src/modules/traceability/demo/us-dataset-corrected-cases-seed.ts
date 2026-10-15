@@ -1,3 +1,4 @@
+import { verifyUsDatasetCorrectedCasesFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
 import { canonicalExportDigest } from "@markiro/domain";
@@ -33,7 +34,6 @@ import {
   usDatasetCorrectedCasesRecordIds,
   type UsDatasetCorrectedCasesResult,
 } from "./us-dataset-corrected-cases-result.js";
-import { verifyUsDatasetCorrectedCases } from "./us-dataset-corrected-cases-verify.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import { makeUsDatasetReferenceIdentity } from "./us-dataset-receiving-contract.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
@@ -184,7 +184,7 @@ export class UsDatasetCorrectedCasesSeedStore {
             };
           },
           verify: (tx, checkedContext, intent, receipt) =>
-            verifyUsDatasetCorrectedCases(
+            verifyUsDatasetCorrectedCasesFinal(
               tx,
               checkedContext,
               intent,

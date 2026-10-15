@@ -4,7 +4,7 @@ import test from "node:test";
 import ts from "typescript";
 
 const owner = new URL(
-  "../../../apps/api/src/modules/traceability/demo/us-dataset-shipping-seed.ts",
+  "../../../apps/api/src/modules/traceability/demo/us-dataset-native-final-verify.ts",
   import.meta.url,
 );
 const source = readFileSync(owner, "utf8");
@@ -103,5 +103,64 @@ test("closed reader confinement rejects authority, lifetime, mutation and escape
   for (const [name, mutated] of mutations) {
     assert.notEqual(mutated, source, `Mutation must apply: ${name}`);
     assert.throws(() => inspect(mutated), undefined, name);
+  }
+});
+
+test("shared owner allocation is confined to named final-verifier functions", () => {
+  const allowed = new Set([
+    "verifyUsDatasetReceivingFinal",
+    "verifyUsDatasetTransformationFinal",
+    "verifyUsDatasetCasesFinal",
+    "verifyUsDatasetCorrectedTransformationFinal",
+    "verifyUsDatasetCorrectedCasesFinal",
+    "verifyUsDatasetShippingFinal",
+  ]);
+  function inspectAllocations(text) {
+    const file = ts.createSourceFile("owner.ts", text, ts.ScriptTarget.Latest, true);
+    const seen = new Set();
+    function visit(node, scope) {
+      if (ts.isClassDeclaration(node)) {
+        assert.ok(
+          !node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
+          "owner class cannot be exported",
+        );
+      }
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+      ) {
+        scope = node.name?.text;
+        assert.ok(allowed.has(scope), "only fixed named final verifiers may be exported");
+        assert.ok(
+          node.parameters.every(
+            (p) => !/reader|proof|callback|core|dependencies/i.test(p.name.getText(file)),
+          ),
+          "named verifiers cannot accept caller reader/proof arguments",
+        );
+      }
+      if (ts.isNewExpression(node) && node.expression.getText(file) === "NativeFinalVerifier") {
+        assert.ok(allowed.has(scope), "owner allocation must be inside a named final verifier");
+        seen.add(scope);
+      }
+      ts.forEachChild(node, (child) => visit(child, scope));
+    }
+    visit(file, undefined);
+    assert.deepEqual(seen, allowed, "every named final verifier owns a fresh private lifetime");
+  }
+  inspectAllocations(source);
+  for (const mutated of [
+    source.replace("class NativeFinalVerifier", "export class NativeFinalVerifier"),
+    source.replace(
+      "export async function verifyUsDatasetReceivingFinal",
+      "export async function leakedAllocator",
+    ),
+    source.replace(
+      /export async function verifyUsDatasetReceivingFinal\(\s*tx:/,
+      "export async function verifyUsDatasetReceivingFinal(proof: unknown, tx:",
+    ),
+    source + "\nconst escaped = new NativeFinalVerifier();\n",
+  ]) {
+    assert.notEqual(mutated, source, "confinement mutation must apply");
+    assert.throws(() => inspectAllocations(mutated));
   }
 });

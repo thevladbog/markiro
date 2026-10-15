@@ -1,3 +1,4 @@
+import { verifyUsDatasetTransformationFinal } from "./us-dataset-native-final-verify.js";
 import { applyUsDatasetTransformationContent } from "./us-dataset-transformation-apply-content.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
@@ -34,10 +35,7 @@ import {
   type UsDatasetTransformationResult,
 } from "./us-dataset-transformation-contract.js";
 import { lockUsDatasetTransformation } from "./us-dataset-transformation-locks.js";
-import {
-  verifyUsDatasetTransformation,
-  type UsDatasetTransformationStores,
-} from "./us-dataset-transformation-verify.js";
+import { type UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
 import { makeUsSixMonthRegularChain } from "./us-six-month-chains.js";
 
@@ -161,7 +159,7 @@ export class UsDatasetTransformationSeedStore {
             return receipt;
           },
           verify: (tx, checked, intent, receipt) =>
-            verifyUsDatasetTransformation(
+            verifyUsDatasetTransformationFinal(
               tx,
               checked,
               intent,
