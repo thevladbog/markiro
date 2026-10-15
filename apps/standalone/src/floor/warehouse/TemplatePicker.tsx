@@ -290,7 +290,7 @@ export function TemplatePicker({
             <div className="label-template-choices">
               <Input
                 size="floor"
-                label={t("floor.warehouse.search")}
+                label={t(sheetTab ? "floor.warehouse.sheets.search" : "floor.warehouse.search")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onFocus={() => source.setManualTextEntryActive(true)}
