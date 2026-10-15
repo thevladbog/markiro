@@ -406,7 +406,7 @@ impl UpdateState {
         office_files::show_folder(folder).map_err(|error| match error {
             OfficeFilesError::InvalidRequest => UpdateError::InvalidRequest,
             OfficeFilesError::DocumentsUnavailable => UpdateError::DocumentsUnavailable,
-            OfficeFilesError::Storage => UpdateError::Storage,
+            OfficeFilesError::Storage | OfficeFilesError::FolderUnavailable => UpdateError::Storage,
             OfficeFilesError::Unsupported => UpdateError::Unsupported,
         })
     }

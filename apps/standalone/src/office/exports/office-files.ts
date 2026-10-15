@@ -16,6 +16,8 @@ export const OFFICE_FILES_CODES = [
   "documents_unavailable",
   "storage",
   "unsupported",
+  "folder_unavailable",
+  "dialog_failed",
 ] as const;
 export type OfficeFilesCode = (typeof OFFICE_FILES_CODES)[number];
 
@@ -35,6 +37,12 @@ export const savedFolderSchema = z
   .strict();
 export type SavedFolder = z.infer<typeof savedFolderSchema>;
 
+/** Where the exports are written on this PC: the chosen folder, and the default it replaces. */
+export const exportsFolderSchema = z
+  .object({ path: z.string().nullable(), default: z.string().nullable() })
+  .strict();
+export type ExportsFolder = z.infer<typeof exportsFolderSchema>;
+
 export interface OfficeFile {
   name: string;
   bytes: Uint8Array;
@@ -50,9 +58,30 @@ export interface OfficeFilesApi {
    * browser (plan О-Ф); the shell opens nothing else.
    */
   openFile: (segments: readonly string[], name: string) => Promise<void>;
+  /**
+   * The system's folder dialog (`pick_folder`): the folder chosen, or `null` when the person
+   * cancelled. Rejects `unsupported` outside Windows, where the office keeps its manual entry.
+   */
+  pickFolder: (title: string) => Promise<string | null>;
+  /** The folder exports are written to on this PC (`get_exports_folder`). */
+  getExportsFolder: () => Promise<ExportsFolder>;
+  /**
+   * Chooses the folder exports are written to, or `null` for the default again. The shell makes
+   * a test file in it first: `folder_unavailable` when that fails, `invalid_request` for a path
+   * that is no full path.
+   */
+  setExportsFolder: (path: string | null) => Promise<ExportsFolder>;
 }
 
 type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
+
+function readExportsFolder(command: string, answer: unknown): ExportsFolder {
+  const parsed = exportsFolderSchema.safeParse(answer);
+  if (!parsed.success) {
+    throw new OfficeFilesError("storage", `${command}: an answer of another shape`);
+  }
+  return parsed.data;
+}
 
 /**
  * Over Tauri's `invoke`. A refusal is an `OfficeFilesError` of the shell's
@@ -89,5 +118,17 @@ export function createTauriOfficeFiles(call: Invoke = invoke): OfficeFilesApi {
     openFile: async (segments, name) => {
       await run("open_office_file", { segments: [...segments], name });
     },
+    pickFolder: async (title) => {
+      const answer = await run("pick_folder", { title });
+      if (answer === null) return null;
+      if (typeof answer !== "string") {
+        throw new OfficeFilesError("storage", "pick_folder: an answer of another shape");
+      }
+      return answer;
+    },
+    getExportsFolder: async () =>
+      readExportsFolder("get_exports_folder", await run("get_exports_folder", {})),
+    setExportsFolder: async (path) =>
+      readExportsFolder("set_exports_folder", await run("set_exports_folder", { path })),
   };
 }

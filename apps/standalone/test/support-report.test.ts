@@ -234,20 +234,16 @@ describe("Статистика использования в сведениях 
   it("puts the counts into the text only as one opaque token, under a neutral label", async () => {
     const { pem, keyset: keys } = keyset();
     const block = await createUsageContributor(keys)(context({ kind: "ok", stats }));
-    expect(block?.title).toBe("Данные для анализа использования");
-    expect(block?.lines).toEqual([
-      [
-        "Статистика",
-        "зашифрована, период 2025-10 — 2026-09; строка ниже читается только в поддержке",
-      ],
-    ]);
+    expect(block?.title).toBe("Данные для анализа");
+    expect(block?.lines).toEqual([["", "Зашифрованные данные"]]);
     const text = buildSupportReport(FACTS, i18n.t, block === null ? [] : [block]);
     const lines = text.split("\r\n");
     expect(lines.slice(-4, -1)).toEqual([
-      "Данные для анализа использования",
-      "Статистика: зашифрована, период 2025-10 — 2026-09; строка ниже читается только в поддержке",
+      "Данные для анализа",
+      "Зашифрованные данные",
       block?.opaque,
     ]);
+    expect(text).not.toContain("Статистика");
     // No count and no field name of the statistics is readable in the text.
     for (const word of ["21640", "7020", "accepted", "scans", "boxes", "1802", "shifts"]) {
       expect(text).not.toContain(word);
@@ -317,18 +313,14 @@ describe("Статистика использования в сведениях 
   it("says why there are no statistics instead of printing them: no key, not an administrator, no answer", async () => {
     const empty = createUsageContributor({ keys: [], retiredKids: [] });
     // A build without a key never prints counts, whatever the host answered.
-    expect((await empty(context({ kind: "ok", stats })))?.lines).toEqual([
-      ["Статистика", "недоступна в этой сборке"],
-    ]);
+    expect((await empty(context({ kind: "ok", stats })))?.lines).toEqual([["", "Отсутствуют"]]);
     expect((await empty(context({ kind: "ok", stats })))?.opaque).toBeUndefined();
     const { keyset: keys } = keyset();
     const contributor = createUsageContributor(keys);
     expect((await contributor(context({ kind: "forbidden" })))?.lines).toEqual([
-      ["Статистика", "доступна администратору: войдите под его учётной записью"],
+      ["", "Отсутствуют"],
     ]);
-    expect((await contributor(context({ kind: "failed" })))?.lines).toEqual([
-      ["Статистика", "хост не ответил, статистику собрать не удалось"],
-    ]);
+    expect((await contributor(context({ kind: "failed" })))?.lines).toEqual([["", "Отсутствуют"]]);
     expect(await contributor(context())).toBeNull();
     const refused = usageLoadOf({
       status: "rejected",

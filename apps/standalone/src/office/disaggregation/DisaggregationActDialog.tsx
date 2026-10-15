@@ -83,6 +83,11 @@ export function DisaggregationActDialog({
     return at === "reading" ? t(errorMessageKey(error)) : t("office.forms.files.storage");
   }
 
+  /** Closes the dialog once a form is in the print window or the browser. */
+  function closeAfterHandOff(): void {
+    if (alive.current) onClose();
+  }
+
   async function press(how: "print" | "open"): Promise<void> {
     if (inFlight.current || !drawable) return;
     inFlight.current = true;
@@ -114,7 +119,11 @@ export function DisaggregationActDialog({
           print(html);
         } catch {
           setOutcome({ kind: "failed", message: t("office.forms.printFailed") });
+          return;
         }
+        // The print window is up: the dialog has nothing more to say, so it goes by itself, unless
+        // the host could not keep its copy (the warning stays to be read).
+        if (kept === null) closeAfterHandOff();
         return;
       }
       at = "saving";
@@ -128,6 +137,8 @@ export function DisaggregationActDialog({
         folder,
       );
       if (alive.current) setOutcome({ kind: "opened", saved });
+      // The browser has the form: close the dialog, so there is none to dismiss on the way back.
+      if (kept === null) closeAfterHandOff();
     } catch (error) {
       if (alive.current) setOutcome({ kind: "failed", message: failureText(error, at) });
     } finally {

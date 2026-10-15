@@ -140,8 +140,9 @@ describe("office template defaults: the organization's", () => {
         .map((item) => item.textContent);
       const catalog = items.indexOf("Каталог");
       expect(items.slice(catalog, catalog + 3)).toEqual(["Каталог", "Товары", "Шаблоны"]);
-      // The next is another section's heading: no catalog item of its own for the defaults.
-      expect(items[catalog + 3]).toBe(user === undefined ? "Доступ" : "Сервис");
+      // The next is another section's heading, the settings block at the foot of the menu
+      // (beta 3.2): no catalog item of its own for the defaults.
+      expect(items[catalog + 3]).toBe("Организация");
       fireEvent.click(within(menu).getByRole("link", { name: "Шаблоны" }));
       const tabs = await screen.findByRole("navigation", { name: "Разделы шаблонов" });
       expect(

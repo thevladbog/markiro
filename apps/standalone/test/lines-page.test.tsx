@@ -57,8 +57,8 @@ function adminSession(): FakeOfficeSession {
 }
 
 async function openLines(session: FakeOfficeSession): Promise<void> {
-  renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Линии" }));
+  renderOffice(session, { initialPath: "/lines" });
+  await screen.findByRole("link", { name: "Линии" });
   await screen.findByText("Фасовка");
 }
 
@@ -103,8 +103,8 @@ describe("office lines", () => {
   it("shows a technologist the lines without a way to change them", async () => {
     const session = fakeOfficeSession({ user: TECHNOLOGIST });
     session.api.listLines.mockResolvedValue([LINE_2, OLD_LINE]);
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Линии" }));
+    renderOffice(session, { initialPath: "/lines" });
+    await screen.findByRole("link", { name: "Линии" });
     await screen.findByText("Линия 2");
     expect(screen.queryByRole("button", { name: "Добавить линию" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Переименовать|архив/ })).toBeNull();

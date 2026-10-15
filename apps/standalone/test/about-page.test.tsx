@@ -208,8 +208,9 @@ describe("Информация", () => {
     // The usage statistics are asked of the host at the click; this build carries the owner's
     // public support key, so the text holds the counts only as one opaque token.
     expect(session.api.getUsageStats).toHaveBeenCalledTimes(1);
-    expect(text).toContain("Данные для анализа использования");
-    expect(text).not.toContain("Статистика: недоступна в этой сборке");
+    expect(text).toContain("Данные для анализа\r\nЗашифрованные данные\r\nMKS1.");
+    expect(text).not.toContain("Статистика");
+    expect(text).not.toContain("Отсутствуют");
     expect(text).toMatch(/MKS1\.sup-d11c3182\.[A-Za-z0-9_-]+/u);
     const shown = screen.getByRole("textbox", { name: "Сведения для поддержки" });
     // A text field keeps line breaks as LF; the copy and the file keep the CRLF of the text.

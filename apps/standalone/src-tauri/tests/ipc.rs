@@ -1455,6 +1455,85 @@ fn saving_office_files_answers_through_the_ipc_shapes() {
     );
 }
 
+/// The exports folder: `get_exports_folder` answers `{ path, default }`,
+/// `set_exports_folder` takes `{ path }` (a string or `null`), tries the folder
+/// with a test file and keeps it; exports then land in it, with the `Выгрузки`
+/// root kept in the answer's segments. A path that is no full path or a folder
+/// that is not there is a bare code, and the dialog is `unsupported` off Windows.
+#[test]
+fn the_exports_folder_is_chosen_and_used_through_the_ipc_shapes() {
+    let documents = tempfile::tempdir().unwrap();
+    let chosen = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let state = OfficeFilesState::at(documents.path().to_path_buf())
+        .with_settings(data.path().join("office-files.json"));
+    let (_app, webview) = mock_app_saving_into(state);
+    let default = documents.path().join("Выгрузки").display().to_string();
+    assert_eq!(
+        invoke(&webview, "get_exports_folder", json!({})),
+        Ok(json!({ "path": null, "default": default }))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "set_exports_folder",
+            json!({ "path": "relative" })
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "set_exports_folder",
+            json!({ "path": chosen.path().join("нет").display().to_string() })
+        ),
+        Err(json!("folder_unavailable"))
+    );
+    let path = chosen.path().display().to_string();
+    assert_eq!(
+        invoke(&webview, "set_exports_folder", json!({ "path": path })),
+        Ok(json!({ "path": path, "default": default }))
+    );
+    let segments = json!(["Выгрузки", "OCT26-004", "run"]);
+    let saved = invoke(
+        &webview,
+        "save_office_files",
+        json!({ "segments": segments, "files": [{ "name": "a.txt", "contentBase64": "eA==" }] }),
+    )
+    .unwrap();
+    assert_eq!(saved["segments"], segments);
+    assert!(chosen
+        .path()
+        .join("OCT26-004")
+        .join("run")
+        .join("a.txt")
+        .is_file());
+    // The forms keep their place under the documents folder.
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({ "segments": ["Формы", "x", "y"], "files": [{ "name": "a.html", "contentBase64": "eA==" }] }),
+    )
+    .unwrap();
+    assert!(documents
+        .path()
+        .join("Формы")
+        .join("x")
+        .join("y")
+        .join("a.html")
+        .is_file());
+    assert_eq!(
+        invoke(&webview, "set_exports_folder", json!({ "path": null })),
+        Ok(json!({ "path": null, "default": default }))
+    );
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(&webview, "pick_folder", json!({ "title": "Папка" })),
+            Err(json!("unsupported"))
+        );
+    }
+}
+
 /// `open_office_file` takes `segments` and `name`
 /// (`src/office/exports/office-files.ts`, plan О-Ф) and opens only a form's
 /// `.html` the office wrote under `Формы`; refusals are bare codes, and off

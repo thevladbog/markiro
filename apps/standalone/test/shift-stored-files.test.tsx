@@ -86,8 +86,7 @@ function history(files: ExportFile[]) {
 
 async function openExports(session: FakeOfficeSession, files = fakeOfficeFiles()) {
   session.api.getShift.mockResolvedValue(CLOSED);
-  renderOffice(session, { files });
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  renderOffice(session, { files, initialPath: "/shifts" });
   await screen.findByRole("heading", { name: "Смены" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
   fireEvent.click(screen.getByRole("link", { name: `Карточка смены ${CLOSED.number}` }));

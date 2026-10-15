@@ -236,8 +236,8 @@ function adminSession(): FakeOfficeSession {
 }
 
 async function openImport(session: FakeOfficeSession): Promise<RenderResult> {
-  const view = renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Перенос из облака" }));
+  const view = renderOffice(session, { initialPath: "/import" });
+  await screen.findByRole("link", { name: "Перенос из облака" });
   await screen.findByRole("heading", { name: "Перенос из облака" });
   return view;
 }

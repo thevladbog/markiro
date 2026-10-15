@@ -36,8 +36,8 @@ function session(page: OfficeConflictPage = PAGE, user = shiftsSession().user): 
 
 /** Opens «Конфликты» from the menu and waits for the list. */
 async function openConflicts(value: FakeOfficeSession): Promise<void> {
-  renderOffice(value);
-  fireEvent.click(await screen.findByRole("link", { name: "Конфликты" }));
+  renderOffice(value, { initialPath: "/conflicts" });
+  await screen.findByRole("link", { name: "Конфликты" });
   await screen.findByRole("heading", { name: "Конфликты", level: 1 });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
 }
@@ -299,8 +299,8 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     value.api.listConflicts.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "x" }),
     );
-    renderOffice(value);
-    fireEvent.click(await screen.findByRole("link", { name: "Конфликты" }));
+    renderOffice(value, { initialPath: "/conflicts" });
+    await screen.findByRole("link", { name: "Конфликты" });
     fireEvent.click(await screen.findByRole("button", { name: "Повторить" }));
     await waitFor(() => expect(value.api.listConflicts).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("table")).toBeTruthy();

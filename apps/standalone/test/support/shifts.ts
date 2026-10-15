@@ -325,8 +325,8 @@ export function shiftsSession(
 
 /** Opens «Смены» from the menu and waits for the list. */
 export async function openShifts(session: FakeOfficeSession): Promise<RenderResult> {
-  const view = renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  // Opened on «Смены» itself: the overview reads the shifts too, which would be one call more.
+  const view = renderOffice(session, { initialPath: "/shifts" });
   await screen.findByRole("heading", { name: "Смены" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
   return view;

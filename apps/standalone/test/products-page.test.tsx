@@ -86,8 +86,8 @@ function session(products: OfficeProduct[] = [WATER_10, WATER_2, MILK, AYRAN]): 
 }
 
 async function openProducts(fake: FakeOfficeSession): Promise<void> {
-  renderOffice(fake);
-  fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+  renderOffice(fake, { initialPath: "/products" });
+  await screen.findByRole("link", { name: "Товары" });
   await screen.findByRole("heading", { name: "Товары" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
 }
@@ -290,8 +290,8 @@ describe("office products", () => {
     const unreachable = "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.";
     const fake = session();
     fake.api.listProducts.mockRejectedValueOnce(down());
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(fake, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText(unreachable)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Молоко 3,2% 0,9 л")).toBeTruthy();
@@ -301,8 +301,8 @@ describe("office products", () => {
     const both = session();
     both.api.listProducts.mockRejectedValueOnce(down());
     both.api.listProductGroups.mockRejectedValueOnce(down());
-    renderOffice(both);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(both, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText(unreachable)).toBeTruthy();
     await waitFor(() => expect(both.api.listProductGroups).toHaveBeenCalledTimes(1));
     // Two passes of the scheduler: the groups' failure has been taken in too.
@@ -343,7 +343,8 @@ describe("office products", () => {
     await openProducts(fake);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
     fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
-    await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(2));
+    // The page's first visit, the overview's read of the names, the page's second visit.
+    await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(3));
     await screen.findByText("Молоко 3,2% 0,9 л");
     // Two passes of the scheduler: an effect that would read again has run.
     await new Promise((resolve) => setImmediate(resolve));
@@ -356,8 +357,8 @@ describe("office products", () => {
       const fake = fakeOfficeSession(user === undefined ? {} : { user });
       fake.api.listProducts.mockResolvedValue([]);
       fake.api.listProductGroups.mockResolvedValue([]);
-      const view = renderOffice(fake);
-      fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+      const view = renderOffice(fake, { initialPath: "/products" });
+      await screen.findByRole("link", { name: "Товары" });
       expect(await screen.findByText("Товаров пока нет.")).toBeTruthy();
       view.unmount();
     }
@@ -371,8 +372,8 @@ describe("office products", () => {
         arrive = resolve;
       }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(fake, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     arrive([MILK]);

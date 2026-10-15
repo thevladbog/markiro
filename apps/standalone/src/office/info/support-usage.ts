@@ -89,23 +89,26 @@ export function usagePayload(
 
 /**
  * The contributor of the usage statistics (`SUPPORT_CONTRIBUTORS`): a block
- * with a short neutral label and the encrypted token, or one line saying why
- * there are no statistics (no key in this build, not an administrator, the
- * host did not answer). Never plaintext counts.
+ * titled «Данные для анализа» with the line «Зашифрованные данные» and the
+ * token under it, or «Отсутствуют» when there is none (no key in this build,
+ * not an administrator, the host did not answer; the text gives no reason).
+ * Never plaintext counts.
  */
 export function createUsageContributor(keyset: SupportKeyset) {
   return async (context: SupportContext): Promise<SupportBlock | null> => {
     const { t, facts } = context;
     const title = t("office.about.support.usage.title");
-    const said = (reason: string): SupportBlock => ({
+    // One neutral line whatever the reason (no key, not an administrator, no answer): the text
+    // names no technical cause.
+    const absent = (): SupportBlock => ({
       title,
-      lines: [[t("office.about.support.usage.label"), t(`office.about.support.usage.${reason}`)]],
+      lines: [["", t("office.about.support.usage.absent")]],
     });
     const key = activeSupportKey(keyset);
-    if (key === null) return said("noKey");
+    if (key === null) return absent();
     if (context.usage === undefined) return null;
-    if (context.usage.kind === "forbidden") return said("adminOnly");
-    if (context.usage.kind === "failed") return said("hostFailed");
+    if (context.usage.kind === "forbidden") return absent();
+    if (context.usage.kind === "failed") return absent();
     const stats = context.usage.stats;
     const payload = usagePayload(stats, {
       generatedAt: facts.generatedAt,
@@ -116,21 +119,11 @@ export function createUsageContributor(keyset: SupportKeyset) {
     try {
       opaque = await encryptSupportPayload(payload, key);
     } catch {
-      return said("encryptFailed");
+      return absent();
     }
-    const first = stats.months[0]?.month;
-    const last = stats.months.at(-1)?.month;
     return {
       title,
-      lines: [
-        [
-          t("office.about.support.usage.label"),
-          t("office.about.support.usage.encrypted", {
-            from: first ?? "—",
-            to: last ?? "—",
-          }),
-        ],
-      ],
+      lines: [["", t("office.about.support.usage.encrypted")]],
       opaque,
     };
   };

@@ -213,4 +213,33 @@ describe("the product's drawer (beta 3)", () => {
     const sheet = readFileSync(join(process.cwd(), "src/app/shell.css"), "utf8");
     expect(sheet).toMatch(/\.standalone-form,[^{]*\{\s*grid-template-columns: minmax\(0, 1fr\);/u);
   });
+
+  it("asks before the header's «Выйти» throws away what is typed in the drawer (beta 3.2)", async () => {
+    const fake = session();
+    await openCreate(fake);
+    type("Название", "Кефир");
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    // Not signed out yet: the question comes first, and «Вернуться» keeps the form.
+    expect(fake.signOut).not.toHaveBeenCalled();
+    const asking = await screen.findByRole("alertdialog", { name: "Выйти без сохранения?" });
+    fireEvent.click(within(asking).getByRole("button", { name: "Вернуться к правке" }));
+    expect(fake.signOut).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Кефир");
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog", { name: "Выйти без сохранения?" })).getByRole(
+        "button",
+        { name: "Выйти без сохранения" },
+      ),
+    );
+    expect(fake.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("signs out at once when nothing is typed", async () => {
+    const fake = session();
+    await openCreate(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    expect(fake.signOut).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
 });

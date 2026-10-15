@@ -23,6 +23,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -86,6 +87,9 @@ pub enum OfficeFilesError {
     Storage,
     /// Showing a folder or opening a file needs Windows Explorer.
     Unsupported,
+    /// The folder chosen for the exports cannot be used: it is gone, is no
+    /// folder, or a test file could not be written into it.
+    FolderUnavailable,
 }
 
 impl OfficeFilesError {
@@ -95,6 +99,7 @@ impl OfficeFilesError {
             OfficeFilesError::DocumentsUnavailable => "documents_unavailable",
             OfficeFilesError::Storage => "storage",
             OfficeFilesError::Unsupported => "unsupported",
+            OfficeFilesError::FolderUnavailable => "folder_unavailable",
         }
     }
 }
@@ -119,34 +124,159 @@ pub struct SavedFolder {
 
 /// The office's folder on this computer: `Документы\Markiro`, or none when
 /// the system has no documents folder. `run` manages it from the app's path
-/// resolver; tests manage one of a temporary directory.
+/// resolver; tests manage one of a temporary directory. The exports may go
+/// elsewhere: a folder an administrator chose on this PC (a network share
+/// among them), kept in a small file of the app's data and applied to the
+/// `Выгрузки` root alone; the forms stay under `Документы\Markiro\Формы`.
 #[derive(Debug, Clone)]
 pub struct OfficeFilesState {
     root: Option<PathBuf>,
+    exports: Arc<Mutex<Option<PathBuf>>>,
+    settings: Option<PathBuf>,
+}
+
+/// The name of the exports root, the only one a chosen folder replaces.
+pub const EXPORTS_ROOT: &str = "Выгрузки";
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredSettings {
+    exports_folder: Option<String>,
 }
 
 impl OfficeFilesState {
+    fn new(root: Option<PathBuf>) -> Self {
+        Self {
+            root,
+            exports: Arc::new(Mutex::new(None)),
+            settings: None,
+        }
+    }
+
     /// The office's folder inside `documents`.
     pub fn from_documents(documents: Option<PathBuf>) -> Self {
-        Self {
-            root: documents.map(|documents| documents.join(APP_FOLDER)),
-        }
+        Self::new(documents.map(|documents| documents.join(APP_FOLDER)))
     }
 
     /// Exactly `root` (tests).
     pub fn at(root: PathBuf) -> Self {
-        Self { root: Some(root) }
+        Self::new(Some(root))
     }
 
     /// No documents folder: every call is `documents_unavailable`.
     pub fn unavailable() -> Self {
-        Self { root: None }
+        Self::new(None)
+    }
+
+    /// Keeps the exports folder in `file` and reads the one kept there. A file
+    /// that is missing or damaged is no choice: the default stays.
+    pub fn with_settings(mut self, file: PathBuf) -> Self {
+        let kept = fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<StoredSettings>(&text).ok())
+            .and_then(|stored| stored.exports_folder)
+            .map(PathBuf::from);
+        *self.exports.lock().unwrap_or_else(|e| e.into_inner()) = kept;
+        self.settings = Some(file);
+        self
     }
 
     fn root(&self) -> Result<PathBuf, OfficeFilesError> {
         self.root
             .clone()
             .ok_or(OfficeFilesError::DocumentsUnavailable)
+    }
+
+    /// The folder chosen for the exports, if one is.
+    pub fn exports_folder(&self) -> Option<PathBuf> {
+        self.exports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Where the exports go by default: `Документы\Markiro\Выгрузки`.
+    pub fn default_exports_folder(&self) -> Option<PathBuf> {
+        self.root.as_ref().map(|root| root.join(EXPORTS_ROOT))
+    }
+
+    /// Chooses `folder` for the exports (after [`check_exports_folder`]), or
+    /// goes back to the default with `None`; kept for the next start.
+    pub fn set_exports_folder(&self, folder: Option<PathBuf>) -> Result<(), OfficeFilesError> {
+        if let Some(file) = &self.settings {
+            let stored = StoredSettings {
+                exports_folder: folder.as_ref().map(|path| path.display().to_string()),
+            };
+            let text = serde_json::to_string(&stored).map_err(|_| OfficeFilesError::Storage)?;
+            let temporary = file.with_extension("json.tmp");
+            fs::write(&temporary, text)
+                .and_then(|()| fs::rename(&temporary, file))
+                .map_err(|error| storage("set_exports_folder", &error))?;
+        }
+        *self.exports.lock().unwrap_or_else(|e| e.into_inner()) = folder;
+        Ok(())
+    }
+}
+
+/// Whether `text` is a full path an administrator may choose: a drive path or
+/// a share (`\\PC\Share`), no `..` part, no device or verbatim path.
+pub fn is_full_path(text: &str) -> bool {
+    let bytes: Vec<char> = text.chars().collect();
+    if text.is_empty() || bytes.iter().any(|c| c.is_control()) {
+        return false;
+    }
+    let slash = |c: char| c == '\\' || c == '/';
+    // `\\?\…` and `\\.\…`: the verbatim and device namespaces.
+    if bytes.len() >= 4 && slash(bytes[0]) && slash(bytes[1]) && matches!(bytes[2], '?' | '.') {
+        return false;
+    }
+    if text.split(['\\', '/']).any(|part| part == "..") {
+        return false;
+    }
+    let drive =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == ':' && slash(bytes[2]);
+    let share = bytes.len() >= 5 && slash(bytes[0]) && slash(bytes[1]) && {
+        let mut parts = text[2..].split(['\\', '/']).filter(|part| !part.is_empty());
+        parts.next().is_some() && parts.next().is_some()
+    };
+    // On a system that is not Windows (the tests) a rooted path stands for a drive.
+    drive || share || (cfg!(not(windows)) && Path::new(text).is_absolute())
+}
+
+/// The folder `text` names, once it is a full path to a folder that exists
+/// and takes a file: a test file is made in it and taken away again.
+pub fn check_exports_folder(text: &str) -> Result<PathBuf, OfficeFilesError> {
+    if !is_full_path(text) {
+        return Err(OfficeFilesError::InvalidRequest);
+    }
+    let folder = PathBuf::from(text);
+    match fs::metadata(&folder) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => return Err(OfficeFilesError::FolderUnavailable),
+        Err(error) => {
+            eprintln!("standalone: exports folder check: {:?}", error.kind());
+            return Err(OfficeFilesError::FolderUnavailable);
+        }
+    }
+    let probe = folder.join(format!(
+        ".markiro-write-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let written = create_new_file(&probe).and_then(|mut file| {
+        file.write_all(b"markiro")?;
+        file.sync_all()
+    });
+    let removed = fs::remove_file(&probe);
+    match (written, removed) {
+        (Ok(()), Ok(())) => Ok(folder),
+        (Err(error), _) | (Ok(()), Err(error)) => {
+            eprintln!("standalone: exports folder write test: {:?}", error.kind());
+            Err(OfficeFilesError::FolderUnavailable)
+        }
     }
 }
 
@@ -405,6 +535,20 @@ where
     W: FnOnce(&Path, &[(String, Vec<u8>)]) -> Result<(), OfficeFilesError>,
 {
     check_segments(segments)?;
+    save_checked(root, segments, files, write)
+}
+
+/// [`save_with`] for `segments` already checked (under a chosen exports
+/// folder the root segment is left off, so the check ran on the whole path).
+fn save_checked<W>(
+    root: &Path,
+    segments: &[String],
+    files: &[OfficeFile],
+    write: W,
+) -> Result<SavedFolder, OfficeFilesError>
+where
+    W: FnOnce(&Path, &[(String, Vec<u8>)]) -> Result<(), OfficeFilesError>,
+{
     let decoded = decode(files)?;
     let (last, parents) = segments
         .split_last()
@@ -432,6 +576,10 @@ where
 /// real one (not a link).
 pub fn existing_folder(root: &Path, segments: &[String]) -> Result<PathBuf, OfficeFilesError> {
     check_segments(segments)?;
+    walk_existing(root, segments)
+}
+
+fn walk_existing(root: &Path, segments: &[String]) -> Result<PathBuf, OfficeFilesError> {
     let mut folder = root.to_path_buf();
     for segment in segments {
         folder.push(segment);
@@ -552,6 +700,35 @@ fn open_in_default_program(file: &Path) -> Result<(), OfficeFilesError> {
     launch_explorer(file, "open_office_file")
 }
 
+/// The path checks, and the root must be the exports one: a chosen folder replaces no other.
+fn check_exports_segments(segments: &[String]) -> Result<(), OfficeFilesError> {
+    check_segments(segments)?;
+    if segments.first().map(String::as_str) != Some(EXPORTS_ROOT) {
+        return Err(OfficeFilesError::InvalidRequest);
+    }
+    Ok(())
+}
+
+/// Saves into the chosen exports folder `base`, which stands for the `Выгрузки` root:
+/// the whole path is checked as for the default, the root segment left off.
+pub fn save_files_in(
+    base: &Path,
+    segments: &[String],
+    files: &[OfficeFile],
+) -> Result<SavedFolder, OfficeFilesError> {
+    check_exports_segments(segments)?;
+    let rest = &segments[1..];
+    let mut saved = save_checked(base, rest, files, write_into)?;
+    saved.segments.insert(0, EXPORTS_ROOT.to_owned());
+    Ok(saved)
+}
+
+/// [`existing_folder`] under the chosen exports folder.
+pub fn existing_folder_in(base: &Path, segments: &[String]) -> Result<PathBuf, OfficeFilesError> {
+    check_exports_segments(segments)?;
+    walk_existing(base, &segments[1..])
+}
+
 /// Saves the office's files (see the module); off the IPC thread.
 #[tauri::command]
 pub async fn save_office_files(
@@ -559,11 +736,21 @@ pub async fn save_office_files(
     segments: Vec<String>,
     files: Vec<OfficeFile>,
 ) -> Result<SavedFolder, String> {
-    let root = state.root().map_err(|error| error.code().to_owned())?;
-    tauri::async_runtime::spawn_blocking(move || save_files(&root, &segments, &files))
-        .await
-        .map_err(|_| OfficeFilesError::Storage.code().to_owned())?
-        .map_err(|error| error.code().to_owned())
+    let custom = state
+        .exports_folder()
+        .filter(|_| segments.first().map(String::as_str) == Some(EXPORTS_ROOT));
+    let root = match custom {
+        Some(_) => None,
+        None => Some(state.root().map_err(|error| error.code().to_owned())?),
+    };
+    tauri::async_runtime::spawn_blocking(move || match (custom, root) {
+        (Some(base), _) => save_files_in(&base, &segments, &files),
+        (None, Some(root)) => save_files(&root, &segments, &files),
+        (None, None) => Err(OfficeFilesError::DocumentsUnavailable),
+    })
+    .await
+    .map_err(|_| OfficeFilesError::Storage.code().to_owned())?
+    .map_err(|error| error.code().to_owned())
 }
 
 /// Shows a folder `save_office_files` made in Windows Explorer.
@@ -572,10 +759,68 @@ pub async fn open_office_folder(
     state: tauri::State<'_, OfficeFilesState>,
     segments: Vec<String>,
 ) -> Result<(), String> {
-    let root = state.root().map_err(|error| error.code().to_owned())?;
-    existing_folder(&root, &segments)
+    let custom = state
+        .exports_folder()
+        .filter(|_| segments.first().map(String::as_str) == Some(EXPORTS_ROOT));
+    let folder = match custom {
+        Some(base) => existing_folder_in(&base, &segments),
+        None => state
+            .root()
+            .and_then(|root| existing_folder(&root, &segments)),
+    };
+    folder
         .and_then(|folder| show_in_explorer(&folder))
         .map_err(|error| error.code().to_owned())
+}
+
+/// Where the exports are written: the chosen folder, and the default it replaces.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportsFolder {
+    pub path: Option<String>,
+    pub default: Option<String>,
+}
+
+fn exports_folder_answer(state: &OfficeFilesState) -> ExportsFolder {
+    ExportsFolder {
+        path: state
+            .exports_folder()
+            .map(|path| path.display().to_string()),
+        default: state
+            .default_exports_folder()
+            .map(|path| path.display().to_string()),
+    }
+}
+
+/// The exports folder in force on this PC.
+#[tauri::command]
+pub async fn get_exports_folder(
+    state: tauri::State<'_, OfficeFilesState>,
+) -> Result<ExportsFolder, String> {
+    Ok(exports_folder_answer(&state))
+}
+
+/// Chooses the folder exports are written to (`None`: the default again). The
+/// folder must exist and take a file; nothing changes otherwise.
+#[tauri::command]
+pub async fn set_exports_folder(
+    state: tauri::State<'_, OfficeFilesState>,
+    path: Option<String>,
+) -> Result<ExportsFolder, String> {
+    let chosen = match path {
+        None => None,
+        Some(text) => {
+            let checked = tauri::async_runtime::spawn_blocking(move || check_exports_folder(&text))
+                .await
+                .map_err(|_| OfficeFilesError::Storage.code().to_owned())?
+                .map_err(|error| error.code().to_owned())?;
+            Some(checked)
+        }
+    };
+    state
+        .set_exports_folder(chosen)
+        .map_err(|error| error.code().to_owned())?;
+    Ok(exports_folder_answer(&state))
 }
 
 /// Opens a form's `.html` that `save_office_files` wrote under `Формы` in the
@@ -1081,6 +1326,143 @@ mod tests {
         for quoted in [r#"C:\a"b"#, r#"C:\a" /root,C:\"#, "\"", "x\""] {
             assert_eq!(explorer_launch(Path::new(quoted), None), None, "{quoted}");
         }
+    }
+
+    /// A chosen exports folder stands for the `Выгрузки` root: files land in it directly,
+    /// the answer keeps the root segment the webview knows, and the folder can be opened again.
+    #[test]
+    fn exports_go_into_the_chosen_folder_and_keep_the_root_name_in_the_answer() {
+        let base = tempfile::tempdir().unwrap();
+        let saved = save_files_in(
+            base.path(),
+            &segments(&["Выгрузки", "OCT26-004", "run"]),
+            &[file("a.csv", b"x")],
+        )
+        .unwrap();
+        assert_eq!(saved.segments, segments(&["Выгрузки", "OCT26-004", "run"]));
+        assert!(base
+            .path()
+            .join("OCT26-004")
+            .join("run")
+            .join("a.csv")
+            .is_file());
+        assert!(!base.path().join("Выгрузки").exists());
+        let again = existing_folder_in(base.path(), &saved.segments).unwrap();
+        assert_eq!(again, base.path().join("OCT26-004").join("run"));
+        // The same name twice gets « (2)», as in the default folder.
+        let second = save_files_in(
+            base.path(),
+            &segments(&["Выгрузки", "OCT26-004", "run"]),
+            &[file("a.csv", b"y")],
+        )
+        .unwrap();
+        assert_eq!(second.segments.last().map(String::as_str), Some("run (2)"));
+    }
+
+    /// The path is checked as for the default folder: a root of another name, a bad segment.
+    #[test]
+    fn a_chosen_folder_does_not_loosen_the_checks_on_the_path() {
+        let base = tempfile::tempdir().unwrap();
+        for bad in [
+            segments(&["Формы", "x", "y"]),
+            segments(&["Выгрузки"]),
+            segments(&["Выгрузки", "..", "y"]),
+            segments(&["Выгрузки", "a/b", "y"]),
+        ] {
+            assert_eq!(
+                save_files_in(base.path(), &bad, &[file("a.csv", b"x")]),
+                Err(OfficeFilesError::InvalidRequest)
+            );
+        }
+        assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn full_paths_are_drives_and_shares_and_nothing_else() {
+        assert!(is_full_path(r"E:\Backups"));
+        assert!(is_full_path("E:/Backups"));
+        assert!(is_full_path(r"\\PC\Share"));
+        assert!(is_full_path(r"\\PC\Share\Exports"));
+        for bad in [
+            "",
+            "E:",
+            "Backups",
+            r"..\x",
+            r"E:\a\..\b",
+            r"\\?\C:\x",
+            r"\\.\pipe\x",
+            r"\\PC",
+            "E:\\a\u{7}b",
+        ] {
+            assert!(!is_full_path(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_folder_is_checked_by_writing_a_test_file_that_is_taken_away() {
+        let base = tempfile::tempdir().unwrap();
+        let text = base.path().display().to_string();
+        assert_eq!(check_exports_folder(&text), Ok(base.path().to_path_buf()));
+        assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
+        let missing = base.path().join("нет").display().to_string();
+        assert_eq!(
+            check_exports_folder(&missing),
+            Err(OfficeFilesError::FolderUnavailable)
+        );
+        let file_path = base.path().join("f.txt");
+        std::fs::write(&file_path, b"x").unwrap();
+        assert_eq!(
+            check_exports_folder(&file_path.display().to_string()),
+            Err(OfficeFilesError::FolderUnavailable)
+        );
+        assert_eq!(
+            check_exports_folder("relative"),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_takes_no_file_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let locked = base.path().join("ro");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // A superuser writes anywhere: the check is only meaningful for an ordinary one.
+        if std::fs::write(locked.join("probe"), b"x").is_err() {
+            assert_eq!(
+                check_exports_folder(&locked.display().to_string()),
+                Err(OfficeFilesError::FolderUnavailable)
+            );
+        }
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// The choice is kept per PC in the settings file and read again at the next start;
+    /// `None` goes back to the default; a damaged file is no choice.
+    #[test]
+    fn the_exports_folder_is_kept_for_the_next_start() {
+        let data = tempfile::tempdir().unwrap();
+        let chosen = tempfile::tempdir().unwrap();
+        let file_path = data.path().join("office-files.json");
+        let state = OfficeFilesState::at(PathBuf::from("docs")).with_settings(file_path.clone());
+        assert_eq!(state.exports_folder(), None);
+        assert_eq!(
+            state.default_exports_folder(),
+            Some(Path::new("docs").join(EXPORTS_ROOT))
+        );
+        state
+            .set_exports_folder(Some(chosen.path().to_path_buf()))
+            .unwrap();
+        let next = OfficeFilesState::at(PathBuf::from("docs")).with_settings(file_path.clone());
+        assert_eq!(next.exports_folder(), Some(chosen.path().to_path_buf()));
+        next.set_exports_folder(None).unwrap();
+        let last = OfficeFilesState::at(PathBuf::from("docs")).with_settings(file_path.clone());
+        assert_eq!(last.exports_folder(), None);
+        std::fs::write(&file_path, b"{broken").unwrap();
+        let damaged = OfficeFilesState::at(PathBuf::from("docs")).with_settings(file_path);
+        assert_eq!(damaged.exports_folder(), None);
     }
 
     /// Both roots the office writes into are open, and the folder is the

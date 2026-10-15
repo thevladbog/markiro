@@ -770,8 +770,10 @@ describe("Резервные копии", () => {
     expect(
       await screen.findByText("Последняя копия во вторую папку не удалась: папка недоступна."),
     ).toBeTruthy();
-    expect(session.api.getOrg).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("link", { name: "Открыть «Резервные копии»" }));
+    // The cards of the overview read the organization for the site's day; the warnings' own
+    // region is what this test is about.
+    const region = document.querySelector(".backup-alerts") as HTMLElement;
+    fireEvent.click(within(region).getByRole("link", { name: "Открыть «Резервные копии»" }));
     expect(await screen.findByRole("heading", { name: "Резервные копии", level: 1 })).toBeTruthy();
   });
 
@@ -792,9 +794,10 @@ describe("Резервные копии", () => {
     renderOffice(session);
     await screen.findByText(/Вы вошли как/);
     await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
-    expect(screen.queryByRole("link", { name: "Открыть «Резервные копии»" })).toBeNull();
-    expect(document.querySelector(".mk-alert")).toBeNull();
-    expect(session.api.getOrg).not.toHaveBeenCalled();
+    // The warnings' region stays empty (the overview's own backups card has a link of its own).
+    const region = document.querySelector(".backup-alerts") as HTMLElement;
+    expect(within(region).queryByRole("link")).toBeNull();
+    expect(region.querySelector(".mk-alert")).toBeNull();
   });
 
   it("says nothing on «Обзор» when the host does not answer", async () => {
@@ -803,7 +806,9 @@ describe("Резервные копии", () => {
     renderOffice(session);
     await screen.findByText(/Вы вошли как/);
     await waitFor(() => expect(session.api.getBackups).toHaveBeenCalled());
-    expect(screen.queryByRole("link", { name: "Открыть «Резервные копии»" })).toBeNull();
-    expect(document.querySelector(".mk-alert")).toBeNull();
+    // Its own card says the copies did not load; the warnings' region says nothing.
+    const region = document.querySelector(".backup-alerts") as HTMLElement;
+    expect(within(region).queryByRole("link")).toBeNull();
+    expect(region.querySelector(".mk-alert")).toBeNull();
   });
 });
