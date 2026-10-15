@@ -1213,7 +1213,11 @@
       "state": "State",
       "actions": "Actions"
     },
-    "state": { "upcoming": "Upcoming", "active": "Active", "expired": "Expired" },
+    "state": {
+      "upcoming": "Upcoming",
+      "active": "Active",
+      "expired": "Expired"
+    },
     "classification": {
       "customer_service": "Package work",
       "product_defect": "Not deducted from package"
@@ -1654,7 +1658,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "units": {
       "month": "Month",
@@ -1692,7 +1697,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "validation": {
       "required": "This field is required",
@@ -1893,12 +1899,299 @@
         "label": "Tenant sections",
         "overview": "Overview and subscription",
         "equipment": "Equipment",
-        "legal": "Legal details"
+        "legal": "Legal details",
+        "diagnostics": "Diagnostics"
       },
       "equipment": {
         "eyebrow": "OPERATIONS / EQUIPMENT",
         "title": "Equipment operations",
         "description": "Working devices, licensed slots, and prepared changes in one operational view."
+      },
+      "standalone": {
+        "title": "Standalone: sites and offline licenses",
+        "description": "The tenant's «Markiro Standalone» sites and the signed license files exported from its entitlements.",
+        "loading": "Loading standalone sites…",
+        "loadError": "Could not load standalone sites.",
+        "retry": "Retry",
+        "empty": "The tenant has no standalone sites.",
+        "signingUnavailable": "Offline license signing is not configured on the server: issuing is unavailable.",
+        "offlineTenant": "Tenant without a cabinet: offline licenses come from offline terms — a plan and a term of up to a year. No cloud access is opened.",
+        "source": {
+          "subscription": "subscription",
+          "offline": "offline terms"
+        },
+        "scrollLabel": "Standalone sites",
+        "noValue": "—",
+        "columns": {
+          "name": "Site",
+          "host": "Host",
+          "inn": "Request INN",
+          "license": "License",
+          "actions": "Actions"
+        },
+        "licenseLine": "No. {{sequence}} · until {{validUntil}}",
+        "phase": {
+          "none": "Never issued",
+          "active": "Valid",
+          "attention": "Renew soon",
+          "retired": "Expired"
+        },
+        "plan": {
+          "demo": "Demo",
+          "subscription": "Subscription"
+        },
+        "renewalDue": "The license of site «{{name}}» ends {{validUntil}} — issue a renewal.",
+        "history": {
+          "open": "Issuance history",
+          "title": "Issuance history: {{name}}",
+          "close": "Close",
+          "scrollLabel": "Issued license files",
+          "sequence": "No.",
+          "plan": "Kind",
+          "validUntil": "Valid until",
+          "graceDays": "Grace, days",
+          "kid": "Key",
+          "sha256": "SHA-256",
+          "download": "Download",
+          "downloadLabel": "Download file No. {{sequence}}",
+          "empty": "No files issued yet.",
+          "downloadError": "Could not download the license file.",
+          "openLabel": "Issuance history: {{name}}"
+        },
+        "register": {
+          "open": "Add a site from an activation request",
+          "title": "Site from an activation request",
+          "drop": "Drop the request file or click",
+          "dropHint": "The «Activation request» file from the standalone «License» section, JSON up to 64 KiB",
+          "fileErrors": {
+            "too_large": "The file is larger than 64 KiB — not an activation request.",
+            "not_json": "The file is not readable JSON.",
+            "invalid": "The file does not look like a standalone activation request."
+          },
+          "facts": {
+            "host": "Host",
+            "version": "Version",
+            "organization": "Organization",
+            "requestInn": "Request INN",
+            "orgInn": "Organization profile INN",
+            "billingInn": "Billing profile INN",
+            "usage": "In use: stations and handhelds {{stations}}, office users {{cabinetUsers}}, lines {{lines}}"
+          },
+          "warningsTitle": "INN mismatches",
+          "mode": {
+            "label": "What to do with the request",
+            "create": "New site",
+            "rebind": "New host for site «{{name}}»"
+          },
+          "name": "Site name",
+          "acknowledge": "Mismatches checked, the site may be bound",
+          "submit": "Add site",
+          "submitRebind": "Bind the new host",
+          "cancel": "Cancel",
+          "blocking": {
+            "host_registered": "This host is already bound to site «{{name}}» of this tenant.",
+            "host_taken": "This host is already bound to another tenant's site."
+          }
+        },
+        "issue": {
+          "open": "Issue offline license",
+          "title": "Issue an offline license: {{name}}",
+          "graceDays": "Grace period, days",
+          "graceHint": "Empty — the default: 14 for a subscription, 0 for a demo. Allowed 0–60.",
+          "graceInvalid": "A whole number from 0 to 60.",
+          "preview": "Preview",
+          "confirm": "Confirm and download",
+          "cancel": "Close",
+          "comparison": "Before → after",
+          "before": "Before",
+          "after": "After",
+          "none": "—",
+          "unlimited": "unlimited",
+          "enabled": "on",
+          "disabled": "off",
+          "unmapped": "not mapped",
+          "belowUsage": "below usage",
+          "row": {
+            "sequence": "File number",
+            "plan": "Kind",
+            "validUntil": "Valid until (exclusive)",
+            "graceDays": "Grace period, days",
+            "source": "Basis"
+          },
+          "reason": {
+            "subscription_end": "subscription end",
+            "entitlement_reduction": "next reduction of rights",
+            "one_year_cap": "one-year cap",
+            "offline_term": "offline terms' term"
+          },
+          "yearCapNote": "The file is valid for at most a year from issuance (a subscription without an end date or longer than a year). When it lapses, the tenant requests a new file from us free of charge.",
+          "offline": {
+            "title": "Offline",
+            "hint": "Tenant without a cabinet: the file's rights and term come from offline terms, not from a subscription. No cloud access is opened.",
+            "plan": "Plan",
+            "planPlaceholder": "Choose a published plan",
+            "termDays": "Term, days",
+            "termHint": "1 to 365 days from issuance; no unlimited term.",
+            "termInvalid": "A whole number from 1 to 365.",
+            "version": "version {{version}}",
+            "catalogError": "Could not load the catalog plans.",
+            "planEmpty": "No published plans.",
+            "planLoading": "Loading plans…"
+          },
+          "issued": "File No. {{sequence}} issued and downloaded.",
+          "openLabel": "Issue offline license: {{name}}"
+        },
+        "warnings": {
+          "request_inn_missing": "The request has no organization INN.",
+          "request_inn_invalid": "The request INN fails the checksum.",
+          "org_inn_missing": "The tenant's organization profile has no valid INN.",
+          "request_inn_differs_org": "The request INN differs from the organization profile INN.",
+          "request_inn_differs_billing": "The request INN differs from the billing profile INN.",
+          "trial_inn_differs": "The standalone trial started under another INN.",
+          "customer_inn_from_billing": "The organization profile has no INN — the license takes the billing profile INN.",
+          "billing_inn_differs": "The billing profile INN ({{billingInn}}) differs from the organization profile INN.",
+          "site_inn_differs": "The site's request INN ({{siteInn}}) differs from the license INN — the host will refuse the file.",
+          "quota_below_usage": "{{quota}}: the license allows {{limit}}, the site already uses {{used}} — new ones will not connect.",
+          "feature_unmapped": "«{{feature}}» is not mapped in the plan — the file carries «off»."
+        },
+        "errors": {
+          "standalone_site_warnings_unacknowledged": "The mismatches changed — check them again.",
+          "standalone_site_host_taken": "This host is already bound to another tenant's site.",
+          "standalone_site_host_registered": "This host is already bound to a site of this tenant.",
+          "standalone_site_host_unchanged": "The site already has this host.",
+          "standalone_site_request_conflict": "This request was already done with other data — reopen the dialog.",
+          "standalone_site_history_full": "The site's host history is too long.",
+          "standalone_license_preview_stale": "The site's rights or issuances changed — preview again.",
+          "standalone_license_subscription_required": "The tenant has no current plan subscription — nothing to issue.",
+          "standalone_license_inn_required": "No valid tenant INN: set it in the organization or billing profile.",
+          "standalone_license_signing_unavailable": "Offline license signing is not configured on the server.",
+          "standalone_license_request_conflict": "This issuance was already confirmed with other data — preview again.",
+          "standalone_license_grace_invalid": "A demo has a grace period of 0 days.",
+          "standalone_license_offline_terms_required": "The tenant has no cabinet: enter the offline terms — a plan and a term.",
+          "standalone_license_offline_not_allowed": "The tenant has a cabinet: its license comes from its subscription, no offline terms.",
+          "standalone_license_offline_plan_unavailable": "The plan is missing or not published — choose a published plan.",
+          "generic": "The operation failed. Retry."
+        }
+      },
+      "diagnostics": {
+        "title": "Standalone diagnostics",
+        "description": "Support texts sent by the customer: versions, license use and monthly statistics. The customer's data is unsigned and never affects a license.",
+        "empty": "No reports yet. Paste the «Support information» text the customer sent.",
+        "emptyReadOnly": "No reports yet. An operator allowed to issue licenses uploads them.",
+        "loading": "Loading diagnostics…",
+        "loadError": "Could not load diagnostics.",
+        "retry": "Retry",
+        "noValue": "—",
+        "role": {
+          "host": "Host and station",
+          "station": "Station only",
+          "office": "Office only",
+          "development": "Development build"
+        },
+        "overview": {
+          "noSite": "Site not linked",
+          "stale": "Old report",
+          "outdated": "Version is out of date: {{latest}} is published",
+          "host": "Host",
+          "role": "PC role",
+          "appVersion": "App version",
+          "hostVersion": "Host version",
+          "received": "Received",
+          "receivedAgo": "days ago: {{n}}",
+          "system": "OS and runtime",
+          "devices": "Devices",
+          "deviceCounts": "stations {{station}}, offices {{office}}, handhelds {{handheld}}",
+          "license": "License",
+          "validUntil": "until",
+          "daysLeft": "days left: {{n}}",
+          "over": "over the limit",
+          "quotaOf": "{{used}} of {{limit}}",
+          "quotaOverOf": "in use {{used}} of {{limit}}",
+          "quotaUnlimited": "{{used}} of ∞",
+          "features": "Features",
+          "on": "on",
+          "off": "off",
+          "fileOnly": "The file on the PC is No. {{pc}}.",
+          "fileSame": "The file on the PC is No. {{pc}}; it matches the one issued in the cloud.",
+          "fileDiffers": "The file on the PC is No. {{pc}}; the cloud issued No. {{cloud}}: the numbers differ."
+        },
+        "ingest": {
+          "title": "Upload a text",
+          "label": "«Support information» text",
+          "counter": "Characters: {{n}}",
+          "submit": "Parse and save",
+          "saved": "Saved: {{host}}, {{version}}, months updated {{n}}",
+          "duplicate": "Already uploaded: this report is in the history.",
+          "confirmUnbound": "The site was not found among the customer's sites. Save without linking?",
+          "confirmUnboundAction": "Save without linking"
+        },
+        "statistics": {
+          "title": "Statistics by month",
+          "tableLabel": "Statistics by month",
+          "scrollLabel": "Statistics by month, scrollable table",
+          "empty": "No statistics yet.",
+          "hostLabel": "Host",
+          "allHosts": "All hosts",
+          "severalHosts": "The sum covers several hosts: a month that both the old and the new host of a rebound site reported is counted twice. Pick a host to see it alone.",
+          "noData": "no data",
+          "chartsTitle": "Charts by month",
+          "chartShifts": "Shifts by mode",
+          "chartScans": "Accepted and rejected",
+          "chartErrors": "Errors and exceptions",
+          "columns": {
+            "month": "Month",
+            "aggregation": "Aggregation shifts",
+            "validation": "Validation shifts",
+            "validationPrint": "Validation with print",
+            "withPallets": "Shifts with pallets",
+            "accepted": "Accepted",
+            "duplicates": "Duplicates",
+            "rejected": "Rejected",
+            "boxes": "Boxes",
+            "codesPerBox": "Codes per box",
+            "pallets": "Pallets",
+            "exceptions": "Exceptions",
+            "conflicts": "Conflicts",
+            "reprints": "Reprints",
+            "disaggregation": "Disaggregations",
+            "syncRejected": "Sync rejections"
+          }
+        },
+        "history": {
+          "title": "Report history",
+          "scrollLabel": "Report history, scrollable table",
+          "empty": "No reports yet.",
+          "received": "Received",
+          "generated": "Generated",
+          "host": "Host",
+          "role": "Role",
+          "appVersion": "App version",
+          "hostVersion": "Host version",
+          "license": "License",
+          "open": "Open",
+          "openLabel": "Open the report of {{date}}",
+          "more": "Show more",
+          "detailTitle": "Support report",
+          "close": "Close",
+          "monthLine": "accepted {{accepted}}, duplicates {{duplicates}}, rejected {{rejected}}, boxes {{boxes}}"
+        },
+        "errors": {
+          "generic": "Could not process the text. Check that the whole text was pasted and try again.",
+          "standalone_diagnostics_not_configured": "Diagnostics: intake is not configured — the server has no support key.",
+          "standalone_diagnostics_text_too_large": "The text is too large for a support text. Paste only the text that was sent.",
+          "standalone_diagnostics_no_token": "The text has no encrypted data (a line starting with MKS1). Paste the whole text.",
+          "standalone_diagnostics_token_malformed": "The encrypted data is damaged: the line is cut or changed.",
+          "standalone_diagnostics_token_too_large": "The encrypted data is too large to be genuine.",
+          "standalone_diagnostics_unknown_key": "No support key fits the token: it is encrypted with a key the API does not have. The API needs the key in its settings, or the customer needs a newer build.",
+          "standalone_diagnostics_undecryptable": "Could not decrypt the token: the text was changed or damaged.",
+          "standalone_diagnostics_payload_too_large": "The decrypted data is too large to be genuine.",
+          "standalone_diagnostics_payload_invalid": "The data was decrypted, but its content does not match the support-text format.",
+          "standalone_diagnostics_generated_in_future": "The report's time is more than a day ahead: check the clock of the customer's PC.",
+          "standalone_diagnostics_host_other_tenant": "The host in this text belongs to another customer's site. Check that the text is pasted into the right card. Nothing was saved.",
+          "standalone_diagnostics_host_unbound": "The site was not found among the customer's sites.",
+          "standalone_diagnostics_token_conflict": "This token was already uploaded to another customer's card.",
+          "standalone_diagnostics_cursor_invalid": "Could not open the next page of the history. Refresh the page."
+        }
       },
       "slug": "Slug",
       "createdAt": "Created",
@@ -2026,7 +2319,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "assignment": {
       "title": "Direct assignment",
@@ -2334,7 +2628,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "operationsLabels": {
       "nk_lookup_v1": "NC: product lookup",
@@ -2417,7 +2712,10 @@
     "syncError": "History sync failed",
     "noticeReview": "This history lacks a confirmed access notice. An operator must review it; retrying sync cannot restore consent.",
     "retrySync": "Retry sync",
-    "side": { "customer": "Customer", "operator": "Operator" },
+    "side": {
+      "customer": "Customer",
+      "operator": "Operator"
+    },
     "proposal": {
       "pending": "Awaiting customer decision",
       "accepted": "Customer accepted",

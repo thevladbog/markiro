@@ -22,6 +22,7 @@ const EFFECT_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const satisfies readonly AddonEffect["key"][];
 
 const QUOTA_EFFECT_KEYS = new Set<AddonEffect["key"]>([
@@ -45,7 +46,7 @@ export function fromAddonEffects(effects: AddonEffect[]): EditableAddonEffect[] 
 }
 
 export function toAddonEffects(editable: EditableAddonEffect[]): AddonEffect[] {
-  if (editable.length < 1 || editable.length > 11) throw new Error("effectRequired");
+  if (editable.length < 1 || editable.length > 12) throw new Error("effectRequired");
   const seen = new Set<AddonEffect["key"]>();
   return editable.map((effect) => {
     if (seen.has(effect.key)) throw new Error("effectDuplicate");
@@ -59,7 +60,8 @@ export function toAddonEffects(editable: EditableAddonEffect[]): AddonEffect[] {
           | "chzIntegration"
           | "inventory"
           | "commerceMl"
-          | "handheld",
+          | "handheld"
+          | "customLogo",
         featureEnabled: true as const,
       };
     }
