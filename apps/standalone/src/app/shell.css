@@ -1195,3 +1195,11 @@
 .shift-drawer .shift-card__section {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* «Поиск кодов»: the quick periods under the filters, one row. */
+.code-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
