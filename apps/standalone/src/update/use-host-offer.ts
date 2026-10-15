@@ -7,7 +7,7 @@ import { hostUpdateOffer, type HostOfferInput, type HostUpdateOffer } from "./ho
 import { UpdateError, type UpdatesApi } from "./updates-api.js";
 
 interface OfferRead {
-  key: string;
+  hostVersion: string;
   offer: DeviceUpdateOffer | null;
   manifest: HostOfferInput["manifest"];
 }
@@ -50,11 +50,15 @@ export function useHostUpdateOffer({
     appVersion !== null &&
     hostVersion !== null &&
     compareAppVersions(hostVersion, appVersion) === 1;
+  // The read is kept per host version and read again each time the link comes
+  // online or the host refuses this app, never on a flap to «away»: the offer
+  // then stays what it was (the dialog may be mid-flow). A failed read never
+  // replaces a good one of the same host version.
   const moment = link?.state === "online" ? "online" : appTooOld ? "too_old" : "away";
-  const key = newer ? `${hostVersion}:${moment}` : null;
+  const fetchKey = newer && moment !== "away" ? `${hostVersion}:${moment}` : null;
   const [read, setRead] = useState<OfferRead | null>(null);
   useEffect(() => {
-    if (key === null) return;
+    if (fetchKey === null || hostVersion === null) return;
     let alive = true;
     void (async () => {
       let offer: DeviceUpdateOffer | null = null;
@@ -70,13 +74,18 @@ export function useHostUpdateOffer({
       } catch {
         // The offer was not read: `offer` stays `null` and the rule says «unread».
       }
-      if (alive) setRead({ key, offer, manifest });
+      if (!alive) return;
+      setRead((previous) =>
+        offer === null && previous !== null && previous.hostVersion === hostVersion
+          ? previous
+          : { hostVersion, offer, manifest },
+      );
     })();
     return () => {
       alive = false;
     };
-  }, [key, host, updates]);
-  const current = read !== null && read.key === key ? read : null;
+  }, [fetchKey, hostVersion, host, updates]);
+  const current = read !== null && read.hostVersion === hostVersion ? read : null;
   return hostUpdateOffer({
     appVersion,
     hostVersion,

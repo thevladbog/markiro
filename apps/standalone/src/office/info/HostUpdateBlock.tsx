@@ -6,6 +6,7 @@ import { Button, Card } from "@markiro/ui";
 
 import type { HostUpdateOffer } from "../../update/host-offer.js";
 import { useUpdateOffer } from "../../update/offer-context.js";
+import { useKeptOffer } from "../../update/kept-offer.js";
 import { UpdateFromHostDialog } from "../../update/UpdateFromHostDialog.js";
 import { useOfficeSession } from "../office-session.js";
 import { useAboutData } from "./about-data.js";
@@ -45,6 +46,7 @@ export function HostUpdateBlock() {
   const session = useOfficeSession();
   const shell = useUpdateShell();
   const [open, setOpen] = useState(false);
+  const dialogOffer = useKeptOffer(offer, open);
   if (about.isPending || about.data?.role === "host") return null;
   const { user } = session;
   const appVersion = about.data?.appVersion ?? "—";
@@ -68,15 +70,15 @@ export function HostUpdateBlock() {
     <Card title={t("office.about.update.host.title")} titleAs="h3">
       <p>{offerText(offer, appVersion, t)}</p>
       {offer.kind === "available" && user.role === "admin" && (
-        <>
-          <Button onClick={() => setOpen(true)}>{t("office.about.update.host.open")}</Button>
-          <UpdateFromHostDialog
-            open={open}
-            offer={offer}
-            onClose={() => setOpen(false)}
-            start={start}
-          />
-        </>
+        <Button onClick={() => setOpen(true)}>{t("office.about.update.host.open")}</Button>
+      )}
+      {dialogOffer !== null && user.role === "admin" && (
+        <UpdateFromHostDialog
+          open={open}
+          offer={dialogOffer}
+          onClose={() => setOpen(false)}
+          start={start}
+        />
       )}
       {offer.kind === "available" && user.role !== "admin" && (
         <p className="office-note">{t("office.about.update.host.adminOnly")}</p>

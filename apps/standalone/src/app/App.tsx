@@ -56,6 +56,7 @@ import { countUnsentRecords } from "../local/outbox.js";
 import type { UpdatesApi } from "../update/updates-api.js";
 import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
 import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
+import { useKeptOffer } from "../update/kept-offer.js";
 import { useHostUpdateOffer } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
@@ -327,6 +328,8 @@ function AppScreens({
   const updateShell = useUpdateShell();
   const [updateOpen, setUpdateOpen] = useState(false);
   const offerToInstall = updateOffer.kind === "available" ? updateOffer : null;
+  // The dialog outlives a re-read of the offer while it is open.
+  const dialogOffer = useKeptOffer(updateOffer, updateOpen);
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
@@ -1068,10 +1071,10 @@ function AppScreens({
           link={state.link}
         />
       )}
-      {offerToInstall !== null && (
+      {dialogOffer !== null && (
         <UpdateFromHostDialog
           open={updateOpen}
-          offer={offerToInstall}
+          offer={dialogOffer}
           onClose={() => setUpdateOpen(false)}
           // No office here: no `app.update.start` report (its route is the
           // office's); Windows' administrator prompt is the permission.
