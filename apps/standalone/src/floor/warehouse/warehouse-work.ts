@@ -3,17 +3,20 @@ import {
   compareWarehouseReprintLabel,
   DomainError,
   kmHash,
-  labelTemplateSpecSchema,
+  isPalletSheetSpec,
   palletLabelFields,
   parseDuplicateKm,
+  parseStoredLabelTemplate,
   resolveWarehouseReprintScan,
   type LabelTemplateSpec,
+  type PalletSheetSpecV2,
 } from "@markiro/domain";
 
 import { shellActionFor } from "../../app/shell.js";
 import { bytesToBase64 } from "../../hardware/hardware.js";
 import { HostError } from "../../host/client.js";
 import type {
+  PalletSheets,
   WarehouseLookup,
   WarehouseLookupResult,
   WarehouseSource,
@@ -35,6 +38,12 @@ import {
 } from "../setup/workstation-settings.js";
 import { readOperatorCopy } from "../sign-in.js";
 import { readKnownOrganizationLogo } from "./warehouse-logo.js";
+import {
+  chosenSheet,
+  parseSheetChoice,
+  renderWarehouseSheet,
+  sheetSpecOf,
+} from "./warehouse-sheet.js";
 import { checkTemplate, readWarehouseTemplates } from "./warehouse-templates.js";
 import {
   insertJobStatement,
@@ -56,7 +65,7 @@ import {
 
 /** How a label printed again is rendered: `warehouseLabelRender` by default, a test's own otherwise. */
 export type RenderWarehouseLabel = (
-  spec: LabelTemplateSpec,
+  spec: LabelTemplateSpec | PalletSheetSpecV2,
   fields: LabelFields,
   printer: LabelPrinter,
   options: { kmDataMatrix?: "native" | "raster" },
@@ -76,8 +85,14 @@ export function warehouseLabelRender(
   pairing: Pairing,
   deps: ShiftRenderDeps = {},
 ): RenderWarehouseLabel {
-  return (spec, fields, printer, options) =>
-    renderLogoLabel(
+  return (spec, fields, printer, options) => {
+    // A pallet's A4 sheet (beta 3.2): a sheet's layout on a printer of sheets, and only there.
+    if (isPalletSheetSpec(spec)) {
+      if (printer.paper !== "a4") throw new Error("a sheet's layout needs a printer of sheets");
+      return renderWarehouseSheet(local, pairing, spec, fields, deps);
+    }
+    if (printer.paper === "a4") throw new Error("a label's layout needs a printer of labels");
+    return renderLogoLabel(
       spec,
       fields,
       printer,
@@ -85,6 +100,7 @@ export function warehouseLabelRender(
       deps,
       options,
     );
+  };
 }
 
 /** What the warehouse work needs: the database, the pairing, the printers, a clock, ids. */
@@ -98,6 +114,11 @@ export interface WarehouseContext {
   render?: RenderWarehouseLabel;
   /** What the app's render takes instead of its own rasterizer and logo loaders (tests). */
   labelDeps?: ShiftRenderDeps;
+  /**
+   * `HostApi.getDevicePalletSheets` (beta 3.2): the A4 sheets and the default of a product, asked
+   * when a pallet is prepared for a printer of sheets; none — no sheet is offered.
+   */
+  sheets?: (productId?: string) => Promise<PalletSheets>;
 }
 
 function renderOf(context: WarehouseContext): RenderWarehouseLabel {
@@ -118,12 +139,15 @@ function renderOptions(kind: WarehouseSubjectKind): { kmDataMatrix?: "raster" } 
 
 /**
  * Why a label cannot go to a printer: none is assigned to its kind
- * (`printer_unconfigured`), the one assigned prints A4 sheets (`printer_a4`,
- * plan А4: a warehouse reprint is a thermal label — a box's, a unit's or a
- * pallet's — and never an A4 sheet, which only a shift's own pallet close
- * prints from its frozen snapshot), or the label does not render for it.
+ * (`printer_unconfigured`), the one assigned prints A4 sheets and the label is a
+ * thermal one (`printer_a4`: a box's or a unit's label never goes to a printer of
+ * sheets, nor a pallet's label job made for a label printer), the printer is of
+ * labels and the job is a pallet's sheet (`printer_not_a4`), or the label does not
+ * render for it. A pallet's sheet (beta 3.2) goes to the printer of sheets assigned
+ * to pallets, from the sheets the host lists.
  */
-export type WarehousePrinterCode = "printer_unconfigured" | "printer_a4" | "render_failed";
+export type WarehousePrinterCode =
+  "printer_unconfigured" | "printer_a4" | "printer_not_a4" | "render_failed";
 
 /** A retry or a new attempt has no printer for its kind, or its label does not render for it. */
 export class WarehousePrinterError extends Error {
@@ -137,9 +161,9 @@ export class WarehousePrinterError extends Error {
 
 /**
  * The printer a label of `kind` prints on, as the settings assign it now: an
- * A4 printer — which only the purpose «Паллета» may have — is no printer for a
- * warehouse reprint (`printer_a4`), so neither a thermal page reaches an A4
- * printer nor an A4 page comes from this path.
+ * A4 printer — which only the purpose «Паллета» may have — takes a pallet's
+ * sheet (beta 3.2) and nothing else: a box's or a unit's label is refused for it
+ * (`printer_a4`), so no thermal page reaches an A4 printer.
  */
 function warehousePrinter(
   settings: Pick<WorkstationSettings, "printers" | "assignments">,
@@ -147,7 +171,7 @@ function warehousePrinter(
 ): { printer: PrinterProfile } | { error: "printer_unconfigured" | "printer_a4" } {
   const printer = resolvePrinter(settings, PRINT_PURPOSE[kind]);
   if (printer === null) return { error: "printer_unconfigured" };
-  if (printer.paper === "a4") return { error: "printer_a4" };
+  if (printer.paper === "a4" && kind !== "pallet") return { error: "printer_a4" };
   return { printer };
 }
 
@@ -292,6 +316,8 @@ export function sourceFields(source: WarehouseSource): LabelFields {
 /** Why a found record was not made into a job. */
 export type PrepareRefusal =
   | "incomplete_km"
+  | "no_sheet"
+  | "sheets_unavailable"
   | "no_template"
   | "template_unavailable"
   | "template_unfit"
@@ -300,6 +326,38 @@ export type PrepareRefusal =
 
 export type PrepareResult =
   { kind: "job"; job: WarehouseJob } | { kind: "refused"; reason: PrepareRefusal };
+
+/**
+ * The A4 sheet a pallet's job freezes (beta 3.2): the session's choice — `sheet:auto`, the
+ * sheet the pallet's product gets by default, or one sheet — among the enabled sheets the host
+ * lists now. The host is asked when the pallet is prepared (the lookup has just reached it):
+ * a host that does not answer is `sheets_unavailable`, a session that holds a label template
+ * instead of a sheet `no_sheet`, a sheet that is gone, off or unreadable `template_unavailable`
+ * and `template_unfit`.
+ */
+async function sheetFor(
+  context: WarehouseContext,
+  chosen: string | null,
+  source: WarehouseSource,
+): Promise<
+  | { kind: "refused"; reason: PrepareRefusal }
+  | { kind: "ok"; frozen: { id: string; rev: number; spec: PalletSheetSpecV2 } }
+> {
+  const choice = parseSheetChoice(chosen);
+  if (choice === null) return { kind: "refused", reason: "no_sheet" };
+  if (context.sheets === undefined) return { kind: "refused", reason: "sheets_unavailable" };
+  let listed: PalletSheets;
+  try {
+    listed = await context.sheets(source.product.id);
+  } catch {
+    return { kind: "refused", reason: "sheets_unavailable" };
+  }
+  const sheet = chosenSheet(listed, choice);
+  if (sheet === null) return { kind: "refused", reason: "template_unavailable" };
+  const spec = sheetSpecOf(sheet);
+  if (spec === null) return { kind: "refused", reason: "template_unfit" };
+  return { kind: "ok", frozen: { id: sheet.id, rev: sheet.revision, spec } };
+}
 
 /**
  * Makes the job of a found record (decisions Р8, Р13, Р14): the operator checked
@@ -333,24 +391,34 @@ export async function prepareWarehouseJob(
     }
     throw error;
   }
-  const check = checkTemplate(
-    await readWarehouseTemplates(local),
-    session.templates[source.kind],
-    source.kind,
-    source.product.chzProductGroupCode,
-  );
-  if (check.kind !== "ok") return { kind: "refused", reason: check.kind };
+  const assigned = warehousePrinter(await readWorkstationSettings(local), source.kind);
+  const printer = "printer" in assigned ? assigned.printer : null;
+  // What the job freezes: a label template of the copies, or — for a pallet on a printer of
+  // sheets (beta 3.2) — the A4 sheet the session chose, from the host's list.
+  let frozen: { id: string; rev: number; spec: LabelTemplateSpec | PalletSheetSpecV2 };
+  if (printer?.paper === "a4") {
+    const sheet = await sheetFor(context, session.templates.pallet, source);
+    if (sheet.kind === "refused") return sheet;
+    frozen = sheet.frozen;
+  } else {
+    const check = checkTemplate(
+      await readWarehouseTemplates(local),
+      session.templates[source.kind],
+      source.kind,
+      source.product.chzProductGroupCode,
+    );
+    if (check.kind !== "ok") return { kind: "refused", reason: check.kind };
+    frozen = { id: check.template.id, rev: check.template.rev, spec: check.spec };
+  }
   if ((await readOpenJob(local, pairing, session.id)) !== null) {
     return { kind: "refused", reason: "busy" };
   }
-  const assigned = warehousePrinter(await readWorkstationSettings(local), source.kind);
-  const printer = "printer" in assigned ? assigned.printer : null;
   let bytes: string | null = null;
   let error: WarehousePrinterCode | null = "error" in assigned ? assigned.error : null;
   if (printer !== null) {
     try {
       bytes = bytesToBase64(
-        await renderOf(context)(check.spec, fields, printer, renderOptions(source.kind)),
+        await renderOf(context)(frozen.spec, fields, printer, renderOptions(source.kind)),
       );
     } catch {
       error = "render_failed";
@@ -366,9 +434,9 @@ export async function prepareWarehouseJob(
     repair: input.repair,
     reason: session.reason,
     state: error === null ? "prepared" : "failed",
-    templateId: check.template.id,
-    templateRev: check.template.rev,
-    templateSpec: JSON.stringify(check.spec),
+    templateId: frozen.id,
+    templateRev: frozen.rev,
+    templateSpec: JSON.stringify(frozen.spec),
     fields,
     printer: bytes === null ? null : printer,
     bytesBase64: bytes,
@@ -494,14 +562,23 @@ export async function sendWarehouseJob(
       bytes === null ||
       printer === null ||
       printerMode(printer) !== printerMode(assigned) ||
+      printer.paper !== assigned.paper ||
       printer.language !== assigned.language ||
       printer.dpi !== assigned.dpi
     ) {
-      const spec = labelTemplateSpecSchema.safeParse(JSON.parse(job.templateSpec));
-      if (!spec.success) throw new WarehousePrinterError("render_failed");
+      let spec: LabelTemplateSpec | PalletSheetSpecV2;
+      try {
+        spec = parseStoredLabelTemplate(JSON.parse(job.templateSpec));
+      } catch {
+        throw new WarehousePrinterError("render_failed");
+      }
+      // A sheet's layout draws only on a printer of sheets, a label's only on a printer of labels.
+      if (isPalletSheetSpec(spec) !== (assigned.paper === "a4")) {
+        throw new WarehousePrinterError(assigned.paper === "a4" ? "printer_a4" : "printer_not_a4");
+      }
       try {
         bytes = bytesToBase64(
-          await renderOf(context)(spec.data, job.fields, assigned, renderOptions(job.kind)),
+          await renderOf(context)(spec, job.fields, assigned, renderOptions(job.kind)),
         );
       } catch {
         throw new WarehousePrinterError("render_failed");
@@ -510,8 +587,10 @@ export async function sendWarehouseJob(
     printer = assigned;
   }
   if (printer === null || bytes === null) throw new WarehouseStateError(job.id, job.state);
-  // A job prepared for an A4 printer by a build before this rule: never sent from here.
-  if (printer.paper === "a4") throw new WarehousePrinterError("printer_a4");
+  // A job prepared for an A4 printer by a build before this rule: never sent from here — only a
+  // pallet's sheet goes to a printer of sheets (beta 3.2).
+  if (printer.paper === "a4" && job.kind !== "pallet")
+    throw new WarehousePrinterError("printer_a4");
   const reason = intent.kind === "again" ? intent.reason : job.reason;
   try {
     await local.transaction([

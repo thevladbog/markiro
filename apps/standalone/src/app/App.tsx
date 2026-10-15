@@ -975,6 +975,7 @@ export function App({
                 checkCode={hostApi.checkCode}
                 requestBlock={hostApi.requestSsccBlock}
                 warehouseLookup={hostApi.warehouseLookup}
+                palletSheets={hostApi.getDevicePalletSheets}
                 requestFacts={requestFacts}
                 source={floorGate.source}
                 printing={printing}

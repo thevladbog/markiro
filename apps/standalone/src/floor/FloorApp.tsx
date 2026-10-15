@@ -20,6 +20,7 @@ import {
 import type {
   WarehouseLookup,
   WarehouseLookupResult,
+  PalletSheets,
   CodeCheck,
   DeviceShift,
   DeviceShiftCreate,
@@ -110,6 +111,8 @@ export interface FloorAppProps {
   requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
   /** `HostApi.warehouseLookup` (plan СКЛ); none — the list offers no warehouse reprint. */
   warehouseLookup?: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
+  /** `HostApi.getDevicePalletSheets`: the A4 sheets of a pallet's warehouse reprint (beta 3.2); none — no sheet is offered. */
+  palletSheets?: (productId?: string) => Promise<PalletSheets>;
   /** The link's delivery of the outbox, asked after every local write (`useHostLink`). */
   requestFacts: () => void;
   /** The floor's scanner: a new shift's product is chosen by a scan. */
@@ -167,6 +170,7 @@ export function FloorApp({
   checkCode,
   requestBlock,
   warehouseLookup,
+  palletSheets,
   requestFacts,
   source,
   printing,
@@ -490,6 +494,7 @@ export function FloorApp({
         isLeaving={isLeaving}
         source={source}
         lookup={warehouseLookup}
+        {...(palletSheets === undefined ? {} : { palletSheets })}
         onHostError={hostError}
         onRecorded={recorded}
         printing={printing}

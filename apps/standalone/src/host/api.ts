@@ -542,6 +542,13 @@ export interface HostApi {
    */
   getDeviceProductPhoto: (productId: string) => Promise<ProductPhotoState>;
   /**
+   * The enabled A4 pallet sheets with their layouts, for a warehouse reprint of a pallet's
+   * sheet (beta 3.2): `defaultId` is the sheet the product gets by default (its own, its
+   * category's, the organization's), or only the organization's without a product. The device
+   * key only; `not_found` for an unknown product.
+   */
+  getDevicePalletSheets: (productId?: string) => Promise<PalletSheets>;
+  /**
    * What a label is printed again from (plan СКЛ): a unit by its code's hash,
    * a box or a pallet by its SSCC, of any station and any shift of this site.
    * The full code comes only in the answer's body.
@@ -952,6 +959,14 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/device/products/${encodeURIComponent(productId)}/photo`, {
         schema: productPhotoStateSchema,
       }),
+    getDevicePalletSheets: (productId) =>
+      client.request(
+        "GET",
+        productId === undefined
+          ? "/v1/device/pallet-sheets"
+          : `/v1/device/pallet-sheets?productId=${encodeURIComponent(productId)}`,
+        { schema: palletSheetsSchema },
+      ),
     warehouseLookup: (lookup) =>
       client.request("POST", "/v1/device/warehouse/lookup", {
         body: lookup,

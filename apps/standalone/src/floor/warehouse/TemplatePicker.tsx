@@ -1,16 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Input } from "@markiro/ui";
+import { Alert, Button, Input } from "@markiro/ui";
 
-import { WAREHOUSE_SUBJECT_KINDS, type WarehouseSubjectKind } from "../../host/protocol.js";
+import {
+  WAREHOUSE_SUBJECT_KINDS,
+  type PalletSheets,
+  type WarehouseSubjectKind,
+} from "../../host/protocol.js";
 import { drawLabel, paintCodeRasters } from "../../office/templates/label-renderer.js";
 import { useLabelRendering } from "../../office/templates/label-rendering.js";
 import { labelRenderOptions, labelSampleData } from "../../office/templates/label-samples.js";
 import type { ScanSource } from "../scan-source.js";
 import { WarehousePanel } from "./WarehousePanel.js";
 import type { WarehouseTemplates } from "./warehouse-store.js";
-import { isChoosable, KIND_PURPOSE, type WarehouseTemplate } from "./warehouse-templates.js";
+import { SHEET_AUTO, sheetChoiceName, sheetChoiceOf } from "./warehouse-sheet.js";
+import {
+  isChoosable,
+  KIND_PURPOSE,
+  type PalletPaper,
+  type WarehouseTemplate,
+} from "./warehouse-templates.js";
 import { realClock, useViewGuard } from "./view-guard.js";
 
 /** The preview's box; the label keeps its own proportions inside it. */
@@ -75,8 +85,22 @@ function TemplatePreview({ template }: { template: WarehouseTemplate | null }) {
   );
 }
 
+/** The host's A4 sheets as the picker has them (beta 3.2). */
+export type SheetsState =
+  { kind: "loading" } | { kind: "failed" } | { kind: "ready"; sheets: PalletSheets };
+
 export interface TemplatePickerProps {
   templates: readonly WarehouseTemplate[];
+  /**
+   * What the printer assigned to pallets prints (beta 3.2): the pallets' tab offers the host's A4
+   * sheets for a printer of sheets, the label templates for a label printer, and says so when
+   * there is no printer.
+   */
+  palletPaper?: PalletPaper;
+  /** The host's sheets, for the pallets' tab on a printer of sheets. */
+  sheets?: SheetsState;
+  /** «Повторить» of a list of sheets the host did not give. */
+  onReloadSheets?: () => void;
   chosen: WarehouseTemplates;
   source: ScanSource;
   onApply: (templates: WarehouseTemplates) => void;
@@ -95,6 +119,9 @@ export interface TemplatePickerProps {
  */
 export function TemplatePicker({
   templates,
+  palletPaper = "thermal",
+  sheets = { kind: "loading" },
+  onReloadSheets,
   chosen,
   source,
   onApply,
@@ -123,6 +150,98 @@ export function TemplatePicker({
   );
   const selected = templates.find((template) => template.id === draft[kind]) ?? null;
   const kindLabel = t(`floor.warehouse.templateFor.${kind}`);
+  // The pallets' tab depends on the pallet printer: sheets for a printer of sheets (beta 3.2).
+  const sheetTab = kind === "pallet" && palletPaper === "a4";
+  const noPrinterTab = kind === "pallet" && palletPaper === "none";
+  const readySheets = sheets.kind === "ready" ? sheets.sheets : null;
+  const listedSheets = (readySheets?.sheets ?? []).filter(
+    (sheet) => sheet.enabled && sheet.name.toLocaleLowerCase("ru").includes(needle),
+  );
+  const lineOf = (each: WarehouseSubjectKind): string => {
+    if (each === "pallet" && palletPaper === "a4") {
+      const named = sheetChoiceName(draft.pallet, readySheets);
+      return named === null
+        ? t("floor.warehouse.templateNone")
+        : named.kind === "auto"
+          ? t("floor.warehouse.sheets.lineAuto")
+          : named.name === null
+            ? t("floor.warehouse.sheets.lineSome")
+            : t("floor.warehouse.sheets.line", { name: named.name });
+    }
+    return (
+      templates.find((template) => template.id === draft[each])?.name ??
+      t("floor.warehouse.templateNone")
+    );
+  };
+  /** The list of A4 sheets: «по умолчанию товара» first, then the host's enabled ones. */
+  const sheetList = () => {
+    if (sheets.kind === "loading")
+      return <p className="label-template-empty">{t("floor.warehouse.sheets.loading")}</p>;
+    if (sheets.kind === "failed") {
+      return (
+        <Alert
+          tone="warn"
+          action={
+            onReloadSheets === undefined ? undefined : (
+              <Button size="floor" variant="secondary" {...press(onReloadSheets)}>
+                {t("floor.warehouse.sheets.retry")}
+              </Button>
+            )
+          }
+        >
+          {t("floor.warehouse.sheets.failed")}
+        </Alert>
+      );
+    }
+    if (sheets.sheets.sheets.filter((sheet) => sheet.enabled).length === 0) {
+      return <p className="label-template-empty">{t("floor.warehouse.sheets.none")}</p>;
+    }
+    const pick = (id: string) => ({ ...press(() => setDraft({ ...draft, pallet: id })) });
+    const optionStyle = (picked: boolean) =>
+      picked ? { ...OPTION_STYLE, ...PICKED_OPTION_STYLE } : OPTION_STYLE;
+    return (
+      <ul className="label-template-list" aria-label={kindLabel}>
+        {needle === "" && (
+          <li>
+            <Button
+              size="floor"
+              variant="secondary"
+              aria-pressed={draft.pallet === SHEET_AUTO}
+              {...pick(SHEET_AUTO)}
+              style={optionStyle(draft.pallet === SHEET_AUTO)}
+            >
+              {t("floor.warehouse.sheets.auto")}
+            </Button>
+          </li>
+        )}
+        {listedSheets.map((sheet) => {
+          const picked = draft.pallet === sheetChoiceOf(sheet.id);
+          return (
+            <li key={sheet.id}>
+              <Button
+                size="floor"
+                variant="secondary"
+                aria-pressed={picked}
+                {...pick(sheetChoiceOf(sheet.id))}
+                style={optionStyle(picked)}
+              >
+                {sheet.name}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
+
+  /** What the right column says of the chosen sheet: its name, or what «по умолчанию» means. */
+  const sheetPreviewText = (): string => {
+    const named = sheetChoiceName(draft.pallet, readySheets);
+    if (named === null) return t("floor.warehouse.sheets.kindHint");
+    if (named.kind === "auto") return t("floor.warehouse.sheets.autoHint");
+    return t("floor.warehouse.sheets.preview", { name: named.name ?? "" });
+  };
+
   return (
     <div className="warehouse-picker" tabIndex={-1} ref={viewRef}>
       <WarehousePanel
@@ -136,9 +255,7 @@ export function TemplatePicker({
               {WAREHOUSE_SUBJECT_KINDS.map((each) =>
                 t("floor.warehouse.templateLine", {
                   kind: t(`floor.warehouse.templateFor.${each}`),
-                  name:
-                    templates.find((template) => template.id === draft[each])?.name ??
-                    t("floor.warehouse.templateNone"),
+                  name: lineOf(each),
                 }),
               ).join(" · ")}
             </p>
@@ -179,7 +296,11 @@ export function TemplatePicker({
                 onFocus={() => source.setManualTextEntryActive(true)}
                 onBlur={() => source.setManualTextEntryActive(false)}
               />
-              {choosable.length === 0 ? (
+              {noPrinterTab ? (
+                <Alert tone="warn">{t("floor.warehouse.noPalletPrinter")}</Alert>
+              ) : sheetTab ? (
+                sheetList()
+              ) : choosable.length === 0 ? (
                 <p className="label-template-empty">{t("floor.warehouse.noTemplates")}</p>
               ) : listed.length === 0 ? (
                 <p className="label-template-empty">{t("floor.warehouse.noMatch")}</p>
@@ -212,11 +333,23 @@ export function TemplatePicker({
               )}
             </div>
             <div className="label-template-preview">
-              <TemplatePreview
-                template={
-                  selected !== null && selected.purpose === KIND_PURPOSE[kind] ? selected : null
-                }
-              />
+              {sheetTab || noPrinterTab ? (
+                <p className="warehouse-label-preview">
+                  {sheetTab && sheetChoiceName(draft.pallet, readySheets) !== null
+                    ? sheetPreviewText()
+                    : t(
+                        sheetTab
+                          ? "floor.warehouse.sheets.kindHint"
+                          : "floor.warehouse.previewNone",
+                      )}
+                </p>
+              ) : (
+                <TemplatePreview
+                  template={
+                    selected !== null && selected.purpose === KIND_PURPOSE[kind] ? selected : null
+                  }
+                />
+              )}
             </div>
           </div>
         </div>

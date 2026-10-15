@@ -129,6 +129,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
     getDeviceProductPhoto: vi.fn<HostApi["getDeviceProductPhoto"]>(async () => ({ photo: null })),
+    getDevicePalletSheets: vi.fn<HostApi["getDevicePalletSheets"]>(async () => ({
+      sheets: [],
+      defaultId: null,
+    })),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
     warehouseLookup: vi.fn<HostApi["warehouseLookup"]>(() => unexpected("warehouseLookup")),
     sendWarehouseRecords: vi.fn<HostApi["sendWarehouseRecords"]>(() =>

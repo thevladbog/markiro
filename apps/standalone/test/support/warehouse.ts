@@ -125,6 +125,8 @@ export function seedWarehouseCopies(db: DatabaseSync, options: { operator?: bool
  */
 export const warehouseRender: RenderWarehouseLabel = async (spec, fields, printer, options) =>
   latin1ToBytes(
-    `^XA ${printer.language} ${printer.dpi} ${spec.widthMm}x${spec.heightMm} ` +
+    `^XA ${printer.language} ${printer.dpi} ` +
+      // A pallet's A4 sheet (beta 3.2) has no size of its own: its page says «A4».
+      `${"widthMm" in spec ? `${spec.widthMm}x${spec.heightMm}` : spec.page.size} ` +
       `${fields.sscc === "" ? "km" : fields.sscc} ${options.kmDataMatrix ?? "native"} ^XZ`,
   );
