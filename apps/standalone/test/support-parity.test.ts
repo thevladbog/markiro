@@ -1,4 +1,4 @@
-import { generateKeyPairSync, webcrypto } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -41,7 +41,7 @@ describe("one token, three readers (plan ДИАГ Ч1)", () => {
     async (compress) => {
       const token = await encryptSupportPayload(payload, key, {
         compress,
-        subtle: webcrypto.subtle,
+        subtle: crypto.subtle,
       });
       const text = `Сведения для поддержки\r\nДанные для анализа\r\nЗашифрованные данные\r\n${token}\r\n`;
 
