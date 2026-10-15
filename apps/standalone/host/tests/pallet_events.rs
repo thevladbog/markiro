@@ -487,3 +487,38 @@ async fn a_box_block_does_not_close_a_pallet() {
         ]
     );
 }
+
+#[tokio::test]
+async fn a_record_whose_id_is_not_a_uuid_is_rejected_before_it_is_applied() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 1).await;
+    let key = pair_handheld(&admin).await;
+    assert_eq!(
+        receipts_of(
+            &admin,
+            &key,
+            &[opened(1, PALLET_A, product_of(&setup), &instant(100, 0))]
+        )
+        .await,
+        vec![accepted(1)]
+    );
+    let mut spoiled = added(2, PALLET_A, &box_sscc(1500), &instant(101, 0));
+    spoiled["id"] = json!("not-a-uuid");
+    let receipts = receipts_of(&admin, &key, &[spoiled]).await;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0]["outcome"], json!("rejected"), "{receipts:?}");
+    assert_eq!(receipts[0]["code"], json!("invalid_record"), "{receipts:?}");
+    assert!(receipts[0].get("id").map_or(true, Value::is_null));
+    // Nothing was applied and no receipt was stored for it.
+    let boxes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM warehouse_pallet_boxes")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(boxes, 0);
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM device_event_receipts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+}

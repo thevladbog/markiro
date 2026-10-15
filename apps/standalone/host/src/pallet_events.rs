@@ -62,6 +62,13 @@ pub async fn receive(
         .and_then(Value::as_str)
         .filter(|id| validate::client_uuid("id", id).is_ok())
         .map(str::to_owned);
+    // A record without a valid id has no receipt to keep and must not write anything either: its
+    // raw id would end up in `warehouse_pallet_boxes.record_id`.
+    let Some(id) = id else {
+        tracing::warn!(device = %device_id, "a pallet event was rejected: its id is not a UUID");
+        return Ok(rejected(None, Reject::new(receipt_codes::INVALID_RECORD)));
+    };
+    let id = Some(id);
     let digest = rules::record_digest(value);
     if let Some(id) = &id {
         if let Some((stored_digest, receipt)) = stored(conn, device_id, id).await? {
