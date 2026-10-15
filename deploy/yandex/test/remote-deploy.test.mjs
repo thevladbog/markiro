@@ -16,6 +16,7 @@ import {
   runRemoteDeployment,
   streamArchive,
 } from "../remote-deploy.mjs";
+import { recordSmokeDiagnostic } from "../../production/smoke-diagnostic.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "987654321";
@@ -120,6 +121,45 @@ test("deploy CLI emits exactly one bounded line and never serializes private cau
     assert.equal(stderr, `MARKIRO_DEPLOY_FAILURE ${stage}\n`);
     for (const fragment of privateFragments) assert.equal(stderr.includes(fragment), false);
   }
+});
+
+test("deploy CLI adds one sanitized smoke cause line before the stage line, only for recorded smoke causes", async () => {
+  const run = async (stage, cause) => {
+    let stderr = "";
+    const exitCode = await runRemoteDeployCli({
+      argv: ["run"],
+      stderr: { write: (value) => (stderr += value) },
+      runDeployment: async () => {
+        throw new DeploymentStageError(stage, { cause });
+      },
+    });
+    assert.equal(exitCode, 1);
+    return stderr;
+  };
+
+  assert.equal(
+    await run("smoke", recordSmokeDiagnostic(new Error("CSP is missing on admin /docs"))),
+    "MARKIRO_SMOKE_FAILURE CSP is missing on admin /docs\nMARKIRO_DEPLOY_FAILURE smoke\n",
+  );
+  // A secret-looking message is withheld; the stage line stays the last line.
+  const leaked = await run(
+    "smoke",
+    recordSmokeDiagnostic(
+      new Error("Bearer registry-token-value ghs_abcdefghijklmnopqrstuvwxyz012345"),
+    ),
+  );
+  assert.equal(leaked, "MARKIRO_SMOKE_FAILURE message withheld\nMARKIRO_DEPLOY_FAILURE smoke\n");
+  // Not recorded by smoke.mjs: nothing extra, even for the smoke stage.
+  assert.equal(
+    await run("smoke", new Error("remote command said private message")),
+    "MARKIRO_DEPLOY_FAILURE smoke\n",
+  );
+  // Never for another stage, even when the cause was recorded.
+  for (const stage of DEPLOYMENT_STAGES.filter((value) => value !== "smoke"))
+    assert.equal(
+      await run(stage, recordSmokeDiagnostic(new Error("HSTS is missing"))),
+      `MARKIRO_DEPLOY_FAILURE ${stage}\n`,
+    );
 });
 
 test("deploy CLI maps invalid invocation and untyped failures to configuration", async () => {

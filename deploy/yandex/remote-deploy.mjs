@@ -12,6 +12,7 @@ import {
   productionBaseUrls,
   runPublicSmoke,
 } from "../production/smoke.mjs";
+import { smokeFailureLine } from "../production/smoke-diagnostic.mjs";
 import { isMainModule } from "./cli-main.mjs";
 import { registryCredentials } from "./registry-auth.mjs";
 
@@ -678,6 +679,9 @@ export async function runRemoteDeployCli(options = {}) {
       cause instanceof DeploymentStageError
         ? cause
         : new DeploymentStageError("configuration", { cause });
+    // The smoke cause is printed only when smoke.mjs itself recorded a sanitized
+    // diagnostic for it; it precedes the stage line, which stays the last line.
+    if (failure.stage === "smoke") stderr.write(smokeFailureLine(failure.cause));
     stderr.write(`MARKIRO_DEPLOY_FAILURE ${failure.stage}\n`);
     return 1;
   }

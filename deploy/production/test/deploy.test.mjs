@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { deployRelease, writeRelease } from "../deploy.mjs";
+import { recordSmokeDiagnostic } from "../smoke-diagnostic.mjs";
 
 const tag = "0123456789abcdef0123456789abcdef01234567";
 const apiImageDigest = `sha256:${"a".repeat(64)}`;
@@ -633,6 +634,20 @@ test("edge readiness stops at its stage timeout and preserves the deployment fai
     ),
     (error) => error.message === "Edge/TLS readiness failed after 5000ms (last cause: HTTP 502)",
   );
+});
+
+test("keeps only the sanitized smoke diagnostic in the failure message", async () => {
+  for (const [smokeError, expected] of [
+    [recordSmokeDiagnostic(new Error("HSTS is missing")), "Public smoke failed: HSTS is missing"],
+    [recordSmokeDiagnostic(new Error("token=private")), "Public smoke failed: message withheld"],
+    [new Error("private smoke failure"), "Public smoke failed"],
+  ]) {
+    const { dependencies, releaseDirectory } = await fixture({ smokeError });
+    await assert.rejects(
+      deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies),
+      (error) => error.message === expected,
+    );
+  }
 });
 
 test("writes a failed release record through the injected atomic writer", async () => {

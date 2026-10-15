@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
+import { smokeDiagnosticOf } from "../smoke-diagnostic.mjs";
 import {
   KIOSK_ROUTE_CHECKS,
   LANDING_ROUTE_CHECKS,
+  OPENAPI_REQUEST_TIMEOUT_MS,
+  PUBLIC_REQUEST_TIMEOUT_MS,
   productionBaseUrls,
   ROUTE_CHECKS,
   VBTECH_ROUTE_CHECKS,
@@ -2342,4 +2345,146 @@ test("rejects unavailable documentation scripts and a bootstrap with the wrong d
       );
     });
   }
+});
+
+const publicSmokeOptions = {
+  adminBaseUrl: "https://app.markiro.example",
+  saasAdminBaseUrl: "https://saas-admin.markiro.example",
+  kioskBaseUrl: "https://kiosk.markiro.example",
+  landingBaseUrl: "https://markiro.example",
+};
+
+function abortError() {
+  return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+}
+
+test("only /openapi.json gets the longer deadline; every other check keeps 5 seconds", async (t) => {
+  assert.equal(PUBLIC_REQUEST_TIMEOUT_MS, 5_000);
+  assert.equal(OPENAPI_REQUEST_TIMEOUT_MS, 30_000);
+  const real = AbortSignal.timeout.bind(AbortSignal);
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds) => {
+    deadlines.push(milliseconds);
+    return real(milliseconds);
+  });
+  const client = smokeClient();
+  const original = client.request;
+  const byPath = new Map();
+  client.request = async (url, init, signal) => {
+    const target = new URL(url);
+    if (target.hostname === "app.markiro.example") byPath.set(target.pathname, deadlines.length);
+    return original(url, init, signal);
+  };
+
+  await runPublicSmoke(publicSmokeOptions, client);
+
+  const long = deadlines.filter((value) => value === OPENAPI_REQUEST_TIMEOUT_MS);
+  assert.equal(long.length, 1);
+  assert.ok(deadlines.length > 10);
+  assert.equal(
+    deadlines
+      .filter((value) => value !== OPENAPI_REQUEST_TIMEOUT_MS)
+      .every((value) => value === 5_000),
+    true,
+  );
+  const openapiIndex = byPath.get("/openapi.json");
+  assert.equal(deadlines[openapiIndex - 1], OPENAPI_REQUEST_TIMEOUT_MS);
+});
+
+test("/openapi.json is retried once after an aborted request or body read", async () => {
+  for (const failAt of ["request", "body"]) {
+    const client = smokeClient();
+    const original = client.request;
+    let openapiRequests = 0;
+    client.request = async (url, init, signal) => {
+      const target = new URL(url);
+      const response = await original(url, init, signal);
+      if (target.hostname !== "app.markiro.example" || target.pathname !== "/openapi.json")
+        return response;
+      openapiRequests += 1;
+      if (openapiRequests > 1) return response;
+      if (failAt === "request") throw abortError();
+      return {
+        status: response.status,
+        headers: response.headers,
+        text: async () => {
+          throw abortError();
+        },
+      };
+    };
+
+    await runPublicSmoke(publicSmokeOptions, client);
+    assert.equal(openapiRequests, 2, failAt);
+  }
+});
+
+test("/openapi.json is retried only once and never for non-abort failures", async () => {
+  for (const scenario of [
+    { error: abortError, expectedRequests: 2 },
+    { error: () => new TypeError("fetch failed"), expectedRequests: 1 },
+  ]) {
+    const client = smokeClient();
+    const original = client.request;
+    let openapiRequests = 0;
+    client.request = async (url, init, signal) => {
+      const target = new URL(url);
+      if (target.hostname === "app.markiro.example" && target.pathname === "/openapi.json") {
+        openapiRequests += 1;
+        throw scenario.error();
+      }
+      return original(url, init, signal);
+    };
+
+    await assert.rejects(runPublicSmoke(publicSmokeOptions, client));
+    assert.equal(openapiRequests, scenario.expectedRequests);
+  }
+});
+
+test("other checks are not retried after an abort", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  let readyRequests = 0;
+  client.request = async (url, init, signal) => {
+    const target = new URL(url);
+    if (target.hostname === "app.markiro.example" && target.pathname === "/health/ready") {
+      readyRequests += 1;
+      throw abortError();
+    }
+    return original(url, init, signal);
+  };
+
+  await assert.rejects(runPublicSmoke(publicSmokeOptions, client));
+  assert.equal(readyRequests, 1);
+});
+
+test("a failed public smoke records a bounded diagnostic without changing the error", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  const secret = "ghs_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF";
+  client.request = async (url, init, signal) => {
+    const target = new URL(url);
+    if (target.hostname === "app.markiro.example" && target.pathname === "/openapi.json")
+      throw new TypeError(`fetch failed for ${secret}`);
+    return original(url, init, signal);
+  };
+
+  const error = await runPublicSmoke(publicSmokeOptions, client).catch((caught) => caught);
+
+  assert.ok(error instanceof TypeError);
+  assert.equal(error.message, `fetch failed for ${secret}`);
+  assert.equal(smokeDiagnosticOf(error), "message withheld name=TypeError");
+
+  const aborted = smokeClient();
+  const base = aborted.request;
+  aborted.request = async (url, init, signal) => {
+    const target = new URL(url);
+    if (target.hostname === "app.markiro.example" && target.pathname === "/health/live")
+      throw abortError();
+    return base(url, init, signal);
+  };
+  const timeout = await runPublicSmoke(publicSmokeOptions, aborted).catch((caught) => caught);
+  assert.equal(
+    smokeDiagnosticOf(timeout),
+    "The operation was aborted due to timeout name=TimeoutError",
+  );
 });
