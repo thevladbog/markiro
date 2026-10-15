@@ -4309,3 +4309,162 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.tenant-diagnostics {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.tenant-diagnostics__header {
+  display: grid;
+  gap: 6px;
+  padding: 22px 24px;
+  border: 1px solid var(--mk-border-operational-strong);
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.tenant-diagnostics__header h2,
+.tenant-diagnostics__header p {
+  margin: 0;
+}
+
+.tenant-diagnostics__header h2 {
+  font: 650 24px/30px var(--font-ui);
+  letter-spacing: -0.025em;
+}
+
+.tenant-diagnostics__header p {
+  max-width: 72ch;
+  opacity: 0.78;
+  font: var(--text-body-sm);
+}
+
+.diagnostics-hosts {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.diagnostics-host__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diagnostics-facts {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.diagnostics-features {
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  list-style: none;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.diagnostics-file-compare,
+.diagnostics-empty {
+  margin: 12px 0 0;
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.diagnostics-ingest form {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.diagnostics-ingest__text {
+  font-family: var(--font-mono);
+  min-height: 140px;
+}
+
+.diagnostics-ingest__counter,
+.diagnostics-ingest__saved {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.diagnostics-ingest__saved {
+  margin-top: 12px;
+  color: var(--ok-fg);
+  font: var(--text-body);
+}
+
+.diagnostics-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.diagnostics-bars__figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.diagnostics-bars__figure figcaption {
+  margin-bottom: 6px;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.diagnostics-bars__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.diagnostics-bars__axis {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.diagnostics-bars__bar--accent {
+  fill: var(--accent);
+}
+
+.diagnostics-bars__bar--muted {
+  fill: var(--fg-3);
+}
+
+.diagnostics-bars__tick {
+  fill: var(--fg-3);
+  font: 10px/1 var(--font-mono);
+  text-anchor: middle;
+}
+
+.diagnostics-bars__legend {
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.diagnostics-bars__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+}
+
+.diagnostics-bars__swatch--accent {
+  background: var(--accent);
+}
+
+.diagnostics-bars__swatch--muted {
+  background: var(--fg-3);
+}

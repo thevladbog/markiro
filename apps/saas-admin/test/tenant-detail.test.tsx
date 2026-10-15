@@ -16,6 +16,7 @@ import {
   readySession,
   renderSaasApp,
 } from "./render.js";
+import { DIAG_HISTORY, DIAG_OVERVIEW, DIAG_STATISTICS } from "./diagnostics-fixtures.js";
 
 afterEach(() => {
   cleanup();
@@ -111,6 +112,44 @@ describe("tenant subscription detail", () => {
     expect(
       screen.queryByRole("heading", { name: "Автоном: площадки и офлайн-лицензии" }),
     ).toBeNull();
+  });
+
+  describe("diagnostics tab (plan ДИАГ У1)", () => {
+    function installDiagnosticsApi() {
+      const tenantFetch = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          const base = `/api/platform/tenants/${TENANT_ID}/standalone-diagnostics`;
+          if (url.endsWith(`${base}/overview`)) return jsonResponse(200, DIAG_OVERVIEW);
+          if (url.endsWith(`${base}/statistics`)) return jsonResponse(200, DIAG_STATISTICS);
+          if (url.endsWith(base)) return jsonResponse(200, DIAG_HISTORY);
+          return tenantFetch(input, init);
+        }),
+      );
+    }
+
+    it("shows the tab to a read-only role, opens it by URL and offers no paste block", async () => {
+      installTenantApi({ me: SUPPORT_ME });
+      installDiagnosticsApi();
+      renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=diagnostics` });
+
+      expect(await screen.findByRole("heading", { name: "Диагностика автонома" })).toBeDefined();
+      expect(screen.getByRole("tab", { name: /Диагностика/ }).getAttribute("aria-selected")).toBe(
+        "true",
+      );
+      expect(await screen.findByText(/Цех розлива/)).toBeDefined();
+      expect(screen.queryByLabelText(/Текст «Сведения для поддержки»/)).toBeNull();
+    });
+
+    it("offers the paste block to the role that issues licenses", async () => {
+      installTenantApi();
+      installDiagnosticsApi();
+      renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=diagnostics` });
+
+      expect(await screen.findByLabelText(/Текст «Сведения для поддержки»/)).toBeDefined();
+    });
   });
 
   it("keeps tenant legal data usable when optional DaData health is unavailable", async () => {
