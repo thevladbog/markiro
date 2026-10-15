@@ -645,7 +645,7 @@ test("keeps only the sanitized smoke diagnostic in the failure message", async (
     const { dependencies, releaseDirectory } = await fixture({ smokeError });
     await assert.rejects(
       deployRelease({ environment, releaseDirectory, readinessAttempts: 1 }, dependencies),
-      (error) => error.message === expected,
+      (error) => error.message === expected && error.cause === smokeError,
     );
   }
 });

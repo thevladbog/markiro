@@ -1162,6 +1162,7 @@ export async function deployRelease(options, supplied = {}) {
       const diagnostic = smokeDiagnosticOf(error);
       throw new Error(
         diagnostic === undefined ? "Public smoke failed" : `Public smoke failed: ${diagnostic}`,
+        { cause: error },
       );
     }
     release.state = "healthy";
