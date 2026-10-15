@@ -1658,7 +1658,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "units": {
       "month": "Month",
@@ -1696,7 +1697,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "validation": {
       "required": "This field is required",
@@ -2196,7 +2198,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "assignment": {
       "title": "Direct assignment",
@@ -2504,7 +2507,8 @@
       "chzIntegration": "Chestny ZNAK and National Catalog",
       "inventory": "Inventory",
       "commerceMl": "CommerceML",
-      "handheld": "Handheld"
+      "handheld": "Handheld",
+      "customLogo": "Custom logo on printed forms"
     },
     "operationsLabels": {
       "nk_lookup_v1": "NC: product lookup",

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
@@ -172,6 +172,37 @@ describe("the printed forms of a shift's card (plan О-Ф)", () => {
     expect(print).toHaveBeenCalledWith(
       renderForm({ kind: "box", rows: BOX_ROWS, timeZone: ORG_PROFILE.timeZone })?.html,
     );
+  });
+
+  it("prints the organization's own logo on a form when the license allows custom branding, Markiro's when it does not", async () => {
+    const own = { width: 16, height: 1, pixelsBase64: "qlU=" };
+    for (const customLogo of [true, false]) {
+      const session = formSession(SHIFT);
+      const license = await session.api.getLicense("t");
+      session.api.getLicense.mockResolvedValue({
+        ...license,
+        features: { ...license.features, customLogo },
+      });
+      session.api.getOrgLogo.mockResolvedValue({
+        logo: { ...own, updatedAt: "2026-10-11T09:00:00Z" },
+      });
+      const print = vi.fn<PrintForm>();
+      await openCard(session, SHIFT, print, fakeOfficeFiles());
+      fireEvent.click(await formButton(BOX_FORM));
+      const dialog = await readyDialog(BOX_FORM);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+      const html = print.mock.calls[0]?.[0] ?? "";
+      if (customLogo) {
+        expect(html).toContain("brand-logo--organization");
+        expect(html).toMatch(/src="data:image\/png;base64,/);
+        expect(html).not.toContain('data-brand-logo="markiro"');
+      } else {
+        expect(html).toContain('data-brand-logo="markiro"');
+        expect(html).not.toContain("brand-logo--organization");
+      }
+      cleanup();
+    }
   });
 
   it("opens a form in the browser: saved as UTF-8 under «Формы» in a folder of its own, then the folder on request", async () => {

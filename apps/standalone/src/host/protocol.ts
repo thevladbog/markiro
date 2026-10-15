@@ -208,6 +208,7 @@ export const LICENSE_FEATURE_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const;
 /**
  * The most a license file may hold (`verify::MAX_FILE_BYTES`). Zod's `.max()`
@@ -235,6 +236,8 @@ export const licenseFeaturesSchema = z.object({
   inventory: z.boolean(),
   commerceMl: z.boolean(),
   handheld: z.boolean(),
+  /** Custom branding: the organization's own logo on printed forms and labels. */
+  customLogo: z.boolean(),
 });
 
 /** `GET /v1/office/license`, and the answers of a load and of the emergency extension. */

@@ -85,6 +85,34 @@ describe("the logo a label's logo box shows in the office", () => {
     expect(fake.api.getOrgLogo).toHaveBeenCalledTimes(1);
   });
 
+  it("is the Markiro logo, though the organization has its own, when the license lacks custom branding", async () => {
+    const fake = session(logoToWire(OWN));
+    const license = await fake.api.getLicense("t");
+    fake.api.getLicense.mockResolvedValue({
+      ...license,
+      features: { ...license.features, customLogo: false },
+    });
+    mount(fake);
+    await waitFor(() => expect(shown()).toBe(describeLogo(MARKIRO)));
+    expect(loadBundledMarkiroLogo).toHaveBeenCalledTimes(1);
+  });
+
+  it("is the Markiro logo when the license cannot be read: no license to brand with", async () => {
+    const fake = session(logoToWire(OWN));
+    fake.api.getLicense.mockRejectedValue(new Error("host down"));
+    mount(fake);
+    await waitFor(() => expect(shown()).toBe(describeLogo(MARKIRO)));
+  });
+
+  it("waits for the license before showing any logo", async () => {
+    const fake = session(logoToWire(OWN));
+    fake.api.getLicense.mockReturnValue(new Promise(() => undefined));
+    mount(fake);
+    await act(async () => undefined);
+    expect(shown()).toBe("none");
+    expect(loadBundledMarkiroLogo).not.toHaveBeenCalled();
+  });
+
   it("is the Markiro logo when the organization has none, once it is loaded", async () => {
     let load: (bitmap: MonoBitmap) => void = () => undefined;
     vi.mocked(loadBundledMarkiroLogo).mockReturnValue(

@@ -26,14 +26,21 @@ import {
 export type FormKind = "box" | "pallet" | "placard" | "placards" | "task" | "act";
 
 /** A form to draw and the host's rows (or the office's records) it is drawn from. */
-export type FormRequest =
+export type FormRequest = (
   | { kind: "box"; rows: BoxReportRows; timeZone: string }
   | { kind: "pallet"; rows: PalletReportRows; palletId: string; timeZone: string }
   | { kind: "placard"; rows: PalletReportRows; palletId: string; format: PlacardFormat }
   | { kind: "placards"; rows: PalletReportRows; format: PlacardFormat }
   | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date }
   // «Акт дезагрегации» of a disaggregation document (plan ДЗГ-О), of any status.
-  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string };
+  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string }
+) & {
+  /**
+   * The organization's own print logo as a PNG data URL (custom branding, a
+   * license feature); left out, every form prints the Markiro logo.
+   */
+  logo?: string | null;
+};
 
 /** A drawn form: its HTML, exactly the cloud's for the same input, and its file's name. */
 export interface RenderedForm {
@@ -79,9 +86,10 @@ export interface PreparedForm {
  * (`SHIFT_TASK_FORM_CLOSED`). Nothing is drawn yet.
  */
 export function prepareForm(request: FormRequest): PreparedForm | null {
+  const logo = request.logo ?? null;
   switch (request.kind) {
     case "box": {
-      const data = boxReportData(request.rows);
+      const data = boxReportData(request.rows, logo);
       return {
         kind: "box",
         draw: () => renderBoxReportHtml(data, request.timeZone),
@@ -89,7 +97,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "pallet": {
-      const data = palletReportData(request.rows, request.palletId);
+      const data = palletReportData(request.rows, request.palletId, logo);
       if (data === null) return null;
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
@@ -99,7 +107,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "placard": {
-      const data = palletPlacardData(request.rows, request.palletId);
+      const data = palletPlacardData(request.rows, request.palletId, logo);
       if (data === null) return null;
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
@@ -109,7 +117,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "placards": {
-      const data = shiftPlacardsData(request.rows);
+      const data = shiftPlacardsData(request.rows, logo);
       if (data === null) return null;
       return {
         kind: "placards",
@@ -118,7 +126,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "task": {
-      const data = taskFormData(request.inputs, request.generatedAt);
+      const data = taskFormData(request.inputs, request.generatedAt, logo);
       if (data === null) return null;
       return {
         kind: "task",
@@ -130,7 +138,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       // The cloud prints an act of any status, so there is no refusal. The
       // note replaces the cloud's «передаются в ГИС МТ автоматически»: the
       // standalone sends nothing, a person uploads the file.
-      const data = actData(request.rows);
+      const data = actData(request.rows, logo);
       return {
         kind: "act",
         draw: () =>

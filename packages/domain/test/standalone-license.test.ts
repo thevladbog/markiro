@@ -140,10 +140,26 @@ describe("verifyStandaloneLicense", () => {
       { typ: STANDALONE_LICENSE_TYP, kid: "k1" },
       license,
     );
+    // A file issued before `customLogo` existed has no such key: it reads as off.
     expect(await verifyStandaloneLicense(compact, keyset)).toEqual({
       ok: true,
       kid: "k1",
-      license,
+      license: { ...license, features: { ...license.features, customLogo: false } },
+    });
+  });
+
+  it("reads custom branding (customLogo) from a file that carries it", async () => {
+    const { privateKey, keyset } = await setUp();
+    const branded = { ...license, features: { ...license.features, customLogo: true } };
+    const compact = await signCompactJws(
+      privateKey,
+      { typ: STANDALONE_LICENSE_TYP, kid: "k1" },
+      branded,
+    );
+    expect(await verifyStandaloneLicense(compact, keyset)).toEqual({
+      ok: true,
+      kid: "k1",
+      license: branded,
     });
   });
 

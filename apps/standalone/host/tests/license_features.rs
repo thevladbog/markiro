@@ -95,7 +95,7 @@ async fn the_trial_has_every_feature() {
             json!({
                 "labelEditor": true, "publicApi": true, "pallets": true,
                 "chzIntegration": true, "inventory": true, "commerceMl": true,
-                "handheld": true
+                "handheld": true, "customLogo": true
             })
         )
     );

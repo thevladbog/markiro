@@ -19,7 +19,8 @@
       "chzIntegration": true,
       "inventory": true,
       "commerceMl": true,
-      "handheld": true
+      "handheld": true,
+      "customLogo": true
     }
   },
   "after": {
@@ -42,7 +43,8 @@
       "chzIntegration": true,
       "inventory": false,
       "commerceMl": false,
-      "handheld": true
+      "handheld": true,
+      "customLogo": true
     }
   },
   "changes": [

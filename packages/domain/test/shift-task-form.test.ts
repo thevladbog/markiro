@@ -240,3 +240,33 @@ describe("renderShiftTaskFormHtml", () => {
     expect(html).toContain("&lt;s&gt;Эмитент&lt;/s&gt;");
   });
 });
+
+describe("the blank's header logo", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("is the Markiro logo unless the organization's own is given", () => {
+    const html = renderShiftTaskFormHtml(fixture());
+    expect(html).toContain('data-brand-logo="markiro"');
+    expect(html).not.toContain("brand-logo--organization");
+  });
+
+  it("is the organization's own picture when a data URL is given, in place of Markiro's", () => {
+    const html = renderShiftTaskFormHtml(fixture({ organizationLogoSrc: PNG }));
+    expect(html).toContain(`src="${PNG}"`);
+    expect(html).toContain("brand-logo--organization");
+    expect(html).not.toContain('data-brand-logo="markiro"');
+  });
+
+  it("never takes a remote or script source: Markiro's logo stays", () => {
+    for (const src of [
+      "https://example.invalid/logo.png",
+      "javascript:alert(1)",
+      'data:image/png;base64,AAAA" onerror="x',
+      "data:text/html;base64,AAAA",
+    ]) {
+      const html = renderShiftTaskFormHtml(fixture({ organizationLogoSrc: src }));
+      expect(html).toContain('data-brand-logo="markiro"');
+      expect(html).not.toContain(src);
+    }
+  });
+});

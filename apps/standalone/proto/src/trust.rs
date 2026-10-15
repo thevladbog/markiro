@@ -591,6 +591,11 @@ pub struct LicenseFeatures {
     pub inventory: bool,
     pub commerce_ml: bool,
     pub handheld: bool,
+    /// Custom branding: the organization's own logo on printed forms and
+    /// labels. Absent from a file issued before it existed, which reads as
+    /// off (the Markiro logo), whatever else the file says.
+    #[serde(default)]
+    pub custom_logo: bool,
 }
 
 impl LicensePayloadV1 {

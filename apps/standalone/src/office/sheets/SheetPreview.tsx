@@ -10,6 +10,7 @@ import {
   renderSheetRaster,
   sampleSheetContext,
 } from "../../labels/sheet-render.js";
+import { useCustomBranding } from "../branding.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 
 /** Dots per preview pixel: an A4 portrait sheet (2480 dots) is 620 px wide. */
@@ -35,15 +36,17 @@ export function SheetPreview({ spec, label }: SheetPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const logo = useOfficeQuery(officeKeys.orgLogo, (api, token) => api.getOrgLogo(token));
+  const branding = useCustomBranding();
   const [failed, setFailed] = useState(false);
   const orgData = org.data;
   const logoData = logo.data;
+  const brandAllowed = branding.allowed;
 
   useEffect(() => {
-    if (orgData === undefined || logoData === undefined) return undefined;
+    if (orgData === undefined || logoData === undefined || !branding.settled) return undefined;
     let cancelled = false;
     const organization = { name: orgData.name, inn: orgData.inn };
-    const own = logoData.logo === null ? null : logoFromWire(logoData.logo);
+    const own = logoData.logo === null || !brandAllowed ? null : logoFromWire(logoData.logo);
     const draw = async () => {
       const bitmap = own ?? (await loadBundledMarkiroLogo());
       const raster = await renderSheetRaster(
@@ -64,7 +67,7 @@ export function SheetPreview({ spec, label }: SheetPreviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [spec, orgData, logoData]);
+  }, [spec, orgData, logoData, brandAllowed, branding.settled]);
 
   const unavailable = org.isError || logo.isError;
   return (

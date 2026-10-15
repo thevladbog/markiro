@@ -540,6 +540,16 @@ fn check_snapshot_len(len: usize) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// The snapshot without the organization's logo: what an opening freezes when
+/// the license lacks custom branding (`license::state::custom_branding_allowed`),
+/// so every print of the shift falls back to the bundled Markiro logo.
+pub fn without_logo(mut snapshot: ShiftSnapshot) -> ShiftSnapshot {
+    if let Some(organization) = snapshot.organization.as_mut() {
+        organization.logo = None;
+    }
+    snapshot
+}
+
 /// The text a shift stores as its snapshot, or [`snapshot_too_large`]. The
 /// byte length of the `String` is what the `CHECK` measures of the text bound
 /// to the column.
@@ -579,6 +589,9 @@ async fn frozen_template(
 /// and template) freezes that template whole the same way, still enabled and
 /// covering the product's group (`duplicate_template_not_fit`, after the
 /// pallet template), with the verification beside it.
+///
+/// The logo is the organization's whatever the license says; the caller
+/// drops it without custom branding ([`without_logo`]).
 ///
 /// The sheet is frozen as it is now, enabled or not (turning a sheet off only
 /// stops new shifts from choosing it). A sheet that is not there (the API

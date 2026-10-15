@@ -1658,7 +1658,8 @@
       "chzIntegration": "Честный знак и Национальный каталог",
       "inventory": "Инвентаризация",
       "commerceMl": "CommerceML",
-      "handheld": "ТСД"
+      "handheld": "ТСД",
+      "customLogo": "Свой логотип на печатных формах"
     },
     "units": {
       "month": "Месяц",
@@ -1696,7 +1697,8 @@
       "chzIntegration": "Честный знак и Национальный каталог",
       "inventory": "Инвентаризация",
       "commerceMl": "CommerceML",
-      "handheld": "ТСД"
+      "handheld": "ТСД",
+      "customLogo": "Свой логотип на печатных формах"
     },
     "validation": {
       "required": "Заполните поле",
@@ -2198,7 +2200,8 @@
       "chzIntegration": "Честный знак и Национальный каталог",
       "inventory": "Инвентаризация",
       "commerceMl": "CommerceML",
-      "handheld": "ТСД"
+      "handheld": "ТСД",
+      "customLogo": "Свой логотип на печатных формах"
     },
     "assignment": {
       "title": "Прямое назначение",
@@ -2506,7 +2509,8 @@
       "chzIntegration": "Честный знак и Национальный каталог",
       "inventory": "Инвентаризация",
       "commerceMl": "CommerceML",
-      "handheld": "ТСД"
+      "handheld": "ТСД",
+      "customLogo": "Свой логотип на печатных формах"
     },
     "operationsLabels": {
       "nk_lookup_v1": "НК: поиск товара",

@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+
 import { render, type RenderResult } from "@testing-library/react";
 import { vi, type Mock } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostApi } from "../../src/host/api.js";
+import { officeLicenseSchema } from "../../src/host/protocol.js";
 import type {
   OfficeUser,
   OfficeUserRecord,
@@ -16,6 +19,19 @@ import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
 import { HEALTHY_BACKUPS } from "./backups.js";
 import { SESSION } from "./fixtures.js";
+
+const supportModuleUrl = import.meta.url;
+
+/**
+ * The license every office session reads unless a test stubs it: the shared
+ * fixture's, with every feature on (custom branding included), as the
+ * built-in trial has them. Custom branding reads it (`office/branding.ts`).
+ */
+const TRIAL_LICENSE = officeLicenseSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../../proto/fixtures/office-license.json", supportModuleUrl), "utf8"),
+  ),
+);
 
 /** A `HostApi` of mocks. */
 export type FakeHostApi = { [K in keyof HostApi]: Mock<HostApi[K]> };
@@ -248,7 +264,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
-    getLicense: vi.fn<HostApi["getLicense"]>(() => unexpected("getLicense")),
+    getLicense: vi.fn<HostApi["getLicense"]>(async () => TRIAL_LICENSE),
     previewLicense: vi.fn<HostApi["previewLicense"]>(() => unexpected("previewLicense")),
     loadLicense: vi.fn<HostApi["loadLicense"]>(() => unexpected("loadLicense")),
     getActivationRequest: vi.fn<HostApi["getActivationRequest"]>(() =>
