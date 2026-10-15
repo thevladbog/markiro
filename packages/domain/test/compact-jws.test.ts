@@ -99,7 +99,9 @@ describe("compact JWS ES256", () => {
       `${header}.${payload}.${(signature ?? "").replace(/-/g, "+").replace(/_/g, "/")}`,
       ` ${compact}`,
       "",
-    ]) {
+      // A signature with neither "-" nor "_" (about 7% of them) is unchanged by the
+      // standard-alphabet rewrite above and is then a valid token, so it is not a case.
+    ].filter((broken) => broken !== compact)) {
       expect(await verifyCompactJws(broken, { typ: TYP, keys })).toEqual({
         ok: false,
         reason: "malformed",

@@ -1026,6 +1026,8 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     expect(within(dialog()).queryByRole("button", { name: "Отменить формирование" })).toBeNull();
     fireEvent.keyDown(dialog(), { key: "Escape" });
     expect(screen.getByRole("dialog")).toBeTruthy();
+    // The label shows before `save` is called; `finish` is the real resolver only once it has been.
+    await waitFor(() => expect(files.save).toHaveBeenCalledTimes(1));
     finish({ segments: ["Выгрузки", "OCT26-004", "x"], path: "C:\\x", files: ["a.txt"] });
     await within(dialog()).findByText(/^Сохранено файлов: 1\./);
     // The journal's row was written once, for the export that was saved.
