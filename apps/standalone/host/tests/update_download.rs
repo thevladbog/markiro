@@ -29,8 +29,17 @@ async fn serving() -> (Admin, Vec<u8>) {
 /// `GET /v1/device/update/installer` with `key`, protocol 1 and `headers`;
 /// the body is not read, so a held answer holds its download's slot.
 async fn open(app: &TestApp, key: &str, headers: &[(&str, &str)]) -> Response<Body> {
+    open_with(app, "GET", key, headers).await
+}
+
+async fn open_with(
+    app: &TestApp,
+    method: &str,
+    key: &str,
+    headers: &[(&str, &str)],
+) -> Response<Body> {
     let mut builder = Request::builder()
-        .method("GET")
+        .method(method)
         .uri("/v1/device/update/installer")
         .header("authorization", format!("Bearer {key}"))
         .header(markiro_proto::PROTOCOL_HEADER, "1");
@@ -334,4 +343,32 @@ async fn the_download_answers_any_protocol_but_only_a_device_key() {
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_head_gives_the_headers_only_without_a_slot_or_a_row() {
+    let (admin, bytes) = serving().await;
+    // A download in progress holds this device's only slot.
+    let held = open(&admin.app, &admin.key, &[]).await;
+    assert_eq!(held.status(), StatusCode::OK);
+    let rows = audit_trail(&admin.app, "update.download").await;
+    assert_eq!(rows.len(), 1);
+    let (status, headers, body) = read(open_with(&admin.app, "HEAD", &admin.key, &[]).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_empty());
+    let etag = format!("\"{}\"", sha256_hex(&bytes));
+    assert_eq!(
+        (
+            header(&headers, "content-length"),
+            header(&headers, "etag"),
+            header(&headers, "accept-ranges"),
+        ),
+        (
+            Some(bytes.len().to_string().as_str()),
+            Some(etag.as_str()),
+            Some("bytes"),
+        )
+    );
+    assert_eq!(audit_trail(&admin.app, "update.download").await, rows);
+    drop(held);
 }

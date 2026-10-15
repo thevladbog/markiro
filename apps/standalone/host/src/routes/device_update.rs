@@ -14,7 +14,7 @@ use axum::http::header::{
     HeaderName, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_RANGE, RANGE,
     RETRY_AFTER,
 };
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use markiro_proto::codes;
@@ -91,10 +91,12 @@ pub async fn offer(
 
 /// `GET /v1/device/update/installer`: the current package's installer,
 /// whole or one range of it (spec §10.11.3). A download from byte 0 writes
-/// one `update.download` row; a resumed one writes none.
+/// one `update.download` row; a resumed one writes none. A `HEAD` answers
+/// the headers alone, taking no slot and writing no row.
 pub async fn installer(
     State(state): State<AppState>,
     device: AuthDevice,
+    method: Method,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     state.update_limits.check_rate(&device.id)?;
@@ -105,6 +107,17 @@ pub async fn installer(
         Err(_) => return Err(unavailable()),
     };
     let etag = format!("\"{}\"", package.sha256);
+    // A HEAD (`get` serves it too) asks for the headers: no slot, no row.
+    if method == Method::HEAD {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CONTENT_LENGTH, package.size_bytes)
+            .header(ETAG, &etag)
+            .header(ACCEPT_RANGES, "bytes")
+            .body(axum::body::Body::empty())
+            .map_err(ApiError::internal);
+    }
     let header = |name: HeaderName| headers.get(name).and_then(|value| value.to_str().ok());
     let span = match requested_span(header(RANGE), header(IF_RANGE), &etag, package.size_bytes) {
         Ok(span) => span,
