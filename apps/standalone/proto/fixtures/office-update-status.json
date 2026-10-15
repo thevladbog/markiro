@@ -1,0 +1,104 @@
+{
+  "hostVersion": "0.3.0",
+  "protocol": 4,
+  "minProtocol": 3,
+  "package": {
+    "state": "ok",
+    "version": "0.3.0",
+    "staged": null,
+    "previous": "0.2.1",
+    "diskBytes": 122469134
+  },
+  "devices": [
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "kind": "station",
+      "name": "Станция линии 1",
+      "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+      "lineName": "Линия 1",
+      "appVersion": "0.3.0",
+      "protocol": 4,
+      "versionSeenAt": "2026-11-03T07:10:00Z",
+      "lastSeenAt": "2026-11-03T09:00:00Z",
+      "state": "current",
+      "downloaded": { "at": "2026-11-03T06:55:00Z", "version": "0.3.0" },
+      "installStarted": { "at": "2026-11-03T07:00:00Z", "version": "0.3.0" }
+    },
+    {
+      "id": "1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b",
+      "kind": "station",
+      "name": "Станция линии 2",
+      "lineId": null,
+      "lineName": null,
+      "appVersion": "0.2.1",
+      "protocol": 3,
+      "versionSeenAt": "2026-11-02T15:00:00Z",
+      "lastSeenAt": "2026-11-03T08:59:00Z",
+      "state": "behind",
+      "downloaded": null,
+      "installStarted": null
+    },
+    {
+      "id": "2a3b4c5d-6e7f-4081-9a2b-3c4d5e6f7a8b",
+      "kind": "office",
+      "name": "ПК бухгалтерии",
+      "lineId": null,
+      "lineName": null,
+      "appVersion": "0.1.0",
+      "protocol": 2,
+      "versionSeenAt": "2026-10-20T10:00:00Z",
+      "lastSeenAt": "2026-10-20T10:05:00Z",
+      "state": "incompatible",
+      "downloaded": null,
+      "installStarted": null
+    },
+    {
+      "id": "3b4c5d6e-7f80-4192-8b3c-4d5e6f7a8b9c",
+      "kind": "station",
+      "name": "Станция склада",
+      "lineId": null,
+      "lineName": null,
+      "appVersion": "0.4.0",
+      "protocol": 4,
+      "versionSeenAt": "2026-11-03T08:00:00Z",
+      "lastSeenAt": "2026-11-03T08:30:00Z",
+      "state": "newer",
+      "downloaded": null,
+      "installStarted": null
+    },
+    {
+      "id": "4c5d6e7f-8091-42a3-9c4d-5e6f7a8b9c0d",
+      "kind": "handheld",
+      "name": "ТСД 1",
+      "lineId": null,
+      "lineName": null,
+      "appVersion": "0.1.0",
+      "protocol": 1,
+      "versionSeenAt": null,
+      "lastSeenAt": null,
+      "state": "unknown",
+      "downloaded": null,
+      "installStarted": null
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-03T07:00:00Z",
+      "action": "app.update.start",
+      "result": "ok",
+      "actor": "Ирина Смирнова",
+      "version": null,
+      "from": "0.2.1",
+      "to": "0.3.0"
+    },
+    {
+      "at": "2026-11-03T06:55:00Z",
+      "action": "update.download",
+      "result": "ok",
+      "actor": "Станция линии 1",
+      "version": "0.3.0",
+      "from": null,
+      "to": null
+    }
+  ]
+}

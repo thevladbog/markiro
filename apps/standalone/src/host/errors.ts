@@ -24,6 +24,8 @@ export const API_ERROR_CODES = [
   "export_store_full",
   "export_file_too_large",
   "export_file_corrupted",
+  "package_verifying",
+  "update_busy",
 ] as const;
 
 const API_CODES: ReadonlySet<string> = new Set(API_ERROR_CODES);

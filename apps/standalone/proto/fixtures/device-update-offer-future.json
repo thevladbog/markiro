@@ -1,0 +1,5 @@
+{
+  "hostVersion": "0.5.0",
+  "package": { "state": "quarantined", "reason": "a newer host's word" },
+  "mirror": "a newer host's field"
+}

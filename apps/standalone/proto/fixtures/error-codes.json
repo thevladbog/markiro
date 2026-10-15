@@ -20,6 +20,8 @@
     "restore_pending",
     "export_store_full",
     "export_file_too_large",
-    "export_file_corrupted"
+    "export_file_corrupted",
+    "package_verifying",
+    "update_busy"
   ]
 }
