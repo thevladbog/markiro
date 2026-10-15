@@ -283,9 +283,9 @@
 .shift-hub .shift-card__photo[data-accent="true"] {
   background: linear-gradient(
     305deg,
-    hsl(var(--product-hue) 40% 20%),
-    hsl(var(--product-hue) 36% 11%) 55%,
-    hsl(var(--product-hue) 32% 6%)
+    hsl(var(--product-hue) var(--product-sat, 40%) 20%),
+    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 4%) 11%) 55%,
+    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 8%) 6%)
   );
 }
 
@@ -532,7 +532,7 @@
   height: 96px;
   overflow: hidden;
   border-radius: var(--r-2);
-  background: hsl(var(--product-hue, 210) 36% 14%);
+  background: hsl(var(--product-hue, 210) var(--product-sat, 36%) 14%);
   place-items: center;
 }
 

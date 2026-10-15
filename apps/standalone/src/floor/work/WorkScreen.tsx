@@ -2351,6 +2351,8 @@ export function WorkScreen(props: WorkScreenProps) {
             counterpartyName={shift.snapshot.counterpartyName}
             accepted={totals?.accepted ?? 0}
             plannedQty={plannedQty}
+            local={props.local}
+            productId={shift.copy.productId}
           />
           {officeClosed && stop?.kind !== "closed" && (
             <Alert tone="warn" title={t("floor.work.officeClosed.title")}>

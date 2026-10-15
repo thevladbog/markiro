@@ -1,12 +1,11 @@
-import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
-import { ProductPhoto } from "./ProductPhoto.js";
+import { ProductPanel } from "./ProductPhoto.js";
 import type { ShiftCopy } from "./shift-copies.js";
-import { hueFromGtin, productMonogram } from "./product-accent.js";
+import { productMonogram } from "./product-accent.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
 
 /**
@@ -83,24 +82,20 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
     action.kind === "finish" ||
     ((action.kind === "open" || action.kind === "continue") && action.enabled);
   const needsLink = (action.kind === "open" || action.kind === "continue") && !action.enabled;
-  const photoStyle = { "--product-hue": String(hueFromGtin(copy.productGtin14)) } as CSSProperties;
   return (
     <Card className="shift-card" padding="var(--sp-1)">
       <div className="shift-card__body">
-        <div className="shift-card__photo" data-accent="true" style={photoStyle}>
-          {(() => {
-            const monogram = (
-              <span className="shift-card__photo-monogram" aria-hidden="true">
-                {productMonogram(copy.productName)}
-              </span>
-            );
-            return local === undefined ? (
-              monogram
-            ) : (
-              <ProductPhoto local={local} productId={copy.productId} fallback={monogram} />
-            );
-          })()}
-        </div>
+        <ProductPanel
+          local={local}
+          productId={copy.productId}
+          gtin={copy.productGtin14}
+          className="shift-card__photo"
+          fallback={
+            <span className="shift-card__photo-monogram" aria-hidden="true">
+              {productMonogram(copy.productName)}
+            </span>
+          }
+        />
         <div className="shift-card__details">
           <div className="shift-card__heading">
             <span className="shift-card__number">{copy.number}</span>

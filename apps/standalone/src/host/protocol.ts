@@ -1974,8 +1974,13 @@ export const deviceShiftCreateSchema = z
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
     palletSheetTemplateId: z.uuid().optional(),
+    /** The shift's mode (beta 3.2); left out, aggregation. A validation shift has no pallets. */
+    mode: shiftModeSchema.optional(),
+    /** The print policy of a validation shift; left out, `none`. */
+    validationPrint: validationPrintSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(printsOnlyInValidation(false));
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;
 
 /**

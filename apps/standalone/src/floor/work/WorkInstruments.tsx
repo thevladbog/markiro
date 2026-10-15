@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 
 import { Button, type ButtonProps } from "@markiro/ui";
 
-import { hueFromGtin, productMonogram } from "../shifts/product-accent.js";
+import type { LocalExecutor } from "../../local/executor.js";
+import { productMonogram } from "../shifts/product-accent.js";
+import { ProductPhotoImage, useProductAccent, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 
 /*
@@ -13,6 +15,12 @@ import { formatQuantity } from "../shifts/shift-text.js";
  * there (a photo, the shift's total across terminals, the journal) the
  * standalone does not have, and the figures come from the work screen.
  */
+
+/** A database that holds nothing: the band without one reads no photo. */
+const NO_LOCAL: LocalExecutor = {
+  query: () => Promise.resolve([]),
+  transaction: () => Promise.resolve([]),
+};
 
 const PERCENT = new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: 0 });
 
@@ -24,6 +32,9 @@ export interface ShiftBandProps {
   /** Codes this station holds in the shift: its actual quantity. */
   accepted: number;
   plannedQty: number | null;
+  /** The station's database and the product's id: its photo and the colour taken from it (beta 3.2). */
+  local?: LocalExecutor;
+  productId?: string;
 }
 
 /**
@@ -38,9 +49,14 @@ export function ShiftBand({
   counterpartyName,
   accepted,
   plannedQty,
+  local,
+  productId,
 }: ShiftBandProps) {
   const { t } = useTranslation();
-  const style = { "--product-hue": String(hueFromGtin(gtin)) } as CSSProperties;
+  // The photo the station holds, and the band's colour from it; without a
+  // database (a test of the band alone) the GTIN's hue and the monogram.
+  const photo = useStoredProductPhoto(local ?? NO_LOCAL, productId ?? "");
+  const style = useProductAccent(local === undefined ? null : photo, gtin);
   const ratio = plannedQty === null || plannedQty <= 0 ? null : Math.min(1, accepted / plannedQty);
   return (
     <section
@@ -49,9 +65,16 @@ export function ShiftBand({
       data-accent="true"
       style={style}
     >
-      <span aria-hidden="true" className="work-shift-band__monogram">
-        {productMonogram(productName)}
-      </span>
+      <div className="work-shift-band__photo">
+        <ProductPhotoImage
+          photo={local === undefined ? null : photo}
+          fallback={
+            <span aria-hidden="true" className="work-shift-band__monogram">
+              {productMonogram(productName)}
+            </span>
+          }
+        />
+      </div>
       <div className="work-shift-band__copy">
         <h2 title={productName}>{productName}</h2>
         <div className="work-shift-band__chips">
