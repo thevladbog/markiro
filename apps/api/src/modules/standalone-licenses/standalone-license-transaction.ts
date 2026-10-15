@@ -5,6 +5,8 @@ const RETRYABLE_CONSTRAINTS = new Set([
   "standalone_sites_host_id_uq",
   "standalone_sites_tenant_request_uq",
   "standalone_license_issuances_tenant_site_request_uq",
+  "standalone_support_diagnostics_blob_uq",
+  "standalone_support_diagnostics_host_generated_uq",
 ]);
 
 /** The PostgreSQL SQLSTATE and constraint behind a driver or ORM error, if any. */
