@@ -10,7 +10,6 @@ import {
   EmptyState,
   PageHeader,
   RowActions,
-  StatusChip,
   Table,
   type TableColumn,
 } from "@markiro/ui";
@@ -27,7 +26,8 @@ import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
-import { labelState, packState, palletCountDiffers, ssccText } from "../shifts/shift-card.js";
+import { PalletCountTag } from "../shifts/PalletCountTag.js";
+import { labelState, packState, ssccText } from "../shifts/shift-card.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
 import { CardBack, isNotFound } from "./BoxCardPage.js";
 import { usePackDisassembly } from "./PackDisassembly.js";
@@ -141,9 +141,7 @@ export function PalletCardPage() {
       {disassembly.notice}
       <div className="shift-cell">
         <PackStateChip state={state} kind="pallet" />
-        {palletCountDiffers(pallet) && (
-          <StatusChip phase="attention" wrap label={t("office.palletCard.changedAfterClose")} />
-        )}
+        <PalletCountTag pallet={pallet} differsLabel={t("office.palletCard.changedAfterClose")} />
         {pallet.disassembledAt !== null && (
           <span className="shift-cell__quiet">
             {t("office.palletCard.disassembledAt", { at: at(pallet.disassembledAt) })}

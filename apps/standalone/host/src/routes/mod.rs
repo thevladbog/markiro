@@ -26,6 +26,7 @@ pub mod office_export_files;
 pub mod office_exports;
 pub mod office_pallets;
 pub mod office_reports;
+pub mod office_scan_history;
 pub mod office_shift_review;
 pub mod office_shifts;
 pub mod office_users;

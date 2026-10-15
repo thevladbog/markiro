@@ -50,7 +50,7 @@ import { shiftCardPath } from "./shift-card.js";
 import { ShiftDrawer } from "./ShiftDrawer.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
 import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
-import { ShiftDialog } from "./ShiftDialog.js";
+import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { datePickerTexts, shiftOutput } from "./shift-text.js";
@@ -83,7 +83,6 @@ const UNITS = new Intl.NumberFormat("ru");
 
 type ShiftsDialog =
   | { kind: "create" }
-  | { kind: "edit"; shift: OfficeShift }
   | { kind: "plan"; shift: OfficeShift }
   | { kind: "delete"; shift: OfficeShift }
   | { kind: "close"; shift: OfficeShift }
@@ -383,16 +382,20 @@ export function ShiftsPage() {
               {t("office.shifts.totalsAction")}
             </Button>
           )}
+          {/* A planned shift's fields are its card's: «Открыть» shows them, and «Изменить» there
+              turns them into the form. */}
+          {shift.status === "planned" && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shifts.openNamed", { number: shift.number })}
+              onClick={() => setParams({ shift: shift.id })}
+            >
+              {t("office.shifts.open")}
+            </Button>
+          )}
           {canPlan && shift.status === "planned" && (
             <>
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.shifts.editNamed", { number: shift.number })}
-                onClick={() => open({ kind: "edit", shift })}
-              >
-                {t("office.shifts.edit")}
-              </Button>
               <Button
                 variant="secondary"
                 size="compact"
@@ -651,17 +654,10 @@ export function ShiftsPage() {
       {openShiftId !== null && openShiftId !== "" && (
         <ShiftDrawer key={openShiftId} id={openShiftId} onClose={closeDrawer} />
       )}
-      {canPlan && (dialog?.kind === "create" || dialog?.kind === "edit") && (
-        <ShiftDialog
-          shift={dialog.kind === "edit" ? dialog.shift : null}
+      {canPlan && dialog?.kind === "create" && (
+        <ShiftCreateDrawer
           onClose={() => setDialog(null)}
-          onSaved={(shift) =>
-            saved(
-              dialog.kind === "create"
-                ? t("office.shifts.created", { number: shift.number })
-                : t("office.common.saved"),
-            )
-          }
+          onSaved={(shift) => saved(t("office.shifts.created", { number: shift.number }))}
           onReload={reload}
           onOutdated={readAgain}
         />

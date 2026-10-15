@@ -74,6 +74,7 @@ function pallet(overrides: Partial<OfficePallet> = {}): OfficePallet {
     boxes: 1,
     units: 2,
     boxCountReported: 1,
+    disassembledBoxes: 0,
     printVerifiedAt: null,
     printSkippedAt: null,
     ...overrides,
@@ -254,6 +255,16 @@ describe("the pallets whose box count differs from the station's report (plan Ч
         pallet({ id: "a0000000-0000-4000-8000-000000000003" }),
       ]),
     ).toEqual([{ kind: "pallet_count_mismatch", pallets: 2 }]);
+  });
+
+  it("leave out a difference exactly the pallet's own taken-apart boxes account for", () => {
+    // Two at the close, one stands, one taken apart since: the repacking, not a mismatch.
+    expect(
+      reportedCountWarnings([pallet({ boxes: 1, boxCountReported: 2, disassembledBoxes: 1 })]),
+    ).toEqual([]);
+    expect(
+      reportedCountWarnings([pallet({ boxes: 1, boxCountReported: 3, disassembledBoxes: 1 })]),
+    ).toEqual([{ kind: "pallet_count_mismatch", pallets: 1 }]);
   });
 
   it("ignore a pallet the station reported no count for and one taken apart", () => {

@@ -1,6 +1,7 @@
 import { isShiftCloseReasonCode, type PlacardFormat } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
@@ -8,6 +9,7 @@ import {
   Alert,
   Button,
   Card,
+  ConfirmDialog,
   DataTabs,
   DefinitionGrid,
   Input,
@@ -19,8 +21,16 @@ import {
   type TagPhase,
 } from "@markiro/ui";
 
-import type { OfficeBox, OfficePallet, OfficeShift, ShiftStatus } from "../../host/protocol.js";
+import type {
+  LabelTemplateSummary,
+  OfficeBox,
+  OfficePallet,
+  OfficeShift,
+  PalletSheets,
+  ShiftStatus,
+} from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { useTemplates } from "../catalog-queries.js";
 import { hasPlacard } from "../forms/form-data.js";
 import { BoxLink, PalletLink, PalletLinkOrOpen } from "../codes/PackLinks.js";
 import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
@@ -36,7 +46,6 @@ import {
   isLateBox,
   labelState,
   packState,
-  palletCountDiffers,
   ssccTail,
   ssccText,
   type PackState,
@@ -45,7 +54,10 @@ import { civilDateLabel, recordLabel } from "./shift-list.js";
 import { ShiftConflicts, ShiftExceptions, ShiftRejections } from "./ShiftReview.js";
 import { shiftOutput } from "./shift-text.js";
 import { ShiftTotalsBody } from "./ShiftTotalsDialog.js";
+import { ShiftEditBody, type ShiftEditStatus } from "./ShiftEditor.js";
 import { ShiftExports } from "./ShiftExports.js";
+import { ShiftScans } from "./ShiftScans.js";
+import { PalletCountTag } from "./PalletCountTag.js";
 
 /**
  * The export dialog comes with the domain's renderers and the check of every
@@ -80,6 +92,7 @@ export const DRAWER_TABS = [
   "summary",
   "boxes",
   "pallets",
+  "scans",
   "exceptions",
   "rejections",
   "conflicts",
@@ -134,6 +147,16 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
   const [paper, setPaper] = useState<PlacardFormat>("a4");
   const [notice, setNotice] = useState<string | null>(null);
   const noticeId = useId();
+  // «Изменить» switches the card to the shift's fields (a planned shift only); the editor reports
+  // its state for the footer, and leaving with unsaved changes asks first.
+  const [editing, setEditing] = useState(false);
+  const [editStatus, setEditStatus] = useState<ShiftEditStatus>({
+    dirty: false,
+    submitDisabled: true,
+    sending: false,
+  });
+  const [asking, setAsking] = useState<"close" | "cancel" | null>(null);
+  const formId = useId();
   const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id));
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
@@ -141,6 +164,13 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     api.listCounterparties(token),
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const templates = useTemplates();
+  const palletSheets = useOfficeQuery(
+    officeKeys.palletSheets,
+    (api, token) => api.listPalletSheets(token),
+    // A validation shift has no pallets, whatever its switch holds.
+    { enabled: shift.data?.palletsEnabled === true && shift.data.mode !== "validation" },
+  );
   const palletList = useOfficeQuery(
     officeKeys.shiftPallets(id),
     (api, token) => api.listShiftPallets(token, id),
@@ -176,18 +206,47 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
     void queryClient.invalidateQueries({ queryKey: officeKeys.conflicts });
   };
 
+  /** The × and Escape: while editing, unsaved changes are asked about, and a write on its way is not abandoned. */
+  const requestClose = () => {
+    if (editing && editStatus.sending) return;
+    if (editing && editStatus.dirty) setAsking("close");
+    else onClose();
+  };
+  const requestCancel = () => {
+    if (editStatus.sending) return;
+    if (editStatus.dirty) setAsking("cancel");
+    else setEditing(false);
+  };
   const panel = (title: string, body: ReactNode, footer?: ReactNode) => (
-    <SidePanel
-      open
-      size="complex"
-      className="shift-drawer"
-      title={title}
-      closeLabel={t("office.shiftCard.close")}
-      onClose={onClose}
-      footer={footer}
-    >
-      {body}
-    </SidePanel>
+    <>
+      <SidePanel
+        open
+        size="complex"
+        className="shift-drawer"
+        title={title}
+        closeLabel={t("office.shiftCard.close")}
+        onClose={requestClose}
+        busy={editing && editStatus.sending}
+        footer={footer}
+      >
+        {body}
+      </SidePanel>
+      <ConfirmDialog
+        open={asking !== null}
+        title={t("office.drawer.discardTitle")}
+        description={t("office.drawer.discardBody")}
+        confirmLabel={t("office.drawer.discard")}
+        cancelLabel={t("office.drawer.keepEditing")}
+        tone="destructive"
+        onConfirm={() => {
+          const action = asking;
+          setAsking(null);
+          if (action === "close") onClose();
+          else setEditing(false);
+        }}
+        onCancel={() => setAsking(null)}
+      />
+    </>
   );
   if (shift.isPending) {
     return panel(t("office.shiftCard.loadingTitle"), <PageLoading />);
@@ -242,11 +301,64 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
       { replace: true },
     );
 
+  const editable = canPlan && current.status === "planned";
+  if (editing && editable) {
+    return panel(
+      t("office.shiftCard.title", { number: current.number }),
+      <div className="office-stack">
+        <ShiftStatusLine shift={current} />
+        <ShiftEditBody
+          key={current.id}
+          shift={current}
+          formId={formId}
+          onStatus={setEditStatus}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setNotice(t("office.common.saved"));
+            readAgain();
+          }}
+          onReload={() => {
+            setEditing(false);
+            readAgain();
+          }}
+          onOutdated={readAgain}
+        />
+      </div>,
+      <>
+        <Button variant="secondary" onClick={requestCancel} disabled={editStatus.sending}>
+          {t("office.common.cancel")}
+        </Button>
+        <Button
+          type="submit"
+          form={formId}
+          loading={editStatus.sending}
+          disabled={editStatus.submitDisabled}
+        >
+          {t("office.common.save")}
+        </Button>
+      </>,
+    );
+  }
+
   return panel(
     t("office.shiftCard.title", { number: current.number }),
     <div className="office-stack">
       <ShiftStatusLine shift={current} />
       <RowActions>
+        {editable && (
+          <Button
+            variant="secondary"
+            aria-label={t("office.shiftCard.editNamed", { number: current.number })}
+            onClick={() => {
+              setNotice(null);
+              setEditStatus({ dirty: false, submitDisabled: true, sending: false });
+              setEditing(true);
+            }}
+          >
+            {t("office.shiftCard.edit")}
+          </Button>
+        )}
         {current.status !== "planned" && (
           <Button variant="secondary" onClick={() => setDialog("export")}>
             {t("office.shifts.export")}
@@ -295,6 +407,8 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
             products={products.data}
             lines={lines.data}
             counterparties={counterparties.data}
+            templates={templates.data}
+            sheets={palletSheets.data}
           />
         )}
         {active === "boxes" && (
@@ -302,6 +416,9 @@ export function ShiftDrawer({ id, onClose }: ShiftDrawerProps) {
         )}
         {active === "pallets" && (
           <ShiftPallets key={`pallets-${current.id}`} shift={current} at={at} onForm={setForm} />
+        )}
+        {active === "scans" && (
+          <ShiftScans key={`scans-${current.id}`} shift={current} at={at} zone={zone} />
         )}
         {active === "exceptions" && (
           <ShiftExceptions key={`exceptions-${current.id}`} shift={current} at={at} />
@@ -366,9 +483,13 @@ function ShiftSummary({
   products,
   lines,
   counterparties,
+  templates,
+  sheets,
 }: {
   shift: OfficeShift;
   at: (instant: string | null) => string;
+  templates: readonly LabelTemplateSummary[] | undefined;
+  sheets: PalletSheets | undefined;
   products: Parameters<typeof recordLabel>[1];
   lines: Parameters<typeof recordLabel>[1];
   counterparties: Parameters<typeof recordLabel>[1];
@@ -465,6 +586,47 @@ function ShiftSummary({
                         }),
                 },
               ]),
+          // The templates the shift prints with, frozen at its opening (a validation shift
+          // prints no box label; its duplicate template is shown above with the flag).
+          ...(validation
+            ? duplicate === null
+              ? []
+              : [
+                  {
+                    id: "duplicateTemplate",
+                    term: t("office.shiftCard.duplicateTemplate"),
+                    description: templateName(templates, duplicate.templateId, t),
+                  },
+                ]
+            : [
+                {
+                  id: "boxTemplate",
+                  term: t("office.shiftCard.boxTemplate"),
+                  description: templateName(templates, current.boxTemplateId, t),
+                },
+                ...(current.palletTemplateId === null
+                  ? []
+                  : [
+                      {
+                        id: "palletTemplate",
+                        term: t("office.shiftCard.palletTemplate"),
+                        description: templateName(templates, current.palletTemplateId, t),
+                      },
+                      {
+                        id: "palletSheet",
+                        term: t("office.shiftCard.palletSheet"),
+                        description:
+                          current.palletSheetTemplateId === null
+                            ? t("office.shiftCard.defaultSheet")
+                            : (sheets?.sheets.find(
+                                (sheet) => sheet.id === current.palletSheetTemplateId,
+                              )?.name ??
+                              t("office.shiftCard.templateNamed", {
+                                id: current.palletSheetTemplateId.slice(0, 8),
+                              })),
+                      },
+                    ]),
+              ]),
           {
             id: "output",
             term: t("office.shifts.table.output"),
@@ -495,6 +657,18 @@ function ShiftSummary({
         </section>
       )}
     </>
+  );
+}
+
+/** A template by its name; one the list lacks (deleted, or the list did not load) by the start of its id. */
+function templateName(
+  templates: readonly LabelTemplateSummary[] | undefined,
+  id: string,
+  t: TFunction,
+): string {
+  return (
+    templates?.find((each) => each.id === id)?.name ??
+    t("office.shiftCard.templateNamed", { id: id.slice(0, 8) })
   );
 }
 
@@ -874,11 +1048,9 @@ function PackStateCell({
   const { t } = useTranslation();
   const state = packState(pack);
   // Each says its own: a box's digest only while it stands closed (a box taken apart is stale),
-  // a pallet's count by `palletCountDiffers`, which leaves a pallet taken apart out.
-  const mismatch =
-    "digestMatches" in pack
-      ? state === "closed" && pack.digestMatches === false
-      : palletCountDiffers(pack);
+  // a pallet's count by `PalletCountTag`, which leaves a pallet taken apart out and tells a
+  // disassembly's difference from a real one.
+  const boxMismatch = "digestMatches" in pack && state === "closed" && pack.digestMatches === false;
   return (
     <span className="shift-cell">
       <StatusChip phase={PACK_PHASE[state]} label={t(`office.shiftCard.${kind}State.${state}`)} />
@@ -887,8 +1059,11 @@ function PackStateCell({
           {t("office.shiftCard.disassembledAt", { at: at(pack.disassembledAt) })}
         </span>
       )}
-      {mismatch && (
-        <StatusChip phase="attention" wrap label={t(`office.shiftCard.${kind}Mismatch`)} />
+      {boxMismatch && (
+        <StatusChip phase="attention" wrap label={t("office.shiftCard.boxMismatch")} />
+      )}
+      {"digestMatches" in pack ? null : (
+        <PalletCountTag pallet={pack} differsLabel={t("office.shiftCard.palletMismatch")} />
       )}
       {late && <StatusChip phase="attention" wrap label={t("office.shiftCard.lateBox")} />}
     </span>

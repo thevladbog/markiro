@@ -1123,6 +1123,12 @@ export const officePalletSchema = z.object({
   boxes: z.number().int().nonnegative(),
   units: z.number().int().nonnegative(),
   boxCountReported: z.number().int().positive().nullable(),
+  /**
+   * How many of the boxes that stood on the pallet were taken apart since (by a station or an
+   * applied disaggregation document). They explain a `boxCountReported` above `boxes`; a host
+   * before this field says none.
+   */
+  disassembledBoxes: z.number().int().nonnegative().default(0),
   printVerifiedAt: z.iso.datetime().nullable(),
   printSkippedAt: z.iso.datetime().nullable(),
 });

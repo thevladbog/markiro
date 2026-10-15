@@ -204,8 +204,12 @@ import {
   officeConflictSchema,
   officeShiftExceptionsSchema,
   officeShiftExportsSchema,
+  officeScanHistoryPageSchema,
   officeShiftRejectionsSchema,
+  shiftScansPath,
   type ConflictQuery,
+  type OfficeScanHistoryPage,
+  type ScanHistoryQuery,
   type ConflictStatusRequest,
   type ConflictStatusResponse,
   type DeviceDisplacements,
@@ -417,6 +421,16 @@ export interface HostApi {
   /** The exports of the shift the office saved, newest first (the shift drawer's history). */
   listShiftExports: (token: string, id: string) => Promise<OfficeShiftExports>;
   listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
+  /**
+   * One page of a shift's scan history, newest first, narrowed by `query`, below the cursor the
+   * page before named; the code only as its GTIN and serial tail. Every office role.
+   */
+  listShiftScans: (
+    token: string,
+    id: string,
+    query: ScanHistoryQuery,
+    cursor: string | null,
+  ) => Promise<OfficeScanHistoryPage>;
   /**
    * One page of the placements of codes the criteria find, newest scan
    * first («Поиск кодов»); every office role. At least one criterion.
@@ -1081,6 +1095,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/shifts/${id}/rejections`, {
         officeToken: token,
         schema: officeShiftRejectionsSchema,
+      }),
+    listShiftScans: (token, id, query, cursor) =>
+      client.request("GET", shiftScansPath(id, query, cursor), {
+        officeToken: token,
+        schema: officeScanHistoryPageSchema,
       }),
     conflictStatus: (request) =>
       client.request("POST", "/v1/device/conflicts/status", {

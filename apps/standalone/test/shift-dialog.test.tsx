@@ -840,6 +840,14 @@ describe("office shifts: planning a shift", () => {
     fillMilk();
     pickDate("Дата производства", "12 октября 2026");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    // Typed and not saved: the drawer asks first (owner decision after beta 3.2), and the answer
+    // «Закрыть без сохранения» drops it.
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" })).getByRole(
+        "button",
+        { name: "Закрыть без сохранения" },
+      ),
+    );
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
     await screen.findByRole("dialog", { name: "Новая смена" });
@@ -905,11 +913,14 @@ describe("office shifts: planning a shift", () => {
     expect(dialog()).toBeTruthy();
     expect(valueOf("Товар")).toBe(MILK.id);
     expect(valueOf("План, шт")).toBe(" 1200 ");
-    // With the calendar shut, the same key on the date still closes the dialog.
+    // With the calendar shut, the same key on the date still closes the drawer: after asking,
+    // because something was typed.
     fireEvent.keyDown(within(dialog()).getByRole("button", { name: "Дата производства" }), {
       key: "Escape",
     });
-    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+    expect(
+      await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" }),
+    ).toBeTruthy();
   });
 
   it("reads the shifts again behind the dialog after a lost answer, since the shift may have been made", async () => {

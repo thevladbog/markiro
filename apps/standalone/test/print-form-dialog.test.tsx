@@ -51,6 +51,7 @@ const OPEN_PALLET: OfficePallet = {
   boxes: 1,
   units: 1,
   boxCountReported: null,
+  disassembledBoxes: 0,
   printVerifiedAt: null,
   printSkippedAt: null,
 };
