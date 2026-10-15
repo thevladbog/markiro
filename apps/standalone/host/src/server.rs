@@ -66,6 +66,12 @@ pub struct AppState {
     /// routes `not_found` and a device's offer `missing`. `crate::start`
     /// always sets it.
     pub updates: Option<Arc<crate::updates::UpdateStore>>,
+    /// One download per device, three on the host, 30 update requests a
+    /// minute per device (plan ОБН-3).
+    pub update_limits: Arc<crate::updates::limits::DownloadLimits>,
+    /// How long a download waits for the client to take its next piece
+    /// (60 s; tests shorten it).
+    pub download_stall: Duration,
     /// The site's license (plan ЛЦ-2): its files, its state, the time it
     /// trusts and its gates.
     pub license: Arc<crate::license::LicenseService>,
@@ -102,6 +108,8 @@ impl AppState {
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
             updates: None,
+            update_limits: Arc::new(crate::updates::limits::DownloadLimits::new(clock.clone())),
+            download_stall: crate::updates::stream::STALL_LIMIT,
             license: Arc::new(crate::license::LicenseService::new(
                 markiro_proto::trust::license_keyset(),
                 Arc::new(crate::license::trial_mark::NoMark),
@@ -153,6 +161,12 @@ impl AppState {
         self
     }
 
+    /// Another stall limit of a download; tests use a short one.
+    pub fn with_download_stall(mut self, stall: Duration) -> Self {
+        self.download_stall = stall;
+        self
+    }
+
     /// Replace the license service (`crate::start` gives it the registry's
     /// mark; tests a mark of their own).
     pub fn with_license(mut self, license: Arc<crate::license::LicenseService>) -> Self {
@@ -172,6 +186,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/device/update",
             get(crate::routes::device_update::offer),
+        )
+        .route(
+            "/v1/device/update/installer",
+            get(crate::routes::device_update::installer),
         )
         .merge(protected_routes().route_layer(middleware::from_fn(protocol_guard)))
         .method_not_allowed_fallback(method_not_allowed)

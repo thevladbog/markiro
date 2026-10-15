@@ -8,7 +8,9 @@
 //! touches it: the package is no data of the site, and its authenticity
 //! rests on its signature, which every device checks itself.
 
+pub mod limits;
 pub mod store;
+pub mod stream;
 pub mod worker;
 
 pub use store::{

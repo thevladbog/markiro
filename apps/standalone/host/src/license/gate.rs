@@ -88,6 +88,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/pairing/claim"),
     ("GET", "/v1/device"),
     ("GET", "/v1/device/update"),
+    ("GET", "/v1/device/update/installer"),
     ("PUT", "/v1/device/line"),
     ("GET", "/v1/device/shifts"),
     ("GET", "/v1/device/products/{id}/photo"),
