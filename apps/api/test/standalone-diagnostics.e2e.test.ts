@@ -495,16 +495,14 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone diagnostics (plan ДИА�
     const bad = await refusal(
       service.ingest(admin, tenantId, { text: supportText(blob.replace("sup-e2e", "sup-zzz")) }),
     );
-    const everything = JSON.stringify([
-      ok,
-      bad,
-      await auditRows(db, tenantId),
-      await service.history(admin, tenantId, {}),
-    ]);
+    const audit = JSON.stringify(await auditRows(db, tenantId));
+    const everything = JSON.stringify([ok, bad, audit, await service.history(admin, tenantId, {})]);
     expect(everything).not.toContain(blob);
     expect(everything).not.toContain("MKS1.sup-e2e");
     expect(everything).not.toMatch(/PRIVATE KEY/u);
-    expect(everything).not.toContain("WebView2 130");
+    // The system line (owner decision В4) is shown to the operator in the history; the audit
+    // keeps only the exact fields of the ingest, never the report's own content.
+    expect(audit).not.toContain("WebView2 130");
   });
 
   it("purges reports older than 24 months with their months and keeps the rest", async () => {
