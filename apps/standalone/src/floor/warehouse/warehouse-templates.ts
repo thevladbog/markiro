@@ -10,6 +10,8 @@ import { z } from "zod";
 import type { TemplatePurpose, WarehouseSubjectKind } from "../../host/protocol.js";
 import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import type { LocalExecutor } from "../../local/executor.js";
+import { resolvePrinter, type WorkstationSettings } from "../setup/workstation-settings.js";
+import { SHEET_AUTO } from "./warehouse-sheet.js";
 import type { WarehouseTemplates } from "./warehouse-store.js";
 
 /** The template purpose of each kind of label printed again. */
@@ -103,12 +105,30 @@ export function isChoosable(template: WarehouseTemplate, kind: WarehouseSubjectK
 }
 
 /**
+ * What the printer assigned to pallets prints (beta 3.2): `a4` sheets (the choice is a sheet of
+ * the host), `thermal` labels (the choice is a label template of the copies), or `none` — no
+ * printer, which the picker says before it offers anything.
+ */
+export type PalletPaper = "a4" | "thermal" | "none";
+
+/** The paper of the printer the settings assign to pallets. */
+export function palletPaperOf(
+  settings: Pick<WorkstationSettings, "printers" | "assignments">,
+): PalletPaper {
+  const printer = resolvePrinter(settings, "pallet");
+  return printer === null ? "none" : printer.paper === "a4" ? "a4" : "thermal";
+}
+
+/**
  * The templates a new session starts with (decision Р8): the organization's default
- * when it is choosable, otherwise the only choosable one, otherwise none.
+ * when it is choosable, otherwise the only choosable one, otherwise none. For pallets on a
+ * printer of sheets (beta 3.2) it is the sheet of the pallet's own product by default
+ * (`SHEET_AUTO`: its, its category's, the organization's), which the host resolves per pallet.
  */
 export function initialTemplates(
   templates: readonly WarehouseTemplate[],
   defaults: WarehouseTemplates,
+  palletPaper: PalletPaper = "thermal",
 ): WarehouseTemplates {
   const pick = (kind: WarehouseSubjectKind): string | null => {
     const choosable = templates.filter((template) => isChoosable(template, kind));
@@ -117,7 +137,11 @@ export function initialTemplates(
     const [only, ...others] = choosable;
     return only !== undefined && others.length === 0 ? only.id : null;
   };
-  return { unit: pick("unit"), box: pick("box"), pallet: pick("pallet") };
+  return {
+    unit: pick("unit"),
+    box: pick("box"),
+    pallet: palletPaper === "a4" ? SHEET_AUTO : pick("pallet"),
+  };
 }
 
 /** Whether the chosen template prints this record, and why not. */

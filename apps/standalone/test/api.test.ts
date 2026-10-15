@@ -1219,6 +1219,29 @@ describe("HostApi floor work", () => {
     ]);
   });
 
+  it("lists the A4 sheets for a warehouse reprint, with the product named in the query and the device key only", async () => {
+    const all = recording(fixture("pallet-sheets.json"));
+    await expect(all.api.getDevicePalletSheets()).resolves.toEqual(fixture("pallet-sheets.json"));
+    const product = "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b";
+    const named = recording(fixture("pallet-sheets.json"));
+    await named.api.getDevicePalletSheets(product);
+    expect([...all.sent, ...named.sent]).toEqual([
+      {
+        method: "GET",
+        path: "/v1/device/pallet-sheets",
+        body: undefined,
+        officeToken: undefined,
+      },
+      {
+        method: "GET",
+        path: `/v1/device/pallet-sheets?productId=${product}`,
+        body: undefined,
+        officeToken: undefined,
+      },
+    ]);
+    await expect(recording({ sheets: "none" }).api.getDevicePalletSheets()).rejects.toThrow();
+  });
+
   it("refuses a warehouse answer of another shape", async () => {
     await expect(
       recording({ status: "found" }).api.warehouseLookup({ sscc: "046006820000015000" }),

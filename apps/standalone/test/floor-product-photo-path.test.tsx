@@ -1,0 +1,160 @@
+import { cleanup, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ProductPanel } from "../src/floor/shifts/ProductPhoto.js";
+import { dominantAccent } from "../src/floor/shifts/photo-accent.js";
+import { ShiftBand } from "../src/floor/work/WorkInstruments.js";
+import { productPhotoStateSchema, type ChangeItem } from "../src/host/protocol.js";
+import { PHOTOS_PER_PASS, syncAllProductPhotos } from "../src/local/product-photos.js";
+import { syncReferences } from "../src/local/reference-sync.js";
+import { fixture } from "./support/proto-fixture.js";
+import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
+import { openLocalDb } from "./support/local-db.js";
+
+afterEach(cleanup);
+
+const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+const checksum = (index: number) => String(index % 10).repeat(63) + "a";
+
+function productItem(index: number): ChangeItem {
+  return {
+    entity: "products",
+    id: id(index),
+    rev: index + 1,
+    deleted: false,
+    data: {
+      gtin14: `0460068200${String(1000 + index).padStart(4, "0")}`,
+      name: `Товар ${index}`,
+      printName: null,
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: null,
+      shelfLifeDays: 10,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      archived: false,
+      status: "active",
+      photoChecksum: checksum(index),
+    },
+  };
+}
+
+describe("a product's photo, from the host's answer to the rendered picture (beta 3.2)", () => {
+  it("every photo the records name reaches the station in one run, not only the first pass's", async () => {
+    // More products with photos than a pass takes: the rest used to wait for a sync that
+    // might be hours away, so their cards stayed on the monogram.
+    const count = PHOTOS_PER_PASS * 2 + 7;
+    const items = Array.from({ length: count }, (_, index) => productItem(index));
+    const { executor } = openLocalDb();
+    await syncReferences({
+      changes: async () => ({ hostId: HOST_ID, rev: count + 1, hasMore: false, items }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    // The host's own answer shape, as the Zod schema of the device route reads it.
+    const answer = productPhotoStateSchema.parse(fixture("product-photo-state.json"));
+    const fetchPhoto = vi.fn(async (productId: string) => {
+      const index = Number(productId.slice(-12));
+      return answer.photo === null
+        ? answer
+        : { photo: { ...answer.photo, checksum: checksum(index) } };
+    });
+    const result = await syncAllProductPhotos({ local: executor, fetchPhoto });
+    expect(result.stored).toBe(count);
+    expect(fetchPhoto).toHaveBeenCalledTimes(count);
+    // Nothing is fetched twice by the next run.
+    await syncAllProductPhotos({ local: executor, fetchPhoto });
+    expect(fetchPhoto).toHaveBeenCalledTimes(count);
+
+    // The last product (the one a single pass leaves out) shows its picture in the shift
+    // band of the work screen and on a card's panel.
+    const last = count - 1;
+    const band = render(
+      <ShiftBand
+        productName="Товар"
+        gtin="04600682001000"
+        number="OCT26-001"
+        counterpartyName={null}
+        accepted={0}
+        plannedQty={null}
+        local={executor}
+        productId={id(last)}
+      />,
+    );
+    await waitFor(() => expect(band.container.querySelector("img.product-photo")).not.toBeNull());
+    expect(band.container.querySelector("img.product-photo")?.getAttribute("src")).toMatch(
+      /^data:image\/jpeg;base64,/,
+    );
+    expect(band.container.querySelector(".work-shift-band__monogram")).toBeNull();
+    const panel = render(
+      <ProductPanel
+        local={executor}
+        productId={id(last)}
+        gtin="04600682001000"
+        className="shift-card__photo"
+        fallback={<span>монограмма</span>}
+      />,
+    );
+    await waitFor(() => expect(panel.container.querySelector("img.product-photo")).not.toBeNull());
+  });
+
+  it("a product without a photo keeps the monogram and the GTIN's hue", async () => {
+    const { executor } = openLocalDb();
+    const view = render(
+      <ShiftBand
+        productName="Молоко"
+        gtin="04600682000013"
+        number="OCT26-001"
+        counterpartyName={null}
+        accepted={0}
+        plannedQty={null}
+        local={executor}
+        productId={id(1)}
+      />,
+    );
+    await waitFor(() =>
+      expect(view.container.querySelector(".work-shift-band__monogram")?.textContent).toBe("М"),
+    );
+    expect(view.container.querySelector("img")).toBeNull();
+    const band = view.container.querySelector<HTMLElement>(".work-shift-band");
+    expect(band?.style.getPropertyValue("--product-hue")).toMatch(/^\d+$/);
+    expect(band?.style.getPropertyValue("--product-sat")).toBe("");
+  });
+});
+
+/** An RGBA sample of `pixels` pixels, each given as [r, g, b, a]. */
+function sample(...groups: [count: number, rgba: [number, number, number, number]][]): number[] {
+  return groups.flatMap(([count, rgba]) => Array.from({ length: count }, () => rgba).flat());
+}
+
+describe("the colour a photo gives its panel", () => {
+  it("takes the dominant vivid hue, not the white or grey around the product", () => {
+    // A blue bottle (hue 220) on white, with a little red.
+    const accent = dominantAccent(
+      sample([600, [255, 255, 255, 255]], [300, [30, 80, 220, 255]], [40, [220, 30, 30, 255]]),
+    );
+    expect(accent).not.toBeNull();
+    expect(accent?.hue).toBeGreaterThanOrEqual(215);
+    expect(accent?.hue).toBeLessThanOrEqual(225);
+    expect(accent?.saturation).toBeGreaterThanOrEqual(25);
+    expect(accent?.saturation).toBeLessThanOrEqual(55);
+  });
+
+  it("finds red across the 0/360 seam", () => {
+    const accent = dominantAccent(
+      sample([200, [230, 20, 40, 255]], [200, [230, 40, 20, 255]], [50, [255, 255, 255, 255]]),
+    );
+    expect(accent).not.toBeNull();
+    const hue = accent?.hue ?? 180;
+    expect(Math.min(hue, 360 - hue)).toBeLessThan(15);
+  });
+
+  it("has none for a grey or transparent picture: the GTIN's hue stays", () => {
+    expect(dominantAccent(sample([500, [120, 120, 120, 255]]))).toBeNull();
+    expect(dominantAccent(sample([500, [255, 0, 0, 0]]))).toBeNull();
+    expect(dominantAccent([])).toBeNull();
+    // A few coloured pixels in a grey picture are noise, not an accent.
+    expect(dominantAccent(sample([990, [128, 128, 128, 255]], [10, [255, 0, 0, 255]]))).toBeNull();
+  });
+});

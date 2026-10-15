@@ -18,6 +18,7 @@ import type {
   UsbPrinter,
 } from "../../hardware/hardware.js";
 import { checkScan, type ScanCheck } from "../../app/scan-check.js";
+import type { SheetAdjusted } from "../../hardware/hardware.js";
 import { paintMonoRaster } from "../../labels/sheet-render.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
@@ -35,6 +36,7 @@ import {
   type PrinterDraft,
 } from "./printer-draft.js";
 import { ComPortField } from "./ComPortField.js";
+import { DiagnosticCopy } from "./DiagnosticCopy.js";
 import { SetupTabs, type SetupTabId } from "./SetupTabs.js";
 import {
   ScannerSelfTest,
@@ -113,8 +115,23 @@ export interface WorkstationSetupProps {
  */
 type TestState =
   | { kind: "sending"; printerId: string }
-  | { kind: "sent"; printerId: string; name: string; code: string; sheet: boolean }
-  | { kind: "failed"; code: PrintJobCode; unknown: boolean; sheet: boolean }
+  | {
+      kind: "sent";
+      printerId: string;
+      name: string;
+      code: string;
+      sheet: boolean;
+      /** A sheet the driver path moved or drew smaller to fit the printer (beta 3.2). */
+      adjusted?: SheetAdjusted;
+    }
+  | {
+      kind: "failed";
+      code: PrintJobCode;
+      unknown: boolean;
+      sheet: boolean;
+      /** The driver's measured numbers of a refused sheet (beta 3.2). */
+      diagnostic?: string;
+    }
   | { kind: "render_failed"; sheet: boolean }
   | { kind: "match" }
   | { kind: "mismatch"; name: string; code: string; sheet: boolean };
@@ -290,9 +307,9 @@ export function WorkstationSetup({
   const testGeneration = useRef(0);
   useEffect(() => {
     const listen = (raw: string, channel: ScanChannel) => {
-      // The self-test judges the scans of the scanner tab against the code it showed (a label's
+      // The self-test judges the scans of its own tab against the code it showed (a label's
       // test scan on the printers tab is not its business); the text stays here.
-      if (scannersOnly || activeTabRef.current === "scanner") selfTestScan(raw, channel);
+      if (scannersOnly || activeTabRef.current === "check") selfTestScan(raw, channel);
       // The scanner check says what any scan read, never its text.
       if (scannersOnly) setScanCheck(checkScan(raw));
       const now = testRef.current;
@@ -388,7 +405,10 @@ export function WorkstationSetup({
   // The scanner tab and the serial printer's form show the COM ports of this PC: ask for them once.
   const wantsPorts =
     draft !== null &&
-    (scannersOnly || activeTab === "scanner" || (editor !== null && editor.kind === "serial"));
+    (scannersOnly ||
+      activeTab === "scanner" ||
+      activeTab === "check" ||
+      (editor !== null && editor.kind === "serial"));
   useEffect(() => {
     if (wantsPorts && serialPorts === null && serialAsk.current === 0) refreshSerial();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- asked once, by the first need
@@ -534,18 +554,33 @@ export function WorkstationSetup({
         return;
       }
     }
-    const settled = settleOutcome(
-      sheet
-        ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
-        : await printing.send(null, printer.target, bytes, printerMode(printer)),
-    );
+    const outcome = sheet
+      ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
+      : await printing.send(null, printer.target, bytes, printerMode(printer));
+    const settled = settleOutcome(outcome);
     if (stale()) return;
     // What was typed ahead (a letter on a list) would join the code of the label.
     source.clearPendingInput();
+    const answer = outcome.kind === "answered" ? outcome.result : null;
+    const adjusted = answer?.sent === true ? answer.adjusted : undefined;
+    const diagnostic = answer !== null && !answer.sent ? answer.diagnostic : undefined;
     setTest(
       settled.state === "sent"
-        ? { kind: "sent", printerId: printer.id, name: printer.name, code, sheet }
-        : { kind: "failed", code: settled.code, unknown: settled.state === "unknown", sheet },
+        ? {
+            kind: "sent",
+            printerId: printer.id,
+            name: printer.name,
+            code,
+            sheet,
+            ...(adjusted === undefined ? {} : { adjusted }),
+          }
+        : {
+            kind: "failed",
+            code: settled.code,
+            unknown: settled.state === "unknown",
+            sheet,
+            ...(diagnostic === undefined ? {} : { diagnostic }),
+          },
     );
   };
 
@@ -609,6 +644,24 @@ export function WorkstationSetup({
     })}`;
   };
 
+  /** What the driver path did to a sheet to fit the printer, in words (moved, drawn smaller). */
+  const adjustedWords = (adjusted: SheetAdjusted | undefined): string[] => {
+    if (adjusted === undefined) return [];
+    const words: string[] = [];
+    if (adjusted.percent < 100) {
+      words.push(t("floor.setup.printers.a4Test.adjustedShrunk", { percent: adjusted.percent }));
+    }
+    const moved = Math.max(Math.abs(adjusted.shiftXMm), Math.abs(adjusted.shiftYMm));
+    if (moved > 0) {
+      words.push(
+        t("floor.setup.printers.a4Test.adjustedMoved", {
+          mm: moved.toLocaleString("ru-RU", { maximumFractionDigits: 1 }),
+        }),
+      );
+    }
+    return words;
+  };
+
   const testText = (state: TestState): { tone: "ok" | "error" | "info" | "warn"; text: string } => {
     switch (state.kind) {
       case "sending":
@@ -617,9 +670,11 @@ export function WorkstationSetup({
         return {
           tone: "info",
           text: state.sheet
-            ? `${t("floor.setup.printers.testResult.sentSheet", { name: state.name })} ${t(
-                "floor.setup.printers.a4Test.scan",
-              )}`
+            ? [
+                t("floor.setup.printers.testResult.sentSheet", { name: state.name }),
+                ...adjustedWords(state.adjusted),
+                t("floor.setup.printers.a4Test.scan"),
+              ].join(" ")
             : t("floor.setup.printers.testResult.sent", { name: state.name }),
         };
       case "failed":
@@ -1112,6 +1167,16 @@ export function WorkstationSetup({
     return settled.state === "sent" ? "sent" : "failed";
   };
 
+  const selfTestPanel = (
+    <ScannerSelfTest
+      state={selfTest}
+      printers={draft.printers
+        .filter((printer) => printer.paper !== "a4")
+        .map((printer) => ({ id: printer.id, name: printer.name }))}
+      print={selfTestPrint}
+    />
+  );
+
   const scannerPanel = (
     <div className="setup-scanner-stack">
       <div
@@ -1248,15 +1313,23 @@ export function WorkstationSetup({
           </section>
         )}
       </div>
-      <ScannerSelfTest
-        state={selfTest}
-        printers={draft.printers
-          .filter((printer) => printer.paper !== "a4")
-          .map((printer) => ({ id: printer.id, name: printer.name }))}
-        print={selfTestPrint}
-      />
+      {/* Before the pairing there are no tabs: the check stands under the connection. */}
+      {scannersOnly && selfTestPanel}
+      {!scannersOnly && (
+        <section className="setup-card setup-card--check-cta" aria-labelledby="setup-check-cta">
+          <h2 id="setup-check-cta" className="setup-card__title">
+            {t("floor.setup.selfTestCta.title")}
+          </h2>
+          <p className="setup-card__hint">{t("floor.setup.selfTestCta.body")}</p>
+          <Button size="floor" onClick={() => setActiveTab("check")}>
+            {t("floor.setup.selfTestCta.open")}
+          </Button>
+        </section>
+      )}
     </div>
   );
+
+  const checkPanel = <div className="setup-panel setup-panel--check">{selfTestPanel}</div>;
 
   const soundPanel = (
     <div className="setup-panel setup-panel--sound setup-card">
@@ -1319,6 +1392,7 @@ export function WorkstationSetup({
 
   const tabs = [
     { id: "scanner" as const, label: t("floor.setup.tabs.scanner"), panel: scannerPanel },
+    { id: "check" as const, label: t("floor.setup.tabs.check"), panel: checkPanel },
     { id: "printer" as const, label: t("floor.setup.tabs.printer"), panel: printersPanel },
     { id: "sound" as const, label: t("floor.setup.tabs.sound"), panel: soundPanel },
   ];
@@ -1333,7 +1407,9 @@ export function WorkstationSetup({
         : t("floor.setup.check.later")
       : shownTab === "scanner"
         ? t("floor.setup.hint.scanner")
-        : t("floor.setup.hint.sound");
+        : shownTab === "check"
+          ? t("floor.setup.hint.check")
+          : t("floor.setup.hint.sound");
 
   return (
     <section className="workstation-setup" aria-labelledby="workstation-setup-title">
@@ -1385,6 +1461,9 @@ export function WorkstationSetup({
               <Alert tone={testText(test).tone} role="presentation">
                 {testText(test).text}
               </Alert>
+            )}
+            {showTest && test.kind === "failed" && test.diagnostic !== undefined && (
+              <DiagnosticCopy text={test.diagnostic} />
             )}
           </div>
           <div className="workstation-setup__live" aria-live="polite">

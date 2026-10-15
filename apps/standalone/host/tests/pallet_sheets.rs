@@ -1065,3 +1065,76 @@ async fn the_sheet_statements_search_by_an_index() {
         );
     }
 }
+
+/// A station lists the enabled sheets with their layouts for a warehouse reprint of a
+/// pallet's sheet (beta 3.2), and the answer names the default a product of a pallet gets:
+/// the product's preference, else its category's, else the organization's.
+#[tokio::test]
+async fn a_station_lists_the_enabled_sheets_and_the_default_of_a_product() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let organization = create(&admin, stock("pallet-a4-portrait", "Вертикальная")).await;
+    let preferred = create(&admin, stock("pallet-a4-two-a5", "Две А5")).await;
+    let mut off = stock("pallet-a4-landscape", "Горизонтальная");
+    off["enabled"] = json!(false);
+    create(&admin, off).await;
+    let (status, _) = set_default(&admin, &organization["id"]).await;
+    assert_eq!(status, StatusCode::OK);
+    let ask = |query: &str| {
+        let path = format!("/v1/device/pallet-sheets{query}");
+        let admin = &admin;
+        async move {
+            admin
+                .app
+                .send(empty(with_device(request("GET", &path), &admin.key)))
+                .await
+        }
+    };
+    // Without a product: the organization's default, and only the enabled sheets, by name.
+    let (status, listed) = ask("").await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["defaultId"], organization["id"]);
+    let names: Vec<&str> = listed["sheets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sheet| sheet["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Вертикальная", "Две А5"]);
+    assert_eq!(listed["sheets"][0]["spec"], spec());
+    // A product with no preference and no category default takes the organization's.
+    let (status, listed) = ask(&format!("?productId={}", setup.product)).await;
+    assert_eq!(
+        (status, listed["defaultId"].clone()),
+        (StatusCode::OK, organization["id"].clone())
+    );
+    // The product's own preference wins.
+    sqlx::query("UPDATE products SET default_pallet_sheet_id = ? WHERE id = ?")
+        .bind(preferred["id"].as_str().unwrap())
+        .bind(&setup.product)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, listed) = ask(&format!("?productId={}", setup.product)).await;
+    assert_eq!(
+        (status, listed["defaultId"].clone()),
+        (StatusCode::OK, preferred["id"].clone())
+    );
+    // A product the host does not know, and a field it does not take.
+    let (status, refused) = ask("?productId=8f6d1c2e-3b4a-4c5d-9e8f-7a6b5c4d3e2f").await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    let (status, refused) = ask("?size=1").await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("validation_failed"))
+    );
+    // An office session alone is no station: the route wants a device's key.
+    let (status, _) = admin
+        .app
+        .send(empty(request("GET", "/v1/device/pallet-sheets")))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}

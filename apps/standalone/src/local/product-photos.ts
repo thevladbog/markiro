@@ -24,7 +24,9 @@ export const WANTED_SQL =
   "SELECT p.id, p.photo_checksum FROM ref_products AS p " +
   "LEFT JOIN ref_product_photos AS ph ON ph.product_id = p.id " +
   "WHERE p.photo_checksum IS NOT NULL AND (ph.checksum IS NULL OR ph.checksum <> p.photo_checksum) " +
-  "ORDER BY p.id LIMIT ?";
+  // The products on the station's own shifts first: their cards and work screens need the
+  // picture before the rest of the catalogue does.
+  "ORDER BY CASE WHEN p.id IN (SELECT product_id FROM floor_shifts) THEN 0 ELSE 1 END, p.id LIMIT ?";
 
 /** Photos of products that have none any more (or are gone): deleted. */
 export const DROP_STALE_SQL =
@@ -71,10 +73,16 @@ export function announceProductPhotosChanged(): void {
  * checksum the host answered with, which may be newer than the record's (the
  * next feed record then matches it, and nothing is fetched twice).
  */
-export async function syncProductPhotos({
+export async function syncProductPhotos(options: PhotoSyncOptions): Promise<PhotoSyncResult> {
+  const { stored, dropped } = await runPass(options);
+  return { stored, dropped };
+}
+
+/** One pass, with how many photos it asked for (a full pass may have more after it). */
+async function runPass({
   local,
   fetchPhoto,
-}: PhotoSyncOptions): Promise<PhotoSyncResult> {
+}: PhotoSyncOptions): Promise<PhotoSyncResult & { asked: number }> {
   const [dropped] = await local.transaction([{ sql: DROP_STALE_SQL }]);
   const wanted = await local.query(WANTED_SQL, [PHOTOS_PER_PASS], wantedRow);
   let stored = 0;
@@ -102,8 +110,34 @@ export async function syncProductPhotos({
   } finally {
     if (stored > 0 || (dropped ?? 0) > 0) announceProductPhotosChanged();
   }
-  return { stored, dropped: dropped ?? 0 };
+  return { stored, dropped: dropped ?? 0, asked: wanted.length };
 }
+
+/**
+ * Passes until no wanted photo is left: a pass takes `PHOTOS_PER_PASS` and the
+ * rest used to wait for the next sync, which may be hours away (beta 3.2: with
+ * more photos than a pass takes, the cards of the rest stayed on the monogram).
+ * A failed fetch
+ * rejects, as in a single pass; what was stored stays.
+ */
+export async function syncAllProductPhotos(options: PhotoSyncOptions): Promise<PhotoSyncResult> {
+  let stored = 0;
+  let dropped = 0;
+  for (let passes = 0; passes < MAX_PASSES; passes += 1) {
+    const pass = await runPass(options);
+    stored += pass.stored;
+    dropped += pass.dropped;
+    // A pass that asked for fewer than it may took everything that was wanted.
+    // (A photo the host answers with a newer checksum than its record stays
+    // «wanted» until the next feed record; full passes of those would repeat,
+    // so the loop is bounded.)
+    if (pass.asked < PHOTOS_PER_PASS) break;
+  }
+  return { stored, dropped };
+}
+
+/** The most passes one run makes: 200 passes cover 5 000 photos. */
+const MAX_PASSES = 200;
 
 export interface StoredPhoto {
   /** A `data:` URL the page can show; its type is the one the host named (JPEG, PNG or WebP). */

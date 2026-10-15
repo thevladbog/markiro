@@ -256,6 +256,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::product_photos::device_photo),
         )
         .route(
+            "/v1/device/pallet-sheets",
+            get(crate::routes::pallet_sheets::device_sheets),
+        )
+        .route(
             "/v1/device/warehouse/lookup",
             post(crate::routes::warehouse::lookup),
         )

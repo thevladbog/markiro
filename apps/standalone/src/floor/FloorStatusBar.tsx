@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button } from "@markiro/ui";
 
-import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FactsFailure, SyncState } from "../app/shell.js";
 import type { HardwareApi } from "../hardware/hardware.js";
 import type { HostStatus } from "../host/protocol.js";
@@ -12,6 +11,7 @@ import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import { LinkDot } from "./LinkDot.js";
 import { FloorWindowControl, type FloorWindowMode } from "./FloorWindowControl.js";
 import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
 import type { ScanSource } from "./scan-source.js";
@@ -443,7 +443,7 @@ export function FloorStatusBar({
           from a call leaves the last status `online`: say it stopped (a stopped
           link also hides the sync failure it can no longer retry).
         */}
-        <HostStatusLine
+        <LinkDot
           status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
           sync={sync}
         />

@@ -81,8 +81,9 @@
 }
 
 /*
- * The band's hue comes from the product's GTIN (the cloud's photo accent has no photo
- * here); lightness is clamped so that white text keeps its contrast on every product.
+ * The band's hue comes from the product's photo (its dominant colour, `--product-hue` and
+ * `--product-sat` set by `useProductAccent`) and from the GTIN without one; lightness is
+ * clamped so that white text keeps its contrast on every product.
  */
 .work-shift-band {
   display: grid;
@@ -99,10 +100,26 @@
 .work-shift-band[data-accent="true"] {
   background: linear-gradient(
     305deg,
-    hsl(var(--product-hue) 46% 21%),
-    hsl(var(--product-hue) 42% 11%) 55%,
-    hsl(var(--product-hue) 38% 6%)
+    hsl(var(--product-hue) var(--product-sat, 46%) 21%),
+    hsl(var(--product-hue) calc(var(--product-sat, 46%) - 4%) 11%) 55%,
+    hsl(var(--product-hue) calc(var(--product-sat, 46%) - 8%) 6%)
   );
+}
+
+/* The product's photo, whole, in the band's first column (beta 3.2). */
+.work-shift-band__photo {
+  display: grid;
+  min-width: clamp(60px, 6.5vw, 120px);
+  max-height: 120px;
+  place-items: center;
+}
+
+.work-shift-band__photo .product-photo {
+  max-width: clamp(80px, 9vw, 150px);
+  max-height: 112px;
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 45%);
+  object-fit: contain;
 }
 
 /* The photo slot's stand-in: the product has no photo on this station. */

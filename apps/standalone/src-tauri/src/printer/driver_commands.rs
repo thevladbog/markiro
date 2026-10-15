@@ -41,6 +41,7 @@ fn unknown_print() -> Outcome {
             code: "driver_failure",
             phase: "delivery_unknown",
             receipt: None,
+            diagnostic: None,
         },
     }
 }
@@ -155,6 +156,7 @@ mod tests {
                     code: "geometry_mismatch",
                     phase: "before_start",
                     receipt: None,
+                    diagnostic: None,
                 },
             })
             .await;

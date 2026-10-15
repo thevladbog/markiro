@@ -1,0 +1,147 @@
+/* The shift's scan history (beta 3.2): a compact list in the work screen, a full screen beside it. */
+.scan-history {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.scan-history h2,
+.scan-history h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.scan-history__title {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scan-history__title h3 {
+  font: var(--floor-body-strong);
+}
+
+.scan-history__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--sp-1);
+  list-style: none;
+}
+
+.scan-history__empty {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.scan-history__head,
+.scan-history__row {
+  display: grid;
+  min-width: 0;
+  padding-inline: var(--sp-3);
+  gap: var(--sp-3);
+  grid-template-columns: 96px minmax(0, 1.2fr) 96px minmax(0, 1.6fr) minmax(0, 1.4fr);
+  align-items: center;
+}
+
+.scan-history__head {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.scan-history__row {
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  font: var(--floor-body);
+}
+
+.scan-history__row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-history__time,
+.scan-history__code,
+.scan-history__position {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-history__result {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.scan-history__reason {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  text-overflow: ellipsis;
+}
+
+/* The full history: 64 px rows, its pager under them. */
+.scan-history--full {
+  width: min(1180px, 100%);
+  margin-inline: auto;
+  gap: var(--sp-3);
+}
+
+.scan-history--full .scan-history__row {
+  min-height: 64px;
+}
+
+.scan-history__pager {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.scan-history__page {
+  color: var(--fg-2);
+  font: var(--floor-body);
+  white-space: nowrap;
+}
+
+/* The compact list lives in a narrow column: two lines to a scan, nothing left out. */
+.work-facts .scan-history__row {
+  padding-block: var(--sp-1);
+  row-gap: 2px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "time operator position"
+    "result result code";
+  min-height: 56px;
+}
+
+.work-facts .scan-history__time {
+  grid-area: time;
+}
+
+.work-facts .scan-history__operator {
+  grid-area: operator;
+}
+
+.work-facts .scan-history__position {
+  grid-area: position;
+}
+
+.work-facts .scan-history__result {
+  grid-area: result;
+}
+
+.work-facts .scan-history__code {
+  grid-area: code;
+  color: var(--fg-2);
+  font-size: 14px;
+}

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { decodeMonoRaster, type MonoBitmap, type RasterizeTextFn } from "@markiro/domain";
+import {
+  buildPalletSheetPresets,
+  decodeMonoRaster,
+  type MonoBitmap,
+  type RasterizeTextFn,
+} from "@markiro/domain";
 
 import * as LabelRender from "../src/floor/print/label-render.js";
 import type { PrintRuntime, SendOutcome } from "../src/floor/print/print-runtime.js";
@@ -18,9 +23,15 @@ import {
   WarehousePrinterError,
   type WarehouseContext,
 } from "../src/floor/warehouse/warehouse-work.js";
+import { SHEET_AUTO, sheetChoiceOf } from "../src/floor/warehouse/warehouse-sheet.js";
 import { readJob, startSession } from "../src/floor/warehouse/warehouse-store.js";
 import type { PrintResult, PrintTarget } from "../src/hardware/hardware.js";
-import type { EnteredShift, WarehouseLookupResult, WarehouseSource } from "../src/host/protocol.js";
+import type {
+  EnteredShift,
+  PalletSheets,
+  WarehouseLookupResult,
+  WarehouseSource,
+} from "../src/host/protocol.js";
 import * as Rasterizer from "../src/labels/rasterizer.js";
 import { ENTERED, OPERATOR_ID, PAIRING, rows } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -98,11 +109,47 @@ function fakeRuntime(answers: PrintResult[] = []) {
   return { runtime, sends };
 }
 
+const [PORTRAIT_SHEET] = buildPalletSheetPresets();
+if (PORTRAIT_SHEET === undefined) throw new Error("no stock sheet");
+const SHEET_SPEC = PORTRAIT_SHEET.spec;
+const SHEET_ID = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
+const OTHER_SHEET_ID = "6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e";
+
+/** The sheets the host lists: the stock portrait sheet, and another one off the default. */
+function hostSheets(defaultId: string | null = SHEET_ID): PalletSheets {
+  return {
+    sheets: [
+      {
+        id: SHEET_ID,
+        name: "Вертикальная",
+        enabled: true,
+        presetKey: null,
+        revision: 3,
+        spec: SHEET_SPEC,
+      },
+      {
+        id: OTHER_SHEET_ID,
+        name: "Другая",
+        enabled: true,
+        presetKey: null,
+        revision: 1,
+        spec: SHEET_SPEC,
+      },
+    ],
+    defaultId,
+  };
+}
+
 /** A station with the warehouse copies, `printers` assigned so, and an open session. */
 async function station(
   printers: PrinterProfile[],
   assignments: WorkstationSettings["assignments"],
-  options: { answers?: PrintResult[]; fallbackLogo?: () => Promise<MonoBitmap> } = {},
+  options: {
+    answers?: PrintResult[];
+    fallbackLogo?: () => Promise<MonoBitmap>;
+    sheets?: WarehouseContext["sheets"];
+    pallet?: string;
+  } = {},
 ) {
   const { db, executor } = openLocalDb();
   seedWarehouseCopies(db);
@@ -118,12 +165,29 @@ async function station(
     runtime,
     now: () => new Date((tick += 1000)),
     newId: () => `00000000-0000-4000-8000-${String((id += 1)).padStart(12, "0")}`,
-    labelDeps: { fallbackLogo, report },
+    labelDeps: {
+      fallbackLogo,
+      report,
+      // The sheet's text and the bundled logo, as the tests of the shift's sheet give them.
+      sheetRasterize: async (_text, textOptions) => ({
+        width: 8,
+        height: Math.ceil(textOptions.fontSizePx * (textOptions.lineHeight ?? 1.5)),
+        bytesPerRow: 1,
+        totalBytes: Math.ceil(textOptions.fontSizePx * (textOptions.lineHeight ?? 1.5)),
+        hex: "00".repeat(Math.ceil(textOptions.fontSizePx * (textOptions.lineHeight ?? 1.5))),
+      }),
+      loadMarkiro: async () => MARKIRO,
+    },
+    ...(options.sheets === undefined ? {} : { sheets: options.sheets }),
   };
   const session = await startSession(executor, PAIRING, {
     id: SESSION,
     reason: "damaged",
-    templates: { unit: UNIT_TEMPLATE, box: BOX_TEMPLATE, pallet: PALLET_TEMPLATE },
+    templates: {
+      unit: UNIT_TEMPLATE,
+      box: BOX_TEMPLATE,
+      pallet: options.pallet ?? PALLET_TEMPLATE,
+    },
     operatorId: OPERATOR_ID,
     at: "2026-10-09T07:00:00.000Z",
   });
@@ -348,18 +412,88 @@ describe("a warehouse reprint on a printer in driver mode (plan ДРВ)", () => 
 describe("a warehouse reprint and a printer of A4 sheets (plan А4)", () => {
   const A4_PALLETS = { box: "zebra", pallet: "hp-a4", duplicate: null };
 
-  it("refuses a pallet whose printer prints A4 sheets: printer_a4, nothing rendered or sent", async () => {
-    const at = await station([ZEBRA, HP_A4], A4_PALLETS);
+  it("prints a pallet's A4 sheet, the session's default one, on the printer of sheets, and freezes the sheet", async () => {
+    const sheets = vi.fn(async () => hostSheets());
+    const at = await station([ZEBRA, HP_A4], A4_PALLETS, { sheets, pallet: SHEET_AUTO });
     const outcome = await reprint(at, PALLET_SSCC, PALLET_SOURCE);
     expect(outcome).toMatchObject({
       kind: "printed",
-      job: { state: "failed", errorCode: "printer_a4", printer: null, bytesBase64: null },
+      job: {
+        state: "sent",
+        errorCode: null,
+        templateId: SHEET_ID,
+        templateRev: 3,
+        printer: { id: "hp-a4", paper: "a4" },
+      },
     });
+    // The default is asked of the host for the pallet's own product (its, its category's, the organization's).
+    expect(sheets).toHaveBeenCalledWith(PALLET_SOURCE.product.id);
+    // The page is the sheet at A4 and goes to the printer of sheets as a sheet, not as a label.
+    expect(at.sends).toHaveLength(1);
+    expect(at.sends[0]?.paper).toBe("a4");
+    const page = decodeMonoRaster(at.sends[0]?.bytes ?? new Uint8Array());
+    expect(page.widthMm).toBeCloseTo(210, 1);
+    expect(page.heightMm).toBeCloseTo(297, 1);
     expect(LabelRender.renderLabel).not.toHaveBeenCalled();
-    expect(at.sends).toEqual([]);
     expect(
       rows(at.db, "SELECT payload FROM wh_outbox").map((row) => JSON.parse(String(row["payload"]))),
-    ).toEqual([expect.objectContaining({ outcome: "failed", errorCode: "printer_a4" })]);
+    ).toEqual([expect.objectContaining({ outcome: "sent", templateId: SHEET_ID, templateRev: 3 })]);
+  });
+
+  it("prints the sheet the session chose, not the product's default", async () => {
+    const at = await station([ZEBRA, HP_A4], A4_PALLETS, {
+      sheets: async () => hostSheets(),
+      pallet: sheetChoiceOf(OTHER_SHEET_ID),
+    });
+    const outcome = await reprint(at, PALLET_SSCC, PALLET_SOURCE);
+    expect(outcome).toMatchObject({
+      kind: "printed",
+      job: { state: "sent", templateId: OTHER_SHEET_ID, templateRev: 1 },
+    });
+  });
+
+  it("refuses a pallet on a printer of sheets while the session holds a label template, a sheet that is gone, or no answer of the host", async () => {
+    const at = await station([ZEBRA, HP_A4], A4_PALLETS, { sheets: async () => hostSheets() });
+    const prepare = (station: Station) =>
+      prepareWarehouseJob(station.context, {
+        session: station.session,
+        source: PALLET_SOURCE,
+        repair: null,
+        operatorId: OPERATOR_ID,
+      });
+    // The session chose a label template of the copies: no sheet.
+    expect(await prepare(at)).toEqual({ kind: "refused", reason: "no_sheet" });
+    const gone = await station([ZEBRA, HP_A4], A4_PALLETS, {
+      sheets: async () => hostSheets(null),
+      pallet: SHEET_AUTO,
+    });
+    // No default for the product, and none chosen: nothing to print.
+    expect(await prepare(gone)).toEqual({ kind: "refused", reason: "template_unavailable" });
+    const silent = await station([ZEBRA, HP_A4], A4_PALLETS, {
+      sheets: async () => {
+        throw new Error("offline");
+      },
+      pallet: SHEET_AUTO,
+    });
+    expect(await prepare(silent)).toEqual({ kind: "refused", reason: "sheets_unavailable" });
+    const unaware = await station([ZEBRA, HP_A4], A4_PALLETS, { pallet: SHEET_AUTO });
+    expect(await prepare(unaware)).toEqual({ kind: "refused", reason: "sheets_unavailable" });
+    for (const each of [at, gone, silent, unaware]) expect(each.sends).toEqual([]);
+    expect(rows(at.db, "SELECT count(*) AS n FROM wh_jobs")).toEqual([{ n: 0 }]);
+  });
+
+  it("does not take a session's sheet for a label printer: a pallet on a label printer needs a label template", async () => {
+    const at = await station(
+      [ZEBRA, HP_A4],
+      { box: "zebra", pallet: "zebra", duplicate: null },
+      {
+        sheets: async () => hostSheets(),
+        pallet: SHEET_AUTO,
+      },
+    );
+    const outcome = await reprint(at, PALLET_SSCC, PALLET_SOURCE);
+    expect(outcome).toMatchObject({ kind: "refused", reason: "template_unavailable" });
+    expect(at.sends).toEqual([]);
   });
 
   it.each([
@@ -394,11 +528,11 @@ describe("a warehouse reprint and a printer of A4 sheets (plan А4)", () => {
     },
   );
 
-  it("never sends a job that carries an A4 printer, whatever made it", async () => {
+  it("never sends a box's or a unit's label that carries an A4 printer, whatever made it", async () => {
     const at = await station([ZEBRA, HP_A4], { box: "zebra", pallet: "zebra", duplicate: null });
     const made = await prepareWarehouseJob(at.context, {
       session: at.session,
-      source: PALLET_SOURCE,
+      source: BOX_SOURCE,
       repair: null,
       operatorId: OPERATOR_ID,
     });
@@ -414,6 +548,34 @@ describe("a warehouse reprint and a printer of A4 sheets (plan А4)", () => {
     expect(await readJob(at.local, PAIRING, made.job.id)).toMatchObject({
       state: "prepared",
       attempts: 0,
+    });
+  });
+
+  it("refuses a pallet's sheet onto a label printer, and a label onto a printer of sheets, before anything is written", async () => {
+    const at = await station([ZEBRA, HP_A4], A4_PALLETS, {
+      sheets: async () => hostSheets(),
+      pallet: SHEET_AUTO,
+      answers: [{ sent: false, code: "not_sent" }],
+    });
+    const first = await reprint(at, PALLET_SSCC, PALLET_SOURCE);
+    if (first.kind !== "printed") throw new Error("printed");
+    expect(first.job.state).toBe("failed");
+    // The pallet printer is a label printer now: the sheet's job cannot go there.
+    await setUpPrinting(at.local, {
+      printers: [ZEBRA, HP_A4],
+      assignments: { box: "zebra", pallet: "zebra", duplicate: null },
+    });
+    const refusal = await sendWarehouseJob(
+      at.context,
+      first.job,
+      { kind: "retry" },
+      OPERATOR_ID,
+    ).catch((error: unknown) => error);
+    expect((refusal as WarehousePrinterError).code).toBe("printer_not_a4");
+    expect(at.sends).toHaveLength(1);
+    expect(await readJob(at.local, PAIRING, first.job.id)).toMatchObject({
+      state: "failed",
+      attempts: 1,
     });
   });
 

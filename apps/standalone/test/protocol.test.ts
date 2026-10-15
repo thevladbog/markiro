@@ -391,6 +391,8 @@ const REQUESTS = [
   ["update-started.json", updateStartedSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
   ["device-shift-create-pallets.json", deviceShiftCreateSchema],
+  ["device-shift-create-validation.json", deviceShiftCreateSchema],
+  ["device-shift-create-validation-print.json", deviceShiftCreateSchema],
   ["sscc-block-request.json", ssccBlockRequestSchema],
   ["facts-request.json", factBatchSchema],
   ["facts-request-pallets.json", factBatchSchema],
@@ -903,6 +905,56 @@ describe("request builders produce their fixtures exactly", () => {
       ...shift,
       plannedQty: 1200,
     });
+  });
+
+  it("a station's validation shift names its mode and its print policy (beta 3.2)", () => {
+    const plain = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+    const typed = {
+      requestId: plain.requestId,
+      productId: plain.productId,
+      boxTemplateId: plain.boxTemplateId,
+      productionDate: plain.productionDate,
+      boxCapacity: 12,
+      plannedQty: null,
+    };
+    expect(deviceShiftCreate({ ...typed, mode: "validation" })).toStrictEqual(
+      fixture("device-shift-create-validation.json"),
+    );
+    const policy = deviceShiftCreateSchema.parse(
+      fixture("device-shift-create-validation-print.json"),
+    );
+    expect(
+      deviceShiftCreate({
+        ...typed,
+        mode: "validation",
+        ...(policy.validationPrint === undefined
+          ? {}
+          : { validationPrint: policy.validationPrint }),
+      }),
+    ).toStrictEqual(fixture("device-shift-create-validation-print.json"));
+    // An aggregation shift names neither: an older host refuses a field it does not know.
+    const aggregation = deviceShiftCreate({
+      ...typed,
+      mode: "aggregation",
+      validationPrint: { mode: "none" },
+    });
+    expect(aggregation).toStrictEqual(fixture("device-shift-create.json"));
+    // The hidden box capacity of a validation shift is the product's: left out.
+    expect(
+      deviceShiftCreate({
+        requestId: typed.requestId,
+        productId: typed.productId,
+        boxTemplateId: typed.boxTemplateId,
+        productionDate: typed.productionDate,
+        plannedQty: null,
+        mode: "validation",
+      }),
+    ).not.toHaveProperty("boxCapacity");
+    // A duplicate is printed only by a validation shift.
+    expect(deviceShiftCreateSchema.safeParse({ ...policy, mode: "aggregation" }).success).toBe(
+      false,
+    );
+    expect(deviceShiftCreateSchema.safeParse({ ...plain, mode: "validation" }).success).toBe(true);
   });
 
   it("sends the capacity, the date and every id the operator chose, not the fixture's", () => {

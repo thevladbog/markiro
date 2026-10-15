@@ -10,7 +10,7 @@ import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "..
 import { readConflictNotices } from "../local/conflict-notices.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { sendFactBatch } from "../local/facts-sender.js";
-import { syncProductPhotos } from "../local/product-photos.js";
+import { syncAllProductPhotos } from "../local/product-photos.js";
 import { sendWarehouseBatch } from "../local/warehouse-sender.js";
 import {
   createSyncScheduler,
@@ -318,17 +318,26 @@ export function useHostLink({
     let photoFailures = 0;
     let photoRetry: ReturnType<typeof setTimeout> | null = null;
     let photoRunning = false;
+    // A sync that finished while a pass was running (a photo set meanwhile)
+    // asks for one more run right after it, as the sync scheduler does.
+    let photoAgain = false;
     const photoPass = (): void => {
-      if (deviceProductPhoto === undefined || photoRunning) return;
+      if (deviceProductPhoto === undefined) return;
+      if (photoRunning) {
+        photoAgain = true;
+        return;
+      }
       if (photoRetry !== null) {
         clearTimeout(photoRetry);
         photoRetry = null;
       }
       photoRunning = true;
-      void syncProductPhotos({ local, fetchPhoto: deviceProductPhoto }).then(
+      photoAgain = false;
+      void syncAllProductPhotos({ local, fetchPhoto: deviceProductPhoto }).then(
         () => {
           photoRunning = false;
           photoFailures = 0;
+          if (photoAgain && active) photoPass();
         },
         (error: unknown) => {
           photoRunning = false;

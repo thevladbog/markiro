@@ -94,6 +94,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/device/sscc/blocks/known"),
     ("POST", "/v1/device/facts"),
     ("GET", "/v1/device/codes/{code_hash}"),
+    ("GET", "/v1/device/pallet-sheets"),
     ("POST", "/v1/device/warehouse/lookup"),
     ("POST", "/v1/device/warehouse/reprints"),
     ("GET", "/v1/changes"),

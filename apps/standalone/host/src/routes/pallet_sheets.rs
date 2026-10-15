@@ -31,9 +31,9 @@ use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Entry, Outcome};
-use crate::auth::OfficeContext;
+use crate::auth::{AskingDevice, OfficeContext};
 use crate::db::{begin_write, commit_with_revision, next_revision};
-use crate::error::{ApiError, ApiJson, ApiPath};
+use crate::error::{ApiError, ApiJson, ApiPath, ApiQuery};
 use crate::server::AppState;
 use crate::validate;
 
@@ -212,6 +212,54 @@ pub async fn list_sheets(
 ) -> Result<Json<PalletSheets>, ApiError> {
     let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
     list(&mut conn).await.map(Json)
+}
+
+/// What a station asks when it lists the sheets (`GET /v1/device/pallet-sheets`):
+/// the product a pallet of is to be printed, so the answer names the sheet that
+/// product gets by default.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceSheetsQuery {
+    product_id: Option<String>,
+}
+
+/// `GET /v1/device/pallet-sheets[?productId=…]` (beta 3.2): the ENABLED sheets by
+/// name, with their layouts, for a station that prints a pallet's sheet again
+/// from the warehouse reprint, and `defaultId`: the product's sheet, its
+/// category's or the organization's, as a new shift of the product would take
+/// it (`default_sheet_for_product`), or only the organization's without a
+/// product; `null` for none. A read through `AskingDevice`, which waits for no
+/// writer; a product the host does not know is `not_found`.
+pub async fn device_sheets(
+    State(state): State<AppState>,
+    AskingDevice(_device): AskingDevice,
+    ApiQuery(query): ApiQuery<DeviceSheetsQuery>,
+) -> Result<Json<PalletSheets>, ApiError> {
+    let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+    let default_id = match &query.product_id {
+        Some(product_id) => {
+            validate::client_uuid("productId", product_id)?;
+            let known: Option<i64> = sqlx::query_scalar("SELECT 1 FROM products WHERE id = ?")
+                .bind(product_id)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?;
+            if known.is_none() {
+                return Err(ApiError::not_found("no such product"));
+            }
+            default_sheet_for_product(&mut conn, product_id).await?
+        }
+        None => default_sheet(&mut conn).await?,
+    };
+    let rows: Vec<SheetRow> =
+        sqlx::query_as(&format!("{SELECT} WHERE enabled = 1 ORDER BY name, id"))
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+    Ok(Json(PalletSheets {
+        sheets: rows.into_iter().map(sheet).collect::<Result<_, _>>()?,
+        default_id,
+    }))
 }
 
 pub async fn create_sheet(

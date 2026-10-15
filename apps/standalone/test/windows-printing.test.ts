@@ -24,7 +24,13 @@ const RECEIPT = { queue: QUEUE, jobId: 42, documentName: DOCUMENT };
 describe("the driver printing answers the shell sends", () => {
   it("are the shapes the shell's fixture pins, parsed strictly", () => {
     const shapes: Record<string, unknown> = JSON.parse(readFileSync(SHAPES_URL, "utf8"));
-    for (const key of ["windowsPrintSent", "windowsPrintUnknown", "windowsPrintRefused"]) {
+    for (const key of [
+      "windowsPrintSent",
+      "windowsPrintSentAdjusted",
+      "windowsPrintUnknown",
+      "windowsPrintRefused",
+      "windowsPrintRefusedDiagnostic",
+    ]) {
       expect(windowsPrintOutcomeSchema.parse(shapes[key]), key).toEqual(shapes[key]);
     }
     for (const key of [
@@ -35,8 +41,20 @@ describe("the driver printing answers the shell sends", () => {
     ]) {
       expect(windowsJobObservationSchema.parse(shapes[key]), key).toEqual(shapes[key]);
     }
-    // The file pins two shapes of the scanners/printers and seven driver answers.
-    expect(Object.keys(shapes)).toHaveLength(9);
+    // The file pins two shapes of the scanners/printers and nine driver answers.
+    expect(Object.keys(shapes)).toHaveLength(11);
+    // A sheet that was moved says how far, and a refusal brings its numbers (beta 3.2).
+    expect(windowsPrintResult(shapes["windowsPrintSentAdjusted"], QUEUE, DOCUMENT)).toEqual({
+      sent: true,
+      receipt: RECEIPT,
+      adjusted: { percent: 100, shiftXMm: 0, shiftYMm: -3.2 },
+    });
+    expect(windowsPrintResult(shapes["windowsPrintRefusedDiagnostic"], QUEUE, DOCUMENT)).toEqual({
+      sent: false,
+      code: "geometry_mismatch",
+      diagnostic:
+        "reason=printable_too_small dpi=600x600 page_mm=210x297 printable_mm=159.2x246.2 needs_mm=190x277",
+    });
     expect(
       windowsPrintOutcomeSchema.safeParse({ ok: true, receipt: RECEIPT, extra: 1 }).success,
     ).toBe(false);

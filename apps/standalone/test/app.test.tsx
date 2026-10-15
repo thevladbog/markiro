@@ -318,6 +318,11 @@ function openLinkDetails(): HTMLElement {
   return screen.getByRole("region", { name: /^Связь с хостом: / });
 }
 
+/** The station's link is a dot (beta 3.2): its details, behind a tap. */
+async function openStationLinkDetails(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: /^Связь с хостом/ }));
+}
+
 describe("App", () => {
   it("creates the site on a fresh host and opens the office", async () => {
     const device = fakeDevice(null);
@@ -1420,9 +1425,14 @@ describe("App", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("На связи с хостом")).toBeTruthy();
+    // On the floor the link is a dot with its state in its name (beta 3.2); the reason is behind a tap.
+    expect(
+      await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
     await link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 2 });
-    expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    );
     expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
@@ -1734,6 +1744,7 @@ describe("reference sync health on screen", () => {
       host,
       connection: link.connection,
     });
+    await openStationLinkDetails();
     expect(
       await screen.findByText("Справочники не обновились — повторим автоматически"),
     ).toBeTruthy();
@@ -1764,6 +1775,7 @@ describe("reference sync health on screen", () => {
     };
     host.getChanges.mockResolvedValueOnce(feedPage(42, [unreadable]));
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    await openStationLinkDetails();
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
     expect(screen.getByText("Вход оператора")).toBeTruthy();
   });
@@ -1796,6 +1808,7 @@ describe("reference sync health on screen", () => {
     });
     // The run fails (the host is unreachable and the link is offline), but
     // the count it read before failing still shows.
+    await openStationLinkDetails();
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
     expect(screen.getByText("Вход оператора")).toBeTruthy();
 

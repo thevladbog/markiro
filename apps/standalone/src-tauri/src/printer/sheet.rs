@@ -2,13 +2,16 @@
 //! `printer_sheet.rs`, #702): the checks the driver path makes before it
 //! draws, pure so that they run on any host. A sheet is a `mono-raster-v1`
 //! page at 300 dpi of exactly A4 in either orientation; the device page must
-//! be A4 in the same orientation at 300, 600 or 1200 dpi, the same on both
-//! axes; the sheet is drawn 1:1, 2:1 or 4:1, never fitted, and its required
-//! area (the content and the SSCC's quiet zones) must lie inside the
-//! device's printable area with a 0.5 mm guard. Anything else is refused
-//! before the job starts (`geometry_mismatch`): nothing reached the printer.
+//! be A4 (or Letter) in the same orientation at a multiple of 300 dpi, the
+//! same on both axes; the sheet is drawn at a whole-number scale, and its
+//! required area (the content and the SSCC's quiet zones) must lie inside the
+//! device's printable area with a 0.5 mm guard: a sheet that does not is moved
+//! the few millimetres it takes, or drawn uniformly smaller (to 90 % at the
+//! least), and says so. Anything else is refused before the job starts
+//! (`geometry_mismatch`) with the measured numbers: nothing reached the printer.
 
 use super::raster::{Caps, Raster};
+use serde::Serialize;
 
 /// `DEVMODE.dmPaperSize` of A4 (`DMPAPER_A4`), `dmOrientation` and `dmDuplex`
 /// values, written here so that the host tests can read them; the Windows
@@ -94,13 +97,54 @@ impl From<Caps> for DeviceCaps {
 /// Where and how large the sheet is drawn on the device's printable area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DrawPlan {
-    /// Device dots per sheet dot: 1, 2 or 4.
+    /// Device dots per sheet dot at full size: 1 for 300 dpi, 2 for 600, 4 for 1200.
     pub scale: i32,
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    /// The part of the full size the sheet is drawn at, in thousandths: 1000 draws it whole
+    /// (the whole-number scale), less shrinks it uniformly so that its required area fits the
+    /// printable area (`MIN_FIT_PERMILLE` at the least).
+    pub fit_permille: u32,
+    /// How far the sheet was moved from the paper's corner to bring its required area inside
+    /// the printable area, in device dots: right and down (`shift_x`, `shift_y`).
+    pub shift_x: i32,
+    pub shift_y: i32,
 }
+
+/// What a plan did to the sheet, for the person at the printer: the sheet was moved a few
+/// millimetres or drawn a little smaller to fit this driver's printable area. `None` when
+/// it was drawn whole and where it was made.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Adjusted {
+    /// The size the sheet was drawn at, in percent of its own (100 when it was only moved).
+    pub percent: u32,
+    pub shift_x_mm: f64,
+    pub shift_y_mm: f64,
+}
+
+impl DrawPlan {
+    /// What this plan changed, at the device's resolution (`dpi`).
+    pub fn adjusted(&self, dpi: i32) -> Option<Adjusted> {
+        let mm = |dots: i32| (f64::from(dots) * 25.4 / f64::from(dpi) * 10.0).round() / 10.0;
+        let (shift_x_mm, shift_y_mm) = (mm(self.shift_x), mm(self.shift_y));
+        if self.fit_permille >= 1000 && shift_x_mm == 0.0 && shift_y_mm == 0.0 {
+            return None;
+        }
+        Some(Adjusted {
+            percent: self.fit_permille.div_ceil(10).min(100),
+            shift_x_mm,
+            shift_y_mm,
+        })
+    }
+}
+
+/// The smallest part of its size a sheet is drawn at to fit a printable area (thousandths):
+/// a sheet that would have to shrink further is refused, since its barcodes would no longer be
+/// the ones that were checked.
+pub const MIN_FIT_PERMILLE: u32 = 900;
 
 /// Why a sheet is not printed; both mean nothing was sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +163,15 @@ impl SheetError {
             SheetError::GeometryMismatch => "geometry_mismatch",
         }
     }
+}
+
+/// A refusal with the numbers behind it: what the driver reported against what the sheet
+/// needs, in millimetres, as one line the operator can copy to whoever helps (the
+/// «Копия диагностики» of the setup).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    pub error: SheetError,
+    pub diagnostic: String,
 }
 
 fn sheet_dots(mm: f64) -> i32 {
@@ -145,19 +198,71 @@ pub fn sheet_orientation(raster: &SheetRaster) -> Result<Orientation, SheetError
     Ok(orientation)
 }
 
+/// How far a driver's paper may differ from the paper's nominal size, millimetres: drivers
+/// round their forms (4961 dots at 600 dpi, a form of 209.9 mm).
+const PAPER_TOLERANCE_MM: f64 = 1.5;
+
+/// Whether the device's page is A4 or Letter in the sheet's orientation, within the
+/// driver's rounding. A Letter page is no A4, but it is a paper a sheet is drawn on, smaller,
+/// as an office printer set to Letter does; anything else (A5, A3, a label) is not.
+fn paper_is_a4_or_letter(width_mm: f64, height_mm: f64, orientation: Orientation) -> bool {
+    let (a4, letter) = match orientation {
+        Orientation::Portrait => ((210.0, 297.0), (215.9, 279.4)),
+        Orientation::Landscape => ((297.0, 210.0), (279.4, 215.9)),
+    };
+    let near = |size: (f64, f64)| {
+        (width_mm - size.0).abs() <= PAPER_TOLERANCE_MM
+            && (height_mm - size.1).abs() <= PAPER_TOLERANCE_MM
+    };
+    near(a4) || near(letter)
+}
+
+/// The whole-number scale of a 300 dpi sheet on a device of `dpi`: any multiple of 300 up to
+/// 4800, from the resolution alone. Any other resolution is refused, never drawn at
+/// `dpi / 300` by integer division (360 or 450 dpi would print the sheet at 83 % or 67 %
+/// without a word).
+fn whole_scale(dpi: i32) -> Option<i32> {
+    (dpi > 0 && dpi % 300 == 0 && dpi <= 4800).then_some(dpi / 300)
+}
+
 /// How the sheet is drawn on a device page, or why it is not.
-pub fn sheet_draw_plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPlan, SheetError> {
-    let orientation = sheet_orientation(raster)?;
+///
+/// The page must be A4 (or Letter) in the sheet's orientation. The sheet is drawn whole-number
+/// times larger. Real printers leave edges unprintable (an inkjet's bottom edge is often a
+/// centimetre or more), so when the sheet's required area (its content and the SSCC's quiet
+/// zones, 10 mm from the paper's edge as made) does not lie inside the printable area less a
+/// 0.5 mm guard, the sheet is MOVED by the few millimetres it takes, and only when the area is
+/// larger than the printable area itself drawn uniformly SMALLER (down to
+/// [`MIN_FIT_PERMILLE`]); beyond that the sheet is refused before the job starts. The plan says
+/// which it did (`DrawPlan::adjusted`), and a refusal carries the measured numbers.
+pub fn sheet_draw_plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPlan, Refusal> {
+    let orientation = sheet_orientation(raster).map_err(|error| Refusal {
+        error,
+        diagnostic: format!(
+            "reason=not_a4 sheet_dpi={} sheet_mm={}x{}",
+            raster.dpi, raster.width_mm, raster.height_mm
+        ),
+    })?;
     let c = caps;
-    // The whole-number scale of a 300 dpi sheet on the device, from its
-    // resolution alone: any other resolution is refused here, never drawn at
-    // `dpi / 300` by integer division (360 or 450 dpi would print the sheet at
-    // 83 % or 67 % without a word).
-    let scale = match c.dpi_x {
-        300 => 1,
-        600 => 2,
-        1200 => 4,
-        _ => return Err(SheetError::GeometryMismatch),
+    let measured = format!(
+        "dpi={}x{} page_dots={}x{} offset_dots={},{} printable_dots={}x{}",
+        c.dpi_x,
+        c.dpi_y,
+        c.width,
+        c.height,
+        c.offset_x,
+        c.offset_y,
+        c.printable_width,
+        c.printable_height
+    );
+    let refuse = |reason: &str, extra: String| Refusal {
+        error: SheetError::GeometryMismatch,
+        diagnostic: format!("reason={reason} {measured} {extra}")
+            .trim_end()
+            .to_owned(),
+    };
+    let Some(scale) = whole_scale(c.dpi_x) else {
+        return Err(refuse("dpi_not_a_multiple_of_300", String::new()));
     };
     if c.dpi_y != c.dpi_x
         || c.width <= 0
@@ -169,36 +274,86 @@ pub fn sheet_draw_plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPla
         || i64::from(c.offset_x) + i64::from(c.printable_width) > i64::from(c.width)
         || i64::from(c.offset_y) + i64::from(c.printable_height) > i64::from(c.height)
     {
-        return Err(SheetError::GeometryMismatch);
+        return Err(refuse("device_caps_unusable", String::new()));
     }
     let mm = |px: i32| f64::from(px) * 25.4 / f64::from(c.dpi_x);
-    let (width_mm, height_mm) = match orientation {
-        Orientation::Portrait => (210.0, 297.0),
-        Orientation::Landscape => (297.0, 210.0),
-    };
-    if (mm(c.width) - width_mm).abs() > 0.5 || (mm(c.height) - height_mm).abs() > 0.5 {
-        return Err(SheetError::GeometryMismatch);
+    let one = |value: f64| (value * 10.0).round() / 10.0;
+    let paper = format!(
+        "page_mm={}x{} printable_mm={}x{} offset_mm={},{}",
+        one(mm(c.width)),
+        one(mm(c.height)),
+        one(mm(c.printable_width)),
+        one(mm(c.printable_height)),
+        one(mm(c.offset_x)),
+        one(mm(c.offset_y))
+    );
+    if !paper_is_a4_or_letter(mm(c.width), mm(c.height), orientation) {
+        return Err(refuse("paper_not_a4_or_letter", paper));
     }
-    let guard = (0.5 * f64::from(c.dpi_x) / 25.4).ceil() as i64;
-    let [left, top, right, bottom] = raster.bounds.map(|px| i64::from(px) * i64::from(scale));
-    // The page is exactly A4 (3508 dots at most) and the scale at most 4, so
-    // nothing here can overflow; an empty required area is no sheet, and one
-    // that leaves the page cannot lie inside the printable area less the guard.
+    let [left, top, right, bottom] = raster.bounds.map(i64::from);
+    // The page is exactly A4 (3508 dots at most) and the scale at most 16, so nothing here can
+    // overflow; an empty required area, or one that leaves the sheet, is no sheet.
     if right <= left
         || bottom <= top
-        || left < i64::from(c.offset_x) + guard
-        || top < i64::from(c.offset_y) + guard
-        || right > i64::from(c.offset_x) + i64::from(c.printable_width) - guard
-        || bottom > i64::from(c.offset_y) + i64::from(c.printable_height) - guard
+        || left < 0
+        || top < 0
+        || right > i64::from(raster.width)
+        || bottom > i64::from(raster.height)
     {
-        return Err(SheetError::GeometryMismatch);
+        return Err(refuse("required_area_unusable", paper));
     }
+    let guard = (0.5 * f64::from(c.dpi_x) / 25.4).ceil() as i64;
+    let scale64 = i64::from(scale);
+    let (inner_left, inner_top) = (i64::from(c.offset_x) + guard, i64::from(c.offset_y) + guard);
+    let inner_right = i64::from(c.offset_x) + i64::from(c.printable_width) - guard;
+    let inner_bottom = i64::from(c.offset_y) + i64::from(c.printable_height) - guard;
+    let (available_width, available_height) = (inner_right - inner_left, inner_bottom - inner_top);
+    let (needed_width, needed_height) = ((right - left) * scale64, (bottom - top) * scale64);
+    let needs = format!(
+        "needs_mm={}x{} guard_mm=0.5",
+        one(mm(needed_width as i32)),
+        one(mm(needed_height as i32))
+    );
+    if available_width <= 0 || available_height <= 0 {
+        return Err(refuse("printable_too_small", format!("{paper} {needs}")));
+    }
+    // The part of its size the sheet is drawn at: whole when its required area fits.
+    let fit = (available_width * 1000 / needed_width)
+        .min(available_height * 1000 / needed_height)
+        .min(1000) as u32;
+    if fit < MIN_FIT_PERMILLE {
+        return Err(refuse(
+            "printable_too_small",
+            format!("{paper} {needs} fit_permille={fit}"),
+        ));
+    }
+    let fit64 = i64::from(fit);
+    // The required area where the scaled sheet puts it (the sheet's corner at the paper's).
+    let placed = |value: i64| value * scale64 * fit64 / 1000;
+    let (placed_left, placed_top) = (placed(left), placed(top));
+    let (placed_right, placed_bottom) = (placed(right), placed(bottom));
+    // Moved the least that brings it inside: right or down when it starts in the unprintable
+    // edge, left or up when it ends in the far one (it cannot do both: it is not wider).
+    let shift = |low: i64, high: i64, inner_low: i64, inner_high: i64| {
+        if low < inner_low {
+            inner_low - low
+        } else if high > inner_high {
+            inner_high - high
+        } else {
+            0
+        }
+    };
+    let shift_x = shift(placed_left, placed_right, inner_left, inner_right);
+    let shift_y = shift(placed_top, placed_bottom, inner_top, inner_bottom);
     Ok(DrawPlan {
         scale,
-        x: -c.offset_x,
-        y: -c.offset_y,
-        width: raster.width * scale,
-        height: raster.height * scale,
+        x: (shift_x - i64::from(c.offset_x)) as i32,
+        y: (shift_y - i64::from(c.offset_y)) as i32,
+        width: (i64::from(raster.width) * scale64 * fit64 / 1000) as i32,
+        height: (i64::from(raster.height) * scale64 * fit64 / 1000) as i32,
+        fit_permille: fit,
+        shift_x: shift_x as i32,
+        shift_y: shift_y as i32,
     })
 }
 
@@ -248,6 +403,46 @@ pub(crate) fn a4_page_bytes(orientation: Orientation, bounds: [u32; 4]) -> Vec<u
 mod tests {
     use super::*;
 
+    /// `sheet_draw_plan` with only the kind of its refusal.
+    fn plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPlan, SheetError> {
+        sheet_draw_plan(raster, caps).map_err(|refusal| refusal.error)
+    }
+
+    /// Where the sheet's required area really lands on the paper, in device dots from the
+    /// paper's corner: the plan's own move and shrink applied to the sheet's bounds.
+    fn landed(raster: &SheetRaster, caps: DeviceCaps, plan: &DrawPlan) -> [i64; 4] {
+        let scale = i64::from(plan.scale) * i64::from(plan.fit_permille);
+        let [l, t, r, b] = raster.bounds.map(|dot| i64::from(dot) * scale / 1000);
+        let (dx, dy) = (
+            i64::from(plan.x) + i64::from(caps.offset_x),
+            i64::from(plan.y) + i64::from(caps.offset_y),
+        );
+        [l + dx, t + dy, r + dx, b + dy]
+    }
+
+    /// The printable area less the guard, in device dots from the paper's corner.
+    fn inner(caps: DeviceCaps) -> [i64; 4] {
+        let guard = (0.5 * f64::from(caps.dpi_x) / 25.4).ceil() as i64;
+        [
+            i64::from(caps.offset_x) + guard,
+            i64::from(caps.offset_y) + guard,
+            i64::from(caps.offset_x) + i64::from(caps.printable_width) - guard,
+            i64::from(caps.offset_y) + i64::from(caps.printable_height) - guard,
+        ]
+    }
+
+    /// The plan holds the required area inside the printable area less the guard.
+    fn assert_inside(raster: &SheetRaster, caps: DeviceCaps, plan: &DrawPlan) {
+        let [l, t, r, b] = landed(raster, caps, plan);
+        let [il, it, ir, ib] = inner(caps);
+        assert!(
+            l >= il - 1 && t >= it - 1 && r <= ir + 1 && b <= ib + 1,
+            "{:?} not inside {:?} ({plan:?})",
+            [l, t, r, b],
+            [il, it, ir, ib]
+        );
+    }
+
     /// A portrait sheet whose required area keeps 10 mm margins (118 dots).
     fn portrait() -> SheetRaster {
         SheetRaster {
@@ -282,13 +477,16 @@ mod tests {
     fn a_portrait_sheet_is_drawn_two_to_one_on_a_600_dpi_laser() {
         assert_eq!(sheet_orientation(&portrait()), Ok(Orientation::Portrait));
         assert_eq!(
-            sheet_draw_plan(&portrait(), laser(Orientation::Portrait)),
+            plan(&portrait(), laser(Orientation::Portrait)),
             Ok(DrawPlan {
                 scale: 2,
                 x: -100,
                 y: -100,
                 width: 4960,
-                height: 7016
+                height: 7016,
+                fit_permille: 1000,
+                shift_x: 0,
+                shift_y: 0,
             })
         );
     }
@@ -304,43 +502,169 @@ mod tests {
             ..portrait()
         };
         assert_eq!(sheet_orientation(&landscape), Ok(Orientation::Landscape));
-        assert!(sheet_draw_plan(&landscape, laser(Orientation::Landscape)).is_ok());
+        assert!(plan(&landscape, laser(Orientation::Landscape)).is_ok());
         assert_eq!(
-            sheet_draw_plan(&landscape, laser(Orientation::Portrait)),
+            plan(&landscape, laser(Orientation::Portrait)),
             Err(SheetError::GeometryMismatch)
         );
     }
 
     #[test]
-    fn content_in_the_unprintable_edge_is_refused_before_sending() {
-        // 2 mm margins: 24 sheet dots, 48 device dots, inside the 100 px edge.
+    fn content_in_the_unprintable_edge_is_drawn_smaller_to_fit_and_a_hopeless_edge_is_refused() {
+        // 2 mm margins: 24 sheet dots, 48 device dots, inside the 100 px edge. The required
+        // area is wider than the printable area less the guard, so the sheet shrinks by the
+        // difference (97.3 %) and is moved inside.
         let tight = SheetRaster {
             bounds: [24, 24, 2480 - 24, 3508 - 24],
             ..portrait()
         };
+        let caps = laser(Orientation::Portrait);
+        let drawn = plan(&tight, caps).unwrap();
+        assert_eq!(drawn.fit_permille, 973);
+        assert_inside(&tight, caps, &drawn);
+        assert_eq!(drawn.adjusted(600).map(|a| a.percent), Some(98));
+        // A printer that leaves 25 mm unprintable on every side would take the sheet below 90 %:
+        // refused, with the numbers.
+        let hopeless = DeviceCaps {
+            offset_x: 600,
+            offset_y: 600,
+            printable_width: 4960 - 1200,
+            printable_height: 7016 - 1200,
+            ..caps
+        };
+        let refusal = sheet_draw_plan(&portrait(), hopeless).unwrap_err();
+        assert_eq!(refusal.error, SheetError::GeometryMismatch);
+        assert!(refusal.diagnostic.starts_with("reason=printable_too_small"));
+        assert!(refusal.diagnostic.contains("page_mm=210x297"));
+        assert!(refusal.diagnostic.contains("printable_mm=159.2x246.2"));
+    }
+
+    /// The numbers of an HP inkjet's driver page: 600 dpi A4 (4961 x 7016 dots), 3.3 mm
+    /// unprintable at the sides and the top and 12.7 mm at the bottom.
+    fn inkjet() -> DeviceCaps {
+        DeviceCaps {
+            dpi_x: 600,
+            dpi_y: 600,
+            width: 4961,
+            height: 7016,
+            offset_x: 78,
+            offset_y: 78,
+            printable_width: 4961 - 2 * 78,
+            printable_height: 7016 - 78 - 300,
+        }
+    }
+
+    #[test]
+    fn a_sheet_with_ten_millimetre_margins_is_moved_up_on_an_inkjet_with_a_wide_bottom_edge() {
+        // The sheet's content ends 10 mm from the paper's edge, 2.7 mm into the 12.7 mm
+        // bottom edge the driver cannot print: it used to be refused («лист не помещается в
+        // область печати»), and now moves up by the 3.2 mm it takes (2.7 mm and the guard).
+        let caps = inkjet();
+        let drawn = plan(&portrait(), caps).unwrap();
         assert_eq!(
-            sheet_draw_plan(&tight, laser(Orientation::Portrait)),
-            Err(SheetError::GeometryMismatch)
+            drawn,
+            DrawPlan {
+                scale: 2,
+                x: -78,
+                y: -78 - 76,
+                width: 4960,
+                height: 7016,
+                fit_permille: 1000,
+                shift_x: 0,
+                shift_y: -76,
+            }
         );
+        assert_inside(&portrait(), caps, &drawn);
+        assert_eq!(
+            drawn.adjusted(600),
+            Some(Adjusted {
+                percent: 100,
+                shift_x_mm: 0.0,
+                shift_y_mm: -3.2,
+            })
+        );
+        // The same inkjet with 6 mm hardware margins all round holds the 10 mm margins as made.
+        let wide = DeviceCaps {
+            offset_x: 142,
+            offset_y: 142,
+            printable_width: 4961 - 284,
+            printable_height: 7016 - 284,
+            ..caps
+        };
+        let drawn = plan(&portrait(), wide).unwrap();
+        assert_eq!(
+            (drawn.shift_x, drawn.shift_y, drawn.fit_permille),
+            (0, 0, 1000)
+        );
+        assert_eq!(drawn.adjusted(600), None);
+        // And a 3 mm margin printer needs no move at all.
+        let near = DeviceCaps {
+            offset_x: 71,
+            offset_y: 71,
+            printable_width: 4961 - 142,
+            printable_height: 7016 - 142,
+            ..caps
+        };
+        assert_eq!(plan(&portrait(), near).unwrap().adjusted(600), None);
+    }
+
+    #[test]
+    fn the_refusal_names_what_the_driver_reported_in_millimetres() {
+        let refusal = sheet_draw_plan(
+            &portrait(),
+            DeviceCaps {
+                dpi_x: 360,
+                dpi_y: 360,
+                ..inkjet()
+            },
+        )
+        .unwrap_err();
+        assert!(refusal
+            .diagnostic
+            .starts_with("reason=dpi_not_a_multiple_of_300"));
+        assert!(refusal.diagnostic.contains("dpi=360x360"));
+        let a5 = DeviceCaps {
+            width: 3500,
+            height: 4961,
+            printable_width: 3400,
+            printable_height: 4800,
+            ..inkjet()
+        };
+        let refusal = sheet_draw_plan(&portrait(), a5).unwrap_err();
+        assert!(refusal
+            .diagnostic
+            .starts_with("reason=paper_not_a4_or_letter"));
+        assert!(refusal.diagnostic.contains("page_mm=148.2x210"));
     }
 
     #[test]
     fn letter_paper_unequal_axes_and_odd_resolutions_are_refused() {
+        // Letter paper (215.9 x 279.4 mm) is a page a sheet is drawn on, smaller (97.4 %); an A5
+        // page is no paper for it.
         let letter = DeviceCaps {
             width: 5100,
             height: 6600,
+            printable_width: 4900,
+            printable_height: 6400,
             ..laser(Orientation::Portrait)
         };
-        assert_eq!(
-            sheet_draw_plan(&portrait(), letter),
-            Err(SheetError::GeometryMismatch)
-        );
+        let drawn = plan(&portrait(), letter).unwrap();
+        assert_eq!(drawn.fit_permille, 974);
+        assert_inside(&portrait(), letter, &drawn);
+        let a5 = DeviceCaps {
+            width: 3508,
+            height: 4960,
+            printable_width: 3308,
+            printable_height: 4760,
+            ..laser(Orientation::Portrait)
+        };
+        assert_eq!(plan(&portrait(), a5), Err(SheetError::GeometryMismatch));
         let unequal = DeviceCaps {
             dpi_y: 300,
             ..laser(Orientation::Portrait)
         };
         assert_eq!(
-            sheet_draw_plan(&portrait(), unequal),
+            plan(&portrait(), unequal),
             Err(SheetError::GeometryMismatch)
         );
         let odd = DeviceCaps {
@@ -348,10 +672,7 @@ mod tests {
             dpi_y: 203,
             ..laser(Orientation::Portrait)
         };
-        assert_eq!(
-            sheet_draw_plan(&portrait(), odd),
-            Err(SheetError::GeometryMismatch)
-        );
+        assert_eq!(plan(&portrait(), odd), Err(SheetError::GeometryMismatch));
     }
 
     #[test]
@@ -465,24 +786,35 @@ mod tests {
     #[test]
     fn a_sheet_is_drawn_whole_number_times_at_300_600_and_1200_dpi() {
         for (dpi, scale) in [(300, 1), (600, 2), (1200, 4)] {
-            let plan = sheet_draw_plan(&portrait(), device(dpi, 20, 30)).unwrap();
+            let drawn = plan(&portrait(), device(dpi, 20, 30)).unwrap();
             assert_eq!(
-                plan,
+                drawn,
                 DrawPlan {
                     scale,
                     x: -20,
                     y: -30,
                     width: 2480 * scale,
                     height: 3508 * scale,
+                    fit_permille: 1000,
+                    shift_x: 0,
+                    shift_y: 0,
                 },
                 "{dpi}"
             );
         }
-        // Resolutions that are not 300, 600 or 1200, whole multiples of 300 or
-        // not, are refused: none is scaled by integer division.
-        for dpi in [150, 203, 299, 301, 360, 400, 450, 900, 1201, 1800, 2400] {
+        // Any multiple of 300 up to 4800 is a whole-number scale (an inkjet's 2400 or 4800 dpi).
+        for (dpi, scale) in [(900, 3), (1800, 6), (2400, 8), (4800, 16)] {
             assert_eq!(
-                sheet_draw_plan(&portrait(), device(dpi, 0, 0)),
+                plan(&portrait(), device(dpi, 0, 0)).map(|p| p.scale),
+                Ok(scale),
+                "{dpi}"
+            );
+        }
+        // Resolutions that are no multiple of 300 (or past 4800) are refused: none is scaled
+        // by integer division.
+        for dpi in [150, 203, 299, 301, 360, 400, 450, 720, 1201, 1440, 5100] {
+            assert_eq!(
+                plan(&portrait(), device(dpi, 0, 0)),
                 Err(SheetError::GeometryMismatch),
                 "{dpi}"
             );
@@ -491,10 +823,10 @@ mod tests {
 
     #[test]
     fn the_origin_is_the_papers_corner_whatever_the_unprintable_edges_are() {
-        let plan = sheet_draw_plan(&portrait(), device(300, 0, 0)).unwrap();
-        assert_eq!((plan.x, plan.y), (0, 0));
-        let plan = sheet_draw_plan(&portrait(), device(600, 100, 80)).unwrap();
-        assert_eq!((plan.x, plan.y), (-100, -80));
+        let drawn = plan(&portrait(), device(300, 0, 0)).unwrap();
+        assert_eq!((drawn.x, drawn.y), (0, 0));
+        let drawn = plan(&portrait(), device(600, 100, 80)).unwrap();
+        assert_eq!((drawn.x, drawn.y), (-100, -80));
     }
 
     #[test]
@@ -508,30 +840,33 @@ mod tests {
             ..portrait()
         };
         assert_eq!(
-            sheet_draw_plan(&landscape, laser(Orientation::Landscape)),
+            plan(&landscape, laser(Orientation::Landscape)),
             Ok(DrawPlan {
                 scale: 2,
                 x: -100,
                 y: -100,
                 width: 7016,
                 height: 4960,
+                fit_permille: 1000,
+                shift_x: 0,
+                shift_y: 0,
             })
         );
     }
 
     #[test]
-    fn the_device_page_is_a4_within_half_a_millimetre_on_each_axis() {
-        // 600 dpi: 210 mm is 4960.6 dots and 297 mm is 7015.7; half a
-        // millimetre is 11.8 dots either way.
+    fn the_device_page_is_a4_within_a_millimetre_and_a_half_on_each_axis() {
+        // 600 dpi: 210 mm is 4960.6 dots and 297 mm is 7015.7; a millimetre and a half (the
+        // rounding of a driver's form) is 35.4 dots either way.
         for (width, height, ok) in [
-            (4949, 7016, true),
-            (4948, 7016, false),
-            (4972, 7016, true),
-            (4973, 7016, false),
-            (4960, 7004, true),
-            (4960, 7003, false),
-            (4960, 7027, true),
-            (4960, 7028, false),
+            (4926, 7016, true),
+            (4925, 7016, false),
+            (4996, 7016, true),
+            (4997, 7016, false),
+            (4960, 6981, true),
+            (4960, 6980, false),
+            (4960, 7051, true),
+            (4960, 7052, false),
         ] {
             let caps = DeviceCaps {
                 width,
@@ -540,11 +875,7 @@ mod tests {
                 printable_height: height - 200,
                 ..laser(Orientation::Portrait)
             };
-            assert_eq!(
-                sheet_draw_plan(&portrait(), caps).is_ok(),
-                ok,
-                "{width}x{height}"
-            );
+            assert_eq!(plan(&portrait(), caps).is_ok(), ok, "{width}x{height}");
         }
     }
 
@@ -603,7 +934,7 @@ mod tests {
         ];
         for (i, caps) in broken.into_iter().enumerate() {
             assert_eq!(
-                sheet_draw_plan(&portrait(), caps),
+                plan(&portrait(), caps),
                 Err(SheetError::GeometryMismatch),
                 "{i}"
             );
@@ -614,38 +945,59 @@ mod tests {
             printable_height: base.height - base.offset_y,
             ..base
         };
-        assert!(sheet_draw_plan(&with_bounds([118, 118, 2480 - 118, 3508 - 118]), exact).is_ok());
+        assert!(plan(&with_bounds([118, 118, 2480 - 118, 3508 - 118]), exact).is_ok());
     }
 
     #[test]
-    fn the_required_area_keeps_half_a_millimetre_from_every_edge_of_the_printable_area() {
-        // 600 dpi, 100 dot edges: the guard is ceil(0.5 mm) = 12 dots, so the
-        // area may start at 112 dots (56 sheet dots) and end at 4848 / 6904.
+    fn the_required_area_lands_half_a_millimetre_inside_every_edge_of_the_printable_area() {
+        // 600 dpi, 100 dot edges: the guard is ceil(0.5 mm) = 12 dots, so the area may start at
+        // 112 dots (56 sheet dots) and end at 4848 / 6904: inside it, the sheet stays where it
+        // was made; one dot past an edge, it moves the dot or two it takes.
         let caps = laser(Orientation::Portrait);
-        let ok = |bounds| sheet_draw_plan(&with_bounds(bounds), caps).is_ok();
-        assert!(ok([56, 56, 2424, 3452]));
-        assert!(!ok([55, 56, 2424, 3452]), "left");
-        assert!(!ok([56, 55, 2424, 3452]), "top");
-        assert!(!ok([56, 56, 2425, 3452]), "right");
-        assert!(!ok([56, 56, 2424, 3453]), "bottom");
+        let drawn = |bounds| plan(&with_bounds(bounds), caps).unwrap();
+        let exact = drawn([56, 56, 2424, 3452]);
+        assert_eq!(
+            (exact.shift_x, exact.shift_y, exact.fit_permille),
+            (0, 0, 1000)
+        );
+        let left = drawn([55, 56, 2423, 3452]);
+        assert_eq!((left.shift_x, left.shift_y), (2, 0), "left");
+        let top = drawn([56, 55, 2424, 3451]);
+        assert_eq!((top.shift_x, top.shift_y), (0, 2), "top");
+        let right = drawn([57, 56, 2425, 3452]);
+        assert_eq!((right.shift_x, right.shift_y), (-2, 0), "right");
+        let bottom = drawn([56, 57, 2424, 3453]);
+        assert_eq!((bottom.shift_x, bottom.shift_y), (0, -2), "bottom");
+        for bounds in [
+            [55, 56, 2423, 3452],
+            [57, 56, 2425, 3452],
+            [56, 57, 2424, 3453],
+        ] {
+            let raster = with_bounds(bounds);
+            assert_inside(&raster, caps, &drawn_of(&raster, caps));
+        }
+    }
+
+    fn drawn_of(raster: &SheetRaster, caps: DeviceCaps) -> DrawPlan {
+        plan(raster, caps).unwrap()
     }
 
     #[test]
     fn the_guard_follows_the_resolution() {
         // 300 dpi: ceil(5.9) = 6 dots; 1200 dpi: ceil(23.6) = 24 dots.
-        let from_left_and_top = |dpi: i32, edge: i32, l: i32| {
-            let bounds = [l, l, 2480 - 60, 3508 - 60];
-            sheet_draw_plan(&with_bounds(bounds), device(dpi, edge, edge)).is_ok()
+        let moves_from_left = |dpi: i32, edge: i32, l: i32| {
+            let raster = with_bounds([l, l, 2480 - 60, 3508 - 60]);
+            plan(&raster, device(dpi, edge, edge)).unwrap().shift_x
         };
-        assert!(from_left_and_top(300, 20, 26));
-        assert!(!from_left_and_top(300, 20, 25));
+        assert_eq!(moves_from_left(300, 20, 26), 0);
+        assert_eq!(moves_from_left(300, 20, 25), 1);
         // 1200 dpi: the edge is 80 dots, a sheet dot is 4 device dots.
-        assert!(from_left_and_top(1200, 80, 26));
-        assert!(!from_left_and_top(1200, 80, 25));
-        // 600 dpi with an odd edge: the guard is 12 dots (11.8 rounded up), so
-        // the area starts at 101 + 12 = 113 dots, i.e. at sheet dot 57.
-        assert!(from_left_and_top(600, 101, 57));
-        assert!(!from_left_and_top(600, 101, 56));
+        assert_eq!(moves_from_left(1200, 80, 26), 0);
+        assert_eq!(moves_from_left(1200, 80, 25), 4);
+        // 600 dpi with an odd edge: the guard is 12 dots (11.8 rounded up), so the area
+        // starts at 101 + 12 = 113 dots, i.e. at sheet dot 56.5: sheet dot 57 stays.
+        assert_eq!(moves_from_left(600, 101, 57), 0);
+        assert_eq!(moves_from_left(600, 101, 56), 1);
     }
 
     #[test]
@@ -666,7 +1018,7 @@ mod tests {
         .enumerate()
         {
             assert_eq!(
-                sheet_draw_plan(&with_bounds(bounds), caps),
+                plan(&with_bounds(bounds), caps),
                 Err(SheetError::GeometryMismatch),
                 "{i}"
             );
@@ -688,7 +1040,9 @@ mod tests {
             width: 0,
             ..laser(Orientation::Portrait)
         };
-        assert_eq!(sheet_draw_plan(&label, nonsense), Err(SheetError::NotA4));
+        assert_eq!(plan(&label, nonsense), Err(SheetError::NotA4));
+        let refusal = sheet_draw_plan(&label, nonsense).unwrap_err();
+        assert!(refusal.diagnostic.starts_with("reason=not_a4 "));
     }
 
     #[test]

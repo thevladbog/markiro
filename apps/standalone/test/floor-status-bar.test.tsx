@@ -118,7 +118,10 @@ describe("the floor's status bar", () => {
     expect(screen.getByText("Линия розлива 2")).toBeTruthy();
     expect(screen.getByText("Никто не вошёл")).toBeTruthy();
     expect(screen.getByRole("region", { name: "Строка состояния цеха" })).toBeTruthy();
-    expect(screen.queryAllByRole("button")).toEqual([]);
+    // The only control is the link's dot (beta 3.2): nothing else in the bar is pressed.
+    expect(
+      screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Связь с хостом: Подключение к хосту…"]);
   });
 
   it("names the operator signed in", async () => {
@@ -216,8 +219,38 @@ describe("the floor's status bar", () => {
       seq: 1,
     };
     render(bar({ local: await synced([ORG]), link: offline }));
-    expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
-    expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
+    // A small dot with the state in its name (beta 3.2), red without the host; the reason is one tap away.
+    const dot = await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" });
+    expect(dot.querySelector('[data-tone="error"]')).not.toBeNull();
+    expect(screen.queryByText("Хост не отвечает.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
+    const details = screen.getByRole("dialog", { name: "Связь с хостом" });
+    expect(within(details).getByText("Хост не отвечает.")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows the link as green, amber while a sync fails or the link is being made, grey before the first status", async () => {
+    const local = await synced([ORG]);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const view = render(bar({ local, link: online }));
+    expect(
+      (await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" })).innerHTML,
+    ).toContain('data-tone="ok"');
+    view.rerender(
+      bar({ local, link: online, sync: { ...SYNCED, kind: "failed", failure: "host" } }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: На связи с хостом" }).innerHTML,
+    ).toContain('data-tone="warn"');
+    view.rerender(bar({ local, link: { ...online, state: "connecting" } }));
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
+    ).toContain('data-tone="warn"');
+    view.rerender(bar({ local, link: null }));
+    expect(
+      screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
+    ).toContain('data-tone="neutral"');
   });
 
   it("reads the names again after every sync", async () => {
@@ -329,23 +362,40 @@ describe("the floor's status bar", () => {
     const view = render(bar({ local, link: online, sync: failing }));
     expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
     const region = screen.getByRole("region", { name: "Строка состояния цеха" });
-    expect(within(region).getByText("На связи с хостом")).toBeTruthy();
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
+    // The sync's failure is in the details behind the dot (a tap away), not across the header.
+    expect(
+      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+    ).toBeNull();
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
     expect(
       within(region).getByText("Справочники не обновились — повторим автоматически"),
     ).toBeTruthy();
-    expect(within(region).queryByText("Нет связи с хостом")).toBeNull();
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
+    expect(
+      within(region).queryByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    ).toBeNull();
 
     // The link is torn down already, but a refusal that came from a call left its status online.
     view.rerender(bar({ local, link: online, sync: failing, refusalHeld: true }));
-    expect(within(region).queryByText("На связи с хостом")).toBeNull();
-    expect(within(region).getByText("Нет связи с хостом")).toBeTruthy();
+    expect(
+      within(region).queryByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeNull();
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    ).toBeTruthy();
     // A sync that cannot run is not the news now: the refusal is.
+    fireEvent.click(within(region).getByRole("button", { name: /Связь с хостом/ }));
     expect(
       within(region).queryByText("Справочники не обновились — повторим автоматически"),
     ).toBeNull();
 
     view.rerender(bar({ local, link: online, sync: failing, refusalHeld: false }));
-    expect(within(region).getByText("На связи с хостом")).toBeTruthy();
+    expect(
+      within(region).getByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
   });
 
   it("shows no link of its own while the refusal waits before the first status of the link", async () => {

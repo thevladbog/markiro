@@ -2228,6 +2228,14 @@ pub struct DeviceShiftCreate {
     /// with pallets takes the organization's default sheet when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_sheet_template_id: Option<String>,
+    /// The shift's mode (plan РЕЖ, beta 3.2): left out, aggregation, which is
+    /// how every station before it creates. A validation shift has no pallets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ShiftMode>,
+    /// The print policy of a validation shift ([`ShiftCreate::validation_print`]);
+    /// left out, `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
 }
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how

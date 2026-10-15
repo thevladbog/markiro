@@ -49,13 +49,13 @@ section.workstation-setup {
 .setup-tabs__list.mk-data-tabs {
   display: grid;
   min-width: 0;
-  width: min(560px, 100%);
+  width: min(780px, 100%);
   overflow: hidden;
   gap: 6px;
   border: 0;
   border-radius: var(--r-2);
   background: var(--surface-card);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .setup-tabs__list .mk-data-tabs__tab {
@@ -90,7 +90,11 @@ section.workstation-setup {
 .setup-tabs__panel {
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  /* The panel scrolls as a whole (beta 3.2): content taller than the screen was cut off and
+     unreachable, the scanner's check with it. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* The two-card layout the tabs share: what is set on the left, what follows on the right. */
@@ -347,7 +351,24 @@ section.workstation-setup {
 
 /* COM scanners: the form on the left, the scanners with their connection on the right. */
 .setup-split--scanners {
+  height: auto;
   grid-template-columns: minmax(320px, 480px) minmax(0, 1fr);
+}
+
+.setup-card--check-cta {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--sp-4);
+}
+
+.setup-card--check-cta .setup-card__title,
+.setup-card--check-cta .setup-card__hint {
+  grid-column: 1;
+}
+
+.setup-card--check-cta .mk-btn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 /* Before pairing (scope «scanners»): the cloud's scanner check as a third card. */
@@ -364,7 +385,8 @@ section.workstation-setup {
 .workstation-setup__single {
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .setup-scanner-list {
@@ -753,4 +775,34 @@ p.workstation-setup__result {
 
 .self-test__history li {
   overflow-wrap: anywhere;
+}
+
+/* The line a refused A4 sheet gives for whoever helps, and the button that copies it (beta 3.2). */
+.setup-diagnostic {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.setup-diagnostic__title {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.setup-diagnostic__text {
+  min-width: 0;
+  max-height: 96px;
+  padding: var(--sp-2) var(--sp-3);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 14px/20px var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: text;
 }

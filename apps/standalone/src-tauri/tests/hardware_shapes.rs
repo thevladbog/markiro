@@ -8,6 +8,7 @@
 //! the fixture and the schema in the same change.
 
 use markiro_standalone_lib::printer::driver::{Failure, Observation, Outcome, Receipt};
+use markiro_standalone_lib::printer::sheet::Adjusted;
 use markiro_standalone_lib::printer::UsbPrinter;
 use markiro_standalone_lib::scanner::{ConnectionStatus, ScannerConnection, ScannerSnapshot};
 use serde_json::Value;
@@ -54,6 +55,19 @@ fn the_hardware_shapes_are_the_ones_the_fixture_pins() {
             serde_json::to_value(Outcome::Success {
                 ok: true,
                 receipt: receipt(),
+                adjusted: None,
+            }),
+        ),
+        (
+            "windowsPrintSentAdjusted",
+            serde_json::to_value(Outcome::Success {
+                ok: true,
+                receipt: receipt(),
+                adjusted: Some(Adjusted {
+                    percent: 100,
+                    shift_x_mm: 0.0,
+                    shift_y_mm: -3.2,
+                }),
             }),
         ),
         (
@@ -64,6 +78,7 @@ fn the_hardware_shapes_are_the_ones_the_fixture_pins() {
                     code: "driver_failure",
                     phase: "delivery_unknown",
                     receipt: Some(receipt()),
+                    diagnostic: None,
                 },
             }),
         ),
@@ -75,6 +90,23 @@ fn the_hardware_shapes_are_the_ones_the_fixture_pins() {
                     code: "geometry_mismatch",
                     phase: "before_start",
                     receipt: None,
+                    diagnostic: None,
+                },
+            }),
+        ),
+        (
+            "windowsPrintRefusedDiagnostic",
+            serde_json::to_value(Outcome::Failed {
+                ok: false,
+                error: Failure {
+                    code: "geometry_mismatch",
+                    phase: "before_start",
+                    receipt: None,
+                    diagnostic: Some(
+                        "reason=printable_too_small dpi=600x600 page_mm=210x297 \
+                         printable_mm=159.2x246.2 needs_mm=190x277"
+                            .into(),
+                    ),
                 },
             }),
         ),
@@ -99,5 +131,5 @@ fn the_hardware_shapes_are_the_ones_the_fixture_pins() {
         assert_eq!(value.unwrap(), fixture[key], "{key}");
     }
     // Nothing else is pinned by the file: a new shape needs a new key here.
-    assert_eq!(fixture.as_object().unwrap().len(), 9);
+    assert_eq!(fixture.as_object().unwrap().len(), 11);
 }

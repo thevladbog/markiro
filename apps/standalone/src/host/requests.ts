@@ -650,10 +650,15 @@ export interface DeviceShiftInput {
   productionDate: string;
   /** Today in the organization's zone (beta 3); left out, the host takes the production date. */
   plannedDate?: string;
-  boxCapacity: number;
+  /** Left out only by a validation shift whose box capacity the form hides: the product's. */
+  boxCapacity?: number;
   plannedQty: number | null;
   /** «С паллетами» (plan ПЛ-Ц): boxes per pallet and the pallet template; absent — none. */
   pallets?: { boxCapacity: number; templateId: string };
+  /** The shift's mode (beta 3.2); left out, aggregation, which an older host also takes. */
+  mode?: ShiftMode;
+  /** The print policy of a validation shift; left out, none. */
+  validationPrint?: ValidationPrint;
 }
 
 /**
@@ -669,9 +674,15 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
     boxTemplateId: shift.boxTemplateId,
     productionDate: shift.productionDate,
     ...(shift.plannedDate === undefined ? {} : { plannedDate: shift.plannedDate }),
-    boxCapacity: shift.boxCapacity,
+    ...(shift.boxCapacity === undefined ? {} : { boxCapacity: shift.boxCapacity }),
     plannedQty: shift.plannedQty,
     counterpartyId: null,
+    // Named only by a validation shift, so a request of an aggregation shift
+    // keeps the shape an older host reads (it refuses a field it does not know).
+    ...(shift.mode === undefined || shift.mode === "aggregation" ? {} : { mode: shift.mode }),
+    ...(shift.validationPrint === undefined || shift.validationPrint.mode === "none"
+      ? {}
+      : { validationPrint: shift.validationPrint }),
     ...(shift.pallets === undefined
       ? {}
       : {

@@ -392,6 +392,39 @@ describe("the A4 test print (plan А4)", () => {
     expect(await screen.findByText(/Неизвестно, напечатался ли пробный лист\./)).toBeTruthy();
   });
 
+  it("gives the measured numbers of a refused sheet and a button that copies them (beta 3.2)", async () => {
+    const diagnostic =
+      "reason=printable_too_small dpi=600x600 page_mm=210x297 printable_mm=159.2x246.2 needs_mm=190x277";
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await setup({ answer: async () => ({ sent: false, code: "geometry_mismatch", diagnostic }) });
+    await act(async () => {
+      click("Пробная печать на «HP LaserJet А4»");
+    });
+    expect((await screen.findByTestId("print-diagnostic")).textContent).toBe(diagnostic);
+    await act(async () => {
+      click("Копия диагностики");
+    });
+    expect(writeText).toHaveBeenCalledWith(diagnostic);
+    expect(await screen.findByRole("button", { name: "Скопировано" })).toBeTruthy();
+  });
+
+  it("says that a sheet was moved or drawn smaller to fit the printer (beta 3.2)", async () => {
+    await setup({
+      answer: async () => ({
+        sent: true,
+        receipt: { queue: "HP", jobId: 5, documentName: "Markiro:x" },
+        adjusted: { percent: 97, shiftXMm: 0, shiftYMm: -3.2 },
+      }),
+    });
+    await act(async () => {
+      click("Пробная печать на «HP LaserJet А4»");
+    });
+    expect(
+      await screen.findByText(/Лист напечатан уменьшенным до 97 %.*Лист сдвинут на 3,2 мм/),
+    ).toBeTruthy();
+  });
+
   it("says a sheet that could not be made, sends nothing and shows no preview", async () => {
     const { prints } = await setup({
       a4Sheet: async () => {
