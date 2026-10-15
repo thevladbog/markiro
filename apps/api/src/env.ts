@@ -4,6 +4,10 @@ import {
   standaloneLicenseReusesGrantKey,
   STANDALONE_LICENSE_SIGNING_ERROR,
 } from "./modules/standalone-licenses/standalone-license-keyset";
+import {
+  configureStandaloneSupportKeys,
+  STANDALONE_SUPPORT_KEYS_ERROR,
+} from "./modules/standalone-diagnostics/standalone-support-keys";
 import { z } from "zod";
 
 /**
@@ -162,6 +166,7 @@ const EnvSchema = z
     STANDALONE_LICENSE_KID: z.string().optional(),
     STANDALONE_LICENSE_PRIVATE_KEY_PEM: z.string().optional(),
     STANDALONE_LICENSE_KEYSET_JSON: z.string().optional(),
+    STANDALONE_SUPPORT_KEYS_JSON: z.string().optional(),
     PLATFORM_AUTH_SECRET: z.string().min(32),
     PLATFORM_AUTH_URL: canonicalHttpUrlSchema,
     // The default is returned as written, not canonicalized: zod's `.default()`
@@ -321,6 +326,15 @@ const EnvSchema = z
         code: "custom",
         path: ["STANDALONE_LICENSE_KEYSET_JSON"],
         message: STANDALONE_LICENSE_SIGNING_ERROR,
+      });
+    }
+    try {
+      configureStandaloneSupportKeys(env);
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        path: ["STANDALONE_SUPPORT_KEYS_JSON"],
+        message: STANDALONE_SUPPORT_KEYS_ERROR,
       });
     }
     if (standaloneLicenseReusesGrantKey(env)) {
