@@ -1075,6 +1075,8 @@ function AppScreens({
         <UpdateFromHostDialog
           open={updateOpen}
           offer={dialogOffer}
+          // Opened from the station's sign-in or the version screen: touch targets.
+          size="floor"
           onClose={() => setUpdateOpen(false)}
           // No office here: no `app.update.start` report (its route is the
           // office's); Windows' administrator prompt is the permission.

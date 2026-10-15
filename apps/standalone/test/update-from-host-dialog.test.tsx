@@ -88,18 +88,30 @@ function open(
   updates: UpdatesApi,
   shell: UpdateShell,
   start = vi.fn<(report: VerifiedReport) => Promise<void>>(async () => undefined),
+  size?: "floor",
 ) {
   const onClose = vi.fn();
-  render(
+  const view = (isOpen: boolean, offer = OFFER) => (
     <ThemeProvider defaultTheme="dark">
       <UpdatesProvider value={updates}>
         <UpdateShellProvider value={shell}>
-          <UpdateFromHostDialog open offer={OFFER} onClose={onClose} start={start} />
+          <UpdateFromHostDialog
+            open={isOpen}
+            offer={offer}
+            onClose={onClose}
+            start={start}
+            {...(size === undefined ? {} : { size })}
+          />
         </UpdateShellProvider>
       </UpdatesProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
   );
-  return { onClose, start };
+  const { rerender } = render(view(true));
+  return {
+    onClose,
+    start,
+    reopen: (isOpen: boolean, offer?: typeof OFFER) => rerender(view(isOpen, offer)),
+  };
 }
 
 async function click(name: string) {
@@ -158,5 +170,54 @@ describe("«Обновить с хоста»", () => {
     expect(screen.getByText(/Хост работает на версии 0\.2\.9, а пакет — другой/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Установить обновление" })).toBeNull();
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("starts over on reopening after a start, with Cancel enabled", async () => {
+    const { reopen } = open(fakeUpdates(), fakeShell());
+    await click("Скачать с хоста");
+    await click("Установить обновление");
+    act(() => reopen(false));
+    act(() => reopen(true));
+    expect(screen.getByRole("button", { name: "Скачать с хоста" })).toBeTruthy();
+    const cancel = screen.getByRole("button", { name: "Отмена" });
+    expect((cancel as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("forgets a checked package of an older version when the offer moves on", async () => {
+    const { reopen } = open(fakeUpdates(), fakeShell());
+    await click("Скачать с хоста");
+    expect(screen.getByRole("button", { name: "Установить обновление" })).toBeTruthy();
+    act(() =>
+      reopen(true, { ...OFFER, hostVersion: "0.4.0", manifest: { ...MANIFEST, version: "0.4.0" } }),
+    );
+    expect(screen.queryByRole("button", { name: "Установить обновление" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Скачать с хоста" })).toBeTruthy();
+  });
+
+  it("shows the download as a progress bar and keeps only the phase text live", async () => {
+    let finish: (() => void) | undefined;
+    const updates = fakeUpdates({
+      fetch: vi.fn(async (onProgress) => {
+        onProgress({ received: 100, total: 200 });
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { version: "0.3.0", manifestPath: PATH, sizeBytes: 200 };
+      }),
+    });
+    open(updates, fakeShell());
+    await click("Скачать с хоста");
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("50");
+    expect(bar.closest("[aria-live]")).toBeNull();
+    await act(async () => finish?.());
+  });
+
+  it("is all floor-sized when opened from the station, with no small close control", () => {
+    open(fakeUpdates(), fakeShell(), undefined, "floor");
+    const buttons = screen.getAllByRole("button");
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) expect(button.className).toContain("mk-btn--floor");
+    expect(screen.queryByRole("button", { name: "Закрыть" })).toBeNull();
   });
 });

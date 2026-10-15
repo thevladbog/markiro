@@ -31,6 +31,12 @@ export interface UpdateFromHostDialogProps {
    * permission (ЛО16).
    */
   start: (report: VerifiedReport) => Promise<void>;
+  /**
+   * `floor` where the dialog opens on the station's sign-in screen: every
+   * control is a floor-sized touch target. The modal's small × is left out
+   * there (no `onClose` to the modal); «Отмена» closes it.
+   */
+  size?: "floor";
 }
 
 /**
@@ -41,7 +47,13 @@ export interface UpdateFromHostDialogProps {
  * only then «Установить обновление». Nothing starts on its own; a silent
  * host is asked about first (ЛО12); a refusal leaves no button to install.
  */
-export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFromHostDialogProps) {
+export function UpdateFromHostDialog({
+  open,
+  offer,
+  onClose,
+  start,
+  size,
+}: UpdateFromHostDialogProps) {
   const { t } = useTranslation();
   const updates = useUpdates();
   const shell = useUpdateShell();
@@ -52,6 +64,14 @@ export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFrom
   }, [state.step]);
   const busy =
     state.step === "downloading" || state.step === "checking" || state.step === "starting";
+  // A package checked or refused for one opening or one version is not shown
+  // for the next: start over once the dialog is shut or the offer moves on.
+  const version = offer.manifest.version;
+  const [seen, setSeen] = useState({ open, version });
+  if (seen.open !== open || seen.version !== version) {
+    setSeen({ open, version });
+    if (!busy && (!open || seen.version !== version)) setState({ step: "idle" });
+  }
 
   const download = async () => {
     setState({ step: "downloading", received: 0, total: offer.manifest.sizeBytes });
@@ -84,6 +104,7 @@ export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFrom
     setState({ step: "starting", report });
     try {
       await start(report);
+      setState({ step: "ready", report });
       onClose();
     } catch (error) {
       setState({ step: "failed", message: updateErrorText(t, error), report });
@@ -98,20 +119,35 @@ export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFrom
   const report = state.step === "ready" || state.step === "failed" ? state.report : null;
   const silent = report?.confirmations.includes("host_unreachable") ?? false;
 
+  const floor = size === "floor" ? ({ size: "floor" } as const) : {};
   let action: ReactNode = null;
   if (state.step === "idle" || (state.step === "failed" && state.report === null)) {
-    action = <Button onClick={() => void download()}>{t("update.dialog.download")}</Button>;
+    action = (
+      <Button {...floor} onClick={() => void download()}>
+        {t("update.dialog.download")}
+      </Button>
+    );
   } else if (state.step === "downloading" || state.step === "checking") {
-    action = <Button loading>{t("update.dialog.download")}</Button>;
+    action = (
+      <Button {...floor} loading>
+        {t("update.dialog.download")}
+      </Button>
+    );
   } else if (state.step === "starting") {
-    action = <Button loading>{t("update.dialog.install")}</Button>;
+    action = (
+      <Button {...floor} loading>
+        {t("update.dialog.install")}
+      </Button>
+    );
   } else if (report !== null) {
     action = silent ? (
-      <Button variant="destructive" onClick={() => void install(report)}>
+      <Button {...floor} variant="destructive" onClick={() => void install(report)}>
         {t("update.dialog.installAnyway")}
       </Button>
     ) : (
-      <Button onClick={() => void install(report)}>{t("update.dialog.install")}</Button>
+      <Button {...floor} onClick={() => void install(report)}>
+        {t("update.dialog.install")}
+      </Button>
     );
   }
 
@@ -120,10 +156,10 @@ export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFrom
       open={open}
       title={t("update.dialog.title", { version: offer.manifest.version })}
       closeLabel={t("update.dialog.close")}
-      {...(busy ? {} : { onClose })}
+      {...(busy || size === "floor" ? {} : { onClose })}
       footer={
         <>
-          <Button variant="secondary" disabled={busy} onClick={onClose}>
+          <Button {...floor} variant="secondary" disabled={busy} onClick={onClose}>
             {t("update.dialog.cancel")}
           </Button>
           {action}
@@ -139,8 +175,21 @@ export function UpdateFromHostDialog({ open, offer, onClose, start }: UpdateFrom
         ))}
       </ul>
       <p className="office-note">{t("update.dialog.uac")}</p>
+      {state.step === "downloading" && (
+        <p>
+          <progress
+            max={100}
+            value={percent}
+            aria-valuenow={percent}
+            aria-label={t("update.dialog.progressLabel")}
+          />{" "}
+          {t("update.dialog.progress", { percent })}
+        </p>
+      )}
       <div aria-live="polite">
-        {state.step === "downloading" && <p>{t("update.dialog.progress", { percent })}</p>}
+        {state.step === "downloading" && (
+          <p className="office-note">{t("update.dialog.downloading")}</p>
+        )}
         {state.step === "checking" && <p>{t("update.dialog.checking")}</p>}
         {state.step === "ready" && !silent && <p>{t("update.dialog.checked")}</p>}
       </div>
