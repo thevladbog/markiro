@@ -25,6 +25,18 @@ data class DeviceConfigEntity(
     val activeShiftId: String? = null,
     /** Inventory task this handheld is working in or paused from. */
     val activeInventoryId: String? = null,
+    /** `cloud` (the default, every device paired before plan ТСД-А) or `host`: a device is one or the other for life (spec Д2). */
+    @androidx.room.ColumnInfo(defaultValue = "'cloud'")
+    val backend: String = "cloud",
+    /** The lower-case hex SHA-256 of the host's certificate this device was paired with; only for `host`. */
+    val pinSha256: String? = null,
+    val hostId: String? = null,
+    /** The addresses of the pairing payload, comma-separated, active one first. */
+    val hostAddresses: String? = null,
+    /** The host's `restoreEpoch` last seen: a change means a restore from a copy (spec 8.5). */
+    val hostRestoreEpoch: String? = null,
+    /** The last revision of `GET /v1/changes` applied. */
+    val hostRev: Long? = null,
 )
 
 /** Roster mirror; hashes are PHC verifiers, never plaintext. */

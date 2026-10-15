@@ -506,3 +506,38 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
         db.execSQL("CREATE TABLE IF NOT EXISTS replacement_drain (id INTEGER NOT NULL PRIMARY KEY, ownerKey TEXT NOT NULL, generation INTEGER NOT NULL, intentJson TEXT NOT NULL, state TEXT NOT NULL, resumeTasksJson TEXT NOT NULL, reportSequence INTEGER NOT NULL, reportJson TEXT, closureJson TEXT, acknowledgedAt TEXT)")
     }
 }
+
+/**
+ * Room 20 → 21 (plan ТСД-А): the second backend. Additive: a cloud terminal keeps every queue and every row, gets `backend = 'cloud'`
+ * and the host columns empty, two new tables and the block id of the SSCC pool.
+ */
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val config = db.columnsOf("device_config")
+        for ((column, ddl) in listOf(
+            "backend" to "TEXT NOT NULL DEFAULT 'cloud'",
+            "pinSha256" to "TEXT",
+            "hostId" to "TEXT",
+            "hostAddresses" to "TEXT",
+            "hostRestoreEpoch" to "TEXT",
+            "hostRev" to "INTEGER",
+        )) {
+            if (column !in config) db.execSQL("ALTER TABLE `device_config` ADD COLUMN `$column` $ddl")
+        }
+        if ("pinSha256" !in db.columnsOf("device_recovery")) db.execSQL("ALTER TABLE `device_recovery` ADD COLUMN `pinSha256` TEXT")
+        if ("blockId" !in db.columnsOf("sscc_pool")) db.execSQL("ALTER TABLE `sscc_pool` ADD COLUMN `blockId` TEXT")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `operator_badges` (`badgeId` TEXT NOT NULL, `operatorId` TEXT NOT NULL, " +
+                "`badgePhc` TEXT NOT NULL, `label` TEXT, PRIMARY KEY(`badgeId`))",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_operator_badges_operatorId` ON `operator_badges` (`operatorId`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `host_outbox` (`seq` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `recordId` TEXT NOT NULL, " +
+                "`target` TEXT NOT NULL, `kind` TEXT NOT NULL, `sourceKind` TEXT NOT NULL, `sourceKey` TEXT NOT NULL, " +
+                "`body` TEXT NOT NULL, `state` TEXT NOT NULL, `reason` TEXT, `createdAt` TEXT NOT NULL)",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_host_outbox_recordId` ON `host_outbox` (`recordId`)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_host_outbox_sourceKind_sourceKey` ON `host_outbox` (`sourceKind`, `sourceKey`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_host_outbox_state_seq` ON `host_outbox` (`state`, `seq`)")
+    }
+}

@@ -125,6 +125,8 @@ class HubViewModel(
     },
     /** Null only in tests that never continue a shift. */
     private val shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
+    /** The seam of the hub's counts; null only in tests that count through [api]. */
+    private val backend: app.markiro.handheld.core.backend.StationBackend? = null,
 ) : ViewModel() {
     @Inject
     constructor(
@@ -148,6 +150,7 @@ class HubViewModel(
         scannerLabel: app.markiro.handheld.core.scan.ScannerLabel,
         shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository,
         replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
+        backend: app.markiro.handheld.core.backend.StationBackend,
     ) : this(
         recovery,
         api,
@@ -171,6 +174,7 @@ class HubViewModel(
         scannerLabel = { scannerLabel() },
         shiftRepository = shiftRepository,
         replacement = replacement,
+        backend = backend,
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -282,9 +286,15 @@ class HubViewModel(
         viewModelScope.launch { recovery.work {
             val current = config.get() ?: return@work
             val counts = runCatching {
-                val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
-                val tasks = api.inventoryTasks().items.size
-                shifts to tasks
+                val seam = backend
+                if (seam != null) {
+                    val counted = seam.hubCounts()
+                    counted.shifts to counted.inventories
+                } else {
+                    val shifts = api.shifts().items.count { it.status in OPEN_SHIFT_STATUSES }
+                    val tasks = api.inventoryTasks().items.size
+                    shifts to tasks
+                }
             }.getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it else return@work }
             recovery.commit { config.upsert(current.copy(shiftsCount = counts.first, inventoryCount = counts.second, countsAt = now())) }
         }

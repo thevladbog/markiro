@@ -18,7 +18,7 @@ class ReplacementMigrationTest {
         val context=ApplicationProvider.getApplicationContext<Context>()
         val name="replacement-${UUID.randomUUID()}.db"
         val credential=InMemoryCredentialStore().apply { write("synthetic-key") }
-        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20).build()
+        fun open()=Room.databaseBuilder(context,HandheldDatabase::class.java,name).allowMainThreadQueries().addMigrations(MIGRATION_19_20, MIGRATION_20_21).build()
         try {
             val before=open(); before.initializeRecoveryForTest(credential)
             val owner=before.deviceRecoveryDao().get()
@@ -29,7 +29,7 @@ class ReplacementMigrationTest {
             before.openHelper.writableDatabase.version=19; before.close()
             val upgraded=open(); DeviceRecovery(upgraded,credential).initialize()
             assertEquals(owner,upgraded.deviceRecoveryDao().get())
-            assertEquals(20, upgraded.openHelper.readableDatabase.version)
+            assertEquals(HANDHELD_DATABASE_VERSION, upgraded.openHelper.readableDatabase.version)
             assertEquals(6, upgraded.palletMembershipDao().byPallet("pallet").single().bottleCount)
             assertEquals(MembershipStatus.SENT, upgraded.palletMembershipDao().byPallet("pallet").single().status)
             assertEquals(RemovalStatus.SENT, upgraded.palletMembershipRemovalDao().all().single().status)

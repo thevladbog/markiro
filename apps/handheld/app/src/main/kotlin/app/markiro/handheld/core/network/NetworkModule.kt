@@ -75,10 +75,12 @@ object NetworkModule {
         reachability: ReachabilityTracker,
         serverUrl: ServerUrlProvider,
         json: Json,
+        config: DeviceConfigDao,
     ): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(app.markiro.handheld.core.backend.BackendGuardInterceptor(config))
         .addInterceptor(BaseUrlInterceptor(serverUrl))
         .addInterceptor(ApiKeyInterceptor(recovery))
         .addInterceptor(CapabilitiesInterceptor())

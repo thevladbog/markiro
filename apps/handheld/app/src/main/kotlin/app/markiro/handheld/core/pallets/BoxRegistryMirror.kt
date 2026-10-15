@@ -1,6 +1,8 @@
 package app.markiro.handheld.core.pallets
 
 import app.markiro.handheld.core.network.BoxRegistryItemDto
+import app.markiro.handheld.core.backend.CloudBackend
+import app.markiro.handheld.core.backend.StationBackend
 import app.markiro.handheld.core.network.StationApi
 import app.markiro.handheld.core.storage.BoxRegistryEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -26,10 +28,12 @@ import java.io.IOException
  * rather than skipping the tail forever.
  */
 class BoxRegistryMirror(
-    private val api: StationApi,
+    private val backend: StationBackend,
     private val db: HandheldDatabase,
     private val meta: MetaStore,
 ) {
+    constructor(api: StationApi, db: HandheldDatabase, meta: MetaStore) : this(CloudBackend(api), db, meta)
+
     /**
      * Reentrant on purpose: the two bootstrap mirrors already hold a recovery
      * lease when they call this, and a direct caller still gets the same
@@ -107,7 +111,7 @@ class BoxRegistryMirror(
         var cursor: String? = null
         var until: String? = null
         while (true) {
-            val page = api.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
+            val page = backend.boxRegistry(since = since, until = until, cursor = cursor, limit = PAGE_SIZE)
             if (until == null) until = page.until else if (page.until != until) return MirrorOutcome.Failed("registry window")
             val changes = ArrayList<Change>(page.items.size)
             for (item in page.items) changes += change(item) ?: return MirrorOutcome.Failed("registry shape")

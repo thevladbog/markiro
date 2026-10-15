@@ -41,6 +41,8 @@ data class DeviceRecoveryEntity(
     @PrimaryKey val id: Int = 1,
     val serverOrigin: String?, val tenantId: String?, val deviceId: String?, val kind: String?,
     val generation: Long, val phase: String, val pendingId: String? = null,
+    /** The pinned certificate fingerprint of a host owner (plan ТСД-А); `null` for the cloud. */
+    val pinSha256: String? = null,
 ) {
     fun owner(): DeviceOwner? = if (serverOrigin != null && tenantId != null && deviceId != null && kind != null) {
         DeviceOwner(serverOrigin, tenantId, deviceId, kind)

@@ -66,4 +66,6 @@ data class SsccRangeEntity(
     val fromSerial: Long,
     val toSerial: Long,
     val nextSerial: Long,
+    /** The host's id of the block, for the `blockId` of a `box_closed`/`pallet_closed`; `null` for a cloud block. */
+    val blockId: String? = null,
 )
