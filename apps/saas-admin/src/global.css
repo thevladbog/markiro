@@ -1649,6 +1649,7 @@ textarea {
 .version-panel__header {
   min-height: 72px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1666,6 +1667,16 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.version-panel__header-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.version-panel__header-actions > * {
+  flex-shrink: 0;
 }
 
 .version-panel__grid {
@@ -2483,6 +2494,92 @@ textarea {
   margin: 0;
   font: 500 30px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+/* The standalone sites card is a grid item of the equipment workspace: without
+   min-width 0 its table's min-content width widens the whole tab on a phone. */
+.standalone-sites-panel {
+  min-width: 0;
+}
+
+.standalone-sites-panel > .mk-card__body,
+.standalone-license-dialog > div,
+.standalone-license-dialog .mk-table {
+  min-width: 0;
+}
+
+.standalone-sites-panel .mk-table__scroll:focus-visible,
+.standalone-license-dialog .mk-table__scroll:focus-visible,
+.tenant-diagnostics .mk-table__scroll:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-w));
+}
+
+.standalone-site-actions,
+.standalone-license-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-cell {
+  min-width: 180px;
+}
+
+.standalone-site-actions {
+  min-width: 230px;
+}
+
+.standalone-license-dialog__actions {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.standalone-license-dialog__actions .mk-btn,
+.standalone-site-actions .mk-btn {
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-dialog > div:first-child > button {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.standalone-license-dialog .mk-badge {
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  line-height: 1.35;
+  overflow-wrap: normal;
+}
+
+@media (max-width: 680px) {
+  .standalone-sites-panel > .mk-card__header {
+    flex-wrap: wrap;
+  }
+
+  .standalone-site-actions {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 230px;
+  }
+
+  .standalone-license-cell {
+    max-width: 220px;
+  }
+
+  .standalone-license-dialog__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .equipment-registry {
@@ -3494,11 +3591,13 @@ textarea {
 
 .tenant-detail-tabs {
   display: flex;
+  flex-wrap: wrap;
   border: 1px solid var(--line);
   background: var(--surface-card);
 }
 
 .tenant-detail-tabs button {
+  flex-shrink: 0;
   min-height: 52px;
   display: inline-flex;
   align-items: center;
@@ -4302,4 +4401,178 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tenant-diagnostics {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.tenant-diagnostics > *,
+.diagnostics-host,
+.tenant-diagnostics .mk-card__body,
+.tenant-diagnostics .mk-table {
+  min-width: 0;
+}
+
+.tenant-diagnostics__header {
+  display: grid;
+  gap: 6px;
+  padding: 22px 24px;
+  border: 1px solid var(--mk-border-operational-strong);
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.tenant-diagnostics__header h2,
+.tenant-diagnostics__header p {
+  margin: 0;
+}
+
+.tenant-diagnostics__header h2 {
+  font: 650 24px/30px var(--font-ui);
+  letter-spacing: -0.025em;
+}
+
+.tenant-diagnostics__header p {
+  max-width: 72ch;
+  opacity: 0.78;
+  font: var(--text-body-sm);
+}
+
+.diagnostics-hosts {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.diagnostics-host__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diagnostics-facts {
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+}
+
+.diagnostics-features {
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  list-style: none;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.diagnostics-file-compare,
+.diagnostics-empty {
+  margin: 12px 0 0;
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.diagnostics-ingest form {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.diagnostics-ingest .mk-field {
+  min-width: 0;
+  width: 100%;
+}
+
+.saas-admin .diagnostics-ingest__text {
+  /* Override the app-wide 44px control minimum. */
+  min-height: 160px !important;
+  resize: vertical;
+}
+
+.diagnostics-ingest__counter,
+.diagnostics-ingest__saved {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.diagnostics-ingest__saved {
+  margin-top: 12px;
+  color: var(--ok-fg);
+  font: var(--text-body);
+}
+
+.diagnostics-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.diagnostics-bars__figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.diagnostics-bars__figure figcaption {
+  margin-bottom: 6px;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.diagnostics-bars__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.diagnostics-bars__axis {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.diagnostics-bars__bar--accent {
+  fill: var(--accent);
+}
+
+.diagnostics-bars__bar--muted {
+  fill: var(--fg-3);
+}
+
+.diagnostics-bars__tick {
+  fill: var(--fg-3);
+  font: 10px/1 var(--font-mono);
+  text-anchor: middle;
+}
+
+.diagnostics-bars__legend {
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  color: var(--fg-2);
+  font: var(--text-caption);
+}
+
+.diagnostics-bars__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+}
+
+.diagnostics-bars__swatch--accent {
+  background: var(--accent);
+}
+
+.diagnostics-bars__swatch--muted {
+  background: var(--fg-3);
 }

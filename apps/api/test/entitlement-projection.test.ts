@@ -42,6 +42,7 @@ const plan: EntitlementSource = {
       inventory: true,
       commerceMl: false,
       handheld: false,
+      customLogo: null,
     },
   },
 };
@@ -86,6 +87,36 @@ describe("entitlement projection", () => {
     expect(snap.candidate.features.chzIntegration).toBe(true);
     expect(evaluateEntitlementOperation(snap, "nk.lookup.v1").outcome).toBe("allow");
     expect(evaluateEntitlementOperation(snap, "chz.export.create.v1").outcome).toBe("unknown");
+  });
+  it("grants custom branding (customLogo) from an add-on or a plan flag, and leaves it unmapped otherwise", () => {
+    expect(project([plan]).candidate.features.customLogo).toBeNull();
+    const addon = source({
+      kind: "addon",
+      prepared: false,
+      effects: [{ key: "customLogo", featureEnabled: true }],
+      operationIds: [],
+      endsAt: null,
+    });
+    expect(project([plan, addon]).candidate.features.customLogo).toBe(true);
+    const planWithFlag: EntitlementSource = {
+      ...plan,
+      plan: {
+        quotas: current.quotas,
+        features: {
+          labelEditor: false,
+          publicApi: false,
+          pallets: false,
+          chzIntegration: null,
+          inventory: null,
+          commerceMl: null,
+          handheld: null,
+          customLogo: true,
+        },
+      },
+    } as EntitlementSource;
+    expect(project([planWithFlag]).candidate.features.customLogo).toBe(true);
+    // The cloud's current (enforced) features never carry it: a label is not a cabinet gate.
+    expect(project([plan, addon]).current.features).toEqual(current.features);
   });
   it("honors overlap and exact source/base interval boundaries", () => {
     const a = source();

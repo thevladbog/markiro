@@ -531,6 +531,7 @@ export class PlatformTenantsService {
               inventoryEnabled: entitlements.inventoryEnabled,
               commerceMlEnabled: entitlements.commerceMlEnabled,
               handheldEnabled: entitlements.handheldEnabled,
+              customLogoEnabled: entitlements.customLogoEnabled,
               demoDurationDays: entitlements.demoDurationDays,
             }
           : null,

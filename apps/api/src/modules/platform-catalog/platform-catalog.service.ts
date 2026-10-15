@@ -377,6 +377,7 @@ export class PlatformCatalogService {
             currentDto.plan.inventoryEnabled,
             currentDto.plan.commerceMlEnabled,
             currentDto.plan.handheldEnabled,
+            currentDto.plan.customLogoEnabled,
           ].some((flag) => flag === null)
             ? catalogVersionCreateV3Schema.options[0]
                 .extend({ plan: planEntitlementsReadV3Schema })
@@ -771,6 +772,7 @@ export class PlatformCatalogService {
           dto.plan.inventoryEnabled,
           dto.plan.commerceMlEnabled,
           dto.plan.handheldEnabled,
+          dto.plan.customLogoEnabled,
         ].some((flag) => flag === null)
       )
         errors.push({ code: "plan_mapping_required", path: "plan" });
@@ -1001,6 +1003,7 @@ export class PlatformCatalogService {
               inventoryEnabled: plan.inventoryEnabled,
               commerceMlEnabled: plan.commerceMlEnabled,
               handheldEnabled: plan.handheldEnabled,
+              customLogoEnabled: plan.customLogoEnabled,
               demoDurationDays: plan.demoDurationDays,
             }
           : undefined,
@@ -1055,6 +1058,7 @@ function toPlanValues(plan: PlanEntitlements | PlanEntitlementsReadV3) {
           inventoryEnabled: plan.inventoryEnabled,
           commerceMlEnabled: plan.commerceMlEnabled,
           handheldEnabled: plan.handheldEnabled,
+          customLogoEnabled: plan.customLogoEnabled,
         }
       : {}),
   };

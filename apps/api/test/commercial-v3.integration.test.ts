@@ -115,6 +115,7 @@ describe.skipIf(!process.env.DATABASE_URL)("Commercial V3 transaction boundaries
             inventoryEnabled: false,
             commerceMlEnabled: false,
             handheldEnabled: false,
+            customLogoEnabled: false,
           },
         },
         3,

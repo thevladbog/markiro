@@ -17,6 +17,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
+import { TenantDiagnosticsPanel } from "./TenantDiagnosticsPanel.js";
 import { GrantCabinetAccessPanel } from "./GrantCabinetAccessPanel.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
 import { TenantEquipmentPanel } from "./TenantEquipmentPanel.js";
@@ -118,7 +119,9 @@ export function TenantPage() {
       ? "equipment"
       : requestedTab === "legal" && financialVisible
         ? "legal"
-        : "overview";
+        : requestedTab === "diagnostics"
+          ? "diagnostics"
+          : "overview";
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   const createdNotice =
     (location.state as { tenantCreated?: unknown } | null)?.tenantCreated === true;
@@ -189,6 +192,12 @@ export function TenantPage() {
                 },
               ]
             : []),
+          {
+            id: "diagnostics",
+            label: t("tenants.detail.tabs.diagnostics"),
+            count: financialVisible ? "04" : "03",
+            panelId: "tenant-diagnostics-panel",
+          },
         ]}
         onChange={(id) => setSearchParams(id === "overview" ? {} : { tab: id })}
       />
@@ -281,6 +290,14 @@ export function TenantPage() {
               principal.capabilities.includes("tenants.write") &&
               principal.capabilities.includes("billing.write")
             }
+            canManageStandalone={principal.capabilities.includes("standaloneLicenses.manage")}
+          />
+        </div>
+      ) : activeTab === "diagnostics" ? (
+        <div id="tenant-diagnostics-panel" role="tabpanel" className="tenant-tab-panel">
+          <TenantDiagnosticsPanel
+            tenantId={detail.tenant.id}
+            canWrite={principal.capabilities.includes("standaloneLicenses.manage")}
           />
         </div>
       ) : (

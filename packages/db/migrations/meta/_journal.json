@@ -1345,6 +1345,27 @@
       "when": 1791842819866,
       "tag": "0191_pallet_sheet_preset_refresh",
       "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1791873360951,
+      "tag": "0192_standalone_licenses",
+      "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1792023187111,
+      "tag": "0193_custom_logo_entitlement",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1792046534553,
+      "tag": "0194_standalone_support_diagnostics",
+      "breakpoints": true
     }
   ]
 }

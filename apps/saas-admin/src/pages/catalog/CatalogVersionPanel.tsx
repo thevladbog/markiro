@@ -84,6 +84,7 @@ interface CatalogFormValues {
   inventory: boolean | null;
   commerceMl: boolean | null;
   handheld: boolean | null;
+  customLogo: boolean | null;
   lifecyclePolicyId: string | null;
   addonEffects: EditableAddonEffect[];
   includedMinutes: string;
@@ -107,6 +108,7 @@ const EFFECT_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const satisfies readonly AddonEffect["key"][];
 
 const QUOTA_EFFECT_KEYS = new Set<AddonEffect["key"]>([
@@ -166,6 +168,7 @@ const catalogFormSchema = z
     inventory: z.boolean().nullable(),
     commerceMl: z.boolean().nullable(),
     handheld: z.boolean().nullable(),
+    customLogo: z.boolean().nullable(),
     lifecyclePolicyId: z.string().nullable(),
     addonEffects: z
       .array(
@@ -175,7 +178,7 @@ const catalogFormSchema = z
           value: z.string(),
         }),
       )
-      .max(11),
+      .max(12),
     includedMinutes: z.string(),
     scopeRu: z.string().max(4000),
     scopeEn: z.string().max(4000),
@@ -189,7 +192,13 @@ const catalogFormSchema = z
       context.addIssue({ code: "custom", path: ["unitPrice"], message: "money" });
     }
     if (values.kind === "plan") {
-      for (const key of ["chzIntegration", "inventory", "commerceMl", "handheld"] as const) {
+      for (const key of [
+        "chzIntegration",
+        "inventory",
+        "commerceMl",
+        "handheld",
+        "customLogo",
+      ] as const) {
         if (values[key] === null)
           context.addIssue({ code: "custom", path: [key], message: "p1Mapping" });
       }
@@ -296,6 +305,7 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     inventory: item.plan?.inventoryEnabled ?? null,
     commerceMl: item.plan?.commerceMlEnabled ?? null,
     handheld: item.plan?.handheldEnabled ?? null,
+    customLogo: item.plan?.customLogoEnabled ?? null,
     lifecyclePolicyId: item.lifecyclePolicyId,
     addonEffects:
       savedAddonEffects.length > 0
@@ -342,6 +352,7 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
       inventoryEnabled: values.inventory,
       commerceMlEnabled: values.commerceMl,
       handheldEnabled: values.handheld,
+      customLogoEnabled: values.customLogo,
       maxLines: numericOrNull(values.maxLines),
       maxStations: numericOrNull(values.maxStations),
       maxKiosks: numericOrNull(values.maxKiosks),
@@ -368,7 +379,8 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
               | "chzIntegration"
               | "inventory"
               | "commerceMl"
-              | "handheld",
+              | "handheld"
+              | "customLogo",
             featureEnabled: true,
           },
     );
@@ -702,6 +714,7 @@ export function CatalogVersionPanel({
                         inventory: form.watch("inventory"),
                         commerceMl: form.watch("commerceMl"),
                         handheld: form.watch("handheld"),
+                        customLogo: form.watch("customLogo"),
                       }
                     : null
                 }
@@ -968,6 +981,7 @@ export function CatalogVersionPanel({
                         form.watch("inventory"),
                         form.watch("commerceMl"),
                         form.watch("handheld"),
+                        form.watch("customLogo"),
                       ].some((value) => value === null))
                   }
                   loading={prepareReview.isPending}

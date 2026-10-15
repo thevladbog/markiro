@@ -12,6 +12,11 @@ import { PlatformGrantActivationController } from "../src/modules/device-grants/
 import { PlatformGrantActivationService } from "../src/modules/device-grants/platform-grant-activation.service";
 import { PlatformGrantRollbackController } from "../src/modules/device-grants/platform-grant-rollback.controller";
 import { PlatformGrantRollbackService } from "../src/modules/device-grants/platform-grant-rollback.service";
+import { PlatformStandaloneDiagnosticsController } from "../src/modules/standalone-diagnostics/platform-standalone-diagnostics.controller";
+import { StandaloneDiagnosticsService } from "../src/modules/standalone-diagnostics/standalone-diagnostics.service";
+import { PlatformStandaloneLicensesController } from "../src/modules/standalone-licenses/platform-standalone-licenses.controller";
+import { StandaloneSitesService } from "../src/modules/standalone-licenses/standalone-sites.service";
+import { StandaloneLicenseIssuanceService } from "../src/modules/standalone-licenses/standalone-license-issuance.service";
 import { PlatformDeviceReplacementController } from "../src/modules/device-licensing/platform-device-replacement.controller";
 import { DeviceReplacementService } from "../src/modules/device-licensing/device-replacement.service";
 import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
@@ -185,6 +190,9 @@ async function createPlatformDocument(): Promise<{
     PlatformGrantActivationService,
     PlatformGrantRollbackService,
     ServicePeriodsService,
+    StandaloneSitesService,
+    StandaloneLicenseIssuanceService,
+    StandaloneDiagnosticsService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -216,6 +224,8 @@ async function createPlatformDocument(): Promise<{
       PlatformGrantReadinessController,
       PlatformGrantActivationController,
       PlatformGrantRollbackController,
+      PlatformStandaloneLicensesController,
+      PlatformStandaloneDiagnosticsController,
     ],
     providers,
   }).compile();
@@ -240,7 +250,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(247);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(266);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

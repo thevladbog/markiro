@@ -89,13 +89,18 @@ export function catalogVersionToCreateInput(
       inventoryEnabled,
       commerceMlEnabled,
       handheldEnabled,
+      customLogoEnabled,
       ...legacyPlan
     } = item.plan;
     if (
       item.lifecyclePolicyId === null &&
-      [chzIntegrationEnabled, inventoryEnabled, commerceMlEnabled, handheldEnabled].every(
-        (value) => value === null,
-      )
+      [
+        chzIntegrationEnabled,
+        inventoryEnabled,
+        commerceMlEnabled,
+        handheldEnabled,
+        customLogoEnabled,
+      ].every((value) => value === null)
     ) {
       const { lifecyclePolicyId, ...legacyCommon } = common;
       void lifecyclePolicyId;
@@ -146,6 +151,7 @@ export async function createCatalogVersion(
               inventoryEnabled: null,
               commerceMlEnabled: null,
               handheldEnabled: null,
+              customLogoEnabled: null,
             },
           }
         : {}),

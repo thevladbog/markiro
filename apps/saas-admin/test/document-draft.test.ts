@@ -48,6 +48,7 @@ const plan = {
     inventoryEnabled: null,
     commerceMlEnabled: null,
     handheldEnabled: null,
+    customLogoEnabled: null,
     demoDurationDays: null,
   },
 } satisfies CatalogVersionDto;

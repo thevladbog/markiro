@@ -17,6 +17,8 @@ import {
 
 const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOINT=\n`;
 const OPTIONAL_OFFLINE_GRANT_INVENTORY = `${INVENTORY}OFFLINE_GRANT_ORIGIN=\nOFFLINE_GRANT_KID=\nOFFLINE_GRANT_PRIVATE_KEY_PEM=\nOFFLINE_GRANT_KEYSET_JSON=\n`;
+const OPTIONAL_STANDALONE_LICENSE_INVENTORY = `${INVENTORY}STANDALONE_LICENSE_ISSUER=\nSTANDALONE_LICENSE_KID=\nSTANDALONE_LICENSE_PRIVATE_KEY_PEM=\nSTANDALONE_LICENSE_KEYSET_JSON=\n`;
+const OPTIONAL_STANDALONE_SUPPORT_INVENTORY = `${INVENTORY}STANDALONE_SUPPORT_KEYS_JSON=\n`;
 const VALUES = {
   DATABASE_URL: "postgres://markiro:password@db.example.test/markiro",
   SMTP_PASSWORD: "mail-password",
@@ -197,6 +199,85 @@ test("rejects a partially configured offline grant group", () => {
   const entries = [
     ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
     { key: "OFFLINE_GRANT_ORIGIN", textValue: "https://api.example.test" },
+  ];
+
+  assert.throws(
+    () => runtimeInventoryKeyNames(keys, entries),
+    (error) => error.message === INVENTORY_FAILURE,
+  );
+});
+
+test("allows the disabled standalone license group to be entirely absent (plan ЛЦ-0)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_LICENSE_INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, entries), /STANDALONE_LICENSE_/u);
+});
+
+test("rejects a partially configured standalone license group (plan ЛЦ-0)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_LICENSE_INVENTORY);
+  const entries = [
+    ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    { key: "STANDALONE_LICENSE_KID", textValue: "lic-1" },
+  ];
+
+  assert.throws(
+    () => runtimeInventoryKeyNames(keys, entries),
+    (error) => error.message === INVENTORY_FAILURE,
+  );
+});
+
+test("allows the standalone support key to be entirely absent (plan ДИАГ)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_SUPPORT_INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+  ]);
+  assert.doesNotMatch(renderRuntimeEnvironment(keys, entries), /STANDALONE_SUPPORT_/u);
+});
+
+test("accepts the standalone support key as one JSON line and rejects a multi-line value", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_SUPPORT_INVENTORY);
+  const base = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+  const json = JSON.stringify([
+    { kid: "sup-1", pem: "-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n" },
+  ]);
+  assert.equal(json.includes("\n"), false);
+  const entries = [...base, { key: "STANDALONE_SUPPORT_KEYS_JSON", textValue: json }];
+
+  assert.deepEqual(runtimeInventoryKeyNames(keys, entries), [
+    "DATABASE_URL",
+    "S3_ENDPOINT",
+    "SMTP_PASSWORD",
+    "STANDALONE_SUPPORT_KEYS_JSON",
+  ]);
+  assert.match(renderRuntimeEnvironment(keys, entries), /^STANDALONE_SUPPORT_KEYS_JSON=\[/mu);
+  assert.throws(
+    () =>
+      renderRuntimeEnvironment(keys, [
+        ...base,
+        {
+          key: "STANDALONE_SUPPORT_KEYS_JSON",
+          textValue: JSON.stringify(JSON.parse(json), null, 2),
+        },
+      ]),
+    (error) => error.message === "runtime environment payload is invalid",
+  );
+});
+
+test("still rejects an unknown key next to the standalone support key (plan ДИАГ)", () => {
+  const keys = environmentKeysFromExample(OPTIONAL_STANDALONE_SUPPORT_INVENTORY);
+  const entries = [
+    ...Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue })),
+    { key: "STANDALONE_SUPPORT_KEYS", textValue: "[]" },
   ];
 
   assert.throws(
@@ -429,8 +510,13 @@ test("uses every and only the production environment example keys", async () => 
     "OFFLINE_GRANT_KID",
     "OFFLINE_GRANT_PRIVATE_KEY_PEM",
     "OFFLINE_GRANT_KEYSET_JSON",
+    "STANDALONE_LICENSE_ISSUER",
+    "STANDALONE_LICENSE_KID",
+    "STANDALONE_LICENSE_PRIVATE_KEY_PEM",
+    "STANDALONE_LICENSE_KEYSET_JSON",
+    "STANDALONE_SUPPORT_KEYS_JSON",
   ]);
-  assert.equal(inventory.length, 52);
+  assert.equal(inventory.length, 57);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,

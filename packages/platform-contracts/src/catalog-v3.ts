@@ -17,6 +17,7 @@ export const planEntitlementsV3Schema = planEntitlementsSchema
     inventoryEnabled: z.boolean(),
     commerceMlEnabled: z.boolean(),
     handheldEnabled: z.boolean(),
+    customLogoEnabled: z.boolean(),
   })
   .strict();
 export const planEntitlementsReadV3Schema = planEntitlementsV3Schema
@@ -25,6 +26,7 @@ export const planEntitlementsReadV3Schema = planEntitlementsV3Schema
     inventoryEnabled: z.boolean().nullable(),
     commerceMlEnabled: z.boolean().nullable(),
     handheldEnabled: z.boolean().nullable(),
+    customLogoEnabled: z.boolean().nullable(),
   })
   .strict();
 export const addonEffectV3Schema = entitlementEffectSchema;
