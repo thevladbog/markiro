@@ -16,6 +16,7 @@ import {
 import { backupWarnings } from "./backups/backup-warnings.js";
 import { useBackupTime } from "./backups/backup-time.js";
 import { BackupWarnings } from "./backups/BackupWarnings.js";
+import { HostAddressNotice } from "./overview/HostAddressNotice.js";
 import { LicenseNotices, useLicenseNotices } from "./info/license/LicenseNotices.js";
 import { officeKeys, useOfficeQuery } from "./office-query.js";
 import { useOfficeSession } from "./office-session.js";
@@ -60,6 +61,7 @@ export function OfficeOverview() {
       <div className="backup-alerts" aria-live="polite">
         <OverviewLicense />
         <OverviewBackups />
+        {admin && <HostAddressNotice />}
       </div>
       <div className="overview-grid">
         <ShiftsCards />

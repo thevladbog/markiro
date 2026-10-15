@@ -1628,6 +1628,28 @@ export const stockTemplateSchema = z
 export type StockTemplate = z.infer<typeof stockTemplateSchema>;
 
 /** `templates` may be left out (a wizard before plan 1e3), never `null`. */
+/** `markiro_proto::AddressMode`: how the host's address was got. */
+export const ADDRESS_MODES = ["dhcp", "static", "unknown"] as const;
+
+/** `GET` and `PUT /v1/office/host-network` (`markiro_proto::HostNetwork`). */
+export const hostNetworkSchema = z.object({
+  addresses: z.array(
+    z.object({
+      address: z.string(),
+      mode: z.enum(ADDRESS_MODES),
+      mac: z.string().nullable(),
+      alias: z.string().nullable(),
+    }),
+  ),
+  port: z.number().int().positive(),
+  confirmedAt: z.iso.datetime().nullable(),
+});
+export type HostNetwork = z.infer<typeof hostNetworkSchema>;
+
+/** The body of `PUT /v1/office/host-network`. */
+export const hostNetworkConfirmSchema = z.strictObject({ confirmed: z.boolean() });
+export type HostNetworkConfirm = z.infer<typeof hostNetworkConfirmSchema>;
+
 export const bootstrapRequestSchema = z
   .object({
     admin: newOfficeUserSchema,
@@ -1635,6 +1657,8 @@ export const bootstrapRequestSchema = z
     sscc: ssccStartSchema,
     lines: z.array(z.string()),
     templates: z.array(stockTemplateSchema).optional(),
+    /** Left out when the box «I reserved the address» was not ticked. */
+    addressConfirmed: z.boolean().optional(),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;

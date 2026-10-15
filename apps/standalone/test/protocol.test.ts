@@ -69,6 +69,8 @@ import {
   operatorRecordSchema,
   operatorUpdateSchema,
   orgLogoPutSchema,
+  hostNetworkConfirmSchema,
+  hostNetworkSchema,
   orgLogoStateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
@@ -298,6 +300,7 @@ describe("feed records that grant access", () => {
 // Host responses pass through the shell unchanged: lenient, like the Rust
 // response types. Requests are strict, like the host's deny_unknown_fields.
 const RESPONSES = [
+  ["host-network.json", hostNetworkSchema],
   ["device-info.json", deviceInfoSchema],
   ["device-record.json", deviceRecordSchema],
   ["device-record-legacy.json", deviceRecordSchema],
@@ -349,6 +352,8 @@ const RESPONSES = [
 ] as const;
 
 const REQUESTS = [
+  ["host-network-confirm.json", hostNetworkConfirmSchema],
+  ["bootstrap-request-address.json", bootstrapRequestSchema],
   ["office-login-request.json", officeLoginRequestSchema],
   ["bootstrap-request.json", bootstrapRequestSchema],
   ["org-profile-update.json", orgProfileUpdateSchema],
@@ -3863,5 +3868,14 @@ describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
       false,
     );
     expect(officeWarehousePalletSchema.safeParse({ ...open, sscc: "12" }).success).toBe(false);
+  });
+
+  it("reads the host's addresses with how each was got and the wizard's mark", () => {
+    const network = hostNetworkSchema.parse(fixture("host-network.json"));
+    expect(network.addresses.map((address) => address.mode)).toStrictEqual(["dhcp", "static"]);
+    expect(hostNetworkConfirmSchema.safeParse({ confirmed: true, extra: 1 }).success).toBe(false);
+    expect(
+      bootstrapRequestSchema.parse(fixture("bootstrap-request-address.json")).addressConfirmed,
+    ).toBe(true);
   });
 });

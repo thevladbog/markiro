@@ -224,3 +224,43 @@ pub struct OfficeWarehousePallet {
 pub struct OfficeWarehousePallets {
     pub pallets: Vec<OfficeWarehousePallet>,
 }
+
+/// How this host's IPv4 address was got (`markiro-host address-check`, spec 9.1): by DHCP it can
+/// change with a lease, and every device that paired by it loses the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressMode {
+    Dhcp,
+    Static,
+    /// The system would not say (not Windows, or the query failed).
+    Unknown,
+}
+
+/// One address devices can reach the host by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostAddress {
+    pub address: String,
+    pub mode: AddressMode,
+    /// The adapter's MAC (`AA-BB-CC-DD-EE-FF`), for the reservation in the router.
+    pub mac: Option<String>,
+    /// The adapter's name in Windows.
+    pub alias: Option<String>,
+}
+
+/// `GET` and `PUT /v1/office/host-network`: the host's addresses and whether an administrator
+/// confirmed that they stay (`confirmedAt`, the host's time, or `null`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostNetwork {
+    pub addresses: Vec<HostAddress>,
+    pub port: u16,
+    pub confirmed_at: Option<String>,
+}
+
+/// `PUT /v1/office/host-network`: the administrator's mark «адрес зарезервирован».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostNetworkConfirm {
+    pub confirmed: bool,
+}

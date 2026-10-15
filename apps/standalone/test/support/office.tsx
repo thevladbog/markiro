@@ -44,6 +44,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("officeChangePassword"),
     ),
     getOrg: vi.fn<HostApi["getOrg"]>(() => unexpected("getOrg")),
+    getHostNetwork: vi.fn<HostApi["getHostNetwork"]>(() => unexpected("getHostNetwork")),
+    confirmHostNetwork: vi.fn<HostApi["confirmHostNetwork"]>(() =>
+      unexpected("confirmHostNetwork"),
+    ),
     updateOrg: vi.fn<HostApi["updateOrg"]>(() => unexpected("updateOrg")),
     getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(async () => ({ logo: null })),
     putOrgLogo: vi.fn<HostApi["putOrgLogo"]>(() => unexpected("putOrgLogo")),

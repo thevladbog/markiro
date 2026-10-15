@@ -32,6 +32,8 @@ pub struct Endpoint {
     pub port: u16,
     /// This host's addresses in the local network, read for every new code.
     pub addresses: Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>,
+    /// How each address was got (the office's notice about a floating address, plan ТСД-П).
+    pub details: Arc<dyn Fn() -> Vec<markiro_proto::HostAddress> + Send + Sync>,
 }
 
 #[derive(Clone)]
@@ -91,6 +93,7 @@ impl AppState {
                 fingerprint: String::new(),
                 port: markiro_proto::DEFAULT_PORT,
                 addresses: Arc::new(crate::network::lan_ipv4_addresses),
+                details: Arc::new(crate::address_check::detect),
             },
             revisions: Arc::new(watch::channel(0).0),
             stopping: Arc::new(watch::channel(false).0),
@@ -127,6 +130,15 @@ impl AppState {
         addresses: impl Fn() -> Vec<Ipv4Addr> + Send + Sync + 'static,
     ) -> Self {
         self.endpoint.addresses = Arc::new(addresses);
+        self
+    }
+
+    /// Replace the lookup of how the addresses were got; tests name them.
+    pub fn with_address_details(
+        mut self,
+        details: impl Fn() -> Vec<markiro_proto::HostAddress> + Send + Sync + 'static,
+    ) -> Self {
+        self.endpoint.details = Arc::new(details);
         self
     }
 
@@ -299,6 +311,11 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/org",
             get(crate::routes::org::get_org).put(crate::routes::org::put_org),
+        )
+        .route(
+            "/v1/office/host-network",
+            get(crate::routes::host_network::get_network)
+                .put(crate::routes::host_network::put_network),
         )
         .route(
             "/v1/office/org/logo",

@@ -2439,3 +2439,22 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
   и краснел на семи новых кодах — в `src/i18n/ru.json` (`floor.queue.code`) добавлены русские формулировки для
   `box_not_found`, `box_not_closed`, `box_on_pallet`, `product_mismatch`, `pallet_not_open`, `pallet_count_mismatch`,
   `feature_disabled`; сам тест не менялся. Формулировки рабочие — владельцу сверить текст.
+
+### Задача П4
+
+- Миграция названа `0045_host_address.sql`, а не `0039_…`: номера 0039+ закреплены за ОБН-3 (решение контроллера;
+  sqlx принимает пропуски в нумерации). Других ссылок на 0039 в тестах плана не было: тест `upgrade.rs` привязан к
+  своей миграции (`ADDED = 31`) и не менялся.
+- Маршруты `GET|PUT /v1/office/host-network` внесены в `NEVER` (`license/gate.rs`); `tests/license_routes.rs` сверяет таблицы
+  с роутером и правок не потребовал. Таблицы `device_kind_routes` ещё нет (создаёт задача Х1): правило для офисных
+  маршрутов добавит она. Под `held_by_a_restore` маршруты не попадают (не факты станции).
+- Число шагов мастера 5 → 6 (решение владельца В-2, новый шаг «Адрес хоста») изменило ожидания в `test/wizard.test.tsx`
+  («из 5» → «из 6», шаг «Проверка» стал 6-м, «Назад» с проверки ведёт на «Адрес хоста»), `test/app.test.tsx`
+  (цепочка шагов после отказа хоста, добавлен «Далее» на шаге адреса) и `test/support/wizard.ts` (`reachAddress` вынесен из
+  `reachReview`, `next` экспортирован). Проверки каждого шага сохранены.
+- `addresses_of` сортирует входной список адресов сама (тест плана подаёт несортированный и ждёт сортированный ответ).
+- Команды Cargo: флаг `--manifest-path` ставится после подкоманды (`cargo test --offline --locked --manifest-path …`).
+- `cargo clippy -D warnings` на `markiro-proto` падает на уже существовавших замечаниях (`proto/src/trust.rs` — `map_or`,
+  `proto/src/lib.rs` — `large_enum_variant` у `WarehouseLookupResult`); новый код замечаний не добавляет.
+- Не проверено: диалог NSIS на Windows, `Get-NetIPAddress` на реальном ПК, плашка и шаг мастера в браузере/Tauri
+  (Vitest доказывает только DOM).

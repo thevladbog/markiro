@@ -9,12 +9,14 @@
 //!   uninstall                                 stop and remove it; the data stays (Windows, administrator)
 //!   stop-service                              stop it and wait (Windows, administrator)
 //!   network-check [--make-private]            list networks; exit 3 while one is public
+//!   address-check                             list addresses and how each was got; exit 5 while one is by DHCP
 //!   trust-keys                                print the kids of the keys this build trusts
 //!
 //! The installer's exit codes (`src-tauri/windows/installer-hooks.nsh`):
 //! `install` 0 = running, 1 = failed, 4 = installed but not staying up (see
 //! `failure_code`); `network-check` 0 = no public network, 3 = one remains,
-//! 1 = failed; 2 = bad command line.
+//! 1 = failed; `address-check` 0 = every address static, 5 = one by DHCP, 1 = failed;
+//! 2 = bad command line.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -51,6 +53,7 @@ enum Command {
     NetworkCheck {
         make_private: bool,
     },
+    AddressCheck,
     TrustKeys,
 }
 
@@ -61,6 +64,7 @@ const USAGE: &str = "usage: markiro-host run [--data-dir <path>] [--port <port>]
        markiro-host verify-copy <copy> [--without-manifest]
        markiro-host install | uninstall | stop-service
        markiro-host network-check [--make-private]
+       markiro-host address-check
        markiro-host trust-keys";
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -77,10 +81,13 @@ fn parse(args: &[String]) -> Result<Command, String> {
         ("network-check", [flag]) if flag == "--make-private" => {
             return Ok(Command::NetworkCheck { make_private: true })
         }
+        ("address-check", []) => return Ok(Command::AddressCheck),
         ("trust-keys", []) => return Ok(Command::TrustKeys),
-        ("install" | "uninstall" | "stop-service" | "network-check" | "trust-keys", _) => {
-            return Err(USAGE.to_owned())
-        }
+        (
+            "install" | "uninstall" | "stop-service" | "network-check" | "address-check"
+            | "trust-keys",
+            _,
+        ) => return Err(USAGE.to_owned()),
         _ => {}
     }
     // `restore` and `verify-copy` take the copy first.
@@ -205,6 +212,17 @@ fn main() -> ExitCode {
             }
             return ExitCode::from(network_check_code(&result));
         }
+        Command::AddressCheck => {
+            let result = address_check();
+            match &result {
+                Ok(true) => eprintln!(
+                    "markiro-host: an address is got by DHCP; reserve it in the router by the MAC above"
+                ),
+                Err(error) => eprintln!("markiro-host: {error}"),
+                Ok(false) => {}
+            }
+            return ExitCode::from(address_check_code(&result));
+        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -244,6 +262,33 @@ fn network_check_code(result: &Result<bool, BoxError>) -> u8 {
         Ok(true) => PUBLIC_REMAINS,
         Err(_) => 1,
     }
+}
+
+/// `address-check`: 0 when every address is static, [`FROM_DHCP`] while one is by DHCP, 1 when the
+/// check failed.
+fn address_check_code(result: &Result<bool, BoxError>) -> u8 {
+    match result {
+        Ok(false) => 0,
+        Ok(true) => markiro_host::address_check::FROM_DHCP,
+        Err(_) => 1,
+    }
+}
+
+/// Prints every address with how it was got and its MAC; whether one is by DHCP.
+fn address_check() -> Result<bool, BoxError> {
+    let lan = markiro_host::network::lan_ipv4_addresses();
+    let adapters = markiro_host::address_check::check(&mut SystemCommands)?;
+    let addresses = markiro_host::address_check::addresses_of(&lan, &adapters);
+    for address in &addresses {
+        println!(
+            "{}\t{:?}\t{}\t{}",
+            address.address,
+            address.mode,
+            address.mac.as_deref().unwrap_or("-"),
+            address.alias.as_deref().unwrap_or("-")
+        );
+    }
+    Ok(markiro_host::address_check::reservation_needed(&addresses))
 }
 
 /// `trust-keys`: the kids of the license keyset, then of the release keyset,
@@ -589,6 +634,20 @@ mod tests {
         assert!(error.contains("is not a file"), "{error}");
         assert!(error.contains("Nothing was changed"), "{error}");
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn address_check_takes_no_arguments_and_its_codes_are_the_documented_ones() {
+        assert_eq!(parse(&args(&["address-check"])), Ok(Command::AddressCheck));
+        assert!(parse(&args(&["address-check", "--now"])).is_err());
+        assert_eq!(address_check_code(&Ok(false)), 0);
+        assert_eq!(
+            address_check_code(&Ok(true)),
+            markiro_host::address_check::FROM_DHCP
+        );
+        assert_eq!(markiro_host::address_check::FROM_DHCP, 5);
+        let failed: BoxError = "no".into();
+        assert_eq!(address_check_code(&Err(failed)), 1);
     }
 
     #[test]

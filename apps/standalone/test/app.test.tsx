@@ -605,13 +605,15 @@ describe("App", () => {
     await completeWizard();
     // Rejected: the wizard jumps back to the org step with the field error;
     // the GLN is already valid, so stepping forward again is enough.
-    await screen.findByText("Шаг 2 из 5 · Организация");
+    await screen.findByText("Шаг 2 из 6 · Организация");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
-    await screen.findByText("Шаг 3 из 5 · Номера SSCC");
+    await screen.findByText("Шаг 3 из 6 · Номера SSCC");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
-    await screen.findByText("Шаг 4 из 5 · Линии");
+    await screen.findByText("Шаг 4 из 6 · Линии");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
-    await screen.findByText("Шаг 5 из 5 · Проверка");
+    await screen.findByText("Шаг 5 из 6 · Адрес хоста");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    await screen.findByText("Шаг 6 из 6 · Проверка");
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(device.pairLocally).toHaveBeenCalledTimes(1);

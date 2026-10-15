@@ -108,6 +108,8 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/me"),
     ("PUT", "/v1/office/me/password"),
     ("POST", "/v1/bootstrap"),
+    ("GET", "/v1/office/host-network"),
+    ("PUT", "/v1/office/host-network"),
     ("GET", "/v1/office/org"),
     ("PUT", "/v1/office/org"),
     ("GET", "/v1/office/org/logo"),

@@ -952,6 +952,10 @@ pub struct BootstrapRequest {
     /// 1e3); a wizard from before then sends none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<StockTemplate>,
+    /// The wizard's mark «I reserved the host's address» (plan ТСД-П, task П4); left out, nothing
+    /// was confirmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_confirmed: Option<bool>,
 }
 
 /// A stock label template of the wizard: enabled, for every category, and

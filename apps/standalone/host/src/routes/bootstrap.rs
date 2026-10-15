@@ -147,6 +147,13 @@ pub async fn bootstrap(
         .execute(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    if request.address_confirmed == Some(true) {
+        sqlx::query("UPDATE site SET address_confirmed_at = ? WHERE id = 1")
+            .bind(&at)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+    }
     // The built-in trial starts with the wizard (plan ЛЦ-2, spec §3.4),
     // once, with the INN the wizard took (it goes into the activation
     // request). Migration 0030 seeds the clock's one row: without it the
@@ -236,6 +243,18 @@ pub async fn bootstrap(
     let (token, expires) = open_session(&mut tx, &admin_id, &device.id, now)
         .await
         .map_err(ApiError::internal)?;
+    let mut details = json!({
+        "adminLogin": login,
+        "orgName": org.name,
+        "issuerPrefix": prefix,
+        "lineCount": lines.len(),
+        "boxNextSerial": request.sscc.box_next_serial,
+        "palletNextSerial": request.sscc.pallet_next_serial,
+        "templateCount": templates.len(),
+    });
+    if request.address_confirmed == Some(true) {
+        details["addressConfirmed"] = json!(true);
+    }
     audit::record(
         &mut tx,
         &at,
@@ -245,15 +264,7 @@ pub async fn bootstrap(
             target_type: Some("office_user"),
             target_id: Some(&admin_id),
             outcome: Outcome::Ok,
-            details: json!({
-                "adminLogin": login,
-                "orgName": org.name,
-                "issuerPrefix": prefix,
-                "lineCount": lines.len(),
-                "boxNextSerial": request.sscc.box_next_serial,
-                "palletNextSerial": request.sscc.pallet_next_serial,
-                "templateCount": templates.len(),
-            }),
+            details,
         },
     )
     .await

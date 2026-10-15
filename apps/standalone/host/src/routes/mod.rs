@@ -14,6 +14,7 @@ pub mod disaggregation;
 pub mod disaggregation_reasons;
 pub mod employees;
 pub mod facts;
+pub mod host_network;
 pub mod known_blocks;
 pub mod lines;
 pub mod office_auth;

@@ -1,7 +1,7 @@
-import { screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeviceRecord } from "../src/host/protocol.js";
+import type { DeviceRecord, HostNetwork } from "../src/host/protocol.js";
 import {
   CLOCK_SKEW_MS,
   clockSkewMs,
@@ -110,6 +110,12 @@ describe("the overview's reading of the host's lists", () => {
   });
 });
 
+const STATIC_NETWORK: HostNetwork = {
+  addresses: [{ address: "10.0.0.5", mode: "static", mac: "AA-BB-CC-DD-EE-FF", alias: "Ethernet" }],
+  port: 45710,
+  confirmedAt: null,
+};
+
 function overviewSession(user?: typeof TECHNOLOGIST): FakeOfficeSession {
   const session = fakeOfficeSession(user === undefined ? {} : { user });
   session.api.getOrg.mockResolvedValue(ORG_PROFILE);
@@ -122,6 +128,7 @@ function overviewSession(user?: typeof TECHNOLOGIST): FakeOfficeSession {
     device({ id: "b", name: "Станция склада", lastSeenAt: "2026-10-09T08:00:00Z" }),
   ]);
   session.api.getBackups.mockResolvedValue({ ...HEALTHY_BACKUPS, now: NOW.toISOString() });
+  session.api.getHostNetwork.mockResolvedValue(STATIC_NETWORK);
   return session;
 }
 
@@ -258,5 +265,63 @@ describe("«Обзор» of the office (beta 3.2)", () => {
       await within(card as HTMLElement).findByRole("button", { name: "Повторить" }),
     ).toBeTruthy();
     expect(await screen.findByRole("link", { name: ACTIVE.number })).toBeTruthy();
+  });
+
+  it("warns that the host's address may change while one is by DHCP, and confirms the reservation", async () => {
+    const session = overviewSession();
+    session.api.getHostNetwork.mockResolvedValue({
+      addresses: [
+        {
+          address: "192.168.1.10",
+          mode: "dhcp",
+          mac: "AA-BB-CC-DD-EE-FF",
+          alias: "Беспроводная сеть",
+        },
+      ],
+      port: 45710,
+      confirmedAt: null,
+    });
+    session.api.confirmHostNetwork.mockResolvedValue({
+      addresses: [
+        {
+          address: "192.168.1.10",
+          mode: "dhcp",
+          mac: "AA-BB-CC-DD-EE-FF",
+          alias: "Беспроводная сеть",
+        },
+      ],
+      port: 45710,
+      confirmedAt: "2026-10-10T09:00:00Z",
+    });
+    renderOffice(session);
+    const notice = await screen.findByRole("alert", { name: /Адрес хоста может измениться/ });
+    expect(within(notice).getByText(/192\.168\.1\.10/)).toBeTruthy();
+    expect(within(notice).getByText(/AA-BB-CC-DD-EE-FF/)).toBeTruthy();
+    fireEvent.click(within(notice).getByRole("button", { name: "Я зарезервировал адрес" }));
+    await waitFor(() =>
+      expect(session.api.confirmHostNetwork).toHaveBeenCalledWith("office-session-token", {
+        confirmed: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("alert", { name: /Адрес хоста может измениться/ })).toBeNull(),
+    );
+  });
+
+  it("says nothing about the address when it is static, or confirmed, or the reader is no administrator", async () => {
+    const confirmed = overviewSession();
+    confirmed.api.getHostNetwork.mockResolvedValue({
+      addresses: [{ address: "192.168.1.10", mode: "dhcp", mac: null, alias: null }],
+      port: 45710,
+      confirmedAt: "2026-10-10T08:00:00Z",
+    });
+    renderOffice(confirmed);
+    await screen.findByRole("heading", { name: "Смены в работе" });
+    expect(screen.queryByRole("alert", { name: /Адрес хоста может измениться/ })).toBeNull();
+    cleanup();
+    const technologist = overviewSession(TECHNOLOGIST);
+    renderOffice(technologist);
+    await screen.findByRole("heading", { name: "Смены в работе" });
+    expect(technologist.api.getHostNetwork).not.toHaveBeenCalled();
   });
 });

@@ -2162,3 +2162,28 @@ fn the_compatibility_cases_say_who_must_update() {
         assert_eq!(compatibility_for(client, &host), expected, "{case}");
     }
 }
+
+#[test]
+fn the_host_network_lists_each_address_with_how_it_was_got() {
+    let network: markiro_proto::HostNetwork = round_trip("host-network.json");
+    assert_eq!(network.port, 45710);
+    assert_eq!(network.addresses[0].mode, markiro_proto::AddressMode::Dhcp);
+    assert_eq!(
+        network.addresses[1].mode,
+        markiro_proto::AddressMode::Static
+    );
+    assert!(network.confirmed_at.is_none());
+    let confirm: markiro_proto::HostNetworkConfirm = round_trip("host-network-confirm.json");
+    assert!(confirm.confirmed);
+    let mut value = fixture("host-network-confirm.json");
+    value["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<markiro_proto::HostNetworkConfirm>(value).is_err());
+}
+
+#[test]
+fn a_wizard_may_say_the_address_is_reserved_and_an_older_one_says_nothing() {
+    let sent: BootstrapRequest = round_trip("bootstrap-request-address.json");
+    assert_eq!(sent.address_confirmed, Some(true));
+    let plain: BootstrapRequest = round_trip("bootstrap-request.json");
+    assert_eq!(plain.address_confirmed, None);
+}

@@ -102,6 +102,7 @@ import {
   officeUserSchema,
   orgLogoStateSchema,
   productPhotoStateSchema,
+  hostNetworkSchema,
   orgProfileSchema,
   palletSheetSchema,
   palletSheetsSchema,
@@ -159,6 +160,8 @@ import {
   type OperatorCreate,
   type OperatorUpdate,
   type OrgLogoPut,
+  type HostNetwork,
+  type HostNetworkConfirm,
   type OrgLogoState,
   type ProductPhotoPut,
   type ProductPhotoState,
@@ -269,6 +272,8 @@ export interface HostApi {
   officeMe: (token: string) => Promise<OfficeUser>;
   officeChangePassword: (token: string, request: PasswordChange) => Promise<void>;
   getOrg: (token: string) => Promise<OrgProfile>;
+  getHostNetwork: (token: string) => Promise<HostNetwork>;
+  confirmHostNetwork: (token: string, request: HostNetworkConfirm) => Promise<HostNetwork>;
   updateOrg: (token: string, update: OrgProfileUpdate) => Promise<OrgProfile>;
   getOrgLogo: (token: string) => Promise<OrgLogoState>;
   putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
@@ -653,6 +658,17 @@ export function createHostApi(client: HostClient): HostApi {
     },
     getOrg: (token) =>
       client.request("GET", "/v1/office/org", { officeToken: token, schema: orgProfileSchema }),
+    getHostNetwork: (token) =>
+      client.request("GET", "/v1/office/host-network", {
+        officeToken: token,
+        schema: hostNetworkSchema,
+      }),
+    confirmHostNetwork: (token, request) =>
+      client.request("PUT", "/v1/office/host-network", {
+        body: request,
+        officeToken: token,
+        schema: hostNetworkSchema,
+      }),
     updateOrg: (token, update) =>
       client.request("PUT", "/v1/office/org", {
         body: update,

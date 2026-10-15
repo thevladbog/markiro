@@ -18,7 +18,8 @@
 ;; 4 = installed but not staying up or still starting after 30 s (usually an
 ;; unfinished restore, or a big first migration: a warning with the restore
 ;; hint), anything else = failure; network-check 3 = a public
-;; network remains. NSIS `==` ignores case, so roles are mapped to literals.
+;; network remains; address-check 5 = an address by DHCP (a warning only).
+;; NSIS `==` ignores case, so roles are mapped to literals.
 
 !define MARKIRO_ROLE_KEY "Software\Markiro\Standalone"
 !define MARKIRO_RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
@@ -142,6 +143,17 @@ Var MarkiroRole
         nsExec::ExecToLog '"$INSTDIR\markiro-host.exe" network-check --make-private'
         Pop $0
         markiro_keep_profile:
+      ${EndIf}
+    ${EndIf}
+    nsExec::ExecToLog '"$INSTDIR\markiro-host.exe" address-check'
+    Pop $0
+    ${If} $0 == "5"
+      DetailPrint "Адрес этого ПК получен по DHCP и может измениться."
+      ; Like the network profile: the question belongs to the first installation, an update the app
+      ; started asks nothing, and the office shows the notice until an administrator confirms.
+      ${IfNot} ${Silent}
+      ${AndIf} $UpdateMode <> 1
+        MessageBox MB_OK|MB_ICONINFORMATION "Адрес этого компьютера в сети получен автоматически (DHCP) и может измениться после перезагрузки: ТСД и станции потеряют связь с хостом.$\n$\nЗарезервируйте адрес этого ПК в роутере по MAC-адресу (лучше всего) или задайте статический адрес вне пула DHCP. MAC и текущий адрес покажет офис после установки.$\n$\nУстановка продолжается."
       ${EndIf}
     ${EndIf}
   ${Else}

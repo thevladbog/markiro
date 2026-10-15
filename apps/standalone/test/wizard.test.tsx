@@ -10,7 +10,13 @@ import { HostError } from "../src/host/client.js";
 import { DeviceError } from "../src/host/device.js";
 import i18n from "../src/i18n/index.js";
 import { BootstrapWizard } from "../src/wizard/BootstrapWizard.js";
-import { completeWizard, EXPECTED_REQUEST, reachReview } from "./support/wizard.js";
+import {
+  completeWizard,
+  EXPECTED_REQUEST,
+  next,
+  reachAddress,
+  reachReview,
+} from "./support/wizard.js";
 
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -49,7 +55,7 @@ describe("BootstrapWizard", () => {
     type("Повторите пароль", "another password");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
     expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
-    expect(screen.getByText("Шаг 1 из 5 · Администратор")).toBeTruthy();
+    expect(screen.getByText("Шаг 1 из 6 · Администратор")).toBeTruthy();
   });
 
   it("checks the GLN check digit before leaving the organization step", async () => {
@@ -58,7 +64,7 @@ describe("BootstrapWizard", () => {
     type("Пароль", "correct horse battery");
     type("Повторите пароль", "correct horse battery");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
-    await screen.findByText("Шаг 2 из 5 · Организация");
+    await screen.findByText("Шаг 2 из 6 · Организация");
     type("Название организации", "ООО «Атолл»");
     type("GLN организации", "4600682000010");
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
@@ -78,7 +84,7 @@ describe("BootstrapWizard", () => {
     render(<BootstrapWizard onSubmit={onSubmit} />);
     await completeWizard();
     expect(await screen.findByText("Хост не принял это значение. Проверьте его.")).toBeTruthy();
-    expect(screen.getByText("Шаг 2 из 5 · Организация")).toBeTruthy();
+    expect(screen.getByText("Шаг 2 из 6 · Организация")).toBeTruthy();
     expect(screen.getByLabelText("GLN организации")).toBeTruthy();
   });
 
@@ -87,7 +93,7 @@ describe("BootstrapWizard", () => {
     render(<BootstrapWizard onSubmit={onSubmit} />);
     await completeWizard();
     expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
-    expect(screen.getByText("Шаг 5 из 5 · Проверка")).toBeTruthy();
+    expect(screen.getByText("Шаг 6 из 6 · Проверка")).toBeTruthy();
   });
 
   it("clears the submit error banner when going back to fix a step", async () => {
@@ -96,7 +102,30 @@ describe("BootstrapWizard", () => {
     await completeWizard();
     expect(await screen.findByText("Служба хоста на этом компьютере не отвечает.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    await screen.findByText("Шаг 4 из 5 · Линии");
+    await screen.findByText("Шаг 5 из 6 · Адрес хоста");
     expect(screen.queryByText("Служба хоста на этом компьютере не отвечает.")).toBeNull();
+  });
+
+  it("lets the address step pass unticked, and sends the mark only when it is ticked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await reachReview();
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).not.toHaveProperty("addressConfirmed");
+  });
+
+  it("sends addressConfirmed when the box «Я зарезервировал адрес» is ticked", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<BootstrapWizard onSubmit={onSubmit} />);
+    await reachAddress();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Я зарезервировал адрес (или задал статический)" }),
+    );
+    next();
+    await screen.findByText("Шаг 6 из 6 · Проверка");
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ addressConfirmed: true });
   });
 });

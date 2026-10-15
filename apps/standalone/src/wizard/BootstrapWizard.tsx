@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Combobox, IconButton, Input } from "@markiro/ui";
+import { Alert, Button, Card, Checkbox, Combobox, IconButton, Input } from "@markiro/ui";
 
 import { HostError } from "../host/client.js";
 import { errorMessageKey } from "../host/errors.js";
@@ -260,6 +260,25 @@ export function BootstrapWizard({ onSubmit }: BootstrapWizardProps) {
             >
               {t("wizard.lines.add")}
             </Button>
+          </>
+        )}
+
+        {step === "address" && (
+          <>
+            <p>{t("wizard.address.intro")}</p>
+            <p>{t("wizard.address.how")}</p>
+            <Controller
+              control={control}
+              name="addressConfirmed"
+              render={({ field }) => (
+                <Checkbox
+                  label={t("wizard.address.confirm")}
+                  checked={field.value}
+                  onCheckedChange={field.onChange}
+                />
+              )}
+            />
+            <p className="standalone-wizard__note">{t("wizard.address.note")}</p>
           </>
         )}
 
