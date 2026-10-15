@@ -49,6 +49,8 @@ export interface TableProps<Row> {
   empty?: ReactNode;
   /** Accessible name for the keyboard-focusable horizontal scroll region. */
   scrollLabel?: string;
+  /** Accessible name of the `<table>` itself (the scroll region has its own). */
+  tableLabel?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -87,6 +89,7 @@ export function Table<Row>({
   onRowClick,
   empty = "No data",
   scrollLabel,
+  tableLabel,
   className,
   style,
 }: TableProps<Row>) {
@@ -109,7 +112,7 @@ export function Table<Row>({
         onKeyDown={scrollLabel ? moveHorizontalRegion : undefined}
         style={{ overflowX: "auto" }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table aria-label={tableLabel} style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-panel)" }}>
               {columns.map((column) => (

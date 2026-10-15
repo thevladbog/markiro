@@ -1670,6 +1670,18 @@ describe("Table", () => {
     expect(scroll.scrollLeft).toBe(0);
   });
 
+  it("names the table itself when `tableLabel` is given", () => {
+    render(
+      <Table
+        columns={[{ key: "batch", title: "Партия" }]}
+        rows={[{ batch: "№ 214" }]}
+        tableLabel="Статистика по месяцам"
+      />,
+    );
+
+    expect(screen.getByRole("table", { name: "Статистика по месяцам" })).toBeDefined();
+  });
+
   it("renders the empty state when there are no rows", () => {
     render(<Table columns={[{ key: "batch", title: "Партия" }]} rows={[]} empty="Пока пусто" />);
 
