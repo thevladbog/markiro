@@ -1,13 +1,21 @@
 package app.markiro.handheld.core.backend
 
 import app.markiro.handheld.core.host.HostBlockSupplier
+import app.markiro.handheld.core.host.HostBoxRegistry
 import app.markiro.handheld.core.host.HostCalls
+import app.markiro.handheld.core.host.HostOrgPrint
 import app.markiro.handheld.core.host.HostReferenceSync
 import app.markiro.handheld.core.host.toBundle
 import app.markiro.handheld.core.host.toBundleProduct
 import app.markiro.handheld.core.host.toBundleTemplate
 import app.markiro.handheld.core.host.toShiftDto
+import app.markiro.handheld.core.network.BoxRegistryPageDto
 import app.markiro.handheld.core.network.BoxSsccTopUpDto
+import app.markiro.handheld.core.network.PalletBootstrapDto
+import app.markiro.handheld.core.network.PalletBootstrapOperatorDto
+import app.markiro.handheld.core.network.PalletBootstrapProductDto
+import app.markiro.handheld.core.network.PalletCategoryTemplateDto
+import app.markiro.handheld.core.network.PalletLabelTemplatesDto
 import app.markiro.handheld.core.network.BundleSsccDto
 import app.markiro.handheld.core.network.OperatorDto
 import app.markiro.handheld.core.network.RosterResponse
@@ -21,9 +29,12 @@ import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.OperatorDao
+import app.markiro.handheld.core.storage.PalletLabelTemplateEntity
+import app.markiro.handheld.core.util.Iso
+import kotlinx.serialization.json.Json
 import java.util.concurrent.ConcurrentHashMap
 
-/** The host behind the seam. Pallet mode is added by task Д3; what is not answered yet is `NoBackend`'s refusal. */
+/** The host behind the seam. What is not answered (inventory, write-offs, replacement) is `NoBackend`'s refusal. */
 class HostBackend(
     private val api: () -> HostApi,
     private val config: DeviceConfigDao,
@@ -32,6 +43,9 @@ class HostBackend(
     private val calls: HostCalls,
     private val reference: HostReferenceSync?,
     private val operators: OperatorDao,
+    private val orgPrint: HostOrgPrint? = null,
+    private val registry: HostBoxRegistry? = null,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : StationBackend by NoBackend {
     private val entries = ConcurrentHashMap<String, DeviceShiftDto>()
 
@@ -77,6 +91,38 @@ class HostBackend(
         calls.run { supplier.ensure(prefix, 0) }
         return BoxSsccTopUpDto(blocks = db.ssccPoolDao().ranges(prefix, 0).map { it.toBundle() }, revokedFrom = emptyList(), issuerProblem = null)
     }
+
+    /**
+     * The pallet mode's dictionaries are what the changes feed already wrote to Room (products with their pallet capacity, the pallet label
+     * templates, the right to build pallets), read back in the cloud's shape; the host's own part is the organization's print identity
+     * (read here, kept for the labels), the extension-1 SSCC block, and the registry's epoch (a restored host makes the next walk a full one).
+     */
+    override suspend fun palletBootstrap(): PalletBootstrapDto {
+        reference?.let { calls.run { it.sync() } }
+        val org = orgPrint?.let { calls.run { it.fetch() } }
+        val prefix = org?.issuerPrefix
+        if (prefix != null) calls.run { supplier.ensure(prefix, 1) }
+        registry?.let { calls.run { runCatching { it.guardEpoch() } } }
+        val templates = db.palletLabelTemplateDao().all()
+        return PalletBootstrapDto(
+            generatedAt = Iso.format(clock()),
+            products = db.palletProductDao().all().map {
+                PalletBootstrapProductDto(it.id, it.gtin14, it.name, it.printName, it.shelfLifeDays, it.palletBoxCapacity, it.chzProductGroupCode)
+            },
+            operators = db.palletPermissionDao().all().map { PalletBootstrapOperatorDto(it.employeeId, it.canBuildPallets) },
+            palletSscc = prefix?.let { heldBlock(it, 1) },
+            palletSsccRevokedFrom = emptyList(),
+            palletLabelTemplates = PalletLabelTemplatesDto(
+                organisation = templates.firstOrNull { it.key == PalletLabelTemplateEntity.ORG }?.let { Json.parseToJsonElement(it.specJson) },
+                byCategory = templates.filter { it.key.startsWith("category:") }.mapNotNull { row ->
+                    row.key.removePrefix("category:").toIntOrNull()?.let { PalletCategoryTemplateDto(it, Json.parseToJsonElement(row.specJson)) }
+                },
+            ),
+        )
+    }
+
+    override suspend fun boxRegistry(since: String?, until: String?, cursor: String?, limit: Int): BoxRegistryPageDto =
+        calls.run { runCatching { checkNotNull(registry) { "the box registry is not wired" }.page(since, until, cursor, limit) } }
 
     override suspend fun hubCounts(): HubCounts {
         val open = shifts().items.count { it.status in setOf("planned", "active") }

@@ -68,6 +68,10 @@ interface BoxRegistryDao {
     @Query("UPDATE box_registry SET palletId = NULL, palletSscc = NULL, palletActive = 0 WHERE sscc = :sscc")
     suspend fun clearPallet(sscc: String)
 
+    /** What the host answered a refused box with: another pallet holds it (the id is known, the SSCC is `null` while that pallet is open). */
+    @Query("UPDATE box_registry SET palletId = :palletId, palletSscc = :palletSscc, palletActive = 1 WHERE sscc = :sscc")
+    suspend fun markOnPallet(sscc: String, palletId: String?, palletSscc: String?)
+
     @Query("DELETE FROM box_registry")
     suspend fun clear()
 }

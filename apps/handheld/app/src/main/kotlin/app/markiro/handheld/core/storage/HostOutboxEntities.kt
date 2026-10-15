@@ -82,6 +82,22 @@ interface HostOutboxDao {
     )
     suspend fun unfrozenCloses(): List<ShiftCloseEntity>
 
+    // The warehouse pallets' sources (the pallet-events channel). A pallet of the device is not a record until it is frozen; `ackedAt` is the
+    // acknowledgement of its close, a membership leaves `pending` when it is frozen (`sent`) and settles on its receipt.
+
+    @Query("SELECT * FROM pallets WHERE kind = 'warehouse' AND ackedAt IS NULL ORDER BY openedAt, palletId")
+    suspend fun unackedWarehousePallets(): List<PalletEntity>
+
+    /** Boxes of the pallet whose events are not settled yet (frozen and unanswered, or not frozen). */
+    @Query("SELECT COUNT(*) FROM pallet_memberships WHERE palletId = :palletId AND status IN ('pending', 'sent')")
+    suspend fun unsettledMemberships(palletId: String): Int
+
+    @Query("SELECT COUNT(*) FROM pallet_membership_removals WHERE palletId = :palletId")
+    suspend fun unsettledRemovals(palletId: String): Int
+
+    @Query("SELECT COUNT(*) FROM pallet_memberships WHERE palletId = :palletId")
+    suspend fun membershipRows(palletId: String): Int
+
     @Query("SELECT codeHash FROM codes_mirror WHERE boxId = :boxId")
     suspend fun codeHashesIn(boxId: String): List<String>
 
@@ -94,7 +110,11 @@ interface HostOutboxDao {
             "+ (SELECT COUNT(*) FROM pallets WHERE kind = 'production' AND shiftId IS NOT NULL AND closedAt IS NOT NULL AND ackedAt IS NULL " +
             "AND sscc IS NOT NULL AND palletId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'pallet')) " +
             "+ (SELECT COUNT(*) FROM shift_close_outbox WHERE state = 'pending' " +
-            "AND eventId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'shift_close'))",
+            "AND eventId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'shift_close')) " +
+            "+ (SELECT COUNT(*) FROM pallet_memberships WHERE status = 'pending') " +
+            "+ (SELECT COUNT(*) FROM pallet_membership_removals WHERE status = 'pending') " +
+            "+ (SELECT COUNT(*) FROM pallets WHERE kind = 'warehouse' AND closedAt IS NOT NULL AND ackedAt IS NULL AND sscc IS NOT NULL " +
+            "AND palletId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'warehouse_pallet_closed'))",
     )
     fun observeOwed(): kotlinx.coroutines.flow.Flow<Int>
 

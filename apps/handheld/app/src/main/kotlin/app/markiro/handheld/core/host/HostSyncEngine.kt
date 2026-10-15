@@ -1,5 +1,6 @@
 package app.markiro.handheld.core.host
 
+import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
@@ -40,6 +41,7 @@ class HostSyncEngine(
     private val calls: HostCalls,
     private val config: DeviceConfigDao = db.deviceConfigDao(),
     private val freezer: HostRecordFreezer = HostRecordFreezer(db),
+    private val palletEvents: HostPalletEvents = HostPalletEvents(db),
     private val scope: CoroutineScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO),
     private val clock: () -> Long = System::currentTimeMillis,
     private val heartbeatMs: Long = SyncEngine.HEARTBEAT_MS,
@@ -91,12 +93,25 @@ class HostSyncEngine(
         }
     }
 
+    /**
+     * Facts first, then the events of the warehouse pallets (they name boxes that the facts closed). What the events settle can free a record
+     * that waited for them (the close of a pallet waits for its boxes), so the passes repeat while a pass froze something new.
+     */
     private suspend fun drainOwned(): Boolean {
-        freezer.freezeAll()
+        repeat(MAX_ROUNDS) {
+            val made = freezer.freezeAll() + palletEvents.freeze()
+            if (!drainTarget(TARGET) { api().postFacts(it) }) return false
+            if (!drainTarget(EVENTS) { api().postPalletEvents(it) }) return false
+            if (made == 0) return true
+        }
+        return true
+    }
+
+    private suspend fun drainTarget(target: String, post: suspend (String) -> Result<List<FactReceiptDto>>): Boolean {
         val dao = db.hostOutboxDao()
         var previous: List<String>? = null
         while (true) {
-            val batch = dao.queuedFor(TARGET, MAX_BATCH)
+            val batch = dao.queuedFor(target, MAX_BATCH)
             if (batch.isEmpty()) return true
             // The same head again means the answer settled nothing that left the queue: end the pass, never ask in a circle.
             val heads = batch.map { it.recordId }
@@ -105,7 +120,7 @@ class HostSyncEngine(
             // The stored bodies are joined, never parsed and written again: a record goes out in the bytes it was frozen in.
             val body = batch.joinToString(separator = ",", prefix = "{\"records\":[", postfix = "]}") { it.body }
             val receipts = try {
-                calls.run { api().postFacts(body) }
+                calls.run { post(body) }
             } catch (_: IOException) {
                 return false
             } catch (_: HttpException) {
@@ -117,6 +132,8 @@ class HostSyncEngine(
 
     companion object {
         const val TARGET = "facts"
+        const val EVENTS = "events"
+        private const val MAX_ROUNDS = 4
 
         /** The host's own limit of `POST /v1/device/facts` (1–100 records). */
         const val MAX_BATCH = 100

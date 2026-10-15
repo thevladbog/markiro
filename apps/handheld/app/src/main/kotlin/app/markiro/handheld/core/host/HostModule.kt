@@ -75,6 +75,14 @@ object HostModule {
 
     @Provides
     @Singleton
+    fun hostOrgPrint(meta: MetaStore, api: HostApi): HostOrgPrint = HostOrgPrint(api, meta)
+
+    @Provides
+    @Singleton
+    fun hostBoxRegistry(db: HandheldDatabase, meta: MetaStore, api: HostApi): HostBoxRegistry = HostBoxRegistry(db, meta, api)
+
+    @Provides
+    @Singleton
     fun hostLinkMonitor(): HostLinkMonitor = HostLinkMonitor(now = System::currentTimeMillis, onRestore = {})
 
     @Provides
@@ -91,7 +99,9 @@ object HostModule {
         revocation: HostRevocation,
         reference: HostReferenceSync,
         operators: OperatorDao,
-    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls { revocation.reject() }, reference, operators)
+        orgPrint: HostOrgPrint,
+        registry: HostBoxRegistry,
+    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls { revocation.reject() }, reference, operators, orgPrint, registry)
 
     @Provides
     @Singleton
