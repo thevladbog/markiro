@@ -15,3 +15,24 @@ pub use store::{
     check_manifest, CheckedManifest, FileStamp, ManifestRefusal, Package, Promotion, Serve,
     StartReport, UpdateStore, Upload, UploadError, CURRENT, MANIFEST_FILE, PREVIOUS, STAGED,
 };
+
+use std::sync::Arc;
+
+use markiro_proto::update::distribution::PackageState;
+
+/// [`UpdateStore::serve_blocking`] for an async handler: a package whose
+/// files changed is checked again in the background, and this answer is
+/// `verifying` (spec §10.11.2).
+pub async fn serve(store: &Arc<UpdateStore>) -> Result<Package, PackageState> {
+    let checking = store.clone();
+    match tokio::task::spawn_blocking(move || checking.serve_blocking()).await {
+        Ok(Serve::Ready(package)) => Ok(package),
+        Ok(Serve::Changed) => {
+            let verifying = store.clone();
+            tokio::task::spawn_blocking(move || verifying.reverify_blocking());
+            Err(PackageState::Verifying)
+        }
+        Ok(Serve::Unavailable(state)) => Err(state),
+        Err(_) => Err(PackageState::Invalid),
+    }
+}

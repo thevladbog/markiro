@@ -164,6 +164,15 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
+        // Outside the protocol guard like `hello` (plan ОБН-3, spec §10.11.3):
+        // a device the host refuses as `app_too_old` can still learn of its
+        // update, yet the handler takes `AuthDevice`: no key, no answer. Its
+        // shape is frozen like `hello`'s. Inline, not a router of its own:
+        // `tests/license_routes.rs` allows one merge and two routers.
+        .route(
+            "/v1/device/update",
+            get(crate::routes::device_update::offer),
+        )
         .merge(protected_routes().route_layer(middleware::from_fn(protocol_guard)))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
@@ -603,6 +612,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/update-package/{upload_id}/installer",
             put(crate::routes::update_package::put_installer),
+        )
+        .route(
+            "/v1/office/update-status",
+            get(crate::routes::update_status::update_status),
         )
         .route(
             "/v1/office/users",
