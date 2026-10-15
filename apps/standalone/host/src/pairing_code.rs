@@ -93,4 +93,37 @@ mod tests {
             format!("markiro-host:1?h=&p=45710&f={fingerprint}&c=7K3MQ9XV2D")
         );
     }
+
+    /// The payloads of `pairing-payloads.json` that are the host's own spelling: what the host builds
+    /// from the parsed parts is the text (the TypeScript and Kotlin readers parse the same texts).
+    #[test]
+    fn the_host_builds_the_canonical_payloads_of_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/pairing-payloads.json"))
+                .unwrap();
+        let mut canonical = 0;
+        for case in fixture["valid"].as_array().unwrap() {
+            if case["canonical"] != true {
+                continue;
+            }
+            canonical += 1;
+            let parsed = &case["parsed"];
+            let addresses: Vec<Ipv4Addr> = parsed["addresses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|address| address.as_str().unwrap().parse().unwrap())
+                .collect();
+            assert_eq!(
+                payload(
+                    &addresses,
+                    parsed["port"].as_u64().unwrap() as u16,
+                    parsed["fingerprint"].as_str().unwrap(),
+                    parsed["code"].as_str().unwrap(),
+                ),
+                case["text"].as_str().unwrap()
+            );
+        }
+        assert_eq!(canonical, 2);
+    }
 }

@@ -112,7 +112,6 @@ test("Standalone native and web changes select their jobs; its Vitest suite has 
   }
   for (const path of [
     "apps/standalone/src/app/App.tsx",
-    "apps/standalone/proto/fixtures/hello.json",
     "apps/standalone/src-tauri/migrations/0001_reference_data.sql",
     "apps/standalone/src-tauri/tests/fixtures/local-sql.json",
   ]) {
@@ -122,6 +121,34 @@ test("Standalone native and web changes select their jobs; its Vitest suite has 
       path,
     );
   }
+});
+
+test("a changed wire fixture of the standalone protocol also runs the Android job that reads it", () => {
+  for (const path of [
+    "apps/standalone/proto/fixtures/hello.json",
+    "apps/standalone/proto/fixtures/pallet-events-request.json",
+  ]) {
+    const result = classifyChangedFiles([path]);
+    assert.equal(result.full, false, path);
+    assert.deepEqual(
+      enabledJobs(result),
+      [
+        "verify_static",
+        "handheld_android",
+        "standalone_rust",
+        "standalone_windows_build",
+        "standalone_app_tests",
+      ],
+      path,
+    );
+  }
+  // The host's and the shell's own sources still do not run it.
+  assert.deepEqual(enabledJobs(classifyChangedFiles(["apps/standalone/proto/src/lib.rs"])), [
+    "verify_static",
+    "standalone_rust",
+    "standalone_windows_build",
+    "standalone_app_tests",
+  ]);
 });
 
 test("application changes select their documented jobs", () => {

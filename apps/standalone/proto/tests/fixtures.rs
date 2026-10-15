@@ -2120,3 +2120,45 @@ fn the_receipt_codes_of_the_fixture_are_the_codes_of_the_crate() {
         assert!(receipt_codes::ALL.contains(&new), "{new}");
     }
 }
+
+fn bytes_of(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+#[test]
+fn the_fingerprint_cases_are_the_sha256_of_the_der_and_their_display_form() {
+    let cases = fixture("fingerprint.json");
+    let cases = cases["cases"].as_array().unwrap();
+    assert!(cases.len() >= 4);
+    for case in cases {
+        let fingerprint = certificate_fingerprint(&bytes_of(case["derHex"].as_str().unwrap()));
+        assert_eq!(fingerprint, case["fingerprint"].as_str().unwrap());
+        assert_eq!(
+            display_fingerprint(&fingerprint),
+            case["display"].as_str().unwrap()
+        );
+    }
+}
+
+#[test]
+fn the_compatibility_cases_say_who_must_update() {
+    let cases = fixture("compatibility.json");
+    for case in cases["cases"].as_array().unwrap() {
+        let host = HelloEnvelope {
+            product: "markiro-host".into(),
+            protocol: case["host"]["protocol"].as_u64().unwrap() as u32,
+            min_protocol: case["host"]["minProtocol"].as_u64().unwrap() as u32,
+        };
+        let client = case["client"].as_u64().unwrap() as u32;
+        let expected = match case["expected"].as_str().unwrap() {
+            "compatible" => Compatibility::Compatible,
+            "host_too_old" => Compatibility::HostTooOld,
+            "app_too_old" => Compatibility::AppTooOld,
+            other => panic!("unknown expectation {other}"),
+        };
+        assert_eq!(compatibility_for(client, &host), expected, "{case}");
+    }
+}
