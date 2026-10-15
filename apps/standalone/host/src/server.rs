@@ -62,6 +62,10 @@ pub struct AppState {
     /// The copies of the database (plan РК); `None` answers the office's
     /// backup routes `not_found`. `crate::start` always sets it.
     pub backups: Option<Arc<crate::backup::Backups>>,
+    /// The update packages (plan ОБН-3); `None` answers the office's upload
+    /// routes `not_found` and a device's offer `missing`. `crate::start`
+    /// always sets it.
+    pub updates: Option<Arc<crate::updates::UpdateStore>>,
     /// The site's license (plan ЛЦ-2): its files, its state, the time it
     /// trusts and its gates.
     pub license: Arc<crate::license::LicenseService>,
@@ -97,6 +101,7 @@ impl AppState {
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
+            updates: None,
             license: Arc::new(crate::license::LicenseService::new(
                 markiro_proto::trust::license_keyset(),
                 Arc::new(crate::license::trial_mark::NoMark),
@@ -139,6 +144,12 @@ impl AppState {
     /// The copies of the database the office's backup routes read.
     pub fn with_backups(mut self, backups: Arc<crate::backup::Backups>) -> Self {
         self.backups = Some(backups);
+        self
+    }
+
+    /// The update packages the distribution routes serve (plan ОБН-3).
+    pub fn with_updates(mut self, updates: Arc<crate::updates::UpdateStore>) -> Self {
+        self.updates = Some(updates);
         self
     }
 
@@ -578,6 +589,20 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::cloud_import::import).layer(axum::extract::DefaultBodyLimit::max(
                 crate::routes::cloud_import::MAX_BODY_BYTES,
             )),
+        )
+        .route(
+            "/v1/office/update-package/manifest",
+            post(crate::routes::update_package::post_manifest).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::routes::update_package::MANIFEST_BODY_LIMIT,
+                ),
+            ),
+        )
+        // The installer is read as a `Body`, which no `DefaultBodyLimit`
+        // limits: the handler holds the manifest's size itself (plan ОБН-3).
+        .route(
+            "/v1/office/update-package/{upload_id}/installer",
+            put(crate::routes::update_package::put_installer),
         )
         .route(
             "/v1/office/users",

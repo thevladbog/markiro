@@ -21,6 +21,16 @@ pub mod actions {
     /// device is the target, and the row records what the office reported,
     /// as `shift.export` does.
     pub const APP_UPDATE_START: &str = "app.update.start";
+    /// An administrator uploaded an update package; the host keeps it as
+    /// `staged\` until it runs that version (plan ОБН-3).
+    pub const UPDATE_PACKAGE_STAGE: &str = "update.package.stage";
+    /// The host made the staged package current at its start or hourly; at
+    /// its start also `failed` for a current package that is not of its
+    /// version or does not check out (plan ОБН-3). The host is the actor.
+    pub const UPDATE_PACKAGE_PROMOTE: &str = "update.package.promote";
+    /// A device began downloading the installer from byte 0; a resumed
+    /// download writes none (plan ОБН-3).
+    pub const UPDATE_DOWNLOAD: &str = "update.download";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";

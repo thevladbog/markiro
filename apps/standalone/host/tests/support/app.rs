@@ -90,6 +90,29 @@ impl TestApp {
     pub fn dir(&self) -> &std::path::Path {
         self._dir.path()
     }
+
+    /// Keep update packages in `<dir>/updates` for a host of `version` (plan
+    /// ОБН-3), the test release key trusted, the store started as the
+    /// service starts it.
+    pub fn keep_updates(&mut self, version: &str) -> Arc<markiro_host::updates::UpdateStore> {
+        let store = markiro_host::updates::UpdateStore::new(
+            self.dir().join("updates"),
+            markiro_proto::trust::update_keyset(),
+            version,
+        );
+        self.keep_updates_with(store)
+    }
+
+    /// [`Self::keep_updates`] with a store a test built (a small limit).
+    pub fn keep_updates_with(
+        &mut self,
+        store: markiro_host::updates::UpdateStore,
+    ) -> Arc<markiro_host::updates::UpdateStore> {
+        store.open_blocking().unwrap();
+        let store = Arc::new(store);
+        self.state = self.state.clone().with_updates(store.clone());
+        store
+    }
 }
 
 /// A request builder with the protocol header already set.

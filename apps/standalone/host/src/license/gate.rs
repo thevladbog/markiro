@@ -202,6 +202,8 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/office/backups/resume"),
     ("POST", "/v1/office/updates/started"),
     ("POST", "/v1/office/import"),
+    ("POST", "/v1/office/update-package/manifest"),
+    ("PUT", "/v1/office/update-package/{upload_id}/installer"),
     ("GET", "/v1/office/users"),
     ("POST", "/v1/office/users"),
     ("PUT", "/v1/office/users/{id}"),
