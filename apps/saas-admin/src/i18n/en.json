@@ -2191,7 +2191,16 @@
           "standalone_diagnostics_host_unbound": "The site was not found among the customer's sites.",
           "standalone_diagnostics_token_conflict": "This token was already uploaded to another customer's card.",
           "standalone_diagnostics_cursor_invalid": "Could not open the next page of the history. Refresh the page."
-        }
+        },
+        "licenseState": {
+          "active": "Active",
+          "grace": "Grace period",
+          "expired": "Expired",
+          "missing": "Missing",
+          "invalid": "Invalid",
+          "unknown": "Unknown state"
+        },
+        "unknownLicensePlan": "Unknown type"
       },
       "slug": "Slug",
       "createdAt": "Created",
@@ -2227,7 +2236,7 @@
       },
       "usageTitle": "Usage and limits",
       "deviceLicensing": {
-        "title": "Working devices: Station and handheld",
+        "title": "Stations and handheld devices",
         "summaryLabel": "Working-device status",
         "count": "{{usage}} of {{limit}}",
         "unlimited": "{{usage}} · unlimited",

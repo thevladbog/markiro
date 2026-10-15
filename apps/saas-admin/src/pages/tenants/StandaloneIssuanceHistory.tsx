@@ -87,6 +87,8 @@ export function StandaloneIssuanceHistory({
   return (
     <Modal
       open
+      className="standalone-license-dialog"
+      width={1120}
       title={t("tenants.detail.standalone.history.title", { name: site.name })}
       onClose={onClose}
       closeLabel={t("tenants.detail.standalone.history.close")}

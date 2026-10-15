@@ -2191,7 +2191,16 @@
           "standalone_diagnostics_host_unbound": "Площадка не найдена среди площадок клиента.",
           "standalone_diagnostics_token_conflict": "Этот токен уже загружен в другую карточку клиента.",
           "standalone_diagnostics_cursor_invalid": "Не удалось открыть следующую страницу истории. Обновите страницу."
-        }
+        },
+        "licenseState": {
+          "active": "Действует",
+          "grace": "Льготный период",
+          "expired": "Истекла",
+          "missing": "Отсутствует",
+          "invalid": "Недействительна",
+          "unknown": "Неизвестное состояние"
+        },
+        "unknownLicensePlan": "Неизвестный вид"
       },
       "slug": "Slug",
       "createdAt": "Создан",
@@ -2227,7 +2236,7 @@
       },
       "usageTitle": "Использование и лимиты",
       "deviceLicensing": {
-        "title": "Рабочие устройства: Station и ТСД",
+        "title": "Станции и ТСД",
         "summaryLabel": "Состояние рабочих устройств",
         "count": "{{usage}} из {{limit}}",
         "unlimited": "{{usage}} · без лимита",

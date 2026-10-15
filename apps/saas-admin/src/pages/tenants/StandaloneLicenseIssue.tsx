@@ -105,11 +105,13 @@ export function StandaloneLicenseIssue({
   return (
     <Modal
       open
+      className="standalone-license-dialog"
+      width={720}
       title={t("tenants.detail.standalone.issue.title", { name: site.name })}
       onClose={onClose}
       closeLabel={t("tenants.detail.standalone.issue.cancel")}
       footer={
-        <>
+        <div className="standalone-license-dialog__actions">
           <Button variant="secondary" onClick={onClose}>
             {t("tenants.detail.standalone.issue.cancel")}
           </Button>
@@ -126,7 +128,7 @@ export function StandaloneLicenseIssue({
           <Button disabled={!preview.data || confirm.isPending} onClick={() => confirm.mutate()}>
             {t("tenants.detail.standalone.issue.confirm")}
           </Button>
-        </>
+        </div>
       }
     >
       {offlinePath ? (

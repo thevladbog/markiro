@@ -48,7 +48,7 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
         const phase = licensePhase(site, now);
         return (
           <span className="standalone-license-cell">
-            <StatusChip phase={phase} label={t(`tenants.detail.standalone.phase.${phase}`)} />{" "}
+            <StatusChip phase={phase} label={t(`tenants.detail.standalone.phase.${phase}`)} wrap />{" "}
             {site.latestIssuance ? (
               <span>
                 {t("tenants.detail.standalone.licenseLine", {

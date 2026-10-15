@@ -1649,6 +1649,7 @@ textarea {
 .version-panel__header {
   min-height: 72px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1666,6 +1667,16 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.version-panel__header-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.version-panel__header-actions > * {
+  flex-shrink: 0;
 }
 
 .version-panel__grid {
@@ -2489,6 +2500,86 @@ textarea {
    min-width 0 its table's min-content width widens the whole tab on a phone. */
 .standalone-sites-panel {
   min-width: 0;
+}
+
+.standalone-sites-panel > .mk-card__body,
+.standalone-license-dialog > div,
+.standalone-license-dialog .mk-table {
+  min-width: 0;
+}
+
+.standalone-sites-panel .mk-table__scroll:focus-visible,
+.standalone-license-dialog .mk-table__scroll:focus-visible,
+.tenant-diagnostics .mk-table__scroll:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-w));
+}
+
+.standalone-site-actions,
+.standalone-license-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-cell {
+  min-width: 180px;
+}
+
+.standalone-site-actions {
+  min-width: 230px;
+}
+
+.standalone-license-dialog__actions {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.standalone-license-dialog__actions .mk-btn,
+.standalone-site-actions .mk-btn {
+  min-height: 44px;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+.standalone-license-dialog > div:first-child > button {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.standalone-license-dialog .mk-badge {
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  line-height: 1.35;
+  overflow-wrap: normal;
+}
+
+@media (max-width: 680px) {
+  .standalone-sites-panel > .mk-card__header {
+    flex-wrap: wrap;
+  }
+
+  .standalone-site-actions {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 230px;
+  }
+
+  .standalone-license-cell {
+    max-width: 220px;
+  }
+
+  .standalone-license-dialog__actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .equipment-registry {
@@ -3500,11 +3591,13 @@ textarea {
 
 .tenant-detail-tabs {
   display: flex;
+  flex-wrap: wrap;
   border: 1px solid var(--line);
   background: var(--surface-card);
 }
 
 .tenant-detail-tabs button {
+  flex-shrink: 0;
   min-height: 52px;
   display: inline-flex;
   align-items: center;
@@ -4313,7 +4406,15 @@ textarea {
 .tenant-diagnostics {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+}
+
+.tenant-diagnostics > *,
+.diagnostics-host,
+.tenant-diagnostics .mk-card__body,
+.tenant-diagnostics .mk-table {
+  min-width: 0;
 }
 
 .tenant-diagnostics__header {
@@ -4344,6 +4445,7 @@ textarea {
 .diagnostics-hosts {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -4354,7 +4456,7 @@ textarea {
 }
 
 .diagnostics-facts {
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
 }
 
 .diagnostics-features {
@@ -4381,9 +4483,15 @@ textarea {
   justify-items: start;
 }
 
-.diagnostics-ingest__text {
-  font-family: var(--font-mono);
-  min-height: 140px;
+.diagnostics-ingest .mk-field {
+  min-width: 0;
+  width: 100%;
+}
+
+.saas-admin .diagnostics-ingest__text {
+  /* Override the app-wide 44px control minimum. */
+  min-height: 160px !important;
+  resize: vertical;
 }
 
 .diagnostics-ingest__counter,
@@ -4401,7 +4509,7 @@ textarea {
 
 .diagnostics-bars {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 16px;
   margin-top: 16px;
   overflow-x: auto;

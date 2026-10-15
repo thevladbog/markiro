@@ -76,7 +76,9 @@ export function StandaloneLicenseComparison({ preview }: { preview: StandaloneIs
               {belowUsage.has(key) ? (
                 <>
                   {" "}
-                  <Badge tone="warn">{t(`${prefix}.issue.belowUsage`)}</Badge>
+                  <Badge tone="warn" wrap>
+                    {t(`${prefix}.issue.belowUsage`)}
+                  </Badge>
                 </>
               ) : null}
             </td>
@@ -91,7 +93,9 @@ export function StandaloneLicenseComparison({ preview }: { preview: StandaloneIs
               {unmapped.has(key) ? (
                 <>
                   {" "}
-                  <Badge tone="warn">{t(`${prefix}.issue.unmapped`)}</Badge>
+                  <Badge tone="warn" wrap>
+                    {t(`${prefix}.issue.unmapped`)}
+                  </Badge>
                 </>
               ) : null}
             </td>

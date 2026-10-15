@@ -70,12 +70,40 @@ function renderPanel(canWrite: boolean) {
     </I18nextProvider>,
   );
 }
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
 });
 
 describe("tenant diagnostics tab (plan ДИАГ У1)", () => {
+  it.each([
+    ["ru", "Действует", "Подписка", "История отчётов", /Открыть отчёт/u],
+    ["en", "Active", "Subscription", "Report history", /Open the report/u],
+  ])(
+    "translates license facts in the %s overview, history and report",
+    async (language, state, plan, history, open) => {
+      await i18n.changeLanguage(language);
+      stubApi(standard());
+      renderPanel(false);
+      expect(
+        (
+          await screen.findByText(
+            (_, element) =>
+              element?.tagName === "DD" &&
+              element.textContent?.startsWith(`${state}, ${plan}`) === true,
+          )
+        ).textContent,
+      ).toContain(`${state}, ${plan}`);
+      const table = await screen.findByRole("table", { name: history });
+      expect(within(table).getByText(state)).toBeDefined();
+      expect(within(table).queryByText("active")).toBeNull();
+      await userEvent.click(within(table).getByRole("button", { name: open }));
+      const dialog = await screen.findByRole("dialog");
+      expect(await within(dialog).findByText(state)).toBeDefined();
+    },
+  );
+
   it("shows quotas as used of available, an over-limit badge with text, the cloud file comparison and no 'outdated' without a source", async () => {
     stubApi(standard());
     renderPanel(true);

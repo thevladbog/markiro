@@ -13,6 +13,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const KNOWN_ERRORS = new Set<string>(STANDALONE_DIAGNOSTICS_ERROR_CODES);
 
+/** Reports can carry newer client codes; never expose an untranslated code as a label. */
+export function diagnosticLicenseState(t: TFunction, state: string | null): string {
+  if (state === null) return t("tenants.detail.diagnostics.noValue");
+  const key = ["active", "grace", "expired", "missing", "invalid"].includes(state)
+    ? state
+    : "unknown";
+  return t(`tenants.detail.diagnostics.licenseState.${key}`);
+}
+
+export function diagnosticLicensePlan(t: TFunction, plan: string | null): string {
+  if (plan === null) return t("tenants.detail.diagnostics.noValue");
+  return plan === "demo" || plan === "subscription"
+    ? t(`tenants.detail.standalone.plan.${plan}`)
+    : t("tenants.detail.diagnostics.unknownLicensePlan");
+}
+
 export function diagnosticsErrorCode(error: unknown): string | null {
   return error instanceof ApiRequestError ? error.code : null;
 }

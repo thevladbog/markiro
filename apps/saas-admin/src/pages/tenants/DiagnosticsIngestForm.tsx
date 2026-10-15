@@ -52,6 +52,7 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
           id={fieldId}
           label={t(`${prefix}.label`)}
           className="diagnostics-ingest__text mono"
+          style={{ fontFamily: "var(--font-mono)" }}
           rows={6}
           value={text}
           readOnly={ingest.isPending}
