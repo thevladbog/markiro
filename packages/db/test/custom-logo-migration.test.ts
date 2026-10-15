@@ -13,7 +13,7 @@ import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
-// Migration 0187: the custom-branding feature (`customLogo`) of «Markiro Автоном».
+// Migration 0193: the custom-branding feature (`customLogo`) of «Markiro Автоном».
 describe.skipIf(!databaseUrl)("custom logo entitlement migration", () => {
   const databaseName = `markiro_custom_logo_${randomUUID().replaceAll("-", "_")}`;
   const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
@@ -59,7 +59,7 @@ describe.skipIf(!databaseUrl)("custom logo entitlement migration", () => {
       migrationsFolder,
       log: () => undefined,
     });
-    expect(applied.packaged).toContain("0187_custom_logo_entitlement");
+    expect(applied.packaged).toContain("0193_custom_logo_entitlement");
   }, 120_000);
 
   afterAll(async () => {
