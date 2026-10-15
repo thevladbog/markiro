@@ -100,7 +100,10 @@ Backups (plan РК) write `backup.create` (the host or the office user who asked
 `host.restore` (the host), `host.restore.resume` and `sscc.block.register`
 (the station). The copy before an upgrade (plan ОБН-1) writes `host.upgrade`
 (the host; see «Backups and restore»). The office's start of an update
-(plan ОБН-2) writes `app.update.start` (see «Updates from a file»). The
+(plan ОБН-2) writes `app.update.start` (see «Updates from a file»).
+Update distribution (plan ОБН-3) writes `update.package.stage` (the
+administrator), `update.package.promote` (the host; `failed` with `reason`)
+and `update.download` (the device, from byte 0 only). The
 license (plan ЛЦ-2) writes `license.load` (the administrator; `denied` for a
 refused file with its reason — a foreign or forged file is an event, unlike
 other refused office writes; the file itself never enters `details`),
@@ -1761,8 +1764,10 @@ it), and «Устройства» shows «0.3.0, протокол 3» or «0.1.0
 
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
 `POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//` or
-a `.` segment, and only the routes `/v1/device[/…]` except `/v1/device/line`,
-`/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`) and `/v1/office/…`.
+a `.` segment, and only the routes `/v1/device[/…]` except `/v1/device/line` and
+`/v1/device/update/installer` (plan ОБН-3), `/v1/bootstrap`, `/v1/changes` (not
+`/v1/changes/stream`) and `/v1/office/…` except `/v1/office/update-package/…`
+(plan ОБН-3).
 The line goes through `device_select_line`, which also keeps the host's answer
 in `device.json`, so the station opens on its line with the host away;
 `device_refresh` reads `GET /v1/device` again and keeps a line the office
@@ -2622,6 +2627,55 @@ sharing on NTFS, a process started from a held file and the final path
 (Windows-only unit tests in `update/package.rs`), removable drives and the
 passive update with the hooks (`smoke.ps1` runs `/P /UPDATE` without `/R`)
 are checked by the Windows job and by hand.
+
+## Update distribution
+
+Plan ОБН-3 (spec `2026-10-13-standalone-license-and-updates-design.md`,
+§10.11, §23) lets every paired PC take the update from the host. An
+administrator uploads a package in the office (`update_stage`: the shell
+sends the manifest, `POST /v1/office/update-package/manifest`, and streams
+the installer from the disk, `PUT /v1/office/update-package/{uploadId}/installer`,
+`Content-Length` equal to the manifest's `sizeBytes`, hashed on the fly; the
+route reads a `Body`, which no `DefaultBodyLimit` limits, and holds the size
+itself). The host keeps at most `updates\staged` (newer than it runs),
+`updates\current` (its own version: the only one served) and
+`updates\previous`, plus one `incoming-<id>.partial`; the start and an hourly
+pass promote `staged` of the running version, the start verifies `current`
+whole (`mismatch`, `invalid`, `missing` are not served) and removes
+everything else, and a file whose size, change or creation time (inode off
+Windows) changed is verified again before it is served (`503
+package_verifying`). The packages are no data of the site: no copy holds
+them and `markiro-host restore` leaves `updates\` alone.
+
+`GET /v1/device/update` and `GET /v1/device/update/installer` are outside
+`protocol_guard` (`server::update_routes`), so a device the host refuses as
+`app_too_old` still gets its update, yet both take `AuthDevice`; their
+shapes are frozen like `hello`'s. The installer is served whole or as one
+`bytes=N-`/`bytes=N-M` range, `If-Range` with another ETag (the SHA-256)
+gives the whole file, anything else is `416`; one download per device, three
+on the host (`503 update_busy`), 30 update requests a minute per device;
+60 s without the client taking a piece cuts it. `update.download` is written
+for a download from byte 0 only; `update.package.stage` and
+`update.package.promote` (the host) complete the audit. `host_request`
+refuses `/v1/device/update/installer` and `/v1/office/update-package/…`:
+only `update_fetch` and `update_stage` reach them.
+
+On the device `update_fetch` downloads into `<local data>\updates\<version>\`
+over the pinned connection with resume, never past `sizeBytes`, checks the
+whole file with `hash_exact`, and the package goes through plan ОБН-2's
+`update_verify`/`update_install`, which take that folder's manifest too and
+refuse it (`host_differs`) unless the host's `hello` names the package's
+very version. The link reports the host's version, protocol and minimum
+from every `hello` and `app_too_old`/`host_too_old` instead of
+`stream_refused`; the webview offers the update only when the host is newer,
+gives a package of its version, this PC is not below `minUpgradeFrom` and
+the manifest's signature checked out (`update_check_manifest`). An office
+PC paired with a host in the network sees «Версии не совпадают»; a station
+keeps working offline, its line says so off a shift's work, and the sign-in
+screen offers «Обновить с хоста» (ЛО16). Releases keep the window of one
+release back: `tools/standalone-release/releases.json` and its contract
+(`releases.mjs`; `prepare.mjs` refuses a release outside the window before it
+writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
 
 ## Office pages
 
@@ -6105,7 +6159,7 @@ Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
 pilot spec's §11 and §22; the procedure is
 `docs/runbooks/standalone-backup-restore.md`). One worker task
 (`backup/worker.rs`, started by `crate::start`) makes every copy of the
-master database, one at a time, on a connection of its own:
+master database, one at a time, on a connection of its own: The update packages in `updates\` (plan ОБН-3) are in no copy and a restore never touches them.
 
 - a copy is `VACUUM INTO <name>.db.partial` while the host runs (a reader:
   it waits for no writer and holds no uncommitted change), then

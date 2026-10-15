@@ -18,6 +18,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
+import { checkCompatibilityWindow, readReleases } from "./releases.mjs";
+
 export const STANDALONE_TAURI_CONFIG = "apps/standalone/src-tauri/tauri.conf.json";
 /** The wire crate the host and the app share: its protocol range goes into the draft. */
 export const STANDALONE_PROTO_LIB = "apps/standalone/proto/src/lib.rs";
@@ -265,14 +267,18 @@ async function main() {
     },
     strict: true,
   });
+  const version = await readStandaloneVersion();
+  const range = await readProtocolRange();
+  // Plan ОБН-3: a release outside the window of one release back never gets a draft.
+  checkCompatibilityWindow({ version, ...range }, await readReleases());
   const prepared = await prepareStandaloneRelease({
-    version: await readStandaloneVersion(),
+    version,
     sourceRepository: values["source-repository"],
     sourceSha: values["source-sha"],
     bundleDir: values["bundle-dir"],
     outputDir: values["output-dir"],
     authenticode: values.authenticode,
-    ...(await readProtocolRange()),
+    ...range,
   });
   process.stdout.write(
     `${prepared.name} ${prepared.evidence.assets[prepared.name].sha256} (${prepared.evidence.authenticode})\n`,
