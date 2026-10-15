@@ -4693,7 +4693,7 @@ printer is A4 is rendered by `shiftLabelRender` →
 when the shift froze none) the SHIFT FROZE, the SSCC and counts of the pallet's label fields, the
 shift's production date (never the pallet's close day; the expiry is the domain's, the production
 day being day one) — to `mono-raster-v1` bytes, whose required area the shell checks against the
-printer's printable area before it sends (`geometry_mismatch`, a refusal before the spooler). The
+printer's printable area before it sends: a sheet that does not lie inside it is MOVED the few millimetres it takes (an inkjet's bottom edge is often 12.7 mm), or drawn uniformly smaller (to 90 % at the least, `BLACKONWHITE`), and the answer says which (`adjusted`); only a printable area that would take it below that, a paper that is neither A4 (±1.5 mm) nor Letter, or a resolution that is no multiple of 300 dpi is refused (`geometry_mismatch`, a refusal before the spooler) with the measured numbers in `diagnostic`, which the setup's test sheet shows with «Копия диагностики» (beta 3.2). The
 job is the ordinary one: `template_id`/`template_rev` are the snapshot's THERMAL pallet template,
 `fields` the label's, `bytes_base64` the page, `printer` the profile with its paper, the same
 states, check by scan of the pallet SSCC, one job per pallet close (the sheet replaces the

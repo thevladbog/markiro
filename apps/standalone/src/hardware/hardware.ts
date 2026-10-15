@@ -41,8 +41,19 @@ export type PrintFailureCode = (typeof PRINT_FAILURE_CODES)[number];
  * label may come out (the receipt, when known, names the spooler job).
  */
 export type PrintResult =
-  | { sent: true; receipt?: WindowsPrintReceipt }
-  | { sent: false; code: PrintResultCode; receipt?: WindowsPrintReceipt };
+  | { sent: true; receipt?: WindowsPrintReceipt; adjusted?: SheetAdjusted }
+  | { sent: false; code: PrintResultCode; receipt?: WindowsPrintReceipt; diagnostic?: string };
+
+/**
+ * A sheet the driver path moved or drew smaller to fit the printer's printable area
+ * (beta 3.2): the part of its own size it was drawn at, and how far it moved, millimetres
+ * right and down.
+ */
+export interface SheetAdjusted {
+  percent: number;
+  shiftXMm: number;
+  shiftYMm: number;
+}
 
 export const scannerConfigSchema = z
   .object({ port: z.string().min(1), baud: z.number().int().positive() })
@@ -250,12 +261,28 @@ const windowsFailureSchema = z
     code: z.enum(WINDOWS_DRIVER_CODES),
     phase: z.enum(["before_start", "delivery_unknown"]),
     receipt: windowsPrintReceiptSchema.optional(),
+    /** What the driver reported against what the print needed: numbers only (beta 3.2). */
+    diagnostic: z.string().max(2000).optional(),
+  })
+  .strict();
+
+const sheetAdjustedSchema = z
+  .object({
+    percent: z.number().int().min(1).max(100),
+    shiftXMm: z.number(),
+    shiftYMm: z.number(),
   })
   .strict();
 
 /** `print_windows_raster`'s answer (`Outcome`); pinned by `tests/fixtures/hardware-shapes.json`. */
 export const windowsPrintOutcomeSchema = z.union([
-  z.object({ ok: z.literal(true), receipt: windowsPrintReceiptSchema }).strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      receipt: windowsPrintReceiptSchema,
+      adjusted: sheetAdjustedSchema.optional(),
+    })
+    .strict(),
   z.object({ ok: z.literal(false), error: windowsFailureSchema }).strict(),
 ]);
 
@@ -321,7 +348,11 @@ export function windowsPrintResult(raw: unknown, queue: string, documentName: st
   const outcome = parsed.data;
   if (outcome.ok) {
     return sameJob(outcome.receipt, queue, documentName)
-      ? { sent: true, receipt: outcome.receipt }
+      ? {
+          sent: true,
+          receipt: outcome.receipt,
+          ...(outcome.adjusted === undefined ? {} : { adjusted: outcome.adjusted }),
+        }
       : { sent: false, code: "driver_unknown" };
   }
   const { error } = outcome;
@@ -338,7 +369,11 @@ export function windowsPrintResult(raw: unknown, queue: string, documentName: st
     case "queue_unavailable":
       return { sent: false, code: "queue_unavailable" };
     case "geometry_mismatch":
-      return { sent: false, code: "geometry_mismatch" };
+      return {
+        sent: false,
+        code: "geometry_mismatch",
+        ...(error.diagnostic === undefined ? {} : { diagnostic: error.diagnostic }),
+      };
     case "driver_failure":
       return { sent: false, code: "driver_not_started" };
     default: {

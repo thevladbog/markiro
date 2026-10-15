@@ -15,6 +15,15 @@
       "documentName": "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f"
     }
   },
+  "windowsPrintSentAdjusted": {
+    "ok": true,
+    "receipt": {
+      "queue": "Godex G500",
+      "jobId": 42,
+      "documentName": "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f"
+    },
+    "adjusted": { "percent": 100, "shiftXMm": 0.0, "shiftYMm": -3.2 }
+  },
   "windowsPrintUnknown": {
     "ok": false,
     "error": {
@@ -30,6 +39,14 @@
   "windowsPrintRefused": {
     "ok": false,
     "error": { "code": "geometry_mismatch", "phase": "before_start" }
+  },
+  "windowsPrintRefusedDiagnostic": {
+    "ok": false,
+    "error": {
+      "code": "geometry_mismatch",
+      "phase": "before_start",
+      "diagnostic": "reason=printable_too_small dpi=600x600 page_mm=210x297 printable_mm=159.2x246.2 needs_mm=190x277"
+    }
   },
   "windowsJobPresent": { "state": "present", "statusFlags": 8 },
   "windowsJobAbsent": { "state": "absent" },
