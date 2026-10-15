@@ -14,6 +14,8 @@ use axum::body::{Body, Bytes};
 pub const CHUNK: usize = 64 * 1024;
 /// How long the client may take nothing before the download is cut.
 pub const STALL_LIMIT: Duration = Duration::from_secs(60);
+/// How long an upload may take nothing from the client before it is dropped.
+pub const UPLOAD_IDLE_LIMIT: Duration = Duration::from_secs(60);
 
 /// `len` bytes of `file` from where it stands, in pieces of [`CHUNK`].
 /// `guard` lives as long as the reader (a download's slot).

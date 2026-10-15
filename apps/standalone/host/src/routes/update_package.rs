@@ -12,6 +12,7 @@
 
 use std::io::Write;
 use std::sync::Arc;
+use std::time::Duration;
 
 use aws_lc_rs::digest::{Context, SHA256};
 use axum::body::{Body, Bytes};
@@ -89,14 +90,27 @@ fn upload_refused(error: UploadError, host_version: &str) -> ApiError {
         UploadError::Unknown => {
             ApiError::conflict(constraints::UPLOAD_UNKNOWN, "no upload of this id waits")
         }
+        UploadError::Receiving => ApiError::conflict(
+            constraints::UPLOAD_UNKNOWN,
+            "another request is sending this upload's installer",
+        ),
         UploadError::Io(error) => io_refused(&error),
     }
 }
 
-async fn abandon(store: &Arc<UpdateStore>, id: &str) {
-    let store = store.clone();
-    let id = id.to_owned();
-    let _ = tokio::task::spawn_blocking(move || store.abandon_upload_blocking(&id)).await;
+/// The PUT that writes an upload's installer: whatever way it ends — a
+/// refusal, an error, the client going away and the handler with it — the
+/// upload's folder goes with it. After the upload became `staged\` it takes
+/// nothing (the id is no upload's any more).
+struct Receiving {
+    store: Arc<UpdateStore>,
+    id: String,
+}
+
+impl Drop for Receiving {
+    fn drop(&mut self) {
+        self.store.abandon_upload_blocking(&self.id);
+    }
 }
 
 pub async fn post_manifest(
@@ -131,26 +145,25 @@ pub async fn put_installer(
 ) -> Result<Json<UpdatePackageStaged>, ApiError> {
     context.require_admin()?;
     let store = store(&state)?.clone();
+    // Before anything else: a refusal below must not abandon the upload
+    // another PUT is writing.
     let upload = store
-        .upload(&upload_id)
-        .ok_or_else(|| upload_refused(UploadError::Unknown, store.host_version()))?;
+        .begin_receive(&upload_id)
+        .map_err(|error| upload_refused(error, store.host_version()))?;
+    let _receiving = Receiving {
+        store: store.clone(),
+        id: upload_id.clone(),
+    };
     let declared = headers
         .get(CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok());
     if declared != Some(upload.manifest.size_bytes) {
-        abandon(&store, &upload_id).await;
         return Err(refused("installer", reasons::SIZE_MISMATCH));
     }
-    if let Err(error) = receive(&upload, body).await {
-        abandon(&store, &upload_id).await;
-        return Err(error);
-    }
+    receive(&upload, body, state.upload_idle).await?;
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    if let Err(error) = context.require_admin_in(&mut tx).await {
-        abandon(&store, &upload_id).await;
-        return Err(error);
-    }
+    context.require_admin_in(&mut tx).await?;
     let version = upload.manifest.version.to_string();
     audit::record(
         &mut tx,
@@ -195,7 +208,7 @@ enum Written {
 /// manifest's size, the manifest's SHA-256. The writing runs on a blocking
 /// thread fed by a small channel, so a slow disk slows the client, not the
 /// host.
-async fn receive(upload: &Upload, body: Body) -> Result<(), ApiError> {
+async fn receive(upload: &Upload, body: Body, idle: Duration) -> Result<(), ApiError> {
     let size = upload.manifest.size_bytes;
     let path = upload.partial();
     let (chunks, mut queue) = tokio::sync::mpsc::channel::<Bytes>(8);
@@ -222,14 +235,16 @@ async fn receive(upload: &Upload, body: Body) -> Result<(), ApiError> {
     });
     let mut stream = body.into_data_stream();
     let mut cut = false;
-    while let Some(frame) = stream.next().await {
-        match frame {
-            Ok(bytes) => {
+    // A client that sends nothing for `idle` is cut like one that went away.
+    loop {
+        match tokio::time::timeout(idle, stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
                 if chunks.send(bytes).await.is_err() {
                     break; // the writer stopped: too long, or the disk
                 }
             }
-            Err(_) => {
+            Ok(None) => break,
+            Ok(Some(Err(_))) | Err(_) => {
                 cut = true;
                 break;
             }

@@ -72,6 +72,9 @@ pub struct AppState {
     /// How long a download waits for the client to take its next piece
     /// (60 s; tests shorten it).
     pub download_stall: Duration,
+    /// How long an upload of an installer may take nothing from the client
+    /// (60 s; tests shorten it).
+    pub upload_idle: Duration,
     /// The site's license (plan ЛЦ-2): its files, its state, the time it
     /// trusts and its gates.
     pub license: Arc<crate::license::LicenseService>,
@@ -110,6 +113,7 @@ impl AppState {
             updates: None,
             update_limits: Arc::new(crate::updates::limits::DownloadLimits::new(clock.clone())),
             download_stall: crate::updates::stream::STALL_LIMIT,
+            upload_idle: crate::updates::stream::UPLOAD_IDLE_LIMIT,
             license: Arc::new(crate::license::LicenseService::new(
                 markiro_proto::trust::license_keyset(),
                 Arc::new(crate::license::trial_mark::NoMark),
@@ -164,6 +168,12 @@ impl AppState {
     /// Another stall limit of a download; tests use a short one.
     pub fn with_download_stall(mut self, stall: Duration) -> Self {
         self.download_stall = stall;
+        self
+    }
+
+    /// Another idle limit of an installer upload; tests use a short one.
+    pub fn with_upload_idle(mut self, idle: Duration) -> Self {
+        self.upload_idle = idle;
         self
     }
 

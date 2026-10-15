@@ -5,8 +5,9 @@
 
 mod support;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::StatusCode;
+use futures_util::StreamExt;
 use markiro_host::updates::{UpdateStore, CURRENT, STAGED};
 use serde_json::{json, Value};
 use support::app::{
@@ -43,6 +44,16 @@ async fn put_installer(
     body: Vec<u8>,
     length: Option<usize>,
 ) -> (StatusCode, Value) {
+    put_body(admin, token, upload_id, Body::from(body), length).await
+}
+
+async fn put_body(
+    admin: &Admin,
+    token: &str,
+    upload_id: &str,
+    body: Body,
+    length: Option<usize>,
+) -> (StatusCode, Value) {
     let mut builder = with_session(
         request(
             "PUT",
@@ -55,10 +66,7 @@ async fn put_installer(
     if let Some(length) = length {
         builder = builder.header("content-length", length.to_string());
     }
-    admin
-        .app
-        .send(builder.body(Body::from(body)).unwrap())
-        .await
+    admin.app.send(builder.body(body).unwrap()).await
 }
 
 fn updates(admin: &Admin) -> std::path::PathBuf {
@@ -325,4 +333,81 @@ async fn a_non_administrator_put_is_refused_before_the_body_and_keeps_the_upload
         "the administrator still finishes: {staged}"
     );
     assert_eq!(names(&updates(&admin)), [STAGED]);
+}
+
+#[tokio::test]
+async fn a_second_put_of_the_same_upload_is_refused_and_the_first_finishes() {
+    let admin = host_of("0.2.0").await;
+    let bytes = installer_bytes("0.3.0");
+    let (_, upload) = post_manifest(&admin, &admin.token, &signed_manifest("0.3.0", &bytes)).await;
+    let id = upload["uploadId"].as_str().unwrap().to_owned();
+    let (sender, receiver) =
+        tokio::sync::mpsc::channel::<Result<Bytes, std::convert::Infallible>>(1);
+    let body = Body::from_stream(futures_util::stream::unfold(
+        receiver,
+        |mut receiver| async move { receiver.recv().await.map(|item| (item, receiver)) },
+    ));
+    let (head, tail) = bytes.split_at(bytes.len() / 2);
+    let first = put_body(&admin, &admin.token, &id, body, Some(bytes.len()));
+    let second = async {
+        sender.send(Ok(Bytes::copy_from_slice(head))).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let answer =
+            put_installer(&admin, &admin.token, &id, bytes.clone(), Some(bytes.len())).await;
+        sender.send(Ok(Bytes::copy_from_slice(tail))).await.unwrap();
+        drop(sender);
+        answer
+    };
+    let ((status, staged), (refused, answer)) = tokio::join!(first, second);
+    assert_eq!(
+        (refused, &answer["error"]["details"]["constraint"]),
+        (StatusCode::CONFLICT, &json!("upload_unknown")),
+        "{answer}"
+    );
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the first PUT was not cut: {staged}"
+    );
+    assert_eq!(names(&updates(&admin)), [STAGED]);
+}
+
+#[tokio::test]
+async fn an_upload_that_sends_nothing_for_the_idle_limit_is_dropped() {
+    let mut admin = host_of("0.2.0").await;
+    admin.app.state = admin
+        .app
+        .state
+        .clone()
+        .with_upload_idle(std::time::Duration::from_millis(150));
+    let bytes = installer_bytes("0.3.0");
+    let (_, upload) = post_manifest(&admin, &admin.token, &signed_manifest("0.3.0", &bytes)).await;
+    let id = upload["uploadId"].as_str().unwrap().to_owned();
+    let stalled =
+        futures_util::stream::once(futures_util::future::ready(
+            Ok::<_, std::convert::Infallible>(Bytes::copy_from_slice(&bytes[..1000])),
+        ))
+        .chain(futures_util::stream::pending());
+    let rows = audit_rows(&admin.app).await;
+    let (status, answer) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        put_body(
+            &admin,
+            &admin.token,
+            &id,
+            Body::from_stream(stalled),
+            Some(bytes.len()),
+        ),
+    )
+    .await
+    .expect("the host gave up on a stalled upload");
+    assert_eq!(
+        (status, &answer["error"]["details"]),
+        (
+            StatusCode::BAD_REQUEST,
+            &json!({ "field": "installer", "reason": "size_mismatch" })
+        )
+    );
+    assert!(names(&updates(&admin)).is_empty(), "the folder went");
+    assert_eq!(audit_rows(&admin.app).await, rows);
 }

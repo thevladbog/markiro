@@ -247,6 +247,8 @@ impl Upload {
 struct Inner {
     current: Current,
     upload: Option<Upload>,
+    /// A PUT is writing the installer of `upload`.
+    receiving: bool,
     /// The generation of the newest check whose result is in `current`.
     applied: u64,
 }
@@ -298,6 +300,8 @@ pub enum Serve {
 pub enum UploadError {
     NotNewer,
     Unknown,
+    /// Another PUT of this upload is writing its installer.
+    Receiving,
     Io(io::Error),
 }
 
@@ -327,6 +331,7 @@ impl UpdateStore {
             inner: Mutex::new(Inner {
                 current: Current::Missing,
                 upload: None,
+                receiving: false,
                 applied: 0,
             }),
             generation: AtomicU64::new(0),
@@ -384,7 +389,11 @@ impl UpdateStore {
     /// Everything in `updates\` but the three package folders goes (spec
     /// §10.11.2, «Гигиена диска»).
     fn clean(&self) {
-        self.lock().upload = None;
+        {
+            let mut inner = self.lock();
+            inner.upload = None;
+            inner.receiving = false;
+        }
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return;
         };
@@ -565,7 +574,11 @@ impl UpdateStore {
             Some(host) if manifest.version > host => {}
             _ => return Err(UploadError::NotNewer),
         }
-        let replaced = self.lock().upload.take();
+        let replaced = {
+            let mut inner = self.lock();
+            inner.receiving = false;
+            inner.upload.take()
+        };
         if let Some(replaced) = replaced {
             remove_any(&replaced.dir);
         }
@@ -578,7 +591,9 @@ impl UpdateStore {
             return Err(UploadError::Io(error));
         }
         let upload = Upload { id, dir, manifest };
-        self.lock().upload = Some(upload.clone());
+        let mut inner = self.lock();
+        inner.upload = Some(upload.clone());
+        inner.receiving = false;
         Ok(upload)
     }
 
@@ -587,10 +602,29 @@ impl UpdateStore {
         self.lock().upload.clone().filter(|upload| upload.id == id)
     }
 
+    /// The upload of `id` for the one PUT that writes its installer: a
+    /// second PUT meanwhile is refused (`Receiving`) and touches nothing.
+    pub fn begin_receive(&self, id: &str) -> Result<Upload, UploadError> {
+        let mut inner = self.lock();
+        let upload = inner
+            .upload
+            .clone()
+            .filter(|upload| upload.id == id)
+            .ok_or(UploadError::Unknown)?;
+        if inner.receiving {
+            return Err(UploadError::Receiving);
+        }
+        inner.receiving = true;
+        Ok(upload)
+    }
+
     fn take_upload(&self, id: &str) -> Option<Upload> {
         let mut inner = self.lock();
         match inner.upload.take() {
-            Some(upload) if upload.id == id => Some(upload),
+            Some(upload) if upload.id == id => {
+                inner.receiving = false;
+                Some(upload)
+            }
             other => {
                 inner.upload = other;
                 None
