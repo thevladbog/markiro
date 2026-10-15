@@ -31,6 +31,7 @@ pub mod service;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
+pub mod updates;
 pub mod upgrade;
 pub mod validate;
 
