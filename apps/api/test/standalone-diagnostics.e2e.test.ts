@@ -19,6 +19,7 @@ import {
   supportPayloadV1,
   supportPayloadV2,
   supportText,
+  usageMonth,
 } from "./support/standalone-support-token";
 
 const connection = createDb(process.env.DATABASE_URL ?? "postgres://invalid");
@@ -515,7 +516,7 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone diagnostics (plan ДИА�
     });
     const old = await service.ingest(admin, tenantId, {
       text: text(
-        supportPayloadV2({ hostId, generatedAt: "2026-10-01T09:00:00.000Z", months: ["2023-01"] }),
+        supportPayloadV2({ hostId, generatedAt: "2026-10-01T09:00:00.000Z", months: ["2023-11"] }),
       ),
     });
     await db
@@ -526,7 +527,110 @@ describe.skipIf(!process.env.DATABASE_URL)("standalone diagnostics (plan ДИА�
     expect(removed).toBeGreaterThanOrEqual(1);
     expect((await rows(tenantId)).map((r) => r.id)).toEqual([kept.diagnostic.id]);
     const stats = await service.statistics(admin, tenantId, {});
-    expect(stats.months.map((m) => m.month)).not.toContain("2023-01");
+    expect(stats.months.map((m) => m.month)).not.toContain("2023-11");
     expect(stats.months.map((m) => m.month)).toContain("2026-10");
+  });
+  it("a host currently bound to another tenant is refused even when this tenant's history names it", async () => {
+    const admin = await platformActor(db);
+    const tenantA = await createOrganization(db);
+    const tenantB = await createOrganization(db);
+    const h1 = randomUUID();
+    // A had H1 and rebound to H2; B then registers H1.
+    await bindSite(tenantA, randomUUID(), admin.userId, [h1]);
+    await bindSite(tenantB, h1, admin.userId);
+
+    const own = text(supportPayloadV2({ hostId: h1 }));
+    const refused = await refusal(service.ingest(admin, tenantA, { text: own }));
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ code: "standalone_diagnostics_host_other_tenant" });
+    // Not even with the unbound acknowledgement: it is not unbound, it is someone else's.
+    const acknowledged = await refusal(
+      service.ingest(admin, tenantA, { text: own, acknowledgeUnboundHost: true }),
+    );
+    expect(acknowledged.body).toMatchObject({ code: "standalone_diagnostics_host_other_tenant" });
+    expect(await rows(tenantA)).toHaveLength(0);
+    // B's own report is still accepted, bound to B's site.
+    const mine = await service.ingest(admin, tenantB, { text: own });
+    expect(mine.diagnostic.siteId).not.toBeNull();
+    expect(await rows(tenantB)).toHaveLength(1);
+  });
+
+  it("refuses sizes the storage cannot hold as an audited payload_invalid, not a 500", async () => {
+    const admin = await platformActor(db);
+    const tenantId = await createOrganization(db);
+    const hostId = randomUUID();
+    await bindSite(tenantId, hostId, admin.userId);
+    const base = supportPayloadV2({ hostId });
+    const hugeMonth = {
+      ...usageMonth("2026-10"),
+      scans: { accepted: 2e9, duplicates: 0, rejected: 0 },
+    };
+    const bad = [
+      { ...base, devices: { station: 2_147_483_648, office: 0, handheld: 0 } },
+      { ...base, months: [hugeMonth] },
+      { ...base, months: [usageMonth("0000-01"), usageMonth("9999-12")] },
+    ];
+    for (const payload of bad) {
+      const result = await refusal(service.ingest(admin, tenantId, { text: text(payload) }));
+      expect(result.status).toBe(422);
+      expect(result.body).toMatchObject({ code: "standalone_diagnostics_payload_invalid" });
+    }
+    expect(await rows(tenantId)).toHaveLength(0);
+    expect((await auditRows(db, tenantId)).map((a) => [a.outcome, a.reason])).toEqual(
+      bad.map(() => ["rejected", "payload_invalid"]),
+    );
+    // The largest accepted values are stored and summed over several hosts without a 500.
+    const maxMonth = (n: number) => ({
+      ...usageMonth("2026-10"),
+      scans: { accepted: n, duplicates: n, rejected: n },
+    });
+    const maxDevices = { station: 1_000_000, office: 1_000_000, handheld: 1_000_000 };
+    for (const [at, host] of [randomUUID(), randomUUID()].entries()) {
+      await service.ingest(admin, tenantId, {
+        text: text({
+          ...supportPayloadV2({ hostId: host, generatedAt: `2026-10-14T09:00:0${at}.000Z` }),
+          devices: maxDevices,
+          months: [maxMonth(1e9)],
+        }),
+        acknowledgeUnboundHost: true,
+      });
+    }
+    const stats = await service.statistics(admin, tenantId, {});
+    expect(stats.months.at(-1)?.stats.scans.accepted).toBe(2e9);
+  });
+
+  it("a token re-made for the same instant is a duplicate and its hash belongs to the first tenant too", async () => {
+    const admin = await platformActor(db);
+    const tenantA = await createOrganization(db);
+    const tenantB = await createOrganization(db);
+    const first = text(supportPayloadV1());
+    const remade = text(supportPayloadV1());
+    expect(remade).not.toBe(first);
+    const stored = await service.ingest(admin, tenantA, {
+      text: first,
+      acknowledgeUnboundHost: true,
+    });
+    const again = await service.ingest(admin, tenantA, {
+      text: remade,
+      acknowledgeUnboundHost: true,
+    });
+    expect(again).toMatchObject({ duplicate: true });
+    expect(again.diagnostic.id).toBe(stored.diagnostic.id);
+    // Retrying the remade token in A stays a duplicate; in B it is the same conflict as the first.
+    expect(
+      await service.ingest(admin, tenantA, { text: remade, acknowledgeUnboundHost: true }),
+    ).toMatchObject({ duplicate: true });
+    const conflict = await refusal(
+      service.ingest(admin, tenantB, { text: remade, acknowledgeUnboundHost: true }),
+    );
+    expect(conflict.body).toMatchObject({ code: "standalone_diagnostics_token_conflict" });
+    expect(await rows(tenantB)).toHaveLength(0);
+    // The reservation goes with the report (retention), like the first token's hash.
+    await db
+      .delete(schema.standaloneSupportDiagnostics)
+      .where(eq(schema.standaloneSupportDiagnostics.id, stored.diagnostic.id));
+    expect(
+      await service.ingest(admin, tenantB, { text: remade, acknowledgeUnboundHost: true }),
+    ).toMatchObject({ duplicate: false });
   });
 });

@@ -2,7 +2,7 @@ import type { schema } from "@markiro/db";
 import {
   standaloneDiagnosticSummarySchema,
   standaloneSupportPayloadSchema,
-  standaloneUsageMonthSchema,
+  standaloneUsageTotalsSchema,
   type StandaloneDiagnosticSummary,
   type StandaloneUsageMonth,
 } from "@markiro/platform-contracts";
@@ -36,18 +36,19 @@ const isRecord = (value: Json): value is Record<string, Json> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 function addTree(a: Json, b: Json): Json {
-  if (typeof a === "number" && typeof b === "number") return a + b;
+  if (typeof a === "number" && typeof b === "number")
+    return Math.min(a + b, Number.MAX_SAFE_INTEGER);
   if (isRecord(a) && isRecord(b))
     return Object.fromEntries(Object.keys(a).map((key) => [key, addTree(a[key], b[key])]));
   return a;
 }
 
-/** The month over hosts: every counter added; done here so the counters' shape stays out of SQL. */
+/** The month over hosts: every counter added (saturating at 2^53 - 1, never past the schema); done here so the counters' shape stays out of SQL. */
 export function sumUsageMonths(items: readonly StandaloneUsageMonth[]): StandaloneUsageMonth {
   const [first, ...rest] = items;
   if (first === undefined) throw new Error("no month to sum");
   const total = rest.reduce<Json>((sum, item) => addTree(sum, item), first);
-  return standaloneUsageMonthSchema.parse(
+  return standaloneUsageTotalsSchema.parse(
     isRecord(total) ? { ...total, month: first.month } : total,
   );
 }

@@ -21,14 +21,16 @@ describe("support payload validation (plan ДИАГ А2)", () => {
   });
 
   it("cuts a generated instant more than a day ahead of the server clock, accepts the past", () => {
-    const at = (iso: string) => parseSupportPayload(supportPayloadV2({ generatedAt: iso }), NOW);
+    const at = (iso: string) =>
+      parseSupportPayload(supportPayloadV2({ generatedAt: iso, months: [iso.slice(0, 7)] }), NOW);
     expect(at("2026-10-21T08:59:59.000Z")).toMatchObject({ ok: true });
     expect(at("2026-10-21T09:00:01.000Z")).toEqual({ ok: false, reason: "generated_in_future" });
     expect(at("2020-01-01T00:00:00.000Z")).toMatchObject({ ok: true });
   });
 
   it("refuses an instant before the first release (and year 0, which PostgreSQL would reject)", () => {
-    const at = (iso: string) => parseSupportPayload(supportPayloadV2({ generatedAt: iso }), NOW);
+    const at = (iso: string) =>
+      parseSupportPayload(supportPayloadV2({ generatedAt: iso, months: [iso.slice(0, 7)] }), NOW);
     expect(at("0000-01-01T00:00:00.000Z")).toEqual({ ok: false, reason: "payload_invalid" });
     expect(at("1999-12-31T23:59:59.000Z")).toEqual({ ok: false, reason: "payload_invalid" });
     expect(at("2000-01-01T00:00:00.000Z")).toMatchObject({ ok: true });

@@ -19,7 +19,7 @@ import {
   standaloneDiagnosticsOverviewSchema,
   standaloneDiagnosticsStatisticsSchema,
   standaloneSupportPayloadSchema,
-  standaloneUsageMonthSchema,
+  standaloneUsageTotalsSchema,
   type PlatformPrincipal,
   type StandaloneDiagnosticDetail,
   type StandaloneDiagnosticsHistory,
@@ -184,6 +184,10 @@ export class StandaloneDiagnosticsService {
                 sql`${schema.standaloneSites.hostHistory} @> ${JSON.stringify([{ hostId: hostKey }])}::jsonb`,
               ),
             );
+    // A host that is another tenant's CURRENT host is never ours, whatever our history says: the
+    // history only helps when the host is unbound or currently ours.
+    if (sites.some((site) => site.tenantId !== tenantId && site.hostId === hostKey))
+      return reject("host_other_tenant", { kid: opened.kid });
     const own =
       sites.find((site) => site.tenantId === tenantId && site.hostId === hostKey) ??
       sites.find((site) => site.tenantId === tenantId);
@@ -193,7 +197,8 @@ export class StandaloneDiagnosticsService {
     if (unbound && body.acknowledgeUnboundHost !== true)
       return reject("host_unbound", { kid: opened.kid });
 
-    // Idempotency: the token's hash (globally), then the exact instant per host.
+    // Idempotency: the token's hash (globally — the report's own, or one reserved by a token
+    // re-made for the same instant), then the exact instant per host.
     const [byHash] = await tx
       .select({
         id: schema.standaloneSupportDiagnostics.id,
@@ -201,12 +206,23 @@ export class StandaloneDiagnosticsService {
       })
       .from(schema.standaloneSupportDiagnostics)
       .where(eq(schema.standaloneSupportDiagnostics.blobSha256, opened.blobSha256));
-    if (byHash !== undefined && byHash.tenantId !== tenantId)
+    const [byAlias] =
+      byHash !== undefined
+        ? []
+        : await tx
+            .select({
+              id: schema.standaloneSupportTokenAliases.diagnosticId,
+              tenantId: schema.standaloneSupportTokenAliases.tenantId,
+            })
+            .from(schema.standaloneSupportTokenAliases)
+            .where(eq(schema.standaloneSupportTokenAliases.blobSha256, opened.blobSha256));
+    const known = byHash ?? byAlias;
+    if (known !== undefined && known.tenantId !== tenantId)
       return reject("token_conflict", { kid: opened.kid });
     const generatedAt = new Date(payload.generatedAt);
     const [byPair] =
-      byHash !== undefined
-        ? [byHash]
+      known !== undefined
+        ? [known]
         : await tx
             .select({ id: schema.standaloneSupportDiagnostics.id })
             .from(schema.standaloneSupportDiagnostics)
@@ -219,6 +235,13 @@ export class StandaloneDiagnosticsService {
             );
     if (byPair !== undefined) {
       const existing = await this.row(tx, tenantId, byPair.id);
+      // A token re-made for this instant: its hash now belongs to the report's tenant too.
+      if (existing.blobSha256 !== opened.blobSha256 && byAlias === undefined)
+        await tx.insert(schema.standaloneSupportTokenAliases).values({
+          blobSha256: opened.blobSha256,
+          tenantId,
+          diagnosticId: existing.id,
+        });
       await this.audit.record(tx, {
         actorPlatformUserId: actor.id,
         actorRole: actor.role,
@@ -541,7 +564,7 @@ export class StandaloneDiagnosticsService {
           months: [...byMonth.entries()].map(([month, group]) => ({
             month,
             hostCount: group.length,
-            stats: sumUsageMonths(group.map((row) => standaloneUsageMonthSchema.parse(row.stats))),
+            stats: sumUsageMonths(group.map((row) => standaloneUsageTotalsSchema.parse(row.stats))),
           })),
         });
       },

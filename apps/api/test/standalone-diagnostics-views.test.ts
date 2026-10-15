@@ -18,6 +18,19 @@ describe("diagnostics views (plan ДИАГ А2)", () => {
     expect(sumUsageMonths([usageMonth("2026-10", 7)])).toEqual(usageMonth("2026-10", 7));
   });
 
+  it("saturates a sum at the safe-integer ceiling instead of overflowing the response schema", () => {
+    const huge = (accepted: number) => ({
+      ...usageMonth("2026-10"),
+      scans: { accepted, duplicates: 0, rejected: 0 },
+    });
+    const sum = sumUsageMonths([
+      huge(Number.MAX_SAFE_INTEGER),
+      huge(Number.MAX_SAFE_INTEGER),
+      huge(1),
+    ]);
+    expect(sum.scans.accepted).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
   it("compares versions: numeric core, a pre-release is older than its release, unknown is null", () => {
     expect(isOlderVersion("0.2.0", "0.10.0")).toBe(true);
     expect(isOlderVersion("0.10.0", "0.2.0")).toBe(false);
