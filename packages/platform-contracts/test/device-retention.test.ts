@@ -45,6 +45,7 @@ const snapshot = (asOf: string, limit: number | null = 1) => ({
       inventory: null,
       commerceMl: null,
       handheld: true,
+      customLogo: null,
     },
   },
   sources: [],

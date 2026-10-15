@@ -1,3 +1,4 @@
+import { decodeBase64UrlCanonical as decode } from "../signed-documents/compact-jws.js";
 import { grantProtectedHeaderSchema, offlineGrantSchema } from "./contracts.js";
 import type { OfflineGrant } from "./types.js";
 
@@ -9,16 +10,6 @@ export interface VerificationKey {
 export type VerifiedGrantResult =
   | { ok: true; grant: OfflineGrant; compact: string }
   | { ok: false; reason: "malformed" | "bad_signature" | "unknown_key" | "wrong_origin" };
-
-function decode(segment: string): Uint8Array<ArrayBuffer> {
-  if (!/^[A-Za-z0-9_-]+$/.test(segment) || segment.length % 4 === 1) {
-    throw new Error("Invalid base64url");
-  }
-  const binary = atob(segment.replace(/-/g, "+").replace(/_/g, "/"));
-  const canonical = btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  if (canonical !== segment) throw new Error("Noncanonical base64url");
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
 
 /** Verifies before local transactions. Callers must still revalidate owner/time/budget at commit. */
 export async function verifyGrant(

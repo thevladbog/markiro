@@ -23,9 +23,16 @@ describe("P1 entitlement registry and source boundaries", () => {
       "inventory",
       "commerceMl",
       "handheld",
+      "customLogo",
     ]);
     expect(c.ENTITLEMENT_QUOTA_KEYS).toEqual(["lines", "stations", "kiosks", "cabinetUsers"]);
-    expect(c.P1_FEATURE_KEYS).toEqual(["chzIntegration", "inventory", "commerceMl", "handheld"]);
+    expect(c.P1_FEATURE_KEYS).toEqual([
+      "chzIntegration",
+      "inventory",
+      "commerceMl",
+      "handheld",
+      "customLogo",
+    ]);
     expect(c.ENTITLEMENT_OPERATIONS["nk.lookup.v1"].features).toEqual(["chzIntegration"]);
     expect(c.ENTITLEMENT_OPERATIONS["chz.export.create.v1"].features).toEqual([
       "inventory",
@@ -150,6 +157,7 @@ describe("P1 entitlement registry and source boundaries", () => {
           inventory: false,
           commerceMl: false,
           handheld: null,
+          customLogo: null,
         },
       },
       sources: [source],
@@ -242,6 +250,7 @@ it("preserves base-plan provenance including unlimited and false without additiv
         inventory: null,
         commerceMl: null,
         handheld: null,
+        customLogo: null,
       },
     },
   };

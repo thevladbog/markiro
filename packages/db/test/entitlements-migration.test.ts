@@ -139,6 +139,7 @@ describe.skipIf(!databaseUrl)("P1 additive migrations and transactional revision
       "inventory_enabled",
       "commerce_ml_enabled",
       "handheld_enabled",
+      "custom_logo_enabled",
     ];
     const plan = (
       await pool.query(
