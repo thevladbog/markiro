@@ -217,15 +217,59 @@
   }
 }
 
-/* The link to the host as a dot (beta 3.2): a 64 px touch target, the details in a popover. */
+/*
+ * The link to the host as a dot (beta 3.2): the telemetry pills' own chip holding only the dot,
+ * inside a 64 px touch target, the details in a popover.
+ */
 .floor-link {
   position: relative;
 }
 
 .floor-link__button.mk-btn {
-  width: 64px;
-  min-width: 64px;
+  width: 52px;
+  min-width: 52px;
   padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+/* The pills' height and padding (their label line is 18 px, 16 px under 1100 px), a ring round the dot. */
+.floor-link__pill {
+  min-width: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  justify-content: center;
+}
+
+.station-status-pill[data-tone="error"] {
+  border-color: var(--err-border, var(--err-fg));
+}
+
+.station-status-pill[data-tone="error"] .station-status-pill__dot {
+  background: var(--err-solid, var(--err-fg));
+}
+
+.floor-link__pill--pulse .station-status-pill__dot {
+  animation: floor-link-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes floor-link-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-link__pill--pulse .station-status-pill__dot {
+    animation: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .floor-link__pill {
+    min-width: 30px;
+    min-height: 30px;
+  }
 }
 
 .floor-link__popover {

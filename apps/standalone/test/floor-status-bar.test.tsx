@@ -221,7 +221,7 @@ describe("the floor's status bar", () => {
     render(bar({ local: await synced([ORG]), link: offline }));
     // A small dot with the state in its name (beta 3.2), red without the host; the reason is one tap away.
     const dot = await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" });
-    expect(dot.querySelector(".status-dot--error")).not.toBeNull();
+    expect(dot.querySelector('[data-tone="error"]')).not.toBeNull();
     expect(screen.queryByText("Хост не отвечает.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
     const details = screen.getByRole("dialog", { name: "Связь с хостом" });
@@ -236,21 +236,21 @@ describe("the floor's status bar", () => {
     const view = render(bar({ local, link: online }));
     expect(
       (await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" })).innerHTML,
-    ).toContain("status-dot--ok");
+    ).toContain('data-tone=\"ok\"');
     view.rerender(
       bar({ local, link: online, sync: { ...SYNCED, kind: "failed", failure: "host" } }),
     );
     expect(
       screen.getByRole("button", { name: "Связь с хостом: На связи с хостом" }).innerHTML,
-    ).toContain("status-dot--warn");
+    ).toContain('data-tone=\"warn\"');
     view.rerender(bar({ local, link: { ...online, state: "connecting" } }));
     expect(
       screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
-    ).toContain("status-dot--warn");
+    ).toContain('data-tone=\"warn\"');
     view.rerender(bar({ local, link: null }));
     expect(
       screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
-    ).toContain("status-dot--neutral");
+    ).toContain('data-tone=\"neutral\"');
   });
 
   it("reads the names again after every sync", async () => {

@@ -7,10 +7,12 @@ import { Button } from "@markiro/ui";
 import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
-import { StatusDot, type StatusDotTone } from "./StatusDot.js";
 
 const CLOCK = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
 const DATE = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" });
+
+/** The dot's colour: green, amber or red; grey before the link's first status. */
+export type LinkTone = "ok" | "warn" | "error" | "neutral";
 
 export interface LinkDotProps {
   /** The link as the shell reports it; `null` before the first status. */
@@ -22,7 +24,7 @@ export interface LinkDotProps {
 export function linkTone(
   status: HostStatus | null,
   sync: SyncState | null,
-): { tone: StatusDotTone; pulse: boolean } {
+): { tone: LinkTone; pulse: boolean } {
   if (status === null) return { tone: "neutral", pulse: true };
   if (status.state === "offline") return { tone: "error", pulse: false };
   if (status.state === "connecting") return { tone: "warn", pulse: true };
@@ -82,12 +84,25 @@ export function LinkDot({ status, sync }: LinkDotProps) {
         size="floor"
         variant="secondary"
         className="floor-link__button"
+        // The kit paints a button inline: the target round the chip is no box of its own.
+        style={{ background: "transparent", borderColor: "transparent", boxShadow: "none" }}
         aria-label={`${t("floor.status.link")}: ${label}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((current) => !current)}
       >
-        <StatusDot tone={tone} label={label} pulse={pulse} decorative />
+        {/*
+          The same chip as the telemetry pills beside it (`StatusPill`: its height, border,
+          radius and dot), holding only the dot; the button around it is the 64 px target.
+        */}
+        <span
+          className={`station-status-item station-status-pill floor-link__pill${
+            pulse ? " floor-link__pill--pulse" : ""
+          }`}
+          data-tone={tone}
+        >
+          <span aria-hidden="true" className="station-status-pill__dot" />
+        </span>
       </Button>
       <span className="station-visually-hidden" role="status" aria-live="polite">
         {label}
