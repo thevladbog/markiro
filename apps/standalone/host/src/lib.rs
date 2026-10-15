@@ -168,16 +168,33 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
-    // The update packages (plan ОБН-3): opened after the migrations and
-    // before the first request, so a device never gets an unchecked package.
+    // The update packages (plan ОБН-3): strays go before the first request,
+    // but the hashing of `staged` and `current` (up to 512 MiB each) runs in
+    // the background so a slow disk cannot outlast the service start timeout.
+    // Until it ends the state is `verifying` and no package is offered.
     let packages = std::sync::Arc::new(updates::UpdateStore::new(
         paths.updates_dir(),
         markiro_proto::trust::update_keyset(),
         HOST_VERSION,
     ));
     let opening = packages.clone();
-    let opened = tokio::task::spawn_blocking(move || opening.open_blocking()).await??;
-    updates::worker::record_start(&pool, &clock::format_timestamp(clock.now()), &opened).await?;
+    tokio::task::spawn_blocking(move || opening.open_quick_blocking()).await??;
+    let finishing = packages.clone();
+    let start_pool = pool.clone();
+    let start_clock = clock.clone();
+    tokio::spawn(async move {
+        let checking = finishing.clone();
+        match tokio::task::spawn_blocking(move || checking.finish_start_blocking()).await {
+            Ok(report) => {
+                let at = clock::format_timestamp(start_clock.now());
+                if let Err(error) = updates::worker::record_start(&start_pool, &at, &report).await {
+                    tracing::error!(%error, "the start of the update packages was not recorded");
+                }
+            }
+            // A panic: `verifying` must not stay for good; the hourly pass looks again.
+            Err(_) => finishing.fail_verifying(),
+        }
+    });
     let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())
         .with_backups(backups.clone())

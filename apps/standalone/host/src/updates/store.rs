@@ -372,18 +372,40 @@ impl UpdateStore {
 
     /// The service starts (after the migrations): strays and a partial
     /// upload go, `staged\` of the running version becomes current, and
-    /// `current\` is verified whole.
+    /// `current\` is verified whole. Reads whole installers: the service
+    /// uses [`UpdateStore::open_quick_blocking`] and does the rest in the
+    /// background, so a slow disk never delays the start.
     pub fn open_blocking(&self) -> io::Result<StartReport> {
+        self.open_quick_blocking()?;
+        Ok(self.finish_start_blocking())
+    }
+
+    /// The part of the start that reads no installer: strays go, and the
+    /// state is `verifying` when a package folder is there (`missing` when
+    /// none), so no package is offered before [`UpdateStore::finish_start_blocking`]
+    /// has checked it whole.
+    pub fn open_quick_blocking(&self) -> io::Result<()> {
         fs::create_dir_all(&self.dir)?;
         self.clean();
+        let waiting = self.dir.join(CURRENT).is_dir() || self.dir.join(STAGED).is_dir();
+        let mut inner = self.lock();
+        if matches!(inner.current, Current::Missing) && waiting {
+            inner.current = Current::Verifying;
+        }
+        Ok(())
+    }
+
+    /// The rest of the start, after [`UpdateStore::open_quick_blocking`]:
+    /// the promotion and the whole check of `current\`.
+    pub fn finish_start_blocking(&self) -> StartReport {
         let promotion = self.promote_blocking();
         self.reverify_blocking();
         let (current, current_version) = self.current_state();
-        Ok(StartReport {
+        StartReport {
             promotion,
             current,
             current_version,
-        })
+        }
     }
 
     /// Everything in `updates\` but the three package folders goes (spec
