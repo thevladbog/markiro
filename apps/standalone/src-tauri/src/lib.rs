@@ -327,6 +327,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         office_files::set_exports_folder,
         folder_dialog::pick_folder,
         external_link::open_external_link,
+        update::fetch::update_fetch,
+        update::fetch::update_check_manifest,
         update::update_scan,
         update::update_verify,
         update::update_install,
@@ -341,7 +343,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
 /// starts and the local commands say so), the connection status, the scanner
 /// manager (it needs the app's handle for its events), kiosk mode, the
 /// awake lease, the office's folder under the documents folder (plan ЧЗ),
-/// the update state with the outcome of the last update (plan ОБН-2) and
+/// the update state with the outcome of the last update (plan ОБН-2), the
+/// folder of the update's downloads from the host (plan ОБН-3) and
 /// what the installation and the launch permit of kiosk mode
 /// (`window_policy`). `installation` is the installer's file for this
 /// computer (`installation::read_file_beside_executable` in `run`), and
@@ -377,6 +380,11 @@ where
         office_files::OfficeFilesState::from_documents(app.path().document_dir().ok())
             .with_settings(dir.join("office-files.json")),
     );
+    // The package `update_fetch` downloads from the host (plan ОБН-3): in
+    // the local data folder, never a roaming one.
+    app.manage(update::fetch::DownloadsDir(
+        dir.join(update::fetch::DOWNLOADS),
+    ));
     let handle = app.clone();
     app.manage(update::UpdateState::load(update::UpdateConfig {
         installed: app.package_info().version.to_string(),

@@ -29,6 +29,10 @@ const LINE_ROUTE: &str = "/v1/device/line";
 /// reads for the line the office assigned and the name it gave the device.
 const DEVICE_ROUTE: &str = "/v1/device";
 
+/// The update's installer (plan ОБН-3): tens of MB, which only
+/// `update_fetch` reads, straight to the disk; never through IPC.
+const INSTALLER_ROUTE: &str = "/v1/device/update/installer";
+
 /// The bounds of `host_request`'s `timeoutMs` (stage 2a spec §5.2). A caller
 /// may ask for a shorter answer than the client's 10 s (the scan pipeline's
 /// 300 ms code check), never for a longer one.
@@ -661,10 +665,11 @@ impl DeviceState {
 /// `host_client::validate_path` separately refuses a `.` path segment: it
 /// stops a spelling such as `/v1/device/./line`, which a URL parser would
 /// otherwise normalize past this check, from ever reaching the host.
+/// The installer of an update goes through `update_fetch` only (plan ОБН-3).
 fn webview_may_reach(path: &str) -> bool {
     let route = path.split('?').next().unwrap_or(path);
-    let device_route =
-        route == "/v1/device" || (route.starts_with("/v1/device/") && route != LINE_ROUTE);
+    let device_route = route == "/v1/device"
+        || (route.starts_with("/v1/device/") && route != LINE_ROUTE && route != INSTALLER_ROUTE);
     device_route
         || route == "/v1/bootstrap"
         || route == "/v1/changes"
@@ -779,6 +784,8 @@ mod tests {
             "/v1/office/me",
             "/v1/office/logout",
             "/v1/office/sscc/counters/460068200/0?since=1",
+            // The offer is small JSON (plan ОБН-3).
+            "/v1/device/update",
         ] {
             assert!(webview_may_reach(route), "{route}");
         }
@@ -793,6 +800,9 @@ mod tests {
             "/v1/changes/stream",
             "/v1/changes/",
             "/v1/changesx",
+            // Tens of MB never cross IPC: only `update_fetch` reads it (plan ОБН-3).
+            "/v1/device/update/installer",
+            "/v1/device/update/installer?x=1",
         ] {
             assert!(!webview_may_reach(route), "{route}");
         }

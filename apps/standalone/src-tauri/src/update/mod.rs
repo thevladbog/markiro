@@ -12,6 +12,7 @@
 //!   (`ShellExecuteExW`, verb `runas`; a fake in tests);
 //! - [`pending`] keeps `update-pending.json`, the outcome the next start reads.
 
+pub mod fetch;
 pub mod launch;
 pub mod package;
 pub mod pending;
