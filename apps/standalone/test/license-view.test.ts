@@ -203,6 +203,7 @@ describe("the license as the office reads it", () => {
       { key: "inventory", on: false },
       { key: "commerceMl", on: false },
       { key: "handheld", on: true },
+      { key: "customLogo", on: true },
     ]);
   });
 

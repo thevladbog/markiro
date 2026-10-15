@@ -312,8 +312,9 @@ describe("the license's band above the office's pages", () => {
     await within(region).findByText(/Лицензия заканчивается 31\.10\.2027\./);
     await within(region).findByText(/Часы ПК хоста отстают/);
     expect(band().childElementCount).toBe(0);
-    // One alert per warning on the whole page: the end and the clock.
-    expect(document.querySelectorAll(".mk-alert")).toHaveLength(2);
+    // One alert per warning in the page's region: the end and the clock (the license card
+    // beside it says the state in words, which is not a warning).
+    expect(region.querySelectorAll(".mk-alert")).toHaveLength(2);
     expect(screen.getAllByText(/Лицензия заканчивается 31\.10\.2027\./)).toHaveLength(1);
     expect(screen.getAllByText(FREE_RENEWAL)).toHaveLength(1);
   });
@@ -356,7 +357,8 @@ describe("the license's band above the office's pages", () => {
     fireEvent.click(within(nav).getByRole("link", { name: "Обзор" }));
     await screen.findByText(/Вы вошли как/);
     expect(within(overviewAlerts()).queryByText(/Пробный период/)).toBeNull();
-    expect(screen.queryByText(/Пробный период/)).toBeNull();
+    // The license card names the state («Пробный период»); the warning is the text with the days.
+    expect(screen.queryByText(/Пробный период: осталось/)).toBeNull();
   });
 
   it("repeats the running extension on «Обзор», never «не открываются»", async () => {

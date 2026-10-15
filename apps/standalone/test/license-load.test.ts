@@ -139,6 +139,7 @@ describe("«было → станет»", () => {
       "features.inventory",
       "features.commerceMl",
       "features.handheld",
+      "features.customLogo",
     ]);
     expect(rows.filter((row) => row.changed).map((row) => row.id)).toEqual(
       rows.map((row) => row.id).filter((id) => FIRST_FILE.changes.includes(id)),
