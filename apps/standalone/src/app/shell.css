@@ -1303,18 +1303,21 @@
 }
 
 /*
- * The office sign-in (beta 3.2, variants B and C): a centred composition on the page colour
- * with two soft, static colour orbs behind it; the brand on top, a flat form card (a hairline,
- * a 24px radius, a faint top highlight) and, from 1100px, the card of recent users beside it.
- * It fits the smallest window (960 x 600) without scrolling.
+ * The office sign-in (beta 3.2, approved variant B2): the whole window, the logo at the top left
+ * and the theme switcher at the top right, one flat card in the middle with the recent users
+ * beside it (from 1100px; under it below), two soft static colour orbs behind (blue above, green
+ * below right; paler in the light theme) and the footer centred under the content. It fits the
+ * smallest window (960 x 600) without scrolling.
  */
 .office-login {
-  position: relative;
+  position: fixed;
+  inset: 0;
   isolation: isolate;
-  width: min(900px, 100%);
+  overflow: hidden auto;
   display: grid;
-  justify-items: center;
-  gap: 16px;
+  place-items: center;
+  padding: 72px 24px 24px;
+  background: var(--surface-page);
 }
 
 .office-login::before,
@@ -1322,48 +1325,59 @@
   content: "";
   position: fixed;
   z-index: -1;
-  width: 420px;
-  height: 420px;
+  width: 480px;
+  height: 480px;
   border-radius: 50%;
   filter: blur(120px);
-  opacity: 0.35;
+  opacity: 0.32;
   pointer-events: none;
 }
 
 .office-login::before {
-  top: -120px;
-  left: -100px;
-  background: var(--accent-module);
+  top: -180px;
+  left: 18%;
+  background: #3b6cff;
 }
 
 .office-login::after {
-  right: -120px;
-  bottom: -140px;
-  background: var(--warn-solid);
+  right: -140px;
+  bottom: -200px;
+  background: var(--accent-module);
+}
+
+:root[data-theme="light"] .office-login::before,
+:root[data-theme="light"] .office-login::after {
+  opacity: 0.16;
+}
+
+.office-login__top {
+  position: absolute;
+  top: 24px;
+  left: 32px;
+  right: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .office-login__brand {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .office-login__wordmark {
   font: 600 22px/1 var(--font-mono);
+  letter-spacing: -0.5px;
 }
 
-.office-login__edition {
-  color: var(--fg-2);
-  font: var(--text-body-sm);
-  padding-left: 12px;
-  border-left: 1px solid var(--line-strong);
-}
-
-.office-login__host {
-  margin: 0;
-  color: var(--fg-2);
-  font: var(--text-body-sm);
+.office-login__content {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 900px;
 }
 
 .office-login__row {
@@ -1378,23 +1392,16 @@
 .office-login__card {
   display: grid;
   align-content: start;
-  gap: 14px;
-  padding: 28px;
+  gap: 16px;
+  padding: 30px;
   border: 1px solid var(--line);
   border-radius: 24px;
   background: var(--surface-card);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-1) 8%, transparent);
 }
 
 .office-login__title {
   margin: 0;
   font: var(--text-h2);
-}
-
-.office-login__tagline {
-  margin: 0;
-  color: var(--fg-2);
-  font: var(--text-body-sm);
 }
 
 .office-login__actions {
@@ -1405,6 +1412,7 @@
 }
 
 .office-login .office-login__ghost {
+  border-radius: 999px;
   background: transparent;
   border-color: transparent;
   color: var(--fg-2);
@@ -1458,8 +1466,7 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--surface-panel);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: #fff;
   font: 600 11px/1 var(--font-mono);
 }
 
@@ -1473,6 +1480,7 @@
 }
 
 .office-login__check {
+  flex: none;
   color: var(--ok-fg);
 }
 
@@ -1482,7 +1490,37 @@
   gap: 8px;
   margin: 0;
   color: var(--fg-3);
-  font: var(--text-caption);
+  font: 400 12px/16px var(--font-ui);
+}
+
+.office-login__nolink {
+  color: var(--err-fg);
+  font-weight: 500;
+}
+
+.theme-switcher {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-card);
+}
+
+.theme-switcher .theme-switcher__option {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-2);
+}
+
+.theme-switcher .theme-switcher__option--on {
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 /* From 1100px the recent users stand to the right of the form; below, under it. */
@@ -1492,27 +1530,34 @@
   }
 }
 
-/* The smallest window: a tighter card, so the form and the brand fit in 600px. */
-@media (max-height: 700px) {
-  .office-login {
-    gap: 10px;
-  }
-
-  .office-login__card {
-    padding: 20px;
-    gap: 10px;
-  }
-}
-
 @media (max-width: 1099px) {
   .office-login__recent-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
+/* The smallest window: a tighter card, so the brand, the form and the footer fit in 600px. */
 @media (max-height: 700px) {
-  .office-login__tagline,
+  .office-login {
+    padding-top: 64px;
+  }
+
+  .office-login__content {
+    gap: 12px;
+  }
+
+  .office-login__card {
+    padding: 22px 30px;
+    gap: 10px;
+  }
+
   .office-login__recent .office-note {
     display: none;
   }
+}
+
+.overview-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }

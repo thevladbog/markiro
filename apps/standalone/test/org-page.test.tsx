@@ -16,8 +16,8 @@ function type(label: string, value: string): void {
 
 /** Opens the profile from the menu, as a user does. */
 async function openProfile(session: FakeOfficeSession): Promise<void> {
-  renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
+  renderOffice(session, { initialPath: "/org" });
+  await screen.findByRole("link", { name: "Профиль" });
   await screen.findByRole("heading", { name: "Профиль организации" });
 }
 

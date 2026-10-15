@@ -286,8 +286,8 @@ describe("office shifts: the list", () => {
     session.api.listShifts.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "x" }),
     );
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     fireEvent.click(await screen.findByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("OCT26-004")).toBeTruthy();
     expect(session.api.listShifts).toHaveBeenCalledTimes(2);
@@ -663,8 +663,8 @@ describe("office shifts: the list, boundaries and states", () => {
   it("shows nothing but «Загрузка…» while the shifts load", async () => {
     const session = shiftsSession();
     session.api.listShifts.mockReturnValue(new Promise(() => undefined));
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     await screen.findByRole("heading", { name: "Смены" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -676,8 +676,8 @@ describe("office shifts: the list, boundaries and states", () => {
     const session = shiftsSession();
     session.api.listShifts.mockRejectedValueOnce(unreachable());
     session.api.listLines.mockRejectedValueOnce(unreachable());
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     const retry = await screen.findByRole("button", { name: "Повторить" });
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();

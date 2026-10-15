@@ -40,6 +40,8 @@ tokio = { version = "=1.53.1", features = ["sync", "macros", "time"] }
 # Win32_System_Registry: ShellExecuteExW with the "runas" verb
 # (update/launch.rs; SHELLEXECUTEINFOW holds an HKEY, so windows-sys gates
 # the struct and the function on Win32_System_Registry).
+# Win32_System_Com with Win32_UI_Shell_Common: SHBrowseForFolderW, the
+# folder dialog of the office (folder_dialog.rs; CoInitializeEx, BROWSEINFOW).
 # Win32_System_Diagnostics_Debug: SetThreadErrorMode, so a search of an empty
 # card reader shows no «no disk» window over the kiosk (update/package.rs).
 windows-sys = { version = "=0.61.2", features = [
@@ -50,11 +52,13 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",
   "Win32_Storage_Xps",
+  "Win32_System_Com",
   "Win32_System_Diagnostics_Debug",
   "Win32_System_Power",
   "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

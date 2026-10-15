@@ -311,6 +311,13 @@ async function elapse(ms: number): Promise<void> {
   });
 }
 
+/** The office header's link dot, pressed open: its popover with the details (beta 3.2). */
+function openLinkDetails(): HTMLElement {
+  const dot = screen.getByRole("button", { name: /^Связь с хостом: / });
+  if (dot.getAttribute("aria-expanded") !== "true") fireEvent.click(dot);
+  return screen.getByRole("region", { name: /^Связь с хостом: / });
+}
+
 describe("App", () => {
   it("creates the site on a fresh host and opens the office", async () => {
     const device = fakeDevice(null);
@@ -1350,7 +1357,8 @@ describe("App", () => {
     await signIn();
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await screen.findByLabelText("Название организации");
-    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    // The overview and the profile each read the organization once.
+    const reads = host.getOrg.mock.calls.length;
     expect(host.officeMe).not.toHaveBeenCalled();
 
     await link.revision(44);
@@ -1364,7 +1372,7 @@ describe("App", () => {
     // setImmediate task, which only real turns like these wait for.
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    expect(host.getOrg).toHaveBeenCalledTimes(reads);
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
 
@@ -1420,7 +1428,13 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
+    // The office header shows the link as a dot with details on a press (beta 3.2).
+    fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
+    expect(
+      within(screen.getByRole("region", { name: "Связь с хостом: Нет связи с хостом" })).getByText(
+        "Нет связи с хостом",
+      ),
+    ).toBeTruthy();
   });
 
   it("pairs a second computer by a scanned code, then chooses its line", async () => {
@@ -1728,7 +1742,9 @@ describe("reference sync health on screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+    expect(
+      within(openLinkDetails()).getByText("Справочники не обновились — повторим автоматически"),
+    ).toBeTruthy();
 
     host.getChanges.mockResolvedValue(feedPage(43));
     await link.revision(43);
@@ -1787,7 +1803,7 @@ describe("reference sync health on screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Не приняты записи справочников: 1")).toBeTruthy();
+    expect(within(openLinkDetails()).getByText("Не приняты записи справочников: 1")).toBeTruthy();
   });
 });
 
@@ -4454,7 +4470,23 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
     await signIn();
     expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+    // «Выйти» returns to the office sign-in (beta 3.2) and is beside «Выйти в цех».
+    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+  });
+
+  it("signs out to the office sign-in from «Выйти», telling the host, with no notice and no floor in between", async () => {
+    const device = fakeDevice({ ...DEVICE_STATUS, hostAddress: REMOTE_ADDRESS });
+    device.installRole.mockResolvedValue("station");
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
+    expect(screen.queryByText("Сессия офиса закончилась. Войдите снова.")).toBeNull();
+    // The sign-in lists the user who just signed in, on this PC only.
+    expect(screen.getByRole("button", { name: /^Войти как / })).toBeTruthy();
   });
 
   it("tells a malformed address the shell refused in plain words, not as a broken app", async () => {

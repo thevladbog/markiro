@@ -69,6 +69,15 @@ function fakeFiles(): OfficeFilesApi & {
     })),
     open: vi.fn<OfficeFilesApi["open"]>(async () => undefined),
     openFile: vi.fn<OfficeFilesApi["openFile"]>(async () => undefined),
+    pickFolder: vi.fn<OfficeFilesApi["pickFolder"]>(async () => null),
+    getExportsFolder: vi.fn<OfficeFilesApi["getExportsFolder"]>(async () => ({
+      path: null,
+      default: null,
+    })),
+    setExportsFolder: vi.fn<OfficeFilesApi["setExportsFolder"]>(async (path) => ({
+      path,
+      default: null,
+    })),
   };
 }
 
@@ -86,8 +95,8 @@ async function openDialog(
   session.api.listShiftPallets.mockResolvedValue(pallets);
   session.api.recordShiftExport.mockResolvedValue(undefined);
   prepare(session);
-  renderOffice(session, { files });
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  renderOffice(session, { files, initialPath: "/shifts" });
+  await screen.findByRole("heading", { name: "Смены" });
   await screen.findAllByRole("button", { name: /^Изменить смену|^Итоги смены|^Выгрузка смены/ });
   pressRowAction(screen, `Выгрузка смены ${shift.number}`);
   await screen.findByRole("dialog", { name: `Выгрузка смены ${shift.number}` });
@@ -800,7 +809,10 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
       [],
       (prepared) => prepared.api.listConflicts.mockRejectedValue(new Error("unreachable")),
     );
-    await waitFor(() => expect(session.api.listConflicts).toHaveBeenCalledTimes(1));
+    // The overview behind the dialog reads the conflicts too (without a shift): count the dialog's.
+    const ofShift = () =>
+      session.api.listConflicts.mock.calls.filter(([, query]) => query.shiftId !== undefined);
+    await waitFor(() => expect(ofShift()).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(within(dialog()).queryByText(/Неразобранных конфликтов/)).toBeNull();
     form();
@@ -871,6 +883,8 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
       documents_unavailable: true,
       storage: true,
       unsupported: true,
+      folder_unavailable: true,
+      dialog_failed: true,
     };
     const { default: ru } = await import("../src/i18n/ru.json");
     expect(Object.keys(ru.office.exports.failures).sort()).toEqual(Object.keys(failures).sort());

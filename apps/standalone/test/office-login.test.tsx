@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { HostStatus } from "../src/host/protocol.js";
+import { ThemeProvider } from "@markiro/ui";
+
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
 import { AboutProvider } from "../src/office/info/about-context.js";
 import type { AboutApi } from "../src/office/info/about-api.js";
@@ -24,9 +26,11 @@ function renderLogin(
   link: HostStatus | null = null,
 ) {
   render(
-    <AboutProvider value={aboutWith(version)}>
-      <OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} link={link} />
-    </AboutProvider>,
+    <ThemeProvider defaultTheme="dark">
+      <AboutProvider value={aboutWith(version)}>
+        <OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} link={link} />
+      </AboutProvider>
+    </ThemeProvider>,
   );
   return onLogin;
 }
@@ -34,18 +38,79 @@ function renderLogin(
 describe("the office sign-in (beta 3.2)", () => {
   beforeEach(() => {
     localStorage.clear();
+    delete document.documentElement.dataset.theme;
   });
 
-  it("says what the software is: the product, a tagline and the sign-in title", () => {
+  it("says what the software is: the logo and the sign-in title", () => {
     renderLogin();
     expect(screen.getByText("маркиро")).toBeTruthy();
-    expect(screen.getByText("Автоном · офис")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Вход в офис" })).toBeTruthy();
   });
 
-  it("keeps the version in a quiet footer when the shell tells it", async () => {
+  it("has the logo at the top left and the theme switcher at the top right, in one header", () => {
+    renderLogin();
+    const top = document.querySelector(".office-login__top") as HTMLElement;
+    expect(top.firstElementChild?.className).toContain("office-login__brand");
+    expect(within(top).getByText("маркиро")).toBeTruthy();
+    expect(top.lastElementChild?.className).toContain("theme-switcher");
+    // No product line under the logo, no second frame around the card.
+    expect(document.querySelector(".office-login__tagline")).toBeNull();
+    expect(document.querySelectorAll(".office-login__card")).toHaveLength(2);
+  });
+
+  it("switches the theme from the pill: light, system, dark; the choice persists and applies", () => {
+    renderLogin();
+    const group = screen.getByRole("group", { name: "Тема оформления" });
+    const dark = within(group).getByRole("button", { name: "Тёмная" });
+    expect(dark.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(group).getByRole("button", { name: "Светлая" }));
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("markiro.theme")).toBe("light");
+    expect(
+      within(group).getByRole("button", { name: "Светлая" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(within(group).getByRole("button", { name: "Система" }));
+    expect(localStorage.getItem("markiro.theme")).toBe("system");
+    expect(["light", "dark"]).toContain(document.documentElement.dataset.theme);
+    fireEvent.click(dark);
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("renders in the light theme too", () => {
+    localStorage.setItem("markiro.theme", "light");
+    renderLogin();
+    expect(screen.getByRole("heading", { level: 2, name: "Вход в офис" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Светлая" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("keeps the version in the footer: «Markiro Автоном 2.1.0 · Офис»", async () => {
     renderLogin(undefined, "2.1.0");
-    expect(await screen.findByText(/Версия 2\.1\.0/)).toBeTruthy();
+    expect(await screen.findByText("Markiro Автоном 2.1.0")).toBeTruthy();
+    const footer = document.querySelector(".office-login__footer") as HTMLElement;
+    expect(footer.textContent).toContain("·Офис");
+  });
+
+  it("shows a green dot when the host answers and no phrase beside it", () => {
+    renderLogin(undefined, null, { state: "online", lastContactAt: 1, lastError: null, seq: 1 });
+    const footer = document.querySelector(".office-login__footer") as HTMLElement;
+    expect(footer.querySelector(".status-dot--ok")).not.toBeNull();
+    expect(within(footer).queryByText("Связи нет")).toBeNull();
+  });
+
+  it("shows a red dot with «Связи нет» right after it, before the rest of the footer", () => {
+    renderLogin(undefined, null, {
+      state: "offline",
+      lastContactAt: null,
+      lastError: "unreachable",
+      seq: 2,
+    });
+    const footer = document.querySelector(".office-login__footer") as HTMLElement;
+    const children = Array.from(footer.children);
+    expect(children[0]?.className).toContain("status-dot--error");
+    expect(children[1]?.textContent).toBe("Связи нет");
+    expect(children[2]?.textContent).toBe("Markiro Автоном");
   });
 
   it("shows the host link as a small dot in the footer", () => {
@@ -79,7 +144,7 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(pick.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(pick);
     expect(pick.getAttribute("aria-pressed")).toBe("true");
-    expect(pick.textContent).toContain("✓");
+    expect(pick.querySelector(".office-login__check")).not.toBeNull();
     expect(pick.textContent).toContain("IR");
     fireEvent.click(screen.getByRole("button", { name: "Очистить список" }));
     expect(screen.queryByRole("button", { name: "Войти как irina" })).toBeNull();

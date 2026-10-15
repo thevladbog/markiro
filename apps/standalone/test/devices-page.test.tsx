@@ -96,8 +96,8 @@ function adminSession(): FakeOfficeSession {
 }
 
 async function openDevices(session: FakeOfficeSession) {
-  renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Устройства" }));
+  renderOffice(session, { initialPath: "/devices" });
+  await screen.findByRole("link", { name: "Устройства" });
   await screen.findByText("Рабочее место хоста");
 }
 
@@ -454,8 +454,8 @@ describe("office devices", () => {
   it("marks this PC's row in words and asks more before this PC revokes itself", async () => {
     const session = adminSession();
     session.api.revokeDevice.mockResolvedValue({ ...HOST_PC, revokedAt: "2026-09-28T10:00:00Z" });
-    renderOffice(session, { deviceId: HOST_PC.id });
-    fireEvent.click(await screen.findByRole("link", { name: "Устройства" }));
+    renderOffice(session, { deviceId: HOST_PC.id, initialPath: "/devices" });
+    await screen.findByRole("link", { name: "Устройства" });
     await screen.findByText("Рабочее место хоста");
     expect(within(rowOf("Рабочее место хоста")).getByText("Этот ПК")).toBeTruthy();
     expect(screen.getAllByText("Этот ПК")).toHaveLength(1);

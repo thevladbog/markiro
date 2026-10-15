@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -21,10 +21,15 @@ function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
+/** The sign-in as the app shows it: its theme switcher needs the theme provider. */
+function renderLogin(ui: ReactElement) {
+  return render(<ThemeProvider defaultTheme="dark">{ui}</ThemeProvider>);
+}
+
 describe("OfficeLogin", () => {
   it("signs in with the trimmed login", async () => {
     const onLogin = vi.fn().mockResolvedValue(undefined);
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     type("Логин", " admin ");
     type("Пароль", "correct horse battery");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -35,7 +40,7 @@ describe("OfficeLogin", () => {
 
   it("asks for both fields before calling the host", async () => {
     const onLogin = vi.fn();
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
     expect(await screen.findAllByText("Заполните поле")).toHaveLength(2);
     expect(onLogin).not.toHaveBeenCalled();
@@ -45,7 +50,7 @@ describe("OfficeLogin", () => {
     // An unpaired surrogate cannot cross the IPC: the call would fail as a
     // lost connection, so the form names the field instead.
     const onLogin = vi.fn();
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     type("Логин", "admin\ud800");
     type("Пароль", "correct horse battery\udc00");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -78,7 +83,7 @@ describe("OfficeLogin", () => {
       "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
     ],
   ])("explains a failed sign-in (%#)", async (error, text) => {
-    render(
+    renderLogin(
       <OfficeLogin notice={null} onLogin={vi.fn().mockRejectedValue(error)} onBack={vi.fn()} />,
     );
     type("Логин", "admin");
@@ -89,14 +94,14 @@ describe("OfficeLogin", () => {
 
   it("says why the session ended and goes back to the floor", () => {
     const onBack = vi.fn();
-    render(<OfficeLogin notice="session_ended" onLogin={vi.fn()} onBack={onBack} />);
+    renderLogin(<OfficeLogin notice="session_ended" onLogin={vi.fn()} onBack={onBack} />);
     expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "В цех" }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("says the host was already set up when the wizard found it initialized", () => {
-    render(<OfficeLogin notice="already_initialized" onLogin={vi.fn()} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice="already_initialized" onLogin={vi.fn()} onBack={vi.fn()} />);
     expect(screen.getByText("Хост уже настроен. Войдите в офис.")).toBeTruthy();
   });
 });
@@ -112,6 +117,8 @@ describe("Office", () => {
     expect(await screen.findByText("Ирина Смирнова")).toBeTruthy();
     expect(screen.getByText("администратор")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Обзор" })).toBeTruthy();
+    expect(screen.getByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(screen.getByText("Роль: администратор.")).toBeTruthy();
   });
 
   it("names the technologist role", async () => {

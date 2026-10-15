@@ -47,6 +47,10 @@ export function OfficeOverview() {
           </>
         }
       />
+      <div className="office-note overview-who">
+        <span>{t("office.overview.greeting", { name: user.name })}</span>
+        <span>{t("office.overview.role", { role: t(`office.roles.${user.role}`) })}</span>
+      </div>
       <OverviewBackups />
       <div className="overview-grid">
         <ShiftsCards />

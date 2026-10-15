@@ -25,6 +25,9 @@ describe("where the office saves its files (plan ЧЗ)", () => {
       save: () => Promise.reject(new Error("not here")),
       open: () => Promise.resolve(),
       openFile: () => Promise.resolve(),
+      pickFolder: () => Promise.resolve(null),
+      getExportsFolder: () => Promise.resolve({ path: null, default: null }),
+      setExportsFolder: (path) => Promise.resolve({ path, default: null }),
     };
     let seen: OfficeFilesApi | null = null;
     render(

@@ -80,8 +80,7 @@ async function openCard(
   print: PrintForm,
   files: FakeOfficeFiles,
 ): Promise<void> {
-  renderOffice(session, { printForm: print, files });
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  renderOffice(session, { printForm: print, files, initialPath: "/shifts" });
   fireEvent.click(await screen.findByRole("link", { name: `Карточка смены ${shift.number}` }));
   await screen.findByRole("heading", { name: `Смена ${shift.number}` });
 }
@@ -1045,8 +1044,7 @@ describe("the rest of the dialog's guards (plan О-Ф)", () => {
     });
     try {
       const session = formSession(SHIFT);
-      renderOffice(session, { files: fakeOfficeFiles() });
-      fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+      renderOffice(session, { files: fakeOfficeFiles(), initialPath: "/shifts" });
       fireEvent.click(await screen.findByRole("link", { name: `Карточка смены ${SHIFT.number}` }));
       fireEvent.click(await formButton(BOX_FORM));
       const dialog = await readyDialog(BOX_FORM);
