@@ -18,6 +18,7 @@ import {
   type SyncState,
 } from "../app/shell.js";
 import type {
+  DeviceLicense,
   WarehouseLookup,
   WarehouseLookupResult,
   PalletSheets,
@@ -101,6 +102,8 @@ export interface FloorAppProps {
    * the link is stopped, and the work screen asks the host nothing.
    */
   rejectionPending: boolean;
+  /** The site's license as the station last heard it (`useStationLicense`, plan ЛЦ-3). */
+  license?: DeviceLicense | null;
   /** `HostApi.enterShift`. */
   enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   /** `HostApi.createDeviceShift`. */
@@ -165,6 +168,7 @@ export function FloorApp({
   outboxVersion = 0,
   lineChangePending,
   rejectionPending,
+  license = null,
   enter,
   create,
   checkCode,
@@ -528,6 +532,7 @@ export function FloorApp({
         onEntered={entered}
         onHostError={hostError}
         onBack={() => setView({ kind: "list" })}
+        license={license}
       />
     );
   }
@@ -547,6 +552,7 @@ export function FloorApp({
       onEntered={entered}
       onHostError={hostError}
       onNew={() => setView({ kind: "new_shift" })}
+      license={license}
       onSetup={() => setView({ kind: "setup", back: null })}
       onQueue={() => setView({ kind: "queue" })}
       {...(warehouseLookup === undefined

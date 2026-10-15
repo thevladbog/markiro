@@ -994,6 +994,7 @@ export function App({
                 outboxVersion={state.outboxVersion}
                 lineChangePending={state.pendingDevice !== null}
                 rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
+                license={stationLicense}
                 enter={hostApi.enterShift}
                 create={hostApi.createDeviceShift}
                 checkCode={hostApi.checkCode}

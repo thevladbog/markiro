@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { shellActionFor } from "../../app/shell.js";
 import { HostError } from "../../host/client.js";
+import { licenseRefusalOf, type LicenseRefusal } from "../license.js";
 import type { DeviceShift, DeviceShiftCreate } from "../../host/protocol.js";
 import { deviceShiftCreate, type DeviceShiftInput } from "../../host/requests.js";
 import type {
@@ -253,7 +254,12 @@ export type CreateRefusal =
   | "duplicate_template"
   | "invalid"
   | "no_line"
-  | "failed";
+  | "failed"
+  /** The site's license opens no new shift (plan ЛЦ-3), by the state the host names. */
+  | LicenseRefusal
+  /** The license lacks pallets, or another feature (`feature_disabled`, spec §4.7). */
+  | "feature_pallets"
+  | "feature_disabled";
 
 export type CreateResult =
   | { kind: "created"; shift: DeviceShift }
@@ -291,6 +297,15 @@ export async function createStationShift(
       const constraint = error.details["constraint"];
       if (constraint === "product_inactive") return { kind: "refused", reason: "product_inactive" };
       if (constraint === "shift_line") return { kind: "refused", reason: "no_line" };
+      if (constraint === "license_restricted") {
+        return { kind: "refused", reason: licenseRefusalOf(error.details) };
+      }
+      if (constraint === "feature_disabled") {
+        return {
+          kind: "refused",
+          reason: error.details["feature"] === "pallets" ? "feature_pallets" : "feature_disabled",
+        };
+      }
       return { kind: "refused", reason: "failed" };
     }
     if (error.code === "validation_failed") {

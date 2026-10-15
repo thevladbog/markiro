@@ -4843,17 +4843,18 @@ describe("the site's license on the station (plan ЛЦ-3)", () => {
     );
     const host = fakeHost();
     renderApp({ probe: probeAnswering(true), device, host });
-    expect(await screen.findByText("Вход оператора")).toBeTruthy();
-    // The link is online and the copies are read: a read of the license
-    // would have gone right after them.
-    await waitFor(() => expect(host.getChanges).toHaveBeenCalled());
+    // The app shows nothing but its loading until the shell has said the role
+    // (start by role): the license is not asked in the meantime.
+    await waitFor(() => expect(device.installRole).toHaveBeenCalled());
     await act(async () => {
       await new Promise((settle) => setTimeout(settle, 50));
     });
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(host.getDevice).not.toHaveBeenCalled();
     await act(async () => {
       sayRole("station");
     });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(host.getDevice).toHaveBeenCalled());
   });
 });

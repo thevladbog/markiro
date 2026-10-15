@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Pager } from "@markiro/ui";
 
-import type { EnteredShift, ShiftEnter } from "../../host/protocol.js";
+import type { DeviceLicense, EnteredShift, ShiftEnter } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { readRefusedCloses } from "../close/shift-close.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
+import { opensBlocked } from "../license.js";
 import { cardAction, ShiftCard } from "./ShiftCard.js";
 
 export interface ShiftListProps {
@@ -38,6 +39,8 @@ export interface ShiftListProps {
   onWarehouse?: () => void;
   /** The queue of what was not sent (plan ОЧ); none — no button. */
   onQueue?: () => void;
+  /** The site's license as the station last heard it (plan ЛЦ-3); `null` — nothing known. */
+  license?: DeviceLicense | null;
 }
 
 /** Two large cards stay legible on the 1280×800 line terminal, as on the cloud station. */
@@ -79,8 +82,10 @@ export function ShiftList({
   onSetup,
   onWarehouse,
   onQueue,
+  license = null,
 }: ShiftListProps) {
   const { t } = useTranslation();
+  const blocked = opensBlocked(license);
   const { hostId, deviceId } = pairing;
   const [copies, setCopies] = useState<Copies>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -222,7 +227,7 @@ export function ShiftList({
                 ? { code: copies.refused.get(copy.id) ?? null }
                 : null
             }
-            action={cardAction(copy, deviceId, online)}
+            action={cardAction(copy, deviceId, online, blocked)}
             busy={busy}
             onAction={() => void choose(copy)}
           />
@@ -255,10 +260,18 @@ export function ShiftList({
       actions={
         <FloorFooter ariaLabel={t("floor.shifts.actions")}>
           <div className="shift-hub__primary">
-            <Button size="floor" disabled={busy || !online} onClick={onNew}>
-              {t("floor.shifts.new")}
-            </Button>
-            {!online && <p className="shift-hub__hint">{t("floor.shifts.newNeedsLink")}</p>}
+            {blocked === null && (
+              <Button size="floor" disabled={busy || !online} onClick={onNew}>
+                {t("floor.shifts.new")}
+              </Button>
+            )}
+            {blocked !== null && (
+              // In place of «Новая смена» (spec §9.6), from the license the station last heard.
+              <p className="shift-hub__hint">{t(`floor.shifts.refused.${blocked}`)}</p>
+            )}
+            {blocked === null && !online && (
+              <p className="shift-hub__hint">{t("floor.shifts.newNeedsLink")}</p>
+            )}
           </div>
           <div className="shift-selection__secondary-actions">
             {onSetup !== undefined && (
