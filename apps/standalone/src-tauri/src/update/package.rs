@@ -191,6 +191,7 @@ impl Manifest {
             version: &self.version,
             min_upgrade_from: &self.min_upgrade_from,
             protocol: self.manifest.protocol,
+            from_host: false,
         }
     }
 }

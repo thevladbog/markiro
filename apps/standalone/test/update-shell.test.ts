@@ -98,6 +98,14 @@ describe("the update commands of the shell", () => {
     ).rejects.toThrow();
   });
 
+  it("read the refusal of a package from the host whose host runs another version", async () => {
+    const refused = {
+      ...REPORT,
+      refusal: { code: "host_differs", hostVersion: "0.2.9" },
+    };
+    expect(await createTauriUpdateShell(async () => refused).verify(PATH)).toEqual(refused);
+  });
+
   it("turn a bare code into its error, and anything else into unsupported", async () => {
     for (const [rejection, code] of [
       ["uac_cancelled", "uac_cancelled"],

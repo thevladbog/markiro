@@ -69,6 +69,8 @@ export function refusalText(t: TFunction, report: VerifiedReport): string | null
         protocol: refusal.protocol,
         host: refusal.hostProtocol,
       });
+    case "host_differs":
+      return t("office.about.update.refusal.host_differs", { host: refusal.hostVersion });
   }
 }
 

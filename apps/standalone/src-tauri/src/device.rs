@@ -33,6 +33,10 @@ const DEVICE_ROUTE: &str = "/v1/device";
 /// `update_fetch` reads, straight to the disk; never through IPC.
 const INSTALLER_ROUTE: &str = "/v1/device/update/installer";
 
+/// The upload of an update package (plan ОБН-3): only `update_stage` sends
+/// it, the installer streamed from the disk; never through IPC.
+const UPDATE_PACKAGE_PREFIX: &str = "/v1/office/update-package/";
+
 /// The bounds of `host_request`'s `timeoutMs` (stage 2a spec §5.2). A caller
 /// may ask for a shorter answer than the client's 10 s (the scan pipeline's
 /// 300 ms code check), never for a longer one.
@@ -673,7 +677,7 @@ fn webview_may_reach(path: &str) -> bool {
     device_route
         || route == "/v1/bootstrap"
         || route == "/v1/changes"
-        || route.starts_with("/v1/office/")
+        || (route.starts_with("/v1/office/") && !route.starts_with(UPDATE_PACKAGE_PREFIX))
 }
 
 /// The address of a host as it is kept in `device.json`: `https://host[:port]`
@@ -784,8 +788,9 @@ mod tests {
             "/v1/office/me",
             "/v1/office/logout",
             "/v1/office/sscc/counters/460068200/0?since=1",
-            // The offer is small JSON (plan ОБН-3).
+            // The offer and the office's table are small JSON (plan ОБН-3).
             "/v1/device/update",
+            "/v1/office/update-status",
         ] {
             assert!(webview_may_reach(route), "{route}");
         }
@@ -803,6 +808,9 @@ mod tests {
             // Tens of MB never cross IPC: only `update_fetch` reads it (plan ОБН-3).
             "/v1/device/update/installer",
             "/v1/device/update/installer?x=1",
+            // The upload goes through `update_stage` only.
+            "/v1/office/update-package/manifest",
+            "/v1/office/update-package/6b1f2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b/installer",
         ] {
             assert!(!webview_may_reach(route), "{route}");
         }

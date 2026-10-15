@@ -329,6 +329,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         external_link::open_external_link,
         update::fetch::update_fetch,
         update::fetch::update_check_manifest,
+        update::stage::update_stage,
         update::update_scan,
         update::update_verify,
         update::update_install,

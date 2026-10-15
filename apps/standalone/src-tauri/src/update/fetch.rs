@@ -478,6 +478,22 @@ pub fn update_check_manifest(manifest: String) -> Result<ManifestView, String> {
         .map_err(|error| error.code().to_owned())
 }
 
+/// Whether `path` is the manifest of a package this app downloaded:
+/// `<downloads>/<version>/markiro-standalone-<version>.update.jws` and
+/// nothing else (`update_install` takes such a path besides the found ones).
+pub fn downloaded_manifest(downloads: &Path, path: &Path) -> bool {
+    let (Some(folder), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
+    else {
+        return false;
+    };
+    let Some(version) = folder.file_name().and_then(|v| v.to_str()) else {
+        return false;
+    };
+    folder.parent() == Some(downloads)
+        && version.parse::<AppVersion>().is_ok()
+        && name == format!("markiro-standalone-{version}.update.jws")
+}
+
 #[cfg(test)]
 mod tests {
     use markiro_proto::update::distribution::testing::sign_update_manifest;
@@ -501,6 +517,31 @@ mod tests {
 
     fn read(text: &str) -> UpdateManifestV1 {
         read_manifest(text, &trust::update_keyset()).unwrap()
+    }
+
+    #[test]
+    fn only_a_manifest_this_app_downloaded_counts_as_one() {
+        let downloads = std::path::Path::new("/data/updates");
+        assert!(downloaded_manifest(
+            downloads,
+            &downloads
+                .join("0.3.0")
+                .join("markiro-standalone-0.3.0.update.jws")
+        ));
+        for path in [
+            downloads.join("markiro-standalone-0.3.0.update.jws"),
+            downloads
+                .join("0.3.0")
+                .join("markiro-standalone-0.4.0.update.jws"),
+            downloads.join("x").join("markiro-standalone-x.update.jws"),
+            downloads
+                .join("0.3.0")
+                .join("..")
+                .join("markiro-standalone-0.3.0.update.jws"),
+            std::path::PathBuf::from("/elsewhere/0.3.0/markiro-standalone-0.3.0.update.jws"),
+        ] {
+            assert!(!downloaded_manifest(downloads, &path), "{}", path.display());
+        }
     }
 
     #[test]

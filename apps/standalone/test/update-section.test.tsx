@@ -313,6 +313,25 @@ describe("«Обновление»", () => {
     );
   });
 
+  it("says that the host runs another version than a package from the host", async () => {
+    renderUpdate({
+      shell: fakeShell({
+        verify: vi.fn<UpdateShell["verify"]>(async () => ({
+          ...REPORT,
+          refusal: { code: "host_differs", hostVersion: "0.2.9" },
+        })),
+      }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: CHECK }));
+    await screen.findByText(
+      "Хост работает на версии 0.2.9, а пакет — другой: установка отменена. Проверьте хост.",
+    );
+    expect(screen.getByRole("button", { name: "Установить обновление" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
   it("passes a confirmed reinstall on, and says so when Windows refused the rights", async () => {
     const shell = fakeShell({
       verify: vi.fn<UpdateShell["verify"]>(async () => ({

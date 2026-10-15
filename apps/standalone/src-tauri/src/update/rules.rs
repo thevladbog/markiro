@@ -37,6 +37,12 @@ pub enum Refusal {
         host_protocol: u32,
         protocol: u32,
     },
+    /// A package downloaded from the host while the host runs another
+    /// version: it was rolled back, or its package changed (plan ОБН-3, §10.11.4).
+    HostDiffers {
+        #[serde(rename = "hostVersion")]
+        host_version: String,
+    },
 }
 
 /// A warning a person confirms before the install (the webview sends its code back).
@@ -77,6 +83,9 @@ pub struct Offered<'a> {
     pub version: &'a AppVersion,
     pub min_upgrade_from: &'a AppVersion,
     pub protocol: u32,
+    /// Downloaded from the host (plan ОБН-3): the host must run exactly
+    /// this version.
+    pub from_host: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +119,14 @@ pub fn decide(offered: Offered<'_>, installed: &AppVersion, host: &HostCheck) ->
             HostCheck::Silent => {
                 confirmations.push(Confirmation::HostUnreachable);
                 None
+            }
+            HostCheck::Seen(seen)
+                if offered.from_host
+                    && seen.version.as_deref() != Some(offered.version.to_string().as_str()) =>
+            {
+                Some(Refusal::HostDiffers {
+                    host_version: seen.version.clone().unwrap_or_default(),
+                })
             }
             HostCheck::Seen(seen) if offered.protocol > seen.protocol => Some(Refusal::HostFirst {
                 host_protocol: seen.protocol,
@@ -148,6 +165,7 @@ mod tests {
             version,
             min_upgrade_from: min,
             protocol,
+            from_host: false,
         }
     }
 
@@ -254,6 +272,56 @@ mod tests {
             )
             .refusal,
             None
+        );
+    }
+
+    #[test]
+    fn a_package_from_the_host_needs_the_host_on_its_very_version() {
+        let version = v("0.3.0");
+        let floor = v("0.2.0");
+        let offered = Offered {
+            version: &version,
+            min_upgrade_from: &floor,
+            protocol: 3,
+            from_host: true,
+        };
+        let host = |version: &str| {
+            HostCheck::Seen(HostVersions {
+                version: Some(version.into()),
+                protocol: 3,
+                min_protocol: 1,
+            })
+        };
+        assert_eq!(decide(offered, &v("0.2.1"), &host("0.3.0")).refusal, None);
+        assert_eq!(
+            decide(offered, &v("0.2.1"), &host("0.2.9")).refusal,
+            Some(Refusal::HostDiffers {
+                host_version: "0.2.9".into()
+            })
+        );
+        assert_eq!(
+            decide(offered, &v("0.2.1"), &host("0.4.0")).refusal,
+            Some(Refusal::HostDiffers {
+                host_version: "0.4.0".into()
+            })
+        );
+        // A silent host asks for the same confirmation as for a file (ЛО12).
+        assert_eq!(
+            decide(offered, &v("0.2.1"), &HostCheck::Silent).confirmations,
+            vec![Confirmation::HostUnreachable]
+        );
+        // A package from a file keeps plan ОБН-2's rule: the protocol, not the version.
+        let from_file = Offered {
+            from_host: false,
+            ..offered
+        };
+        assert_eq!(decide(from_file, &v("0.2.1"), &host("0.2.9")).refusal, None);
+        assert_eq!(
+            serde_json::to_value(Refusal::HostDiffers {
+                host_version: "0.2.9".into()
+            })
+            .unwrap(),
+            json!({ "code": "host_differs", "hostVersion": "0.2.9" })
         );
     }
 

@@ -78,6 +78,15 @@ impl Host {
     }
 }
 
+/// The update state of the plain mock app starts nothing.
+struct NeverLaunches;
+
+impl Launcher for NeverLaunches {
+    fn launch(&self, _: &std::path::Path, _: &str, _: usize) -> Result<(), LaunchError> {
+        panic!("these tests start nothing")
+    }
+}
+
 /// The app's own command list on the mock runtime, with the shell's states
 /// managed. The `App` is returned too: it must outlive the webview.
 fn mock_app_with(
@@ -92,6 +101,15 @@ fn mock_app_with(
         .manage(markiro_standalone_lib::update::fetch::DownloadsDir(
             std::env::temp_dir().join("markiro-ipc-updates"),
         ))
+        .manage(UpdateState::load(UpdateConfig {
+            installed: "0.1.0".to_owned(),
+            data_dir: std::env::temp_dir().join("markiro-ipc-update-state"),
+            documents: None,
+            drives: std::sync::Arc::new(FixedDrives(Vec::new())),
+            launcher: std::sync::Arc::new(NeverLaunches),
+            keyset: markiro_proto::trust::update_keyset(),
+            exit: std::sync::Arc::new(|_: i32| panic!("these tests never exit")),
+        }))
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -209,6 +227,28 @@ fn an_unpaired_device_reports_null_and_refuses_host_requests() {
             "notes": ["Тест"], "minUpgradeFrom": "0.2.0", "protocol": 4, "minProtocol": 3,
             "sizeBytes": 22
         }))
+    );
+    // Only a manifest `update_scan` found goes to the host (plan ОБН-2's list).
+    assert_eq!(
+        invoke(
+            &webview,
+            "update_stage",
+            json!({ "manifestPath": "/elsewhere/markiro-standalone-0.3.0.update.jws", "officeToken": "t" })
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "host_request",
+            request(
+                "POST",
+                "/v1/office/update-package/manifest",
+                json!({ "manifest": "x" }),
+                Some("t")
+            )
+        ),
+        Err(json!("invalid_request"))
     );
 }
 
