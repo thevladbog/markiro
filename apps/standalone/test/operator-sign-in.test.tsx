@@ -1428,44 +1428,66 @@ describe("the scanner's state on the welcome screen", () => {
     };
   }
 
-  function chip() {
+  function warning() {
     return screen.getByTestId("scanner-state");
   }
 
-  it("says the scanner is ready with only the keyboard wedge", async () => {
-    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+  it("says nothing of a scanner that is ready: its state is in the header's rail", async () => {
+    const local = await synced([SITE, OPERATOR]);
+    const view = renderSignIn({ local });
     await screen.findByText(BADGE_PROMPT);
-    expect(chip().textContent).toContain("Сканер штрихкодов готов");
-    expect(chip().getAttribute("data-tone")).toBe("ok");
+    expect(screen.queryByTestId("scanner-state")).toBeNull();
+    expect(screen.queryByText("Сканер штрихкодов готов")).toBeNull();
+    view.unmount();
+    renderSignIn({ local, watchScanners: watching("connected") });
+    await screen.findByText(BADGE_PROMPT);
+    expect(screen.queryByTestId("scanner-state")).toBeNull();
   });
 
-  it("follows the COM scanners the shell reports", async () => {
+  it("warns quietly, with the way to the settings, when no scanner answers", async () => {
+    const onScannerSettings = vi.fn();
     const local = await synced([SITE, OPERATOR]);
-    const view = renderSignIn({ local, watchScanners: watching("connected") });
+    render(
+      <ThemeProvider>
+        <OperatorSignIn
+          local={local}
+          pairing={PAIRING}
+          lineId={null}
+          sync={SYNCED}
+          notice={null}
+          source={createKeyboardWedgeSource(window)}
+          now={CLOCK}
+          onSignedIn={vi.fn()}
+          onSync={vi.fn()}
+          onOffice={vi.fn()}
+          watchScanners={watching("disconnected")}
+          onScannerSettings={onScannerSettings}
+        />
+      </ThemeProvider>,
+    );
     await screen.findByText(BADGE_PROMPT);
-    expect(chip().textContent).toContain("Сканер штрихкодов готов");
-    view.unmount();
-
-    renderSignIn({ local, watchScanners: watching("disconnected") });
-    await screen.findByText(BADGE_PROMPT);
-    await waitFor(() => expect(chip().getAttribute("data-tone")).toBe("error"));
-    expect(chip().textContent).toContain("Сканер не на связи");
+    await waitFor(() => expect(warning().getAttribute("data-tone")).toBe("error"));
+    expect(warning().textContent).toContain("Сканер не на связи");
+    fireEvent.click(screen.getByRole("button", { name: "Настройки сканера" }));
+    expect(onScannerSettings).toHaveBeenCalledTimes(1);
   });
 
   it("warns when only a part of the scanners answers, and when the shell cannot say", async () => {
     const local = await synced([SITE, OPERATOR]);
     const view = renderSignIn({ local, watchScanners: watching("connected", "disconnected") });
     await screen.findByText(BADGE_PROMPT);
-    await waitFor(() => expect(chip().textContent).toContain("Часть сканеров недоступна"));
-    expect(chip().getAttribute("data-tone")).toBe("warn");
+    await waitFor(() => expect(warning().textContent).toContain("Часть сканеров недоступна"));
+    expect(warning().getAttribute("data-tone")).toBe("warn");
+    // Without a way to the settings the warning has no button.
+    expect(screen.queryByRole("button", { name: "Настройки сканера" })).toBeNull();
     view.unmount();
 
     renderSignIn({ local, watchScanners: () => Promise.reject(new Error("no shell")) });
     await screen.findByText(BADGE_PROMPT);
-    await waitFor(() => expect(chip().textContent).toContain("Состояние сканера неизвестно"));
+    await waitFor(() => expect(warning().textContent).toContain("Состояние сканера неизвестно"));
   });
 
-  it("says the sign-in is paused while the station is locked out, and still takes the scan's answer", async () => {
+  it("leaves a station lockout to its message: no scanner warning for it", async () => {
     const local = await synced([SITE, OPERATOR, BADGE]);
     await local.transaction([
       {
@@ -1477,14 +1499,13 @@ describe("the scanner's state on the welcome screen", () => {
     ]);
     renderSignIn({ local });
     await screen.findByText(BADGE_PROMPT);
-    expect(chip().getAttribute("data-tone")).toBe("ok");
+    expect(screen.queryByTestId("scanner-state")).toBeNull();
     act(() => scan("MRK-000742"));
     expect(
       await screen.findByText(
         "Слишком много неудачных попыток. Вход на этой станции приостановлен на 1 мин.",
       ),
     ).toBeTruthy();
-    expect(chip().textContent).toContain("Вход приостановлен");
-    expect(chip().getAttribute("data-tone")).toBe("error");
+    expect(screen.queryByTestId("scanner-state")).toBeNull();
   });
 });

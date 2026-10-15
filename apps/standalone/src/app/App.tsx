@@ -623,7 +623,9 @@ export function App({
 
   const session = view.kind === "office" ? view.session : null;
   // The scanner settings belong to the pairing screen: leaving it closes them.
-  if (scannerSetup && view.kind !== "network_pairing") setScannerSetup(false);
+  if (scannerSetup && view.kind !== "network_pairing" && view.kind !== "floor") {
+    setScannerSetup(false);
+  }
 
   // An office PC (the installer's role «только офис») has no floor and is
   // never locked (plan УСТ, owner question П11). The role is the shell's; a
@@ -927,7 +929,18 @@ export function App({
             tools={floorTools}
             {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
           />
-          {view.kind === "floor" ? (
+          {view.kind === "floor" && scannerSetup ? (
+            // The scanner's settings from the sign-in's warning (beta 3.2): as before the pairing.
+            <WorkstationSetup
+              scope="scanners"
+              local={localDb}
+              hardware={hardwareApi}
+              printing={printing}
+              source={scanner}
+              onSaved={() => undefined}
+              onBack={() => setScannerSetup(false)}
+            />
+          ) : view.kind === "floor" ? (
             <OperatorSignIn
               // A number or PIN typed under another pairing or line is not kept.
               key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
@@ -941,6 +954,7 @@ export function App({
               onSync={signInSync.request}
               onOffice={() => dispatch({ type: "office_requested" })}
               watchScanners={hardwareApi.watchScanners}
+              onScannerSettings={() => setScannerSetup(true)}
             />
           ) : (
             <UnpairContext.Provider value={unpairApi}>
