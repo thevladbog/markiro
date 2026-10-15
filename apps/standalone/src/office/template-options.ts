@@ -10,6 +10,20 @@ export interface TemplateOption {
 }
 
 /**
+ * The templates that fit one slot for the category (`templateFitsSlot`), by
+ * name, then by id (`byNameThenId`); none while the list is not loaded.
+ */
+export function fittingTemplates(
+  templates: readonly LabelTemplateSummary[] | undefined,
+  purpose: TemplatePurpose,
+  group: number | null,
+): LabelTemplateSummary[] {
+  return (templates ?? [])
+    .filter((template) => templateFitsSlot(template, { purpose, chzProductGroupCode: group }))
+    .sort(byNameThenId);
+}
+
+/**
  * The choices of a template for one slot: none (`""`), then every template
  * that fits the slot for the category (`templateFitsSlot`: enabled, of the
  * slot's purpose, covering the category; `null` is a product without a group
@@ -26,9 +40,7 @@ export function templateOptions(
   kept: readonly string[],
   t: TFunction,
 ): TemplateOption[] {
-  const fitting = (templates ?? [])
-    .filter((template) => templateFitsSlot(template, { purpose, chzProductGroupCode: group }))
-    .sort(byNameThenId);
+  const fitting = fittingTemplates(templates, purpose, group);
   const options: TemplateOption[] = [
     { value: "", label: t("office.templateChoice.none") },
     ...fitting.map((template) => ({ value: template.id, label: template.name })),

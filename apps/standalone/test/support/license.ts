@@ -54,6 +54,7 @@ export const ACTIVE_LICENSE: OfficeLicense = {
     inventory: false,
     commerceMl: false,
     handheld: true,
+    customLogo: true,
   },
   emergency: { available: false, until: null },
 };

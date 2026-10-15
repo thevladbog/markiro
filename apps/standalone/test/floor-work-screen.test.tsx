@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { buildSscc } from "@markiro/domain";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider, type SignalTone } from "@markiro/ui";
@@ -257,7 +257,10 @@ describe("the work screen of a shift", () => {
     await screenWork.scan(km("A2"));
     expect(shown("Открытый короб")).toBe("2 из 12");
     expect(shown("Принято в смене")).toBe("2");
-    expect(shown("План")).toBe("1\u00a0200");
+    // The plan is in the shift band at the top alone: the lower «Итоги смены» had a second
+    // row of it (owner's decision of beta 3.2), and the scan history stands there.
+    expect(screen.queryByText("План")).toBeNull();
+    expect(document.querySelector(".work-shift-band__planned")?.textContent).toBe("/ 1\u00a0200");
     expect(lastLine()).toBe("Принято: в коробе 2 из 12.");
     expect(screenWork.props.signal).toHaveBeenCalledTimes(2);
     expect(screenWork.props.signal).toHaveBeenLastCalledWith("ok");
@@ -574,6 +577,14 @@ describe("the work screen of a shift", () => {
     expect(screen.queryByText(/План выполнен/)).toBeNull();
     await screenWork.scan(km("L2"));
     heardOnce("План выполнен: принято 2 из 2.");
+    // An aggregation shift's card only lets the work go on: its close is the footer's alone.
+    const reached = screen.getByText("План выполнен: принято 2 из 2.").closest(".work-overlay");
+    if (!(reached instanceof HTMLElement)) throw new Error("the plan's card is not on the screen");
+    expect(
+      within(reached)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Продолжить"]);
     fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
     await screenWork.scan(km("L3"));
     expect(screen.queryByText(/План выполнен/)).toBeNull();
@@ -1261,8 +1272,8 @@ describe("the work screen's obligations to the floor", () => {
     }
     // «Продолжить заполнять», «Закрыть короб», «Исключения», «Закрыть смену» (plan 2a8), «Выйти из
     // смены», and the open box's own «Снять последний код» and «Очистить короб» (the cloud's box
-    // instrument, owner's decision of 2026-10-13).
-    expect(screen.getAllByRole("button")).toHaveLength(7);
+    // instrument, owner's decision of 2026-10-13), and «Вся история» of the scan history (beta 3.2).
+    expect(screen.getAllByRole("button")).toHaveLength(8);
   });
 
   it("writes nothing to the console, whatever the scan was", async () => {

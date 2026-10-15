@@ -1,10 +1,11 @@
 //! `scan` facts: the journal of every scan of the work screen. An accepted
-//! scan (`ok`) opens its box when the host does not know it yet, and claims
-//! its code in the registry (`registry::claim`); the others are journal
-//! rows only. An `invalid` scan keeps no text, only its length and what it
+//! scan (`ok`) of an aggregation shift opens its box when the host does not
+//! know it yet; one of a validation shift (plan РЕЖ) has no box. Either
+//! claims its code in the registry (`registry::claim`); the others are
+//! journal rows only. An `invalid` scan keeps no text, only its length and what it
 //! looked like.
 
-use markiro_proto::{receipt_codes, ScanFact, ScanRawKind, ScanVerdict};
+use markiro_proto::{receipt_codes, ScanFact, ScanRawKind, ScanVerdict, ShiftMode};
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
@@ -20,11 +21,12 @@ pub const MAX_SERIAL_BYTES: usize = 64;
 /// The longest canonical code the host keeps, in bytes of UTF-8.
 pub const MAX_CANONICAL_BYTES: usize = 1024;
 
-/// The fields of a scan agree with its verdict: an `invalid` scan has no
-/// code and looked like no code, a `duplicate` names who found it, an `ok`
-/// one names its box; and the code, when there is one, has the shape the
-/// domain gives it.
-fn check(scan: &ScanFact) -> Result<(), Reject> {
+/// The fields of a scan agree with its verdict and its shift's mode: an
+/// `invalid` scan has no code and looked like no code, a `duplicate` names
+/// who found it, an `ok` one names its box in an aggregation shift and none
+/// in a validation shift (no other scan names a box); and the code, when
+/// there is one, has the shape the domain gives it.
+fn check(scan: &ScanFact, mode: ShiftMode) -> Result<(), Reject> {
     let invalid = scan.verdict == ScanVerdict::Invalid;
     if rules::device_instant(&scan.scanned_at).is_none() {
         return Err(Reject::field("data.scannedAt"));
@@ -38,13 +40,14 @@ fn check(scan: &ScanFact) -> Result<(), Reject> {
     if (scan.verdict == ScanVerdict::Duplicate) != scan.duplicate_source.is_some() {
         return Err(Reject::field("data.duplicateSource"));
     }
+    let boxed = scan.verdict == ScanVerdict::Ok && mode == ShiftMode::Aggregation;
     match &scan.box_id {
-        Some(box_id) if scan.verdict == ScanVerdict::Ok => {
+        Some(box_id) if boxed => {
             if validate::client_uuid("data.boxId", box_id).is_err() {
                 return Err(Reject::field("data.boxId"));
             }
         }
-        None if scan.verdict != ScanVerdict::Ok => {}
+        None if !boxed => {}
         _ => return Err(Reject::field("data.boxId")),
     }
     if let Some(code) = &scan.code {
@@ -68,39 +71,54 @@ fn check(scan: &ScanFact) -> Result<(), Reject> {
     Ok(())
 }
 
+/// The box an accepted scan of an aggregation shift goes into: an open box
+/// of this device and shift, else a new one opened at the scan;
+/// `box_closed` when it is closed already.
+async fn open_box(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    box_id: &str,
+    scanned_at: &str,
+) -> Result<(), Failure> {
+    match boxes::find(&mut *conn, context, box_id).await? {
+        Some(found) if found.closed_at.is_some() => {
+            Err(Reject::new(receipt_codes::BOX_CLOSED).into())
+        }
+        Some(_) => Ok(()),
+        None => {
+            sqlx::query(
+                "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) \
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(box_id)
+            .bind(&context.shift.id)
+            .bind(context.device_id)
+            .bind(scanned_at)
+            .bind(context.received_at)
+            .execute(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            Ok(())
+        }
+    }
+}
+
 pub async fn apply(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
     data: &Value,
 ) -> Result<Applied, Failure> {
     let scan: ScanFact = serde_json::from_value(data.clone()).map_err(|_| Reject::field("data"))?;
-    check(&scan)?;
-    let accepted = match (&scan.code, &scan.box_id) {
-        (Some(code), Some(box_id)) if scan.verdict == ScanVerdict::Ok => {
+    check(&scan, context.shift.mode)?;
+    let accepted = match &scan.code {
+        Some(code) if scan.verdict == ScanVerdict::Ok => {
             if code.gtin14 != context.shift.gtin14 {
                 return Err(Reject::new(receipt_codes::GTIN_MISMATCH).into());
             }
-            match boxes::find(&mut *conn, context, box_id).await? {
-                Some(found) if found.closed_at.is_some() => {
-                    return Err(Reject::new(receipt_codes::BOX_CLOSED).into());
-                }
-                Some(_) => {}
-                None => {
-                    sqlx::query(
-                        "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) \
-                         VALUES (?, ?, ?, ?, ?)",
-                    )
-                    .bind(box_id)
-                    .bind(&context.shift.id)
-                    .bind(context.device_id)
-                    .bind(&scan.scanned_at)
-                    .bind(context.received_at)
-                    .execute(&mut *conn)
-                    .await
-                    .map_err(ApiError::internal)?;
-                }
+            if let Some(box_id) = &scan.box_id {
+                open_box(&mut *conn, context, box_id, &scan.scanned_at).await?;
             }
-            Some((code, box_id))
+            Some((code, scan.box_id.as_deref()))
         }
         _ => None,
     };

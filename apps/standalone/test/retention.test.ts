@@ -9,6 +9,8 @@ import { boxLabelStep, readPrintJob, sendLabelJob } from "../src/floor/print/pri
 import { closeOpenBox } from "../src/floor/work/box-close.js";
 import { processScan } from "../src/floor/work/scan-pipeline.js";
 import type { EnteredShift } from "../src/host/protocol.js";
+import { readQueue } from "../src/floor/queue/outbox-recovery.js";
+import { readConflictNotices } from "../src/local/conflict-notices.js";
 import { LocalDbError } from "../src/local/executor.js";
 import {
   noteRestoreEpoch,
@@ -180,6 +182,7 @@ const NONE = {
   floor_print_jobs: 0,
   floor_boxes: 0,
   floor_pallets: 0,
+  floor_unit_labels: 0,
   outbox: 0,
 };
 const WHOLE = {
@@ -191,6 +194,7 @@ const WHOLE = {
   floor_print_jobs: 1,
   floor_boxes: 1,
   floor_pallets: 0,
+  floor_unit_labels: 0,
   outbox: 5,
 };
 
@@ -223,6 +227,50 @@ describe("the retention of a shift's records on the station", () => {
       1,
     );
     expect(kept(at, SECOND.id)).toEqual(NONE);
+  });
+
+  // A displaced scan of a shift the retention deletes keeps its shift's number and its box's
+  // SSCC in its own row (plan КНФ, the owner's decision): the queue screen still names them.
+  it("leaves a displacement readable after its shift is deleted", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    const [box] = rows(at.db, "SELECT id, sscc FROM floor_boxes WHERE shift_id = ?", ENTERED.id);
+    const boxId = String(box?.["id"]);
+    const sscc = String(box?.["sscc"]);
+    // The host still had the box open when it saw the displacement: the station's SSCC is kept.
+    await readConflictNotices({
+      local: at.local,
+      pairing: PAIRING,
+      conflictStatus: async () => ({ reviewed: [] }),
+      listDisplacements: async () => ({
+        items: [
+          {
+            conflictId: "c0000000-0000-4000-8000-000000000001",
+            recordId: "00000000-0000-4000-8000-0000000000d1",
+            shiftId: ENTERED.id,
+            shiftNumber: ENTERED.number,
+            codeHash: "0".repeat(63) + "7",
+            boxId,
+            boxSscc: null,
+            detectedAt: "2026-10-08T07:12:03Z",
+            winner: {
+              shiftId: SECOND.id,
+              shiftNumber: SECOND.number,
+              deviceId: "8d0f7780-8536-41ef-a55c-f18a2c3d4e5f",
+              scannedAt: "2026-10-08T06:00:50.000Z",
+              sameDevice: false,
+            },
+            reviewedAt: null,
+          },
+        ],
+        more: false,
+      }),
+      now: () => NOW,
+    });
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    const [record] = (await readQueue(at.local, PAIRING)).displaced;
+    expect(record).toMatchObject({ shiftNumber: ENTERED.number, sscc });
   });
 
   // A shift the office closed and this station then finished: its close is
@@ -275,6 +323,108 @@ describe("the retention of a shift's records on the station", () => {
     expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
     expect(kept(at, ENTERED.id)).toEqual(WHOLE);
     expect(kept(at, SECOND.id)).toEqual(WHOLE);
+  });
+
+  // The unit label jobs of a shift that prints duplicates (plan РЕЖ part B, migration `0015`)
+  // keep the full code in their fields and bytes: they go with the shift, whole rows, while the
+  // same shift's labels under another pairing and another shift's stay.
+  const FULL_CODE = "0104600682000013215abc\u001d93Zz";
+  function unitLabel(
+    at: Station,
+    shiftId: string,
+    id: string,
+    verification: "verified" | "pending",
+    pairing: Pair = PAIRING,
+  ): void {
+    at.db
+      .prepare(
+        "INSERT INTO floor_unit_labels (id, host_id, device_id, shift_id, code_hash, scan_id, " +
+          "attempt_no, attempt_state, verification_policy, verification, print_mode, language, dpi, " +
+          "bytes_base64, bytes_digest, payload_digest, template_id, template_rev, fields, " +
+          "operator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'sent', 'required', " +
+          "?, 'raw', 'zpl', 203, 'XlhB', ?, ?, 'template-1', 1, ?, 'operator-1', ?, ?)",
+      )
+      .run(
+        id,
+        pairing.hostId,
+        pairing.deviceId,
+        shiftId,
+        "a".repeat(64),
+        `scan-${id}`,
+        verification,
+        "b".repeat(64),
+        "c".repeat(64),
+        JSON.stringify({ "km.full": FULL_CODE }),
+        CUTOFF,
+        CUTOFF,
+      );
+  }
+  const fullCodes = (at: Station): unknown[] =>
+    rows(
+      at.db,
+      "SELECT host_id, device_id, shift_id FROM floor_unit_labels " +
+        "WHERE instr(fields, ?) > 0 ORDER BY shift_id, device_id",
+      JSON.stringify(FULL_CODE).slice(1, -1),
+    );
+
+  it("deletes a shift's unit labels with it, the full code they keep included, and no one else's", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    await finished(at, SECOND, "B", "2026-11-08T11:00:00.000Z");
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    unitLabel(at, SECOND.id, "label-2", "verified");
+    unitLabel(at, ENTERED.id, "label-3", "verified", OTHER_PAIRING);
+    expect(fullCodes(at)).toHaveLength(3);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 2 });
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(NONE);
+    expect(fullCodes(at)).toEqual([
+      { host_id: OTHER_PAIRING.hostId, device_id: OTHER_PAIRING.deviceId, shift_id: ENTERED.id },
+      { host_id: PAIRING.hostId, device_id: PAIRING.deviceId, shift_id: SECOND.id },
+    ]);
+  });
+
+  it("keeps a shift while a unit label of it is unresolved, and purges it once it is", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    unitLabel(at, ENTERED.id, "label-2", "pending");
+    expect(await dueIds(at)).toEqual([]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 2 });
+    // Another pairing's unresolved label of the same shift id keeps nothing of this one.
+    at.db
+      .prepare("UPDATE floor_unit_labels SET verification = 'verified' WHERE id = ?")
+      .run("label-2");
+    unitLabel(at, ENTERED.id, "label-3", "pending", OTHER_PAIRING);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual({ ...NONE, floor_unit_labels: 1 });
+  });
+
+  it("keeps a shift a unit label of which turned unresolved between its reading and its delete", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    unitLabel(at, ENTERED.id, "label-1", "verified");
+    let first = true;
+    const racing = {
+      query: at.local.query.bind(at.local),
+      transaction: async (statements: Parameters<typeof at.local.transaction>[0]) => {
+        if (first) {
+          first = false;
+          // A reprint lands first: the label's next attempt, its check pending again.
+          at.db
+            .prepare(
+              "UPDATE floor_unit_labels SET attempt_no = 2, attempt_state = 'prepared', " +
+                "reason = 'lost', verification = 'pending' WHERE id = ?",
+            )
+            .run("label-1");
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, floor_unit_labels: 1 });
   });
 
   it("leaves another pairing's rows alone, the same shift ids included", async () => {
@@ -528,7 +678,11 @@ describe("the retention of a shift's records on the station", () => {
       "SELECT m.name AS name FROM sqlite_master m WHERE m.type = 'table' AND EXISTS " +
         "(SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name = 'shift_id') ORDER BY m.name",
     ).map((row) => row["name"]);
-    expect(withShift).toEqual([...RETAINED_TABLES].sort());
+    // Kept on purpose (plan КНФ, migration `0016`): the displaced scans are few, and the
+    // newest one is the cursor of the next read from the host, which must never go back — a
+    // deleted cursor would bring every displacement back as new.
+    const notRetained = ["floor_displacements"];
+    expect(withShift).toEqual([...RETAINED_TABLES, ...notRetained].sort());
   });
 
   // The pallets of a shift (plan ПЛ-Ц) go with it: the pallet, its exception, one pairing's,

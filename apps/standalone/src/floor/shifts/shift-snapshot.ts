@@ -1,4 +1,5 @@
 import {
+  assertDuplicateTemplate,
   isValidGtin,
   labelTemplateSpecSchema,
   parsePalletSheetSpec,
@@ -27,6 +28,18 @@ export interface CheckedSnapshot {
   palletSheet: SnapshotSheet | null;
   /** The organization (plan А4); `null` — a snapshot of a host before it. */
   organization: SnapshotOrganization | null;
+  /**
+   * The Data Matrix duplicate a validation shift prints (plan РЕЖ part B): its
+   * check and its layout, read by the domain as a duplicate's; `null` — the
+   * shift prints none.
+   */
+  validationPrint: SnapshotValidationPrint | null;
+}
+
+/** The duplicate print a shift froze (plan РЕЖ part B): the check and the layout the domain read. */
+export interface SnapshotValidationPrint {
+  verification: "none" | "required";
+  template: SnapshotTemplate;
 }
 
 /** A template as the snapshot froze it, with the layout the domain read. */
@@ -112,6 +125,22 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
       palletSheet = null;
     }
   }
+  // The duplicate's layout keeps the operator out as the box's does (plan РЕЖ part B): a unit
+  // is accepted with its label, so a layout the domain does not print as a duplicate
+  // (`assertDuplicateTemplate`: one Data Matrix of the full code inside the label, no SSCC)
+  // would stop the line at the first unit.
+  const printRaw = parsed.data.validationPrint;
+  let validationPrint: SnapshotValidationPrint | null = null;
+  if (printRaw !== undefined) {
+    const template = readTemplate(printRaw.template);
+    if (template === null) return { ok: false, reason: "layout" };
+    try {
+      assertDuplicateTemplate(template.spec);
+    } catch {
+      return { ok: false, reason: "layout" };
+    }
+    validationPrint = { verification: printRaw.verification, template };
+  }
   const org = parsed.data.organization;
   const organization: SnapshotOrganization | null =
     org === undefined
@@ -127,6 +156,7 @@ export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): Snapsh
       palletTemplate: palletsEnabled ? pallet : null,
       palletSheet,
       organization,
+      validationPrint,
     },
   };
 }

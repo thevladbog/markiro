@@ -86,8 +86,8 @@ function session(products: OfficeProduct[] = [WATER_10, WATER_2, MILK, AYRAN]): 
 }
 
 async function openProducts(fake: FakeOfficeSession): Promise<void> {
-  renderOffice(fake);
-  fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+  renderOffice(fake, { initialPath: "/products" });
+  await screen.findByRole("link", { name: "Товары" });
   await screen.findByRole("heading", { name: "Товары" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
 }
@@ -99,7 +99,7 @@ function rows(): HTMLElement[] {
 /** The names column, top to bottom: each product's name, without its print name. */
 function names(): (string | null | undefined)[] {
   return rows().map(
-    (row) => within(row).getAllByRole("cell")[1]?.firstElementChild?.firstElementChild?.textContent,
+    (row) => within(row).getAllByRole("cell")[2]?.firstElementChild?.firstElementChild?.textContent,
   );
 }
 
@@ -164,12 +164,28 @@ describe("office products", () => {
     expect(screen.getAllByText(/^Для печати:/)).toHaveLength(1);
   });
 
-  it("says in words which products have a photo (plan ТОВ)", async () => {
+  it("shows the photo of a product that has one as a thumbnail in its row (plan ТОВ, beta 3)", async () => {
     const photo = "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd";
-    await openProducts(session([{ ...MILK, photoChecksum: photo }, WATER_2]));
-    expect(within(rowOf(MILK.name)).getByText("Есть фото")).toBeTruthy();
-    expect(within(rowOf(WATER_2.name)).queryByText("Есть фото")).toBeNull();
-    expect(screen.getAllByText("Есть фото")).toHaveLength(1);
+    const fake = session([{ ...MILK, photoChecksum: photo }, WATER_2]);
+    fake.api.getProductPhoto.mockResolvedValue({
+      photo: {
+        width: 2,
+        height: 1,
+        dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        mediaType: "image/jpeg",
+        checksum: photo,
+        updatedAt: "2026-10-13T09:00:00.000Z",
+      },
+    });
+    await openProducts(fake);
+    const thumbnail = await within(rowOf(MILK.name)).findByRole("img", {
+      name: `Фото товара ${MILK.name}`,
+    });
+    expect(thumbnail.getAttribute("src")).toBe("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==");
+    expect(within(rowOf(WATER_2.name)).queryByRole("img")).toBeNull();
+    // Only the product that has a photo is read.
+    expect(fake.api.getProductPhoto).toHaveBeenCalledTimes(1);
+    expect(fake.api.getProductPhoto).toHaveBeenCalledWith("office-session-token", MILK.id);
   });
 
   it("finds products by name, print name or GTIN, without case and with spaces in a GTIN", async () => {
@@ -275,8 +291,8 @@ describe("office products", () => {
     const unreachable = "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.";
     const fake = session();
     fake.api.listProducts.mockRejectedValueOnce(down());
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(fake, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText(unreachable)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Молоко 3,2% 0,9 л")).toBeTruthy();
@@ -286,8 +302,8 @@ describe("office products", () => {
     const both = session();
     both.api.listProducts.mockRejectedValueOnce(down());
     both.api.listProductGroups.mockRejectedValueOnce(down());
-    renderOffice(both);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(both, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText(unreachable)).toBeTruthy();
     await waitFor(() => expect(both.api.listProductGroups).toHaveBeenCalledTimes(1));
     // Two passes of the scheduler: the groups' failure has been taken in too.
@@ -328,7 +344,8 @@ describe("office products", () => {
     await openProducts(fake);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
     fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
-    await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(2));
+    // The page's first visit, the overview's read of the names, the page's second visit.
+    await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(3));
     await screen.findByText("Молоко 3,2% 0,9 л");
     // Two passes of the scheduler: an effect that would read again has run.
     await new Promise((resolve) => setImmediate(resolve));
@@ -341,8 +358,8 @@ describe("office products", () => {
       const fake = fakeOfficeSession(user === undefined ? {} : { user });
       fake.api.listProducts.mockResolvedValue([]);
       fake.api.listProductGroups.mockResolvedValue([]);
-      const view = renderOffice(fake);
-      fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+      const view = renderOffice(fake, { initialPath: "/products" });
+      await screen.findByRole("link", { name: "Товары" });
       expect(await screen.findByText("Товаров пока нет.")).toBeTruthy();
       view.unmount();
     }
@@ -356,8 +373,8 @@ describe("office products", () => {
         arrive = resolve;
       }),
     );
-    renderOffice(fake);
-    fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+    renderOffice(fake, { initialPath: "/products" });
+    await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     arrive([MILK]);

@@ -168,6 +168,9 @@ pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
 /// What a restore holds (plan РК): a station's facts, its code checks and
 /// its warehouse reprints, whose answers depend on the shifts, blocks and
 /// codes a copy may lack.
+/// The reads of a station's conflicts (plan КНФ) are not held on purpose: a
+/// copy is an older state, so they can only tell of fewer reviews and
+/// displacements, never wrong ones.
 fn held_by_a_restore(path: &str) -> bool {
     path == "/v1/device/facts"
         || path.starts_with("/v1/device/codes/")
@@ -241,6 +244,22 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::codes::check_code),
         )
         .route(
+            "/v1/device/conflicts/status",
+            post(crate::routes::device_conflicts::conflict_status),
+        )
+        .route(
+            "/v1/device/displacements",
+            get(crate::routes::device_conflicts::list_displacements),
+        )
+        .route(
+            "/v1/device/products/{id}/photo",
+            get(crate::routes::product_photos::device_photo),
+        )
+        .route(
+            "/v1/device/pallet-sheets",
+            get(crate::routes::pallet_sheets::device_sheets),
+        )
+        .route(
             "/v1/device/warehouse/lookup",
             post(crate::routes::warehouse::lookup),
         )
@@ -253,6 +272,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/devices",
             get(crate::routes::devices::list_devices),
+        )
+        .route(
+            "/v1/office/usage-stats",
+            get(crate::routes::usage_stats::usage_stats),
         )
         .route(
             "/v1/office/devices/{id}",
@@ -300,6 +323,49 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/counterparties/{id}",
             put(crate::routes::counterparties::update_counterparty),
+        )
+        .route(
+            "/v1/office/disaggregation-reasons",
+            get(crate::routes::disaggregation_reasons::list_reasons)
+                .post(crate::routes::disaggregation_reasons::create_reason),
+        )
+        .route(
+            "/v1/office/disaggregation-reasons/{id}",
+            put(crate::routes::disaggregation_reasons::update_reason),
+        )
+        .route(
+            "/v1/office/disaggregation",
+            get(crate::routes::disaggregation::list_documents)
+                .post(crate::routes::disaggregation::create_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}",
+            get(crate::routes::disaggregation::get_document)
+                .put(crate::routes::disaggregation::update_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/lines",
+            post(crate::routes::disaggregation::add_lines),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/lines/{line_id}",
+            delete(crate::routes::disaggregation::delete_line),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/apply",
+            post(crate::routes::disaggregation::apply_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/cancel",
+            post(crate::routes::disaggregation::cancel_document),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/report-data",
+            get(crate::routes::office_disaggregation_reports::report_data),
+        )
+        .route(
+            "/v1/office/disaggregation/{id}/exports",
+            post(crate::routes::office_disaggregation_reports::record_export),
         )
         .route(
             "/v1/office/lines",
@@ -412,12 +478,56 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::office_boxes::list_pallets),
         )
         .route(
+            "/v1/office/shifts/{id}/scans",
+            get(crate::routes::office_scan_history::list_scans),
+        )
+        .route(
+            "/v1/office/shifts/{id}/exceptions",
+            get(crate::routes::office_shift_review::list_exceptions),
+        )
+        .route(
+            "/v1/office/shifts/{id}/rejections",
+            get(crate::routes::office_shift_review::list_rejections),
+        )
+        .route(
+            "/v1/office/conflicts",
+            get(crate::routes::office_conflicts::list_conflicts),
+        )
+        .route(
+            "/v1/office/conflicts/{id}/review",
+            post(crate::routes::office_conflicts::review_conflict),
+        )
+        .route(
             "/v1/office/shifts/{id}/export-source",
             get(crate::routes::office_exports::export_source),
         )
         .route(
             "/v1/office/shifts/{id}/exports",
-            post(crate::routes::office_exports::record_export),
+            get(crate::routes::office_exports::list_exports)
+                .post(crate::routes::office_exports::record_export),
+        )
+        .route(
+            "/v1/office/export-files",
+            get(crate::routes::office_export_files::list)
+                .post(crate::routes::office_export_files::begin),
+        )
+        .route(
+            "/v1/office/export-files/settings",
+            get(crate::routes::office_export_files::get_settings)
+                .put(crate::routes::office_export_files::put_settings),
+        )
+        .route(
+            "/v1/office/export-files/{id}/chunks/{seq}",
+            get(crate::routes::office_export_files::get_chunk)
+                .put(crate::routes::office_export_files::put_chunk),
+        )
+        .route(
+            "/v1/office/export-files/{id}/complete",
+            post(crate::routes::office_export_files::complete),
+        )
+        .route(
+            "/v1/office/export-files/{id}/download",
+            post(crate::routes::office_export_files::open_download),
         )
         .route(
             "/v1/office/shifts/{id}/pallet-report-data",
@@ -426,6 +536,18 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/boxes/{id}/report-data",
             get(crate::routes::office_reports::box_report),
+        )
+        .route(
+            "/v1/office/boxes/{id}",
+            get(crate::routes::office_cards::box_card),
+        )
+        .route(
+            "/v1/office/pallets",
+            get(crate::routes::office_pallets::list_pallets),
+        )
+        .route(
+            "/v1/office/pallets/{id}",
+            get(crate::routes::office_cards::pallet_card),
         )
         .route(
             "/v1/office/codes",
@@ -679,8 +801,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 3 (pallets, plan ПЛ-Х) is this build's; 2 (stage 2a) and
-        // 1 (stage 1) are still taken.
+        // Protocol 5 (the duplicate print, plan РЕЖ part B) is this build's;
+        // 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
+        // (stage 1) are still taken.
+        assert_eq!(call(Some("5")).await.0, StatusCode::OK);
+        assert_eq!(call(Some("4")).await.0, StatusCode::OK);
         assert_eq!(call(Some("3")).await.0, StatusCode::OK);
         assert_eq!(call(Some("2")).await.0, StatusCode::OK);
         assert_eq!(call(Some("1")).await.0, StatusCode::OK);
@@ -693,7 +818,7 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 3);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 5);
     }
 
     #[tokio::test]
@@ -703,6 +828,6 @@ mod tests {
         assert_eq!(body["error"]["details"]["protocol"], 7);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("4")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("6")).await.0, StatusCode::BAD_REQUEST);
     }
 }

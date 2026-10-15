@@ -1,19 +1,28 @@
 import {
+  keepPreviousData,
   QueryClient,
+  useInfiniteQuery,
   useMutation,
   useQuery,
+  type InfiniteData,
   type QueryKey,
+  type UseInfiniteQueryResult,
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 
 import type { HostApi } from "../host/api.js";
+import type { DisaggregationFilter } from "../host/disaggregation.js";
+import type { PalletListQuery } from "../host/pack-cards.js";
+import type { ConflictQuery, ScanHistoryQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
 
 /** Query keys of office data, one per host resource. */
 export const officeKeys = {
   org: ["office", "org"],
   orgLogo: ["office", "org-logo"],
+  /** The site's license (`GET /v1/office/license`): the license section, the band and «Обзор» (plan ЛЦ-3), and custom branding's features. */
+  license: ["office", "license"],
   palletSheets: ["office", "pallet-sheets"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],
@@ -22,26 +31,68 @@ export const officeKeys = {
   lines: ["office", "lines"],
   operators: ["office", "operators"],
   /** The site's register of people and their links to operators (host migration 0018). */
-  employees: ["office", "employees"],
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
   /** A product's photo (plan ТОВ, `GET /v1/office/products/{id}/photo`); a write changes the list's `photoChecksum` too. */
   productPhoto: (id: string) => ["office", "product-photo", id],
+  /** A list row's thumbnail: keyed by the photo's checksum, so a changed photo is read again. */
+  productThumb: (id: string, checksum: string) => ["office", "product-thumb", id, checksum],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */
   backups: ["office", "backups"],
-  /** The site's license as the host computes it (`GET /v1/office/license`, plan ЛЦ-3). */
-  license: ["office", "license"],
   /** Every list of shifts, whatever its period: a write reads them all again. */
   shifts: ["office", "shifts"],
   /** The list of shifts of a period of production dates, or the host's own list (`null`). */
-  shiftList: (period: { from: string; to: string } | null) => [
+  shiftList: (
+    period: {
+      from?: string;
+      to?: string;
+      plannedFrom?: string;
+      plannedTo?: string;
+    } | null,
+  ) => [
     "office",
     "shifts",
     period?.from ?? null,
     period?.to ?? null,
+    // A period of production dates alone keeps its key of four parts.
+    ...(period?.plannedFrom === undefined && period?.plannedTo === undefined
+      ? []
+      : [period.plannedFrom ?? null, period.plannedTo ?? null]),
+  ],
+  /** Every list of conflicts, whatever its filter: a review reads them all again (plan КНФ). */
+  conflicts: ["office", "conflicts"],
+  /** One page of conflicts as `GET /v1/office/conflicts` narrows it. */
+  conflictList: (query: ConflictQuery) => [
+    "office",
+    "conflicts",
+    query.shiftId ?? null,
+    query.reviewed ?? null,
+    query.page ?? 1,
+  ],
+  /** Every list of disaggregation documents (plan ДЗГ-О): a write reads them all again. */
+  disaggregation: ["office", "disaggregation"],
+  /** One filtered list (`listDisaggregations(token, filter)`). */
+  disaggregationList: (filter: DisaggregationFilter) => [
+    "office",
+    "disaggregation",
+    filter.status ?? null,
+    filter.reasonId ?? null,
+    filter.q ?? null,
+    filter.from ?? null,
+    filter.to ?? null,
+  ],
+  /** One document with its lines, read afresh at every opening. */
+  disaggregationDocument: (id: string) => ["office", "disaggregation-document", id],
+  disaggregationReasons: ["office", "disaggregation-reasons"],
+  /** What the act or the ЧЗ file of a document is drawn from. */
+  disaggregationReport: (id: string, variant: "boxes" | "full") => [
+    "office",
+    "disaggregation-report",
+    id,
+    variant,
   ],
   /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],
@@ -51,6 +102,28 @@ export const officeKeys = {
   shiftPallets: (id: string) => ["office", "shift-pallets", id],
   /** A shift's boxes for its card (`GET /v1/office/shifts/{id}/boxes`, plan О-Ф); the pallets are `shiftPallets`. */
   shiftBoxes: (id: string) => ["office", "shift-boxes", id],
+  /** A shift's box and pallet exceptions (`GET /v1/office/shifts/{id}/exceptions`, plan КНФ). */
+  shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
+  /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
+  shiftRejections: (id: string) => ["office", "shift-rejections", id],
+  /** Every page of one query of a shift's scan history (`GET /v1/office/shifts/{id}/scans`). */
+  shiftScans: (id: string, query: ScanHistoryQuery) => ["office", "shift-scans", id, query],
+  /** A shift's saved exports (`GET /v1/office/shifts/{id}/exports`), for the drawer's history. */
+  shiftExports: (id: string) => ["office", "shift-exports", id],
+  /** Every list of stored files (host migration `0029`): a new export or form reads them all again. */
+  exportFiles: ["office", "export-files"],
+  /** A shift's printed forms kept on the host. */
+  shiftForms: (id: string) => ["office", "export-files", "shift-forms", id],
+  /** The files kept for one card: a box's, a pallet's or a disaggregation document's. */
+  cardFiles: (targetType: string, id: string) => ["office", "export-files", targetType, id],
+  /** The retention of stored files and what the store holds. */
+  exportSettings: ["office", "export-settings"],
+  /** A box's card (`GET /v1/office/boxes/{id}`, plan КРТ). */
+  boxCard: (id: string) => ["office", "box-card", id],
+  /** A pallet's card (`GET /v1/office/pallets/{id}`, plan КРТ). */
+  palletCard: (id: string) => ["office", "pallet-card", id],
+  /** Every page of one query of the pallet list (`GET /v1/office/pallets`, plan КРТ). */
+  palletList: (query: PalletListQuery) => ["office", "pallet-list", query],
   /** What a box's and a shift's pallets' forms print (`…/report-data`, plan О-Ф). */
   boxReport: (id: string) => ["office", "box-report", id],
   shiftPalletReport: (id: string) => ["office", "shift-pallet-report", id],
@@ -134,5 +207,30 @@ export function useOfficeMutation<V, T>(
   return useMutation({
     mutationFn: (variables: V) => call((token) => write(api, token, variables)),
     ...(options.gcTime === undefined ? {} : { gcTime: options.gcTime }),
+  });
+}
+
+/**
+ * Reads office data a page at a time, each page below the cursor the one
+ * before named (the pallet list, plan КРТ). `nextCursor` is `null` on the
+ * last page.
+ */
+export function useOfficeInfiniteQuery<T>(
+  key: QueryKey,
+  read: (api: HostApi, token: string, cursor: string | null) => Promise<T>,
+  nextCursor: (page: T) => string | null,
+  options: Pick<OfficeQueryOptions, "enabled"> = {},
+): UseInfiniteQueryResult<InfiniteData<T, string | null>, Error> {
+  const { api, call } = useOfficeSession();
+  return useInfiniteQuery<T, Error, InfiniteData<T, string | null>, QueryKey, string | null>({
+    queryKey: key,
+    queryFn: ({ pageParam }) => call((token) => read(api, token, pageParam)),
+    initialPageParam: null,
+    getNextPageParam: (last) => nextCursor(last) ?? undefined,
+    // A page of another filter keeps the last answer until its own arrives (`isPlaceholderData`),
+    // so what the filters were read from (the stations of the list) does not vanish meanwhile.
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+    enabled: options.enabled ?? true,
   });
 }

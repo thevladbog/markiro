@@ -17,7 +17,7 @@ use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
 use markiro_standalone_lib::installation::{InstallRole, InstallationFile};
 use markiro_standalone_lib::local_db::{
-    LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
+    pre_upgrade_file, LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
 use markiro_standalone_lib::lockdown::LockdownState;
 use markiro_standalone_lib::office_files::OfficeFilesState;
@@ -364,6 +364,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
     let config = app_dir.path().join("device.json");
     std::fs::write(&config, "{").unwrap();
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    // The copy an upgrade made holds the hashes of that moment (beta 3): it
+    // stays while the clearing fails, and goes with the pairing.
+    let upgrade_copy = app_dir.path().join(pre_upgrade_file("0.9.0"));
+    std::fs::write(&upgrade_copy, b"hashes").unwrap();
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
     invoke(
         &webview,
@@ -407,6 +411,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         Err(json!("storage"))
     );
     assert!(config.exists(), "the pairing stays for another try");
+    assert!(
+        upgrade_copy.exists(),
+        "the upgrade's copy waits for the clearing"
+    );
     assert_eq!(
         copies(),
         json!([{ "n": 2 }]),
@@ -419,6 +427,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         Ok(Value::Null)
     );
     assert!(!config.exists());
+    assert!(
+        !upgrade_copy.exists(),
+        "the upgrade's copy goes with the pairing"
+    );
     assert_eq!(copies(), json!([{ "n": 0 }]));
     assert!(
         app_dir.path().join(FILE_NAME).exists(),
@@ -1441,6 +1453,85 @@ fn saving_office_files_answers_through_the_ipc_shapes() {
         ),
         Err(json!("documents_unavailable"))
     );
+}
+
+/// The exports folder: `get_exports_folder` answers `{ path, default }`,
+/// `set_exports_folder` takes `{ path }` (a string or `null`), tries the folder
+/// with a test file and keeps it; exports then land in it, with the `Выгрузки`
+/// root kept in the answer's segments. A path that is no full path or a folder
+/// that is not there is a bare code, and the dialog is `unsupported` off Windows.
+#[test]
+fn the_exports_folder_is_chosen_and_used_through_the_ipc_shapes() {
+    let documents = tempfile::tempdir().unwrap();
+    let chosen = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let state = OfficeFilesState::at(documents.path().to_path_buf())
+        .with_settings(data.path().join("office-files.json"));
+    let (_app, webview) = mock_app_saving_into(state);
+    let default = documents.path().join("Выгрузки").display().to_string();
+    assert_eq!(
+        invoke(&webview, "get_exports_folder", json!({})),
+        Ok(json!({ "path": null, "default": default }))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "set_exports_folder",
+            json!({ "path": "relative" })
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "set_exports_folder",
+            json!({ "path": chosen.path().join("нет").display().to_string() })
+        ),
+        Err(json!("folder_unavailable"))
+    );
+    let path = chosen.path().display().to_string();
+    assert_eq!(
+        invoke(&webview, "set_exports_folder", json!({ "path": path })),
+        Ok(json!({ "path": path, "default": default }))
+    );
+    let segments = json!(["Выгрузки", "OCT26-004", "run"]);
+    let saved = invoke(
+        &webview,
+        "save_office_files",
+        json!({ "segments": segments, "files": [{ "name": "a.txt", "contentBase64": "eA==" }] }),
+    )
+    .unwrap();
+    assert_eq!(saved["segments"], segments);
+    assert!(chosen
+        .path()
+        .join("OCT26-004")
+        .join("run")
+        .join("a.txt")
+        .is_file());
+    // The forms keep their place under the documents folder.
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({ "segments": ["Формы", "x", "y"], "files": [{ "name": "a.html", "contentBase64": "eA==" }] }),
+    )
+    .unwrap();
+    assert!(documents
+        .path()
+        .join("Формы")
+        .join("x")
+        .join("y")
+        .join("a.html")
+        .is_file());
+    assert_eq!(
+        invoke(&webview, "set_exports_folder", json!({ "path": null })),
+        Ok(json!({ "path": null, "default": default }))
+    );
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(&webview, "pick_folder", json!({ "title": "Папка" })),
+            Err(json!("unsupported"))
+        );
+    }
 }
 
 /// `open_office_file` takes `segments` and `name`

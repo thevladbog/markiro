@@ -8,6 +8,7 @@ import type { OrgProfile } from "../src/host/protocol.js";
 import {
   createOfficeQueryClient,
   officeKeys,
+  useOfficeInfiniteQuery,
   useOfficeMutation,
   useOfficeQuery,
 } from "../src/office/office-query.js";
@@ -38,6 +39,50 @@ function wrapperFor(session: OfficeSessionValue) {
     );
   };
 }
+
+describe("useOfficeInfiniteQuery", () => {
+  it("reads the first page without a cursor and the next with the one the page named", async () => {
+    const session = fakeOfficeSession();
+    const pages = [
+      { items: ["a"], nextCursor: "c1" },
+      { items: ["b"], nextCursor: null },
+    ];
+    const read = vi.fn(async (_cursor: string | null) => pages[read.mock.calls.length - 1]!);
+    const { result } = renderHook(
+      () =>
+        useOfficeInfiniteQuery(
+          ["office", "pages"],
+          (_api, _token, cursor) => read(cursor),
+          (page) => page.nextCursor,
+        ),
+      { wrapper: wrapperFor(session) },
+    );
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    expect(read).toHaveBeenLastCalledWith(null);
+    expect(result.current.hasNextPage).toBe(true);
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(read).toHaveBeenLastCalledWith("c1");
+    expect(result.current.data?.pages.map((page) => page.items)).toEqual([["a"], ["b"]]);
+    expect(result.current.hasNextPage).toBe(false);
+  });
+
+  it("reads nothing while it is not enabled", async () => {
+    const session = fakeOfficeSession();
+    const read = vi.fn(async () => ({ nextCursor: null }));
+    renderHook(
+      () =>
+        useOfficeInfiniteQuery(["office", "held"], read, (page) => page.nextCursor, {
+          enabled: false,
+        }),
+      { wrapper: wrapperFor(session) },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(read).not.toHaveBeenCalled();
+  });
+});
 
 describe("useOfficeQuery", () => {
   it("reads through the session's call with its api and token", async () => {

@@ -13,11 +13,17 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 3 since plan ПЛ-Х (pallets: the
-/// shift's pallet fields, pallet blocks, the pallet facts and a box's
-/// `palletId`). A new fact kind or a new field of a fact's `data` raises it,
-/// because an older host refuses such a record for good.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// Protocol version this build speaks: 5 since part B of plan РЕЖ (the
+/// duplicate print of a validation shift: its [`ValidationPrint`] policy, the
+/// snapshot's [`SnapshotValidationPrint`] and the `unit_label` fact,
+/// [`UnitLabelFact`]); 4 came with part A (the shift modes: the body of a
+/// shift entry naming what the station works, [`ShiftEnter`], and a
+/// validation shift's `ok` scan without a box); 3 came with plan ПЛ-Х
+/// (pallets: the shift's pallet fields, pallet blocks, the pallet facts and a
+/// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
+/// new meaning of one raises it, because an older host refuses such a record
+/// for good.
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -58,6 +64,14 @@ pub mod codes {
     /// code checks) until an administrator resumes them (plan РК): a station
     /// sends them again later, as after a lost connection.
     pub const RESTORE_PENDING: &str = "restore_pending";
+    /// The host's store of generated files is full (host migration `0029`);
+    /// a retention setting or a smaller export makes room.
+    pub const EXPORT_STORE_FULL: &str = "export_store_full";
+    /// A generated file is larger than the host stores.
+    pub const EXPORT_FILE_TOO_LARGE: &str = "export_file_too_large";
+    /// A stored file no longer matches the SHA-256 it was stored with: the
+    /// host serves nothing of it.
+    pub const EXPORT_FILE_CORRUPTED: &str = "export_file_corrupted";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -79,6 +93,9 @@ pub mod codes {
         PAIRING_CODE_EXPIRED,
         SSCC_EXHAUSTED,
         RESTORE_PENDING,
+        EXPORT_STORE_FULL,
+        EXPORT_FILE_TOO_LARGE,
+        EXPORT_FILE_CORRUPTED,
     ];
 }
 
@@ -96,7 +113,8 @@ pub mod credentials {
 /// receipt per record, and a record the host refuses names one of these.
 pub mod receipt_codes {
     /// The record could not be read, or one of its fields breaks its rule
-    /// (`details.field` names it when the record itself was readable).
+    /// (`details.field` names it when the record itself was readable). A box
+    /// or pallet fact of a validation shift names `shift_mode` (plan РЕЖ).
     pub const INVALID_RECORD: &str = "invalid_record";
     /// A record with this id was received before with other content.
     pub const PAYLOAD_MISMATCH: &str = "payload_mismatch";
@@ -133,6 +151,10 @@ pub mod receipt_codes {
     /// The pallet is not in the state the record needs (a label check or an
     /// exception of an open pallet, an exception of one taken apart).
     pub const PALLET_STATE: &str = "pallet_state";
+    /// What the record is about is not on the host: a unit label event (plan
+    /// РЕЖ, part B) of a code this station has no accepted scan of in this
+    /// shift.
+    pub const SUBJECT_UNKNOWN: &str = "subject_unknown";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -151,6 +173,7 @@ pub mod receipt_codes {
         PALLET_UNKNOWN,
         PALLET_ALREADY_CLOSED,
         PALLET_STATE,
+        SUBJECT_UNKNOWN,
     ];
 }
 
@@ -195,10 +218,15 @@ pub mod shift_close_reasons {
 pub mod backup;
 pub mod cloud_import;
 pub mod code_search;
+pub mod disaggregation;
+pub mod export_files;
 pub mod license;
+pub mod pack_cards;
 pub mod pairing;
+pub mod review;
 pub mod trust;
 pub mod update;
+pub mod usage_stats;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
 /// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with
@@ -558,6 +586,9 @@ pub mod entities {
     pub const PRODUCTS: &str = "products";
     pub const LABEL_TEMPLATES: &str = "label_templates";
     pub const CATEGORY_TEMPLATE_DEFAULTS: &str = "category_template_defaults";
+    /// A box a disaggregation document took apart (plan ДЗГ): a station acts
+    /// on it and keeps no copy ([`crate::disaggregation::CodeReleaseRecord`]).
+    pub const CODE_RELEASES: &str = "code_releases";
 }
 
 /// The feed id of a category default: `<code>:<purpose>` (`8:box`), the
@@ -754,6 +785,12 @@ pub struct ProductRecord {
     pub default_pallet_template_id: Option<String>,
     pub archived: bool,
     pub status: ProductStatus,
+    /// SHA-256 of the product's photo in lower-case hex, `null` without one
+    /// (beta 3): the station fetches the bytes from
+    /// `GET /v1/device/products/{id}/photo` when its copy differs. A record
+    /// from an older host has none.
+    #[serde(default)]
+    pub photo_checksum: Option<String>,
 }
 
 /// `data` of a `label_templates` item. A disabled template stays in the feed
@@ -968,9 +1005,17 @@ pub struct ProductPhoto {
     pub width: u32,
     pub height: u32,
     pub data_base64: String,
+    /// `image/jpeg`, `image/png` or `image/webp`, derived by the host from
+    /// the magic bytes; a host before beta 3.2 sends none (a JPEG).
+    #[serde(default = "jpeg_media_type")]
+    pub media_type: String,
     /// SHA-256 of the bytes in lower-case hex.
     pub checksum: String,
     pub updated_at: String,
+}
+
+fn jpeg_media_type() -> String {
+    "image/jpeg".to_owned()
 }
 
 /// `GET`, `PUT` and `DELETE /v1/office/products/{id}/photo`: the photo, or
@@ -1684,8 +1729,9 @@ impl std::str::FromStr for ShiftStatus {
 }
 
 /// What a shift does, as the cloud's: aggregation into boxes, or validation
-/// of single codes. The host takes only aggregation in stage 2a; validation
-/// (stage 3) needs no new shape.
+/// of single codes. Stage 2a took only aggregation; validation (plan РЕЖ,
+/// protocol 4) also needed a new shape: the entry's [`ShiftEnter`] and an
+/// `ok` [`ScanFact`] without a box.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShiftMode {
@@ -1712,6 +1758,75 @@ impl std::str::FromStr for ShiftMode {
     }
 }
 
+/// What a station can work, as it names it in the body of
+/// `POST /v1/device/shifts/{id}/enter` ([`ShiftEnter::supports`], plan РЕЖ).
+pub mod shift_supports {
+    /// Validation shifts: single codes accepted without a box.
+    pub const VALIDATION: &str = "validation-v1";
+    /// Validation shifts that print a Data Matrix duplicate of each accepted
+    /// code (part B of plan РЕЖ; declared with protocol 4, checked by the
+    /// host from protocol 5).
+    pub const VALIDATION_DM_DUPLICATE: &str = "validation-dm-duplicate-v1";
+}
+
+/// Whether the operator must scan a printed duplicate before the next unit
+/// (the cloud's `verification` of `validationPrint`): `none` lets the next
+/// unit go once the label is sent, `required` waits for the check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelVerification {
+    None,
+    Required,
+}
+
+impl LabelVerification {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LabelVerification::None => "none",
+            LabelVerification::Required => "required",
+        }
+    }
+}
+
+impl std::str::FromStr for LabelVerification {
+    type Err = UnknownVariant;
+
+    /// The name [`LabelVerification::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("label verification", text)
+    }
+}
+
+/// The print policy of a validation shift (part B of plan РЕЖ, protocol 5),
+/// the cloud's `validationPrint` without its reprocessing of earlier codes
+/// (part C): `{ "mode": "none" }`, or `{ "mode": "duplicate_dm",
+/// "verification", "templateId" }`, a Data Matrix duplicate of each accepted
+/// code printed with a `product_duplicate` template. Only a validation shift
+/// prints one; an aggregation shift's policy is `none`. Each shape takes
+/// exactly its own fields (so `None` is an empty struct variant: serde lets
+/// a unit variant of an internally tagged enum ignore unknown fields).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ValidationPrint {
+    None {},
+    DuplicateDm {
+        verification: LabelVerification,
+        #[serde(rename = "templateId")]
+        template_id: String,
+    },
+}
+
+/// The body of `POST /v1/device/shifts/{id}/enter` (protocol 4, plan РЕЖ):
+/// what the station can work, from [`shift_supports`]. A station of
+/// protocol 3 sends no body, which reads as `{}`: it names nothing, so it
+/// enters an aggregation shift as before and no validation shift.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftEnter {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supports: Vec<String>,
+}
+
 /// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
 /// the answer of every office write). `number` is the host's
 /// (`OCT26-004`, `/S` for a station's). Names come from the office's own
@@ -1728,8 +1843,12 @@ pub struct OfficeShift {
     pub product_id: String,
     pub line_id: String,
     pub counterparty_id: Option<String>,
-    /// The shift's civil date, `YYYY-MM-DD`; the number's month comes from it.
+    /// The shift's production date, `YYYY-MM-DD`; the number's month comes from it.
     pub production_date: String,
+    /// The shift's own date (the cloud's `plannedDate`, «Дата смены»): the
+    /// working day it takes place, a civil date apart from the production
+    /// date. A shift written before it has its production date here.
+    pub planned_date: String,
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
@@ -1741,6 +1860,10 @@ pub struct OfficeShift {
     /// `null` for none, and always `null` without pallets.
     #[serde(default)]
     pub pallet_sheet_template_id: Option<String>,
+    /// The shift's print policy (part B of plan РЕЖ, protocol 5); left out
+    /// by a host before it, which reads as `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     /// The station that opened the shift; `null` while it is planned.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
@@ -1779,19 +1902,50 @@ pub struct ShiftTotals {
     pub device_ids: Vec<String>,
     pub closed_pallets: u32,
     pub open_pallets: u32,
+    /// The unit labels of a validation shift that prints a duplicate (plan
+    /// РЕЖ, part B); left out for every other shift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_labels: Option<UnitLabelTotals>,
+}
+
+/// What a shift's `unit_label` facts give its card (plan РЕЖ, part B; the
+/// cloud's `productLabelSummary`): the attempts sent and the attempts
+/// verified (each attempt once, whatever was received twice), the jobs whose
+/// check was skipped, the reprints (attempts after a job's first), and the
+/// jobs not resolved yet: those whose last event is not `verified`,
+/// `verification_skipped`, or `sent` when the shift requires no check. A
+/// job's last event is its latest by `attemptNo` (every event of an attempt
+/// precedes the next attempt's), then by its place in the domain's order of
+/// an attempt (`prepared`, `sending`, the print's outcome, a rejected check,
+/// a check that passed or was skipped), then by `at` only among events of
+/// the same place (the device's clock may step back), then by the station's
+/// record id and device: an order neither the record's arrival nor a copy of
+/// the database changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitLabelTotals {
+    pub sent: u64,
+    pub verified: u64,
+    pub skipped: u64,
+    pub unresolved: u64,
+    pub reprints: u64,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
-/// product's; `mode` left out is aggregation (the only mode taken) and
-/// `palletsEnabled` false. A shift with pallets names its pallet template
-/// and may name its pallet capacity (the product's when left out); one
-/// without sends neither.
+/// product's; `mode` left out is aggregation and `palletsEnabled` false. A
+/// shift with pallets names its pallet template and may name its pallet
+/// capacity (the product's when left out); one without sends neither. A
+/// validation shift (plan РЕЖ) has no pallets: `validation_failed` on
+/// `palletsEnabled`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftCreate {
     pub product_id: String,
     pub line_id: String,
     pub production_date: String,
+    /// The shift's own date (beta 3); left out, the production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     pub box_template_id: String,
     #[serde(default)]
     pub box_capacity: Option<u32>,
@@ -1811,6 +1965,10 @@ pub struct ShiftCreate {
     /// with pallets takes the organization's default sheet when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_sheet_template_id: Option<String>,
+    /// The print policy (part B of plan РЕЖ, protocol 5); left out, `none`.
+    /// `duplicate_dm` only with `mode: validation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
 }
 
 /// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
@@ -1828,6 +1986,9 @@ pub struct ShiftUpdate {
     pub line_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub production_date: Option<String>,
+    /// The shift's own date (beta 3); left out, it stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub box_template_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1851,6 +2012,10 @@ pub struct ShiftUpdate {
     /// its sheet, and pallets just turned on take the main one.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
     pub pallet_sheet_template_id: Option<Option<String>>,
+    /// The print policy (part B of plan РЕЖ, protocol 5), only of a planned
+    /// shift; left out, the shift keeps its policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     pub expected_rev: i64,
 }
 
@@ -1884,6 +2049,10 @@ pub struct DeviceShift {
     pub product_gtin14: String,
     pub counterparty_name: Option<String>,
     pub production_date: String,
+    /// The shift's own date (beta 3, the cloud's `plannedDate`); left out by
+    /// a host before it, which reads as the production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
@@ -1893,6 +2062,11 @@ pub struct DeviceShift {
     pub pallet_box_capacity: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_template_id: Option<String>,
+    /// The shift's print policy (part B of plan РЕЖ, protocol 5); left out
+    /// by a host before it, which reads as `none`. Once the shift is open,
+    /// the snapshot's [`SnapshotValidationPrint`] is the same policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
     /// The station that opened the shift: another one's id means the shift
     /// is busy (stage 2a puts one device on a shift).
     pub owner_device_id: Option<String>,
@@ -1933,6 +2107,22 @@ pub struct ShiftSnapshot {
     /// box. Left out by a host before plan А4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<ShiftSnapshotOrganization>,
+    /// The duplicate print as the shift froze it (part B of plan РЕЖ): only
+    /// for a validation shift that prints one; left out otherwise, and by
+    /// every snapshot frozen before part B, which therefore reads and writes
+    /// back as it was stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<SnapshotValidationPrint>,
+}
+
+/// A shift's `duplicate_dm` policy as the shift froze it: the check of the
+/// printed label and the `product_duplicate` template, its layout whole (its
+/// `id` is the policy's `templateId`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotValidationPrint {
+    pub verification: LabelVerification,
+    pub template: ShiftSnapshotTemplate,
 }
 
 /// The product as a shift froze it; only an active product opens a shift,
@@ -1952,8 +2142,9 @@ pub struct ShiftSnapshotProduct {
     pub egais_code: Option<String>,
 }
 
-/// A label template as a shift froze it (its box template, and its pallet
-/// template when it has pallets), its layout whole. The host never checks a
+/// A label template as a shift froze it (its box template, its pallet
+/// template when it has pallets, its duplicate template when it prints one),
+/// its layout whole. The host never checks a
 /// layout; the station checks it with `labelTemplateSpecSchema` when it
 /// enters the shift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2016,6 +2207,11 @@ pub struct DeviceShiftCreate {
     pub product_id: String,
     pub box_template_id: String,
     pub production_date: String,
+    /// The shift's own date, today in the organization's time zone as the
+    /// station reads it (beta 3); left out (an older station), the
+    /// production date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_date: Option<String>,
     #[serde(default)]
     pub box_capacity: Option<u32>,
     #[serde(default)]
@@ -2032,13 +2228,22 @@ pub struct DeviceShiftCreate {
     /// with pallets takes the organization's default sheet when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallet_sheet_template_id: Option<String>,
+    /// The shift's mode (plan РЕЖ, beta 3.2): left out, aggregation, which is
+    /// how every station before it creates. A validation shift has no pallets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ShiftMode>,
+    /// The print policy of a validation shift ([`ShiftCreate::validation_print`]);
+    /// left out, `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_print: Option<ValidationPrint>,
 }
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how
 /// to read the record's `data`. A kind added later is a new variant; a host
 /// that does not know it answers the record `invalid_record`, for good, as it
 /// does a new `data` field: either raises `PROTOCOL_VERSION` (the pallet
-/// kinds came with protocol 3, plan ПЛ-Х).
+/// kinds came with protocol 3, plan ПЛ-Х; `unit_label` with protocol 5, part
+/// B of plan РЕЖ).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
@@ -2050,6 +2255,7 @@ pub enum FactKind {
     PalletClosed,
     PalletLabel,
     PalletException,
+    UnitLabel,
 }
 
 impl FactKind {
@@ -2063,6 +2269,7 @@ impl FactKind {
             FactKind::PalletClosed => "pallet_closed",
             FactKind::PalletLabel => "pallet_label",
             FactKind::PalletException => "pallet_exception",
+            FactKind::UnitLabel => "unit_label",
         }
     }
 }
@@ -2106,7 +2313,8 @@ pub struct FactBatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanVerdict {
-    /// Accepted into the box.
+    /// Accepted: into the box in an aggregation shift, without one in a
+    /// validation shift.
     Ok,
     /// A code already taken, by this station's own copy or by the host.
     Duplicate,
@@ -2182,8 +2390,11 @@ pub struct ScannedCode {
 
 /// `data` of a `scan` fact: every scan of the work screen, accepted or not.
 /// An `invalid` scan carries no text, only its length and what it looked
-/// like (it may be a badge, whose code is a secret); an `ok` one names the
-/// box it went into.
+/// like (it may be a badge, whose code is a secret). `boxId` is always sent:
+/// an `ok` scan of an aggregation shift names the box it went into; an `ok`
+/// scan of a validation shift is `null` (protocol 4, plan РЕЖ), and so is
+/// every scan not accepted. Which of the two an `ok` scan must be is the
+/// host's to check against the shift's mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanFact {
@@ -2193,6 +2404,8 @@ pub struct ScanFact {
     pub raw_kind: ScanRawKind,
     pub raw_length: u32,
     pub code: Option<ScannedCode>,
+    /// `ok` in an aggregation shift: the box; `ok` in a validation shift:
+    /// `null`.
     pub box_id: Option<String>,
 }
 
@@ -2337,6 +2550,192 @@ pub struct BoxExceptionFact {
     pub reason_code: Option<String>,
     pub reason_text: Option<String>,
     pub occurred_at: String,
+}
+
+/// An event of a unit label job (part B of plan РЕЖ): the kinds of the
+/// domain's `productLabelEventSchema` (`@markiro/domain` `product-labels`),
+/// by name. An attempt is `prepared`, then `sending`, then `sent` or
+/// `delivery_unknown` (never sent again on its own), or `failed_before_send`
+/// when the printer no longer fits; its label is then `verified`,
+/// `verification_rejected` (the scan did not match) or
+/// `verification_skipped` (only after `sent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnitLabelEvent {
+    Prepared,
+    Sending,
+    Sent,
+    FailedBeforeSend,
+    DeliveryUnknown,
+    Verified,
+    VerificationRejected,
+    VerificationSkipped,
+}
+
+impl UnitLabelEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UnitLabelEvent::Prepared => "prepared",
+            UnitLabelEvent::Sending => "sending",
+            UnitLabelEvent::Sent => "sent",
+            UnitLabelEvent::FailedBeforeSend => "failed_before_send",
+            UnitLabelEvent::DeliveryUnknown => "delivery_unknown",
+            UnitLabelEvent::Verified => "verified",
+            UnitLabelEvent::VerificationRejected => "verification_rejected",
+            UnitLabelEvent::VerificationSkipped => "verification_skipped",
+        }
+    }
+
+    /// The error codes an event of this kind carries, one of them exactly
+    /// (`UNIT_LABEL_ERROR_CODES` in `protocol.ts`, the `CHECK` of
+    /// `unit_label_events` in the host's `0021`): the domain's `errorCode` of
+    /// `failed_before_send` and `delivery_unknown`, its rejection `reason` of
+    /// `verification_rejected`; none for every other event, which carries
+    /// none. `proto/fixtures/unit-label-rules.json` pins the lists.
+    pub fn error_codes(self) -> &'static [&'static str] {
+        match self {
+            UnitLabelEvent::FailedBeforeSend => &["printer_unconfigured", "printer_changed"],
+            UnitLabelEvent::DeliveryUnknown => {
+                &["transport_failed", "persistence_failed", "interrupted"]
+            }
+            UnitLabelEvent::VerificationRejected => &["invalid", "mismatch"],
+            UnitLabelEvent::Prepared
+            | UnitLabelEvent::Sending
+            | UnitLabelEvent::Sent
+            | UnitLabelEvent::Verified
+            | UnitLabelEvent::VerificationSkipped => &[],
+        }
+    }
+}
+
+impl std::str::FromStr for UnitLabelEvent {
+    type Err = UnknownVariant;
+
+    /// The name [`UnitLabelEvent::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("unit label event", text)
+    }
+}
+
+/// Why a unit label is printed again (the domain's `ReprintReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReprintReason {
+    NotPrinted,
+    Damaged,
+    Lost,
+}
+
+impl ReprintReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReprintReason::NotPrinted => "not_printed",
+            ReprintReason::Damaged => "damaged",
+            ReprintReason::Lost => "lost",
+        }
+    }
+}
+
+impl std::str::FromStr for ReprintReason {
+    type Err = UnknownVariant;
+
+    /// The name [`ReprintReason::as_str`] gives.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("reprint reason", text)
+    }
+}
+
+/// `data` of a `unit_label` fact (protocol 5, part B of plan РЕЖ): one event
+/// of the job that prints the Data Matrix duplicate of an accepted code of a
+/// validation shift. `jobId` is the station's job (a lower-case hyphenated
+/// UUID), `codeHash` the accepted code's `kmHash`, `attemptNo` the attempt
+/// from 1 (a reprint is a new attempt with the same bytes). `reason` is set
+/// on the `prepared` event of a reprint only (attempt 2 and later), as the
+/// domain's rule; `errorCode` on `failed_before_send` (`printer_unconfigured`,
+/// `printer_changed`), `delivery_unknown` (`transport_failed`,
+/// `persistence_failed`, `interrupted`) and `verification_rejected`
+/// (`invalid`, `mismatch`) only. `payloadDigest` and `bytesDigest` are the
+/// domain's digests of the printed text and of the printer's bytes: the
+/// full code never travels in a fact. Which of these rules a record breaks
+/// is the host's to check; so is the operator a decision names
+/// ([`UnitLabelFact::is_operator_decision`]) and the code and printed text
+/// a job keeps (an event of a known job with another `codeHash` or
+/// `payloadDigest` is `invalid_record` on `data.codeHash`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnitLabelFact {
+    pub job_id: String,
+    pub code_hash: String,
+    pub attempt_no: u32,
+    pub event: UnitLabelEvent,
+    pub reason: Option<ReprintReason>,
+    pub error_code: Option<String>,
+    pub payload_digest: String,
+    pub bytes_digest: String,
+    pub at: String,
+}
+
+/// Whether `text` is a SHA-256 as the domain writes it: 64 lower-case hex
+/// digits (a code's `kmHash`, the digests of a unit label). The host's
+/// `facts::rules::is_code_hash` is this rule.
+pub fn is_sha256_hex(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+impl UnitLabelFact {
+    /// Whether the event is the operator's decision, which names its
+    /// operator on the record (`FactRecord::operator_id`; the host refuses
+    /// one without, `invalid_record` on `operatorId`, as `factRecordSchema`
+    /// does): a skipped check, and the `prepared` event of a reprint (attempt
+    /// 2 and later), which carries its reason. Every other event may come
+    /// without one: the station's recovery after a restart writes
+    /// `delivery_unknown` with nobody signed in. The cloud requires an
+    /// operator on every event; the host keeps an event without one.
+    pub fn is_operator_decision(&self) -> bool {
+        self.event == UnitLabelEvent::VerificationSkipped
+            || (self.event == UnitLabelEvent::Prepared && self.attempt_no > 1)
+    }
+
+    /// The rules of the event that serde does not hold, as the webview's
+    /// `unitLabelFactSchema` and the `CHECK`s of the host's
+    /// `unit_label_events` hold them: `codeHash`, `payloadDigest` and
+    /// `bytesDigest` are 64 lower-case hex digits, `attemptNo` is 1 or more,
+    /// `reason` is set exactly on the `prepared` event of a later attempt,
+    /// and `errorCode` exactly on the events that have one, from that
+    /// event's list ([`UnitLabelEvent::error_codes`]; a code a newer station
+    /// adds is refused). The error is the broken field's name in `data`.
+    /// `jobId` (a client UUID) and `at` (a device instant) are the host's own
+    /// rules. `proto/fixtures/unit-label-rules.json` pins every case.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if !is_sha256_hex(&self.code_hash) {
+            return Err("codeHash");
+        }
+        if self.attempt_no < 1 {
+            return Err("attemptNo");
+        }
+        let reprint = self.event == UnitLabelEvent::Prepared && self.attempt_no > 1;
+        if self.reason.is_some() != reprint {
+            return Err("reason");
+        }
+        let codes = self.event.error_codes();
+        let fits = match &self.error_code {
+            None => codes.is_empty(),
+            Some(code) => codes.contains(&code.as_str()),
+        };
+        if !fits {
+            return Err("errorCode");
+        }
+        if !is_sha256_hex(&self.payload_digest) {
+            return Err("payloadDigest");
+        }
+        if !is_sha256_hex(&self.bytes_digest) {
+            return Err("bytesDigest");
+        }
+        Ok(())
+    }
 }
 
 /// `data` of a `shift_closed` fact: a station closed its shift. The numbers
@@ -2615,6 +3014,9 @@ pub struct OfficeBox {
     pub digest_matches: Option<bool>,
     pub print_verified_at: Option<String>,
     pub print_skipped_at: Option<String>,
+    /// The operator who closed the box (plan КРТ, П-14), `null` without one.
+    #[serde(default)]
+    pub operator_name: Option<String>,
 }
 
 /// A pallet of a shift as the office lists it (`GET
@@ -2634,6 +3036,11 @@ pub struct OfficePallet {
     pub boxes: u32,
     pub units: u64,
     pub box_count_reported: Option<u32>,
+    /// How many of the boxes that stood on the pallet were taken apart since
+    /// (by a station or an applied disaggregation document): they explain a
+    /// `boxCountReported` above `boxes`.
+    #[serde(default)]
+    pub disassembled_boxes: u32,
     pub print_verified_at: Option<String>,
     pub print_skipped_at: Option<String>,
 }
@@ -2956,6 +3363,7 @@ mod tests {
             FactKind::PalletClosed,
             FactKind::PalletLabel,
             FactKind::PalletException,
+            FactKind::UnitLabel,
         ];
         for kind in &kinds {
             match kind {
@@ -2966,7 +3374,8 @@ mod tests {
                 | FactKind::ShiftClosed
                 | FactKind::PalletClosed
                 | FactKind::PalletLabel
-                | FactKind::PalletException => {}
+                | FactKind::PalletException
+                | FactKind::UnitLabel => {}
             }
         }
         kinds

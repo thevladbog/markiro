@@ -1,12 +1,15 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
 import type { HostStatus } from "../src/host/protocol.js";
 import { PROTOCOL_VERSION } from "../src/host/protocol.js";
+import { usageStatsSchema } from "../src/host/usage-stats.js";
 import { ExternalLinkError, type AboutApi } from "../src/office/info/about-api.js";
 import { AboutProvider } from "../src/office/info/about-context.js";
 import { AboutPage } from "../src/office/info/AboutPage.js";
@@ -197,6 +200,11 @@ describe("Информация", () => {
   it("builds the support text from the allowlist, copies it and shows it", async () => {
     const about = fakeAbout();
     const { session } = renderAbout(about);
+    session.api.getUsageStats.mockResolvedValue(
+      usageStatsSchema.parse(
+        JSON.parse(readFileSync(join(__dirname, "../proto/fixtures/usage-stats.json"), "utf8")),
+      ),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Сформировать и скопировать" }));
     await screen.findByText("Сведения скопированы в буфер обмена.");
     const text = writeText.mock.calls[0]?.[0] ?? "";
@@ -215,6 +223,13 @@ describe("Информация", () => {
     expect(text).not.toContain(HOST_ID);
     expect(text).not.toContain(DEVICE_STATUS.fingerprint);
     expect(session.api.getBackups).toHaveBeenCalled();
+    // The usage statistics are asked of the host at the click; this build carries the owner's
+    // public support key, so the text holds the counts only as one opaque token.
+    expect(session.api.getUsageStats).toHaveBeenCalledTimes(1);
+    expect(text).toContain("Данные для анализа\r\nЗашифрованные данные\r\nMKS1.");
+    expect(text).not.toContain("Статистика");
+    expect(text).not.toContain("Отсутствуют");
+    expect(text).toMatch(/MKS1\.sup-d11c3182\.[A-Za-z0-9_-]+/u);
     const shown = screen.getByRole("textbox", { name: "Сведения для поддержки" });
     // A text field keeps line breaks as LF; the copy and the file keep the CRLF of the text.
     expect((shown as HTMLTextAreaElement).value).toBe(text.replaceAll("\r\n", "\n"));

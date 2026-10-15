@@ -62,6 +62,8 @@ export const standaloneLicenseRightsSchema = z
         inventory: z.boolean(),
         commerceMl: z.boolean(),
         handheld: z.boolean(),
+        // Custom branding; rights stored before the key existed read as off.
+        customLogo: z.boolean().default(false),
       })
       .strict(),
   })

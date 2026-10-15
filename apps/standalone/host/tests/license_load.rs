@@ -31,7 +31,7 @@ const OTHER_HOST: &str = "9b2e4f60-1a3c-4d5e-8f70-1a2b3c4d5e6f";
 fn all_features() -> Value {
     json!({
         "labelEditor": true, "publicApi": true, "pallets": true, "chzIntegration": true,
-        "inventory": true, "commerceMl": true, "handheld": true
+        "inventory": true, "commerceMl": true, "handheld": true, "customLogo": true
     })
 }
 
@@ -62,7 +62,14 @@ fn kept_of(payload: &Value) -> StoredLicense {
             Some(limit.as_u64().expect("a quota"))
         }
     };
-    let feature = |key: &str| payload["features"][key].as_bool().expect("a feature");
+    // A file issued before `customLogo` existed has no such key: it reads as off.
+    let feature = |key: &str| match payload["features"][key].as_bool() {
+        Some(on) => on,
+        None => {
+            assert_eq!(key, "customLogo", "a feature");
+            false
+        }
+    };
     StoredLicense {
         license_id: string(&payload["licenseId"]),
         sequence: int(&payload["sequence"]),
@@ -90,6 +97,7 @@ fn kept_of(payload: &Value) -> StoredLicense {
             inventory: feature("inventory"),
             commerce_ml: feature("commerceMl"),
             handheld: feature("handheld"),
+            custom_logo: feature("customLogo"),
         },
     }
 }
@@ -553,7 +561,8 @@ async fn the_preview_of_an_upgrade_compares_with_the_file_in_force() {
             "features.chzIntegration",
             "features.inventory",
             "features.commerceMl",
-            "features.handheld"
+            "features.handheld",
+            "features.customLogo"
         ])
     );
     assert_eq!(

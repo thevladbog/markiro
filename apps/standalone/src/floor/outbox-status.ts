@@ -8,13 +8,16 @@ import { BOX_EXTENSION } from "./work/box-close.js";
 
 /**
  * What the floor's status bar says of the outbox (stage 2a spec §5.5): this
- * pairing's records without a receipt, the ones the host refused, and the
- * scans the host found another device's scan owns.
+ * pairing's records without a receipt, the ones the host refused, the scans
+ * the host found another device's scan owns, and the scans an earlier scan
+ * elsewhere took the code from (plan КНФ).
  */
 export interface OutboxStatus {
   unsent: number;
   rejected: number;
   conflicts: number;
+  /** Displaced scans nobody resolved (plan КНФ). */
+  displaced: number;
 }
 
 /*
@@ -36,6 +39,11 @@ export const CONFLICT_COUNT_SQL =
   "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'conflict' " +
   "AND resolved_at IS NULL";
 
+// The displaced scans nobody resolved (plan КНФ), from their partial index.
+export const DISPLACED_COUNT_SQL =
+  "SELECT count(*) AS n FROM floor_displacements WHERE host_id = ? AND device_id = ? " +
+  "AND resolved_at IS NULL";
+
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
 async function count(local: LocalExecutor, pairing: Pairing, sql: string): Promise<number> {
@@ -47,12 +55,13 @@ export async function readOutboxStatus(
   local: LocalExecutor,
   pairing: Pairing,
 ): Promise<OutboxStatus> {
-  const [unsent, rejected, conflicts] = await Promise.all([
+  const [unsent, rejected, conflicts, displaced] = await Promise.all([
     count(local, pairing, UNSENT_COUNT_SQL),
     count(local, pairing, REJECTED_COUNT_SQL),
     count(local, pairing, CONFLICT_COUNT_SQL),
+    count(local, pairing, DISPLACED_COUNT_SQL),
   ]);
-  return { unsent, rejected, conflicts };
+  return { unsent, rejected, conflicts, displaced };
 }
 
 /**
@@ -155,13 +164,17 @@ export function waitUnits(ms: number): { unit: "day" | "hour" | "minute"; n: num
 
 /**
  * The issuer prefix of a shift this pairing entered (`NULL` for a shift it only
- * listed) and whether it has pallets.
+ * listed), whether it has pallets, and its mode (a validation shift has no stock, plan РЕЖ).
  */
 export const SHIFT_STOCK_SQL =
-  "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts " +
+  "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled, mode FROM floor_shifts " +
   "WHERE host_id = ? AND device_id = ? AND id = ?";
 
-const stockRow = z.object({ prefix: z.string().nullable(), pallets_enabled: z.number().int() });
+const stockRow = z.object({
+  prefix: z.string().nullable(),
+  pallets_enabled: z.number().int(),
+  mode: z.string(),
+});
 const newestRow = z.object({
   from_serial: z.number().int(),
   to_serial: z.number().int(),
@@ -220,7 +233,7 @@ async function serialStock(
  * The SSCC serials this pairing has left for a shift it entered, counted the
  * way a close takes them (`remainingSerials`): its boxes', and its pallets'
  * when it has pallets, each with its level; `null` for a shift without a
- * snapshot.
+ * snapshot, and for a validation shift, which numbers neither (plan РЕЖ).
  */
 export async function readShiftStock(
   local: LocalExecutor,
@@ -232,7 +245,8 @@ export async function readShiftStock(
     [pairing.hostId, pairing.deviceId, shiftId],
     stockRow,
   );
-  if (row === undefined || row.prefix === null) return null;
+  // A validation shift numbers no box and no pallet (plan РЕЖ): it has no stock to show.
+  if (row === undefined || row.prefix === null || row.mode === "validation") return null;
   const boxes = await serialStock(local, pairing, row.prefix, BOX_EXTENSION);
   const pallets =
     row.pallets_enabled === 1

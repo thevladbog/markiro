@@ -78,6 +78,9 @@ function blockerText(blocker: CloseBlocker, waitingSscc: string | null, t: TFunc
       return waitingSscc === null
         ? t("floor.close.blocked.labelUnknown")
         : t("floor.close.blocked.label", { sscc: waitingSscc });
+    case "label_unresolved":
+      // A unit label of a shift that prints the duplicate (plan РЕЖ part B): the cloud's words.
+      return t("floor.unitLabels.closeBlocked");
     case "open_pallet":
       return t("floor.close.blocked.open_pallet", { quantity: formatQuantity(blocker.boxes) });
     case "closed":
@@ -155,6 +158,8 @@ export interface ShiftClosePanelProps {
   onClosePallet?: (reason: ShiftCloseReasonCode | null) => void;
   /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
   clock?: () => number;
+  /** A validation shift (plan РЕЖ): its codes have no box, and the summary names none. */
+  boxless?: boolean;
 }
 
 /**
@@ -187,6 +192,7 @@ export function ShiftClosePanel({
   palletCapacity = null,
   onClosePallet,
   clock = realClock,
+  boxless = false,
 }: ShiftClosePanelProps) {
   const { t } = useTranslation();
   const [reason, setReason] = useState<ShiftCloseReasonCode | null>(null);
@@ -228,7 +234,7 @@ export function ShiftClosePanel({
           </Alert>
           <div className="shift-close__actions">
             {back}
-            {blocker.kind === "label" && (
+            {(blocker.kind === "label" || blocker.kind === "label_unresolved") && (
               <Button size="floor" {...press(onLabel)}>
                 {t("floor.close.toLabel")}
               </Button>
@@ -264,14 +270,18 @@ export function ShiftClosePanel({
               <dd>{deviation(summary.plannedQty, summary.actualQty)}</dd>
             </div>
           )}
-          <div>
-            <dt>{t("floor.close.boxes")}</dt>
-            <dd>{formatQuantity(summary.closedBoxes)}</dd>
-          </div>
-          <div>
-            <dt>{t("floor.close.average")}</dt>
-            <dd>{average ?? t("floor.close.none")}</dd>
-          </div>
+          {!boxless && (
+            <>
+              <div>
+                <dt>{t("floor.close.boxes")}</dt>
+                <dd>{formatQuantity(summary.closedBoxes)}</dd>
+              </div>
+              <div>
+                <dt>{t("floor.close.average")}</dt>
+                <dd>{average ?? t("floor.close.none")}</dd>
+              </div>
+            </>
+          )}
         </dl>
         {summary.plannedQty !== null && (
           <p
@@ -389,6 +399,8 @@ export interface ShiftClosedPanelProps {
   onDone: () => void;
   /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
   clock?: () => number;
+  /** A validation shift (plan РЕЖ): the numbers name its codes and no box. */
+  boxless?: boolean;
 }
 
 /**
@@ -404,6 +416,7 @@ export function ShiftClosedPanel({
   leaving,
   onDone,
   clock = realClock,
+  boxless = false,
 }: ShiftClosedPanelProps) {
   const { t } = useTranslation();
   const { viewRef, settled } = useViewGuard<HTMLDivElement>("closed", clock);
@@ -413,10 +426,12 @@ export function ShiftClosedPanel({
       <Alert tone="ok" role="presentation" className="shift-close__done" title={title}>
         <p>{t("floor.close.done.body")}</p>
         <p>
-          {t("floor.close.done.numbers", {
-            quantity: formatQuantity(record.actualQty),
-            boxes: formatQuantity(record.closedBoxCount),
-          })}
+          {boxless
+            ? t("floor.validation.closedNumbers", { quantity: formatQuantity(record.actualQty) })
+            : t("floor.close.done.numbers", {
+                quantity: formatQuantity(record.actualQty),
+                boxes: formatQuantity(record.closedBoxCount),
+              })}
         </p>
         {linkHeld && <p>{t("floor.close.done.held")}</p>}
       </Alert>

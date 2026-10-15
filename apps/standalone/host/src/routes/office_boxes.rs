@@ -19,8 +19,10 @@ pub const BOXES_SQL: &str = "SELECT b.id, b.device_id, b.sscc, b.opened_at, b.cl
      b.disassembled_at, b.pallet_id, \
      (SELECT COUNT(*) FROM box_items i WHERE i.box_id = b.id \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units, \
-     b.item_count_reported, b.digest_matches, b.print_verified_at, b.print_skipped_at \
-     FROM boxes b WHERE b.shift_id = ? ORDER BY b.opened_at, b.id";
+     b.item_count_reported, b.digest_matches, b.print_verified_at, b.print_skipped_at, \
+     op.name AS operator_name \
+     FROM boxes b LEFT JOIN operators op ON op.id = b.operator_id \
+     WHERE b.shift_id = ? ORDER BY b.opened_at, b.id";
 
 /// Every pallet of the shift, opened first first, with what stands on it:
 /// its closed boxes not taken apart and their live items.
@@ -32,7 +34,9 @@ pub const PALLETS_SQL: &str = "SELECT p.id, p.device_id, p.sscc, p.opened_at, p.
       AND i.removed_at IS NULL AND i.displaced_at IS NULL \
       WHERE b.pallet_id = p.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) \
       AS units, \
-     p.box_count_reported, p.print_verified_at, p.print_skipped_at \
+     p.box_count_reported, p.print_verified_at, p.print_skipped_at, \
+     (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
+      AND b.disassembled_at IS NOT NULL) AS disassembled_boxes \
      FROM pallets p WHERE p.shift_id = ? ORDER BY p.opened_at, p.id";
 
 #[derive(sqlx::FromRow)]
@@ -49,6 +53,7 @@ struct BoxRow {
     digest_matches: Option<bool>,
     print_verified_at: Option<String>,
     print_skipped_at: Option<String>,
+    operator_name: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -64,9 +69,11 @@ struct PalletRow {
     box_count_reported: Option<u32>,
     print_verified_at: Option<String>,
     print_skipped_at: Option<String>,
+    disassembled_boxes: i64,
 }
 
-async fn require_shift(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
+/// `not_found` for a shift the host does not have (also plan КНФ's review).
+pub(crate) async fn require_shift(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
     let found: Option<i64> = sqlx::query_scalar("SELECT 1 FROM shifts WHERE id = ?")
         .bind(id)
         .fetch_optional(conn)
@@ -110,6 +117,7 @@ pub async fn list_boxes(
                 digest_matches: row.digest_matches,
                 print_verified_at: row.print_verified_at,
                 print_skipped_at: row.print_skipped_at,
+                operator_name: row.operator_name,
             })
         })
         .collect::<Result<Vec<_>, ApiError>>()
@@ -146,6 +154,8 @@ pub async fn list_pallets(
                 boxes: u32::try_from(row.boxes).map_err(ApiError::internal)?,
                 units: u64::try_from(row.units).map_err(ApiError::internal)?,
                 box_count_reported: row.box_count_reported,
+                disassembled_boxes: u32::try_from(row.disassembled_boxes)
+                    .map_err(ApiError::internal)?,
                 print_verified_at: row.print_verified_at,
                 print_skipped_at: row.print_skipped_at,
             })

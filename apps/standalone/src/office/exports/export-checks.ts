@@ -5,7 +5,7 @@ import {
   type ShiftExportFormatDescriptor,
 } from "@markiro/domain";
 
-import type { OfficePallet, ShiftExportRows } from "../../host/protocol.js";
+import type { OfficePallet, ShiftExportRows, ShiftMode } from "../../host/protocol.js";
 import {
   palletExportSnapshot,
   shiftExportSnapshot,
@@ -64,22 +64,44 @@ export type ExportWarning =
    */
   | { kind: "late_boxes"; boxes: number }
   /** Pallets whose live box count differs from what the station counted at the close. */
-  | { kind: "pallet_count_mismatch"; pallets: number };
+  | { kind: "pallet_count_mismatch"; pallets: number }
+  /**
+   * Code conflicts of the shift nobody reviewed (plan КНФ): a box where a scan lost may
+   * differ from what the file writes. A warning, never a refusal (ПР-12).
+   */
+  | { kind: "unreviewed_conflicts"; conflicts: number };
+
+/** The shift's unreviewed conflicts as a warning of every shift format (plan КНФ, ПР-12). */
+export function conflictWarnings(unreviewed: number): ExportWarning[] {
+  return unreviewed > 0 ? [{ kind: "unreviewed_conflicts", conflicts: unreviewed }] : [];
+}
 
 /**
  * The formats the cloud's dialog offers this shift (`ShiftExportsDialog`:
  * the pallets formats only for a shift with pallets), each with its
- * source's refusal now.
+ * source's refusal now. A validation shift (plan РЕЖ, Р11) is offered the
+ * flat TXT and CSV alone: it has no box, so a format with boxes or pallets
+ * would only be refused (the cloud offers them and fails later).
  */
-export function formatOffers(rows: ShiftExportRows, formedAt: string): FormatOffer[] {
-  return offeredFormats(rows).map((format) => {
+export function formatOffers(
+  rows: ShiftExportRows,
+  formedAt: string,
+  mode: ShiftMode,
+): FormatOffer[] {
+  return offeredFormats(rows, mode).map((format) => {
     const snapshot = shiftExportSnapshot(rows, format, formedAt);
     return { format, refusal: snapshot.ok ? null : snapshot.refusal };
   });
 }
 
 /** The formats of `formatOffers`, without the work of checking them. */
-export function offeredFormats(rows: ShiftExportRows): ShiftExportFormatDescriptor[] {
+export function offeredFormats(
+  rows: ShiftExportRows,
+  mode: ShiftMode,
+): ShiftExportFormatDescriptor[] {
+  if (mode === "validation") {
+    return SHIFT_EXPORT_FORMATS.filter((format) => format.boxMode === "flat");
+  }
   return SHIFT_EXPORT_FORMATS.filter(
     (format) => rows.shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
   );
@@ -212,14 +234,21 @@ export function palletWarnings(rows: ShiftExportRows, palletId: string): ExportW
 /**
  * Pallets (the office's list of a shift's pallets) whose live box count is
  * not what the station counted when it closed them. A pallet taken apart is
- * left out: its count is stale by design.
+ * left out: its count is stale by design. A difference that exactly equals the
+ * pallet's boxes taken apart since the close is no warning either.
  */
 export function reportedCountWarnings(pallets: readonly OfficePallet[]): ExportWarning[] {
   const differing = pallets.filter(
     (pallet) =>
       pallet.disassembledAt === null &&
       pallet.boxCountReported !== null &&
-      pallet.boxCountReported !== pallet.boxes,
+      pallet.boxCountReported !== pallet.boxes &&
+      // A difference the pallet's own taken-apart boxes account for is the card's neutral tag,
+      // not a warning (`palletCountState`).
+      !(
+        pallet.disassembledBoxes > 0 &&
+        pallet.boxCountReported === pallet.boxes + pallet.disassembledBoxes
+      ),
   ).length;
   return differing > 0 ? [{ kind: "pallet_count_mismatch", pallets: differing }] : [];
 }

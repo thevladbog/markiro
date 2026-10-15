@@ -283,10 +283,22 @@
 .shift-hub .shift-card__photo[data-accent="true"] {
   background: linear-gradient(
     305deg,
-    hsl(var(--product-hue) 40% 20%),
-    hsl(var(--product-hue) 36% 11%) 55%,
-    hsl(var(--product-hue) 32% 6%)
+    hsl(var(--product-hue) var(--product-sat, 40%) 20%),
+    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 4%) 11%) 55%,
+    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 8%) 6%)
   );
+}
+
+/*
+ * The product's own photo, whole, over the colour panel (beta 3). A PNG or WebP
+ * with transparency (beta 3.2) lets the panel's colour through, so the shadow
+ * follows the picture's alpha (`drop-shadow`), not its rectangle.
+ */
+.shift-hub .shift-card__photo .product-photo {
+  max-width: 100%;
+  max-height: 100%;
+  filter: drop-shadow(0 10px 14px rgb(0 0 0 / 45%));
+  object-fit: contain;
 }
 
 .shift-hub .shift-card__photo-monogram {
@@ -335,6 +347,17 @@
   flex-wrap: wrap;
   column-gap: var(--sp-3);
   row-gap: var(--sp-1);
+}
+
+/*
+ * 1024×600: the production date and the shift date stand one above the other
+ * in the narrow column, so the card's rows are packed closer to keep the
+ * 72 px action and every fact on the card.
+ */
+@media (max-height: 700px) {
+  .shift-hub .shift-card__details {
+    gap: var(--sp-1);
+  }
 }
 
 .shift-hub .shift-card__date-part {
@@ -412,7 +435,8 @@
   min-width: 0;
   min-height: 0;
   margin-inline: auto;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   gap: var(--sp-3);
   align-content: center;
 }
@@ -432,6 +456,41 @@
 
 .new-shift .new-shift__results p {
   margin: 0;
+}
+
+/*
+ * A found product: its name is cut with an ellipsis and the GTIN stays whole
+ * (beta 3: a long name pushed the row past the panel and the panel scrolled
+ * sideways). The full text is the button's title and accessible name.
+ */
+.new-shift .new-shift__results {
+  min-width: 0;
+}
+
+.new-shift .new-shift__result {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.new-shift .new-shift__result > * {
+  min-width: 0;
+}
+
+.new-shift .new-shift__result-name,
+.new-shift .new-shift__ellipsis {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-shift .new-shift__result-gtin {
+  flex: none;
+  white-space: pre;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The form step: the product card, then the choices, scrolling only if it must. */
@@ -461,9 +520,48 @@
   overflow: hidden;
 }
 
+/* The product card: the photo (or the monogram on the colour panel) and the name. */
+.new-shift .new-shift__product .mk-card__body {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-3);
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+}
+
+.new-shift .new-shift__product-photo {
+  display: grid;
+  width: 96px;
+  height: 96px;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: hsl(var(--product-hue, 210) var(--product-sat, 36%) 14%);
+  place-items: center;
+}
+
+.new-shift .new-shift__product-photo .product-photo {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.new-shift .new-shift__product-monogram {
+  color: rgb(250 250 248 / 70%);
+  font: 700 44px / 1 var(--font-ui);
+}
+
+.new-shift .new-shift__product-text {
+  min-width: 0;
+}
+
 .new-shift .new-shift__product h3 {
+  display: -webkit-box;
   margin: 0;
+  overflow: hidden;
   font: var(--floor-title);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .new-shift .new-shift__code {
@@ -590,7 +688,7 @@
   display: grid;
   min-width: 0;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1.3fr)) repeat(2, minmax(0, 1fr));
   align-items: start;
 }
 
@@ -610,4 +708,67 @@
 
 .new-shift .new-shift__message p {
   margin: 0;
+}
+
+/* The verification choice beside the duplicate templates (beta 3.2). */
+.new-shift .new-shift__verification {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+/*
+ * A short panel (1024 x 600 and the like): the details keep to the height without
+ * an inner scroll. The product card shrinks, the mode, the print flag and the pallets
+ * pair up, and the explanatory lines go (the groups keep their accessible names).
+ */
+@media (max-height: 860px) {
+  .new-shift .new-shift__panel--found .new-shift__fields {
+    gap: var(--sp-2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* «Необязательно» under the plan: the label says enough; a field's error stays. */
+  .new-shift .new-shift__counts [id$="-hint"] {
+    display: none;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__product,
+  .new-shift .new-shift__panel--found .new-shift__counts {
+    grid-column: 1 / -1;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__label,
+  .new-shift .new-shift__panel--found .new-shift__hint {
+    display: none;
+  }
+
+  .new-shift .new-shift__panel--found .new-shift__message {
+    min-height: 24px;
+  }
+
+  .new-shift .new-shift__product .mk-card__body {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .new-shift .new-shift__product-photo {
+    width: 56px;
+    height: 56px;
+  }
+
+  .new-shift .new-shift__product-monogram {
+    font-size: 28px;
+  }
+
+  .new-shift .new-shift__product h3 {
+    font-size: 22px;
+    -webkit-line-clamp: 1;
+  }
+
+  .new-shift .new-shift__code {
+    margin-top: 2px;
+    font-size: 18px;
+  }
 }

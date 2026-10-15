@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { PALLET_EXPORT_FORMATS, SHIFT_EXPORT_FORMATS } from "@markiro/domain";
+import {
+  PALLET_EXPORT_FORMATS,
+  SHIFT_EXPORT_FORMATS,
+  type ProductLabelEvent,
+  type ReprintReason,
+  type VerificationPolicy,
+} from "@markiro/domain";
 
 import {
   PROTOCOL_VERSION,
@@ -81,8 +87,16 @@ import {
   productGroupSchema,
   productRecordSchema,
   productUpdateSchema,
+  LABEL_VERIFICATIONS,
+  REPRINT_REASONS,
+  SHIFT_SUPPORTS,
+  UNIT_LABEL_ERROR_CODES,
+  UNIT_LABEL_EVENTS,
+  unitLabelFactSchema,
+  validationPrintSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftEnterSchema,
   shiftExportRecordSchema,
   shiftExportRowsSchema,
   shiftUpdateSchema,
@@ -120,11 +134,13 @@ import {
   shiftCreate,
   shiftExportRecord,
   shiftUpdate,
+  STATION_SHIFT_ENTER,
   templateCreate,
   templateDefaultsUpdate,
   templateUpdate,
   updateStarted,
 } from "../src/host/requests.js";
+import { USAGE_MONTHS, usageStatsSchema } from "../src/host/usage-stats.js";
 
 // Vite statically rewrites the literal pattern `new URL(..., import.meta.url)`
 // for browser asset bundling (see `vite:asset-import-meta-url`); under the
@@ -309,6 +325,8 @@ const RESPONSES = [
   ["template-defaults.json", templateDefaultsSchema],
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
+  ["office-shift-validation.json", officeShiftSchema],
+  ["office-shift-validation-print.json", officeShiftSchema],
   ["shift-export-rows.json", shiftExportRowsSchema],
   ["box-report-rows.json", boxReportRowsSchema],
   ["pallet-report-rows.json", palletReportRowsSchema],
@@ -319,6 +337,8 @@ const RESPONSES = [
   ["device-shift-entered.json", enteredShiftSchema],
   ["device-shift-entered-pallets.json", enteredShiftSchema],
   ["device-shift-entered-sheet.json", enteredShiftSchema],
+  ["device-shift-entered-validation.json", enteredShiftSchema],
+  ["device-shift-entered-validation-print.json", enteredShiftSchema],
   ["sscc-block.json", ssccBlockSchema],
   ["code-check-free.json", codeCheckSchema],
   ["code-check-taken.json", codeCheckSchema],
@@ -360,6 +380,10 @@ const REQUESTS = [
   ["shift-create.json", shiftCreateSchema],
   ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-create-pallet-sheet.json", shiftCreateSchema],
+  ["shift-create-validation.json", shiftCreateSchema],
+  ["shift-create-validation-print.json", shiftCreateSchema],
+  ["shift-enter.json", shiftEnterSchema],
+  ["shift-enter-empty.json", shiftEnterSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-update-main-sheet.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
@@ -367,9 +391,18 @@ const REQUESTS = [
   ["update-started.json", updateStartedSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
   ["device-shift-create-pallets.json", deviceShiftCreateSchema],
+  ["device-shift-create-validation.json", deviceShiftCreateSchema],
+  ["device-shift-create-validation-print.json", deviceShiftCreateSchema],
   ["sscc-block-request.json", ssccBlockRequestSchema],
   ["facts-request.json", factBatchSchema],
   ["facts-request-pallets.json", factBatchSchema],
+  ["fact-scan-validation.json", factRecordSchema],
+  ["fact-unit-label-prepared.json", factRecordSchema],
+  ["fact-unit-label-sent.json", factRecordSchema],
+  ["fact-unit-label-verified.json", factRecordSchema],
+  ["fact-unit-label-skipped.json", factRecordSchema],
+  ["fact-unit-label-unknown.json", factRecordSchema],
+  ["fact-unit-label-reprint.json", factRecordSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -477,6 +510,80 @@ describe.each(REQUESTS)("request fixture %s", (name, schema) => {
 
   it("rejects an unknown field, like the host", () => {
     expect(schema.safeParse(extended(name)).success).toBe(false);
+  });
+});
+
+describe("protocol 4: the shift modes (plan РЕЖ)", () => {
+  const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+  const input = {
+    productId: shift.productId,
+    lineId: shift.lineId,
+    productionDate: shift.productionDate,
+    boxTemplateId: shift.boxTemplateId,
+    boxCapacity: shift.boxCapacity,
+    plannedQty: 1200,
+    counterpartyId: shift.counterpartyId,
+    pallets: null,
+  };
+
+  it("speaks protocol 4 and enters a shift naming what this station works", () => {
+    // Protocol 4 brought the modes; 5 (part B, below) keeps them.
+    expect(PROTOCOL_VERSION).toBe(5);
+    expect(SHIFT_SUPPORTS).toStrictEqual({
+      validation: "validation-v1",
+      validationDmDuplicate: "validation-dm-duplicate-v1",
+    });
+    // The station of part A works validation, and says so on every entry.
+    expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
+    expect(shiftEnterSchema.parse(STATION_SHIFT_ENTER)).toStrictEqual(STATION_SHIFT_ENTER);
+  });
+
+  it("bounds the capabilities an entry names", () => {
+    const enter = (supports: unknown) => shiftEnterSchema.safeParse({ supports }).success;
+    expect(enter([])).toBe(true);
+    expect(enter(["x".repeat(64)])).toBe(true);
+    expect(enter(Array.from({ length: 32 }, (_, index) => `cap-${index}`))).toBe(true);
+    expect(enter([""])).toBe(false);
+    expect(enter(["x".repeat(65)])).toBe(false);
+    expect(enter(Array.from({ length: 33 }, (_, index) => `cap-${index}`))).toBe(false);
+    expect(enter("validation-v1")).toBe(false);
+    expect(enter([1])).toBe(false);
+  });
+
+  it("plans a shift in the mode the office chose, aggregation when it names none", () => {
+    expect(shiftCreate({ ...input, mode: "validation" })).toStrictEqual(
+      fixture("shift-create-validation.json"),
+    );
+    expect(shiftCreate({ ...input, mode: "aggregation" })).toStrictEqual(
+      fixture("shift-create.json"),
+    );
+    expect(shiftCreate(input)).toStrictEqual(fixture("shift-create.json"));
+  });
+
+  it("plans a validation shift that prints a duplicate as the shared fixture (plan РЕЖ, B7)", () => {
+    expect(
+      shiftCreate({
+        ...input,
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          verification: "none",
+          templateId: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+        },
+      }),
+    ).toStrictEqual(fixture("shift-create-validation-print.json"));
+  });
+
+  it("reads a validation scan accepted without a box; whether an ok scan needs one is the host's", () => {
+    const record = factRecordSchema.parse(fixture("fact-scan-validation.json"));
+    expect(record.kind).toBe("scan");
+    if (record.kind !== "scan") return;
+    expect(record.data.verdict).toBe("ok");
+    expect(record.data.boxId).toBeNull();
+    // The station never leaves `boxId` out: a scan names its box or `null`.
+    const withoutBox: Record<string, unknown> = { ...record.data };
+    delete withoutBox["boxId"];
+    expect(factRecordSchema.safeParse({ ...record, data: withoutBox }).success).toBe(false);
   });
 });
 
@@ -798,6 +905,56 @@ describe("request builders produce their fixtures exactly", () => {
       ...shift,
       plannedQty: 1200,
     });
+  });
+
+  it("a station's validation shift names its mode and its print policy (beta 3.2)", () => {
+    const plain = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+    const typed = {
+      requestId: plain.requestId,
+      productId: plain.productId,
+      boxTemplateId: plain.boxTemplateId,
+      productionDate: plain.productionDate,
+      boxCapacity: 12,
+      plannedQty: null,
+    };
+    expect(deviceShiftCreate({ ...typed, mode: "validation" })).toStrictEqual(
+      fixture("device-shift-create-validation.json"),
+    );
+    const policy = deviceShiftCreateSchema.parse(
+      fixture("device-shift-create-validation-print.json"),
+    );
+    expect(
+      deviceShiftCreate({
+        ...typed,
+        mode: "validation",
+        ...(policy.validationPrint === undefined
+          ? {}
+          : { validationPrint: policy.validationPrint }),
+      }),
+    ).toStrictEqual(fixture("device-shift-create-validation-print.json"));
+    // An aggregation shift names neither: an older host refuses a field it does not know.
+    const aggregation = deviceShiftCreate({
+      ...typed,
+      mode: "aggregation",
+      validationPrint: { mode: "none" },
+    });
+    expect(aggregation).toStrictEqual(fixture("device-shift-create.json"));
+    // The hidden box capacity of a validation shift is the product's: left out.
+    expect(
+      deviceShiftCreate({
+        requestId: typed.requestId,
+        productId: typed.productId,
+        boxTemplateId: typed.boxTemplateId,
+        productionDate: typed.productionDate,
+        plannedQty: null,
+        mode: "validation",
+      }),
+    ).not.toHaveProperty("boxCapacity");
+    // A duplicate is printed only by a validation shift.
+    expect(deviceShiftCreateSchema.safeParse({ ...policy, mode: "aggregation" }).success).toBe(
+      false,
+    );
+    expect(deviceShiftCreateSchema.safeParse({ ...plain, mode: "validation" }).success).toBe(true);
   });
 
   it("sends the capacity, the date and every id the operator chose, not the fixture's", () => {
@@ -1229,6 +1386,7 @@ describe("request builders send only what changes", () => {
       palletBoxCapacity: null,
       palletTemplateId: null,
       palletSheetTemplateId: null,
+      mode: "aggregation" as const,
       rev: 71,
     };
     const same = {
@@ -1253,6 +1411,12 @@ describe("request builders send only what changes", () => {
         { boxTemplateId: other, expectedRev: 71 },
       ],
       [shiftUpdate(shift, { ...same, boxCapacity: 24 }), { boxCapacity: 24, expectedRev: 71 }],
+      // The mode (plan РЕЖ) goes only when it changes.
+      [shiftUpdate(shift, { ...same, mode: "aggregation" }), { expectedRev: 71 }],
+      [
+        shiftUpdate(shift, { ...same, mode: "validation" }),
+        { mode: "validation", expectedRev: 71 },
+      ],
       [shiftUpdate(shift, { ...same, plannedQty: 1500 }), { plannedQty: 1500, expectedRev: 71 }],
       [shiftUpdate(shift, { ...same, plannedQty: null }), { plannedQty: null, expectedRev: 71 }],
       [
@@ -3245,6 +3409,261 @@ describe("the A4 pallet sheets (plan А4)", () => {
   });
 });
 
+describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
+  type Row = Record<string, unknown>;
+  const TEMPLATE = "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e";
+  const printing = { mode: "duplicate_dm", verification: "none", templateId: TEMPLATE } as const;
+  const create = fixture("shift-create-validation-print.json") as Row;
+  const entered = fixture("device-shift-entered-validation-print.json") as Row & {
+    snapshot: Row & { validationPrint: Row & { template: Row } };
+  };
+  const frozen = entered.snapshot.validationPrint;
+
+  it("speaks protocol 5 with the domain's names", () => {
+    expect(PROTOCOL_VERSION).toBe(5);
+    expect(LABEL_VERIFICATIONS).toStrictEqual(["none", "required"]);
+    expect(REPRINT_REASONS).toStrictEqual(["not_printed", "damaged", "lost"]);
+    expect(UNIT_LABEL_EVENTS).toStrictEqual([
+      "prepared",
+      "sending",
+      "sent",
+      "failed_before_send",
+      "delivery_unknown",
+      "verified",
+      "verification_rejected",
+      "verification_skipped",
+    ]);
+    expectTypeOf<(typeof LABEL_VERIFICATIONS)[number]>().toEqualTypeOf<VerificationPolicy>();
+    expectTypeOf<(typeof REPRINT_REASONS)[number]>().toEqualTypeOf<ReprintReason>();
+    expectTypeOf<(typeof UNIT_LABEL_EVENTS)[number]>().toEqualTypeOf<ProductLabelEvent["kind"]>();
+    expect(UNIT_LABEL_ERROR_CODES).toStrictEqual({
+      failed_before_send: ["printer_unconfigured", "printer_changed"],
+      delivery_unknown: ["transport_failed", "persistence_failed", "interrupted"],
+      verification_rejected: ["invalid", "mismatch"],
+    });
+    type Of<K extends ProductLabelEvent["kind"]> = Extract<ProductLabelEvent, { kind: K }>;
+    expectTypeOf<(typeof UNIT_LABEL_ERROR_CODES)["failed_before_send"][number]>().toEqualTypeOf<
+      Of<"failed_before_send">["errorCode"]
+    >();
+    expectTypeOf<(typeof UNIT_LABEL_ERROR_CODES)["delivery_unknown"][number]>().toEqualTypeOf<
+      Of<"delivery_unknown">["errorCode"]
+    >();
+    expectTypeOf<(typeof UNIT_LABEL_ERROR_CODES)["verification_rejected"][number]>().toEqualTypeOf<
+      Of<"verification_rejected">["reason"]
+    >();
+  });
+
+  it("reads exactly the policy's two shapes", () => {
+    const read = (value: unknown) => validationPrintSchema.safeParse(value).success;
+    expect(read({ mode: "none" })).toBe(true);
+    expect(read(printing)).toBe(true);
+    expect(read({ ...printing, verification: "required" })).toBe(true);
+    expect(read({})).toBe(false);
+    expect(read({ mode: "aggregation" })).toBe(false);
+    expect(read({ mode: "duplicate_dm", verification: "none" })).toBe(false);
+    expect(read({ mode: "duplicate_dm", templateId: TEMPLATE })).toBe(false);
+    expect(read({ ...printing, verification: "optional" })).toBe(false);
+    expect(read({ ...printing, templateId: "a-template" })).toBe(false);
+    // The cloud's reprocessing of earlier codes is part C: not this wire.
+    expect(read({ ...printing, allowPreviouslyAcceptedCodes: false })).toBe(false);
+    expect(read({ mode: "none", templateId: TEMPLATE })).toBe(false);
+  });
+
+  it("plans a duplicate only for a validation shift", () => {
+    const plan = (change: Row) => shiftCreateSchema.safeParse({ ...create, ...change }).success;
+    expect(plan({})).toBe(true);
+    expect(plan({ validationPrint: { mode: "none" } })).toBe(true);
+    expect(plan({ mode: "aggregation", validationPrint: { mode: "none" } })).toBe(true);
+    expect(plan({ mode: "aggregation" })).toBe(false);
+    const withoutMode: Row = { ...create };
+    delete withoutMode["mode"];
+    // A plan without a mode is an aggregation shift's.
+    expect(shiftCreateSchema.safeParse(withoutMode).success).toBe(false);
+    expect(plan({ validationPrint: { mode: "duplicate_dm", verification: "none" } })).toBe(false);
+  });
+
+  it("refuses an edit to aggregation that keeps a duplicate", () => {
+    const edit = (change: Row) =>
+      shiftUpdateSchema.safeParse({ expectedRev: 4, ...change }).success;
+    // Without a mode the edit keeps the shift's: the host checks it.
+    expect(edit({ validationPrint: printing })).toBe(true);
+    expect(edit({ mode: "validation", validationPrint: printing })).toBe(true);
+    expect(edit({ mode: "aggregation", validationPrint: { mode: "none" } })).toBe(true);
+    expect(edit({ mode: "aggregation", validationPrint: printing })).toBe(false);
+  });
+
+  it("reads a shift's policy only with its mode", () => {
+    const office = fixture("office-shift-validation-print.json") as Row;
+    expect(officeShiftSchema.safeParse({ ...office, mode: "aggregation" }).success).toBe(false);
+    expect(
+      officeShiftSchema.safeParse({
+        ...office,
+        mode: "aggregation",
+        validationPrint: { mode: "none" },
+      }).success,
+    ).toBe(true);
+    const listed: Row = { ...entered };
+    delete listed["snapshot"];
+    expect(deviceShiftSchema.parse(listed)).toStrictEqual(listed);
+    expect(deviceShiftSchema.safeParse({ ...listed, mode: "aggregation" }).success).toBe(false);
+  });
+
+  it("enters a shift whose snapshot froze the shift's own policy", () => {
+    const enter = (shift: Row) => enteredShiftSchema.safeParse(shift).success;
+    const snapshot = (change: Row) => ({ ...entered.snapshot, ...change });
+    expect(enter(entered)).toBe(true);
+    expect(enter({ ...entered, validationPrint: { ...printing, verification: "required" } })).toBe(
+      false,
+    );
+    expect(
+      enter({
+        ...entered,
+        snapshot: snapshot({
+          validationPrint: {
+            ...frozen,
+            template: { ...frozen.template, id: entered["boxTemplateId"] },
+          },
+        }),
+      }),
+    ).toBe(false);
+    const noFrozen: Row = { ...entered.snapshot };
+    delete noFrozen["validationPrint"];
+    expect(enter({ ...entered, snapshot: noFrozen })).toBe(false);
+    for (const policy of [undefined, { mode: "none" }]) {
+      const shift: Row = { ...entered, validationPrint: policy };
+      if (policy === undefined) delete shift["validationPrint"];
+      expect(enter(shift)).toBe(false);
+      expect(enter({ ...shift, snapshot: noFrozen })).toBe(true);
+    }
+  });
+
+  it("enters a shift frozen before part B as it was", () => {
+    for (const name of [
+      "device-shift-entered.json",
+      "device-shift-entered-pallets.json",
+      "device-shift-entered-sheet.json",
+      "device-shift-entered-validation.json",
+    ]) {
+      const shift = enteredShiftSchema.parse(fixture(name));
+      expect(shift.validationPrint).toBeUndefined();
+      expect(shift.snapshot.validationPrint).toBeUndefined();
+      expect(JSON.stringify(shift.snapshot)).not.toContain("validationPrint");
+    }
+  });
+
+  it("keeps a unit label event to the domain's rules, never with the full code", () => {
+    const data = (name: string) => (fixture(`fact-unit-label-${name}.json`) as { data: Row }).data;
+    const read = (value: Row) => unitLabelFactSchema.safeParse(value).success;
+    const sent = data("sent");
+    for (const name of ["prepared", "sent", "verified", "skipped", "unknown", "reprint"]) {
+      expect(JSON.stringify(data(name))).not.toContain("\u001d");
+      expect(read(data(name))).toBe(true);
+    }
+    // A reason only on the prepared event of a reprint.
+    expect(read({ ...data("reprint"), reason: null })).toBe(false);
+    expect(read({ ...data("prepared"), reason: "damaged" })).toBe(false);
+    expect(read({ ...sent, attemptNo: 2, reason: "lost" })).toBe(false);
+    expect(read({ ...sent, attemptNo: 2 })).toBe(true);
+    expect(read({ ...data("reprint"), reason: "smudged" })).toBe(false);
+    // An error code exactly where the domain has one, of that event's list.
+    expect(read({ ...data("unknown"), errorCode: null })).toBe(false);
+    expect(read({ ...data("unknown"), errorCode: "printer_changed" })).toBe(false);
+    expect(read({ ...sent, event: "failed_before_send", errorCode: "printer_changed" })).toBe(true);
+    expect(read({ ...sent, event: "verification_rejected", errorCode: "mismatch" })).toBe(true);
+    expect(read({ ...sent, event: "verification_rejected", errorCode: null })).toBe(false);
+    expect(read({ ...sent, errorCode: "interrupted" })).toBe(false);
+    // Shapes: a job id, a code hash and digests, an attempt from 1.
+    expect(read({ ...sent, event: "printed" })).toBe(false);
+    expect(read({ ...sent, attemptNo: 0 })).toBe(false);
+    expect(read({ ...sent, jobId: "job-1" })).toBe(false);
+    expect(read({ ...sent, codeHash: "3F6C" })).toBe(false);
+    expect(read({ ...sent, bytesDigest: "x".repeat(64) })).toBe(false);
+    expect(read({ ...sent, code: "0104600682000013215Yq'Ct;\u001d93dGVz" })).toBe(false);
+    // The printed text's digest has the shape of the others (B1 review).
+    expect(read({ ...sent, payloadDigest: "8C1F" })).toBe(false);
+    expect(read({ ...sent, payloadDigest: "8c1f".repeat(16).slice(1) })).toBe(false);
+  });
+
+  it("names the operator of a decision on a unit label record, as the host does", () => {
+    const record = (name: string) => fixture(`fact-unit-label-${name}.json`) as Row;
+    const read = (value: Row) => factRecordSchema.safeParse(value);
+    // A skipped check and a reprint's `prepared` are the operator's decisions.
+    for (const name of ["skipped", "reprint"]) {
+      expect(read(record(name)).success, name).toBe(true);
+      const answer = read({ ...record(name), operatorId: null });
+      expect(answer.success, name).toBe(false);
+      expect(answer.error?.issues.map((issue) => issue.path)).toStrictEqual([["operatorId"]]);
+    }
+    // Every other event may come without one (a restart's `delivery_unknown`).
+    for (const name of ["prepared", "sent", "verified", "unknown"]) {
+      expect(read({ ...record(name), operatorId: null }).success, name).toBe(true);
+    }
+  });
+
+  it("keeps the unit label rules of the shared fixture, as the host does", () => {
+    const rules = fixture("unit-label-rules.json") as {
+      events: string[];
+      errorCodes: Record<string, string[]>;
+      reasons: string[];
+      base: Row;
+      cases: { change: Row; field: string | null }[];
+    };
+    expect(rules.events).toStrictEqual([...UNIT_LABEL_EVENTS]);
+    expect(rules.reasons).toStrictEqual([...REPRINT_REASONS]);
+    const codes: Readonly<Record<string, readonly string[]>> = UNIT_LABEL_ERROR_CODES;
+    expect(Object.keys(rules.errorCodes)).toStrictEqual([...UNIT_LABEL_EVENTS]);
+    for (const event of UNIT_LABEL_EVENTS) {
+      expect(rules.errorCodes[event], event).toStrictEqual([...(codes[event] ?? [])]);
+    }
+    for (const { change, field } of rules.cases) {
+      const answer = unitLabelFactSchema.safeParse({ ...rules.base, ...change });
+      const paths = answer.success ? [] : answer.error.issues.map((issue) => issue.path);
+      expect(paths, JSON.stringify(change)).toStrictEqual(field === null ? [] : [[field]]);
+    }
+  });
+
+  it("enters no aggregation shift that prints (B1 review)", () => {
+    const shift = { ...entered, mode: "aggregation" };
+    const answer = enteredShiftSchema.safeParse(shift);
+    expect(answer.success).toBe(false);
+    expect(answer.error?.issues.map((issue) => issue.path)).toStrictEqual([["validationPrint"]]);
+  });
+
+  it("reads the label totals of a shift that prints, and none of another", () => {
+    const office = officeShiftSchema.parse(fixture("office-shift-validation-print.json"));
+    expect(office.totals.unitLabels).toStrictEqual({
+      sent: 321,
+      verified: 0,
+      skipped: 0,
+      unresolved: 2,
+      reprints: 3,
+    });
+    expect(officeShiftSchema.parse(fixture("office-shift.json")).totals.unitLabels).toBeUndefined();
+    const raw = fixture("office-shift-validation-print.json") as Row & { totals: Row };
+    const totals = (unitLabels: unknown) => ({ ...raw, totals: { ...raw.totals, unitLabels } });
+    expect(officeShiftSchema.safeParse(totals({ sent: -1 })).success).toBe(false);
+    expect(
+      officeShiftSchema.safeParse(
+        totals({ sent: 1, verified: 0, skipped: 0, unresolved: 0.5, reprints: 0 }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("reads a policy with a field a newer host adds (B1 review)", () => {
+    const office = fixture("office-shift-validation-print.json") as Row;
+    const newer = {
+      ...office,
+      validationPrint: { ...printing, policyRevision: 3 },
+    };
+    expect(officeShiftSchema.safeParse(newer).success).toBe(true);
+    const listed: Row = { ...entered, validationPrint: { mode: "none", note: "x" } };
+    delete listed["snapshot"];
+    expect(deviceShiftSchema.safeParse(listed).success).toBe(true);
+    // A request takes exactly the policy's own fields.
+    expect(validationPrintSchema.safeParse({ ...printing, policyRevision: 3 }).success).toBe(false);
+  });
+});
+
 describe("the report of a started update (plan ОБН-2)", () => {
   const record = fixture("update-started.json") as Record<string, unknown>;
 
@@ -3279,5 +3698,120 @@ describe("the report of a started update (plan ОБН-2)", () => {
         JSON.stringify(change),
       ).toBe(false);
     }
+  });
+});
+
+describe("the shift's own date (beta 3, «Дата смены»)", () => {
+  const input = {
+    productId: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+    lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+    productionDate: "2026-10-08",
+    boxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+    boxCapacity: 12,
+    plannedQty: 1200,
+    counterpartyId: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+    pallets: null,
+  };
+
+  it("is a field of the office's shift, always present, beside the production date", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    expect(shift.plannedDate).toBe("2026-10-08");
+    const body = JSON.parse(JSON.stringify(fixture("office-shift.json"))) as Record<
+      string,
+      unknown
+    >;
+    delete body.plannedDate;
+    expect(officeShiftSchema.safeParse(body).success).toBe(false);
+    expect(officeShiftSchema.safeParse({ ...body, plannedDate: "2026-02-3" }).success).toBe(false);
+  });
+
+  it("is named by a plan only when the form has it, and the older body stays as it was", () => {
+    expect(shiftCreate({ ...input, plannedDate: "2026-10-09" })).toStrictEqual(
+      fixture("shift-create-planned-date.json"),
+    );
+    expect(shiftCreate(input)).toStrictEqual(fixture("shift-create.json"));
+    expect(shiftCreateSchema.parse(fixture("shift-create-planned-date.json"))).toEqual(
+      fixture("shift-create-planned-date.json"),
+    );
+  });
+
+  it("is sent by a change only when it differs from the loaded shift's", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    expect(shiftUpdate(shift, { plannedDate: shift.plannedDate })).toStrictEqual({
+      expectedRev: shift.rev,
+    });
+    expect(shiftUpdate(shift, { plannedDate: "2026-10-10" })).toStrictEqual({
+      plannedDate: "2026-10-10",
+      expectedRev: shift.rev,
+    });
+    expect(shiftUpdateSchema.parse(fixture("shift-update-planned-date.json"))).toEqual(
+      fixture("shift-update-planned-date.json"),
+    );
+  });
+
+  it("is a station's field too, and a station's list reads with or without it", () => {
+    const create = {
+      requestId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      productId: input.productId,
+      boxTemplateId: input.boxTemplateId,
+      productionDate: "2026-10-09",
+      boxCapacity: 12,
+      plannedQty: null,
+    };
+    expect(deviceShiftCreate({ ...create, plannedDate: "2026-10-09" })).toStrictEqual(
+      fixture("device-shift-create-planned-date.json"),
+    );
+    expect(deviceShiftCreate(create)).toStrictEqual(fixture("device-shift-create.json"));
+    expect(deviceShiftCreateSchema.parse(fixture("device-shift-create-planned-date.json"))).toEqual(
+      fixture("device-shift-create-planned-date.json"),
+    );
+    // A host before beta 3 sends no shift date: the list and the entry still read.
+    expect(deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts[0]?.plannedDate).toBe(
+      undefined,
+    );
+    const shifts = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json")).shifts;
+    expect(shifts.map((shift) => shift.plannedDate)).toEqual(["2026-10-08", "2026-10-09"]);
+    expect(
+      enteredShiftSchema.parse(fixture("device-shift-entered-planned-date.json")).plannedDate,
+    ).toBe("2026-10-10");
+  });
+});
+
+describe("the usage statistics (beta 3)", () => {
+  it("parse the shared fixture: twelve months of counts", () => {
+    const stats = usageStatsSchema.parse(fixture("usage-stats.json"));
+    expect(stats.months).toHaveLength(USAGE_MONTHS);
+    expect(stats.months.map((month) => month.month)).toEqual(
+      [...stats.months.map((month) => month.month)].sort(),
+    );
+    expect(stats.months.at(-2)?.scans).toEqual({ accepted: 21640, duplicates: 212, rejected: 37 });
+    expect(stats.devices).toEqual({ station: 3, office: 2, handheld: 1 });
+  });
+
+  it("refuse a month that is no month, a count that is not one, and a month that lacks a part", () => {
+    const base = JSON.parse(JSON.stringify(fixture("usage-stats.json"))) as {
+      months: Record<string, unknown>[];
+    };
+    const broken = (change: (month: Record<string, unknown>) => void): boolean => {
+      const copy = structuredClone(base);
+      const first = copy.months[0];
+      if (first === undefined) throw new Error("no month");
+      change(first);
+      return usageStatsSchema.safeParse(copy).success;
+    };
+    expect(broken(() => undefined)).toBe(true);
+    expect(broken((month) => (month.month = "2026-13"))).toBe(false);
+    expect(broken((month) => (month.month = "Сентябрь"))).toBe(false);
+    expect(broken((month) => ((month.scans as Record<string, unknown>).accepted = -1))).toBe(false);
+    expect(broken((month) => ((month.scans as Record<string, unknown>).accepted = 1.5))).toBe(
+      false,
+    );
+    expect(broken((month) => delete month.pallets)).toBe(false);
+    expect(
+      usageStatsSchema.safeParse({
+        ...base,
+        months: Array.from({ length: 13 }, () => base.months[0]),
+      }).success,
+    ).toBe(false);
   });
 });

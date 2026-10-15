@@ -47,7 +47,9 @@ pub const MAX_PAGE_BYTES: usize = 1024 * 1024;
 /// an operator only while active and a badge only while not revoked, since
 /// their tombstones say they left. Archived products and disabled templates
 /// stay, with their flags. A category default's id is `<code>:<purpose>`,
-/// as `markiro_proto::category_default_id` builds it.
+/// as `markiro_proto::category_default_id` builds it. A code release (plan
+/// ДЗГ) is one row per box an applied document took apart, keyed by the box;
+/// it is never deleted and has no tombstone.
 const FEED_KEYS: &str = "\
     SELECT 'org_profile' AS entity, '1' AS id, rev, 0 AS deleted FROM org_profile WHERE rev > ?1 \
     UNION ALL SELECT 'site', '1', rev, 0 FROM site WHERE rev > ?1 AND initialized_at IS NOT NULL \
@@ -55,9 +57,12 @@ const FEED_KEYS: &str = "\
     UNION ALL SELECT 'operators', id, rev, 0 FROM operators WHERE rev > ?1 AND active = 1 \
     UNION ALL SELECT 'operator_badges', id, rev, 0 FROM operator_badges WHERE rev > ?1 AND revoked_at IS NULL \
     UNION ALL SELECT 'products', id, rev, 0 FROM products WHERE rev > ?1 \
+    UNION ALL SELECT 'products', id, photo_rev, 0 FROM products \
+        WHERE photo_rev > ?1 AND photo_rev <> rev \
     UNION ALL SELECT 'label_templates', id, rev, 0 FROM label_templates WHERE rev > ?1 \
     UNION ALL SELECT 'category_template_defaults', chz_group_code || ':' || purpose, rev, 0 \
         FROM category_template_defaults WHERE rev > ?1 \
+    UNION ALL SELECT 'code_releases', box_id, rev, 0 FROM code_releases WHERE rev > ?1 \
     UNION ALL SELECT entity, id, rev, 1 FROM tombstones WHERE rev > ?1";
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +112,7 @@ struct ProductFeedRow {
     default_pallet_template_id: Option<String>,
     archived: bool,
     status: String,
+    photo_checksum: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -332,7 +338,9 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
             let row: ProductFeedRow = sqlx::query_as(
                 "SELECT gtin14, name, print_name, chz_group_code, box_capacity, \
                  pallet_box_capacity, shelf_life_days, default_box_template_id, \
-                 default_pallet_template_id, archived, status FROM products WHERE id = ?",
+                 default_pallet_template_id, archived, status, \
+                 (SELECT ph.checksum FROM product_photos ph WHERE ph.product_id = products.id) \
+                 AS photo_checksum FROM products WHERE id = ?",
             )
             .bind(&key.id)
             .fetch_one(&mut *conn)
@@ -350,6 +358,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 default_pallet_template_id: row.default_pallet_template_id,
                 archived: row.archived,
                 status: row.status.parse().map_err(ApiError::internal)?,
+                photo_checksum: row.photo_checksum,
             })
         }
         entities::LABEL_TEMPLATES => {
@@ -387,6 +396,23 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 chz_product_group_code: code,
                 purpose: purpose.parse().map_err(ApiError::internal)?,
                 template_id,
+            })
+        }
+        entities::CODE_RELEASES => {
+            let (shift_id, document_id, released_at, code_count): (String, String, String, u32) =
+                sqlx::query_as(
+                    "SELECT shift_id, document_id, released_at, code_count FROM code_releases \
+                     WHERE box_id = ?",
+                )
+                .bind(&key.id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?;
+            serde_json::to_value(markiro_proto::disaggregation::CodeReleaseRecord {
+                shift_id,
+                document_id,
+                released_at,
+                code_count,
             })
         }
         other => {

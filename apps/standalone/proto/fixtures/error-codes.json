@@ -17,6 +17,9 @@
     "pairing_code_invalid",
     "pairing_code_expired",
     "sscc_exhausted",
-    "restore_pending"
+    "restore_pending",
+    "export_store_full",
+    "export_file_too_large",
+    "export_file_corrupted"
   ]
 }

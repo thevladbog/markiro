@@ -14,6 +14,7 @@ import {
   shiftsSession,
   WATER,
 } from "./support/shifts.js";
+import { hasRowAction, pressRowAction } from "./support/row-menu.js";
 
 const TOKEN = "office-session-token";
 
@@ -44,7 +45,7 @@ async function openDelete(session: FakeOfficeSession): Promise<HTMLElement> {
 
 async function openClose(session: FakeOfficeSession): Promise<HTMLElement> {
   await openShifts(session);
-  fireEvent.click(screen.getByRole("button", { name: "Закрыть смену OCT26-004" }));
+  pressRowAction(screen, "Закрыть смену OCT26-004");
   return screen.findByRole("dialog", { name: "Закрыть смену OCT26-004" });
 }
 
@@ -655,7 +656,7 @@ describe("office shifts: closing an active shift", () => {
     fireEvent.click(cancelButton("Закрыть смену OCT26-004"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(session.api.closeShift).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть смену OCT26-004" }));
+    pressRowAction(screen, "Закрыть смену OCT26-004");
     await screen.findByRole("dialog", { name: "Закрыть смену OCT26-004" });
     expect(reason().value).toBe("");
     expect(reasonNote()).toBe(
@@ -668,10 +669,12 @@ describe("office shifts: closing an active shift", () => {
       const session = shiftsSession(undefined, user);
       session.api.closeShift.mockResolvedValue(CLOSED_ACTIVE);
       const view = await openShifts(session);
-      expect(screen.getAllByRole("button", { name: /^Закрыть смену / })).toHaveLength(1);
-      expect(within(shiftRow("OCT26-005")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
-      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Закрыть смену OCT26-004" }));
+      // Only the active shift's row has a close action (in its «⋯» menu).
+      expect(hasRowAction(screen, /^Закрыть смену /)).toBe(true);
+      expect(hasRowAction(within(shiftRow("OCT26-004")), "Закрыть смену OCT26-004")).toBe(true);
+      expect(hasRowAction(within(shiftRow("OCT26-005")), /Закрыть/)).toBe(false);
+      expect(hasRowAction(within(shiftRow("OCT26-001/S")), /Закрыть/)).toBe(false);
+      pressRowAction(screen, "Закрыть смену OCT26-004");
       await screen.findByRole("dialog", { name: "Закрыть смену OCT26-004" });
       giveReason("Станция сломалась");
       await screen.findByText("Смена OCT26-004 закрыта.");

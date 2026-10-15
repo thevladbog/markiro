@@ -5,8 +5,12 @@ import type { CodeCheck, CodeOwner, ScanFact, ScanRawKind } from "../../host/pro
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, scanRecord, scannedCode, type RecordHead } from "../facts.js";
+import type { ShiftRenderDeps } from "../print/shift-render.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
-import { readOpenBox } from "./work-reads.js";
+import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
+import type { UnitLabelRef } from "../unit-labels/unit-label-store.js";
+import { acceptWithLabel, checkUnitAcceptance } from "../unit-labels/unit-label-work.js";
+import { readOpenBox, SHIFT_CODES_SQL } from "./work-reads.js";
 
 /**
  * The longest serial the host keeps, in bytes of UTF-8 (`MAX_SERIAL_BYTES`,
@@ -54,19 +58,48 @@ export interface ScanContext {
   onHostError: (error: unknown) => void;
   now: () => Date;
   newId: () => string;
+  /**
+   * What a unit's label needs in a validation shift that prints the Data
+   * Matrix duplicate (plan РЕЖ part B): the name it prints as the operator —
+   * required: such a shift takes no scan without it — and the render replaced
+   * (tests; left out, the app's render draws it).
+   */
+  unitLabel?: {
+    operatorName: string;
+    render?: RenderUnitLabel;
+    labelDeps?: ShiftRenderDeps;
+  };
 }
 
-/** What became of a scan; every outcome is in `floor_scans` and the outbox. */
-export type ScanOutcome =
+/**
+ * What became of a scan; every outcome is in `floor_scans` and the outbox, and `scannedAt` is
+ * the moment journalled with it (`floor_scans.scanned_at`), what the screen says it at. An
+ * accepted code of an aggregation shift is in its open box (`itemCount`: the box's codes now);
+ * one of a validation shift is in no box (`boxId: null`, plan РЕЖ), and `acceptedCount` is the
+ * codes this station holds in the shift now.
+ */
+export type ScanOutcome = { scannedAt: string } & (
   | { kind: "accepted"; boxId: string; itemCount: number }
+  | {
+      kind: "accepted";
+      boxId: null;
+      acceptedCount: number;
+      /**
+       * The unit's label job, `prepared`, in a shift that prints the duplicate
+       * (plan РЕЖ part B), by its light reference: never its code nor its bytes.
+       */
+      label?: UnitLabelRef;
+    }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
   | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
   | { kind: "wrong_gtin"; gtin14: string }
-  | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> };
+  | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> }
+);
 
 const localOwnerRow = z.object({ scanned_at: z.string() });
+const countRow = z.object({ n: z.number().int().nonnegative() });
 
-/** When this station accepted the code, if it holds it in a box of this pairing. */
+/** When this station accepted the code, if it holds it in this pairing (in a box or not). */
 async function readLocalOwner(
   context: ScanContext,
   codeHash: string,
@@ -136,7 +169,8 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
  * time (`createWorkQueue`): read it; a code of another product is
  * `wrong_gtin`; a code this station holds is a local duplicate; a code
  * another device's scan owns on the host is a host duplicate; otherwise it
- * is accepted into the shift's open box, which opens with it. Every scan is
+ * is accepted into the shift's open box, which opens with it — or, in a
+ * validation shift (plan РЕЖ), into no box at all. Every scan is
  * journalled with its outbox record in ONE transaction: the accepted one with
  * its box and its place in `floor_codes`, whose key keeps a code in one box
  * of the pairing at most — a second accept of a code the check missed fails
@@ -144,9 +178,25 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
  * keeps its length and kind, never its text (decision 15: it may be a
  * badge). A failed write rejects: the scan is not taken, and the screen says
  * so.
+ *
+ * A validation shift that prints the Data Matrix duplicate (plan РЕЖ part B)
+ * takes no scan at all while the station's unit label waits for the operator
+ * or no duplicate printer is assigned, and accepts a unit with its label
+ * (`acceptWithLabel`): its place, journal row and `scan` record, the job and
+ * its `prepared` record in one transaction. Those refusals and the unit's own
+ * (a code without its crypto tail, a label that does not render) reject with
+ * `UnitLabelRefusedError`, nothing written.
  */
 export async function processScan(context: ScanContext, raw: string): Promise<ScanOutcome> {
   const { local, pairing, shift } = context;
+  const printing = shift.copy.mode === "validation" && shift.snapshot.validationPrint !== null;
+  // A label prints the operator who accepted its unit: never a label without one (a caller's
+  // fault, before anything is read or written).
+  const operatorName = context.unitLabel?.operatorName ?? "";
+  if (printing && operatorName.trim() === "") {
+    throw new Error("processScan: a unit label needs its operator's name");
+  }
+  if (printing) await checkUnitAcceptance(context);
   const scannedAt = context.now().toISOString();
   const head: RecordHead = {
     id: context.newId(),
@@ -171,18 +221,18 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       code: null,
       boxId: null,
     });
-    return { kind: "invalid", rawKind: reading.kind };
+    return { kind: "invalid", rawKind: reading.kind, scannedAt };
   }
   const code = scannedCode(reading.km);
   const refused = { ...base, rawKind: "km" as const, code, boxId: null };
   if (code.gtin14 !== shift.snapshot.product.gtin14) {
     await journal({ ...refused, verdict: "wrong_gtin", duplicateSource: null });
-    return { kind: "wrong_gtin", gtin14: code.gtin14 };
+    return { kind: "wrong_gtin", gtin14: code.gtin14, scannedAt };
   }
   const mine = await readLocalOwner(context, code.codeHash);
   if (mine !== null) {
     await journal({ ...refused, verdict: "duplicate", duplicateSource: "local" });
-    return { kind: "duplicate", source: "local", firstScannedAt: mine.scannedAt };
+    return { kind: "duplicate", source: "local", firstScannedAt: mine.scannedAt, scannedAt };
   }
   const owner = await hostOwner(context, code.codeHash);
   if (owner !== null) {
@@ -192,7 +242,65 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       source: "host",
       firstScannedAt: owner.scannedAt,
       shiftNumber: owner.shiftNumber,
+      scannedAt,
     };
+  }
+  const claim = (boxId: string | null): LocalStatement => ({
+    sql:
+      "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, " +
+      "scanned_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    values: [
+      pairing.hostId,
+      pairing.deviceId,
+      code.codeHash,
+      shift.copy.id,
+      boxId,
+      head.id,
+      scannedAt,
+    ],
+    expectedChanges: 1,
+  });
+  if (shift.copy.mode === "validation") {
+    // A validation shift takes the code without a box (plan РЕЖ, Р8): its place, its journal
+    // row and its record name none, and no box is opened. Read in the queue's turn, where
+    // nothing else writes the shift's codes, so the count after the write is one more.
+    const [held] = await local.query(
+      SHIFT_CODES_SQL,
+      [pairing.hostId, pairing.deviceId, shift.copy.id],
+      countRow,
+    );
+    const acceptedCount = (held?.n ?? 0) + 1;
+    if (printing) {
+      const data: ScanFact = { ...refused, verdict: "ok", duplicateSource: null, boxId: null };
+      const label = await acceptWithLabel(
+        {
+          local,
+          pairing,
+          shift,
+          operatorId: context.operatorId,
+          operatorName,
+          now: context.now,
+          newId: context.newId,
+          ...(context.unitLabel?.render === undefined ? {} : { render: context.unitLabel.render }),
+          ...(context.unitLabel?.labelDeps === undefined
+            ? {}
+            : { labelDeps: context.unitLabel.labelDeps }),
+        },
+        {
+          scanId: head.id,
+          code,
+          scannedAt,
+          statements: [
+            claim(null),
+            scanRow(context, head.id, data),
+            outboxStatement(scanRecord(head, data), pairing, scannedAt),
+          ],
+        },
+      );
+      return { kind: "accepted", boxId: null, acceptedCount, scannedAt, label };
+    }
+    await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId: null }, [claim(null)]);
+    return { kind: "accepted", boxId: null, acceptedCount, scannedAt };
   }
   const box = await readOpenBox(local, pairing, shift.copy.id);
   const boxId = box?.id ?? context.newId();
@@ -212,21 +320,9 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
           values: [boxId, pairing.hostId, pairing.deviceId],
           expectedChanges: 1,
         };
-  const claim: LocalStatement = {
-    sql:
-      "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, " +
-      "scanned_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-    values: [
-      pairing.hostId,
-      pairing.deviceId,
-      code.codeHash,
-      shift.copy.id,
-      boxId,
-      head.id,
-      scannedAt,
-    ],
-    expectedChanges: 1,
-  };
-  await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId }, [intoBox, claim]);
-  return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1 };
+  await journal({ ...refused, verdict: "ok", duplicateSource: null, boxId }, [
+    intoBox,
+    claim(boxId),
+  ]);
+  return { kind: "accepted", boxId, itemCount: (box?.itemCount ?? 0) + 1, scannedAt };
 }

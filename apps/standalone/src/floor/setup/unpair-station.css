@@ -1,0 +1,22 @@
+/*
+ * «Отвязать станцию» in the footer of «Рабочее место» (beta 3): the 64 px
+ * destructive button on one line, and the dialog's text, which wraps.
+ */
+.unpair-station__button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.unpair-station__body {
+  display: grid;
+  width: min(760px, 100%);
+  min-width: 0;
+  margin-inline: auto;
+  gap: var(--sp-3);
+}
+
+.unpair-station__body p {
+  margin: 0;
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}

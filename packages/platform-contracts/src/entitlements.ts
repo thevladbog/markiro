@@ -6,7 +6,15 @@ import {
   platformUuidSchema,
 } from "./primitives.js";
 
-export const P1_FEATURE_KEYS = ["chzIntegration", "inventory", "commerceMl", "handheld"] as const;
+export const P1_FEATURE_KEYS = [
+  "chzIntegration",
+  "inventory",
+  "commerceMl",
+  "handheld",
+  // Custom branding: the organization's own logo on printed forms and labels
+  // («Markiro Автоном»; without it everything prints the Markiro logo).
+  "customLogo",
+] as const;
 export const ENTITLEMENT_FEATURE_KEYS = [
   "labelEditor",
   "publicApi",
@@ -449,6 +457,7 @@ export const entitlementCandidateFeaturesSchema = z
     inventory: z.boolean().nullable(),
     commerceMl: z.boolean().nullable(),
     handheld: z.boolean().nullable(),
+    customLogo: z.boolean().nullable(),
   })
   .strict();
 const sourceBaseSchema = z

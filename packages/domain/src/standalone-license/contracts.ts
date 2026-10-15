@@ -22,6 +22,7 @@ export const STANDALONE_FEATURE_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const;
 export type StandaloneQuotaKey = (typeof STANDALONE_QUOTA_KEYS)[number];
 export type StandaloneFeatureKey = (typeof STANDALONE_FEATURE_KEYS)[number];
@@ -95,6 +96,9 @@ export const standaloneLicenseFeaturesSchema = z
     inventory: z.boolean(),
     commerceMl: z.boolean(),
     handheld: z.boolean(),
+    // Custom branding (the organization's logo on printed forms and labels).
+    // A file issued before the key existed has none: it reads as off.
+    customLogo: z.boolean().default(false),
   })
   .strict();
 

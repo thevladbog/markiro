@@ -56,14 +56,10 @@ describe("the office layout rules", () => {
     );
   });
 
-  it("starts a table row's buttons at their heading, and lays many of them out by the table's room", () => {
-    expect(rule(".office-shell__content .mk-table .mk-row-actions")).toContain(
-      "justify-content: flex-start",
-    );
-    expect(css).toContain("@container office-table (min-width:");
-    expect(rule(".office-shell__content .mk-table__scroll")).toContain(
-      "container: office-table / inline-size",
-    );
+  it("starts a table row's buttons at their heading and keeps them on one line", () => {
+    const actions = rule(".office-shell__content .mk-table .mk-row-actions");
+    expect(actions).toContain("justify-content: flex-start");
+    expect(actions).toContain("flex-wrap: nowrap");
   });
 
   it("gives a warning in a table cell its own wrapping sentence, not a chip", () => {

@@ -101,6 +101,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
       width: 2,
       height: 1,
       dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      mediaType: "image/jpeg" as const,
       checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
       updatedAt: "2026-10-13T09:00:00.000Z",
     };
@@ -130,7 +131,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     expect(bare).not.toContain("<img");
   });
 
-  it("draws the blank of a planned or an active shift, with its one date as both dates, and none of a closed one", () => {
+  it("draws the blank of a planned or an active shift, with its own date and its production date, and none of a closed one", () => {
     const inputs = {
       shift: PLANNED,
       product: MILK,
@@ -143,7 +144,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     const blank = taskFormData(inputs, at);
     expect(blank).toMatchObject({
       status: "planned",
-      plannedDate: PLANNED.productionDate,
+      plannedDate: PLANNED.plannedDate,
       productionDate: PLANNED.productionDate,
       lineName: LINE_2.name,
       counterpartyName: NORTH.name,

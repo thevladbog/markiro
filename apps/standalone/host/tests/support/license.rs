@@ -136,7 +136,7 @@ pub fn terms(host_id: &str) -> Value {
         "quotas": { "lines": null, "stations": null, "kiosks": null, "cabinetUsers": null },
         "features": {
             "labelEditor": true, "publicApi": true, "pallets": true, "chzIntegration": true,
-            "inventory": true, "commerceMl": true, "handheld": true
+            "inventory": true, "commerceMl": true, "handheld": true, "customLogo": true
         },
         "replaces": null
     })

@@ -1,5 +1,7 @@
 import {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
   renderBoxReportHtml,
+  renderDisaggregationReportHtml,
   renderPalletPlacardHtml,
   renderPalletReportHtml,
   renderShiftPlacardsHtml,
@@ -7,8 +9,10 @@ import {
   type PlacardFormat,
 } from "@markiro/domain";
 
+import type { DisaggregationReportRows } from "../../host/disaggregation.js";
 import type { BoxReportRows, OrgProfile, PalletReportRows } from "../../host/protocol.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { actData } from "../disaggregation/act-data.js";
 import {
   boxReportData,
   palletPlacardData,
@@ -19,15 +23,24 @@ import {
 } from "./form-data.js";
 
 /** The printed forms of a shift (pilot spec §5.5), as the cloud's routes serve them. */
-export type FormKind = "box" | "pallet" | "placard" | "placards" | "task";
+export type FormKind = "box" | "pallet" | "placard" | "placards" | "task" | "act";
 
 /** A form to draw and the host's rows (or the office's records) it is drawn from. */
-export type FormRequest =
+export type FormRequest = (
   | { kind: "box"; rows: BoxReportRows; timeZone: string }
   | { kind: "pallet"; rows: PalletReportRows; palletId: string; timeZone: string }
   | { kind: "placard"; rows: PalletReportRows; palletId: string; format: PlacardFormat }
   | { kind: "placards"; rows: PalletReportRows; format: PlacardFormat }
-  | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date };
+  | { kind: "task"; inputs: TaskFormInputs; generatedAt: Date }
+  // «Акт дезагрегации» of a disaggregation document (plan ДЗГ-О), of any status.
+  | { kind: "act"; rows: DisaggregationReportRows; timeZone: string }
+) & {
+  /**
+   * The organization's own print logo as a PNG data URL (custom branding, a
+   * license feature); left out, every form prints the Markiro logo.
+   */
+  logo?: string | null;
+};
 
 /** A drawn form: its HTML, exactly the cloud's for the same input, and its file's name. */
 export interface RenderedForm {
@@ -73,9 +86,10 @@ export interface PreparedForm {
  * (`SHIFT_TASK_FORM_CLOSED`). Nothing is drawn yet.
  */
 export function prepareForm(request: FormRequest): PreparedForm | null {
+  const logo = request.logo ?? null;
   switch (request.kind) {
     case "box": {
-      const data = boxReportData(request.rows);
+      const data = boxReportData(request.rows, logo);
       return {
         kind: "box",
         draw: () => renderBoxReportHtml(data, request.timeZone),
@@ -83,7 +97,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "pallet": {
-      const data = palletReportData(request.rows, request.palletId);
+      const data = palletReportData(request.rows, request.palletId, logo);
       if (data === null) return null;
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
@@ -93,7 +107,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "placard": {
-      const data = palletPlacardData(request.rows, request.palletId);
+      const data = palletPlacardData(request.rows, request.palletId, logo);
       if (data === null) return null;
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
@@ -103,7 +117,7 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "placards": {
-      const data = shiftPlacardsData(request.rows);
+      const data = shiftPlacardsData(request.rows, logo);
       if (data === null) return null;
       return {
         kind: "placards",
@@ -112,12 +126,27 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       };
     }
     case "task": {
-      const data = taskFormData(request.inputs, request.generatedAt);
+      const data = taskFormData(request.inputs, request.generatedAt, logo);
       if (data === null) return null;
       return {
         kind: "task",
         draw: () => renderShiftTaskFormHtml(data),
         fileName: "Бланк смены.html",
+      };
+    }
+    case "act": {
+      // The cloud prints an act of any status, so there is no refusal. The
+      // note replaces the cloud's «передаются в ГИС МТ автоматически»: the
+      // standalone sends nothing, a person uploads the file.
+      const data = actData(request.rows, logo);
+      return {
+        kind: "act",
+        draw: () =>
+          renderDisaggregationReportHtml(
+            { ...data, operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE },
+            request.timeZone,
+          ),
+        fileName: `Акт дезагрегации ${request.rows.docNo}.html`,
       };
     }
   }

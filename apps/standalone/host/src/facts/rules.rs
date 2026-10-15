@@ -64,13 +64,30 @@ pub fn device_instant(text: &str) -> Option<OffsetDateTime> {
     (written == text).then_some(at)
 }
 
+/// An instant written as a device writes its own ([`device_instant`]'s form,
+/// 24 characters with milliseconds): what the office's disaggregation
+/// stamps on the fact tables (plan ДЗГ), so their columns hold one kind of
+/// text and the box report finds the items a disassembly took out by
+/// equality.
+pub fn device_text(at: OffsetDateTime) -> String {
+    let at = at.to_offset(time::UtcOffset::UTC);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute(),
+        at.second(),
+        at.millisecond()
+    )
+}
+
 /// A code's hash as the domain's `kmHash` writes it: 64 lower-case hex
-/// digits.
+/// digits (`markiro_proto::is_sha256_hex`, the rule of a unit label's
+/// digests too).
 pub fn is_code_hash(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    markiro_proto::is_sha256_hex(text)
 }
 
 /// Whether `sscc` is the SSCC of `serial` under `issuer_prefix` and the

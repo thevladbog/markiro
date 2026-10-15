@@ -1106,6 +1106,26 @@ async fn the_earliest_scan_owns_a_code_whatever_order_the_scans_arrive_in() {
     .await
     .unwrap();
     assert_eq!(live, 1);
+    // Plan КНФ: each row says how its loser lost — taken from its box by an
+    // earlier scan, or later than the owner.
+    let kinds: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT l.record_id, w.record_id, c.kind FROM code_conflicts c \
+         JOIN scans l ON l.id = c.loser_scan_id JOIN scans w ON w.id = c.winner_scan_id \
+         ORDER BY l.record_id, w.record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kinds,
+        vec![
+            (record_id(1), record_id(2), "displaced".into()),
+            (record_id(2), record_id(6), "displaced".into()),
+            (record_id(3), record_id(2), "late".into()),
+            (record_id(4), record_id(2), "late".into()),
+            (record_id(5), record_id(2), "late".into()),
+        ]
+    );
 }
 
 /// The registry compares the scans' instants to the millisecond, not to the
@@ -3367,8 +3387,9 @@ async fn accepted_by_schema(admin: &Admin, what: &str, sql: &str) {
         .unwrap_or_else(|error| panic!("{what}: {error}"));
 }
 
-/// What no row may break, whatever writes it: the checks of migration 0010.
-/// Every refusal is paired with a control that differs in one thing.
+/// What no row may break, whatever writes it: the checks of migration 0010
+/// (an accepted scan's box: the CHECK and trigger of 0020, plan РЕЖ). Every
+/// refusal is paired with a control that differs in one thing.
 #[tokio::test]
 async fn the_schema_refuses_the_rows_no_fact_may_leave() {
     let (admin, floor) = floor().await;
@@ -3595,7 +3616,8 @@ async fn the_schema_refuses_the_rows_no_fact_may_leave() {
         (
             "an accepted scan with no box",
             scan("s-11", "ok", None, "km", 1, Some(&hash), Some("x"), None),
-            "(verdict = 'ok') = (box_id IS NOT NULL)",
+            // 0020: the trigger of an aggregation shift, no longer a CHECK.
+            "scan_needs_box",
         ),
         (
             "a duplicate in a box",
@@ -3609,7 +3631,7 @@ async fn the_schema_refuses_the_rows_no_fact_may_leave() {
                 Some("x"),
                 Some(b1_ref),
             ),
-            "(verdict = 'ok') = (box_id IS NOT NULL)",
+            "box_id IS NULL OR verdict = 'ok'",
         ),
         (
             "a duplicate with no finder",

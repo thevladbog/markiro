@@ -97,6 +97,18 @@ import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { FloorFooter } from "../shifts/FloorScreen.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
+import type { RenderUnitLabel } from "../unit-labels/unit-label-render.js";
+import {
+  printsUnitLabels,
+  unitLabelPolicy,
+  useUnitLabelWork,
+  type UnitStop,
+} from "../unit-labels/use-unit-label-work.js";
+import { UnitLabelRefusedError } from "../unit-labels/unit-label-work.js";
+import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
+import { ScanHistory, ScanHistoryScreen } from "./ScanHistory.js";
+import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
+import { UnitLabelVerification } from "../unit-labels/UnitLabelVerification.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
 import {
   BOX_EXTENSION,
@@ -111,7 +123,14 @@ import {
 import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline.js";
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
-import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
+import { ValidationPanel, type ValidationOutcome } from "./ValidationPanel.js";
+import {
+  readOpenBox,
+  readValidationCounts,
+  readWorkTotals,
+  type ValidationCounts,
+  type WorkTotals,
+} from "./work-reads.js";
 import {
   BoxFill,
   FooterAction,
@@ -238,6 +257,11 @@ export interface WorkScreenProps {
   onSetup?: () => void;
   /** How a label is rendered; the app's rasterizer by default. */
   render?: RenderLabel;
+  /**
+   * How a unit's Data Matrix duplicate is rendered (plan РЕЖ part B); the
+   * app's own (`unitLabelRender`, from the shift's snapshot) by default.
+   */
+  unitLabelRender?: RenderUnitLabel;
   /** The label panel's clock (milliseconds, never going back); tests drive it. */
   labelClock?: () => number;
   /**
@@ -257,6 +281,8 @@ type Stop =
    */
   | { kind: "system_error"; cause: "write" | "read" | "label" }
   | { kind: "confirm_close" }
+  /** The full scan history (beta 3.2), over the instruments. */
+  | { kind: "scan_history" }
   | { kind: "no_serials"; reason: "offline" | "exhausted" | "failed"; full: boolean }
   /**
    * Plan ПЛ-Ц: the shift works with pallets, but this station's copy has no
@@ -314,7 +340,13 @@ type Stop =
       attempt: number;
     }
   /** The shift is closed on this station: the end of its work screen, no scan is taken again. */
-  | { kind: "closed"; record: ClosedNumbers };
+  | { kind: "closed"; record: ClosedNumbers }
+  /**
+   * The unit labels' own (plan РЕЖ part B, task B6): the window of the station's
+   * unit label over the work, and «История этикеток» in place of the exceptions
+   * (`UnitStop`, `use-unit-label-work.ts`).
+   */
+  | UnitStop;
 
 /** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
 function outcomeOf(error: unknown): ExceptionOutcome {
@@ -342,7 +374,13 @@ type Last =
   | ScanOutcome
   | { kind: "paused"; leaving: boolean }
   | { kind: "shift_closed" }
-  | { kind: "office_closed" };
+  | { kind: "office_closed" }
+  /**
+   * A unit of a shift that prints the duplicate, refused before anything was
+   * written (plan РЕЖ part B): its code has no crypto tail to duplicate, or its
+   * label does not render for the duplicate printer.
+   */
+  | { kind: "unit_refused"; reason: "incomplete_km" | "render_failed" };
 
 /** How long the coloured flash of a refusal covers the screen (an accepted scan has none). */
 export const SIGNAL_MS = 700;
@@ -375,10 +413,17 @@ export function scanTime(iso: string): string {
   return TIME.format(new Date(iso));
 }
 
+/** How many outcomes the validation panel lists (plan РЕЖ). */
+const VALIDATION_OUTCOMES = 5;
+
 /** The last scan in words. */
 function lastText(last: Last, t: TFunction, capacity: number): string {
   switch (last.kind) {
     case "accepted":
+      // A validation shift's code is in no box (plan РЕЖ): the shift's count is said instead.
+      if (last.boxId === null) {
+        return t("floor.validation.accepted", { quantity: formatQuantity(last.acceptedCount) });
+      }
       return t("floor.work.last.accepted", {
         quantity: formatQuantity(last.itemCount),
         capacity: formatQuantity(capacity),
@@ -400,6 +445,12 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
       return t("floor.work.last.closed");
     case "office_closed":
       return t("floor.work.last.officeClosed");
+    case "unit_refused":
+      return t(
+        last.reason === "incomplete_km"
+          ? "floor.unitLabels.invalid"
+          : "floor.unitLabels.renderFailed",
+      );
   }
 }
 
@@ -415,6 +466,7 @@ function lastTone(last: Last | null): LastTone {
     case "duplicate":
     case "wrong_gtin":
     case "invalid":
+    case "unit_refused":
       return "error";
     case "paused":
     case "shift_closed":
@@ -452,6 +504,7 @@ interface Live {
   printing: PrintRuntime;
   operatorName: string;
   render: RenderLabel | undefined;
+  unitLabelRender: RenderUnitLabel | undefined;
   t: TFunction;
 }
 
@@ -503,6 +556,11 @@ function scanContextOf(live: LiveRef): ScanContext {
     online: () => live.current.online,
     checkCode: now.checkCode,
     onHostError: (error) => live.current.onHostError(error),
+    // A unit's label (plan РЕЖ part B) prints the operator who accepted it.
+    unitLabel: {
+      operatorName: now.operatorName,
+      ...(now.unitLabelRender === undefined ? {} : { render: now.unitLabelRender }),
+    },
   };
 }
 
@@ -524,6 +582,9 @@ function blockContextOf(live: LiveRef, extension: number): BlockContext {
     },
     get issuerPrefix() {
       return live.current.shift.snapshot.issuerPrefix;
+    },
+    get mode() {
+      return live.current.shift.copy.mode;
     },
     online: () => live.current.online,
     requestBlock: (request) => live.current.requestBlock(request),
@@ -710,10 +771,19 @@ export function WorkScreen(props: WorkScreenProps) {
   const [cued, setCued] = useState(false);
   // A close waits for the host's serials.
   const [waitingSerials, setWaitingSerials] = useState(false);
+  // The one point where the screen chooses by the shift's mode (plan РЕЖ): a validation shift
+  // takes its codes without a box, so it has no box, pallet, label, exceptions or SSCC serials;
+  // its panel stands where the box does. The mode never changes once the shift is open.
+  const validation = shift.copy.mode === "validation";
+  // A validation shift that prints the Data Matrix duplicate (plan РЕЖ part B): its label panel
+  // under the validation panel, the window of its label, and «История этикеток» in place of the
+  // exceptions. The policy is the snapshot's, frozen when the shift opened.
+  const printPolicy = unitLabelPolicy(shift);
+  const printsLabels = printPolicy !== null;
   // The shift's pallets (plan ПЛ-Ц): what its copy and snapshot give. A shift that
   // works with pallets and gives none is a stop from the first render, never boxes alone.
-  const pallets = shiftPallets(shift);
-  const palletsMissing = shift.copy.palletsEnabled && pallets === null;
+  const pallets = validation ? null : shiftPallets(shift);
+  const palletsMissing = !validation && shift.copy.palletsEnabled && pallets === null;
   const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
   const [planReached, setPlanReached] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
@@ -735,6 +805,10 @@ export function WorkScreen(props: WorkScreenProps) {
   // Shown only while the pallet that `refresh` reads is still full (see `palletWaitsNow`),
   // so it cannot outlive the pallet it speaks of.
   const [palletWaits, setPalletWaits] = useState<"no_serials" | "invalid" | null>(null);
+  // A validation shift's refused scans by kind, and the outcomes of this entry, newest first.
+  const [counts, setCounts] = useState<ValidationCounts | null>(null);
+  const [outcomes, setOutcomes] = useState<readonly ValidationOutcome[]>([]);
+  const outcomeId = useRef(0);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
@@ -765,6 +839,7 @@ export function WorkScreen(props: WorkScreenProps) {
     printing: props.printing,
     operatorName: props.operator.name,
     render,
+    unitLabelRender: props.unitLabelRender,
     t,
   };
   const live = useRef(latest);
@@ -873,9 +948,14 @@ export function WorkScreen(props: WorkScreenProps) {
       now.pallets === null
         ? null
         : await readOpenPallet(now.local, pairingOf(now), now.shift.copy.id);
+    const refusals =
+      now.shift.copy.mode === "validation"
+        ? await readValidationCounts(now.local, pairingOf(now), now.shift.copy.id)
+        : null;
     if (alive.current) {
       setTotals(next);
       setPallet(open);
+      setCounts(refusals);
     }
     return next;
   }, []);
@@ -1012,6 +1092,30 @@ export function WorkScreen(props: WorkScreenProps) {
       setStop({ kind: "system_error", cause: "label" });
     }
   }, [settleLabel, setStop]);
+
+  // The unit labels of a shift that prints the duplicate (plan РЕЖ part B): their panel's job,
+  // their window and history, and every piece of work on them, in this screen's queue.
+  const unit = useUnitLabelWork({
+    live,
+    stopRef,
+    setStop,
+    alive,
+    queue,
+    show,
+    refreshQuietly,
+    leavingNow,
+  });
+  // Stable for the screen's life: what the scans, the entry and the resumed work call.
+  const {
+    settleSafely: settleUnitSafely,
+    scanInWindow: scanUnitWindow,
+    sendAccepted: sendUnitAccepted,
+  } = unit;
+
+  /** «Пауза»: out of the shift; the label is kept for the next entry, where its window opens. */
+  const pauseUnit = () => {
+    if (!leavingNow()) onLeave();
+  };
 
   /**
    * The full open pallet's close (`closePalletIfFull`, plan ПЛ-Ц), a serial
@@ -1280,15 +1384,31 @@ export function WorkScreen(props: WorkScreenProps) {
     setPendingClose,
   ]);
 
+  /** One outcome of a validation shift's scan into its panel's list (plan РЕЖ), newest first. */
+  const sayOutcome = useCallback((scannedAt: string, text: string, tone: LastTone) => {
+    if (live.current.shift.copy.mode !== "validation" || !alive.current) return;
+    outcomeId.current += 1;
+    const said: ValidationOutcome = {
+      id: outcomeId.current,
+      time: scanTime(scannedAt),
+      text,
+      tone,
+    };
+    setOutcomes((before) => [said, ...before].slice(0, VALIDATION_OUTCOMES));
+  }, []);
+
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
       const say = live.current.t;
       const boxCapacity = live.current.shift.copy.boxCapacity;
       const text = lastText(outcome, say, boxCapacity);
       setLast(outcome);
+      sayOutcome(outcome.scannedAt, text, lastTone(outcome));
       if (outcome.kind === "accepted") {
         show("ok", say("floor.work.signal.ok"), text);
-        if (boxIsFull(outcome.itemCount, boxCapacity)) await closeBox(true);
+        if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
+          await closeBox(true);
+        }
         const next = await refreshQuietly();
         const planned = live.current.shift.copy.plannedQty;
         if (next !== null && planned !== null && !planShown.current && next.accepted >= planned) {
@@ -1299,19 +1419,21 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       if (outcome.kind === "duplicate") {
         show("duplicate", say("floor.work.signal.duplicate"), text);
-        return;
+      } else {
+        show(
+          "error",
+          say(
+            outcome.kind === "wrong_gtin"
+              ? "floor.work.signal.wrongGtin"
+              : "floor.work.signal.invalid",
+          ),
+          text,
+        );
       }
-      show(
-        "error",
-        say(
-          outcome.kind === "wrong_gtin"
-            ? "floor.work.signal.wrongGtin"
-            : "floor.work.signal.invalid",
-        ),
-        text,
-      );
+      // A validation shift's panel counts the refused scans too (plan РЕЖ).
+      if (live.current.shift.copy.mode === "validation") await refreshQuietly();
     },
-    [closeBox, refreshQuietly, show],
+    [closeBox, refreshQuietly, show, sayOutcome],
   );
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
@@ -1327,6 +1449,30 @@ export function WorkScreen(props: WorkScreenProps) {
       show("error", say("floor.work.signal.paused"), lastText(refused, say, 0));
     },
     [show],
+  );
+
+  /**
+   * A unit refused by its label before anything was written (B5's
+   * `UnitLabelRefusedError`): a code without its crypto tail, or a label that
+   * does not render for the duplicate printer, is said as the scan's outcome;
+   * the station's label in the way (this shift's or another's) or no duplicate
+   * printer is refused in words, and the label's window opens.
+   */
+  const unitRefused = useCallback(
+    async (error: UnitLabelRefusedError): Promise<void> => {
+      if (error.code === "incomplete_km" || error.code === "render_failed") {
+        const say = live.current.t;
+        const refused: Last = { kind: "unit_refused", reason: error.code };
+        const text = lastText(refused, say, 0);
+        setLast(refused);
+        sayOutcome(new Date().toISOString(), text, "error");
+        show("error", say("floor.work.signal.invalid"), text);
+        return;
+      }
+      refuse(false);
+      await settleUnitSafely(false);
+    },
+    [refuse, show, sayOutcome, settleUnitSafely],
   );
 
   /**
@@ -1414,14 +1560,24 @@ export function WorkScreen(props: WorkScreenProps) {
         }
         return;
       }
+      // The unit label's window takes the printed label's scan while its check waits (plan РЕЖ
+      // part B) — in a shift the office closed too, whose label is finished — and refuses any
+      // other scan in words: nothing reaches the pipeline, nothing is journalled.
+      if (stopped?.kind === "unit_label") {
+        if ((await scanUnitWindow(stopped.view, raw)) === "refused") refuse(false);
+        return;
+      }
       if (stopped !== null) {
         refuse(false, stopped.kind === "closed");
         return;
       }
-      await closeBox(true);
-      if (stopRef.current !== null) {
-        refuse(false);
-        return;
+      // A validation shift has no box to close first (plan РЕЖ).
+      if (live.current.shift.copy.mode !== "validation") {
+        await closeBox(true);
+        if (stopRef.current !== null) {
+          refuse(false);
+          return;
+        }
       }
       // A shift the office closed takes no new code: nothing is journalled.
       if (live.current.officeClosed) {
@@ -1431,7 +1587,12 @@ export function WorkScreen(props: WorkScreenProps) {
       let outcome: ScanOutcome;
       try {
         outcome = await processScan(scanContextOf(live), raw);
-      } catch {
+      } catch (error) {
+        // A unit of a shift that prints the duplicate, refused before anything was written.
+        if (error instanceof UnitLabelRefusedError) {
+          await unitRefused(error);
+          return;
+        }
         setStop({ kind: "system_error", cause: "write" });
         const say = live.current.t;
         show("error", say("floor.work.signal.systemError"), null);
@@ -1439,8 +1600,12 @@ export function WorkScreen(props: WorkScreenProps) {
       }
       live.current.onRecorded();
       await settle(outcome);
+      // The accepted unit's label goes at once (its first send), and its window follows it.
+      if (outcome.kind === "accepted" && outcome.boxId === null && outcome.label !== undefined) {
+        await sendUnitAccepted(outcome.label.id);
+      }
     },
-    [check, closeBox, refuse, settle, setStop, show],
+    [check, closeBox, refuse, settle, setStop, show, scanUnitWindow, sendUnitAccepted, unitRefused],
   );
 
   /**
@@ -1894,13 +2059,30 @@ export function WorkScreen(props: WorkScreenProps) {
     exceptionsWere.current = exceptionsOpen;
   }, [exceptionsOpen, stop, exceptionsFrom]);
 
+  // «Назад» from «История этикеток»: the focus returns to its button. The unit label's window
+  // gone (resolved, or the work went on): the focus goes somewhere safe, as after any answer.
+  const unitStop = stop?.kind === "unit_history" || stop?.kind === "unit_label" ? stop.kind : null;
+  const unitStopWas = useRef<typeof unitStop>(null);
+  useEffect(() => {
+    const was = unitStopWas.current;
+    unitStopWas.current = unitStop;
+    if (was === null || unitStop !== null || stop !== null) return;
+    if (was === "unit_history") {
+      actionsRef.current
+        ?.querySelector<HTMLButtonElement>('[data-action="unit-history"]:not(:disabled)')
+        ?.focus();
+    } else refocus();
+  }, [unitStop, stop, refocus]);
+
   /** The work goes on, after the label that may wait is read again (its panel takes the screen). */
   const resumeWork = () => {
     if (leavingNow()) return;
     void live.current
       .track(
         queue.run(async () => {
-          await settleSafely();
+          // A shift that prints the duplicate has unit labels, never a box's (plan РЕЖ part B).
+          if (printsUnitLabels(live.current.shift)) await settleUnitSafely(false);
+          else await settleSafely();
           await refreshQuietly();
         }),
       )
@@ -1945,6 +2127,13 @@ export function WorkScreen(props: WorkScreenProps) {
           await refresh();
           // Pallets that are missing stop the work before anything is written.
           if (stopRef.current?.kind === "pallets_missing") return;
+          // A validation shift has no box (plan РЕЖ): nothing of a box to recover, settle or
+          // close. One that prints the duplicate (part B) recovers its unit labels' sends the
+          // app lost, and opens the window of the station's label that waits, at once.
+          if (live.current.shift.copy.mode === "validation") {
+            if (printsUnitLabels(live.current.shift)) await settleUnitSafely(true);
+            return;
+          }
           try {
             await recoverInterruptedJobs(printContextOf(live));
           } catch {
@@ -1964,6 +2153,7 @@ export function WorkScreen(props: WorkScreenProps) {
     refresh,
     refreshQuietly,
     settleSafely,
+    settleUnitSafely,
     settlePalletSafely,
     closeBox,
     failSystem,
@@ -1974,7 +2164,8 @@ export function WorkScreen(props: WorkScreenProps) {
   // that waited for them goes again.
   const online = props.online;
   useEffect(() => {
-    if (!online) return;
+    // A validation shift numbers no box: it never asks for serials (plan РЕЖ).
+    if (!online || validation) return;
     void live.current
       .track(
         Promise.resolve()
@@ -1994,7 +2185,7 @@ export function WorkScreen(props: WorkScreenProps) {
           }),
       )
       .catch(() => undefined);
-  }, [online, supply, queue, closeBox, refreshQuietly, setStop]);
+  }, [online, validation, supply, queue, closeBox, refreshQuietly, setStop]);
 
   // Pallet serials by the half rule on entry and whenever the link is back (plan
   // ПЛ-Ц): a pallet that waited for them closes, and an early close that stopped
@@ -2097,17 +2288,21 @@ export function WorkScreen(props: WorkScreenProps) {
     stop?.kind === "exceptions" ||
     stop?.kind === "close" ||
     stop?.kind === "closed" ||
-    stop?.kind === "label";
-  const facts = [
-    { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
-    {
-      term: t("floor.work.plan"),
-      value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
-    },
-    ...(totals !== null && totals.lastSscc !== null
-      ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
-      : []),
-  ];
+    stop?.kind === "label" ||
+    stop?.kind === "unit_label" ||
+    stop?.kind === "unit_history" ||
+    stop?.kind === "scan_history";
+  // The plan is in the shift band at the top; a second row of it here repeated it (beta 3.2),
+  // and the scan history stands in its place. A validation shift has no box to count (plan РЕЖ):
+  // its figures are in its panel.
+  const facts = validation
+    ? []
+    : [
+        { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
+        ...(totals !== null && totals.lastSscc !== null
+          ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
+          : []),
+      ];
   /** A stop's card over the work: the cloud's overlay alert, its action row under the words. */
   const card = (
     tone: "ok" | "warn" | "error",
@@ -2157,6 +2352,10 @@ export function WorkScreen(props: WorkScreenProps) {
             counterpartyName={shift.snapshot.counterpartyName}
             accepted={totals?.accepted ?? 0}
             plannedQty={plannedQty}
+            // The photo is read after the screen's own first read, so a failed first read stops
+            // the line as it did, whatever the band asks.
+            {...(totals === null ? {} : { local: props.local })}
+            productId={shift.copy.productId}
           />
           {officeClosed && stop?.kind !== "closed" && (
             <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
@@ -2165,52 +2364,71 @@ export function WorkScreen(props: WorkScreenProps) {
           )}
           <div className="work-screen__instruments">
             <div className="work-screen__primary">
-              <BoxFill
-                items={items}
-                capacity={capacity}
-                acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
-                actions={
-                  <>
-                    {!confirming && (
-                      <Button
-                        size="floor"
-                        variant="secondary"
-                        data-action="close-box"
-                        disabled={!canClose}
-                        onClick={() => setStop({ kind: "confirm_close" })}
-                      >
-                        {t("floor.work.closeBox")}
-                      </Button>
-                    )}
-                    {/*
+              {validation ? (
+                <>
+                  <ValidationPanel
+                    accepted={totals?.accepted ?? 0}
+                    duplicates={counts?.duplicates ?? 0}
+                    errors={counts?.errors ?? 0}
+                    plannedQty={plannedQty}
+                    outcomes={outcomes}
+                  />
+                  {printPolicy !== null && (
+                    <UnitLabelPanel
+                      job={unit.job}
+                      busy={unit.sending || unit.busy}
+                      verification={printPolicy.verification}
+                    />
+                  )}
+                </>
+              ) : (
+                <BoxFill
+                  items={items}
+                  capacity={capacity}
+                  acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
+                  actions={
+                    <>
+                      {!confirming && (
+                        <Button
+                          size="floor"
+                          variant="secondary"
+                          data-action="close-box"
+                          disabled={!canClose}
+                          onClick={() => setStop({ kind: "confirm_close" })}
+                        >
+                          {t("floor.work.closeBox")}
+                        </Button>
+                      )}
+                      {/*
                       The cloud's box instrument: the open box's two exceptions under it, the
                       same actions as their cards (gone under a stage, which has them itself).
                     */}
-                    {!staged && (
-                      <>
-                        <Button
-                          size="floor"
-                          variant="secondary"
-                          data-action="box-undo"
-                          disabled={!canClose}
-                          onClick={() => openExceptions("box-undo")}
-                        >
-                          {t("floor.exceptions.actions.undo")}
-                        </Button>
-                        <Button
-                          size="floor"
-                          variant="secondary"
-                          data-action="box-clear"
-                          disabled={!canClose}
-                          onClick={() => openExceptions("box-clear")}
-                        >
-                          {t("floor.exceptions.actions.clear")}
-                        </Button>
-                      </>
-                    )}
-                  </>
-                }
-              />
+                      {!staged && (
+                        <>
+                          <Button
+                            size="floor"
+                            variant="secondary"
+                            data-action="box-undo"
+                            disabled={!canClose}
+                            onClick={() => openExceptions("box-undo")}
+                          >
+                            {t("floor.exceptions.actions.undo")}
+                          </Button>
+                          <Button
+                            size="floor"
+                            variant="secondary"
+                            data-action="box-clear"
+                            disabled={!canClose}
+                            onClick={() => openExceptions("box-clear")}
+                          >
+                            {t("floor.exceptions.actions.clear")}
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  }
+                />
+              )}
               {pallets !== null && (
                 <PalletStrip
                   boxCount={palletBoxes}
@@ -2244,20 +2462,55 @@ export function WorkScreen(props: WorkScreenProps) {
                 cued={cued}
                 lineRef={lastRef}
               />
-              <WorkFacts facts={facts} />
+              <WorkFacts
+                facts={facts}
+                history={
+                  <ScanHistory
+                    local={props.local}
+                    pairing={props.pairing}
+                    shiftId={shift.copy.id}
+                    refreshKey={last}
+                    enabled={totals !== null}
+                    onOpenAll={() => setStop({ kind: "scan_history" })}
+                  />
+                }
+              />
             </div>
           </div>
         </div>
       </div>
-      <FloorFooter className="work-footer" ariaLabel={t("floor.work.layout.actions")}>
-        <FooterAction
-          variant="secondary"
-          data-action="exceptions"
-          disabled={stop !== null || leaving}
-          onClick={() => openExceptions()}
-        >
-          {t("floor.exceptions.open")}
-        </FooterAction>
+      <FloorFooter
+        className={validation && !printsLabels ? "work-footer work-footer--two" : "work-footer"}
+        ariaLabel={t(
+          printsLabels
+            ? "floor.unitLabels.actions"
+            : validation
+              ? "floor.validation.actions"
+              : "floor.work.layout.actions",
+        )}
+      >
+        {/* A shift that prints the duplicate has its labels' history there (plan РЕЖ part B). */}
+        {printsLabels && (
+          <FooterAction
+            variant="secondary"
+            data-action="unit-history"
+            disabled={stop !== null || leaving}
+            onClick={unit.openHistory}
+          >
+            {t("floor.unitLabels.history")}
+          </FooterAction>
+        )}
+        {/* A validation shift has no exceptions (plan РЕЖ, Р9: the cloud's are its boxes'). */}
+        {!validation && (
+          <FooterAction
+            variant="secondary"
+            data-action="exceptions"
+            disabled={stop !== null || leaving}
+            onClick={() => openExceptions()}
+          >
+            {t("floor.exceptions.open")}
+          </FooterAction>
+        )}
         {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
         <FooterAction
           variant="warning-outline"
@@ -2352,13 +2605,26 @@ export function WorkScreen(props: WorkScreenProps) {
               planned: formatQuantity(plannedQty ?? 0),
             }),
             null,
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => dismiss(() => setPlanReached(false))}
-            >
-              {t("floor.work.continue")}
-            </Button>,
+            <>
+              {/* A validation shift is offered its close at the plan, as at the cloud station. */}
+              {validation && (
+                <Button
+                  size="floor"
+                  aria-disabled={leaving || stop !== null ? true : undefined}
+                  style={leaving || stop !== null ? WAITING_STYLE : undefined}
+                  onClick={openClose}
+                >
+                  {t("floor.close.open")}
+                </Button>
+              )}
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => dismiss(() => setPlanReached(false))}
+              >
+                {t("floor.work.continue")}
+              </Button>
+            </>,
           )}
         {egaisOffSheet !== null &&
           card(
@@ -2378,7 +2644,7 @@ export function WorkScreen(props: WorkScreenProps) {
             {t("floor.work.waitingSerials")}
           </p>
         )}
-        {sending && (
+        {(sending || unit.sending) && (
           <p className="work-overlay--note work-screen__waiting">{t("floor.print.sending")}</p>
         )}
         {stop?.kind === "exceptions" && (
@@ -2419,6 +2685,31 @@ export function WorkScreen(props: WorkScreenProps) {
             />
           </div>
         )}
+        {stop?.kind === "scan_history" && (
+          <div className="work-screen__stage">
+            <ScanHistoryScreen
+              local={props.local}
+              pairing={props.pairing}
+              shiftId={shift.copy.id}
+              refreshKey={last}
+              onBack={() => setStop(null)}
+            />
+          </div>
+        )}
+        {stop?.kind === "unit_history" && (
+          <div className="work-screen__stage">
+            <UnitLabelHistory
+              entries={stop.entries}
+              failure={stop.failure}
+              busy={unit.busy || leaving}
+              blocked={stop.blocked}
+              closed={officeClosed}
+              onReprint={unit.reprint}
+              onBack={() => setStop(null)}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          </div>
+        )}
         {stop?.kind === "close" && (
           <div className="work-screen__stage" data-centred="true">
             <ShiftClosePanel
@@ -2434,6 +2725,7 @@ export function WorkScreen(props: WorkScreenProps) {
               onLabel={toLabel}
               palletCapacity={pallets?.capacity ?? null}
               onClosePallet={confirmPalletClose}
+              boxless={validation}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
@@ -2446,6 +2738,7 @@ export function WorkScreen(props: WorkScreenProps) {
               linkHeld={linkHeld}
               leaving={leaving}
               onDone={onLeave}
+              boxless={validation}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           </div>
@@ -2544,6 +2837,29 @@ export function WorkScreen(props: WorkScreenProps) {
             </div>
           )}
         </div>
+      )}
+      {/*
+        The unit label's window (plan РЕЖ part B): a full-screen dialog over the work and the
+        status bar, outside the polite region (the dialog is announced as a dialog), which takes
+        the focus and keeps it until the label is resolved or the operator pauses.
+      */}
+      {stop?.kind === "unit_label" && (
+        <UnitLabelVerification
+          view={stop.view}
+          note={unit.note}
+          refused={unit.refusedIn(stop.view)}
+          busy={unit.busy || unit.sending || leaving}
+          running={unit.busy || unit.sending}
+          closed={officeClosed}
+          onReasonOpen={unit.holdChecks}
+          onPause={pauseUnit}
+          onSkip={unit.skip}
+          onReprint={unit.reprintShown}
+          onSendPrepared={unit.sendPrepared}
+          onRetry={unit.retry}
+          {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
+          {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+        />
       )}
       {/* Always on the screen, so that the text put into it is announced. */}
       <p className="work-screen__leaving" aria-live="polite">

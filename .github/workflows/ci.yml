@@ -110,6 +110,8 @@ jobs:
       - run: pnpm turbo run build --filter=@markiro/domain
       - run: pnpm test:standalone-export
       - run: pnpm test:handheld-release:contract
+      # The maker's tool for the encrypted usage statistics of a support text.
+      - run: pnpm test:standalone-support:contract
       # The CI policy suite guards this very file -- the reviewed workflow list,
       # the classifier's job gating, the trigger scopes. It was in the repository
       # but in no workflow, so a workflow added without registering it stayed

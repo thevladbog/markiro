@@ -1,0 +1,93 @@
+{
+  "codeHash": "4e1d2c3b4a5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f708",
+  "gtin14": "04600682000013",
+  "serial": "S000017",
+  "canonical": "010460068200001321S000017\u001d93Tail",
+  "ownerScanId": "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+  "placements": [
+    {
+      "scanId": "9b8c7d6e-5f4a-4b3c-8d2e-1f0a9b8c7d6e",
+      "codeHash": "4e1d2c3b4a5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f708",
+      "gtin14": "04600682000013",
+      "serial": "S000017",
+      "scannedAt": "2026-10-13T07:10:00.000Z",
+      "state": "displaced",
+      "leftAt": "2026-10-13T07:20:00Z",
+      "boxId": null,
+      "boxSscc": null,
+      "boxClosedAt": null,
+      "boxDisassembledAt": null,
+      "palletId": null,
+      "palletSscc": null,
+      "palletDisassembledAt": null,
+      "shiftId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "shiftNumber": "OCT26-007",
+      "shiftStatus": "active",
+      "productionDate": "2026-10-13",
+      "productName": "Молоко 3,2% 0,9 л",
+      "lineName": "Линия 2",
+      "deviceId": "6d7e8f90-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+      "deviceName": "Станция на линии 2",
+      "operatorName": null
+    },
+    {
+      "scanId": "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+      "codeHash": "4e1d2c3b4a5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f708",
+      "gtin14": "04600682000013",
+      "serial": "S000017",
+      "scannedAt": "2026-10-13T07:05:00.000Z",
+      "state": "checked",
+      "leftAt": null,
+      "boxId": null,
+      "boxSscc": null,
+      "boxClosedAt": null,
+      "boxDisassembledAt": null,
+      "palletId": null,
+      "palletSscc": null,
+      "palletDisassembledAt": null,
+      "shiftId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "shiftNumber": "OCT26-006",
+      "shiftStatus": "active",
+      "productionDate": "2026-10-13",
+      "productName": "Молоко 3,2% 0,9 л",
+      "lineName": "Линия 1",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция на линии 1",
+      "operatorName": "Анна Кузнецова"
+    }
+  ],
+  "events": [
+    {
+      "type": "scan",
+      "at": "2026-10-13T07:05:00.000Z",
+      "scanId": "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+      "verdict": "ok",
+      "duplicateSource": null,
+      "shiftId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "shiftNumber": "OCT26-006",
+      "deviceName": "Станция на линии 1",
+      "operatorName": "Анна Кузнецова",
+      "boxId": null,
+      "placed": true
+    },
+    {
+      "type": "scan",
+      "at": "2026-10-13T07:10:00.000Z",
+      "scanId": "9b8c7d6e-5f4a-4b3c-8d2e-1f0a9b8c7d6e",
+      "verdict": "ok",
+      "duplicateSource": null,
+      "shiftId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "shiftNumber": "OCT26-007",
+      "deviceName": "Станция на линии 2",
+      "operatorName": null,
+      "boxId": null,
+      "placed": true
+    },
+    {
+      "type": "displaced",
+      "at": "2026-10-13T07:20:00Z",
+      "boxId": null,
+      "boxSscc": null
+    }
+  ]
+}

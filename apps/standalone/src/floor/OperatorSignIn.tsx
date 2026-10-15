@@ -69,6 +69,11 @@ export interface OperatorSignInProps {
    * chip; without it the keyboard wedge alone is assumed (it always scans).
    */
   watchScanners?: HardwareApi["watchScanners"];
+  /**
+   * «Настройки сканера»: the way from the sign-in's scanner warning to the scanner's settings.
+   * Without it the warning has no button.
+   */
+  onScannerSettings?: () => void;
 }
 
 type Stage = "badge" | "login" | "search" | "pin";
@@ -137,6 +142,7 @@ export function OperatorSignIn({
   onSync,
   onOffice,
   watchScanners,
+  onScannerSettings,
 }: OperatorSignInProps) {
   const { t } = useTranslation();
   const scanner = useScannerIndicator(watchScanners);
@@ -318,6 +324,9 @@ export function OperatorSignIn({
     scanner,
     message?.kind === "locked" && message.scope === "station",
   );
+  // The scanner's state lives in the header's rail. Here only a quiet warning while the scanner
+  // is not ready (a lockout says its own words in the message).
+  const scannerWarning = working && scannerState.tone !== "ok" && scannerState.key !== "locked";
 
   /** What the header says under «Вход оператора»: the step, or nothing while the screen says why not. */
   const prompt = () => {
@@ -505,7 +514,17 @@ export function OperatorSignIn({
         {t("floor.signIn.useLogin")}
       </Button>
     );
-    if (stage === "badge") return [byName, byLogin(true)];
+    if (stage === "badge") {
+      return scannerWarning && onScannerSettings !== undefined
+        ? [
+            <Button key="scanner" size="floor" variant="secondary" onClick={onScannerSettings}>
+              {t("floor.signIn.scannerSettings")}
+            </Button>,
+            byName,
+            byLogin(true),
+          ]
+        : [byName, byLogin(true)];
+    }
     if (stage === "search") return [back, byLogin(true)];
     if (stage === "login") {
       return [
@@ -548,21 +567,18 @@ export function OperatorSignIn({
         <div className="operator-login__prompt">
           <h1 id="floor-sign-in-title">{t("floor.signIn.title")}</h1>
           {promptText !== null && <p>{promptText}</p>}
-        </div>
-        <div className="operator-login__aside">
-          {working && (
-            <div
-              className="operator-login__scanner-status"
+          {scannerWarning && (
+            <p
+              className="operator-login__scanner-warning"
               role="status"
               data-testid="scanner-state"
               data-tone={scannerState.tone}
             >
-              <span className="operator-login__scanner-status-icon" aria-hidden="true">
-                {scannerState.tone === "ok" ? "✓" : "!"}
-              </span>
-              <span>{t(`floor.signIn.scanner.${scannerState.key}`)}</span>
-            </div>
+              {t(`floor.signIn.scanner.${scannerState.key}`)}
+            </p>
           )}
+        </div>
+        <div className="operator-login__aside">
           {/* Never held by a check: one that never settles must not trap the station here. */}
           <Button variant="secondary" size="floor" onClick={onOffice}>
             {t("floor.office")}

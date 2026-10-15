@@ -142,12 +142,31 @@ describe("the shifts of the station's line", () => {
     expect(screen.getByRole("heading", { name: "Смены линии" })).toBeTruthy();
   });
 
+  it("shows the shift date beside the production date, and nothing extra for a copy without one", async () => {
+    const [dated] = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json")).shifts as [
+      DeviceShift,
+      DeviceShift,
+    ];
+    const { executor } = await copiesOf([{ ...dated, plannedDate: "2026-10-12" }, PLANNED]);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    const withDate = card("OCT26-004");
+    expect(within(withDate).getByText("Дата производства: 08.10.2026")).toBeTruthy();
+    expect(within(withDate).getByText("Дата смены: 12.10.2026")).toBeTruthy();
+    // A copy a host before beta 3 sent has no shift date: the production date alone.
+    const plain = card("OCT26-005/S");
+    expect(within(plain).getByText(/Дата производства: /)).toBeTruthy();
+    expect(within(plain).queryByText(/Дата смены/)).toBeNull();
+  });
+
   it("opens a planned shift with the host and hands over the shift with its checked snapshot", async () => {
     const { executor } = await copiesOf([PLANNED]);
     const { handlers } = renderList(executor);
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
-    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id);
+    expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, {
+      supports: ["validation-v1", "validation-dm-duplicate-v1"],
+    });
     const [shift] = handlers.onEntered.mock.calls[0] ?? [];
     expect(shift).toMatchObject({
       copy: { id: PLANNED.id, status: "active", entered: true },
@@ -215,6 +234,16 @@ describe("the shifts of the station's line", () => {
     [
       "pallet_template_not_fit",
       "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
+    // The template of a validation shift's duplicate (plan РЕЖ, part B).
+    [
+      "duplicate_template_not_fit",
+      "Шаблон дубликата Data Matrix выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
+    // A mode this build does not name in its entry (plan РЕЖ, Р5).
+    [
+      "station_update",
+      "Эту смену приложение этой станции открыть не может. Обновите приложение станции.",
     ],
   ])("says why the host refused the entry (%s) and keeps the list", async (constraint, text) => {
     const { executor } = await copiesOf([PLANNED]);

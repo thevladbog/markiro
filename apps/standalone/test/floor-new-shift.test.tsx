@@ -44,6 +44,8 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
   DeviceShift,
   DeviceShift,
 ];
+/** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
+const ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
 /**
  * The shift the host makes of `CREATED_BODY` (the form as it starts on `NOW`):
@@ -205,6 +207,17 @@ function shownDate(): string {
   return screen.getByRole("button", { name: "Дата производства" }).textContent ?? "";
 }
 
+/** The shift date («Дата смены») the picker shows, in words. */
+function shownShiftDate(): string {
+  return screen.getByRole("button", { name: "Дата смены" }).textContent ?? "";
+}
+
+/** Picks a shift date in its own DatePicker: opens it and presses the day. */
+async function pickShiftDate(day: string): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: "Дата смены" }));
+  fireEvent.click(await screen.findByRole("button", { name: day }));
+}
+
 /** Picks a production date in the cloud's DatePicker: opens it and presses the day. */
 async function pickDate(day: string): Promise<void> {
   fireEvent.click(screen.getByRole("button", { name: "Дата производства" }));
@@ -226,6 +239,8 @@ const CREATED_BODY: DeviceShiftCreate = {
   productId: MILK,
   boxTemplateId: MILK_TEMPLATE,
   productionDate: "2026-10-10",
+  // The working day: today in the organization's zone, whatever production date is chosen.
+  plannedDate: "2026-10-10",
   boxCapacity: 12,
   plannedQty: null,
   counterpartyId: null,
@@ -657,6 +672,133 @@ describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
   });
 });
 
+/** Two duplicate templates for the milk's group (8) and one for another group (beta 3.2). */
+const DUPLICATE_TEMPLATE = "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e";
+function duplicateTemplate(id: string, name: string, codes: number[] | null): ChangeItem {
+  return item("label_templates", id, 104, {
+    name,
+    purpose: "product_duplicate",
+    enabled: true,
+    chzProductGroupCodes: codes,
+    stock: false,
+    spec: { widthMm: 40, heightMm: 30, dpi: 203, language: "zpl", elements: [] },
+  });
+}
+const DUPLICATE_COPIES = [
+  ...CATALOG,
+  duplicateTemplate(DUPLICATE_TEMPLATE, "Дубликат 40×30", [8]),
+  duplicateTemplate("c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e1f", "Дубликат 58×40", null),
+  duplicateTemplate("d9e0f1a2-b3c4-4d5e-8f6a-7b8c9d0e1f2a", "Дубликат для воды", [13]),
+];
+
+describe("the mode of a new shift on the station (beta 3.2, plan РЕЖ Р16)", () => {
+  it("offers «Проверка» and «Агрегация», starts on «Агрегация» and names no mode for it", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    const group = screen.getByRole("group", { name: "Режим работы" });
+    const [validation, aggregation] = within(group).getAllByRole("button");
+    expect([validation?.textContent, aggregation?.textContent]).toEqual(["Проверка", "Агрегация"]);
+    expect(aggregation?.getAttribute("aria-pressed")).toBe("true");
+    expect(validation?.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByRole("group", { name: "Печатать дубликат Data Matrix" })).toBeNull();
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    // An older host refuses a field it does not know: an aggregation shift sends none.
+    expect(handlers.create.mock.calls).toEqual([[CREATED_BODY]]);
+  });
+
+  it("creates a validation shift without the box and pallet choices, from the details", async () => {
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => ({ ...MADE, mode: "validation" }),
+    });
+    await chooseMilk();
+    expect(screen.getByRole("group", { name: "Паллеты" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    // No pallets and no box capacity: a validation shift puts codes in no box.
+    expect(screen.queryByRole("group", { name: "Паллеты" })).toBeNull();
+    expect(screen.queryByLabelText("В коробе, шт.")).toBeNull();
+    expect(screen.getByText("В режиме проверки этикетки коробов не печатаются.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Далее" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      mode: "validation",
+    });
+  });
+
+  it("chooses the duplicate template and the check when the shift prints a duplicate", async () => {
+    const { handlers } = renderNew(await copiesOf(DUPLICATE_COPIES), {
+      create: async () => ({
+        ...MADE,
+        mode: "validation",
+        validationPrint: {
+          mode: "duplicate_dm",
+          verification: "required",
+          templateId: DUPLICATE_TEMPLATE,
+        },
+      }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    const flag = screen.getByRole("group", { name: "Печатать дубликат Data Matrix" });
+    fireEvent.click(within(flag).getByRole("button", { name: "Да" }));
+    // The template is chosen on a step of its own; the creation waits for it.
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+    // Only the templates that fit the product's group: not «Дубликат для воды».
+    expect(screen.getByRole("button", { name: "Дубликат 40×30" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Дубликат 58×40" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Дубликат для воды" })).toBeNull();
+    const create = screen.getByRole("button", { name: "Создать и открыть" });
+    expect((create as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Дубликат 40×30" }));
+    const check = screen.getByRole("group", { name: "Обязательная проверка этикетки" });
+    fireEvent.click(within(check).getByRole("button", { name: "Да" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      mode: "validation",
+      validationPrint: {
+        mode: "duplicate_dm",
+        verification: "required",
+        templateId: DUPLICATE_TEMPLATE,
+      },
+    });
+  });
+
+  it("gives the choice of the duplicate template back when the host refuses it", async () => {
+    const { handlers } = renderNew(await copiesOf(DUPLICATE_COPIES), {
+      create: async () => {
+        throw new HostError({
+          kind: "api",
+          status: 400,
+          code: "validation_failed",
+          message: "no",
+          details: { field: "validationPrint.templateId" },
+        });
+      },
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Проверка" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Печатать дубликат Data Matrix" })).getByRole(
+        "button",
+        { name: "Да" },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    fireEvent.click(screen.getByRole("button", { name: "Дубликат 40×30" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(/Шаблон этикетки продукции больше не подходит товару/),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+  });
+});
+
 describe("a new shift on the station", () => {
   it("finds a product in use by its name and starts from its template, today and its capacity", async () => {
     renderNew(await copiesOf(CATALOG));
@@ -674,6 +816,36 @@ describe("a new shift on the station", () => {
     // The product's own template fits its group, so the rule picks it.
     next();
     expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
+  });
+
+  it("shows the product's photo on the product card when the station holds it, and the monogram when it does not (beta 3)", async () => {
+    const local = await copiesOf(CATALOG);
+    const [milk] = await local.query(
+      "SELECT id FROM ref_products WHERE gtin14 = ?",
+      ["04600682000013"],
+      z.object({ id: z.string() }),
+    );
+    // Without a photo: the monogram on the colour panel.
+    const first = renderNew(local);
+    await chooseMilk();
+    expect(document.querySelector(".new-shift__product-monogram")?.textContent).toBe("М");
+    expect(document.querySelector(".new-shift__product-photo img")).toBeNull();
+    first.view.unmount();
+
+    await local.transaction([
+      {
+        sql: "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64) VALUES (?, ?, 2, 1, ?)",
+        values: [milk?.id, "a".repeat(64), "/9j/4AAQSkZJRgABAQ=="],
+      },
+    ]);
+    renderNew(local);
+    await chooseMilk();
+    await waitFor(() =>
+      expect(document.querySelector(".new-shift__product-photo img")?.getAttribute("src")).toBe(
+        "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==",
+      ),
+    );
+    expect(document.querySelector(".new-shift__product-monogram")).toBeNull();
   });
 
   it("chooses the product a scan names, by its barcode or its code of marking", async () => {
@@ -738,7 +910,7 @@ describe("a new shift on the station", () => {
     createShift();
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     expect(handlers.create.mock.calls).toEqual([[CREATED_BODY]]);
-    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
+    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id, ENTRY]]);
     expect(handlers.onEntered.mock.calls[0]?.[0]).toMatchObject({
       copy: { id: PLANNED.id, entered: true },
       snapshot: { issuerPrefix: "460068200" },
@@ -761,6 +933,29 @@ describe("a new shift on the station", () => {
       productionDate: "2026-10-09",
       plannedQty: 1200,
       boxCapacity: 6,
+    });
+  });
+
+  it("offers the shift date beside the production date: today to begin with, editable on its own", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    expect(shownShiftDate()).toContain("10 октября 2026");
+    expect(
+      screen.getByRole("button", { name: "Дата смены" }).closest(".new-shift__date"),
+    ).not.toBeNull();
+    // The production date moves apart from it: the shift date stays the working day.
+    await pickDate("8 октября 2026");
+    await pickDate("9 октября 2026");
+    expect(shownShiftDate()).toContain("10 октября 2026");
+    await pickShiftDate("12 октября 2026");
+    expect(shownShiftDate()).toContain("12 октября 2026");
+    expect(shownDate()).toContain("9 октября 2026");
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      productionDate: "2026-10-09",
+      plannedDate: "2026-10-12",
     });
   });
 
@@ -1230,6 +1425,21 @@ describe("the search of a product", () => {
       target: { value: "сыр" },
     });
     expect(productButtons()).toEqual([1, 2, 3, 4, 5].map((n) => `Сыр ${n} — ${GTINS[n - 1]}`));
+  });
+
+  it("cuts a long product name with an ellipsis instead of widening the row: the name is its own element, the full text the button's title (beta 3)", async () => {
+    const long =
+      "Молоко питьевое ультрапастеризованное 3,2% 0,9 л в упаковке Tetra Pak с крышкой Premium Edition";
+    renderNew(await copiesOf([...CATALOG, productItem(9, long, GTINS[1] ?? GTINS[0])]));
+    fireEvent.change(await screen.findByLabelText("Название товара"), {
+      target: { value: "молоко питьевое" },
+    });
+    const [button] = screen.getAllByRole("button", { name: /—/ });
+    expect(button?.getAttribute("title")).toBe(`${long} — ${GTINS[1] ?? GTINS[0]}`);
+    expect(button?.querySelector(".new-shift__result-name")?.textContent).toBe(long);
+    expect(button?.querySelector(".new-shift__result-gtin")?.textContent).toBe(
+      ` — ${GTINS[1] ?? GTINS[0]}`,
+    );
   });
 
   it("starts at two letters, whatever the case or the spaces, and does not count digits as letters", async () => {
@@ -1755,6 +1965,7 @@ describe("a request to create a shift", () => {
     ["the product", { productId: uuid(77) }],
     ["the template", { boxTemplateId: uuid(78) }],
     ["the day", { productionDate: "2026-10-09" }],
+    ["the shift date", { plannedDate: "2026-10-09" }],
     ["the capacity", { boxCapacity: 6 }],
     ["the plan", { plannedQty: 500 }],
   ] as const)("does not enter a shift that is not the form's in %s", async (_name, patch) => {
@@ -1795,7 +2006,7 @@ describe("a request to create a shift", () => {
     next();
     fireEvent.click(await screen.findByRole("button", { name: "Открыть смену OCT26-005/S" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
-    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
+    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id, ENTRY]]);
     expect(handlers.create).toHaveBeenCalledTimes(1);
   });
 
@@ -1871,6 +2082,7 @@ describe("a request to create a shift", () => {
       "disabled",
       true,
     );
+    expect(screen.getByRole("button", { name: "Дата смены" })).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
     next();
@@ -1878,7 +2090,10 @@ describe("a request to create a shift", () => {
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     // The second press made nothing: it entered the shift that was kept.
     expect(handlers.create).toHaveBeenCalledTimes(1);
-    expect(enter.mock.calls).toEqual([[PLANNED.id], [PLANNED.id]]);
+    expect(enter.mock.calls).toEqual([
+      [PLANNED.id, ENTRY],
+      [PLANNED.id, ENTRY],
+    ]);
     expect(screen.queryByText(/создана, но не открыта/)).toBeNull();
   });
   it("freezes the choice of a template too once the shift is made", async () => {
@@ -2012,6 +2227,7 @@ describe("the creation of a shift, apart from its screen", () => {
     productId: MILK,
     boxTemplateId: MILK_TEMPLATE,
     productionDate: "2026-10-10",
+    plannedDate: "2026-10-10",
     boxCapacity: 12,
     plannedQty: null,
   };
@@ -2160,11 +2376,14 @@ describe("the creation of a shift, apart from its screen", () => {
   it("makes the copy of a created shift one nobody has entered and nobody is closing", () => {
     expect(createdCopy(PLANNED)).toEqual({
       ...PLANNED,
+      // A host before beta 3 names no shift date: the copy keeps none.
+      plannedDate: null,
       palletBoxCapacity: null,
       palletTemplateId: null,
       localState: null,
       entered: false,
     });
+    expect(createdCopy({ ...PLANNED, plannedDate: "2026-10-12" }).plannedDate).toBe("2026-10-12");
   });
 
   it("makes the copy of a created shift with pallets keep its boxes per pallet and pallet template", () => {
@@ -2176,6 +2395,7 @@ describe("the creation of a shift, apart from its screen", () => {
     };
     expect(createdCopy(palletsShift)).toEqual({
       ...palletsShift,
+      plannedDate: null,
       localState: null,
       entered: false,
     });

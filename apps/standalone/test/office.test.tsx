@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -21,10 +21,15 @@ function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
+/** The sign-in as the app shows it: its theme switcher needs the theme provider. */
+function renderLogin(ui: ReactElement) {
+  return render(<ThemeProvider defaultTheme="dark">{ui}</ThemeProvider>);
+}
+
 describe("OfficeLogin", () => {
   it("signs in with the trimmed login", async () => {
     const onLogin = vi.fn().mockResolvedValue(undefined);
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     type("Логин", " admin ");
     type("Пароль", "correct horse battery");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -35,7 +40,7 @@ describe("OfficeLogin", () => {
 
   it("asks for both fields before calling the host", async () => {
     const onLogin = vi.fn();
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
     expect(await screen.findAllByText("Заполните поле")).toHaveLength(2);
     expect(onLogin).not.toHaveBeenCalled();
@@ -45,7 +50,7 @@ describe("OfficeLogin", () => {
     // An unpaired surrogate cannot cross the IPC: the call would fail as a
     // lost connection, so the form names the field instead.
     const onLogin = vi.fn();
-    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
     type("Логин", "admin\ud800");
     type("Пароль", "correct horse battery\udc00");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -78,7 +83,7 @@ describe("OfficeLogin", () => {
       "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
     ],
   ])("explains a failed sign-in (%#)", async (error, text) => {
-    render(
+    renderLogin(
       <OfficeLogin notice={null} onLogin={vi.fn().mockRejectedValue(error)} onBack={vi.fn()} />,
     );
     type("Логин", "admin");
@@ -89,14 +94,14 @@ describe("OfficeLogin", () => {
 
   it("says why the session ended and goes back to the floor", () => {
     const onBack = vi.fn();
-    render(<OfficeLogin notice="session_ended" onLogin={vi.fn()} onBack={onBack} />);
+    renderLogin(<OfficeLogin notice="session_ended" onLogin={vi.fn()} onBack={onBack} />);
     expect(screen.getByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "В цех" }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("says the host was already set up when the wizard found it initialized", () => {
-    render(<OfficeLogin notice="already_initialized" onLogin={vi.fn()} onBack={vi.fn()} />);
+    renderLogin(<OfficeLogin notice="already_initialized" onLogin={vi.fn()} onBack={vi.fn()} />);
     expect(screen.getByText("Хост уже настроен. Войдите в офис.")).toBeTruthy();
   });
 });
@@ -126,9 +131,29 @@ describe("Office", () => {
     renderOffice(session);
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
     expect(session.logout).toHaveBeenCalledTimes(1);
-    // One way out: no button that would hide the office and keep the session.
+    expect(session.signOut).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+  });
+
+  it("signs out to the office sign-in from «Выйти», beside «Сменить пароль» (beta 3.2)", async () => {
+    const session = fakeOfficeSession();
+    renderOffice(session);
+    const signOut = await screen.findByRole("button", { name: "Выйти" });
+    // Beside «Сменить пароль» in the header's user area.
+    expect(signOut.parentElement).toBe(
+      screen.getByRole("button", { name: "Сменить пароль" }).parentElement,
+    );
+    fireEvent.click(signOut);
+    expect(session.signOut).toHaveBeenCalledTimes(1);
+    expect(session.logout).not.toHaveBeenCalled();
+  });
+
+  it("has one way out on an office PC, which has no floor: «Выйти»", async () => {
+    const session = { ...fakeOfficeSession(), exitTo: "sign_in" as const };
+    renderOffice(session);
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    expect(session.logout).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
   });
 
   it("switches the theme", async () => {
@@ -152,8 +177,9 @@ describe("Office", () => {
     const view = renderOffice(session, { hostRevision: 3 });
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await screen.findByLabelText("Название организации");
-    // The revision the office opened with is not news.
-    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+    // The revision the office opened with is not news. (The overview and the profile each read
+    // the organization once; what is asked later is what counts.)
+    const reads = session.api.getOrg.mock.calls.length;
     expect(session.refreshUser).not.toHaveBeenCalled();
 
     view.rerender(
@@ -163,7 +189,7 @@ describe("Office", () => {
     );
     await waitFor(() => expect(session.refreshUser).toHaveBeenCalledTimes(1));
     // The open form is not reloaded under the user.
-    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+    expect(session.api.getOrg).toHaveBeenCalledTimes(reads);
   });
 
   it("moves focus to the page after a menu navigation", async () => {
@@ -453,7 +479,7 @@ describe("ChangePasswordDialog", () => {
     await screen.findByRole("heading", { name: "Профиль организации" });
     expect(screen.queryByText(notice)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { level: 1, name: "Обзор" });
     expect(screen.queryByText(notice)).toBeNull();
   });
 });

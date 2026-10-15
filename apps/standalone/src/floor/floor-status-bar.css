@@ -33,7 +33,8 @@
   min-height: 80px;
   padding: var(--sp-2) var(--sp-4);
   gap: 0 var(--sp-4);
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* The identity keeps room to be read whatever the pills and the rail take (beta 3). */
+  grid-template-columns: minmax(200px, 1fr) auto;
   align-items: center;
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
@@ -214,4 +215,78 @@
     min-height: 64px;
     padding-block: var(--sp-1);
   }
+}
+
+/*
+ * The link to the host as a dot (beta 3.2): the telemetry pills' own chip holding only the dot,
+ * inside a 64 px touch target, the details in a popover.
+ */
+.floor-link {
+  position: relative;
+}
+
+.floor-link__button.mk-btn {
+  width: 52px;
+  min-width: 52px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+/* The pills' height and padding (their label line is 18 px, 16 px under 1100 px), a ring round the dot. */
+.floor-link__pill {
+  min-width: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  justify-content: center;
+}
+
+.station-status-pill[data-tone="error"] {
+  border-color: var(--err-border, var(--err-fg));
+}
+
+.station-status-pill[data-tone="error"] .station-status-pill__dot {
+  background: var(--err-solid, var(--err-fg));
+}
+
+.floor-link__pill--pulse .station-status-pill__dot {
+  animation: floor-link-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes floor-link-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-link__pill--pulse .station-status-pill__dot {
+    animation: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .floor-link__pill {
+    min-width: 30px;
+    min-height: 30px;
+  }
+}
+
+.floor-link__popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  width: max-content;
+  min-width: 240px;
+  max-width: min(420px, 80vw);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.floor-link__popover .host-status {
+  justify-items: start;
 }

@@ -30,7 +30,9 @@
   min-width: 0;
   min-height: 64px;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Equal side columns: the mark on the left and «Офис» on the right take the same width, so the
+     title and its subtitle stand on the screen's axis whatever the side elements hold. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -79,50 +81,19 @@
   justify-self: end;
 }
 
-.operator-login__scanner-status {
-  display: flex;
-  min-width: 0;
-  min-height: 40px;
-  max-width: 300px;
-  padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  box-shadow: var(--shadow-1);
-  color: var(--fg-1);
-  font: var(--text-body);
-  gap: var(--sp-1);
-  align-items: center;
+/* A quiet warning under the title while the scanner is not ready (its state lives in the header's rail). */
+.operator-login__prompt .operator-login__scanner-warning {
+  margin-top: var(--sp-1);
+  color: var(--fg-2);
+  font: var(--floor-body);
 }
 
-.operator-login__scanner-status[data-tone="warn"] {
-  border-color: var(--warn-border);
+.operator-login__prompt .operator-login__scanner-warning[data-tone="warn"] {
+  color: var(--warn-fg);
 }
 
-.operator-login__scanner-status[data-tone="error"] {
-  border-color: var(--err-border);
-}
-
-.operator-login__scanner-status-icon {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--ok-solid);
-  color: var(--fg-on-ok-solid);
-  font: var(--text-h3);
-  flex: 0 0 auto;
-  place-items: center;
-}
-
-.operator-login__scanner-status[data-tone="warn"] .operator-login__scanner-status-icon {
-  background: var(--warn-solid);
-  color: var(--fg-on-warn-solid);
-}
-
-.operator-login__scanner-status[data-tone="error"] .operator-login__scanner-status-icon {
-  background: var(--err-solid);
-  color: var(--fg-on-err-solid);
+.operator-login__prompt .operator-login__scanner-warning[data-tone="error"] {
+  color: var(--err-fg);
 }
 
 .operator-login__message {
@@ -424,14 +395,9 @@
     width: 48px;
   }
 
-  /* The title takes what the mark and the right column leave. */
-  .operator-login__header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .operator-login__scanner-status {
-    max-width: none;
-    white-space: nowrap;
+  /* The title keeps the screen's axis: the side columns stay equal, the title takes the middle. */
+  .operator-login__prompt {
+    max-width: 100%;
   }
 }
 

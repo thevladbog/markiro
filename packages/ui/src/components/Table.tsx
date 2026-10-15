@@ -21,6 +21,11 @@ export interface TableColumn<Row> {
   wrap?: boolean;
   /** Least width of the column: a wrapping column stops at it and the table scrolls, instead of squeezing the text. */
   minWidth?: number | string;
+  /**
+   * Pins the column to the right edge of the scrolling table (for the actions column), so it is
+   * always in reach however wide the table is; the other columns scroll under it.
+   */
+  stickyEnd?: boolean;
   /** Разрешить перенос заголовка (по умолчанию nowrap): для узкой колонки с длинным названием */
   wrapTitle?: boolean;
   sortable?: boolean;
@@ -112,6 +117,26 @@ export function Table<Row>({
                   key={column.key}
                   scope="col"
                   onClick={column.sortable && onSort ? () => onSort(column.key) : undefined}
+                  // A sortable header is a control: reachable by the keyboard, and it says its order.
+                  tabIndex={column.sortable && onSort ? 0 : undefined}
+                  aria-sort={
+                    column.sortable && onSort
+                      ? sortKey === column.key
+                        ? sortDir === "desc"
+                          ? "descending"
+                          : "ascending"
+                        : "none"
+                      : undefined
+                  }
+                  onKeyDown={
+                    column.sortable && onSort
+                      ? (event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          onSort(column.key);
+                        }
+                      : undefined
+                  }
                   style={{
                     textAlign: column.align ?? "left",
                     padding: "10px 16px",
@@ -124,6 +149,14 @@ export function Table<Row>({
                     width: column.width,
                     minWidth: column.minWidth,
                     userSelect: "none",
+                    ...(column.stickyEnd
+                      ? {
+                          position: "sticky" as const,
+                          right: 0,
+                          background: "var(--surface-panel)",
+                          boxShadow: "-1px 0 0 var(--line)",
+                        }
+                      : {}),
                   }}
                 >
                   {column.title}
@@ -156,7 +189,22 @@ export function Table<Row>({
               <tr
                 key={getRowKey(row, index)}
                 tabIndex={onRowClick ? 0 : undefined}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={
+                  onRowClick
+                    ? (event) => {
+                        // A control inside the row (a link, a button, a menu) does its own thing.
+                        if (
+                          event.target instanceof Element &&
+                          event.target.closest(
+                            "a, button, input, select, textarea, [role='menuitem']",
+                          )
+                        ) {
+                          return;
+                        }
+                        onRowClick(row);
+                      }
+                    : undefined
+                }
                 onKeyDown={
                   onRowClick
                     ? (event) => {
@@ -184,6 +232,14 @@ export function Table<Row>({
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
                       minWidth: column.minWidth,
+                      ...(column.stickyEnd
+                        ? {
+                            position: "sticky" as const,
+                            right: 0,
+                            background: "var(--surface-card)",
+                            boxShadow: "-1px 0 0 var(--line)",
+                          }
+                        : {}),
                       whiteSpace: column.wrap ? "normal" : "nowrap",
                       // `break-word`, not `anywhere`: a squeezed column keeps its longest word whole
                       // (the table scrolls instead) and never breaks letter by letter.

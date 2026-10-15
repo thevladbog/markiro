@@ -7,15 +7,23 @@ import { Alert, Button, Checkbox, Input, Modal, RadioGroup } from "@markiro/ui";
 
 import { errorMessageKey } from "../../host/errors.js";
 import type { OfficeShift, ShiftExportRecord } from "../../host/protocol.js";
+import type { ConflictQuery } from "../../host/review.js";
 import { shiftExportRecord } from "../../host/requests.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
-import { exportFolder, reportedCountWarnings, type ExportWarning } from "./export-checks.js";
+import {
+  conflictWarnings,
+  exportFolder,
+  reportedCountWarnings,
+  type ExportWarning,
+} from "./export-checks.js";
 import { useExportPlan, yieldToUi } from "./export-plan.js";
 import { OfficeFilesError, type SavedFolder } from "./office-files.js";
+import { storeExportFiles } from "./stored-files.js";
+import { useRefreshStoredFiles } from "./use-refresh-files.js";
 import { useOfficeFiles } from "./office-files-context.js";
 import { runExport } from "./run-export.js";
 
@@ -36,12 +44,19 @@ const formatKey = (format: { id: string; version: number }) => `${format.id}@${f
 /** Where an export is: the first two can still be called off, the rest cannot. */
 type Phase = "idle" | "reading" | "forming" | "saving" | "recording";
 
+/** What became of the host's own copy of the files (host migration `0029`). */
+type HostCopy = { kind: "stored" } | { kind: "failed"; message: string };
+
 type Outcome =
   | { kind: "failed"; message: string; reason?: string }
   | { kind: "cancelled" }
   | {
       kind: "saved";
-      saved: SavedFolder;
+      /** The folder the shell wrote, or `null` when it could not and only the host holds the files. */
+      saved: SavedFolder | null;
+      /** Why the folder has no files (the words), when `saved` is `null`. */
+      folderFailure: string | null;
+      hostCopy: HostCopy;
       /** The record the host has not taken, with why; `null` once it is written. */
       unrecorded: { record: ShiftExportRecord; message: string } | null;
     };
@@ -49,6 +64,11 @@ type Outcome =
 export interface ExportDialogProps {
   /** An active or closed shift. */
   shift: OfficeShift;
+  /**
+   * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
+   * shows its row and its «XML паллеты», not the shift's formats.
+   */
+  palletId?: string;
   onClose: () => void;
 }
 
@@ -70,7 +90,7 @@ export interface ExportDialogProps {
  * What the dialog says it does goes into one polite region, where the focus
  * goes when an export starts; the focus then goes to its result.
  */
-export function ExportDialog({ shift, onClose }: ExportDialogProps) {
+export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const { t } = useTranslation();
   const formId = useId();
   const progressId = useId();
@@ -78,6 +98,7 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
   const files = useOfficeFiles();
   const session = useOfficeSession();
   const queryClient = useQueryClient();
+  const refreshFiles = useRefreshStoredFiles();
   const source = useOfficeQuery(officeKeys.shiftExportSource(shift.id), (api, token) =>
     api.getShiftExportSource(token, shift.id),
   );
@@ -90,7 +111,13 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
     (api, token) => api.listShiftPallets(token, shift.id),
     { enabled: rows?.shift.palletsEnabled === true },
   );
-  const plan = useExportPlan(rows);
+  // The shift's unreviewed conflicts (plan КНФ): information, so a list that does not load
+  // leaves the dialog whole and the warning out (ПР-12: never a refusal).
+  const conflictQuery: ConflictQuery = { shiftId: shift.id, reviewed: false, page: 1 };
+  const unreviewed = useOfficeQuery(officeKeys.conflictList(conflictQuery), (api, token) =>
+    api.listConflicts(token, conflictQuery),
+  );
+  const plan = useExportPlan(rows, shift.mode);
   const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
     api.recordShiftExport(token, shift.id, body),
   );
@@ -119,15 +146,21 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
       : Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const checks = plan.status === "ready" ? plan.plan.checks : [];
+  // A pallet's own dialog (plan КРТ) lists that pallet only.
+  const pallets =
+    plan.status === "ready"
+      ? plan.plan.pallets.filter((pallet) => palletId === undefined || pallet.palletId === palletId)
+      : [];
   const firstAllowed = checks.find((check) => check.refusal === null);
   const selected =
     checks.find((check) => formatKey(check.format) === chosen && check.refusal === null) ??
     firstAllowed;
   const warnings: ExportWarning[] =
-    selected === undefined
+    selected === undefined || palletId !== undefined
       ? []
       : [
           ...selected.warnings,
+          ...conflictWarnings(unreviewed.data?.total ?? 0),
           ...(shiftExportFormatRequiresPallets(selected.format) && palletList.data !== undefined
             ? reportedCountWarnings(palletList.data)
             : []),
@@ -215,7 +248,28 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         return;
       }
       setPhase("saving");
-      let saved: SavedFolder;
+      // The host keeps the exact bytes first: whatever happens to the folder on this PC, the
+      // file stays downloadable from the shift's drawer. A host that cannot keep them (its store
+      // is full, it does not answer) never stops the export: the folder copy is made all the same.
+      const stored = await storeExportFiles(session, {
+        kind: palletId === null ? "shift_export" : "pallet_export",
+        targetType: palletId === null ? "shift" : "pallet",
+        targetId: palletId ?? shift.id,
+        batchId: documentId,
+        formatId: format.id,
+        formatVersion: format.version,
+        parts: result.parts.map((part, index) => ({
+          partNo: index + 1,
+          name: part.filename,
+          bytes: part.bytes,
+        })),
+      });
+      refreshFiles();
+      const hostCopy: HostCopy = stored.ok
+        ? { kind: "stored" }
+        : { kind: "failed", message: t(stored.messageKey) };
+      let saved: SavedFolder | null = null;
+      let folderFailure: string | null = null;
       try {
         saved = await files.save(
           exportFolder(fresh.shift.number, format.id, formedAt, timeZone),
@@ -223,7 +277,11 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         );
       } catch (error) {
         const code = error instanceof OfficeFilesError ? error.code : "storage";
-        setOutcome({ kind: "failed", message: t(`office.exports.files.${code}`) });
+        folderFailure = t(`office.exports.files.${code}`);
+      }
+      if (saved === null && !stored.ok) {
+        // Neither the host nor the folder has the files: nothing is recorded.
+        setOutcome({ kind: "failed", message: folderFailure ?? t("office.exports.files.storage") });
         return;
       }
       const body = shiftExportRecord({
@@ -235,7 +293,7 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         parts: result.parts,
         openPalletSuppressedBoxCount: result.openPalletSuppressedBoxCount,
       });
-      await writeRecord(saved, body);
+      await writeRecord(saved, folderFailure, hostCopy, body);
     } catch (error) {
       // Nothing above is meant to throw; if it does, the dialog says so instead of going quiet.
       setOutcome({
@@ -250,26 +308,36 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
   }
 
   /** Writes the journal's row of files already saved; a refusal leaves the same row to write again. */
-  async function writeRecord(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+  async function writeRecord(
+    saved: SavedFolder | null,
+    folderFailure: string | null,
+    hostCopy: HostCopy,
+    body: ShiftExportRecord,
+  ): Promise<void> {
     setPhase("recording");
     try {
       await record.mutateAsync(body);
-      setOutcome({ kind: "saved", saved, unrecorded: null });
+      setOutcome({ kind: "saved", saved, folderFailure, hostCopy, unrecorded: null });
     } catch (error) {
       setOutcome({
         kind: "saved",
         saved,
+        folderFailure,
+        hostCopy,
         unrecorded: { record: body, message: t(errorMessageKey(error)) },
       });
     }
   }
 
-  async function recordAgain(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+  async function recordAgain(
+    done: Extract<Outcome, { kind: "saved" }>,
+    body: ShiftExportRecord,
+  ): Promise<void> {
     if (inFlight.current) return;
     inFlight.current = true;
     document.getElementById(progressId)?.focus();
     try {
-      await writeRecord(saved, body);
+      await writeRecord(done.saved, done.folderFailure, done.hostCopy, body);
     } finally {
       inFlight.current = false;
       setPhase("idle");
@@ -306,6 +374,8 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         return t("office.exports.warnings.late_boxes", { count: warning.boxes });
       case "pallet_count_mismatch":
         return t("office.exports.warnings.pallet_count_mismatch", { count: warning.pallets });
+      case "unreviewed_conflicts":
+        return t("office.exports.warnings.unreviewed_conflicts", { count: warning.conflicts });
     }
   };
 
@@ -349,27 +419,39 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
       );
     }
     const unrecorded = outcome.unrecorded;
+    const folder = outcome.saved;
     return (
       <>
-        <Alert
-          tone="ok"
-          role="status"
-          {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
-          action={
-            <Button
-              variant="secondary"
-              size="compact"
-              onClick={() => void openFolder(outcome.saved)}
-            >
-              {t("office.exports.openFolder")}
-            </Button>
-          }
-        >
-          {t("office.exports.saved", {
-            count: outcome.saved.files.length,
-            path: outcome.saved.path,
-          })}
-        </Alert>
+        {folder !== null ? (
+          <Alert
+            tone="ok"
+            role="status"
+            {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
+            action={
+              <Button variant="secondary" size="compact" onClick={() => void openFolder(folder)}>
+                {t("office.exports.openFolder")}
+              </Button>
+            }
+          >
+            {t("office.exports.saved", {
+              count: folder.files.length,
+              path: folder.path,
+            })}
+          </Alert>
+        ) : (
+          <Alert
+            tone="warn"
+            role="status"
+            {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
+          >
+            {outcome.folderFailure} {t("office.exports.heldByHost")}
+          </Alert>
+        )}
+        {outcome.hostCopy.kind === "failed" && (
+          <Alert tone="warn" role="status">
+            {t("office.storedFiles.hostCopyFailed", { reason: outcome.hostCopy.message })}
+          </Alert>
+        )}
         {unrecorded !== null && (
           <Alert
             tone="warn"
@@ -380,7 +462,7 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
                 variant="secondary"
                 size="compact"
                 disabled={busy}
-                onClick={() => void recordAgain(outcome.saved, unrecorded.record)}
+                onClick={() => void recordAgain(outcome, unrecorded.record)}
               >
                 {t("office.exports.recordAgain")}
               </Button>
@@ -446,49 +528,56 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
         </div>
         {plan.status === "ready" && (
           <>
-            <RadioGroup
-              label={t("office.exports.formats")}
-              name="shift-export-format"
-              disabled={busy}
-              value={selected === undefined ? "" : formatKey(selected.format)}
-              onValueChange={setChosen}
-              options={checks.map((check) => ({
-                value: formatKey(check.format),
-                disabled: check.refusal !== null,
-                label:
-                  check.refusal === null ? (
-                    check.format.label
-                  ) : (
-                    <span className="shift-cell">
-                      <span>{check.format.label}</span>
-                      <span className="shift-cell__quiet">
-                        {t(`office.exports.failures.${check.refusal}`)}
-                      </span>
-                    </span>
-                  ),
-              }))}
-            />
-            <Checkbox
-              label={t("office.exports.split")}
-              checked={split}
-              disabled={busy}
-              onCheckedChange={setSplit}
-            />
-            {split && (
-              <Input
-                label={t("office.exports.lineLimit")}
-                inputMode="numeric"
-                value={lineLimit}
-                disabled={busy}
-                {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
-                onChange={(event) => setLineLimit(event.target.value)}
-              />
+            {palletId === undefined && (
+              <>
+                <RadioGroup
+                  label={t("office.exports.formats")}
+                  name="shift-export-format"
+                  disabled={busy}
+                  value={selected === undefined ? "" : formatKey(selected.format)}
+                  onValueChange={setChosen}
+                  options={checks.map((check) => ({
+                    value: formatKey(check.format),
+                    disabled: check.refusal !== null,
+                    label:
+                      check.refusal === null ? (
+                        check.format.label
+                      ) : (
+                        <span className="shift-cell">
+                          <span>{check.format.label}</span>
+                          <span className="shift-cell__quiet">
+                            {t(`office.exports.failures.${check.refusal}`)}
+                          </span>
+                        </span>
+                      ),
+                  }))}
+                />
+                <Checkbox
+                  label={t("office.exports.split")}
+                  checked={split}
+                  disabled={busy}
+                  onCheckedChange={setSplit}
+                />
+                {split && (
+                  <Input
+                    label={t("office.exports.lineLimit")}
+                    inputMode="numeric"
+                    value={lineLimit}
+                    disabled={busy}
+                    {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
+                    onChange={(event) => setLineLimit(event.target.value)}
+                  />
+                )}
+              </>
             )}
             <p className="office-note">{t("office.exports.folderHint")}</p>
-            {plan.plan.pallets.length > 0 && (
+            {palletId !== undefined && pallets.length === 0 && (
+              <Alert tone="warn">{t("office.exports.palletUnavailable")}</Alert>
+            )}
+            {pallets.length > 0 && (
               <section aria-label={t("office.exports.pallets")}>
                 <p>{t("office.exports.pallets")}</p>
-                {plan.plan.pallets.map((pallet) => (
+                {pallets.map((pallet) => (
                   <div key={pallet.palletId} className="shift-cell">
                     <span>
                       {pallet.sscc === null
@@ -540,7 +629,11 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
   return (
     <Modal
       open
-      title={t("office.exports.title", { number: shift.number })}
+      title={
+        palletId === undefined
+          ? t("office.exports.title", { number: shift.number })
+          : t("office.exports.palletTitle", { sscc: pallets[0]?.sscc ?? "—" })
+      }
       onClose={close}
       closeLabel={t("office.common.close")}
       width="min(760px, calc(100vw - 32px))"
@@ -549,14 +642,16 @@ export function ExportDialog({ shift, onClose }: ExportDialogProps) {
           <Button variant="secondary" onClick={close} disabled={busy}>
             {t("office.common.close")}
           </Button>
-          <Button
-            type="submit"
-            form={formId}
-            loading={busy}
-            disabled={selected === undefined || lineLimitError !== undefined}
-          >
-            {t("office.exports.submit")}
-          </Button>
+          {palletId === undefined && (
+            <Button
+              type="submit"
+              form={formId}
+              loading={busy}
+              disabled={selected === undefined || lineLimitError !== undefined}
+            >
+              {t("office.exports.submit")}
+            </Button>
+          )}
         </>
       }
     >

@@ -5,7 +5,13 @@ import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
 
 import type { LabelTemplateSpec } from "@markiro/domain";
 
-import type { DeviceShift, DeviceShiftCreate, EnteredShift } from "../../host/protocol.js";
+import type {
+  DeviceShift,
+  DeviceShiftCreate,
+  EnteredShift,
+  ShiftEnter,
+  ShiftMode,
+} from "../../host/protocol.js";
 import type { DeviceShiftInput } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
@@ -19,6 +25,7 @@ import {
   createdCopy,
   createStationShift,
   findScannedProduct,
+  fittingDuplicateTemplates,
   fittingPalletTemplates,
   fittingTemplates,
   isShiftOfRequest,
@@ -31,6 +38,8 @@ import {
 import type { WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
+import { productMonogram } from "./product-accent.js";
+import { ProductPanel } from "./ProductPhoto.js";
 import { TemplatePreview } from "./TemplatePreview.js";
 
 /** At most this many products answer a search by name. */
@@ -47,7 +56,7 @@ export interface NewShiftProps {
   /** `HostApi.createDeviceShift`. */
   create: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /** `HostApi.enterShift`. */
-  enter: (shiftId: string) => Promise<EnteredShift>;
+  enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   onEntered: (shift: WorkShift) => void;
   /** A refused key or a changed certificate: the shell's to route. */
   onHostError: (error: unknown) => void;
@@ -71,6 +80,8 @@ interface Form {
   /** The rule chose the template, or only one fits: nothing to choose. */
   templateFixed: boolean;
   productionDate: string;
+  /** «Дата смены»: the working day, today in the organization's zone until the operator moves it. */
+  plannedDate: string;
   plannedQty: string;
   boxCapacity: string;
   /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
@@ -78,6 +89,14 @@ interface Form {
   palletTemplateId: string | null;
   /** The rule chose the pallet template, or only one fits. */
   palletTemplateFixed: boolean;
+  /** «Режим работы» (plan РЕЖ): «Агрегация» unless the operator chose «Проверка». */
+  mode: ShiftMode;
+  /** «Печатать дубликат Data Matrix»: only a validation shift prints. */
+  printDuplicate: boolean;
+  /** The duplicate template: the only one that fits, or the operator's choice. */
+  duplicateTemplateId: string | null;
+  /** «Обязательная проверка этикетки». */
+  verificationRequired: boolean;
   /**
    * The shift the host has answered for this form's request id. From then on
    * the form is frozen (a repeated id brings this shift back whatever the form
@@ -98,7 +117,29 @@ type Problem =
  * steps: the shift's details, then the box template with its preview, then
  * — for a shift with pallets — the pallet template with its preview.
  */
-type FormView = "details" | "box_template" | "pallet_template";
+type FormView = "details" | "box_template" | "pallet_template" | "duplicate_template";
+
+/**
+ * The form's views in order for the form's mode: an aggregation shift chooses
+ * its box template and, with pallets, the pallet template; a validation shift
+ * prints no box label (its box template is the rule's, never asked) and, when it
+ * prints a duplicate, chooses the duplicate template.
+ */
+function viewsOf(form: Form, from: NewShiftChoices): FormView[] {
+  if (form.mode === "validation") {
+    return form.printDuplicate ? ["details", "duplicate_template"] : ["details"];
+  }
+  const withPallets =
+    form.pallets && palletCapacityOffered(form.product, from.palletTemplates) !== null;
+  return withPallets ? ["details", "box_template", "pallet_template"] : ["details", "box_template"];
+}
+
+/** The box template the request names: the form's, or for a validation shift the first that fits. */
+function boxTemplateOf(form: Form, from: NewShiftChoices): string | null {
+  if (form.templateId !== null) return form.templateId;
+  if (form.mode !== "validation") return null;
+  return fittingTemplates(form.product, from.templates)[0]?.id ?? null;
+}
 
 type Step = { kind: "product" } | { kind: "form"; form: Form; view: FormView };
 
@@ -116,7 +157,7 @@ function palletsOf(
   | { kind: "none" }
   | { kind: "unavailable" }
   | { kind: "pallets"; pallets: NonNullable<DeviceShiftInput["pallets"]> } {
-  if (!form.pallets) return { kind: "none" };
+  if (!form.pallets || form.mode === "validation") return { kind: "none" };
   const boxCapacity = palletCapacityOffered(form.product, from.palletTemplates);
   const template = fittingPalletTemplates(form.product, from.palletTemplates).find(
     (each) => each.id === form.palletTemplateId,
@@ -208,6 +249,8 @@ export function NewShift({
       const palletFixed =
         suggestPalletTemplate(product, ready.palletTemplates, ready.defaults) ??
         (palletFitting.length === 1 && onlyPallet !== undefined ? onlyPallet.id : null);
+      const duplicateFitting = fittingDuplicateTemplates(product, ready.duplicateTemplates);
+      const [onlyDuplicate] = duplicateFitting.length === 1 ? duplicateFitting : [];
       setProblem(null);
       setErrors({});
       setStep({
@@ -219,11 +262,16 @@ export function NewShift({
           templateId: fixed,
           templateFixed: fixed !== null,
           productionDate: civilToday(ready.timeZone, current.current.now()),
+          plannedDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
           pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
           palletTemplateId: palletFixed,
           palletTemplateFixed: palletFixed !== null,
+          mode: "aggregation",
+          printDuplicate: false,
+          duplicateTemplateId: onlyDuplicate?.id ?? null,
+          verificationRequired: false,
           created: null,
         },
       });
@@ -350,6 +398,10 @@ export function NewShift({
         update({ palletTemplateId: null, palletTemplateFixed: false });
         go("pallet_template");
       }
+      if (created.reason === "duplicate_template") {
+        update({ duplicateTemplateId: null });
+        go("duplicate_template");
+      }
       setProblem({ kind: "create", reason: created.reason });
       return;
     }
@@ -370,6 +422,18 @@ export function NewShift({
   const counts = (form: Form): { plannedQty: number | null; boxCapacity: number } | null => {
     const plan = plannedQtyRule.safeParse(form.plannedQty);
     const capacity = shiftBoxCapacityRule.safeParse(form.boxCapacity);
+    if (form.mode === "validation") {
+      // The capacity is hidden: a valid one stands, else the host takes the product's.
+      if (!plan.success) {
+        setErrors({ plannedQty: t("rules.plannedQty") });
+        return null;
+      }
+      setErrors({});
+      return {
+        plannedQty: toCount(plan.data),
+        boxCapacity: capacity.success ? (toCount(capacity.data) ?? 0) : 0,
+      };
+    }
     if (!plan.success || !capacity.success) {
       setErrors({
         ...(plan.success ? {} : { plannedQty: t("rules.plannedQty") }),
@@ -382,15 +446,19 @@ export function NewShift({
   };
 
   /** «Далее» from the details: the fields are checked before the template is chosen. */
-  const next = (form: Form) => {
+  const next = (form: Form, to: FormView) => {
     if (form.created === null && counts(form) === null) return;
-    go("box_template");
+    go(to);
   };
 
   const submit = async (form: Form) => {
-    if (running.current || form.templateId === null) return;
-    const pallets = ready === null ? { kind: "unavailable" as const } : palletsOf(form, ready);
+    if (ready === null || running.current) return;
+    const templateId = boxTemplateOf(form, ready);
+    if (templateId === null) return;
+    const pallets = palletsOf(form, ready);
     if (pallets.kind === "unavailable") return;
+    const prints = form.mode === "validation" && form.printDuplicate;
+    if (prints && form.duplicateTemplateId === null) return;
     if (form.created !== null) {
       // Made already, here or by an earlier request: only the entry is left.
       const { shift } = form.created;
@@ -405,11 +473,32 @@ export function NewShift({
     const input: DeviceShiftInput = {
       requestId: form.requestId,
       productId: form.product.id,
-      boxTemplateId: form.templateId,
+      boxTemplateId: templateId,
       productionDate: form.productionDate,
-      boxCapacity: checked.boxCapacity,
+      // The working day: today in the organization's zone unless the operator moved it.
+      plannedDate: form.plannedDate,
+      // A validation shift hides the capacity: the host takes the product's unless a valid one stands.
+      ...(form.mode === "validation" && checked.boxCapacity === 0
+        ? {}
+        : { boxCapacity: checked.boxCapacity }),
       plannedQty: checked.plannedQty,
       ...(pallets.kind === "pallets" ? { pallets: pallets.pallets } : {}),
+      ...(form.mode === "validation"
+        ? {
+            mode: "validation" as const,
+            ...(prints && form.duplicateTemplateId !== null
+              ? {
+                  validationPrint: {
+                    mode: "duplicate_dm" as const,
+                    verification: form.verificationRequired
+                      ? ("required" as const)
+                      : ("none" as const),
+                    templateId: form.duplicateTemplateId,
+                  },
+                }
+              : {}),
+          }
+        : {}),
     };
     await run("creating", () => make(input));
   };
@@ -501,9 +590,18 @@ export function NewShift({
                 size="floor"
                 variant="secondary"
                 fullWidth
+                className="new-shift__result"
+                title={t("floor.newShift.result", { name: product.name, gtin: product.gtin14 })}
+                aria-label={t("floor.newShift.result", {
+                  name: product.name,
+                  gtin: product.gtin14,
+                })}
                 onClick={() => choose(product)}
               >
-                {t("floor.newShift.result", { name: product.name, gtin: product.gtin14 })}
+                {/* A long name is cut with an ellipsis, never a sideways scroll;
+                    the full text is the button's title. */}
+                <span className="new-shift__result-name">{product.name}</span>
+                <span className="new-shift__result-gtin">{` — ${product.gtin14}`}</span>
               </Button>
             ))
           )}
@@ -521,12 +619,88 @@ export function NewShift({
     return (
       <>
         <Card className="new-shift__product" padding="var(--sp-3)">
-          <h3>{form.product.name}</h3>
-          <div className="new-shift__code">{form.product.gtin14}</div>
+          <ProductPanel
+            local={local}
+            productId={form.product.id}
+            gtin={form.product.gtin14}
+            className="new-shift__product-photo"
+            fallback={
+              <span className="new-shift__product-monogram" aria-hidden="true">
+                {productMonogram(form.product.name)}
+              </span>
+            }
+          />
+          <div className="new-shift__product-text">
+            <h3 title={form.product.name}>{form.product.name}</h3>
+            <div className="new-shift__code">{form.product.gtin14}</div>
+          </div>
         </Card>
-        {/* Plan РЕЖ puts the shift's mode and the duplicate print here, as the
-            cloud's two-column `new-shift__modes` rows under the product. */}
-        {palletCapacity !== null && (
+        {/* The shift's mode and the duplicate print, as the cloud's two-column
+            `new-shift__modes` rows under the product (plan РЕЖ). */}
+        <div className="new-shift__group">
+          <p className="new-shift__label">{t("floor.newShift.mode")}</p>
+          <div className="new-shift__modes" role="group" aria-label={t("floor.newShift.mode")}>
+            <Button
+              size="floor"
+              fullWidth
+              variant={form.mode === "validation" ? "primary" : "secondary"}
+              aria-pressed={form.mode === "validation"}
+              disabled={frozen}
+              onClick={() => update({ mode: "validation" })}
+            >
+              {t("floor.newShift.modeValidation")}
+            </Button>
+            <Button
+              size="floor"
+              fullWidth
+              variant={form.mode === "aggregation" ? "primary" : "secondary"}
+              aria-pressed={form.mode === "aggregation"}
+              disabled={frozen}
+              onClick={() => update({ mode: "aggregation" })}
+            >
+              {t("floor.newShift.modeAggregation")}
+            </Button>
+          </div>
+        </div>
+        {form.mode === "validation" && (
+          <div className="new-shift__group">
+            <p className="new-shift__label">{t("floor.newShift.printDuplicate")}</p>
+            <div
+              className="new-shift__modes"
+              role="group"
+              aria-label={t("floor.newShift.printDuplicate")}
+            >
+              <Button
+                size="floor"
+                fullWidth
+                variant={form.printDuplicate ? "secondary" : "primary"}
+                aria-pressed={!form.printDuplicate}
+                disabled={frozen}
+                onClick={() => update({ printDuplicate: false })}
+              >
+                {t("floor.newShift.no")}
+              </Button>
+              <Button
+                size="floor"
+                fullWidth
+                variant={form.printDuplicate ? "primary" : "secondary"}
+                aria-pressed={form.printDuplicate}
+                disabled={frozen}
+                onClick={() => update({ printDuplicate: true })}
+              >
+                {t("floor.newShift.yes")}
+              </Button>
+            </div>
+            <p className="new-shift__hint">
+              {t(
+                form.printDuplicate
+                  ? "floor.newShift.printDuplicateHint"
+                  : "floor.newShift.validationBoxHint",
+              )}
+            </p>
+          </div>
+        )}
+        {form.mode === "aggregation" && palletCapacity !== null && (
           <div className="new-shift__group">
             <div className="new-shift__modes" role="group" aria-label={t("floor.newShift.pallets")}>
               <Button
@@ -576,6 +750,21 @@ export function NewShift({
               }}
             />
           </div>
+          <div className="new-shift__date">
+            <DatePicker
+              label={t("floor.newShift.plannedDate")}
+              value={form.plannedDate}
+              locale="ru-RU"
+              calendarLabel={t("floor.newShift.calendar")}
+              previousMonthLabel={t("floor.newShift.previousMonth")}
+              nextMonthLabel={t("floor.newShift.nextMonth")}
+              disabled={frozen}
+              // The shift date is required too: clearing it keeps the date shown.
+              onValueChange={(value) => {
+                if (value !== undefined) update({ plannedDate: value });
+              }}
+            />
+          </div>
           <Input
             size="floor"
             label={t("floor.newShift.plannedQty")}
@@ -586,15 +775,17 @@ export function NewShift({
             {...(errors.plannedQty === undefined ? {} : { error: errors.plannedQty })}
             onChange={(event) => update({ plannedQty: event.currentTarget.value })}
           />
-          <Input
-            size="floor"
-            label={t("floor.newShift.boxCapacity")}
-            inputMode="numeric"
-            value={form.boxCapacity}
-            disabled={frozen}
-            {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
-            onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
-          />
+          {form.mode === "aggregation" && (
+            <Input
+              size="floor"
+              label={t("floor.newShift.boxCapacity")}
+              inputMode="numeric"
+              value={form.boxCapacity}
+              disabled={frozen}
+              {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
+              onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
+            />
+          )}
         </div>
       </>
     );
@@ -606,37 +797,62 @@ export function NewShift({
    * offered (decision 7): the choice is the operator's only where the rule
    * leaves several.
    */
-  const templateView = (form: Form, from: NewShiftChoices, purpose: "box" | "pallet") => {
+  const templateView = (
+    form: Form,
+    from: NewShiftChoices,
+    purpose: "box" | "pallet" | "duplicate",
+  ) => {
     const box = purpose === "box";
+    const duplicate = purpose === "duplicate";
     const fitting = box
       ? fittingTemplates(form.product, from.templates)
-      : fittingPalletTemplates(form.product, from.palletTemplates);
-    const chosenId = box ? form.templateId : form.palletTemplateId;
-    const fixed = box ? form.templateFixed : form.palletTemplateFixed;
+      : duplicate
+        ? fittingDuplicateTemplates(form.product, from.duplicateTemplates)
+        : fittingPalletTemplates(form.product, from.palletTemplates);
+    const chosenId = box
+      ? form.templateId
+      : duplicate
+        ? form.duplicateTemplateId
+        : form.palletTemplateId;
+    const fixed = box ? form.templateFixed : duplicate ? false : form.palletTemplateFixed;
     const chosen = fitting.find((template) => template.id === chosenId) ?? null;
     const frozen = busy !== null || form.created !== null;
     const spec = chosen === null ? null : (specs?.get(chosen.id) ?? null);
-    const label = box ? "floor.newShift.template" : "floor.newShift.palletTemplate";
+    const label = box
+      ? "floor.newShift.template"
+      : duplicate
+        ? "floor.newShift.duplicateTemplate"
+        : "floor.newShift.palletTemplate";
     return (
       <>
         <h3 className="new-shift__template-title">{t(label)}</h3>
         {fitting.length === 0 ? (
-          <Alert tone="error">{t("floor.newShift.noTemplate")}</Alert>
+          <Alert tone="error">
+            {t(duplicate ? "floor.newShift.noDuplicateTemplate" : "floor.newShift.noTemplate")}
+          </Alert>
         ) : (
           <div className="new-shift__template-grid">
             <div className="new-shift__template-choices">
               {chosen !== null ? (
                 <p className="new-shift__value">
                   {t(
-                    box ? "floor.newShift.templateChosen" : "floor.newShift.palletTemplateChosen",
-                    {
-                      name: chosen.name,
-                    },
+                    box
+                      ? "floor.newShift.templateChosen"
+                      : duplicate
+                        ? "floor.newShift.duplicateTemplateChosen"
+                        : "floor.newShift.palletTemplateChosen",
+                    { name: chosen.name },
                   )}
                 </p>
               ) : (
                 <p className="new-shift__label">
-                  {t(box ? "floor.newShift.templateChoose" : "floor.newShift.palletTemplateChoose")}
+                  {t(
+                    box
+                      ? "floor.newShift.templateChoose"
+                      : duplicate
+                        ? "floor.newShift.duplicateTemplateChoose"
+                        : "floor.newShift.palletTemplateChoose",
+                  )}
                 </p>
               )}
               {!(fixed && chosen !== null) && (
@@ -651,25 +867,72 @@ export function NewShift({
                       disabled={frozen}
                       onClick={() =>
                         update(
-                          box ? { templateId: template.id } : { palletTemplateId: template.id },
+                          box
+                            ? { templateId: template.id }
+                            : duplicate
+                              ? { duplicateTemplateId: template.id }
+                              : { palletTemplateId: template.id },
                         )
                       }
                     >
-                      {template.name}
+                      <span className="new-shift__ellipsis" title={template.name}>
+                        {template.name}
+                      </span>
                     </Button>
                   ))}
                 </div>
               )}
             </div>
-            <div className="new-shift__preview">
-              {spec !== null ? (
-                <TemplatePreview spec={spec} purpose={purpose} product={form.product} />
-              ) : (
+            {duplicate ? (
+              <div className="new-shift__verification">
+                <p className="new-shift__label">{t("floor.newShift.verification")}</p>
+                <div
+                  className="new-shift__modes"
+                  role="group"
+                  aria-label={t("floor.newShift.verification")}
+                >
+                  <Button
+                    size="floor"
+                    fullWidth
+                    variant={form.verificationRequired ? "secondary" : "primary"}
+                    aria-pressed={!form.verificationRequired}
+                    disabled={frozen}
+                    onClick={() => update({ verificationRequired: false })}
+                  >
+                    {t("floor.newShift.no")}
+                  </Button>
+                  <Button
+                    size="floor"
+                    fullWidth
+                    variant={form.verificationRequired ? "primary" : "secondary"}
+                    aria-pressed={form.verificationRequired}
+                    disabled={frozen}
+                    onClick={() => update({ verificationRequired: true })}
+                  >
+                    {t("floor.newShift.yes")}
+                  </Button>
+                </div>
                 <p className="new-shift__hint">
-                  {t(chosen === null ? "floor.newShift.previewPick" : "floor.newShift.previewNone")}
+                  {t(
+                    form.verificationRequired
+                      ? "floor.newShift.verificationRequiredHint"
+                      : "floor.newShift.verificationNoneHint",
+                  )}
                 </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="new-shift__preview">
+                {spec !== null ? (
+                  <TemplatePreview spec={spec} purpose={purpose} product={form.product} />
+                ) : (
+                  <p className="new-shift__hint">
+                    {t(
+                      chosen === null ? "floor.newShift.previewPick" : "floor.newShift.previewNone",
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </>
@@ -714,28 +977,23 @@ export function NewShift({
 
   const formActions = (shown: { form: Form; view: FormView }, from: NewShiftChoices) => {
     const { form, view } = shown;
-    if (view === "details") {
-      return (
-        <>
-          <Button size="floor" fullWidth disabled={busy !== null} onClick={() => next(form)}>
-            {t("floor.newShift.next")}
-          </Button>
-          {otherProduct}
-          {back}
-        </>
-      );
-    }
-    const withPallets =
-      form.pallets && palletCapacityOffered(form.product, from.palletTemplates) !== null;
-    const toPallets = view === "box_template" && withPallets;
+    const order = viewsOf(form, from);
+    const at = Math.max(0, order.indexOf(view));
+    const following = order[at + 1];
+    const previous = order[at - 1] ?? "details";
+    const prints = form.mode === "validation" && form.printDuplicate;
     return (
       <>
-        {toPallets ? (
+        {following !== undefined ? (
           <Button
             size="floor"
             fullWidth
-            disabled={busy !== null || form.templateId === null}
-            onClick={() => go("pallet_template")}
+            disabled={
+              busy !== null ||
+              (view === "box_template" && form.templateId === null) ||
+              (view === "pallet_template" && form.palletTemplateId === null)
+            }
+            onClick={() => (view === "details" ? next(form, following) : go(following))}
           >
             {t("floor.newShift.next")}
           </Button>
@@ -745,24 +1003,32 @@ export function NewShift({
             fullWidth
             loading={busy !== null}
             disabled={
-              !online || form.templateId === null || palletsOf(form, from).kind === "unavailable"
+              !online ||
+              boxTemplateOf(form, from) === null ||
+              palletsOf(form, from).kind === "unavailable" ||
+              (prints && form.duplicateTemplateId === null)
             }
-            onClick={() => void submit(form)}
+            onClick={() => {
+              if (view === "details" && form.created === null && counts(form) === null) return;
+              void submit(form);
+            }}
           >
             {form.created === null
               ? t("floor.newShift.create")
               : t("floor.newShift.openCreated", { number: form.created.shift.number })}
           </Button>
         )}
-        <Button
-          size="floor"
-          fullWidth
-          variant="secondary"
-          disabled={busy !== null}
-          onClick={() => go(view === "pallet_template" ? "box_template" : "details")}
-        >
-          {t("floor.newShift.previousStep")}
-        </Button>
+        {view !== "details" && (
+          <Button
+            size="floor"
+            fullWidth
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() => go(previous)}
+          >
+            {t("floor.newShift.previousStep")}
+          </Button>
+        )}
         {otherProduct}
         {back}
       </>
@@ -772,6 +1038,7 @@ export function NewShift({
   const formBody = (shown: { form: Form; view: FormView }, from: NewShiftChoices) => {
     if (shown.view === "box_template") return templateView(shown.form, from, "box");
     if (shown.view === "pallet_template") return templateView(shown.form, from, "pallet");
+    if (shown.view === "duplicate_template") return templateView(shown.form, from, "duplicate");
     return detailsView(shown.form, from);
   };
 

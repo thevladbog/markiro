@@ -1,10 +1,11 @@
 //! Code search in the office (owner's beta feedback «Поиск кодов», the
 //! cloud's `code-search` for one site): `GET /v1/office/codes` lists the
 //! placements of codes in boxes — one row per accepted scan that put a code
-//! into a box — and `GET /v1/office/codes/{codeHash}` is one code's card
-//! with its history. Every office role reads them; a device key alone never
-//! does (`OfficeContext`). Read only: nothing is written, not even an audit
-//! row, as the shift's lists.
+//! into a box, and per accepted scan of a validation shift that took its
+//! code without one (plan РЕЖ) — and `GET /v1/office/codes/{codeHash}` is
+//! one code's card with its history. Every office role reads them; a device
+//! key alone never does (`OfficeContext`). Read only: nothing is written, not
+//! even an audit row, as the shift's lists.
 //!
 //! The office classifies what was typed or scanned with the domain's
 //! `classifyScan` and sends the hash of a code (`kmHash`, never the code),
@@ -53,12 +54,31 @@ const LATEST: &str = "~";
 // and ?7 the period's ends (text of device instants), ?8 the limit, ?9 the
 // offset. A criterion not asked is NULL and narrows nothing.
 
+/// Whether the scan `s` took its code when it arrived: its receipt is
+/// `accepted`, not `conflict` (the receipt's key, `fact_receipts`' primary
+/// key). A box-less accepted scan of a validation shift has no item to say
+/// so; a boxed one has its item.
+macro_rules! took_its_code {
+    () => {
+        "EXISTS (SELECT 1 FROM fact_receipts r WHERE r.device_id = s.device_id \
+         AND r.record_id = s.record_id AND r.outcome = 'accepted')"
+    };
+}
+
 /// The criteria that narrow whatever query drives: each one asked must hold.
+/// A placement is an item in a box, or an accepted scan without a box (a
+/// validation shift's) that took its code; a scan that lost its code on
+/// arrival is none.
 macro_rules! narrowed {
     () => {
-        " AND (?1 IS NULL OR s.code_hash = ?1) AND (?2 IS NULL OR s.gtin14 = ?2) \
-         AND (?3 IS NULL OR s.shift_id = ?3) AND (?4 IS NULL OR i.box_id = ?4) \
-         AND (?5 IS NULL OR b.pallet_id = ?5) AND s.scanned_at >= ?6 AND s.scanned_at < ?7"
+        concat!(
+            " AND (?1 IS NULL OR s.code_hash = ?1) AND (?2 IS NULL OR s.gtin14 = ?2) \
+             AND (?3 IS NULL OR s.shift_id = ?3) AND (?4 IS NULL OR i.box_id = ?4) \
+             AND (?5 IS NULL OR b.pallet_id = ?5) AND s.scanned_at >= ?6 AND s.scanned_at < ?7 \
+             AND (i.scan_id IS NOT NULL OR (s.box_id IS NULL AND ",
+            took_its_code!(),
+            "))"
+        )
     };
 }
 
@@ -67,8 +87,12 @@ macro_rules! narrowed {
 macro_rules! items {
     ($from:literal, $driver:literal) => {
         concat!(
-            "SELECT i.scan_id, i.code_hash, s.gtin14, s.serial, s.scanned_at, i.removed_at, \
-             i.displaced_at, b.id AS box_id, b.sscc AS box_sscc, b.closed_at AS box_closed_at, \
+            "SELECT s.id AS scan_id, s.code_hash, s.gtin14, s.serial, s.scanned_at, \
+             i.removed_at, CASE WHEN i.scan_id IS NULL \
+             THEN (SELECT MIN(c.detected_at) FROM code_conflicts c \
+                   WHERE c.code_hash = s.code_hash AND c.loser_scan_id = s.id) \
+             ELSE i.displaced_at END AS displaced_at, \
+             b.id AS box_id, b.sscc AS box_sscc, b.closed_at AS box_closed_at, \
              b.disassembled_at AS box_disassembled_at, p.id AS pallet_id, \
              p.sscc AS pallet_sscc, p.disassembled_at AS pallet_disassembled_at, \
              sh.id AS shift_id, sh.number_month_key, sh.number_seq, sh.created_from, \
@@ -82,7 +106,7 @@ macro_rules! items {
              LEFT JOIN operators op ON op.id = s.operator_id WHERE ",
             $driver,
             narrowed!(),
-            " ORDER BY s.scanned_at DESC, i.scan_id DESC LIMIT ?8 OFFSET ?9"
+            " ORDER BY s.scanned_at DESC, s.id DESC LIMIT ?8 OFFSET ?9"
         )
     };
 }
@@ -108,8 +132,8 @@ macro_rules! drivers {
             (
                 "code",
                 $emit!(
-                    "FROM scans s JOIN box_items i ON i.scan_id = s.id \
-                     JOIN boxes b ON b.id = i.box_id",
+                    "FROM scans s LEFT JOIN box_items i ON i.scan_id = s.id \
+                     LEFT JOIN boxes b ON b.id = i.box_id",
                     "s.code_hash = ?1 AND s.verdict = 'ok'"
                 ),
             ),
@@ -132,24 +156,24 @@ macro_rules! drivers {
             (
                 "shift",
                 $emit!(
-                    "FROM scans s JOIN box_items i ON i.scan_id = s.id \
-                     JOIN boxes b ON b.id = i.box_id",
+                    "FROM scans s LEFT JOIN box_items i ON i.scan_id = s.id \
+                     LEFT JOIN boxes b ON b.id = i.box_id",
                     "s.shift_id = ?3 AND s.verdict = 'ok'"
                 ),
             ),
             (
                 "gtin",
                 $emit!(
-                    "FROM scans s JOIN box_items i ON i.scan_id = s.id \
-                     JOIN boxes b ON b.id = i.box_id",
+                    "FROM scans s LEFT JOIN box_items i ON i.scan_id = s.id \
+                     LEFT JOIN boxes b ON b.id = i.box_id",
                     "s.gtin14 = ?2 AND s.verdict = 'ok'"
                 ),
             ),
             (
                 "period",
                 $emit!(
-                    "FROM scans s JOIN box_items i ON i.scan_id = s.id \
-                     JOIN boxes b ON b.id = i.box_id",
+                    "FROM scans s LEFT JOIN box_items i ON i.scan_id = s.id \
+                     LEFT JOIN boxes b ON b.id = i.box_id",
                     "s.verdict = 'ok'"
                 ),
             ),
@@ -163,14 +187,19 @@ pub const ITEMS_SQL: [(&str, &str); 6] = drivers!(items);
 pub const COUNT_SQL: [(&str, &str); 6] = drivers!(count);
 
 /// Every scan of a code, whatever its verdict, oldest first; `placed` says
-/// it put the code into a box.
-pub const CARD_SCANS_SQL: &str = "SELECT s.id, s.scanned_at, s.verdict, s.duplicate_source, \
+/// it took the code: into a box, or without one in a validation shift.
+pub const CARD_SCANS_SQL: &str = concat!(
+    "SELECT s.id, s.scanned_at, s.verdict, s.duplicate_source, \
      s.gtin14, s.serial, s.canonical, s.shift_id, sh.number_month_key, sh.number_seq, \
      sh.created_from, d.name AS device_name, op.name AS operator_name, s.box_id, \
-     EXISTS (SELECT 1 FROM box_items i WHERE i.scan_id = s.id) AS placed \
+     (EXISTS (SELECT 1 FROM box_items i WHERE i.scan_id = s.id) \
+      OR (s.verdict = 'ok' AND s.box_id IS NULL AND ",
+    took_its_code!(),
+    ")) AS placed \
      FROM scans s JOIN shifts sh ON sh.id = s.shift_id JOIN devices d ON d.id = s.device_id \
      LEFT JOIN operators op ON op.id = s.operator_id \
-     WHERE s.code_hash = ?1 ORDER BY s.scanned_at, s.id LIMIT ?2";
+     WHERE s.code_hash = ?1 ORDER BY s.scanned_at, s.id LIMIT ?2"
+);
 
 /// The exception that took each placement of a code out of its box: of its
 /// box, at the instant the item left it, of a kind that takes items out (an
@@ -183,6 +212,21 @@ pub const CARD_EXCEPTIONS_SQL: &str = "SELECT i.scan_id, e.kind, e.reason_code, 
      AND (e.kind <> 'undo' OR e.code_hash = i.code_hash) \
      LEFT JOIN operators op ON op.id = e.operator_id \
      WHERE s.code_hash = ?1 ORDER BY e.received_at, e.id LIMIT ?2";
+
+/// The applied disaggregation document (plan ДЗГ-О) that took the box of
+/// each placement of a code apart at the instant the item left it: the
+/// office's counterpart of [`CARD_EXCEPTIONS_SQL`], which a document does
+/// not write a row to. A box is taken apart once, by a station or by one
+/// document, so a placement has at most one of the two.
+pub const CARD_OFFICE_RELEASES_SQL: &str = "SELECT i.scan_id, dc.id AS document_id, dc.doc_no, \
+     u.name AS office_user_name, r.name AS reason_name FROM scans s \
+     JOIN box_items i ON i.scan_id = s.id \
+     JOIN boxes b ON b.id = i.box_id AND b.disassembled_at = i.removed_at \
+     JOIN disaggregation_document_lines l ON l.box_id = b.id AND l.status = 'ok' \
+     JOIN disaggregation_documents dc ON dc.id = l.document_id AND dc.status = 'applied' \
+     JOIN office_users u ON u.id = dc.applied_by \
+     LEFT JOIN disaggregation_reasons r ON r.id = dc.reason_id \
+     WHERE s.code_hash = ?1 ORDER BY dc.applied_at, dc.id LIMIT ?2";
 
 /// The unit's warehouse reprints of a code (plan СКЛ), oldest first.
 pub const CARD_REPRINTS_SQL: &str = "SELECT w.occurred_at, w.outcome, w.reason_code, \
@@ -203,7 +247,7 @@ pub const SHIFT_BY_NUMBER_SQL: &str =
 
 /// Every query of this module by name, for the test that each one searches
 /// by an index.
-pub const QUERIES: [(&str, &str); 19] = [
+pub const QUERIES: [(&str, &str); 20] = [
     ITEMS_SQL[0],
     ITEMS_SQL[1],
     ITEMS_SQL[2],
@@ -218,6 +262,7 @@ pub const QUERIES: [(&str, &str); 19] = [
     COUNT_SQL[5],
     ("card scans", CARD_SCANS_SQL),
     ("card exceptions", CARD_EXCEPTIONS_SQL),
+    ("card office releases", CARD_OFFICE_RELEASES_SQL),
     ("card reprints", CARD_REPRINTS_SQL),
     ("card owner", CARD_OWNER_SQL),
     ("box by sscc", BOX_BY_SSCC_SQL),
@@ -299,7 +344,7 @@ fn shift_number(text: &str) -> Result<ShiftNumber, ApiError> {
 /// Digits only, 1-15 of them, naming an instant of the years 1970-9999 in
 /// milliseconds; returned as a device instant's text, which orders with the
 /// stored ones.
-fn period_end(field: &str, text: &str) -> Result<String, ApiError> {
+pub(crate) fn period_end(field: &str, text: &str) -> Result<String, ApiError> {
     let refused = || ApiError::validation(field, "milliseconds since 1970 up to the year 9999");
     if !(1..=15).contains(&text.len()) || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(refused());
@@ -483,7 +528,7 @@ struct ItemRow {
     scanned_at: String,
     removed_at: Option<String>,
     displaced_at: Option<String>,
-    box_id: String,
+    box_id: Option<String>,
     box_sscc: Option<String>,
     box_closed_at: Option<String>,
     box_disassembled_at: Option<String>,
@@ -511,10 +556,12 @@ fn shift_label(month_key: &str, seq: i64, created_from: &str) -> Result<String, 
 impl ItemRow {
     fn into_wire(self) -> Result<OfficeCodeItem, ApiError> {
         // An item leaves its box once: taken out, or taken by an earlier
-        // scan elsewhere.
+        // scan elsewhere. A validation shift's scan has no box: it holds its
+        // code until an earlier scan takes it (no exception releases it).
         let (state, left_at) = match (self.removed_at, self.displaced_at) {
             (Some(at), _) => (CodePlacementState::Removed, Some(at)),
             (None, Some(at)) => (CodePlacementState::Displaced, Some(at)),
+            (None, None) if self.box_id.is_none() => (CodePlacementState::Checked, None),
             (None, None) if self.box_closed_at.is_some() => (CodePlacementState::Packed, None),
             (None, None) => (CodePlacementState::OpenBox, None),
         };
@@ -703,6 +750,15 @@ struct ExceptionRow {
 }
 
 #[derive(sqlx::FromRow)]
+struct OfficeReleaseRow {
+    scan_id: String,
+    document_id: String,
+    doc_no: String,
+    office_user_name: String,
+    reason_name: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
 struct ReprintRow {
     occurred_at: String,
     outcome: String,
@@ -777,6 +833,16 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
         // The first received is the one that took the item out.
         exception_of.entry(row.scan_id.clone()).or_insert(row);
     }
+    let office_releases: Vec<OfficeReleaseRow> = sqlx::query_as(CARD_OFFICE_RELEASES_SQL)
+        .bind(code_hash)
+        .bind(CARD_LIMIT)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    let mut office_of: HashMap<String, OfficeReleaseRow> = HashMap::new();
+    for row in office_releases {
+        office_of.entry(row.scan_id.clone()).or_insert(row);
+    }
     let reprints: Vec<ReprintRow> = sqlx::query_as(CARD_REPRINTS_SQL)
         .bind(code_hash)
         .bind(CARD_LIMIT)
@@ -810,17 +876,34 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
         match placement.state {
             CodePlacementState::Removed => {
                 let exception = exception_of.remove(&placement.scan_id);
+                // Only an exception of its box takes an item out.
+                let box_id = placement
+                    .box_id
+                    .clone()
+                    .ok_or_else(|| ApiError::internal("a removed placement has no box"))?;
+                let office = office_of.remove(&placement.scan_id);
                 events.push(OfficeCodeEvent::Removed {
                     at: left_at,
-                    box_id: placement.box_id.clone(),
+                    box_id,
                     box_sscc: placement.box_sscc.clone(),
-                    exception: exception
-                        .as_ref()
-                        .map(|row| stored::<ExceptionKind>(&row.kind))
-                        .transpose()?,
+                    // An office disassembly is a `disassemble` with the
+                    // document's reason; a station's exception wins if a
+                    // row of both exists (it cannot: a box is taken apart once).
+                    exception: match (&exception, &office) {
+                        (Some(row), _) => Some(stored::<ExceptionKind>(&row.kind)?),
+                        (None, Some(_)) => Some(ExceptionKind::Disassemble),
+                        (None, None) => None,
+                    },
                     reason_code: exception.as_ref().and_then(|row| row.reason_code.clone()),
-                    reason_text: exception.as_ref().and_then(|row| row.reason_text.clone()),
+                    reason_text: match (&exception, &office) {
+                        (Some(row), _) => row.reason_text.clone(),
+                        (None, Some(row)) => row.reason_name.clone(),
+                        (None, None) => None,
+                    },
                     operator_name: exception.and_then(|row| row.operator_name),
+                    document_id: office.as_ref().map(|row| row.document_id.clone()),
+                    document_no: office.as_ref().map(|row| row.doc_no.clone()),
+                    office_user_name: office.map(|row| row.office_user_name),
                 });
             }
             CodePlacementState::Displaced => events.push(OfficeCodeEvent::Displaced {
@@ -828,7 +911,9 @@ async fn card(conn: &mut SqliteConnection, code_hash: &str) -> Result<OfficeCode
                 box_id: placement.box_id.clone(),
                 box_sscc: placement.box_sscc.clone(),
             }),
-            CodePlacementState::OpenBox | CodePlacementState::Packed => {}
+            CodePlacementState::OpenBox
+            | CodePlacementState::Packed
+            | CodePlacementState::Checked => {}
         }
     }
     for reprint in reprints {

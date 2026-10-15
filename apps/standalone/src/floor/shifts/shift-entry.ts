@@ -1,5 +1,6 @@
 import { HostError } from "../../host/client.js";
-import type { EnteredShift } from "../../host/protocol.js";
+import type { EnteredShift, ShiftEnter } from "../../host/protocol.js";
+import { STATION_SHIFT_ENTER } from "../../host/requests.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { shellActionFor } from "../../app/shell.js";
@@ -16,7 +17,9 @@ import { checkShiftSnapshot } from "./shift-snapshot.js";
  * not one this station entered before (`no_link`); the host refused it
  * (`busy`: another station opened it, `closed`, `other_line`, `not_found`:
  * deleted, `product_inactive`, `template_not_fit`, `pallet_template_not_fit`:
- * the pallet template, plan ПЛ-Х); its layout is one this
+ * the pallet template, plan ПЛ-Х; `duplicate_template_not_fit`: the template
+ * of a validation shift's duplicate, plan РЕЖ part B; `station_update`: the shift's mode needs
+ * what this build does not name in its entry, plan РЕЖ); its layout is one this
  * build does not read (`unreadable`); this computer could not keep it
  * (`local`); or anything else (`failed`).
  */
@@ -29,6 +32,8 @@ export type EntryRefusal =
   | "product_inactive"
   | "template_not_fit"
   | "pallet_template_not_fit"
+  | "duplicate_template_not_fit"
+  | "station_update"
   | "unreadable"
   | "local"
   | "failed";
@@ -45,7 +50,7 @@ export interface EntryContext {
   /** The link to the host is online now. */
   online: boolean;
   /** `HostApi.enterShift`. */
-  enter: (shiftId: string) => Promise<EnteredShift>;
+  enter: (shiftId: string, enter: ShiftEnter) => Promise<EnteredShift>;
   now: () => Date;
 }
 
@@ -57,6 +62,8 @@ const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
   product_inactive: "product_inactive",
   template_not_fit: "template_not_fit",
   pallet_template_not_fit: "pallet_template_not_fit",
+  duplicate_template_not_fit: "duplicate_template_not_fit",
+  station_update: "station_update",
 };
 
 /**
@@ -85,7 +92,8 @@ async function storedWork(context: EntryContext, shiftId: string): Promise<Entry
 
 /**
  * Enters `copy` (stage 2a spec §5.4). With the link online the host opens a
- * planned shift or answers the snapshot of one this station opened, which is
+ * planned shift or answers the snapshot of one this station opened (the entry
+ * names what this station works, `STATION_SHIFT_ENTER`), which is
  * checked (`checkShiftSnapshot`) and kept before the station works from it;
  * a snapshot this build does not read is neither kept nor worked from. With
  * the link down, or a request that never reached the host, only an active
@@ -103,7 +111,7 @@ export async function enterShift(context: EntryContext, copy: ShiftCopy): Promis
   if (copy.status === "closed" || !context.online) return storedWork(context, copy.id);
   let answer: EnteredShift;
   try {
-    answer = await context.enter(copy.id);
+    answer = await context.enter(copy.id, STATION_SHIFT_ENTER);
   } catch (error) {
     if (shellActionFor(error, null) !== null) return { kind: "rejected", error };
     if (!(error instanceof HostError)) return { kind: "refused", reason: "failed" };

@@ -72,6 +72,7 @@ function snapshot(input: {
         inventory: true,
         commerceMl: false,
         handheld: true,
+        customLogo: false,
         ...input.features,
       },
     },
@@ -95,10 +96,20 @@ describe("exportStandaloneRights", () => {
           inventory: true,
           commerceMl: false,
           handheld: true,
+          customLogo: false,
         },
       },
       unmapped: ["chzIntegration"],
     });
+  });
+
+  it("carries custom branding (customLogo) from a plan or an add-on, and names it when unmapped", () => {
+    const granted = exportStandaloneRights(snapshot({ features: { customLogo: true } }));
+    expect(granted.rights.features.customLogo).toBe(true);
+    expect(granted.unmapped).toEqual(["chzIntegration"]);
+    const unmapped = exportStandaloneRights(snapshot({ features: { customLogo: null } }));
+    expect(unmapped.rights.features.customLogo).toBe(false);
+    expect(unmapped.unmapped).toEqual(["chzIntegration", "customLogo"]);
   });
 });
 
@@ -226,6 +237,7 @@ describe("offline terms (owner decision 2026-10-13)", () => {
     inventoryEnabled: false,
     commerceMlEnabled: true,
     handheldEnabled: null,
+    customLogoEnabled: null,
   };
 
   it("takes the plan version's quotas and features, exporting an unmapped feature as false and naming it", () => {
@@ -240,9 +252,10 @@ describe("offline terms (owner decision 2026-10-13)", () => {
           inventory: false,
           commerceMl: true,
           handheld: false,
+          customLogo: false,
         },
       },
-      unmapped: ["chzIntegration", "handheld"],
+      unmapped: ["chzIntegration", "handheld", "customLogo"],
     });
   });
 

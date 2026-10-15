@@ -59,6 +59,7 @@ export function projectEntitlements(input: EntitlementProjectionInput): Entitlem
     inventory: current.access === "read_only" ? false : null,
     commerceMl: current.access === "read_only" ? false : null,
     handheld: current.access === "read_only" ? false : null,
+    customLogo: current.access === "read_only" ? false : null,
   };
   const limits = { ...current.quotas };
   if (plan?.kind === "plan") {

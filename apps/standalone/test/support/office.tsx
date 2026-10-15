@@ -28,8 +28,11 @@ function unexpected(name: keyof HostApi): Promise<never> {
 /**
  * Every method a test did not stub fails loudly; `officeLogout` succeeds,
  * `getOrgLogo` answers no logo (a label preview reads it, #703),
- * `getProductPhoto` no photo (a shift task form reads it, plan ТОВ) and
- * `getDeviceShifts` answers no shifts.
+ * `getProductPhoto` no photo (a shift task form reads it, plan ТОВ),
+ * `getDeviceShifts` answers no shifts, `conflictStatus` and `listDisplacements`
+ * tell of nothing (the station's link reads them, plan КНФ), and `listConflicts`,
+ * `listShiftExceptions` and `listShiftRejections` answer none (the shift card
+ * and the export dialog read them in passing, plan КНФ).
  */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
   return {
@@ -78,8 +81,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateCounterparty: vi.fn<HostApi["updateCounterparty"]>(() =>
       unexpected("updateCounterparty"),
     ),
-    // «Операторы» reads the employees for its «Сотрудник» column; a test
-    // about something else gets none.
+    // The office no longer has «Сотрудники»; the client keeps the host calls.
     listEmployees: vi.fn<HostApi["listEmployees"]>(async () => []),
     createEmployee: vi.fn<HostApi["createEmployee"]>(() => unexpected("createEmployee")),
     updateEmployee: vi.fn<HostApi["updateEmployee"]>(() => unexpected("updateEmployee")),
@@ -129,6 +131,11 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
+    getDeviceProductPhoto: vi.fn<HostApi["getDeviceProductPhoto"]>(async () => ({ photo: null })),
+    getDevicePalletSheets: vi.fn<HostApi["getDevicePalletSheets"]>(async () => ({
+      sheets: [],
+      defaultId: null,
+    })),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
     warehouseLookup: vi.fn<HostApi["warehouseLookup"]>(() => unexpected("warehouseLookup")),
     sendWarehouseRecords: vi.fn<HostApi["sendWarehouseRecords"]>(() =>
@@ -141,16 +148,119 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getPalletReportRows: vi.fn<HostApi["getPalletReportRows"]>(() =>
       unexpected("getPalletReportRows"),
     ),
+    listConflicts: vi.fn<HostApi["listConflicts"]>(async () => ({
+      items: [],
+      page: 1,
+      pageCount: 1,
+      total: 0,
+    })),
+    reviewConflict: vi.fn<HostApi["reviewConflict"]>(() => unexpected("reviewConflict")),
+    listDisaggregationReasons: vi.fn<HostApi["listDisaggregationReasons"]>(() =>
+      unexpected("listDisaggregationReasons"),
+    ),
+    createDisaggregationReason: vi.fn<HostApi["createDisaggregationReason"]>(() =>
+      unexpected("createDisaggregationReason"),
+    ),
+    updateDisaggregationReason: vi.fn<HostApi["updateDisaggregationReason"]>(() =>
+      unexpected("updateDisaggregationReason"),
+    ),
+    listDisaggregations: vi.fn<HostApi["listDisaggregations"]>(() =>
+      unexpected("listDisaggregations"),
+    ),
+    getDisaggregation: vi.fn<HostApi["getDisaggregation"]>(() => unexpected("getDisaggregation")),
+    createDisaggregation: vi.fn<HostApi["createDisaggregation"]>(() =>
+      unexpected("createDisaggregation"),
+    ),
+    updateDisaggregation: vi.fn<HostApi["updateDisaggregation"]>(() =>
+      unexpected("updateDisaggregation"),
+    ),
+    addDisaggregationLines: vi.fn<HostApi["addDisaggregationLines"]>(() =>
+      unexpected("addDisaggregationLines"),
+    ),
+    deleteDisaggregationLine: vi.fn<HostApi["deleteDisaggregationLine"]>(() =>
+      unexpected("deleteDisaggregationLine"),
+    ),
+    applyDisaggregation: vi.fn<HostApi["applyDisaggregation"]>(() =>
+      unexpected("applyDisaggregation"),
+    ),
+    cancelDisaggregation: vi.fn<HostApi["cancelDisaggregation"]>(() =>
+      unexpected("cancelDisaggregation"),
+    ),
+    getDisaggregationReportRows: vi.fn<HostApi["getDisaggregationReportRows"]>(() =>
+      unexpected("getDisaggregationReportRows"),
+    ),
+    recordDisaggregationExport: vi.fn<HostApi["recordDisaggregationExport"]>(() =>
+      unexpected("recordDisaggregationExport"),
+    ),
+    listShiftExceptions: vi.fn<HostApi["listShiftExceptions"]>(async () => ({
+      items: [],
+      total: 0,
+    })),
+    listShiftExports: vi.fn<HostApi["listShiftExports"]>(async () => ({ items: [] })),
+    // The host's store of generated files (host migration 0029): by default it takes every
+    // file whole and lists none, so a test about something else sees no warning.
+    beginExportFile: vi.fn<HostApi["beginExportFile"]>(async (_token, begin) => ({
+      id: begin.id,
+      chunkCount: Math.max(1, Math.ceil(begin.sizeBytes / 1_048_576)),
+      receivedChunks: begin.contentBase64 === undefined ? 0 : 1,
+      ready: begin.contentBase64 !== undefined,
+    })),
+    putExportFileChunk: vi.fn<HostApi["putExportFileChunk"]>(async (_token, id, seq) => ({
+      id,
+      chunkCount: seq + 1,
+      receivedChunks: seq + 1,
+      ready: false,
+    })),
+    completeExportFile: vi.fn<HostApi["completeExportFile"]>(async (_token, id) => ({
+      id,
+      chunkCount: 1,
+      receivedChunks: 1,
+      ready: true,
+    })),
+    listExportFiles: vi.fn<HostApi["listExportFiles"]>(async () => ({ items: [] })),
+    openExportFileDownload: vi.fn<HostApi["openExportFileDownload"]>(() =>
+      unexpected("openExportFileDownload"),
+    ),
+    getExportFileChunk: vi.fn<HostApi["getExportFileChunk"]>(() =>
+      unexpected("getExportFileChunk"),
+    ),
+    getExportSettings: vi.fn<HostApi["getExportSettings"]>(async () => ({
+      retentionDays: null,
+      fileCount: 0,
+      storedBytes: 0,
+      originalBytes: 0,
+      maxStoredBytes: 2_147_483_648,
+    })),
+    putExportSettings: vi.fn<HostApi["putExportSettings"]>(() => unexpected("putExportSettings")),
+    listShiftRejections: vi.fn<HostApi["listShiftRejections"]>(async () => ({
+      items: [],
+      total: 0,
+    })),
+    listShiftScans: vi.fn<HostApi["listShiftScans"]>(async () => ({
+      items: [],
+      nextCursor: null,
+    })),
+    // The station's link reads them at every revision (plan КНФ): nothing to tell by default.
+    conflictStatus: vi.fn<HostApi["conflictStatus"]>(async () => ({ reviewed: [] })),
+    listDisplacements: vi.fn<HostApi["listDisplacements"]>(async () => ({
+      items: [],
+      more: false,
+    })),
     searchCodes: vi.fn<HostApi["searchCodes"]>(() => unexpected("searchCodes")),
     getCodeCard: vi.fn<HostApi["getCodeCard"]>(() => unexpected("getCodeCard")),
+    getBoxCard: vi.fn<HostApi["getBoxCard"]>(() => unexpected("getBoxCard")),
+    getPalletCard: vi.fn<HostApi["getPalletCard"]>(() => unexpected("getPalletCard")),
+    listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
     getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
+    getUsageStats: vi.fn<HostApi["getUsageStats"]>(() => unexpected("getUsageStats")),
     startBackup: vi.fn<HostApi["startBackup"]>(() => unexpected("startBackup")),
     updateBackupSettings: vi.fn<HostApi["updateBackupSettings"]>(() =>
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
-    // The banner and «Обзор» read the license on every office test: a valid one warns of nothing.
+    // The banner and «Обзор» read the license on every office test: a valid one warns of nothing,
+    // and it has every feature on, custom branding included (`office/branding.ts`).
     getLicense: vi.fn<HostApi["getLicense"]>(async () => ACTIVE_LICENSE),
     previewLicense: vi.fn<HostApi["previewLicense"]>(() => unexpected("previewLicense")),
     loadLicense: vi.fn<HostApi["loadLicense"]>(() => unexpected("loadLicense")),
@@ -170,6 +280,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
 export type FakeOfficeSession = OfficeSessionValue & {
   api: FakeHostApi;
   logout: Mock<OfficeSessionValue["logout"]>;
+  signOut: Mock<NonNullable<OfficeSessionValue["signOut"]>>;
   refreshUser: Mock<OfficeSessionValue["refreshUser"]>;
 };
 
@@ -182,6 +293,7 @@ export function fakeOfficeSession(
     api: options.api ?? fakeHostApi(),
     call: <T,>(operation: (token: string) => Promise<T>) => operation(SESSION.token),
     logout: vi.fn<OfficeSessionValue["logout"]>(),
+    signOut: vi.fn<NonNullable<OfficeSessionValue["signOut"]>>(),
     refreshUser: vi.fn<OfficeSessionValue["refreshUser"]>(async () => undefined),
   };
 }

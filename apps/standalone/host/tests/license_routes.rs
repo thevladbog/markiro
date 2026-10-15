@@ -10,11 +10,16 @@ use markiro_host::license::gate::{GATED, LIMITED, NEVER};
 
 /// `src/server.rs` without its unit tests (which build probe routes of their
 /// own).
-fn router_source() -> &'static str {
+///
+/// A Windows checkout may hold CRLF line ends: they are read as LF, because
+/// the parser below looks for `"\n}\n"` (the first run of this test on
+/// Windows read the last route's segment up to the end of the file).
+fn router_source() -> String {
     include_str!("../src/server.rs")
         .split("#[cfg(test)]")
         .next()
         .expect("the source of the router")
+        .replace("\r\n", "\n")
 }
 
 /// Where `call` stands in `text` as a call of its own (not the tail of a
@@ -39,7 +44,7 @@ fn calls(text: &str, call: &str) -> usize {
 fn routed() -> BTreeSet<(String, String)> {
     let source = router_source();
     let mut found = BTreeSet::new();
-    let mut rest = source;
+    let mut rest = source.as_str();
     while let Some(start) = rest.find(".route(") {
         // `rustfmt` puts a long route's path on the next line.
         let after = rest[start + ".route(".len()..].trim_start();
@@ -94,6 +99,7 @@ fn the_router_adds_routes_only_in_the_form_the_parser_reads() {
     assert_eq!(calls(".route(\"/x\", get(a).patch(b))", "patch("), 1);
     assert_eq!(calls("Ok(Json(hello))", "on("), 0);
     let source = router_source();
+    let source = source.as_str();
     for form in OTHER_FORMS {
         assert_eq!(calls(source, form), 0, "the router uses {form}");
     }

@@ -11,7 +11,8 @@
     "itemCountReported": 2,
     "digestMatches": true,
     "printVerifiedAt": "2026-10-08T06:06:09.540Z",
-    "printSkippedAt": null
+    "printSkippedAt": null,
+    "operatorName": "Анна Кузнецова"
   },
   {
     "id": "b0000000-0000-4000-8000-000000000002",
@@ -25,7 +26,8 @@
     "itemCountReported": 1,
     "digestMatches": true,
     "printVerifiedAt": null,
-    "printSkippedAt": "2026-10-08T06:07:20.001Z"
+    "printSkippedAt": "2026-10-08T06:07:20.001Z",
+    "operatorName": null
   },
   {
     "id": "b0000000-0000-4000-8000-000000000003",
@@ -39,6 +41,7 @@
     "itemCountReported": null,
     "digestMatches": null,
     "printVerifiedAt": null,
-    "printSkippedAt": null
+    "printSkippedAt": null,
+    "operatorName": null
   }
 ]

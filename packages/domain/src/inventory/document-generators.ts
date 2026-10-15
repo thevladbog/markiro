@@ -1,9 +1,12 @@
 import { compareText } from "../document-text-encoding.js";
 import { DomainError } from "../errors.js";
 import { GismtAggregationError, renderGismtAggregationXml } from "../gismt-aggregation.js";
+import { isParticipantInn, renderGismtDisaggregationXml } from "../gismt-disaggregation.js";
 import { parseKmSegments } from "../gs1/km.js";
 import { formatSsccWithAi } from "../gs1/sscc.js";
 import { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
+
+export { isParticipantInn } from "../gismt-disaggregation.js";
 
 export interface InventoryDocumentGenerationMetadata {
   documentId: string;
@@ -183,20 +186,21 @@ export function generateInventoryDisaggregationXml(
     return [emptyPart(filename)];
   }
 
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<disaggregation action_id="31" version="2">',
-    `    <trade_participant_inn>${metadata.organizationInn}</trade_participant_inn>`,
-    "    <packings_list>",
-    ...boxes.flatMap((sscc) => [
-      "        <packing>",
-      `            <kitu><![CDATA[${sscc}]]></kitu>`,
-      "        </packing>",
-    ]),
-    "    </packings_list>",
-    "</disaggregation>",
+  const rendered = renderGismtDisaggregationXml({
+    organizationInn: metadata.organizationInn,
+    ssccs: boxes,
+  });
+  return [
+    {
+      partNumber: 1,
+      filename,
+      mimeType: XML_MIME_TYPE,
+      bytes: rendered.bytes,
+      rowCount: rendered.physicalLineCount,
+      codeCount: 0,
+      boxCount: rendered.packingCount,
+    },
   ];
-  return [part(filename, lines, 0, boxes.length)];
 }
 
 function frozenAggregationV1Boxes(source: InventoryDocumentGenerationSource): {
@@ -288,19 +292,6 @@ function validateCommonMetadata(metadata: InventoryDocumentGenerationMetadata): 
   ) {
     throw new InventoryDocumentGenerationError("INVALID_DOCUMENT_METADATA");
   }
-}
-
-/**
- * Shared "is this shaped like a usable organization/participant INN" predicate.
- * Accepts the 9-digit, 10-digit (legal entity), and 12-digit (individual
- * entrepreneur) forms used by the ГИС МТ disaggregation `trade_participant_inn`
- * field. Aggregation is stricter — it only accepts the 10-digit legal-entity
- * form (see the inline regex in `validateAggregationMetadata`) — so a value
- * that passes this predicate can still be rejected by the aggregation
- * generator.
- */
-export function isParticipantInn(value: string): boolean {
-  return /^\d{9}$/.test(value) || /^(?:\d[1-9]|[1-9]\d)(?:\d{8}|\d{10})$/.test(value);
 }
 
 function isCanonicalIsoTimestamp(value: string): boolean {

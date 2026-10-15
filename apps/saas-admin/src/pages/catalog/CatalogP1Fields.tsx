@@ -7,6 +7,7 @@ export const UNKNOWN_P1_FEATURES: P1DraftFeatures = {
   inventory: null,
   commerceMl: null,
   handheld: null,
+  customLogo: null,
 };
 export function CatalogP1Fields({
   values,

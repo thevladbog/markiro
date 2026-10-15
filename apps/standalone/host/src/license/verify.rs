@@ -136,6 +136,7 @@ fn stored_of(payload: &LicensePayloadV1, kid: String) -> Option<StoredLicense> {
             inventory: payload.features.inventory,
             commerce_ml: payload.features.commerce_ml,
             handheld: payload.features.handheld,
+            custom_logo: payload.features.custom_logo,
         },
     })
 }

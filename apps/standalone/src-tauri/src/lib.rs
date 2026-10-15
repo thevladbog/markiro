@@ -6,6 +6,7 @@ pub mod connection;
 pub mod device;
 pub mod device_config;
 pub mod external_link;
+pub mod folder_dialog;
 pub mod host_client;
 pub mod host_probe;
 pub mod installation;
@@ -187,6 +188,11 @@ async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceSt
 /// command answers `storage` and `device.json` stays for another try (stage
 /// 2a spec §5.2, question В7).
 ///
+/// The copies an upgrade made (`standalone-station.pre-<version>.db`, plan
+/// ОБН-1) hold the PIN and badge hashes of that moment; the forget removes them
+/// once the database itself is cleared ([`LocalDbState::remove_pre_upgrade_copies`]),
+/// and answers `storage` when one cannot go.
+///
 /// One window stays by design: a fact written between the clear's commit and
 /// the removal of `device.json` belongs to the pairing that is still current,
 /// but the count did not see it, and it loses its link with no confirmation.
@@ -239,6 +245,15 @@ async fn device_forget(
                 return Err(storage());
             }
         }
+    }
+    // The copy an upgrade made keeps the hashes the database held then; the
+    // forget has just emptied the database itself, so it goes too (beta 3).
+    if let Err(error) = local.remove_pre_upgrade_copies() {
+        eprintln!(
+            "standalone: device_forget could not remove the upgrade's copy of the database: {:?}",
+            error.kind()
+        );
+        return Err(storage());
     }
     state
         .forget()
@@ -308,6 +323,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         office_files::save_office_files,
         office_files::open_office_folder,
         office_files::open_office_file,
+        office_files::get_exports_folder,
+        office_files::set_exports_folder,
+        folder_dialog::pick_folder,
         external_link::open_external_link,
         update::update_scan,
         update::update_verify,
@@ -355,9 +373,10 @@ where
         args,
     ));
     app.manage(power::SystemAwakeState::default());
-    app.manage(office_files::OfficeFilesState::from_documents(
-        app.path().document_dir().ok(),
-    ));
+    app.manage(
+        office_files::OfficeFilesState::from_documents(app.path().document_dir().ok())
+            .with_settings(dir.join("office-files.json")),
+    );
     let handle = app.clone();
     app.manage(update::UpdateState::load(update::UpdateConfig {
         installed: app.package_info().version.to_string(),

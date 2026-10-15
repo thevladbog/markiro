@@ -258,6 +258,12 @@ export {
   InventoryDocumentGenerationError,
   isParticipantInn,
 } from "./inventory/index.js";
+export { GismtDisaggregationError, renderGismtDisaggregationXml } from "./gismt-disaggregation.js";
+export type {
+  GismtDisaggregationErrorCode,
+  GismtDisaggregationInput,
+  RenderedGismtDisaggregation,
+} from "./gismt-disaggregation.js";
 export type {
   InventoryDocumentGeneratedPart,
   InventoryDocumentGenerationErrorCode,
@@ -408,12 +414,24 @@ export type {
   PlacardDateRow,
   PlacardFormat,
 } from "./print-forms/pallet-placard.js";
+export { renderPairingCardFragment, renderPairingCardHtml } from "./print-forms/pairing-card.js";
+export type { PairingCardData, PairingCardFormat } from "./print-forms/pairing-card.js";
 export { renderShiftTaskFormHtml } from "./print-forms/shift-task-form.js";
 export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
 // The chrome helpers stay grouped under one name: `escapeHtml`, `formatInteger`
 // and friends are generic names that should not crowd the package root, and
 // contents-report.ts has a different `escapeHtml` of its own.
 export * as taskFormChrome from "./print-forms/task-form-chrome.js";
+export {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+  renderDisaggregationReportHtml,
+} from "./print-forms/disaggregation-report.js";
+export type {
+  DisaggregationReportBox,
+  DisaggregationReportCode,
+  DisaggregationReportData,
+  DisaggregationReportLine,
+} from "./print-forms/disaggregation-report.js";
 
 export {
   createLabelRenderPlan,

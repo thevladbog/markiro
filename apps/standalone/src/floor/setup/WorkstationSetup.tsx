@@ -18,24 +18,39 @@ import type {
   UsbPrinter,
 } from "../../hardware/hardware.js";
 import { checkScan, type ScanCheck } from "../../app/scan-check.js";
+import type { SheetAdjusted } from "../../hardware/hardware.js";
 import { paintMonoRaster } from "../../labels/sheet-render.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
 import { settleOutcome, type PrintJobCode, type RenderLabel } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
 import { printerFormatText } from "../print/printer-format.js";
-import type { ScanSource } from "../scan-source.js";
+import type { ScanChannel, ScanSource } from "../scan-source.js";
 import { playSignalTone } from "../work/signal-sound.js";
 import { a4TestSheet, makeA4TestSscc } from "./a4-test.js";
 import {
   draftOf,
-  NEW_PRINTER,
+  newPrinterDraft,
   profileOf,
   settleDraft,
   type PrinterDraft,
 } from "./printer-draft.js";
+import { ComPortField } from "./ComPortField.js";
+import { DiagnosticCopy } from "./DiagnosticCopy.js";
 import { SetupTabs, type SetupTabId } from "./SetupTabs.js";
-import { makeTestCode, scannedTestCode, testLabelSpec } from "./test-label.js";
+import {
+  ScannerSelfTest,
+  useScannerSelfTest,
+  type SelfTestPrintResult,
+} from "./ScannerSelfTest.js";
+import type { SelfTestKind } from "./scanner-selftest.js";
+import {
+  makeTestCode,
+  scannedTestCode,
+  selfTestDataMatrixSpec,
+  testLabelSpec,
+} from "./test-label.js";
+import { UnpairStation } from "./UnpairStation.js";
 import {
   canonicalPort,
   InvalidSettingsError,
@@ -100,8 +115,23 @@ export interface WorkstationSetupProps {
  */
 type TestState =
   | { kind: "sending"; printerId: string }
-  | { kind: "sent"; printerId: string; name: string; code: string; sheet: boolean }
-  | { kind: "failed"; code: PrintJobCode; unknown: boolean; sheet: boolean }
+  | {
+      kind: "sent";
+      printerId: string;
+      name: string;
+      code: string;
+      sheet: boolean;
+      /** A sheet the driver path moved or drew smaller to fit the printer (beta 3.2). */
+      adjusted?: SheetAdjusted;
+    }
+  | {
+      kind: "failed";
+      code: PrintJobCode;
+      unknown: boolean;
+      sheet: boolean;
+      /** The driver's measured numbers of a refused sheet (beta 3.2). */
+      diagnostic?: string;
+    }
   | { kind: "render_failed"; sheet: boolean }
   | { kind: "match" }
   | { kind: "mismatch"; name: string; code: string; sheet: boolean };
@@ -119,6 +149,16 @@ function listed(snapshot: ScannerSnapshot, config: ScannerConfig) {
     (candidate) => candidate.port === config.port && candidate.baud === config.baud,
   );
 }
+
+/** The chip of a printer's row for the test it had: the phase of its tag (the words are in the bottom row). */
+const TEST_CHIP: Record<TestState["kind"], { phase: TagPhase }> = {
+  sending: { phase: "running" },
+  sent: { phase: "planned" },
+  match: { phase: "active" },
+  mismatch: { phase: "attention" },
+  failed: { phase: "failed" },
+  render_failed: { phase: "failed" },
+};
 
 /** A button that waits for an answer: still on the keyboard, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
@@ -162,7 +202,12 @@ export function WorkstationSetup({
   const scannersOnly = scope === "scanners";
   // What the last scan read, for the scanner check (scanners only).
   const [scanCheck, setScanCheck] = useState<ScanCheck | null>(null);
+  // The scanner self-test («Проверить сканер»): its code and results outlive a change of tab.
+  const selfTest = useScannerSelfTest();
+  const { onScan: selfTestScan } = selfTest;
   const [activeTab, setActiveTab] = useState<SetupTabId>(initialTab);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const [stored, setStored] = useState<WorkstationSettings | null>(null);
   const [draft, setDraft] = useState<WorkstationSettings | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -260,25 +305,29 @@ export function WorkstationSetup({
   // the paper changes»).
   const testOwner = useRef<string | null>(null);
   const testGeneration = useRef(0);
-  useEffect(
-    () =>
-      source.start((raw) => {
-        // The scanner check says what any scan read, never its text.
-        if (scannersOnly) setScanCheck(checkScan(raw));
-        const now = testRef.current;
-        // The check stays open after a wrong scan, until the right code comes.
-        if (now?.kind !== "sent" && now?.kind !== "mismatch") return;
-        // A scan that is not this label's code is never shown: it may be a badge.
-        // A sheet's SSCC is read as any scanner hands an SSCC over; a label's Code 128 as it was printed.
-        const read = now.sheet ? parseScannedSscc(raw) : scannedTestCode(raw);
-        setTest(
-          read === now.code
-            ? { kind: "match" }
-            : { kind: "mismatch", name: now.name, code: now.code, sheet: now.sheet },
-        );
-      }),
-    [source, setTest, scannersOnly],
-  );
+  useEffect(() => {
+    const listen = (raw: string, channel: ScanChannel) => {
+      // The self-test judges the scans of its own tab against the code it showed (a label's
+      // test scan on the printers tab is not its business); the text stays here.
+      if (scannersOnly || activeTabRef.current === "check") selfTestScan(raw, channel);
+      // The scanner check says what any scan read, never its text.
+      if (scannersOnly) setScanCheck(checkScan(raw));
+      const now = testRef.current;
+      // The check stays open after a wrong scan, until the right code comes.
+      if (now?.kind !== "sent" && now?.kind !== "mismatch") return;
+      // A scan that is not this label's code is never shown: it may be a badge.
+      // A sheet's SSCC is read as any scanner hands an SSCC over; a label's Code 128 as it was printed.
+      const read = now.sheet ? parseScannedSscc(raw) : scannedTestCode(raw);
+      setTest(
+        read === now.code
+          ? { kind: "match" }
+          : { kind: "mismatch", name: now.name, code: now.code, sheet: now.sheet },
+      );
+    };
+    return source.startTagged
+      ? source.startTagged(listen)
+      : source.start((raw) => listen(raw, "unknown"));
+  }, [source, setTest, scannersOnly, selfTestScan]);
 
   // The keys typed into a text field are the field's, not a scan: the scan
   // source ignores them, and its Enter stays the field's. A field removed with
@@ -352,6 +401,18 @@ export function WorkstationSetup({
       },
     );
   };
+
+  // The scanner tab and the serial printer's form show the COM ports of this PC: ask for them once.
+  const wantsPorts =
+    draft !== null &&
+    (scannersOnly ||
+      activeTab === "scanner" ||
+      activeTab === "check" ||
+      (editor !== null && editor.kind === "serial"));
+  useEffect(() => {
+    if (wantsPorts && serialPorts === null && serialAsk.current === 0) refreshSerial();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- asked once, by the first need
+  }, [wantsPorts]);
 
   const change = (next: WorkstationSettings) => {
     setDraft(next);
@@ -493,18 +554,33 @@ export function WorkstationSetup({
         return;
       }
     }
-    const settled = settleOutcome(
-      sheet
-        ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
-        : await printing.send(null, printer.target, bytes, printerMode(printer)),
-    );
+    const outcome = sheet
+      ? await printing.send(null, printer.target, bytes, printerMode(printer), "a4")
+      : await printing.send(null, printer.target, bytes, printerMode(printer));
+    const settled = settleOutcome(outcome);
     if (stale()) return;
     // What was typed ahead (a letter on a list) would join the code of the label.
     source.clearPendingInput();
+    const answer = outcome.kind === "answered" ? outcome.result : null;
+    const adjusted = answer?.sent === true ? answer.adjusted : undefined;
+    const diagnostic = answer !== null && !answer.sent ? answer.diagnostic : undefined;
     setTest(
       settled.state === "sent"
-        ? { kind: "sent", printerId: printer.id, name: printer.name, code, sheet }
-        : { kind: "failed", code: settled.code, unknown: settled.state === "unknown", sheet },
+        ? {
+            kind: "sent",
+            printerId: printer.id,
+            name: printer.name,
+            code,
+            sheet,
+            ...(adjusted === undefined ? {} : { adjusted }),
+          }
+        : {
+            kind: "failed",
+            code: settled.code,
+            unknown: settled.state === "unknown",
+            sheet,
+            ...(diagnostic === undefined ? {} : { diagnostic }),
+          },
     );
   };
 
@@ -568,6 +644,24 @@ export function WorkstationSetup({
     })}`;
   };
 
+  /** What the driver path did to a sheet to fit the printer, in words (moved, drawn smaller). */
+  const adjustedWords = (adjusted: SheetAdjusted | undefined): string[] => {
+    if (adjusted === undefined) return [];
+    const words: string[] = [];
+    if (adjusted.percent < 100) {
+      words.push(t("floor.setup.printers.a4Test.adjustedShrunk", { percent: adjusted.percent }));
+    }
+    const moved = Math.max(Math.abs(adjusted.shiftXMm), Math.abs(adjusted.shiftYMm));
+    if (moved > 0) {
+      words.push(
+        t("floor.setup.printers.a4Test.adjustedMoved", {
+          mm: moved.toLocaleString("ru-RU", { maximumFractionDigits: 1 }),
+        }),
+      );
+    }
+    return words;
+  };
+
   const testText = (state: TestState): { tone: "ok" | "error" | "info" | "warn"; text: string } => {
     switch (state.kind) {
       case "sending":
@@ -576,9 +670,11 @@ export function WorkstationSetup({
         return {
           tone: "info",
           text: state.sheet
-            ? `${t("floor.setup.printers.testResult.sentSheet", { name: state.name })} ${t(
-                "floor.setup.printers.a4Test.scan",
-              )}`
+            ? [
+                t("floor.setup.printers.testResult.sentSheet", { name: state.name }),
+                ...adjustedWords(state.adjusted),
+                t("floor.setup.printers.a4Test.scan"),
+              ].join(" ")
             : t("floor.setup.printers.testResult.sent", { name: state.name }),
         };
       case "failed":
@@ -643,7 +739,7 @@ export function WorkstationSetup({
               onChange={(event) => set({ name: event.target.value })}
             />
             <Select
-              native
+              custom
               size="floor"
               label={t("floor.setup.printers.editor.dpi")}
               value={form.dpi}
@@ -656,7 +752,7 @@ export function WorkstationSetup({
             />
           </div>
           <Select
-            native
+            custom
             size="floor"
             label={t("floor.setup.printers.editor.kind")}
             value={form.kind}
@@ -692,13 +788,21 @@ export function WorkstationSetup({
             )}
             {form.kind === "serial" && (
               <>
-                <Input
-                  {...manualEntry}
-                  size="floor"
+                <ComPortField
                   label={t("floor.setup.printers.editor.serialPort")}
                   value={form.serialPort}
-                  onChange={(event) => set({ serialPort: event.target.value })}
+                  ports={serialPorts}
+                  manualEntry={manualEntry}
+                  onChange={(serialPort) => set({ serialPort })}
                 />
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  className="setup-printer-connection__wide setup-nowrap"
+                  onClick={refreshSerial}
+                >
+                  {t("floor.setup.scanners.listPorts")}
+                </Button>
                 <Input
                   {...manualEntry}
                   size="floor"
@@ -713,9 +817,13 @@ export function WorkstationSetup({
             {form.kind === "usb" && (
               <>
                 <Select
-                  native
+                  custom
                   size="floor"
                   label={t("floor.setup.printers.editor.usbPrinter")}
+                  searchable
+                  searchLabel={t("floor.setup.printers.editor.usbSearch")}
+                  searchPlaceholder={t("floor.setup.printers.editor.usbSearchPlaceholder")}
+                  searchEmptyLabel={t("floor.setup.printers.editor.usbSearchEmpty")}
                   value={form.usbPrinter}
                   options={usbOptions}
                   {...(usbFailed ? { error: t("floor.setup.printers.editor.usbFailed") } : {})}
@@ -724,9 +832,15 @@ export function WorkstationSetup({
                     : usbPrinters !== null && usbPrinters.length === 0 && !usbFailed
                       ? { hint: t("floor.setup.printers.editor.usbNone") }
                       : {})}
+                  className="setup-printer-connection__wide"
                   onValueChange={(usbPrinter) => set({ usbPrinter })}
                 />
-                <Button size="floor" variant="secondary" onClick={refreshUsb}>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  className="setup-printer-connection__wide setup-nowrap"
+                  onClick={refreshUsb}
+                >
                   {t("floor.setup.printers.editor.usbRefresh")}
                 </Button>
               </>
@@ -742,7 +856,7 @@ export function WorkstationSetup({
           </h2>
           {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
             <Select
-              native
+              custom
               size="floor"
               label={t("floor.setup.printers.editor.mode")}
               value={form.mode}
@@ -755,7 +869,7 @@ export function WorkstationSetup({
           )}
           {driver && (
             <Select
-              native
+              custom
               size="floor"
               label={t("floor.setup.printers.editor.paper")}
               value={form.paper}
@@ -775,7 +889,7 @@ export function WorkstationSetup({
             <p className="setup-card__hint">{t("floor.setup.printers.editor.driverHint")}</p>
           ) : (
             <Select
-              native
+              custom
               size="floor"
               label={t("floor.setup.printers.editor.language")}
               value={form.language}
@@ -891,7 +1005,18 @@ export function WorkstationSetup({
                 {draft.printers.length}
               </span>
             </div>
-            <Button size="floor" variant="secondary" onClick={() => setEditor(NEW_PRINTER)}>
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() =>
+                setEditor(
+                  newPrinterDraft(
+                    draft.printers.map((printer) => printer.name),
+                    t("floor.setup.printers.defaultNamePrefix"),
+                  ),
+                )
+              }
+            >
               {t("floor.setup.printers.add")}
             </Button>
           </div>
@@ -916,6 +1041,14 @@ export function WorkstationSetup({
                                 .map((purpose) => t(`floor.setup.printers.purposes.${purpose}`))
                                 .join(" · ")}
                         </p>
+                        {test !== null && testOwner.current === printer.id && (
+                          <StatusChip
+                            size="floor"
+                            wrap
+                            phase={TEST_CHIP[test.kind].phase}
+                            label={t(`floor.setup.printers.testChip.${test.kind}`)}
+                          />
+                        )}
                       </div>
                       <div className="setup-printer-row__actions">
                         <Button
@@ -973,12 +1106,11 @@ export function WorkstationSetup({
           {PRINT_PURPOSES.map((purpose) => (
             <Select
               key={purpose}
-              native
+              custom
               size="floor"
               label={t(`floor.setup.printers.purposes.${purpose}`)}
               value={draft.assignments[purpose] ?? ""}
               options={purposeOptions(purpose)}
-              {...(purpose === "box" ? {} : { hint: t("floor.setup.printers.purposes.later") })}
               onValueChange={(id) => assign(purpose, id)}
             />
           ))}
@@ -1006,142 +1138,198 @@ export function WorkstationSetup({
     return parts.join(" ");
   };
 
-  const scannerPanel = (
-    <div
-      className={`setup-split setup-split--scanners${scannersOnly ? " setup-split--scanners-check" : ""}`}
-    >
-      <section
-        className="setup-card setup-card--scanner-config"
-        aria-labelledby="setup-scanner-add"
-      >
-        <h2 id="setup-scanner-add" className="setup-card__title">
-          {t("floor.setup.scanners.connection")}
-        </h2>
-        <Input
-          {...manualEntry}
-          size="floor"
-          label={t("floor.setup.scanners.port")}
-          value={scanner.port}
-          onChange={(event) => {
-            setScanner({ ...scanner, port: event.target.value });
-            setScannerError(null);
-            setStatus((now) => (now?.kind === "scanner_unadded" ? null : now));
-          }}
-        />
-        <Input
-          {...manualEntry}
-          size="floor"
-          mono
-          inputMode="numeric"
-          label={t("floor.setup.scanners.baud")}
-          value={scanner.baud}
-          onChange={(event) => {
-            setScanner({ ...scanner, baud: event.target.value });
-            setScannerError(null);
-          }}
-        />
-        <div className="workstation-setup__live" aria-live="polite">
-          {scannerError !== null && (
-            <Alert tone="error" role="presentation">
-              {scannerError}
-            </Alert>
-          )}
-        </div>
-        <div className="setup-card__actions setup-card__actions--fill">
-          <Button size="floor" variant="secondary" onClick={refreshSerial}>
-            {t("floor.setup.scanners.listPorts")}
-          </Button>
-          <Button size="floor" onClick={addScanner}>
-            {t("floor.setup.scanners.add")}
-          </Button>
-        </div>
-        <div className="workstation-setup__live" aria-live="polite">
-          {serialAsking ? (
-            <p className="setup-card__hint">{t("floor.setup.scanners.portsAsking")}</p>
-          ) : (
-            serialPorts !== null && (
-              <p className="setup-card__hint">
-                {serialFailed
-                  ? t("floor.setup.scanners.portsFailed")
-                  : serialPorts.length === 0
-                    ? t("floor.setup.scanners.portsNone")
-                    : t("floor.setup.scanners.ports", { ports: serialPorts.join(", ") })}
-              </p>
+  // The self-test's code on a label: the printer is the operator's choice among the label printers.
+  const selfTestPrint = async (
+    printerId: string,
+    kind: SelfTestKind,
+    code: string,
+  ): Promise<SelfTestPrintResult> => {
+    const printer = draft.printers.find((candidate) => candidate.id === printerId);
+    if (printer === undefined) return "failed";
+    let bytes: Uint8Array;
+    try {
+      bytes =
+        kind === "dm"
+          ? await render(
+              selfTestDataMatrixSpec(printer.language),
+              { ...sampleLabelData(), "km.code": code },
+              printer,
             )
-          )}
-        </div>
-      </section>
-      <section className="setup-card setup-card--scanners" aria-labelledby="setup-scanners-title">
-        <h2
-          id="setup-scanners-title"
-          className="setup-card__title"
-          ref={scannersHeading}
-          tabIndex={-1}
-        >
-          {t("floor.setup.scanners.title")}
-        </h2>
-        {draft.scanners.length === 0 ? (
-          <p className="setup-card__waiting">{t("floor.setup.scanners.empty")}</p>
-        ) : (
-          <ul className="setup-scanner-list">
-            {draft.scanners.map((configured) => {
-              const state = connection(configured);
-              return (
-                <li className="setup-scanner-row" key={configured.port}>
-                  <div className="setup-scanner-row__detail">
-                    <strong>
-                      {t("floor.setup.scanners.summary", {
-                        port: configured.port,
-                        baud: configured.baud,
-                      })}
-                    </strong>
-                    <span aria-live="polite">
-                      <StatusChip size="floor" wrap phase={state.phase} label={state.text} />
-                    </span>
-                  </div>
-                  <Button
-                    size="floor"
-                    variant="secondary"
-                    aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
-                    onClick={() => {
-                      change({
-                        ...draft,
-                        scanners: draft.scanners.filter((s) => s.port !== configured.port),
-                      });
-                      // The button that was here is gone: the keyboard stays in the section.
-                      scannersHeading.current?.focus();
-                    }}
-                  >
-                    {t("floor.setup.scanners.remove")}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <p className="setup-card__hint">{t("floor.setup.scanners.keyboard")}</p>
-      </section>
-      {scannersOnly && (
+          : await render(testLabelSpec(code, printer.language), sampleLabelData(), printer);
+    } catch {
+      return "render_failed";
+    }
+    const settled = settleOutcome(
+      await printing.send(null, printer.target, bytes, printerMode(printer)),
+    );
+    // What was typed ahead would join the next scan.
+    source.clearPendingInput();
+    return settled.state === "sent" ? "sent" : "failed";
+  };
+
+  const selfTestPanel = (
+    <ScannerSelfTest
+      state={selfTest}
+      printers={draft.printers
+        .filter((printer) => printer.paper !== "a4")
+        .map((printer) => ({ id: printer.id, name: printer.name }))}
+      print={selfTestPrint}
+    />
+  );
+
+  const scannerPanel = (
+    <div className="setup-scanner-stack">
+      <div
+        className={`setup-split setup-split--scanners${scannersOnly ? " setup-split--scanners-check" : ""}`}
+      >
         <section
-          className="setup-card setup-card--check"
-          aria-labelledby="setup-scan-check"
-          data-testid="scanner-check"
+          className="setup-card setup-card--scanner-config"
+          aria-labelledby="setup-scanner-add"
         >
-          <h2 id="setup-scan-check" className="setup-card__title">
-            {t("floor.setup.scannerScope.checkTitle")}
+          <h2 id="setup-scanner-add" className="setup-card__title">
+            {t("floor.setup.scanners.connection")}
           </h2>
-          <p className="setup-card__hint">{t("floor.setup.scannerScope.checkBody")}</p>
+          <ComPortField
+            label={t("floor.setup.scanners.port")}
+            value={scanner.port}
+            ports={serialPorts}
+            manualEntry={manualEntry}
+            onChange={(port) => {
+              setScanner({ ...scanner, port });
+              setScannerError(null);
+              setStatus((now) => (now?.kind === "scanner_unadded" ? null : now));
+            }}
+          />
+          <Input
+            {...manualEntry}
+            size="floor"
+            mono
+            inputMode="numeric"
+            label={t("floor.setup.scanners.baud")}
+            value={scanner.baud}
+            onChange={(event) => {
+              setScanner({ ...scanner, baud: event.target.value });
+              setScannerError(null);
+            }}
+          />
           <div className="workstation-setup__live" aria-live="polite">
-            {scanCheck !== null && (
-              <Alert tone={scanCheckTone(scanCheck)} role="presentation">
-                {scanCheckText(scanCheck)}
+            {scannerError !== null && (
+              <Alert tone="error" role="presentation">
+                {scannerError}
               </Alert>
             )}
           </div>
+          <div className="setup-card__actions setup-card__actions--fill">
+            <Button size="floor" variant="secondary" onClick={refreshSerial}>
+              {t("floor.setup.scanners.listPorts")}
+            </Button>
+            <Button size="floor" onClick={addScanner}>
+              {t("floor.setup.scanners.add")}
+            </Button>
+          </div>
+          <div className="workstation-setup__live" aria-live="polite">
+            {serialAsking ? (
+              <p className="setup-card__hint">{t("floor.setup.scanners.portsAsking")}</p>
+            ) : (
+              serialPorts !== null && (
+                <p className="setup-card__hint">
+                  {serialFailed
+                    ? t("floor.setup.scanners.portsFailed")
+                    : serialPorts.length === 0
+                      ? t("floor.setup.scanners.portsNone")
+                      : t("floor.setup.scanners.ports", { ports: serialPorts.join(", ") })}
+                </p>
+              )
+            )}
+          </div>
+        </section>
+        <section className="setup-card setup-card--scanners" aria-labelledby="setup-scanners-title">
+          <h2
+            id="setup-scanners-title"
+            className="setup-card__title"
+            ref={scannersHeading}
+            tabIndex={-1}
+          >
+            {t("floor.setup.scanners.title")}
+          </h2>
+          {draft.scanners.length === 0 ? (
+            <p className="setup-card__waiting">{t("floor.setup.scanners.empty")}</p>
+          ) : (
+            <ul className="setup-scanner-list">
+              {draft.scanners.map((configured) => {
+                const state = connection(configured);
+                return (
+                  <li className="setup-scanner-row" key={configured.port}>
+                    <div className="setup-scanner-row__detail">
+                      <strong>
+                        {t("floor.setup.scanners.summary", {
+                          port: configured.port,
+                          baud: configured.baud,
+                        })}
+                      </strong>
+                      <span aria-live="polite">
+                        <StatusChip size="floor" wrap phase={state.phase} label={state.text} />
+                      </span>
+                    </div>
+                    <Button
+                      size="floor"
+                      variant="secondary"
+                      aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
+                      onClick={() => {
+                        change({
+                          ...draft,
+                          scanners: draft.scanners.filter((s) => s.port !== configured.port),
+                        });
+                        // The button that was here is gone: the keyboard stays in the section.
+                        scannersHeading.current?.focus();
+                      }}
+                    >
+                      {t("floor.setup.scanners.remove")}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="setup-card__hint">{t("floor.setup.scanners.keyboard")}</p>
+        </section>
+        {scannersOnly && (
+          <section
+            className="setup-card setup-card--check"
+            aria-labelledby="setup-scan-check"
+            data-testid="scanner-check"
+          >
+            <h2 id="setup-scan-check" className="setup-card__title">
+              {t("floor.setup.scannerScope.checkTitle")}
+            </h2>
+            <p className="setup-card__hint">{t("floor.setup.scannerScope.checkBody")}</p>
+            <div className="workstation-setup__live" aria-live="polite">
+              {scanCheck !== null && (
+                <Alert tone={scanCheckTone(scanCheck)} role="presentation">
+                  {scanCheckText(scanCheck)}
+                </Alert>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+      {/* Before the pairing there are no tabs: the check stands under the connection. */}
+      {scannersOnly && selfTestPanel}
+      {!scannersOnly && (
+        <section className="setup-card setup-card--check-cta" aria-labelledby="setup-check-cta">
+          <h2 id="setup-check-cta" className="setup-card__title">
+            {t("floor.setup.selfTestCta.title")}
+          </h2>
+          <p className="setup-card__hint">{t("floor.setup.selfTestCta.body")}</p>
+          <Button size="floor" onClick={() => setActiveTab("check")}>
+            {t("floor.setup.selfTestCta.open")}
+          </Button>
         </section>
       )}
     </div>
   );
+
+  const checkPanel = <div className="setup-panel setup-panel--check">{selfTestPanel}</div>;
 
   const soundPanel = (
     <div className="setup-panel setup-panel--sound setup-card">
@@ -1204,6 +1392,7 @@ export function WorkstationSetup({
 
   const tabs = [
     { id: "scanner" as const, label: t("floor.setup.tabs.scanner"), panel: scannerPanel },
+    { id: "check" as const, label: t("floor.setup.tabs.check"), panel: checkPanel },
     { id: "printer" as const, label: t("floor.setup.tabs.printer"), panel: printersPanel },
     { id: "sound" as const, label: t("floor.setup.tabs.sound"), panel: soundPanel },
   ];
@@ -1218,7 +1407,9 @@ export function WorkstationSetup({
         : t("floor.setup.check.later")
       : shownTab === "scanner"
         ? t("floor.setup.hint.scanner")
-        : t("floor.setup.hint.sound");
+        : shownTab === "check"
+          ? t("floor.setup.hint.check")
+          : t("floor.setup.hint.sound");
 
   return (
     <section className="workstation-setup" aria-labelledby="workstation-setup-title">
@@ -1271,6 +1462,9 @@ export function WorkstationSetup({
                 {testText(test).text}
               </Alert>
             )}
+            {showTest && test.kind === "failed" && test.diagnostic !== undefined && (
+              <DiagnosticCopy text={test.diagnostic} />
+            )}
           </div>
           <div className="workstation-setup__live" aria-live="polite">
             {status !== null && (
@@ -1289,6 +1483,8 @@ export function WorkstationSetup({
           {t(dirty ? "floor.setup.backUnsaved" : "floor.setup.back")}
         </Button>
         <span className="workstation-setup__footer-spacer" />
+        {/* Beta 3: the station's unpairing; renders only where the app provides it. */}
+        {!scannersOnly && <UnpairStation />}
         {/* Kept on the keyboard while it saves or has nothing to save: a button that vanishes from the tab order takes the focus with it. */}
         <Button
           size="floor"

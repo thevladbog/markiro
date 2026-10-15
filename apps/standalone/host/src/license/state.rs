@@ -77,6 +77,10 @@ pub struct Features {
     pub inventory: bool,
     pub commerce_ml: bool,
     pub handheld: bool,
+    /// Custom branding (the organization's logo on forms and labels); a
+    /// record stored before the key existed reads as off.
+    #[serde(default)]
+    pub custom_logo: bool,
 }
 
 impl Features {
@@ -89,7 +93,18 @@ impl Features {
         inventory: true,
         commerce_ml: true,
         handheld: true,
+        custom_logo: true,
     };
+}
+
+/// Whether the print paths may use the organization's own logo (the license
+/// feature `customLogo`, custom branding). With no file (the trial, or none
+/// yet) every feature is on, so the beta shows the organization's logo; a
+/// file that lacks the feature prints the Markiro logo everywhere. The one
+/// seam of branding: the shift snapshot freezes the logo through it, and the
+/// office reads the same answer from `GET /v1/office/license`.
+pub fn custom_branding_allowed(features: &Features) -> bool {
+    features.custom_logo
 }
 
 /// A stored license file: the verified payload's fields, times in ms UTC.

@@ -82,6 +82,39 @@ pub mod actions {
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";
+    /// The office stored a file it generated on the host (migration `0029`):
+    /// a part of an export, a disaggregation file or a printed form. The
+    /// target is what the file belongs to; the details name the file, never
+    /// its bytes.
+    pub const SHIFT_EXPORT_STORE: &str = "shift.export.store";
+    /// A stored file was downloaded again; `failed` (with `reason`
+    /// `corrupted`) when its bytes no longer matched their SHA-256 and the
+    /// host served nothing.
+    pub const SHIFT_EXPORT_DOWNLOAD: &str = "shift.export.download";
+    /// Stored files deleted by the retention setting; the details count them.
+    pub const SHIFT_EXPORT_PURGE: &str = "shift.export.purge";
+    /// An administrator changed how long stored files are kept.
+    pub const SHIFT_EXPORT_RETENTION: &str = "shift.export.retention";
+    /// The office marked a code conflict reviewed (plan КНФ); the details name
+    /// its kind, the losing shift and device and the winning shift, never the
+    /// code or its hash. A conflict reviewed already writes no row.
+    pub const CONFLICT_REVIEW: &str = "conflict.review";
+    /// The office's disaggregation reasons (plan ДЗГ); a change that changes
+    /// nothing writes no row.
+    pub const DISAGGREGATION_REASON_CREATE: &str = "disaggregation_reason.create";
+    pub const DISAGGREGATION_REASON_UPDATE: &str = "disaggregation_reason.update";
+    /// The office's disaggregation documents (plan ДЗГ); the target is the
+    /// document.
+    pub const DISAGGREGATION_CREATE: &str = "disaggregation.create";
+    pub const DISAGGREGATION_UPDATE: &str = "disaggregation.update";
+    pub const DISAGGREGATION_LINES_ADD: &str = "disaggregation.lines.add";
+    pub const DISAGGREGATION_LINE_DELETE: &str = "disaggregation.lines.delete";
+    /// `ok` with what the apply took apart, `failed` when a line was not `ok`.
+    pub const DISAGGREGATION_APPLY: &str = "disaggregation.apply";
+    pub const DISAGGREGATION_CANCEL: &str = "disaggregation.cancel";
+    /// The office saved a document's ЧЗ file «Расформирование упаковки» and
+    /// recorded it (plan ДЗГ-О): no data changed, as `shift.export`.
+    pub const DISAGGREGATION_EXPORT: &str = "disaggregation.export";
     /// After a restore, a station gave the host back a block the copy had
     /// lost (plan РК).
     pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";

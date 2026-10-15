@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { codeReleaseRecordSchema } from "../host/disaggregation.js";
 import {
   categoryTemplateDefaultSchema,
   labelTemplateRecordSchema,
@@ -215,12 +216,13 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       upsert:
         "INSERT INTO ref_products (id, gtin14, name, print_name, chz_group_code, box_capacity, " +
         "pallet_box_capacity, shelf_life_days, default_box_template_id, " +
-        "default_pallet_template_id, archived, status, rev) " +
+        "default_pallet_template_id, archived, status, photo_checksum, rev) " +
         "SELECT r.value ->> 'id', r.value ->> 'gtin14', r.value ->> 'name', " +
         "r.value ->> 'printName', r.value ->> 'chzProductGroupCode', r.value ->> 'boxCapacity', " +
         "r.value ->> 'palletBoxCapacity', r.value ->> 'shelfLifeDays', " +
         "r.value ->> 'defaultBoxTemplateId', r.value ->> 'defaultPalletTemplateId', " +
-        "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'rev' " +
+        "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'photoChecksum', " +
+        "r.value ->> 'rev' " +
         "FROM json_each(?) AS r " +
         notQuarantinedNewer("products") +
         " ON CONFLICT (id) DO UPDATE SET gtin14 = excluded.gtin14, name = excluded.name, " +
@@ -230,7 +232,8 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "shelf_life_days = excluded.shelf_life_days, " +
         "default_box_template_id = excluded.default_box_template_id, " +
         "default_pallet_template_id = excluded.default_pallet_template_id, " +
-        "archived = excluded.archived, status = excluded.status, rev = excluded.rev " +
+        "archived = excluded.archived, status = excluded.status, " +
+        "photo_checksum = excluded.photo_checksum, rev = excluded.rev " +
         "WHERE excluded.rev > ref_products.rev",
     },
   ],
@@ -279,18 +282,51 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
  * matches, every device syncs from zero, and records an older build
  * quarantined or kept differently come again.
  */
-const SYNC_SCHEMA_VERSION = 4;
+const SYNC_SCHEMA_VERSION = 5;
 
 /**
- * This build's copies, in `sync_state.entity_set`: the feed entities it
- * keeps (derived from `ENTITIES`, so a new entity cannot update that map and
- * forget this value, or the reverse) and `SYNC_SCHEMA_VERSION`, eight
- * entities and `v4` today (`test/reference-sync.test.ts` pins the text). A
- * build that keeps other entities, or reads them differently, finds another
- * value there and syncs from zero: records the old build skipped or
- * quarantined would never come otherwise.
+ * The feed entities this build acts on but keeps no copy of (plan ДЗГ):
+ * `code_releases`, a box a document took apart, whose codes this station
+ * stops counting as its own. Part of `ENTITY_SET`: a build that starts
+ * acting on one syncs from zero once and meets every release it skipped.
  */
-export const ENTITY_SET = `${[...ENTITIES.keys()].join(",")};v${SYNC_SCHEMA_VERSION}`;
+const CODE_RELEASES = "code_releases";
+const ACTION_ENTITIES = [CODE_RELEASES] as const;
+
+/** A release's box id, read once per module and not once per item. */
+const releaseBoxId = z.uuid();
+
+/**
+ * This build's copies and actions, in `sync_state.entity_set`: the feed
+ * entities it keeps (derived from `ENTITIES`, so a new entity cannot update
+ * that map and forget this value, or the reverse), the ones it only acts on
+ * (`ACTION_ENTITIES`) and `SYNC_SCHEMA_VERSION`; nine entities and `v5`
+ * today (`test/reference-sync.test.ts` pins the text). A build that keeps
+ * other entities, or reads them differently, finds another value there and
+ * syncs from zero: records the old build skipped or quarantined would never
+ * come otherwise.
+ */
+export const ENTITY_SET = `${[...ENTITIES.keys(), ...ACTION_ENTITIES].join(",")};v${SYNC_SCHEMA_VERSION}`;
+
+/**
+ * Deletes this pairing's codes of the boxes a page's releases name, only
+ * where this station's box of that id is closed and of the named shift
+ * (plan ДЗГ, Р7): the host frees codes of closed shifts only (owner
+ * decision ПР-1), and an open box here is never touched. The station's copy
+ * of the shift is not asked: it lags the host's (an office close while the
+ * station was offline), and a release skipped because of the lag would be
+ * lost for good, the feed's cursor having moved on. The same delete as the
+ * station's own disassembly (`box-exceptions.ts`), by box. The host names a
+ * box once, and a closed box takes no codes, so a page applied again, or
+ * the whole feed from zero after a restore, deletes nothing new.
+ * Parameters: host id, device id, the releases (`[{ id, shiftId }]`), host
+ * id, device id.
+ */
+export const APPLY_CODE_RELEASES_SQL =
+  "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id IN " +
+  "(SELECT b.id FROM json_each(?) AS r JOIN floor_boxes AS b ON b.id = r.value ->> 'id' " +
+  "WHERE +b.host_id = ? AND +b.device_id = ? AND +b.shift_id = r.value ->> 'shiftId' " +
+  "AND b.closed_at IS NOT NULL)";
 
 /**
  * Deletes the rows that the page's tombstones and quarantined records are
@@ -495,14 +531,19 @@ export async function copiesReady(local: LocalExecutor, pairing: Pairing): Promi
  * records, then one quarantine upsert, one quarantine lift and the page's
  * revision. A record that fails its schema fails closed: it is not applied,
  * an older copy of it goes as if deleted, and it waits in `sync_quarantine`.
- * Entities this build does not keep are skipped, not quarantined.
+ * Entities this build does not keep are skipped, not quarantined. A code
+ * release (plan ДЗГ) is acted on, not kept: one statement per page, and an
+ * invalid one is quarantined like any record, so the code stays a local
+ * duplicate (fail closed) and the status bar counts it.
  *
  * `syncReferences` prepends `pairingGuard` and, when starting over, `WIPE`: for
- * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 = 3E + 6
- * statements — 30 for the eight kept today, the most within the shell's 32: a
- * ninth entity would need 33. A revision larger than a page's byte bound
- * still comes whole, as one JSON parameter per entity: the shell bounds SQL
- * text and the number of values, not a value's size.
+ * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 + 1 (the
+ * releases) = 3E + 7 statements — 31 for the eight kept today, the most
+ * within the shell's 32: a ninth kept entity would need 34 (the next one must
+ * take the way of `ACTION_ENTITIES`, which costs one statement for all). A
+ * revision larger than a page's byte bound still comes whole, as one JSON
+ * parameter per entity: the shell bounds SQL text and the number of values,
+ * not a value's size.
  */
 function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number): LocalStatement[] {
   const statements: LocalStatement[] = [];
@@ -532,6 +573,39 @@ function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number)
       statements.push({ sql: deleteOlder(table.table), values: [JSON.stringify(older)] });
     }
     if (rows.length > 0) statements.push({ sql: table.upsert, values: [JSON.stringify(rows)] });
+  }
+  // The feed entities this build acts on without a copy (`ACTION_ENTITIES`).
+  const releases: Array<{ id: string; shiftId: string }> = [];
+  for (const item of page.items) {
+    if (item.entity !== CODE_RELEASES) continue;
+    const key = { id: item.id, rev: item.rev };
+    // The host never deletes a release; a tombstone would only settle.
+    if (item.deleted) {
+      settled.push({ entity: item.entity, ...key });
+      continue;
+    }
+    const record = codeReleaseRecordSchema.safeParse(item.data);
+    const id = releaseBoxId.safeParse(item.id);
+    if (!record.success) {
+      quarantined.push({ entity: item.entity, ...key, reason: quarantineReason(record.error) });
+    } else if (!id.success) {
+      quarantined.push({ entity: item.entity, ...key, reason: "id: invalid_format" });
+    } else {
+      releases.push({ id: item.id, shiftId: record.data.shiftId });
+      settled.push({ entity: item.entity, ...key });
+    }
+  }
+  if (releases.length > 0) {
+    statements.push({
+      sql: APPLY_CODE_RELEASES_SQL,
+      values: [
+        pairing.hostId,
+        pairing.deviceId,
+        JSON.stringify(releases),
+        pairing.hostId,
+        pairing.deviceId,
+      ],
+    });
   }
   if (quarantined.length > 0) {
     statements.push({ sql: QUARANTINE, values: [seenAt, JSON.stringify(quarantined)] });

@@ -66,6 +66,9 @@ import { DEVICE_INFO, deviceLicense } from "./support/license.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
+/** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
+const STATION_ENTRY = { supports: ["validation-v1", "validation-dm-duplicate-v1"] };
+
 /**
  * What `onSignOut` each mount of the signed-in floor was given, in order, so
  * a test can call an earlier session's callback late. The real screen is
@@ -307,6 +310,18 @@ async function elapse(ms: number): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
+}
+
+/** The office header's link dot, pressed open: its popover with the details (beta 3.2). */
+function openLinkDetails(): HTMLElement {
+  const dot = screen.getByRole("button", { name: /^Связь с хостом: / });
+  if (dot.getAttribute("aria-expanded") !== "true") fireEvent.click(dot);
+  return screen.getByRole("region", { name: /^Связь с хостом: / });
+}
+
+/** The station's link is a dot (beta 3.2): its details, behind a tap. */
+async function openStationLinkDetails(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: /^Связь с хостом/ }));
 }
 
 describe("App", () => {
@@ -1348,7 +1363,8 @@ describe("App", () => {
     await signIn();
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await screen.findByLabelText("Название организации");
-    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    // The overview and the profile each read the organization once.
+    const reads = host.getOrg.mock.calls.length;
     expect(host.officeMe).not.toHaveBeenCalled();
 
     await link.revision(44);
@@ -1362,7 +1378,7 @@ describe("App", () => {
     // setImmediate task, which only real turns like these wait for.
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(host.getOrg).toHaveBeenCalledTimes(1);
+    expect(host.getOrg).toHaveBeenCalledTimes(reads);
     expect(screen.getByLabelText("Название организации")).toBeTruthy();
   });
 
@@ -1410,15 +1426,26 @@ describe("App", () => {
       host: fakeHost(),
       connection: link.connection,
     });
-    expect(await screen.findByText("На связи с хостом")).toBeTruthy();
+    // On the floor the link is a dot with its state in its name (beta 3.2); the reason is behind a tap.
+    expect(
+      await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" }),
+    ).toBeTruthy();
     await link.status({ state: "offline", lastContactAt: null, lastError: "unreachable", seq: 2 });
-    expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" }),
+    );
     expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Нет связи с хостом")).toBeTruthy();
+    // The office header shows the link as a dot with details on a press (beta 3.2).
+    fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
+    expect(
+      within(screen.getByRole("region", { name: "Связь с хостом: Нет связи с хостом" })).getByText(
+        "Нет связи с хостом",
+      ),
+    ).toBeTruthy();
   });
 
   it("pairs a second computer by a scanned code, then chooses its line", async () => {
@@ -1718,6 +1745,7 @@ describe("reference sync health on screen", () => {
       host,
       connection: link.connection,
     });
+    await openStationLinkDetails();
     expect(
       await screen.findByText("Справочники не обновились — повторим автоматически"),
     ).toBeTruthy();
@@ -1726,7 +1754,9 @@ describe("reference sync health on screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Справочники не обновились — повторим автоматически")).toBeTruthy();
+    expect(
+      within(openLinkDetails()).getByText("Справочники не обновились — повторим автоматически"),
+    ).toBeTruthy();
 
     host.getChanges.mockResolvedValue(feedPage(43));
     await link.revision(43);
@@ -1746,6 +1776,7 @@ describe("reference sync health on screen", () => {
     };
     host.getChanges.mockResolvedValueOnce(feedPage(42, [unreadable]));
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    await openStationLinkDetails();
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
     expect(screen.getByText("Вход оператора")).toBeTruthy();
   });
@@ -1778,6 +1809,7 @@ describe("reference sync health on screen", () => {
     });
     // The run fails (the host is unreachable and the link is offline), but
     // the count it read before failing still shows.
+    await openStationLinkDetails();
     expect(await screen.findByText("Не приняты записи справочников: 1")).toBeTruthy();
     expect(screen.getByText("Вход оператора")).toBeTruthy();
 
@@ -1785,7 +1817,7 @@ describe("reference sync health on screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Офис" }));
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
-    expect(screen.getByText("Не приняты записи справочников: 1")).toBeTruthy();
+    expect(within(openLinkDetails()).getByText("Не приняты записи справочников: 1")).toBeTruthy();
   });
 });
 
@@ -2184,7 +2216,7 @@ describe("the operator on the floor", () => {
    * hub's own «Вошёл: …» line is gone, as on the cloud station). Gone again
    * once the operator is signed out — the bar then says nobody is in.
    */
-  const SIGNED_IN = "Анна Кузнецова, табельный номер 0042";
+  const SIGNED_IN = "Анна Кузнецова";
   /** The hub of the line: its title, under the status bar that names the operator. */
   const onTheList = async () => {
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
@@ -2235,7 +2267,7 @@ describe("the operator on the floor", () => {
     await onTheList();
     expect(
       within(screen.getByRole("region", { name: "Строка состояния цеха" })).getByText(
-        "Анна Кузнецова, табельный номер 0042",
+        "Анна Кузнецова",
       ),
     ).toBeTruthy();
   });
@@ -2869,7 +2901,7 @@ describe("the operator on the floor", () => {
 
   it("shows the shifts the host lists for the line and opens one into its work screen", async () => {
     const { host } = await inTheShift();
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     isOnTheList();
@@ -2930,7 +2962,7 @@ describe("the operator on the floor", () => {
     );
     await link.revision(43);
     const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
-    expect(await within(bar).findByText("Анна Петрова, табельный номер 0042")).toBeTruthy();
+    expect(await within(bar).findByText("Анна Петрова")).toBeTruthy();
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
   });
 
@@ -3206,7 +3238,7 @@ describe("the operator on the floor", () => {
       plannedQty: null,
       counterpartyId: null,
     });
-    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     // A refusal that comes now waits for the operator to leave this shift.
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
@@ -4362,10 +4394,13 @@ describe("an office PC and the host's address (plan УСТ)", () => {
         }),
     );
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
-    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    // A floor screen waits for the role (a host PC must not flash the operator
+    // sign-in before the office), so nothing locks and nothing shows meanwhile.
     await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(kiosk.commands).toEqual([]);
     act(() => answer("station"));
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
   });
 
@@ -4452,7 +4487,23 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
     await signIn();
     expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+    // «Выйти» returns to the office sign-in (beta 3.2) and is beside «Выйти в цех».
+    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+  });
+
+  it("signs out to the office sign-in from «Выйти», telling the host, with no notice and no floor in between", async () => {
+    const device = fakeDevice({ ...DEVICE_STATUS, hostAddress: REMOTE_ADDRESS });
+    device.installRole.mockResolvedValue("station");
+    const host = fakeHost();
+    renderApp({ probe: probeAnswering(true), device, host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
+    expect(screen.queryByText("Сессия офиса закончилась. Войдите снова.")).toBeNull();
+    // The sign-in lists the user who just signed in, on this PC only.
+    expect(screen.getByRole("button", { name: /^Войти как / })).toBeTruthy();
   });
 
   it("tells a malformed address the shell refused in plain words, not as a broken app", async () => {
@@ -4541,6 +4592,192 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(device.changeAddress).not.toHaveBeenCalled();
     expect(screen.getByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
     expect(document.activeElement).toBe(open);
+  });
+});
+
+describe("the floor's own controls in the status bar (beta 3)", () => {
+  const ANNA = "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b";
+  /** The PIN 4821 and the badge «MRK-000742» under the site's salt (`proto/fixtures`). */
+  const PIN_PHC =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+  const BADGE_PHC =
+    "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+  const PEOPLE: ChangeItem[] = [
+    {
+      entity: "site",
+      id: "1",
+      rev: 40,
+      deleted: false,
+      data: { badgeSalt: "AAECAwQFBgcICQoLDA0ODw==", boxBlockSize: 2000, palletBlockSize: 200 },
+    },
+    {
+      entity: "operators",
+      id: ANNA,
+      rev: 41,
+      deleted: false,
+      data: { login: "0042", name: "Анна Кузнецова", role: null, pinPhc: PIN_PHC },
+    },
+    {
+      entity: "operator_badges",
+      id: "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d",
+      rev: 42,
+      deleted: false,
+      data: { operatorId: ANNA, badgePhc: BADGE_PHC, label: null },
+    },
+  ];
+
+  function scan(text: string) {
+    act(() => {
+      for (const key of text) fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key: "Enter" });
+    });
+  }
+
+  async function station(options: Partial<Parameters<typeof renderApp>[0]> = {}) {
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      hardware: fakeHardware().hardware,
+      ...options,
+    });
+    await screen.findByText("Отсканируйте бейдж для входа");
+    return { device, host };
+  }
+
+  it("leaves the full-screen mode after the operator proved who they are, and goes back with one press", async () => {
+    const kiosk = recordingLockdown();
+    await station({ lockdown: kiosk.lockdown });
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    scan("MRK-000742");
+    await screen.findByRole("heading", { name: "Смены линии" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(await screen.findByText("Выйти из полноэкранного режима?")).toBeTruthy();
+    // A press alone changes nothing.
+    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+    // The badge asked for here is not taken for anything on the floor behind.
+    scan("MRK-000742");
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    expect(screen.queryByText("Выйти из полноэкранного режима?")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Вернуться в полноэкранный режим" }));
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Выйти из полноэкранного режима" }),
+    ).toBeTruthy();
+  });
+
+  it("offers the same control on the sign-in screen, where any operator's proof will do", async () => {
+    const kiosk = recordingLockdown();
+    await station({ lockdown: kiosk.lockdown });
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(await screen.findByText("Выйти из полноэкранного режима?")).toBeTruthy();
+    scan("MRK-000742");
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    // The proof signed nobody in.
+    expect(screen.queryByRole("heading", { name: "Смены линии" })).toBeNull();
+  });
+
+  it("does not offer it where the window is never locked (development, and so a host or office PC)", async () => {
+    await station({
+      lockdown: createLockdownLifecycle({ dev: true, invoke: async () => undefined }),
+    });
+    expect(screen.queryByRole("button", { name: "Выйти из полноэкранного режима" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Вернуться в полноэкранный режим" })).toBeNull();
+    // The sync button is not tied to the window.
+    expect(screen.getByRole("button", { name: "Синхронизация" })).toBeTruthy();
+  });
+
+  it("fetches the photos the feed's products name once the sync is done, with the device key only", async () => {
+    const MILK = "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b";
+    const SUM = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    const { db, executor } = openLocalDb();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(
+      feedPage(43, [
+        ...PEOPLE,
+        {
+          entity: "products",
+          id: MILK,
+          rev: 43,
+          deleted: false,
+          data: {
+            gtin14: "04600682000013",
+            name: "Молоко 3,2% 0,9 л",
+            printName: null,
+            chzProductGroupCode: 8,
+            boxCapacity: 12,
+            palletBoxCapacity: null,
+            shelfLifeDays: 10,
+            defaultBoxTemplateId: null,
+            defaultPalletTemplateId: null,
+            archived: false,
+            status: "active",
+            photoChecksum: SUM,
+          },
+        },
+      ]),
+    );
+    host.getDeviceProductPhoto.mockResolvedValue({
+      photo: {
+        width: 2,
+        height: 1,
+        dataBase64: "/9j/4AAQSkZJRgABAQ==",
+        mediaType: "image/jpeg",
+        checksum: SUM,
+        updatedAt: "2026-10-14T10:00:00.000Z",
+      },
+    });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      local: executor,
+      hardware: fakeHardware().hardware,
+    });
+    await waitFor(() =>
+      expect(
+        Array.from(
+          db.prepare("SELECT product_id, checksum FROM ref_product_photos").all(),
+          (row) => ({
+            ...row,
+          }),
+        ),
+      ).toEqual([{ product_id: MILK, checksum: SUM }]),
+    );
+    expect(host.getDeviceProductPhoto).toHaveBeenCalledWith(MILK);
+  });
+
+  it("asks the existing retries to run from «Синхронизация», and shows when the catalog last arrived", async () => {
+    const { host } = await station();
+    const before = host.getChanges.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Синхронизация" }));
+    expect(await screen.findByText(/Последнее обновление:/, { selector: "p" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить сейчас" }));
+    await waitFor(() => expect(host.getChanges.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("unpairs the station from «Рабочее место» only after the operator's proof, with the shell's forget", async () => {
+    const { device } = await station();
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Отвязать станцию" }));
+    expect(await screen.findByText("Отвязать станцию?")).toBeTruthy();
+    const next = await screen.findByRole("button", { name: "Подтвердите, что это вы" });
+    await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(next);
+    expect(device.forget).not.toHaveBeenCalled();
+    scan("MRK-000742");
+    await waitFor(() => expect(device.forget).toHaveBeenCalledTimes(1));
+    // Nothing waited to be sent: no `keepUnsent`.
+    expect(device.forget).toHaveBeenCalledWith(undefined);
   });
 });
 

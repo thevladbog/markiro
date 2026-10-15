@@ -174,6 +174,23 @@ function template(id: string, rev: number, data: object = {}): ChangeItem {
   };
 }
 
+/** A code release (plan ДЗГ) of the box `boxId`, as the feed carries it. */
+function codeRelease(boxId: string, rev: number, data: object = {}): ChangeItem {
+  return {
+    entity: "code_releases",
+    id: boxId,
+    rev,
+    deleted: false,
+    data: {
+      shiftId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      documentId: "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c",
+      releasedAt: "2026-10-13T09:05:00.000Z",
+      codeCount: 1,
+      ...data,
+    },
+  };
+}
+
 /** A category's default template, keyed `<code>:<purpose>` as the feed keys it. */
 function categoryDefault(
   code: number,
@@ -228,6 +245,7 @@ const COPY_TABLES = [
   "ref_operators",
   "ref_operator_badges",
   "ref_products",
+  "ref_product_photos",
   "ref_templates",
   "ref_template_defaults",
   "sync_quarantine",
@@ -359,7 +377,7 @@ describe("ENTITY_SET", () => {
     // build cannot change one and forget the other.
     expect(ENTITY_SET).toBe(
       "org_profile,site,lines,operators,operator_badges,products,label_templates," +
-        "category_template_defaults;v4",
+        "category_template_defaults,code_releases;v5",
     );
   });
 });
@@ -1742,6 +1760,9 @@ describe("sync quarantine", () => {
       { entity: "category_template_defaults", id: "15:pallet", rev: 40, deleted: true },
       categoryDefault(8, "box", 42),
       categoryDefault(8, "pallet", 42, { templateId: "7" }),
+      // A code release (plan ДЗГ) is acted on, not kept: a readable one and an unreadable one.
+      codeRelease("b0000000-0000-4000-8000-000000000001", 42),
+      codeRelease("b0000000-0000-4000-8000-000000000002", 42, { shiftId: "x" }),
     ];
     await expect(
       syncReferences({
@@ -1751,13 +1772,14 @@ describe("sync quarantine", () => {
         deviceId: DEVICE_ID,
         now: () => SEEN_AT,
       }),
-    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 8 });
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 9 });
     // The pairing stamp (and the drop of a `last_rev` there is none of),
     // then the page: the guard, the wipe (8 copy tables, the quarantine, the
-    // sync state), per entity one delete and one upsert, the quarantine
-    // upsert, the quarantine lift and the sync state: 3 × 8 + 6 = 30, within
-    // the shell's 32. A ninth entity would make it 33.
-    expect(recorded.batches.map((batch) => batch.length)).toEqual([2, 30]);
+    // sync state), per entity one delete and one upsert, the releases'
+    // delete, the quarantine upsert, the quarantine lift and the sync state:
+    // 3 × 8 + 7 = 31, within the shell's 32. A ninth kept entity would make
+    // it 34.
+    expect(recorded.batches.map((batch) => batch.length)).toEqual([2, 31]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
   });
 });

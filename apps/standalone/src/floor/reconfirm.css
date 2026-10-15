@@ -1,0 +1,125 @@
+/*
+ * The identity re-confirmation dialog (beta 3): a statement, the answer to the
+ * last attempt, then the badge prompt or the keypad. Every control is the
+ * floor's 64 px (`size="floor"`).
+ */
+.reconfirm {
+  display: grid;
+  width: min(720px, 100%);
+  min-width: 0;
+  margin-inline: auto;
+  gap: var(--sp-3);
+  justify-items: center;
+}
+
+.reconfirm__detail {
+  max-width: 100%;
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
+}
+
+.reconfirm__message {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+
+.reconfirm__badge {
+  display: grid;
+  width: 100%;
+  padding: var(--sp-4);
+  gap: var(--sp-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-2);
+  text-align: center;
+}
+
+.reconfirm__badge h3 {
+  margin: 0;
+  font: var(--floor-title);
+}
+
+.reconfirm__badge p {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.reconfirm__pad {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  justify-items: center;
+}
+
+.reconfirm__prompt {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.reconfirm__readout {
+  display: flex;
+  width: min(360px, 100%);
+  height: 64px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  font: var(--floor-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.reconfirm__footer {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.reconfirm__footer > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/*
+ * A small panel (1024x600): the keypad's four 64 px rows need the room the
+ * explanation took, so once the keypad is up the dialog's own title says what
+ * is being confirmed and the paragraph waits for the first step.
+ */
+@media (max-height: 760px) {
+  .reconfirm[data-stage="login"] .reconfirm__detail,
+  .reconfirm[data-stage="pin"] .reconfirm__detail {
+    display: none;
+  }
+
+  .reconfirm {
+    --control-keypad: 64px;
+
+    gap: var(--sp-2);
+  }
+
+  /* The readout beside the keypad, as the sign-in does, so the keypad stays whole. */
+  .reconfirm__pad {
+    width: min(720px, 100%);
+    column-gap: var(--sp-4);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-content: center;
+    align-items: center;
+    justify-items: stretch;
+  }
+
+  .reconfirm__pad > .reconfirm__prompt,
+  .reconfirm__pad > .reconfirm__readout {
+    grid-column: 1;
+    text-align: center;
+  }
+
+  .reconfirm__pad > :last-child {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}

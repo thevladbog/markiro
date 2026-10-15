@@ -2,9 +2,10 @@
 //! shift; its local close is the point of no return, so the host takes it
 //! whenever it arrives. An active shift closes (the batch writes the close,
 //! `facts::receive`); a shift the office closed first answers `accepted`
-//! with `alreadyClosed`. Every close is kept in `shift_close_events`.
+//! with `alreadyClosed`. Every close is kept in `shift_close_events`. A
+//! validation shift has no boxes (plan РЕЖ, Р7): its close counts none.
 
-use markiro_proto::{shift_close_reasons, ShiftClosedFact, ShiftStatus};
+use markiro_proto::{shift_close_reasons, ShiftClosedFact, ShiftMode, ShiftStatus};
 use serde_json::{json, Value};
 use sqlx::SqliteConnection;
 
@@ -27,6 +28,9 @@ pub async fn apply(
         .is_some_and(|planned| !(1..=validate::MAX_PLANNED_QTY).contains(&planned))
     {
         return Err(Reject::field("data.plannedQtySnapshot").into());
+    }
+    if context.shift.mode == ShiftMode::Validation && closed.closed_box_count != 0 {
+        return Err(Reject::field("data.closedBoxCount").into());
     }
     match closed.reason_code.as_deref() {
         Some(code) if !shift_close_reasons::ALL.contains(&code) => {

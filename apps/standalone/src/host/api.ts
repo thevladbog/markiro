@@ -13,6 +13,7 @@ import {
   type KnownBlocksResponse,
 } from "./backups.js";
 import type { HostClient } from "./client.js";
+import { usageStatsSchema, type UsageStats } from "./usage-stats.js";
 import {
   codeSearchPath,
   officeCodeCardSchema,
@@ -26,6 +27,53 @@ import {
   type CloudImportRequest,
   type CloudImportSummary,
 } from "./cloud-import.js";
+import {
+  disaggregationDetailSchema,
+  disaggregationDocumentSchema,
+  disaggregationQuery,
+  disaggregationReasonSchema,
+  disaggregationReportRowsSchema,
+  type DisaggregationCreate,
+  type DisaggregationDetail,
+  type DisaggregationDocument,
+  type DisaggregationExportRecord,
+  type DisaggregationFilter,
+  type DisaggregationLinesAdd,
+  type DisaggregationReason,
+  type DisaggregationReasonCreate,
+  type DisaggregationReasonUpdate,
+  type DisaggregationReportRows,
+  type DisaggregationReportVariant,
+  type DisaggregationTransition,
+  type DisaggregationUpdate,
+} from "./disaggregation.js";
+import {
+  exportFileChunkSchema,
+  exportFileListSchema,
+  exportFileOpenedSchema,
+  exportFileProgressSchema,
+  exportFilesPath,
+  exportSettingsSchema,
+  type ExportFileBegin,
+  type ExportFileChunk,
+  type ExportFileList,
+  type ExportFileOpened,
+  type ExportFileProgress,
+  type ExportFileQuery,
+  type ExportSettings,
+  type ExportSettingsUpdate,
+} from "./export-files.js";
+import {
+  isPackId,
+  officeBoxCardSchema,
+  officePalletCardSchema,
+  officePalletPageSchema,
+  palletListPath,
+  type OfficeBoxCard,
+  type OfficePalletCard,
+  type OfficePalletPage,
+  type PalletListQuery,
+} from "./pack-cards.js";
 import {
   badgeInfoSchema,
   badgeSaltSchema,
@@ -130,6 +178,7 @@ import {
   type ProductUpdate,
   type ShiftClose,
   type ShiftCreate,
+  type ShiftEnter,
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
@@ -148,6 +197,30 @@ import {
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
+import {
+  conflictStatusResponseSchema,
+  conflictsPath,
+  deviceDisplacementsSchema,
+  displacementsPath,
+  officeConflictPageSchema,
+  officeConflictSchema,
+  officeShiftExceptionsSchema,
+  officeShiftExportsSchema,
+  officeScanHistoryPageSchema,
+  officeShiftRejectionsSchema,
+  shiftScansPath,
+  type ConflictQuery,
+  type OfficeScanHistoryPage,
+  type ScanHistoryQuery,
+  type ConflictStatusRequest,
+  type ConflictStatusResponse,
+  type DeviceDisplacements,
+  type OfficeConflict,
+  type OfficeConflictPage,
+  type OfficeShiftExceptions,
+  type OfficeShiftExports,
+  type OfficeShiftRejections,
+} from "./review.js";
 
 /** An SSCC counter's address: its issuer prefix and extension digit (0 box, 1 pallet). */
 export interface SsccCounterKey {
@@ -155,10 +228,32 @@ export interface SsccCounterKey {
   extension: number;
 }
 
-/** A period of production dates, both ends included, `YYYY-MM-DD`. */
+/**
+ * A period of production dates (`from`, `to`) and a period of shift dates
+ * (`plannedFrom`, `plannedTo`), both ends included, `YYYY-MM-DD`; any end may
+ * be left out and the two periods narrow each other.
+ */
 export interface ShiftPeriod {
-  from: string;
-  to: string;
+  from?: string;
+  to?: string;
+  plannedFrom?: string;
+  plannedTo?: string;
+}
+
+/** The query of `GET /v1/office/shifts` for a period; empty for none. */
+export function shiftPeriodQuery(period: ShiftPeriod | undefined): string {
+  if (period === undefined) return "";
+  const parts = (
+    [
+      ["from", period.from],
+      ["to", period.to],
+      ["plannedFrom", period.plannedFrom],
+      ["plannedTo", period.plannedTo],
+    ] as const
+  ).flatMap(([name, value]) =>
+    value === undefined ? [] : [`${name}=${encodeURIComponent(value)}`],
+  );
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
 /**
@@ -277,6 +372,33 @@ export interface HostApi {
   listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
   /** `204`: the export's files are saved; the host writes its `shift.export` audit row (plan ЧЗ). */
   recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
+  /**
+   * Starts the upload of a file the office generated to the host's store (host migration
+   * `0029`); a file of one chunk that carries its bytes is stored by this call. Repeating a
+   * call answers where the upload stands.
+   */
+  beginExportFile: (token: string, begin: ExportFileBegin) => Promise<ExportFileProgress>;
+  /** Chunk `seq` (at most 1 MiB of the file, base64) of an upload, in order. */
+  putExportFileChunk: (
+    token: string,
+    id: string,
+    seq: number,
+    contentBase64: string,
+  ) => Promise<ExportFileProgress>;
+  /** Seals an upload: the host checks the whole against the declared size and SHA-256. */
+  completeExportFile: (token: string, id: string) => Promise<ExportFileProgress>;
+  /** The stored files of a shift or of a card, newest first. */
+  listExportFiles: (token: string, query: ExportFileQuery) => Promise<ExportFileList>;
+  /**
+   * Opens a download: the host checks the stored bytes against their SHA-256 (`export_file_corrupted`
+   * otherwise) and writes the `shift.export.download` audit row; the chunks follow.
+   */
+  openExportFileDownload: (token: string, id: string) => Promise<ExportFileOpened>;
+  getExportFileChunk: (token: string, id: string, seq: number) => Promise<ExportFileChunk>;
+  /** The retention of stored files and what the store holds. */
+  getExportSettings: (token: string) => Promise<ExportSettings>;
+  /** Administrators only. */
+  putExportSettings: (token: string, update: ExportSettingsUpdate) => Promise<ExportSettings>;
   /** What «Состав короба» prints of the box, in one snapshot (plan О-Ф); every office role. */
   getBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
   /**
@@ -285,12 +407,124 @@ export interface HostApi {
    */
   getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
   /**
+   * One page of the code conflicts the facts wrote, newest detection first,
+   * narrowed to the losing shift and to reviewed or not (plan КНФ); every
+   * office role. The code travels as its hash, GTIN and serial only.
+   */
+  listConflicts: (token: string, query: ConflictQuery) => Promise<OfficeConflictPage>;
+  /**
+   * Marks a conflict reviewed and answers it (plan КНФ); administrators and
+   * technologists. A conflict reviewed already answers as it is.
+   */
+  reviewConflict: (token: string, id: string) => Promise<OfficeConflict>;
+  /** A shift's box and pallet exceptions, newest first, up to 500 (plan КНФ); every office role. */
+  listShiftExceptions: (token: string, id: string) => Promise<OfficeShiftExceptions>;
+  /** The shift's records the host refused, newest first, up to 500 (plan КНФ); every office role. */
+  /** The exports of the shift the office saved, newest first (the shift drawer's history). */
+  listShiftExports: (token: string, id: string) => Promise<OfficeShiftExports>;
+  listShiftRejections: (token: string, id: string) => Promise<OfficeShiftRejections>;
+  /**
+   * One page of a shift's scan history, newest first, narrowed by `query`, below the cursor the
+   * page before named; the code only as its GTIN and serial tail. Every office role.
+   */
+  listShiftScans: (
+    token: string,
+    id: string,
+    query: ScanHistoryQuery,
+    cursor: string | null,
+  ) => Promise<OfficeScanHistoryPage>;
+  /**
    * One page of the placements of codes the criteria find, newest scan
    * first («Поиск кодов»); every office role. At least one criterion.
    */
   searchCodes: (token: string, query: CodeSearchQuery) => Promise<OfficeCodePage>;
   /** One code's card with its history; `not_found` for a code the host never saw. */
   getCodeCard: (token: string, codeHash: string) => Promise<OfficeCodeCard>;
+  /** A box's card (plan КРТ); `not_found` for a box the host never saw. Every office role. */
+  getBoxCard: (token: string, id: string) => Promise<OfficeBoxCard>;
+  /** A pallet's card (plan КРТ); `not_found` for a pallet the host never saw. Every office role. */
+  getPalletCard: (token: string, id: string) => Promise<OfficePalletCard>;
+  /** One page of every pallet of the site (plan КРТ); `cursor` from the previous page. */
+  listPallets: (
+    token: string,
+    query: PalletListQuery,
+    cursor: string | null,
+  ) => Promise<OfficePalletPage>;
+  /**
+   * Of the station's records it names (1–200), those whose conflict the office
+   * marked reviewed (plan КНФ), with the device key only; a host before plan
+   * КНФ answers `not_found`.
+   */
+  conflictStatus: (request: ConflictStatusRequest) => Promise<ConflictStatusResponse>;
+  /** What «Акт дезагрегации» prints of the document, in one snapshot (plan ДЗГ-О); every office role. */
+  getDisaggregationReportRows: (
+    token: string,
+    id: string,
+    variant: DisaggregationReportVariant,
+  ) => Promise<DisaggregationReportRows>;
+  /** `204`: the document's ЧЗ file is saved; the host writes its `disaggregation.export` row (plan ДЗГ-О). */
+  recordDisaggregationExport: (
+    token: string,
+    id: string,
+    record: DisaggregationExportRecord,
+  ) => Promise<void>;
+  /** The disaggregation reasons, archived ones included (plan ДЗГ); administrators and technologists. */
+  listDisaggregationReasons: (token: string) => Promise<DisaggregationReason[]>;
+  createDisaggregationReason: (
+    token: string,
+    create: DisaggregationReasonCreate,
+  ) => Promise<DisaggregationReason>;
+  /** The whole reason over its `rev`; `archived: true` archives it. */
+  updateDisaggregationReason: (
+    token: string,
+    id: string,
+    update: DisaggregationReasonUpdate,
+  ) => Promise<DisaggregationReason>;
+  /** Disaggregation documents, newest first, up to 1 000 (plan ДЗГ). */
+  listDisaggregations: (
+    token: string,
+    filter?: DisaggregationFilter,
+  ) => Promise<DisaggregationDocument[]>;
+  getDisaggregation: (token: string, id: string) => Promise<DisaggregationDetail>;
+  /** A new draft numbered `DSG-YY-NNNN`. */
+  createDisaggregation: (
+    token: string,
+    create: DisaggregationCreate,
+  ) => Promise<DisaggregationDetail>;
+  /** The whole header of a draft over its `rev`. */
+  updateDisaggregation: (
+    token: string,
+    id: string,
+    update: DisaggregationUpdate,
+  ) => Promise<DisaggregationDetail>;
+  /** 1–500 lines a request; each gets its status at once. */
+  addDisaggregationLines: (
+    token: string,
+    id: string,
+    add: DisaggregationLinesAdd,
+  ) => Promise<DisaggregationDetail>;
+  /** `DELETE …/lines/{lineId}`: the card without the line. */
+  deleteDisaggregationLine: (
+    token: string,
+    id: string,
+    lineId: string,
+  ) => Promise<DisaggregationDetail>;
+  /** `409 conflict` `invalid_lines`: the fresh statuses are saved, read the card again. */
+  applyDisaggregation: (
+    token: string,
+    id: string,
+    transition: DisaggregationTransition,
+  ) => Promise<DisaggregationDetail>;
+  cancelDisaggregation: (
+    token: string,
+    id: string,
+    transition: DisaggregationTransition,
+  ) => Promise<DisaggregationDetail>;
+  /**
+   * The station's scans an earlier scan elsewhere took the code from, oldest
+   * first after `after` (plan КНФ), with the device key only.
+   */
+  listDisplacements: (after: { at: string; id: string } | null) => Promise<DeviceDisplacements>;
   /**
    * This device's record (`GET /v1/device`) with the site's license (field
    * `license`, plan ЛЦ-2), with the device key only (plan ЛЦ-3). The shell's
@@ -308,9 +542,11 @@ export interface HostApi {
   createDeviceShift: (create: DeviceShiftCreate) => Promise<DeviceShift>;
   /**
    * Opens a planned shift or enters again the active one this station opened;
-   * the answer carries the frozen snapshot.
+   * the answer carries the frozen snapshot. `enter` names what the station
+   * can work (`STATION_SHIFT_ENTER`, protocol 4): the host refuses a
+   * validation shift to a station that does not name `validation-v1`.
    */
-  enterShift: (id: string) => Promise<EnteredShift>;
+  enterShift: (id: string, enter: ShiftEnter) => Promise<EnteredShift>;
   /**
    * A block of SSCC serials for this station; the same `requestId` answers the
    * same block, and the same id with another prefix is `validation_failed` on
@@ -323,6 +559,18 @@ export interface HostApi {
    * `timeout`, and the station decides on its own copy.
    */
   checkCode: (codeHash: string) => Promise<CodeCheck>;
+  /**
+   * A product's photo for the station's copy (beta 3): the device key only,
+   * `photo: null` without one; `not_found` for an unknown product.
+   */
+  getDeviceProductPhoto: (productId: string) => Promise<ProductPhotoState>;
+  /**
+   * The enabled A4 pallet sheets with their layouts, for a warehouse reprint of a pallet's
+   * sheet (beta 3.2): `defaultId` is the sheet the product gets by default (its own, its
+   * category's, the organization's), or only the organization's without a product. The device
+   * key only; `not_found` for an unknown product.
+   */
+  getDevicePalletSheets: (productId?: string) => Promise<PalletSheets>;
   /**
    * What a label is printed again from (plan СКЛ): a unit by its code's hash,
    * a box or a pallet by its SSCC, of any station and any shift of this site.
@@ -346,6 +594,11 @@ export interface HostApi {
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
+  /**
+   * The counts by month for the support bundle (beta 3 feedback); administrators
+   * only, `forbidden` for another role.
+   */
+  getUsageStats: (token: string) => Promise<UsageStats>;
   /**
    * «Сделать копию сейчас»: `202` with the copy running; the host makes it on
    * its own, and the office reads the state again until nothing runs.
@@ -429,7 +682,8 @@ export function createHostApi(client: HostClient): HostApi {
       }),
     putProductPhoto: (token, id, put) =>
       client.request("PUT", `/v1/office/products/${id}/photo`, {
-        body: put,
+        // Only the wire's three fields: the host derives the media type from the bytes.
+        body: { width: put.width, height: put.height, dataBase64: put.dataBase64 },
         officeToken: token,
         schema: productPhotoStateSchema,
       }),
@@ -682,13 +936,10 @@ export function createHostApi(client: HostClient): HostApi {
         schema: cloudImportSummarySchema,
       }),
     listShifts: (token, period) =>
-      client.request(
-        "GET",
-        period === undefined
-          ? "/v1/office/shifts"
-          : `/v1/office/shifts?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`,
-        { officeToken: token, schema: z.array(officeShiftSchema) },
-      ),
+      client.request("GET", `/v1/office/shifts${shiftPeriodQuery(period)}`, {
+        officeToken: token,
+        schema: z.array(officeShiftSchema),
+      }),
     getShift: (token, id) =>
       client.request("GET", `/v1/office/shifts/${id}`, {
         officeToken: token,
@@ -717,8 +968,11 @@ export function createHostApi(client: HostClient): HostApi {
       (await client.request("GET", "/v1/device/shifts", { schema: deviceShiftsSchema })).shifts,
     createDeviceShift: (create) =>
       client.request("POST", "/v1/device/shifts", { body: create, schema: deviceShiftSchema }),
-    enterShift: (id) =>
-      client.request("POST", `/v1/device/shifts/${id}/enter`, { schema: enteredShiftSchema }),
+    enterShift: (id, enter) =>
+      client.request("POST", `/v1/device/shifts/${id}/enter`, {
+        body: enter,
+        schema: enteredShiftSchema,
+      }),
     requestSsccBlock: (request) =>
       client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
     checkCode: (codeHash) =>
@@ -726,6 +980,18 @@ export function createHostApi(client: HostClient): HostApi {
         timeoutMs: CODE_CHECK_TIMEOUT_MS,
         schema: codeCheckSchema,
       }),
+    getDeviceProductPhoto: (productId) =>
+      client.request("GET", `/v1/device/products/${encodeURIComponent(productId)}/photo`, {
+        schema: productPhotoStateSchema,
+      }),
+    getDevicePalletSheets: (productId) =>
+      client.request(
+        "GET",
+        productId === undefined
+          ? "/v1/device/pallet-sheets"
+          : `/v1/device/pallet-sheets?productId=${encodeURIComponent(productId)}`,
+        { schema: palletSheetsSchema },
+      ),
     warehouseLookup: (lookup) =>
       client.request("POST", "/v1/device/warehouse/lookup", {
         body: lookup,
@@ -778,6 +1044,49 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    beginExportFile: (token, begin) =>
+      client.request("POST", "/v1/office/export-files", {
+        body: begin,
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    putExportFileChunk: (token, id, seq, contentBase64) =>
+      client.request("PUT", `/v1/office/export-files/${id}/chunks/${seq}`, {
+        body: { contentBase64 },
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    completeExportFile: (token, id) =>
+      client.request("POST", `/v1/office/export-files/${id}/complete`, {
+        officeToken: token,
+        schema: exportFileProgressSchema,
+      }),
+    listExportFiles: (token, query) =>
+      client.request("GET", exportFilesPath(query), {
+        officeToken: token,
+        schema: exportFileListSchema,
+      }),
+    openExportFileDownload: (token, id) =>
+      client.request("POST", `/v1/office/export-files/${id}/download`, {
+        officeToken: token,
+        schema: exportFileOpenedSchema,
+      }),
+    getExportFileChunk: (token, id, seq) =>
+      client.request("GET", `/v1/office/export-files/${id}/chunks/${seq}`, {
+        officeToken: token,
+        schema: exportFileChunkSchema,
+      }),
+    getExportSettings: (token) =>
+      client.request("GET", "/v1/office/export-files/settings", {
+        officeToken: token,
+        schema: exportSettingsSchema,
+      }),
+    putExportSettings: (token, update) =>
+      client.request("PUT", "/v1/office/export-files/settings", {
+        body: update,
+        officeToken: token,
+        schema: exportSettingsSchema,
+      }),
     getBoxReportRows: (token, id) =>
       client.request("GET", `/v1/office/boxes/${id}/report-data`, {
         officeToken: token,
@@ -788,6 +1097,117 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: palletReportRowsSchema,
       }),
+    listConflicts: (token, query) =>
+      client.request("GET", conflictsPath(query), {
+        officeToken: token,
+        schema: officeConflictPageSchema,
+      }),
+    reviewConflict: (token, id) =>
+      client.request("POST", `/v1/office/conflicts/${id}/review`, {
+        officeToken: token,
+        schema: officeConflictSchema,
+      }),
+    listShiftExceptions: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/exceptions`, {
+        officeToken: token,
+        schema: officeShiftExceptionsSchema,
+      }),
+    listShiftExports: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/exports`, {
+        officeToken: token,
+        schema: officeShiftExportsSchema,
+      }),
+    listShiftRejections: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/rejections`, {
+        officeToken: token,
+        schema: officeShiftRejectionsSchema,
+      }),
+    listShiftScans: (token, id, query, cursor) =>
+      client.request("GET", shiftScansPath(id, query, cursor), {
+        officeToken: token,
+        schema: officeScanHistoryPageSchema,
+      }),
+    conflictStatus: (request) =>
+      client.request("POST", "/v1/device/conflicts/status", {
+        body: request,
+        schema: conflictStatusResponseSchema,
+      }),
+    listDisplacements: (after) =>
+      client.request("GET", displacementsPath(after), { schema: deviceDisplacementsSchema }),
+    listDisaggregationReasons: (token) =>
+      client.request("GET", "/v1/office/disaggregation-reasons", {
+        officeToken: token,
+        schema: z.array(disaggregationReasonSchema),
+      }),
+    createDisaggregationReason: (token, create) =>
+      client.request("POST", "/v1/office/disaggregation-reasons", {
+        body: create,
+        officeToken: token,
+        schema: disaggregationReasonSchema,
+      }),
+    updateDisaggregationReason: (token, id, update) =>
+      client.request("PUT", `/v1/office/disaggregation-reasons/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: disaggregationReasonSchema,
+      }),
+    listDisaggregations: (token, filter) =>
+      client.request("GET", `/v1/office/disaggregation${disaggregationQuery(filter)}`, {
+        officeToken: token,
+        schema: z.array(disaggregationDocumentSchema),
+      }),
+    getDisaggregation: (token, id) =>
+      client.request("GET", `/v1/office/disaggregation/${id}`, {
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    createDisaggregation: (token, create) =>
+      client.request("POST", "/v1/office/disaggregation", {
+        body: create,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    updateDisaggregation: (token, id, update) =>
+      client.request("PUT", `/v1/office/disaggregation/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    addDisaggregationLines: (token, id, add) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/lines`, {
+        body: add,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    deleteDisaggregationLine: (token, id, lineId) =>
+      client.request("DELETE", `/v1/office/disaggregation/${id}/lines/${lineId}`, {
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    applyDisaggregation: (token, id, transition) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/apply`, {
+        body: transition,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    cancelDisaggregation: (token, id, transition) =>
+      client.request("POST", `/v1/office/disaggregation/${id}/cancel`, {
+        body: transition,
+        officeToken: token,
+        schema: disaggregationDetailSchema,
+      }),
+    getDisaggregationReportRows: (token, id, variant) =>
+      client.request("GET", `/v1/office/disaggregation/${id}/report-data?variant=${variant}`, {
+        officeToken: token,
+        schema: disaggregationReportRowsSchema,
+      }),
+    recordDisaggregationExport: async (token, id, record) => {
+      await client.request("POST", `/v1/office/disaggregation/${id}/exports`, {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
     searchCodes: (token, query) =>
       client.request("GET", codeSearchPath(query), {
         officeToken: token,
@@ -802,10 +1222,34 @@ export function createHostApi(client: HostClient): HostApi {
         schema: officeCodeCardSchema,
       });
     },
+    getBoxCard: (token, id) => {
+      if (!isPackId(id)) return Promise.reject(new RangeError("not a box id"));
+      return client.request("GET", `/v1/office/boxes/${id}`, {
+        officeToken: token,
+        schema: officeBoxCardSchema,
+      });
+    },
+    getPalletCard: (token, id) => {
+      if (!isPackId(id)) return Promise.reject(new RangeError("not a pallet id"));
+      return client.request("GET", `/v1/office/pallets/${id}`, {
+        officeToken: token,
+        schema: officePalletCardSchema,
+      });
+    },
+    listPallets: (token, query, cursor) =>
+      client.request("GET", palletListPath(query, cursor), {
+        officeToken: token,
+        schema: officePalletPageSchema,
+      }),
     getBackups: (token) =>
       client.request("GET", "/v1/office/backups", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getUsageStats: (token) =>
+      client.request("GET", "/v1/office/usage-stats", {
+        officeToken: token,
+        schema: usageStatsSchema,
       }),
     startBackup: (token) =>
       client.request("POST", "/v1/office/backups", {

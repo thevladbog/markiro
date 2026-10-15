@@ -47,18 +47,27 @@ export function recordLabel(
 
 /** Why a planned shift will not open on a station (`shift.open` refuses it). */
 export type OpenBlocker =
-  "product_archived" | "product_draft" | "template_unfit" | "pallet_template_unfit";
+  | "product_archived"
+  | "product_draft"
+  | "template_unfit"
+  | "pallet_template_unfit"
+  | "duplicate_template_unfit";
 
 /**
  * Why a planned shift would be refused when a station opens it, by the lists
  * the office read: its product archived or a draft (`product_inactive`), its
  * box template switched off, narrowed or no longer of the product's group
  * (`template_not_fit`), its pallet template so too (`pallet_template_not_fit`,
- * plan О-Ф). `null` when it opens, or while a list it needs is not loaded or
- * lacks the record: then nothing is claimed.
+ * plan О-Ф), the template of the duplicate it prints so too
+ * (`duplicate_template_not_fit`, plan РЕЖ part B), in the host's order.
+ * `null` when it opens, or while a list it needs is not loaded or lacks the
+ * record: then nothing is claimed.
  */
 export function openBlocker(
-  shift: Pick<OfficeShift, "status" | "productId" | "boxTemplateId" | "palletTemplateId">,
+  shift: Pick<
+    OfficeShift,
+    "status" | "productId" | "boxTemplateId" | "palletTemplateId" | "validationPrint"
+  >,
   products: readonly OfficeProduct[] | undefined,
   templates: readonly LabelTemplateSummary[] | undefined,
 ): OpenBlocker | null {
@@ -75,12 +84,24 @@ export function openBlocker(
   });
   if (!fits) return "template_unfit";
   const pallet = templates?.find((each) => each.id === shift.palletTemplateId);
-  if (pallet === undefined) return null;
-  const palletFits = templateFitsSlot(pallet, {
-    purpose: "pallet",
+  if (
+    pallet !== undefined &&
+    !templateFitsSlot(pallet, {
+      purpose: "pallet",
+      chzProductGroupCode: product.chzProductGroupCode,
+    })
+  ) {
+    return "pallet_template_unfit";
+  }
+  const print = shift.validationPrint;
+  if (print?.mode !== "duplicate_dm") return null;
+  const duplicate = templates?.find((each) => each.id === print.templateId);
+  if (duplicate === undefined) return null;
+  const duplicateFits = templateFitsSlot(duplicate, {
+    purpose: "product_duplicate",
     chzProductGroupCode: product.chzProductGroupCode,
   });
-  return palletFits ? null : "pallet_template_unfit";
+  return duplicateFits ? null : "duplicate_template_unfit";
 }
 
 /** What the filters of the list hold. */
@@ -134,4 +155,87 @@ export function periodState(from: string, to: string): PeriodState {
   if (days < 0) return { kind: "reversed" };
   if (days + 1 > MAX_PERIOD_DAYS) return { kind: "too_long" };
   return { kind: "ready", from, to };
+}
+
+/** The columns of the list the office sorts by; the others (mode, marks, actions) have no order worth keeping. */
+export type ShiftSortKey =
+  | "number"
+  | "productionDate"
+  | "plannedDate"
+  | "line"
+  | "product"
+  | "plannedQty"
+  | "status"
+  | "output";
+export type ShiftSortDir = "asc" | "desc";
+
+const STATUS_ORDER: Record<ShiftStatus, number> = { planned: 0, active: 1, closed: 2 };
+
+/** What a shift output (boxes aside): a validation shift's accepted codes, else the codes in closed boxes. */
+export function shiftUnits(shift: Pick<OfficeShift, "mode" | "totals">): number {
+  return shift.mode === "validation" ? shift.totals.acceptedUnits : shift.totals.unitsInClosedBoxes;
+}
+
+/**
+ * The shifts in the order of a column: a copy, stable (equal keys keep the host's order).
+ * `names` gives the line's and the product's own names; numbers compare as numbers
+ * («OCT26-010» after «OCT26-004»), a missing plan sorts last in both directions.
+ */
+export function sortShifts(
+  shifts: readonly OfficeShift[],
+  key: ShiftSortKey,
+  dir: ShiftSortDir,
+  names: { line: (shift: OfficeShift) => string; product: (shift: OfficeShift) => string },
+): OfficeShift[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const text = (a: string, b: string) => a.localeCompare(b, "ru", { numeric: true });
+  const number = (a: number, b: number) => a - b;
+  const compare = (a: OfficeShift, b: OfficeShift): number => {
+    switch (key) {
+      case "number":
+        return sign * text(a.number, b.number);
+      case "productionDate":
+        return sign * text(a.productionDate, b.productionDate);
+      case "plannedDate":
+        return sign * text(a.plannedDate, b.plannedDate);
+      case "line":
+        return sign * text(names.line(a), names.line(b));
+      case "product":
+        return sign * text(names.product(a), names.product(b));
+      case "status":
+        return sign * number(STATUS_ORDER[a.status], STATUS_ORDER[b.status]);
+      case "output":
+        return sign * number(shiftUnits(a), shiftUnits(b));
+      case "plannedQty": {
+        // A shift without a plan goes last whichever way the column runs.
+        if (a.plannedQty === null || b.plannedQty === null) {
+          return a.plannedQty === b.plannedQty ? 0 : a.plannedQty === null ? 1 : -1;
+        }
+        return sign * number(a.plannedQty, b.plannedQty);
+      }
+    }
+  };
+  return shifts
+    .map((shift, index) => ({ shift, index }))
+    .sort((a, b) => compare(a.shift, b.shift) || a.index - b.index)
+    .map(({ shift }) => shift);
+}
+
+/** The totals row of the list: what the shifts it keeps put in closed boxes and on closed pallets. */
+export interface ShiftListTotals {
+  shifts: number;
+  units: number;
+  boxes: number;
+  pallets: number;
+}
+
+export function totalShifts(shifts: readonly OfficeShift[]): ShiftListTotals {
+  const sum: ShiftListTotals = { shifts: shifts.length, units: 0, boxes: 0, pallets: 0 };
+  for (const shift of shifts) {
+    if (shift.status === "planned") continue;
+    sum.units += shiftUnits(shift);
+    sum.boxes += shift.totals.closedBoxes;
+    sum.pallets += shift.totals.closedPallets;
+  }
+  return sum;
 }

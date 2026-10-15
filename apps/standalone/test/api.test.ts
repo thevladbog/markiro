@@ -5,6 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/api.js";
 import { knownBlocksRequestSchema } from "../src/host/backups.js";
 import {
+  exportFileBeginSchema,
+  exportFileChunkPutSchema,
+  exportSettingsUpdateSchema,
+} from "../src/host/export-files.js";
+import {
+  disaggregationCreateSchema,
+  disaggregationExportRecordSchema,
+  disaggregationLinesAddSchema,
+  disaggregationReasonCreateSchema,
+  disaggregationReasonUpdateSchema,
+  disaggregationUpdateSchema,
+} from "../src/host/disaggregation.js";
+import {
   createTauriHostClient,
   HostError,
   type HostClient,
@@ -37,6 +50,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftEnterSchema,
   shiftExportRecordSchema,
   shiftUpdateSchema,
   ssccBlockRequestSchema,
@@ -125,6 +139,27 @@ const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
 const UPDATE_STARTED = updateStartedSchema.parse(fixture("update-started.json"));
+const DOCUMENT_ID = "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c";
+const DISAGGREGATION_EXPORT_RECORD = disaggregationExportRecordSchema.parse(
+  fixture("disaggregation-export-record.json"),
+);
+const EXPORT_FILE_BEGIN = exportFileBeginSchema.parse(fixture("export-file-begin.json"));
+const EXPORT_FILE_CHUNK_PUT = exportFileChunkPutSchema.parse(fixture("export-file-chunk-put.json"));
+const EXPORT_SETTINGS_UPDATE = exportSettingsUpdateSchema.parse(
+  fixture("export-settings-update.json"),
+);
+const EXPORT_FILE_ID = "7a1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8";
+const REASON_ID = "d15a0000-0000-4000-8000-000000000003";
+const DOCUMENT_LINE_ID = "c0000000-0000-4000-8000-000000000004";
+const REASON_CREATE = disaggregationReasonCreateSchema.parse(
+  fixture("disaggregation-reason-create.json"),
+);
+const REASON_UPDATE = disaggregationReasonUpdateSchema.parse(
+  fixture("disaggregation-reason-update.json"),
+);
+const DOCUMENT_CREATE = disaggregationCreateSchema.parse(fixture("disaggregation-create.json"));
+const DOCUMENT_UPDATE = disaggregationUpdateSchema.parse(fixture("disaggregation-update.json"));
+const LINES_ADD = disaggregationLinesAddSchema.parse(fixture("disaggregation-lines-add.json"));
 
 type Case = [
   name: string,
@@ -554,6 +589,84 @@ const CASES: Case[] = [
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
   ],
   [
+    "beginExportFile",
+    fixture("export-file-progress.json"),
+    (api) => api.beginExportFile(TOKEN, EXPORT_FILE_BEGIN),
+    { method: "POST", path: "/v1/office/export-files", body: EXPORT_FILE_BEGIN },
+  ],
+  [
+    "putExportFileChunk",
+    fixture("export-file-progress.json"),
+    (api) => api.putExportFileChunk(TOKEN, EXPORT_FILE_ID, 2, EXPORT_FILE_CHUNK_PUT.contentBase64),
+    {
+      method: "PUT",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/chunks/2`,
+      body: EXPORT_FILE_CHUNK_PUT,
+    },
+  ],
+  [
+    "completeExportFile",
+    fixture("export-file-progress.json"),
+    (api) => api.completeExportFile(TOKEN, EXPORT_FILE_ID),
+    {
+      method: "POST",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/complete`,
+      body: undefined,
+    },
+  ],
+  [
+    "listExportFiles of a shift",
+    fixture("export-file-list.json"),
+    (api) => api.listExportFiles(TOKEN, { shiftId: SHIFT_ID, kind: "form" }),
+    {
+      method: "GET",
+      path: `/v1/office/export-files?shiftId=${SHIFT_ID}&kind=form`,
+      body: undefined,
+    },
+  ],
+  [
+    "listExportFiles of a card",
+    fixture("export-file-list.json"),
+    (api) => api.listExportFiles(TOKEN, { targetType: "box", targetId: BOX_ID }),
+    {
+      method: "GET",
+      path: `/v1/office/export-files?targetType=box&targetId=${BOX_ID}`,
+      body: undefined,
+    },
+  ],
+  [
+    "openExportFileDownload",
+    fixture("export-file-opened.json"),
+    (api) => api.openExportFileDownload(TOKEN, EXPORT_FILE_ID),
+    {
+      method: "POST",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/download`,
+      body: undefined,
+    },
+  ],
+  [
+    "getExportFileChunk",
+    fixture("export-file-chunk.json"),
+    (api) => api.getExportFileChunk(TOKEN, EXPORT_FILE_ID, 0),
+    {
+      method: "GET",
+      path: `/v1/office/export-files/${EXPORT_FILE_ID}/chunks/0`,
+      body: undefined,
+    },
+  ],
+  [
+    "getExportSettings",
+    fixture("export-settings.json"),
+    (api) => api.getExportSettings(TOKEN),
+    { method: "GET", path: "/v1/office/export-files/settings", body: undefined },
+  ],
+  [
+    "putExportSettings",
+    fixture("export-settings.json"),
+    (api) => api.putExportSettings(TOKEN, EXPORT_SETTINGS_UPDATE),
+    { method: "PUT", path: "/v1/office/export-files/settings", body: EXPORT_SETTINGS_UPDATE },
+  ],
+  [
     "recordUpdateStarted",
     null,
     (api) => api.recordUpdateStarted(TOKEN, UPDATE_STARTED),
@@ -583,6 +696,122 @@ const CASES: Case[] = [
       method: "PUT",
       path: `/v1/office/users/${USER_ID}/password`,
       body: { password: "a new long password" },
+    },
+  ],
+  [
+    "listDisaggregationReasons",
+    [fixture("disaggregation-reason.json")],
+    (api) => api.listDisaggregationReasons(TOKEN),
+    { method: "GET", path: "/v1/office/disaggregation-reasons", body: undefined },
+  ],
+  [
+    "createDisaggregationReason",
+    fixture("disaggregation-reason.json"),
+    (api) => api.createDisaggregationReason(TOKEN, REASON_CREATE),
+    { method: "POST", path: "/v1/office/disaggregation-reasons", body: REASON_CREATE },
+  ],
+  [
+    "updateDisaggregationReason",
+    fixture("disaggregation-reason.json"),
+    (api) => api.updateDisaggregationReason(TOKEN, REASON_ID, REASON_UPDATE),
+    {
+      method: "PUT",
+      path: `/v1/office/disaggregation-reasons/${REASON_ID}`,
+      body: REASON_UPDATE,
+    },
+  ],
+  [
+    "listDisaggregations",
+    [fixture("disaggregation-document.json")],
+    (api) => api.listDisaggregations(TOKEN),
+    { method: "GET", path: "/v1/office/disaggregation", body: undefined },
+  ],
+  [
+    "listDisaggregations with filters",
+    [fixture("disaggregation-document.json")],
+    (api) => api.listDisaggregations(TOKEN, { status: "applied", q: "DSG-26" }),
+    { method: "GET", path: "/v1/office/disaggregation?status=applied&q=DSG-26", body: undefined },
+  ],
+  [
+    "getDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.getDisaggregation(TOKEN, DOCUMENT_ID),
+    { method: "GET", path: `/v1/office/disaggregation/${DOCUMENT_ID}`, body: undefined },
+  ],
+  [
+    "createDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.createDisaggregation(TOKEN, DOCUMENT_CREATE),
+    { method: "POST", path: "/v1/office/disaggregation", body: DOCUMENT_CREATE },
+  ],
+  [
+    "updateDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.updateDisaggregation(TOKEN, DOCUMENT_ID, DOCUMENT_UPDATE),
+    {
+      method: "PUT",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}`,
+      body: DOCUMENT_UPDATE,
+    },
+  ],
+  [
+    "addDisaggregationLines",
+    fixture("disaggregation-detail.json"),
+    (api) => api.addDisaggregationLines(TOKEN, DOCUMENT_ID, LINES_ADD),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/lines`,
+      body: LINES_ADD,
+    },
+  ],
+  [
+    "deleteDisaggregationLine",
+    fixture("disaggregation-detail.json"),
+    (api) => api.deleteDisaggregationLine(TOKEN, DOCUMENT_ID, DOCUMENT_LINE_ID),
+    {
+      method: "DELETE",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/lines/${DOCUMENT_LINE_ID}`,
+      body: undefined,
+    },
+  ],
+  [
+    "applyDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.applyDisaggregation(TOKEN, DOCUMENT_ID, { expectedRev: 41 }),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/apply`,
+      body: { expectedRev: 41 },
+    },
+  ],
+  [
+    "cancelDisaggregation",
+    fixture("disaggregation-detail.json"),
+    (api) => api.cancelDisaggregation(TOKEN, DOCUMENT_ID, { expectedRev: 41 }),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/cancel`,
+      body: { expectedRev: 41 },
+    },
+  ],
+  [
+    "getDisaggregationReportRows",
+    fixture("disaggregation-report-rows-full.json"),
+    (api) => api.getDisaggregationReportRows(TOKEN, DOCUMENT_ID, "full"),
+    {
+      method: "GET",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/report-data?variant=full`,
+      body: undefined,
+    },
+  ],
+  [
+    "recordDisaggregationExport",
+    null,
+    (api) => api.recordDisaggregationExport(TOKEN, DOCUMENT_ID, DISAGGREGATION_EXPORT_RECORD),
+    {
+      method: "POST",
+      path: `/v1/office/disaggregation/${DOCUMENT_ID}/exports`,
+      body: DISAGGREGATION_EXPORT_RECORD,
     },
   ],
 ];
@@ -757,6 +986,7 @@ describe("HostApi device shifts", () => {
   const list = fixture("device-shifts.json");
   const entered = fixture("device-shift-entered.json");
   const CREATE = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+  const ENTER = shiftEnterSchema.parse(fixture("shift-enter.json"));
 
   it("reads, creates and enters shifts with the device key only, no office session", async () => {
     const reading = recording(list);
@@ -769,7 +999,7 @@ describe("HostApi device shifts", () => {
       number: "OCT26-005/S",
     });
     const entering = recording(entered);
-    await expect(entering.api.enterShift(SHIFT_ID)).resolves.toMatchObject({
+    await expect(entering.api.enterShift(SHIFT_ID, ENTER)).resolves.toMatchObject({
       status: "active",
       snapshot: { issuerPrefix: "460068200" },
     });
@@ -779,7 +1009,7 @@ describe("HostApi device shifts", () => {
       {
         method: "POST",
         path: `/v1/device/shifts/${SHIFT_ID}/enter`,
-        body: undefined,
+        body: ENTER,
         officeToken: undefined,
       },
     ]);
@@ -794,7 +1024,7 @@ describe("HostApi device shifts", () => {
     ).rejects.toThrow();
     const withoutSnapshot = { ...(entered as Record<string, unknown>) };
     delete withoutSnapshot["snapshot"];
-    await expect(recording(withoutSnapshot).api.enterShift(SHIFT_ID)).rejects.toThrow();
+    await expect(recording(withoutSnapshot).api.enterShift(SHIFT_ID, ENTER)).rejects.toThrow();
     await expect(recording(withoutSnapshot).api.createDeviceShift(CREATE)).resolves.toMatchObject({
       id: SHIFT_ID,
     });
@@ -832,11 +1062,20 @@ describe("HostApi device shifts", () => {
       officeToken: null,
     });
     const entering = overShell(200, entered);
-    await entering.api.enterShift(SHIFT_ID);
+    await entering.api.enterShift(SHIFT_ID, ENTER);
     expect(entering.call).toHaveBeenCalledWith("host_request", {
       method: "POST",
       path: `/v1/device/shifts/${SHIFT_ID}/enter`,
-      body: null,
+      body: ENTER,
+      officeToken: null,
+    });
+    // The body goes as the caller names it: an entry naming nothing is `{ supports: [] }`.
+    const naming = overShell(200, entered);
+    await naming.api.enterShift(SHIFT_ID, { supports: [] });
+    expect(naming.call).toHaveBeenCalledWith("host_request", {
+      method: "POST",
+      path: `/v1/device/shifts/${SHIFT_ID}/enter`,
+      body: { supports: [] },
       officeToken: null,
     });
   });
@@ -856,7 +1095,7 @@ describe("HostApi device shifts", () => {
           : fixture(file);
       const { api } = overShell(status, body);
       const error: unknown = await (
-        what === "entering" ? api.enterShift(SHIFT_ID) : api.createDeviceShift(CREATE)
+        what === "entering" ? api.enterShift(SHIFT_ID, ENTER) : api.createDeviceShift(CREATE)
       ).then(
         () => undefined,
         (caught: unknown) => caught,
@@ -885,7 +1124,7 @@ describe("HostApi device shifts", () => {
       kind: "transport",
       code: "unreachable",
     });
-    await expect(lost.enterShift(SHIFT_ID)).rejects.toMatchObject({ code: "unreachable" });
+    await expect(lost.enterShift(SHIFT_ID, ENTER)).rejects.toMatchObject({ code: "unreachable" });
     await expect(lost.createDeviceShift(CREATE)).rejects.toMatchObject({ code: "unreachable" });
   });
 
@@ -895,7 +1134,9 @@ describe("HostApi device shifts", () => {
     await expect(fake.createDeviceShift(CREATE)).rejects.toThrow(
       "unexpected HostApi.createDeviceShift call",
     );
-    await expect(fake.enterShift(SHIFT_ID)).rejects.toThrow("unexpected HostApi.enterShift call");
+    await expect(fake.enterShift(SHIFT_ID, ENTER)).rejects.toThrow(
+      "unexpected HostApi.enterShift call",
+    );
     // A test that stubs the list gets its own answer, not the empty one.
     const shifts = await recording(list).api.getDeviceShifts();
     const stubbed = fakeHostApi({ getDeviceShifts: vi.fn(async () => shifts) });
@@ -976,6 +1217,29 @@ describe("HostApi floor work", () => {
         officeToken: undefined,
       },
     ]);
+  });
+
+  it("lists the A4 sheets for a warehouse reprint, with the product named in the query and the device key only", async () => {
+    const all = recording(fixture("pallet-sheets.json"));
+    await expect(all.api.getDevicePalletSheets()).resolves.toEqual(fixture("pallet-sheets.json"));
+    const product = "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b";
+    const named = recording(fixture("pallet-sheets.json"));
+    await named.api.getDevicePalletSheets(product);
+    expect([...all.sent, ...named.sent]).toEqual([
+      {
+        method: "GET",
+        path: "/v1/device/pallet-sheets",
+        body: undefined,
+        officeToken: undefined,
+      },
+      {
+        method: "GET",
+        path: `/v1/device/pallet-sheets?productId=${product}`,
+        body: undefined,
+        officeToken: undefined,
+      },
+    ]);
+    await expect(recording({ sheets: "none" }).api.getDevicePalletSheets()).rejects.toThrow();
   });
 
   it("refuses a warehouse answer of another shape", async () => {

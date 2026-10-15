@@ -23,6 +23,7 @@ import {
   Pager,
   RadioGroup,
   RowActions,
+  RowActionMenu,
   Select,
   StatusChip,
   Table,
@@ -595,6 +596,17 @@ describe("Select", () => {
     expect(getComputedStyle(optionText!).whiteSpace).toBe("nowrap");
   });
 
+  it("keeps the full text of a long value as a tooltip of the closed control and its items", async () => {
+    const user = userEvent.setup();
+    const longLabel = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    render(<Select label="Группа" options={[{ value: "15", label: longLabel }]} value="15" />);
+
+    const trigger = screen.getByRole("combobox", { name: "Группа" });
+    expect(trigger.getAttribute("title")).toBe(longLabel);
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: longLabel }).getAttribute("title")).toBe(longLabel);
+  });
+
   it("selects the next enabled option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -951,6 +963,41 @@ describe("shared control styles", () => {
     expect(document.getElementById(select.getAttribute("aria-describedby")!)?.textContent).toBe(
       "Unavailable",
     );
+  });
+});
+
+describe("Select at the floor size with `custom`", () => {
+  it("renders the product's own list in touch dimensions, never a native select", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const { container } = render(
+      <Select
+        custom
+        searchable
+        size="floor"
+        label="Port"
+        options={[
+          { value: "", label: "Choose" },
+          { value: "COM3", label: "COM3" },
+          { value: "COM7", label: "COM7" },
+        ]}
+        value=""
+        onValueChange={onValueChange}
+      />,
+    );
+
+    expect(container.querySelector("select")).toBeNull();
+    const trigger = screen.getByRole("combobox", { name: "Port" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.style.height).toBe("var(--control-floor)");
+    expect(trigger.style.font).toBe("var(--floor-body)");
+    expect(screen.getByText("Port").style.font).toBe("var(--floor-body-strong)");
+
+    await user.click(trigger);
+    const option = await screen.findByRole("option", { name: "COM7" });
+    expect(option.style.minHeight).toBe("var(--control-floor)");
+    await user.click(option);
+    expect(onValueChange).toHaveBeenCalledWith("COM7");
   });
 });
 
@@ -1477,6 +1524,57 @@ describe("геометрия тега", () => {
 });
 
 describe("Table", () => {
+  it("sorts by the keyboard from a sortable header, which says its order, and leaves a control inside a clickable row alone", () => {
+    const onSort = vi.fn();
+    const onRowClick = vi.fn();
+    render(
+      <Table
+        columns={[
+          { key: "n", title: "Номер", sortable: true },
+          { key: "act", title: "Действие", render: () => <button type="button">Открыть</button> },
+        ]}
+        rows={[{ n: "1" }]}
+        sortKey="n"
+        sortDir="desc"
+        onSort={onSort}
+        onRowClick={onRowClick}
+      />,
+    );
+    const header = screen.getByRole("columnheader", { name: "Номер" });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    expect(screen.getByRole("columnheader", { name: "Действие" }).hasAttribute("tabindex")).toBe(
+      false,
+    );
+    fireEvent.keyDown(header, { key: "Enter" });
+    fireEvent.keyDown(header, { key: " " });
+    expect(onSort).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("cell", { name: "1" }));
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("pins a column to the right edge of the scrolling table, heading and cells alike", () => {
+    render(
+      <Table
+        columns={[
+          { key: "name", title: "Название" },
+          { key: "actions", title: "Действия", stickyEnd: true },
+        ]}
+        rows={[{ name: "Линия 1", actions: "Изменить" }]}
+      />,
+    );
+
+    for (const element of [
+      screen.getByRole("columnheader", { name: "Действия" }),
+      screen.getByRole("cell", { name: "Изменить" }),
+    ]) {
+      expect(element.style.position).toBe("sticky");
+      expect(element.style.right).toBe("0px");
+    }
+    expect(screen.getByRole("cell", { name: "Линия 1" }).style.position).toBe("");
+  });
+
   it("holds a column at its minimum width, heading and cells alike", () => {
     render(
       <Table
@@ -1611,5 +1709,57 @@ describe("инвариант словаря фаз", () => {
     for (const phase of PHASES) {
       expect(allowed.has(PHASE_TONE[phase])).toBe(true);
     }
+  });
+});
+
+describe("RowActionMenu", () => {
+  function menu(onSelect = vi.fn()) {
+    render(
+      <RowActionMenu
+        label="Действия: Иван"
+        items={[
+          { key: "pin", label: "Сменить PIN", ariaLabel: "Сменить PIN оператора Иван", onSelect },
+          { key: "off", label: "Выключить", destructive: true, onSelect: vi.fn() },
+        ]}
+      />,
+    );
+    return onSelect;
+  }
+
+  it("opens a labelled menu with the actions as items, the destructive one set apart", async () => {
+    const user = userEvent.setup();
+    menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await user.click(trigger);
+    expect(screen.getByRole("menu", { name: "Действия: Иван" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Сменить PIN оператора Иван" })).toBeTruthy();
+    const destructive = screen.getByRole("menuitem", { name: "Выключить" });
+    expect(destructive.getAttribute("data-destructive")).toBe("true");
+    expect(screen.getByRole("separator")).toBeTruthy();
+  });
+
+  it("is keyboard operable: arrows move, Enter chooses and closes, Escape returns to the button", async () => {
+    const user = userEvent.setup();
+    const onSelect = menu();
+    const trigger = screen.getByRole("button", { name: "Действия: Иван" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const first = await screen.findByRole("menuitem", { name: "Сменить PIN оператора Иван" });
+    await waitFor(() => expect(document.activeElement).toBe(first));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Выключить" }));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(first);
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    await user.click(trigger);
+    await screen.findByRole("menu");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

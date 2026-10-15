@@ -251,6 +251,7 @@ function floor(boot: Boot, host: FakeHost, link: { online: boolean }, now: () =>
     local: boot.executor,
     pairing: PAIRING,
     issuerPrefix: PREFIX,
+    mode: "aggregation",
     online: () => link.online,
     requestBlock: host.requestBlock,
     onHostError: () => undefined,

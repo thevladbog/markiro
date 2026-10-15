@@ -12,6 +12,7 @@ use std::future::Future;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
+use markiro_proto::review::{OfficeShiftExport, OfficeShiftExports, SHIFT_EXPORT_HISTORY_LIMIT};
 use markiro_proto::{
     ExportBox, ExportCode, ExportItem, ExportOrganization, ExportPallet, ExportShift,
     ShiftExportRecord, ShiftExportRows, ShiftStatus,
@@ -23,6 +24,7 @@ use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::begin_write;
 use crate::error::{ApiError, ApiJson, ApiPath};
+use crate::routes::office_boxes::require_shift;
 use crate::server::AppState;
 use crate::shifts;
 use crate::validate;
@@ -111,6 +113,81 @@ pub async fn export_source(
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("no such shift"))
+}
+
+/// The shift's saved exports, newest first; ?1 the shift, ?2 the limit. The
+/// audit trail keeps each export's record (`record_export`), `audit_log_target`
+/// (`0027`) finds them by the shift.
+pub const EXPORT_HISTORY_SQL: &str = "SELECT a.id, a.at, u.name AS user_name, a.details \
+     FROM audit_log a LEFT JOIN office_users u ON a.actor_kind = 'office_user' AND u.id = a.actor_id \
+     WHERE a.target_id = ?1 AND a.action = 'shift.export' AND a.result = 'ok' \
+     ORDER BY a.at DESC, a.id DESC LIMIT ?2";
+
+#[derive(sqlx::FromRow)]
+struct HistoryRow {
+    id: i64,
+    at: String,
+    user_name: Option<String>,
+    details: String,
+}
+
+/// `GET /v1/office/shifts/{id}/exports`: the history of the shift's saved
+/// exports, every office role; an unknown shift is `not_found`.
+pub async fn list_exports(
+    State(state): State<AppState>,
+    _context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<OfficeShiftExports>, ApiError> {
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let read = async {
+        require_shift(&mut tx, &id).await?;
+        let rows = sqlx::query_as::<_, HistoryRow>(EXPORT_HISTORY_SQL)
+            .bind(&id)
+            .bind(i64::from(SHIFT_EXPORT_HISTORY_LIMIT))
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        // The files each export stored on the host (migration `0029`), by the
+        // export's `documentId`; an export from before they were stored has none.
+        let batches = rows
+            .iter()
+            .filter_map(|row| {
+                serde_json::from_str::<ShiftExportRecord>(&row.details)
+                    .ok()
+                    .map(|record| record.document_id)
+            })
+            .collect::<Vec<_>>();
+        let files =
+            crate::routes::office_export_files::files_of_batches(&mut tx, &id, &batches).await?;
+        Ok::<_, ApiError>((rows, files))
+    }
+    .await;
+    tx.rollback().await.map_err(ApiError::internal)?;
+    let (rows, files) = read?;
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            let record: ShiftExportRecord =
+                serde_json::from_str(&row.details).map_err(ApiError::internal)?;
+            Ok(OfficeShiftExport {
+                files: files.get(&record.document_id).cloned().unwrap_or_default(),
+                id: row.id,
+                recorded_at: row.at,
+                user_name: row.user_name,
+                format_id: record.format_id,
+                format_version: record.format_version,
+                max_lines: record.max_lines,
+                pallet_id: record.pallet_id,
+                document_id: record.document_id,
+                part_count: record.part_count,
+                code_count: record.code_count,
+                box_count: record.box_count,
+                pallet_count: record.pallet_count,
+                open_pallet_suppressed_box_count: record.open_pallet_suppressed_box_count,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+    Ok(Json(OfficeShiftExports { items }))
 }
 
 /// The six reads of a shift's export source in one plain deferred

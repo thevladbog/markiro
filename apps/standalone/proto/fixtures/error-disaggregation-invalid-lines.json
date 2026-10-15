@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "some lines of the document are not ok",
+    "details": {
+      "constraint": "invalid_lines",
+      "invalidLines": 4
+    }
+  }
+}

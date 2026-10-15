@@ -4281,7 +4281,8 @@
       "chzIntegration": "Честный знак и Национальный каталог",
       "inventory": "Инвентаризация",
       "commerceMl": "CommerceML",
-      "handheld": "ТСД"
+      "handheld": "ТСД",
+      "customLogo": "Свой логотип на печатных формах"
     },
     "operationsLabels": {
       "nk_lookup_v1": "НК: поиск товара",

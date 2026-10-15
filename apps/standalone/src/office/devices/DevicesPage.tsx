@@ -213,6 +213,7 @@ export function DevicesPage() {
       // A revoked device is a dead record: its key is refused for good and a
       // new pairing makes a new device, so it offers nothing to change.
       key: "actions",
+      stickyEnd: true,
       title: t("office.devices.table.actions"),
       render: (device) =>
         device.revokedAt === null ? (

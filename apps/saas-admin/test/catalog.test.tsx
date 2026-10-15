@@ -35,6 +35,7 @@ async function chooseP1Defaults(user: ReturnType<typeof userEvent.setup>) {
     "Инвентаризация",
     "CommerceML",
     "ТСД",
+    "Свой логотип на печатных формах",
   ]) {
     const combobox = screen.queryByRole("combobox", { name: label });
     if (combobox) {
@@ -325,15 +326,18 @@ describe("commercial catalog", () => {
       "Инвентаризация",
       "CommerceML",
       "ТСД",
+      "Свой логотип на печатных формах",
     ]) {
       await choose(label, "Не включено");
     }
+    // Custom branding is a plan feature like the other modules.
+    await choose("Свой логотип на печатных формах", "Включено");
     await user.click(form.getByRole("button", { name: "Создать позицию" }));
     expect(api.createCalls()[0]?.body).toMatchObject({
       billingPeriod: "year",
       unit: "year",
       unitPrice: "69000.00",
-      plan: { maxKiosks: 0, maxLines: 2, maxStations: null },
+      plan: { maxKiosks: 0, maxLines: 2, maxStations: null, customLogoEnabled: true },
     });
   });
 
@@ -1019,6 +1023,7 @@ describe("commercial catalog", () => {
             inventoryEnabled: false,
             commerceMlEnabled: false,
             handheldEnabled: false,
+            customLogoEnabled: false,
             demoDurationDays: 14,
             labelEditorEnabled: true,
             publicApiEnabled: false,
@@ -1199,6 +1204,7 @@ it("shows unmapped new module facts when a legacy published plan is read or clon
       inventoryEnabled: null,
       commerceMlEnabled: null,
       handheldEnabled: null,
+      customLogoEnabled: null,
     },
   };
   installCatalogApi({ items: [legacy] });
@@ -1218,4 +1224,6 @@ it("offers translated new module add-on effects", async () => {
   await user.click(screen.getByRole("combobox", { name: "Тип эффекта 1" }));
   expect(screen.getByRole("option", { name: "Честный знак и Национальный каталог" })).toBeDefined();
   expect(screen.getByRole("option", { name: "ТСД" })).toBeDefined();
+  // Custom branding is grantable as an add-on, too.
+  expect(screen.getByRole("option", { name: "Свой логотип на печатных формах" })).toBeDefined();
 });

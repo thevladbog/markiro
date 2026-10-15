@@ -34,9 +34,17 @@ export function machineSscc(sscc: string | null): string | null {
   return sscc === null ? null : `00${sscc}`;
 }
 
-/** The organization as the forms name it: the standalone has no logo (pilot question П15). */
-function reportOrg(organization: { name: string; inn: string | null }): ReportOrg {
-  return { name: organization.name, inn: organization.inn, logo: null };
+/**
+ * The organization as the forms name it. `logo` is the organization's own
+ * print logo as a PNG data URL when the license allows custom branding and
+ * the organization has uploaded one (`office/branding.ts`); `null` leaves
+ * the Markiro logo, as the cloud's forms print it without one.
+ */
+function reportOrg(
+  organization: { name: string; inn: string | null },
+  logo: string | null,
+): ReportOrg {
+  return { name: organization.name, inn: organization.inn, logo };
 }
 
 /** A box's or a pallet's state, as the cloud's loaders derive it. */
@@ -54,12 +62,12 @@ function at(value: string | null): Date | null {
 }
 
 /** «Состав короба» of one box (`CodeSearchService.boxReportData`). */
-export function boxReportData(rows: BoxReportRows): BoxReportData {
+export function boxReportData(rows: BoxReportRows, logo: string | null = null): BoxReportData {
   return {
     sscc: machineSscc(rows.sscc),
     status: lifecycle(rows.closedAt, rows.disassembledAt),
     productName: rows.productName,
-    org: reportOrg(rows.organization),
+    org: reportOrg(rows.organization, logo),
     openedAt: at(rows.openedAt),
     closedAt: at(rows.closedAt),
     disassembledAt: at(rows.disassembledAt),
@@ -79,6 +87,7 @@ export function boxReportData(rows: BoxReportRows): BoxReportData {
 export function palletReportData(
   rows: PalletReportRows,
   palletId: string,
+  logo: string | null = null,
 ): PalletReportData | null {
   const pallet = rows.pallets.find((each) => each.id === palletId);
   if (pallet === undefined) return null;
@@ -86,7 +95,7 @@ export function palletReportData(
     sscc: machineSscc(pallet.sscc),
     status: lifecycle(pallet.closedAt, pallet.disassembledAt),
     productName: rows.shift.productName,
-    org: reportOrg(rows.organization),
+    org: reportOrg(rows.organization, logo),
     openedAt: at(pallet.openedAt),
     closedAt: at(pallet.closedAt),
     disassembledAt: at(pallet.disassembledAt),
@@ -107,14 +116,14 @@ export function hasPlacard(pallet: Pick<Pallet, "closedAt" | "sscc">): boolean {
   return pallet.closedAt !== null && pallet.sscc !== null;
 }
 
-function placard(rows: PalletReportRows, pallet: Pallet): PalletPlacardData {
+function placard(rows: PalletReportRows, pallet: Pallet, logo: string | null): PalletPlacardData {
   return {
     sscc: machineSscc(pallet.sscc),
     status: pallet.disassembledAt !== null ? "disassembled" : "closed",
     productName: rows.shift.productName,
     gtin14: rows.shift.gtin14,
     shelfLifeDays: rows.shift.shelfLifeDays,
-    org: reportOrg(rows.organization),
+    org: reportOrg(rows.organization, logo),
     // Every box of a standalone pallet is of its own shift, so each carries
     // the shift's declared production date (the host's date is never empty).
     boxes: pallet.boxes.map((box) => ({
@@ -129,9 +138,10 @@ function placard(rows: PalletReportRows, pallet: Pallet): PalletPlacardData {
 export function palletPlacardData(
   rows: PalletReportRows,
   palletId: string,
+  logo: string | null = null,
 ): PalletPlacardData | null {
   const pallet = rows.pallets.find((each) => each.id === palletId);
-  return pallet === undefined || !hasPlacard(pallet) ? null : placard(rows, pallet);
+  return pallet === undefined || !hasPlacard(pallet) ? null : placard(rows, pallet, logo);
 }
 
 /**
@@ -156,10 +166,14 @@ function byText(a: string, b: string): number {
  */
 export function shiftPlacardsData(
   rows: PalletReportRows,
+  logo: string | null = null,
 ): { shiftNumber: string; pallets: PalletPlacardData[] } | null {
   const pallets = placardPallets(rows);
   if (pallets.length === 0) return null;
-  return { shiftNumber: rows.shift.number, pallets: pallets.map((each) => placard(rows, each)) };
+  return {
+    shiftNumber: rows.shift.number,
+    pallets: pallets.map((each) => placard(rows, each, logo)),
+  };
 }
 
 /** What «Бланк смены» is drawn from: records the office reads already. */
@@ -175,29 +189,37 @@ export interface TaskFormInputs {
 
 /**
  * «Бланк смены» (`ShiftsService.taskFormData`), or `null` for a closed shift
- * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The standalone shift has one date
- * (stage 2a spec, question В3), so it is both the shift's date and its
- * production date; the product's photo is printed from its own bytes (a
- * `data:` URL, plan ТОВ), as the cloud links its image; the standalone neither prints
- * duplicates nor issues SSCCs under a counterparty's prefix yet.
+ * (the cloud's `SHIFT_TASK_FORM_CLOSED`). The shift's own date («Дата смены»,
+ * beta 3) is the form's date and the production date stays its own line; the
+ * product's photo is printed from its own bytes (a
+ * `data:` URL, plan ТОВ), as the cloud links its image; a validation shift's
+ * duplicate print is its own policy (plan РЕЖ part B: none when the host
+ * sends none); the standalone neither reprocesses earlier codes nor issues
+ * SSCCs under a counterparty's prefix yet.
  */
-export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTaskFormData | null {
+export function taskFormData(
+  inputs: TaskFormInputs,
+  generatedAt: Date,
+  logo: string | null = null,
+): ShiftTaskFormData | null {
   const { shift, product, line, counterparty, organization, photo } = inputs;
   if (shift.status === "closed") return null;
+  const duplicate = shift.validationPrint?.mode === "duplicate_dm" ? shift.validationPrint : null;
   return {
     shiftId: shift.id,
     shiftNumber: shift.number,
     status: shift.status,
     mode: shift.mode,
     organizationName: organization.name,
+    ...(logo === null ? {} : { organizationLogoSrc: logo }),
     productId: product.id,
     productName: product.name,
     productPrintName: product.printName,
     gtin14: product.gtin14,
     imageChecksum: photo?.checksum ?? null,
-    ...(photo === null ? {} : { imageSrc: `data:image/jpeg;base64,${photo.dataBase64}` }),
+    ...(photo === null ? {} : { imageSrc: `data:${photo.mediaType};base64,${photo.dataBase64}` }),
     lineName: line.name,
-    plannedDate: shift.productionDate,
+    plannedDate: shift.plannedDate,
     productionDate: shift.productionDate,
     plannedQty: shift.plannedQty,
     boxCapacity: shift.boxCapacity,
@@ -205,8 +227,8 @@ export function taskFormData(inputs: TaskFormInputs, generatedAt: Date): ShiftTa
     palletBoxCapacity: shift.palletBoxCapacity,
     counterpartyName: counterparty?.name ?? null,
     ssccIssuerName: null,
-    validationPrintMode: "none",
-    validationPrintVerification: "none",
+    validationPrintMode: duplicate === null ? "none" : "duplicate_dm",
+    validationPrintVerification: duplicate?.verification ?? "none",
     allowPreviouslyAcceptedCodes: false,
     generatedAt,
   };

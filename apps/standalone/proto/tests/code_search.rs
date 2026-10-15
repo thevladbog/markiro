@@ -45,6 +45,7 @@ fn a_page_round_trips_with_every_state_of_a_placement() {
         (CodePlacementState::Packed, "packed"),
         (CodePlacementState::Removed, "removed"),
         (CodePlacementState::Displaced, "displaced"),
+        (CodePlacementState::Checked, "checked"),
     ] {
         assert_eq!(serde_json::to_value(state).unwrap(), Value::from(text));
     }
@@ -70,7 +71,15 @@ fn a_card_round_trips_with_every_kind_of_event() {
         .collect();
     assert_eq!(
         kinds,
-        ["scan", "scan", "scan", "removed", "displaced", "reprint"]
+        [
+            "scan",
+            "scan",
+            "scan",
+            "removed",
+            "displaced",
+            "removed",
+            "reprint"
+        ]
     );
     assert!(matches!(
         card.events[0],
@@ -93,5 +102,32 @@ fn a_card_round_trips_with_every_kind_of_event() {
             exception: Some(ExceptionKind::Undo),
             ..
         }
+    ));
+}
+
+/// A validation shift's code (plan РЕЖ): its placements name no box, one
+/// `checked`, one `displaced`, and the displacement names no box either.
+#[test]
+fn a_validation_shifts_card_round_trips_without_a_box() {
+    let card: OfficeCodeCard = round_trip("office-code-card-validation.json");
+    let placements: Vec<(CodePlacementState, Option<&str>)> = card
+        .placements
+        .iter()
+        .map(|item| (item.state, item.box_id.as_deref()))
+        .collect();
+    assert_eq!(
+        placements,
+        [
+            (CodePlacementState::Displaced, None),
+            (CodePlacementState::Checked, None)
+        ]
+    );
+    assert!(matches!(
+        card.events.last(),
+        Some(OfficeCodeEvent::Displaced {
+            box_id: None,
+            box_sscc: None,
+            ..
+        })
     ));
 }

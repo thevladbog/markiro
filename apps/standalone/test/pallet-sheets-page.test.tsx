@@ -16,6 +16,7 @@ import {
   type FakeOfficeSession,
 } from "./support/office.js";
 import { stockSheets } from "./support/shifts.js";
+import { findRowAction, pressRowAction } from "./support/row-menu.js";
 
 import type * as SheetRenderModule from "../src/labels/sheet-render.js";
 import type * as LogoModule from "../src/labels/logo.js";
@@ -102,7 +103,7 @@ function names(): string[] {
 }
 
 function click(name: string): void {
-  fireEvent.click(screen.getByRole("button", { name }));
+  pressRowAction(screen, name);
 }
 
 function pickFile(file: File): void {
@@ -228,10 +229,7 @@ describe("the A4 sheets page: reading", () => {
       "disabled",
       true,
     );
-    expect(screen.getByRole("button", { name: `Скачать JSON «${odd.name}»` })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(findRowAction(screen, `Скачать JSON «${odd.name}»`)).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: `Просмотр «${PORTRAIT.name}»` })).toHaveProperty(
       "disabled",
       false,
@@ -240,8 +238,8 @@ describe("the A4 sheets page: reading", () => {
 
   it("gives a technologist every action too: both office roles keep the catalog", async () => {
     await openSheets(session(STOCK, TECHNOLOGIST));
-    expect(screen.getByRole("button", { name: `Переименовать «${LANDSCAPE.name}»` })).toBeTruthy();
-    expect(screen.getByRole("button", { name: `Удалить «${LANDSCAPE.name}»` })).toBeTruthy();
+    expect(findRowAction(screen, `Переименовать «${LANDSCAPE.name}»`)).toBeTruthy();
+    expect(findRowAction(screen, `Удалить «${LANDSCAPE.name}»`)).toBeTruthy();
     expect(screen.getByTestId("file-drop-input")).toBeTruthy();
   });
 });
@@ -367,30 +365,23 @@ describe("the A4 sheets page: the main sheet and the state", () => {
     const slow = deferred<PalletSheet>();
     fake.api.updatePalletSheet.mockReturnValue(slow.promise);
     await openSheets(fake);
-    const first = screen.getByRole("button", { name: `Выключить «${LANDSCAPE.name}»` });
-    const second = screen.getByRole("button", { name: `Выключить «${TWO_A5.name}»` });
-    await act(async () => {
-      fireEvent.click(first);
-      fireEvent.click(second);
-    });
+    pressRowAction(screen, `Выключить «${LANDSCAPE.name}»`);
+    await waitFor(() => expect(fake.api.updatePalletSheet).toHaveBeenCalledTimes(1));
+    // Every row's «⋯» menu is off while the write is on its way: no second write can start.
+    const triggers = screen.getAllByRole("button", { name: /^Действия: / });
+    expect(triggers).toHaveLength(3);
+    for (const trigger of triggers) expect(trigger).toHaveProperty("disabled", true);
     expect(fake.api.updatePalletSheet).toHaveBeenCalledTimes(1);
-    expect(second).toHaveProperty("disabled", true);
-    expect(
-      screen.getByRole("button", { name: `Переименовать «${LANDSCAPE.name}»` }),
-    ).toHaveProperty("disabled", true);
-    expect(screen.getByRole("button", { name: `Удалить «${LANDSCAPE.name}»` })).toHaveProperty(
-      "disabled",
-      true,
-    );
-    expect(screen.getByRole("button", { name: `Удалить «${TWO_A5.name}»` })).toHaveProperty(
-      "disabled",
-      true,
-    );
     await act(async () => {
       slow.resolve({ ...LANDSCAPE, enabled: false, revision: 2 });
       await slow.promise;
     });
-    await waitFor(() => expect(second).toHaveProperty("disabled", false));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /^Действия: / })[0]).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
   });
 });
 
@@ -546,7 +537,7 @@ describe("the A4 sheets page: deleting", () => {
     const links = within(box).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["Смена 11111111", "Смена 11111111"]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
-      ids.map((id) => `/shifts/${id}`),
+      ids.map((id) => `/shifts?shift=${id}`),
     );
     expect(screen.getByRole("dialog", { name: `Удалить «${LANDSCAPE.name}»?` })).toBeTruthy();
     expect(rows()).toHaveLength(3);

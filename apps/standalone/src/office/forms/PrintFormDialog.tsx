@@ -17,12 +17,15 @@ import type {
 } from "../../host/protocol.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
+import { readFormLogo } from "../branding.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import type { TaskFormInputs } from "./form-data.js";
 import { usePrintForm } from "./form-printer-context.js";
-import { formFolder, openInBrowser } from "./print-form.js";
+import { formFolder, openInBrowser, paint } from "./print-form.js";
+import { useRefreshStoredFiles } from "../exports/use-refresh-files.js";
+import { storeForm, type FormTarget as StoredFormTarget } from "./store-form.js";
 import { prepareForm, type FormRequest } from "./render-form.js";
 import { taskFormInputs } from "./task-inputs.js";
 
@@ -45,6 +48,20 @@ export interface PrintFormDialogProps {
   format: PlacardFormat;
   onFormat: (format: PlacardFormat) => void;
   onClose: () => void;
+}
+
+/** What a form belongs to on the host: the card it is printed from. */
+function formTarget(target: FormTarget, shiftId: string): StoredFormTarget {
+  switch (target.kind) {
+    case "box":
+      return { type: "box", id: target.boxId };
+    case "pallet":
+    case "placard":
+      return { type: "pallet", id: target.palletId };
+    case "placards":
+    case "task":
+      return { type: "shift", id: shiftId };
+  }
 }
 
 /** Where a press is: the data is read again, the form is drawn, the file is saved. */
@@ -87,27 +104,6 @@ function formRequest(
   }
 }
 
-/**
- * Lets the window paint what the press has said (a frame and a turn after it)
- * before the heavy work blocks it. A window that draws no frames (hidden,
- * minimised) waits no longer than 100 ms.
- */
-function paint(): Promise<void> {
-  return new Promise((resolve) => {
-    let waiting = true;
-    const finish = () => {
-      if (waiting) {
-        waiting = false;
-        resolve();
-      }
-    };
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => setTimeout(finish, 0));
-    }
-    setTimeout(finish, 100);
-  });
-}
-
 type Listed<K extends keyof HostApi> = Awaited<ReturnType<HostApi[K]>>;
 
 /**
@@ -137,8 +133,12 @@ export function PrintFormDialog({
   const files = useOfficeFiles();
   const print = usePrintForm();
   const queryClient = useQueryClient();
-  const { api, call } = useOfficeSession();
+  const session = useOfficeSession();
+  const refreshFiles = useRefreshStoredFiles();
+  const { api, call } = session;
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // The words for why the host kept no copy of the last form, or `null`.
+  const [hostCopy, setHostCopy] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage | null>(null);
   const inFlight = useRef(false);
   const alive = useRef(true);
@@ -254,12 +254,18 @@ export function PrintFormDialog({
     return at === "reading" ? t(errorMessageKey(error)) : t("office.forms.files.storage");
   }
 
+  /** Closes the dialog once a form is in the print window or the browser. */
+  function closeAfterHandOff(): void {
+    if (alive.current) onClose();
+  }
+
   async function press(how: "print" | "open"): Promise<void> {
     if (inFlight.current || !drawable) return;
     inFlight.current = true;
     let at: Stage = "reading";
     setStage(at);
     setOutcome(null);
+    setHostCopy(null);
     try {
       const fresh = await readAgain();
       // A dialog closed while the rows were read is found out after the paint, before any draw.
@@ -270,16 +276,32 @@ export function PrintFormDialog({
       if (!alive.current) return;
       // Prepared again from the rows just read, at the moment of printing.
       const asked = formRequest(target, fresh, timeZone, format, new Date());
-      const form = asked === null ? null : prepareForm(asked);
+      // The organization's own logo, when the license allows custom branding; else Markiro's.
+      const logo = asked === null ? null : await readFormLogo(queryClient, api, call);
+      if (!alive.current) return;
+      const form = asked === null ? null : prepareForm({ ...asked, logo });
       // Nothing to draw: the rows just read were also the dialog's own, which now says why.
       if (form === null) return;
       const html = form.draw();
+      // The host keeps the exact HTML first, printed or opened: a form can then be had again from
+      // the card. A host that cannot never stops the form.
+      const kept = await storeForm(
+        session,
+        { kind: form.kind, html, fileName: form.fileName },
+        formTarget(target, shift.id),
+      );
+      refreshFiles();
+      if (alive.current) setHostCopy(kept === null ? null : t(kept));
       if (how === "print") {
         try {
           print(html);
         } catch {
           setOutcome({ kind: "failed", message: t("office.forms.printFailed") });
+          return;
         }
+        // The print window is up: the dialog has nothing more to say, so it goes by itself, unless
+        // the host could not keep its copy (the warning stays to be read).
+        if (kept === null) closeAfterHandOff();
         return;
       }
       at = "saving";
@@ -293,6 +315,8 @@ export function PrintFormDialog({
         folder,
       );
       if (alive.current) setOutcome({ kind: "opened", saved });
+      // The browser has the form: close the dialog, so there is none to dismiss on the way back.
+      if (kept === null) closeAfterHandOff();
     } catch (error) {
       if (alive.current) setOutcome({ kind: "failed", message: failureText(error, at) });
     } finally {
@@ -392,6 +416,11 @@ export function PrintFormDialog({
             }
           >
             {t("office.forms.opened", { path: outcome.saved.path })}
+          </Alert>
+        )}
+        {hostCopy !== null && (
+          <Alert tone="warn" role="presentation">
+            {t("office.storedFiles.hostCopyFailed", { reason: hostCopy })}
           </Alert>
         )}
         {outcome?.kind === "failed" && (

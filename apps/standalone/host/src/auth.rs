@@ -42,11 +42,12 @@ impl FromRequestParts<AppState> for AuthDevice {
 /// A paired, non-revoked device that WRITES NOTHING when it is
 /// authenticated: the same key, revocation and kind checks as
 /// [`AuthDevice`], but `last_seen_at` is never touched, nor the version it
-/// reports (plan ОБН-1). Only the code check
+/// reports (plan ОБН-1). The code check
 /// (`GET /v1/device/codes/{codeHash}`, answered by a station within 300 ms)
 /// uses it, so that route never waits for a writer, even for the first
-/// request after an idle minute. Every other device route takes
-/// [`AuthDevice`].
+/// request after an idle minute, and so do the reads of a station's
+/// conflicts (`routes/device_conflicts.rs`, plan КНФ). Every other device
+/// route takes [`AuthDevice`].
 #[derive(Debug, Clone)]
 pub struct AskingDevice(pub AuthDevice);
 
@@ -337,6 +338,55 @@ impl OfficeContext {
             Err(ApiError::forbidden("a shift planning role is required"))
         }
     }
+
+    /// The early check of a disaggregation document or reason write (plan
+    /// ДЗГ): administrators and technologists, as shifts and exports.
+    pub fn require_disaggregation(&self) -> Result<(), ApiError> {
+        if disaggregates(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a disaggregation role is required"))
+        }
+    }
+
+    /// Re-check the disaggregation right inside the caller's write
+    /// transaction, as [`Self::require_shift_planning_in`] does for shifts.
+    pub async fn require_disaggregation_in(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ApiError> {
+        if disaggregates(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a disaggregation role is required"))
+        }
+    }
+
+    /// The early check of a conflict's review (plan КНФ): administrators and
+    /// technologists, as the shift's own actions.
+    pub fn require_conflict_review(&self) -> Result<(), ApiError> {
+        if reviews_conflicts(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "a role that reviews conflicts is required",
+            ))
+        }
+    }
+
+    /// Re-check the review right inside the caller's write transaction.
+    pub async fn require_conflict_review_in(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ApiError> {
+        if reviews_conflicts(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(
+                "a role that reviews conflicts is required",
+            ))
+        }
+    }
 }
 
 /// Whether a role plans, edits, deletes and closes shifts (stage 2a spec
@@ -348,10 +398,28 @@ pub fn plans_shifts(role: OfficeRole) -> bool {
     }
 }
 
+/// Whether a role keeps disaggregation documents and their reasons (plan
+/// ДЗГ: administrators and technologists, as shifts and exports). No
+/// wildcard arm: a new role does not compile until it is placed here.
+pub fn disaggregates(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
+}
+
 /// Whether a role changes the catalog, label templates and their defaults
 /// (spec §4.8: administrators and technologists). No wildcard arm: a new
 /// role does not compile until it is placed here.
 pub fn edits_catalog(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
+}
+
+/// Whether a role marks a code conflict reviewed (plan КНФ: administrators and
+/// technologists). No wildcard arm: a new role — a viewer of plan РОЛ — does
+/// not compile until it is placed here.
+pub fn reviews_conflicts(role: OfficeRole) -> bool {
     match role {
         OfficeRole::Admin | OfficeRole::Technologist => true,
     }

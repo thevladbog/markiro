@@ -1,8 +1,14 @@
+import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import i18n from "i18next";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostApi } from "../src/host/api.js";
 import type { OfficeLicense } from "../src/host/protocol.js";
+import { decryptBlob, findBlob } from "../../../tools/standalone-support/decrypt.mjs";
+import { HostError } from "../src/host/client.js";
+import { usageStatsSchema } from "../src/host/usage-stats.js";
 import type { AboutData } from "../src/office/info/about-data.js";
 import { licenseSupportBlock } from "../src/office/info/license/license-support.js";
 import type { SupportContext } from "../src/office/info/support-blocks.js";
@@ -20,6 +26,13 @@ import {
 import { fakeHostApi } from "./support/office.js";
 import { PROGRAM_ROWS } from "../src/office/info/ProgramSection.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "../src/office/info/support-blocks.js";
+import type { SupportKeyset } from "../src/office/info/support-keys.js";
+import {
+  createUsageContributor,
+  usageLoadOf,
+  usagePayload,
+  type UsageLoad,
+} from "../src/office/info/support-usage.js";
 import {
   buildSupportReport,
   plainAddress,
@@ -207,8 +220,9 @@ describe("Блоки сведений для поддержки (точка ра
     expect(blocks.map((block) => block.title)).toEqual(["Первый", "Пятый"]);
   });
 
-  it("has the license's contributor first and no extra program rows yet", () => {
-    expect(SUPPORT_CONTRIBUTORS).toEqual([licenseSupportBlock]);
+  it("has the usage statistics after the license's contributor and no extra program rows", () => {
+    expect(SUPPORT_CONTRIBUTORS).toHaveLength(2);
+    expect(SUPPORT_CONTRIBUTORS[0]).toBe(licenseSupportBlock);
     expect(PROGRAM_ROWS).toEqual([]);
   });
 });
@@ -306,5 +320,151 @@ describe("the license's block of the support text (plan ЛЦ-3)", () => {
       title: "Лицензия",
       lines: [["Состояние", "не удалось прочитать у хоста"]],
     });
+  });
+});
+
+// Bound first: Vite rewrites the literal `new URL(..., import.meta.url)` (see protocol.test.ts).
+const testModuleUrl = import.meta.url;
+
+describe("Статистика использования в сведениях для поддержки (бета 3)", () => {
+  const stats = usageStatsSchema.parse(
+    JSON.parse(readFileSync(new URL("../proto/fixtures/usage-stats.json", testModuleUrl), "utf8")),
+  );
+  const context = (usage?: UsageLoad) => ({
+    t: i18n.t,
+    facts: FACTS,
+    about: {} as AboutData,
+    read: () => Promise.reject(new Error("the usage block reads nothing")),
+    ...(usage === undefined ? {} : { usage }),
+  });
+  const keyset = (): { pem: string; keyset: SupportKeyset } => {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const jwk = publicKey.export({ format: "jwk" });
+    return {
+      pem: privateKey.export({ type: "sec1", format: "pem" }).toString(),
+      keyset: {
+        keys: [{ kid: "sup-t1", jwk: { kty: "EC", crv: "P-256", x: jwk.x ?? "", y: jwk.y ?? "" } }],
+        retiredKids: [],
+      },
+    };
+  };
+
+  it("puts the counts into the text only as one opaque token, under a neutral label", async () => {
+    const { pem, keyset: keys } = keyset();
+    const block = await createUsageContributor(keys)(context({ kind: "ok", stats }));
+    expect(block?.title).toBe("Данные для анализа");
+    expect(block?.lines).toEqual([["", "Зашифрованные данные"]]);
+    const text = buildSupportReport(FACTS, i18n.t, block === null ? [] : [block]);
+    const lines = text.split("\r\n");
+    expect(lines.slice(-4, -1)).toEqual([
+      "Данные для анализа",
+      "Зашифрованные данные",
+      block?.opaque,
+    ]);
+    expect(text).not.toContain("Статистика");
+    // No count and no field name of the statistics is readable in the text.
+    for (const word of ["21640", "7020", "accepted", "scans", "boxes", "1802", "shifts"]) {
+      expect(text).not.toContain(word);
+    }
+    // And the maker's tool opens the token to the allowlisted JSON.
+    const opened = decryptBlob(findBlob(text), pem);
+    expect(opened.json).toMatchObject({
+      v: 1,
+      generatedAt: "2026-10-13T09:41:05.000Z",
+      appVersion: "0.1.0",
+      hostVersion: "0.1.0",
+      devices: { station: 3, office: 2, handheld: 1 },
+    });
+    expect((opened.json as { months: unknown[] }).months).toHaveLength(12);
+  });
+
+  it("builds the payload by an allowlist: a field the host's answer holds beyond it cannot reach the token", async () => {
+    const polluted = {
+      ...stats,
+      secretName: "Молоко ООО Север",
+      months: stats.months.map((month) => ({
+        ...month,
+        productName: "Молоко",
+        shifts: { ...month.shifts, operatorPin: "123456" },
+      })),
+    } as typeof stats;
+    const payload = usagePayload(polluted, {
+      generatedAt: FACTS.generatedAt,
+      appVersion: FACTS.appVersion,
+      hostVersion: FACTS.hostVersion,
+    });
+    expect(payload).toBe(
+      usagePayload(stats, {
+        generatedAt: FACTS.generatedAt,
+        appVersion: FACTS.appVersion,
+        hostVersion: FACTS.hostVersion,
+      }),
+    );
+    for (const word of ["Молоко", "Север", "123456", "productName", "secretName", "operatorPin"]) {
+      expect(payload).not.toContain(word);
+    }
+    // Every leaf of the payload is a count, a month key, a date or a version.
+    const keys = new Set<string>();
+    const walk = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) value.forEach((item) => walk(item, `${path}[]`));
+      else if (typeof value === "object" && value !== null) {
+        for (const [key, inner] of Object.entries(value)) {
+          keys.add(`${path}.${key}`);
+          walk(inner, `${path}.${key}`);
+        }
+      }
+    };
+    walk(JSON.parse(payload), "");
+    expect(
+      [...keys].filter((key) =>
+        /name|pin|badge|hash|code(?!s)|sscc|gtin|password|token/iu.test(key),
+      ),
+    ).toEqual([]);
+    expect([...keys].sort()).toEqual(
+      [...new Set(Object.keys(JSON.parse(payload) as object).map((key) => `.${key}`))]
+        .concat([...keys].filter((key) => key.includes(".months[].") || key.includes(".devices.")))
+        .filter((key, at, all) => all.indexOf(key) === at)
+        .sort(),
+    );
+  });
+
+  it("says why there are no statistics instead of printing them: no key, not an administrator, no answer", async () => {
+    const empty = createUsageContributor({ keys: [], retiredKids: [] });
+    // A build without a key never prints counts, whatever the host answered.
+    expect((await empty(context({ kind: "ok", stats })))?.lines).toEqual([["", "Отсутствуют"]]);
+    expect((await empty(context({ kind: "ok", stats })))?.opaque).toBeUndefined();
+    const { keyset: keys } = keyset();
+    const contributor = createUsageContributor(keys);
+    expect((await contributor(context({ kind: "forbidden" })))?.lines).toEqual([
+      ["", "Отсутствуют"],
+    ]);
+    expect((await contributor(context({ kind: "failed" })))?.lines).toEqual([["", "Отсутствуют"]]);
+    expect(await contributor(context())).toBeNull();
+    const refused = usageLoadOf({
+      status: "rejected",
+      reason: new HostError({
+        kind: "api",
+        code: "forbidden",
+        status: 403,
+        message: "forbidden",
+        details: {},
+      }),
+    });
+    expect(refused).toEqual({ kind: "forbidden" });
+    expect(usageLoadOf({ status: "rejected", reason: new Error("down") })).toEqual({
+      kind: "failed",
+    });
+    expect(usageLoadOf({ status: "fulfilled", value: stats })).toEqual({ kind: "ok", stats });
+  });
+
+  it("carries a token only of the token's shape, never free text", () => {
+    const text = buildSupportReport(FACTS, i18n.t, [
+      { title: "Блок", lines: [], opaque: "МОЛОКО 123456 это не токен" },
+      { title: "Второй", lines: [], opaque: `MKS1.sup-t1.${"B".repeat(40)}` },
+      { title: "Третий", lines: [], opaque: `MKS1.sup-t1.${"A".repeat(200)}` },
+    ]);
+    expect(text).not.toContain("МОЛОКО");
+    expect(text).not.toContain("B".repeat(40));
+    expect(text).toContain(`MKS1.sup-t1.${"A".repeat(200)}`);
   });
 });

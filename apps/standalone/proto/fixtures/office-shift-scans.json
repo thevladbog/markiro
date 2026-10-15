@@ -1,0 +1,53 @@
+{
+  "items": [
+    {
+      "id": "6c1d0d52-6a8f-4f6b-8d0e-2f1b6a1d7e01",
+      "scannedAt": "2026-10-08T06:41:10Z",
+      "receivedAt": "2026-10-08T06:41:12Z",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "operatorName": "Иванов И.",
+      "verdict": "duplicate",
+      "duplicateSource": "local",
+      "gtin14": "04607004090011",
+      "serialTail": "k3Z9",
+      "boxId": null,
+      "boxSscc": null,
+      "palletId": null,
+      "palletSscc": null
+    },
+    {
+      "id": "6c1d0d52-6a8f-4f6b-8d0e-2f1b6a1d7e02",
+      "scannedAt": "2026-10-08T06:41:00Z",
+      "receivedAt": "2026-10-08T06:41:02Z",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "operatorName": null,
+      "verdict": "ok",
+      "duplicateSource": null,
+      "gtin14": "04607004090011",
+      "serialTail": "a1B2",
+      "boxId": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+      "boxSscc": "046070040900000019",
+      "palletId": "0b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4be0",
+      "palletSscc": "046070040900000026"
+    },
+    {
+      "id": "6c1d0d52-6a8f-4f6b-8d0e-2f1b6a1d7e03",
+      "scannedAt": "2026-10-08T06:40:30Z",
+      "receivedAt": "2026-10-08T06:40:31Z",
+      "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "deviceName": "Станция А",
+      "operatorName": "Иванов И.",
+      "verdict": "invalid",
+      "duplicateSource": null,
+      "gtin14": null,
+      "serialTail": null,
+      "boxId": null,
+      "boxSscc": null,
+      "palletId": null,
+      "palletSscc": null
+    }
+  ],
+  "nextCursor": "1791441630000~6c1d0d52-6a8f-4f6b-8d0e-2f1b6a1d7e03"
+}

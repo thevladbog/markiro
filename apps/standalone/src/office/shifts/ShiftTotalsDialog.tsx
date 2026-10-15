@@ -37,32 +37,16 @@ export interface ShiftTotalsDialogProps {
  */
 export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
   const { t } = useTranslation();
-  const isAdmin = useOfficeSession().user.role === "admin";
   const detail = useOfficeQuery(officeKeys.shift(shift.id), (api, token) =>
     api.getShift(token, shift.id),
   );
-  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
-  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
-    enabled: isAdmin,
-  });
 
   const body = () => {
-    if (detail.isPending || org.isPending || (isAdmin && devices.isPending)) {
-      return <PageLoading />;
-    }
+    if (detail.isPending) return <PageLoading />;
     if (detail.isError) {
       return <LoadError error={detail.error} onRetry={() => void detail.refetch()} />;
     }
-    const zone = org.isSuccess && isKnownTimeZone(org.data.timeZone) ? org.data.timeZone : null;
-    return (
-      <ShiftFigures
-        shift={detail.data}
-        zone={zone}
-        timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
-        devices={isAdmin ? devices.data : undefined}
-        devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
-      />
-    );
+    return <ShiftTotalsBody shift={detail.data} />;
   };
 
   return (
@@ -79,6 +63,29 @@ export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
     >
       {body()}
     </Modal>
+  );
+}
+
+/**
+ * The figures of a shift already read, with the devices' names and the time
+ * zone: what «Итоги» of the dialog and of the shift's drawer show.
+ */
+export function ShiftTotalsBody({ shift }: { shift: OfficeShift }) {
+  const isAdmin = useOfficeSession().user.role === "admin";
+  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
+    enabled: isAdmin,
+  });
+  if (org.isPending || (isAdmin && devices.isPending)) return <PageLoading />;
+  const zone = org.isSuccess && isKnownTimeZone(org.data.timeZone) ? org.data.timeZone : null;
+  return (
+    <ShiftFigures
+      shift={shift}
+      zone={zone}
+      timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
+      devices={isAdmin ? devices.data : undefined}
+      devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
+    />
   );
 }
 
@@ -136,24 +143,29 @@ function ShiftFigures({
             description: UNITS.format(totals.acceptedUnits),
             mono: true,
           },
-          {
-            id: "inClosedBoxes",
-            term: t("office.shifts.totals.inClosedBoxes"),
-            description: UNITS.format(totals.unitsInClosedBoxes),
-            mono: true,
-          },
-          {
-            id: "closedBoxes",
-            term: t("office.shifts.totals.closedBoxes"),
-            description: UNITS.format(totals.closedBoxes),
-            mono: true,
-          },
-          {
-            id: "openBoxes",
-            term: t("office.shifts.totals.openBoxes"),
-            description: UNITS.format(totals.openBoxes),
-            mono: true,
-          },
+          // A validation shift puts its codes in no box (plan РЕЖ, Р11): no box figure is its.
+          ...(shift.mode === "validation"
+            ? []
+            : [
+                {
+                  id: "inClosedBoxes",
+                  term: t("office.shifts.totals.inClosedBoxes"),
+                  description: UNITS.format(totals.unitsInClosedBoxes),
+                  mono: true,
+                },
+                {
+                  id: "closedBoxes",
+                  term: t("office.shifts.totals.closedBoxes"),
+                  description: UNITS.format(totals.closedBoxes),
+                  mono: true,
+                },
+                {
+                  id: "openBoxes",
+                  term: t("office.shifts.totals.openBoxes"),
+                  description: UNITS.format(totals.openBoxes),
+                  mono: true,
+                },
+              ]),
           {
             id: "lastFact",
             term: t("office.shifts.totals.lastFact"),

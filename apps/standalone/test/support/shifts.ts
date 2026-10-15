@@ -73,6 +73,37 @@ export const PALLET: LabelTemplateSummary = {
   rev: 65,
 };
 
+/**
+ * Product duplicate templates (plan РЕЖ part B): for every category, for milk
+ * only (group 8, at 300 dpi), and switched off.
+ */
+export const DUPLICATE_58: LabelTemplateSummary = {
+  ...BOX_58,
+  id: "b7c8d9e0-f1a2-4b3c-8d4e-5f6a7b8c9d0e",
+  name: "Дубликат 58×40",
+  purpose: "product_duplicate",
+  rev: 66,
+};
+export const MILK_DUPLICATE: LabelTemplateSummary = {
+  ...DUPLICATE_58,
+  id: "c8d9e0f1-a2b3-4c4d-9e5f-6a7b8c9d0e1f",
+  name: "Дубликат молока",
+  chzProductGroupCodes: [8],
+  widthMm: 43,
+  heightMm: 25,
+  dpi: 300,
+  stock: false,
+  rev: 67,
+};
+export const OLD_DUPLICATE: LabelTemplateSummary = {
+  ...DUPLICATE_58,
+  id: "d9e0f1a2-b3c4-4d5e-8f6a-7b8c9d0e1f2a",
+  name: "Старый дубликат",
+  enabled: false,
+  stock: false,
+  rev: 68,
+};
+
 export const MILK: OfficeProduct = {
   id: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
   gtin14: "04600682000013",
@@ -176,6 +207,7 @@ export const ACTIVE: OfficeShift = {
   lineId: LINE_2.id,
   counterpartyId: NORTH.id,
   productionDate: "2026-10-08",
+  plannedDate: "2026-10-08",
   plannedQty: 1200,
   boxCapacity: 12,
   boxTemplateId: MILK_BOX.id,
@@ -212,6 +244,8 @@ export const PLANNED: OfficeShift = {
   lineId: LINE_10.id,
   counterpartyId: null,
   productionDate: "2026-10-09",
+  // The working day differs from the production date, so a screen that shows the wrong one fails.
+  plannedDate: "2026-10-10",
   plannedQty: null,
   boxCapacity: 24,
   boxTemplateId: BOX_58.id,
@@ -260,8 +294,29 @@ export function shiftsSession(
   session.api.listProducts.mockResolvedValue([MILK, WATER, KEFIR_DRAFT, AYRAN_ARCHIVED]);
   session.api.listLines.mockResolvedValue([LINE_10, LINE_2, OLD_LINE]);
   session.api.listCounterparties.mockResolvedValue([NORTH, SOUTH_ARCHIVED]);
-  session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, OLD_BOX, PALLET]);
+  session.api.listTemplates.mockResolvedValue([
+    BOX_58,
+    MILK_BOX,
+    OLD_BOX,
+    PALLET,
+    DUPLICATE_58,
+    MILK_DUPLICATE,
+    OLD_DUPLICATE,
+  ]);
   session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+  // The shift's card reads the shift it opens: the one the list holds. A test that answers the
+  // list with other shifts (`listShifts.mockResolvedValue`) changes what the card reads too.
+  let held = shifts;
+  const answerList = session.api.listShifts.mockResolvedValue.bind(session.api.listShifts);
+  session.api.listShifts.mockResolvedValue = (next) => {
+    held = next;
+    return answerList(next);
+  };
+  session.api.getShift.mockImplementation(async (_token, id) => {
+    const found = held.find((shift) => shift.id === id);
+    if (found === undefined) throw new Error(`no shift ${id}`);
+    return found;
+  });
   session.api.getTemplateDefaults.mockResolvedValue(DEFAULTS);
   // A shift with pallets reads the A4 sheets; a test about something else finds none.
   session.api.listPalletSheets.mockResolvedValue({ sheets: [], defaultId: null });
@@ -270,11 +325,25 @@ export function shiftsSession(
 
 /** Opens «Смены» from the menu and waits for the list. */
 export async function openShifts(session: FakeOfficeSession): Promise<RenderResult> {
-  const view = renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  // Opened on «Смены» itself: the overview reads the shifts too, which would be one call more.
+  const view = renderOffice(session, { initialPath: "/shifts" });
   await screen.findByRole("heading", { name: "Смены" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
   return view;
+}
+
+/**
+ * Opens a planned shift's card from the list and turns it into its form: «Открыть» on the row,
+ * then «Изменить» in the card (owner decision after beta 3.2: no modal for a shift's fields).
+ * Resolves with the card's name, which the form keeps as its dialog's.
+ */
+export async function startEditing(number: string): Promise<string> {
+  fireEvent.click(screen.getByRole("button", { name: `Открыть смену ${number}` }));
+  const name = `Смена ${number}`;
+  const card = await screen.findByRole("dialog", { name });
+  fireEvent.click(await within(card).findByRole("button", { name: `Изменить смену ${number}` }));
+  await within(screen.getByRole("dialog", { name })).findByRole("button", { name: "Сохранить" });
+  return name;
 }
 
 /** The rows of the list, without the header. */

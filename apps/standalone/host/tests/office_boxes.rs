@@ -3,10 +3,10 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, box_closed, box_exception, box_id, code_hash, empty, fact, instant, issue_block,
-    issue_pallet_block, ok_scan, open_pallet_floor, pair_device, pallet_closed, pallet_id,
-    pallet_sscc, plan_shift, receipts, record_id, request, shift_body, shift_setup, sscc,
-    with_device, Admin, Floor, ShiftSetup,
+    add_operator, admin, box_closed, box_exception, box_id, code_hash, empty, fact, instant,
+    issue_block, issue_pallet_block, ok_scan, open_pallet_floor, pair_device, pallet_closed,
+    pallet_id, pallet_sscc, plan_shift, receipts, record_id, request, shift_body, shift_setup,
+    sscc, with_device, Admin, Floor, ShiftSetup,
 };
 
 const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
@@ -180,32 +180,32 @@ async fn the_lists_name_the_shifts_boxes_and_pallets_with_what_is_live_on_them()
         boxes,
         json!([
             {
-                "id": box_id(1), "deviceId": station, "sscc": sscc(1500),
+                "id": box_id(1), "deviceId": station, "operatorName": null, "sscc": sscc(1500),
                 "openedAt": instant(10, 0), "closedAt": instant(20, 0), "disassembledAt": null,
                 "palletId": p1, "units": 1, "itemCountReported": 2,
                 "digestMatches": true, "printVerifiedAt": null, "printSkippedAt": null,
             },
             {
-                "id": box_id(2), "deviceId": station, "sscc": sscc(1501),
+                "id": box_id(2), "deviceId": station, "operatorName": null, "sscc": sscc(1501),
                 "openedAt": instant(30, 0), "closedAt": instant(40, 0),
                 "disassembledAt": instant(45, 0), "palletId": p1, "units": 0,
                 "itemCountReported": 1, "digestMatches": true,
                 "printVerifiedAt": null, "printSkippedAt": null,
             },
             {
-                "id": box_id(3), "deviceId": station, "sscc": null,
+                "id": box_id(3), "deviceId": station, "operatorName": null, "sscc": null,
                 "openedAt": instant(50, 0), "closedAt": null, "disassembledAt": null,
                 "palletId": null, "units": 1, "itemCountReported": null,
                 "digestMatches": null, "printVerifiedAt": null, "printSkippedAt": null,
             },
             {
-                "id": box_id(4), "deviceId": station, "sscc": sscc(1502),
+                "id": box_id(4), "deviceId": station, "operatorName": null, "sscc": sscc(1502),
                 "openedAt": instant(60, 0), "closedAt": instant(65, 0), "disassembledAt": null,
                 "palletId": null, "units": 1, "itemCountReported": 1,
                 "digestMatches": true, "printVerifiedAt": null, "printSkippedAt": instant(66, 0),
             },
             {
-                "id": box_id(5), "deviceId": station, "sscc": sscc(1503),
+                "id": box_id(5), "deviceId": station, "operatorName": null, "sscc": sscc(1503),
                 "openedAt": instant(70, 0), "closedAt": instant(75, 0), "disassembledAt": null,
                 "palletId": p2, "units": 1, "itemCountReported": 1,
                 "digestMatches": true, "printVerifiedAt": null, "printSkippedAt": null,
@@ -225,13 +225,13 @@ async fn the_lists_name_the_shifts_boxes_and_pallets_with_what_is_live_on_them()
                 // counted two boxes at its close.
                 "id": p1, "deviceId": station, "sscc": pallet_sscc(40),
                 "openedAt": instant(20, 0), "closedAt": instant(41, 500), "disassembledAt": null,
-                "boxes": 1, "units": 1, "boxCountReported": 2,
+                "boxes": 1, "units": 1, "boxCountReported": 2, "disassembledBoxes": 1,
                 "printVerifiedAt": instant(42, 0), "printSkippedAt": null,
             },
             {
                 "id": p2, "deviceId": station, "sscc": null,
                 "openedAt": instant(75, 0), "closedAt": null, "disassembledAt": null,
-                "boxes": 1, "units": 1, "boxCountReported": null,
+                "boxes": 1, "units": 1, "boxCountReported": null, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": null,
             },
         ])
@@ -330,6 +330,51 @@ async fn list(admin: &Admin, shift: &str, which: &str) -> Value {
     body
 }
 
+/// Plan КРТ (П-14): a box closed by an operator lists the operator's name, a
+/// box closed with no operator lists `null`.
+#[tokio::test]
+async fn a_box_lists_the_operator_who_closed_it() {
+    let (admin, _, floor, block, _) = pallet_station().await;
+    let (operator, _) = add_operator(&admin, "1001").await;
+    let shift = floor.shift.clone();
+    let mut closed_by_anna = fact(
+        &record_id(2),
+        "box_closed",
+        &shift,
+        closed_on(&block, 1, 1500, &[1], 10, 20, None),
+    );
+    closed_by_anna["operatorId"] = json!(operator);
+    accept(
+        &admin,
+        &floor,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                &shift,
+                ok_scan(1, &box_id(1), &instant(10, 0)),
+            ),
+            closed_by_anna,
+            fact(
+                &record_id(3),
+                "scan",
+                &shift,
+                ok_scan(2, &box_id(2), &instant(30, 0)),
+            ),
+            fact(
+                &record_id(4),
+                "box_closed",
+                &shift,
+                closed_on(&block, 2, 1501, &[2], 30, 40, None),
+            ),
+        ],
+    )
+    .await;
+    let boxes = list(&admin, &floor.shift, "boxes").await;
+    assert_eq!(boxes[0]["operatorName"], "Анна Кузнецова");
+    assert_eq!(boxes[1]["operatorName"], Value::Null);
+}
+
 /// A box that closed after its pallet did joins the pallet silently; the
 /// lists carry what shows it (the box's `closedAt` after the pallet's), and
 /// the pallet's derived count beside the station's own shows the
@@ -410,7 +455,7 @@ async fn a_late_box_and_a_count_that_disagrees_can_be_told_from_the_lists() {
             {
                 "id": p1, "deviceId": station, "sscc": pallet_sscc(40),
                 "openedAt": instant(40, 0), "closedAt": instant(80, 0), "disassembledAt": null,
-                "boxes": 2, "units": 2, "boxCountReported": 1,
+                "boxes": 2, "units": 2, "boxCountReported": 1, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": instant(95, 0),
             },
             {
@@ -419,7 +464,7 @@ async fn a_late_box_and_a_count_that_disagrees_can_be_told_from_the_lists() {
                 "id": p2, "deviceId": station, "sscc": pallet_sscc(41),
                 "openedAt": instant(105, 0), "closedAt": instant(110, 0),
                 "disassembledAt": instant(120, 0),
-                "boxes": 1, "units": 1, "boxCountReported": 1,
+                "boxes": 1, "units": 1, "boxCountReported": 1, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": null,
             },
         ])
@@ -780,7 +825,7 @@ async fn a_shift_of_thousands_of_boxes_comes_whole_in_order_and_still_by_the_ind
     assert_eq!(
         boxes[999],
         json!({
-            "id": box_id(1000), "deviceId": floor.station, "sscc": sscc(101_000),
+            "id": box_id(1000), "deviceId": floor.station, "operatorName": null, "sscc": sscc(101_000),
             "openedAt": "2026-10-09T00:16:40.000Z", "closedAt": "2026-10-09T00:16:41.000Z",
             "disassembledAt": null, "palletId": pallet_id(200), "units": 2,
             "itemCountReported": 2, "digestMatches": true,

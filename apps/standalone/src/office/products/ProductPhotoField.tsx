@@ -17,12 +17,19 @@ import {
 } from "./photo-encode.js";
 
 export interface ProductPhotoFieldProps {
-  /** The saved product's id; `null` for a product not saved yet, which has no photo. */
+  /** The saved product's id; `null` for a product not saved yet, whose photo is only staged. */
   productId: string | null;
   /** Names the photo for a screen reader. */
   productName: string;
   /** Tests pass a fake; `encodePhoto` by default. */
   encode?: PhotoEncoder;
+  /**
+   * For a product not saved yet: the picture picked so far, kept by the
+   * drawer and written once the product exists. Ignored for a saved product,
+   * whose photo is written at once.
+   */
+  staged?: EncodedPhoto | null;
+  onStage?: (photo: EncodedPhoto | null) => void;
 }
 
 /** What the picker offers: the types `encodePhoto` reads. */
@@ -40,19 +47,23 @@ export function ProductPhotoField({
   productId,
   productName,
   encode = encodePhoto,
+  staged = null,
+  onStage,
 }: ProductPhotoFieldProps) {
-  const { t } = useTranslation();
   if (productId === null) {
     return (
-      <PhotoSection>
-        <p className="product-photo-field__hint">{t("office.products.photo.saveFirst")}</p>
-      </PhotoSection>
+      <StagedProductPhoto
+        productName={productName}
+        encode={encode}
+        staged={staged}
+        {...(onStage === undefined ? {} : { onStage })}
+      />
     );
   }
   return <SavedProductPhoto productId={productId} productName={productName} encode={encode} />;
 }
 
-/** The section «Фото», named by its heading. */
+/** The section «Фото товара», named by its heading. */
 function PhotoSection({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const titleId = useId();
@@ -66,7 +77,143 @@ function PhotoSection({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The photo's card at the top of the drawer: the picture (or an empty frame
+ * that says there is none), what a photo may be, and the buttons
+ * «Загрузить фото» / «Заменить фото» and «Удалить фото».
+ */
+function PhotoCard({
+  photo,
+  alt,
+  busy,
+  note,
+  onFile,
+  onRejected,
+  onRemove,
+}: {
+  photo: EncodedPhoto | null;
+  alt: string;
+  busy: boolean;
+  /** What the photo's write does, under the limits. */
+  note: string;
+  onFile: (file: File) => void;
+  onRejected: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="product-photo-field__card">
+      <div className="product-photo-field__frame">
+        {photo === null ? (
+          <span className="product-photo-field__empty">{t("office.products.photo.none")}</span>
+        ) : (
+          <img
+            className="product-photo-field__preview"
+            src={`data:${photo.mediaType};base64,${photo.dataBase64}`}
+            alt={alt}
+            width={photo.width}
+            height={photo.height}
+          />
+        )}
+      </div>
+      <div className="product-photo-field__actions">
+        <FileDropZone
+          compact
+          label={t(
+            photo === null ? "office.products.photo.choose" : "office.products.photo.replace",
+          )}
+          accept={PHOTO_ACCEPT}
+          busy={busy}
+          onFile={onFile}
+          onRejected={onRejected}
+        />
+        {photo !== null && (
+          <Button variant="destructive-outline" disabled={busy} onClick={onRemove}>
+            {t("office.products.photo.remove")}
+          </Button>
+        )}
+        <p className="product-photo-field__hint">{t("office.products.photo.limits")}</p>
+        <p className="product-photo-field__hint">{note}</p>
+      </div>
+    </div>
+  );
+}
+
 type Problem = { kind: "picture"; message: string } | { kind: "write"; failure: AlertFailure };
+
+/** Turns a picked file into the photo, or says why it cannot be one (`undefined` after a newer pick). */
+function useEncoder(encode: PhotoEncoder) {
+  const { t } = useTranslation();
+  // The latest picked file wins: a slow encode of an earlier one is dropped.
+  const pick = useRef(0);
+  const [picture, setPicture] = useState<string | null>(null);
+  return {
+    picture,
+    supersede: () => {
+      pick.current += 1;
+      setPicture(null);
+    },
+    reject: () => {
+      pick.current += 1;
+      setPicture(t("office.products.photo.unreadable"));
+    },
+    run: async (file: File): Promise<EncodedPhoto | null> => {
+      const mine = ++pick.current;
+      setPicture(null);
+      try {
+        const encoded = await encode(file);
+        return mine === pick.current ? encoded : null;
+      } catch (error) {
+        if (mine !== pick.current) return null;
+        setPicture(
+          t(
+            error instanceof PhotoTooLargeError
+              ? "office.products.photo.tooLarge"
+              : "office.products.photo.unreadable",
+          ),
+        );
+        return null;
+      }
+    },
+  };
+}
+
+/** A new product: the picture is encoded here and kept by the drawer until the product is saved. */
+function StagedProductPhoto({
+  productName,
+  encode,
+  staged,
+  onStage,
+}: {
+  productName: string;
+  encode: PhotoEncoder;
+  staged: EncodedPhoto | null;
+  onStage?: (photo: EncodedPhoto | null) => void;
+}) {
+  const { t } = useTranslation();
+  const encoder = useEncoder(encode);
+  return (
+    <PhotoSection>
+      {encoder.picture !== null && <Alert tone="error">{encoder.picture}</Alert>}
+      <PhotoCard
+        photo={staged}
+        alt={t("office.products.photo.alt", { name: productName })}
+        busy={false}
+        note={t("office.products.photo.stagedNote")}
+        onFile={(file) =>
+          void encoder.run(file).then((encoded) => {
+            if (encoded !== null) onStage?.(encoded);
+          })
+        }
+        onRejected={encoder.reject}
+        onRemove={() => {
+          encoder.supersede();
+          onStage?.(null);
+        }}
+      />
+    </PhotoSection>
+  );
+}
 
 function SavedProductPhoto({
   productId,
@@ -89,8 +236,7 @@ function SavedProductPhoto({
     api.deleteProductPhoto(token, productId),
   );
   const [problem, setProblem] = useState<Problem | null>(null);
-  // The latest picked file wins: a slow encode of an earlier one is dropped.
-  const pick = useRef(0);
+  const encoder = useEncoder(encode);
   const busy = put.isPending || clear.isPending;
   const photo = state.data?.photo ?? null;
 
@@ -100,21 +246,9 @@ function SavedProductPhoto({
   };
 
   const choose = async (file: File) => {
-    const mine = ++pick.current;
     setProblem(null);
-    let encoded: EncodedPhoto;
-    try {
-      encoded = await encode(file);
-    } catch (error) {
-      if (mine !== pick.current) return;
-      const key =
-        error instanceof PhotoTooLargeError
-          ? "office.products.photo.tooLarge"
-          : "office.products.photo.unreadable";
-      setProblem({ kind: "picture", message: t(key) });
-      return;
-    }
-    if (mine !== pick.current) return;
+    const encoded = await encoder.run(file);
+    if (encoded === null) return;
     try {
       stored(await put.mutateAsync(encoded));
     } catch (error) {
@@ -124,7 +258,7 @@ function SavedProductPhoto({
 
   const remove = async () => {
     if (busy) return;
-    pick.current += 1;
+    encoder.supersede();
     setProblem(null);
     try {
       stored(await clear.mutateAsync(null));
@@ -135,41 +269,18 @@ function SavedProductPhoto({
 
   return (
     <PhotoSection>
-      {problem?.kind === "picture" && <Alert tone="error">{problem.message}</Alert>}
+      {encoder.picture !== null && <Alert tone="error">{encoder.picture}</Alert>}
       <WriteFailureAlert failure={problem?.kind === "write" ? problem.failure : null} />
-      {photo !== null && (
-        <img
-          className="product-photo-field__preview"
-          src={`data:image/jpeg;base64,${photo.dataBase64}`}
-          alt={t("office.products.photo.alt", { name: productName })}
-          width={photo.width}
-          height={photo.height}
-        />
-      )}
       {state.isSuccess && (
-        <>
-          <FileDropZone
-            compact
-            label={t(
-              photo === null ? "office.products.photo.choose" : "office.products.photo.replace",
-            )}
-            accept={PHOTO_ACCEPT}
-            busy={busy}
-            onFile={(file) => void choose(file)}
-            onRejected={() => {
-              pick.current += 1;
-              setProblem({ kind: "picture", message: t("office.products.photo.unreadable") });
-            }}
-          />
-          <p className="product-photo-field__hint">{t("office.products.photo.hint")}</p>
-          {photo !== null && (
-            <div className="standalone-form__actions">
-              <Button variant="destructive-outline" disabled={busy} onClick={() => void remove()}>
-                {t("office.products.photo.remove")}
-              </Button>
-            </div>
-          )}
-        </>
+        <PhotoCard
+          photo={photo}
+          alt={t("office.products.photo.alt", { name: productName })}
+          busy={busy}
+          note={t("office.products.photo.savedNote")}
+          onFile={(file) => void choose(file)}
+          onRejected={encoder.reject}
+          onRemove={() => void remove()}
+        />
       )}
       {state.isError && <p className="office-note">{t("office.products.photo.unavailable")}</p>}
     </PhotoSection>

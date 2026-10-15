@@ -37,7 +37,7 @@ it("presents exact safe facts with injected language, dates and consumer classes
   expect(screen.getByText("entitlements.usageAt:date:2026-09-11T12:00:00.000Z")).toBeDefined();
   expect(screen.getByText("entitlements.operationsLabels.nk_lookup_v1")).toBeDefined();
   expect(container.querySelectorAll(".quota-grid > .quota-item")).toHaveLength(4);
-  expect(container.querySelector("dl.facts")?.children).toHaveLength(7);
+  expect(container.querySelector("dl.facts")?.children).toHaveLength(8);
   expect(container.querySelector("ul.sources")).not.toBeNull();
 });
 it("classifies source intervals against snapshot time and preserves prepared state and effects", () => {

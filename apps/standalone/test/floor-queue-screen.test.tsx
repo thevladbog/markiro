@@ -6,7 +6,7 @@ import { ThemeProvider } from "@markiro/ui";
 import type { FloorSession } from "../src/app/shell.js";
 import { QueueScreen } from "../src/floor/queue/QueueScreen.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
-import { FACT_RECEIPT_CODES, type HostStatus } from "../src/host/protocol.js";
+import { FACT_KINDS, FACT_RECEIPT_CODES, type HostStatus } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import ru from "../src/i18n/ru.json";
 import {
@@ -739,16 +739,9 @@ describe("the queue screen", () => {
 
   it("has words for every kind of record the station keeps", () => {
     const kinds: Record<string, unknown> = ru.floor.queue.kind;
-    expect(Object.keys(kinds).sort()).toEqual([
-      "box_closed",
-      "box_exception",
-      "box_label",
-      "pallet_closed",
-      "pallet_exception",
-      "pallet_label",
-      "scan",
-      "shift_closed",
-    ]);
+    expect(Object.keys(kinds).sort()).toEqual([...FACT_KINDS].sort());
+    expect(FACT_KINDS).toContain("unit_label");
+    for (const kind of FACT_KINDS) expect(kinds[kind], kind).toEqual(expect.any(String));
   });
 });
 
@@ -968,5 +961,132 @@ describe("the queue screen after a restore: a shift refused whole", () => {
     expect(screen.getAllByRole("button", { name: "Разобрано" })).toHaveLength(20);
     // A conflict is never taken off with a shift's refusals.
     expect(screen.queryByRole("button", { name: BULK })).toBeNull();
+  });
+});
+
+describe("the displaced codes on the queue screen (plan КНФ)", () => {
+  const HASH = "0".repeat(63) + "7";
+
+  function displaced(
+    db: ReturnType<typeof openLocalDb>["db"],
+    conflictId: string,
+    fields: { boxId?: string | null; sameDevice?: boolean } = {},
+  ): void {
+    db.prepare(
+      "INSERT INTO floor_displacements (host_id, device_id, conflict_id, record_id, shift_id, " +
+        "code_hash, box_id, detected_at, winner_shift_number, winner_same_device, " +
+        "winner_scanned_at, learned_at) VALUES (?, ?, ?, ?, ?, ?, ?, '2026-10-08T07:12:03Z', " +
+        "'OCT26-005/S', ?, '2026-10-08T06:00:50.000Z', '2026-10-08T07:13:00.000Z')",
+    ).run(
+      PAIRING.hostId,
+      PAIRING.deviceId,
+      conflictId,
+      `r-${conflictId}`,
+      SHIFT_ID,
+      HASH,
+      fields.boxId ?? null,
+      fields.sameDevice === true ? 1 : 0,
+    );
+  }
+
+  function closedBox(db: ReturnType<typeof openLocalDb>["db"]): void {
+    db.prepare(
+      "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, closed_at, sscc, " +
+        "block_id, serial, item_count) VALUES ('box-1', ?, ?, ?, '2026-10-08T06:10:00.000Z', " +
+        "'2026-10-08T06:20:00.000Z', '046006820000015001', 'block-1', 1500, 1)",
+    ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID);
+  }
+
+  it("lists each displaced code by its box and when the host saw it, with what to check", async () => {
+    const { db, local } = await station();
+    closedBox(db);
+    displaced(db, "c-1", { boxId: "box-1" });
+    // A box the host still had open: its id is known, its SSCC is not.
+    displaced(db, "c-2", { boxId: "box-open", sameDevice: true });
+    view(local);
+    const section = await screen.findByRole("region", { name: "Вытесненные коды" });
+    // 07:12 UTC on this computer's clock as the screen writes every record's time.
+    const time = new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date("2026-10-08T07:12:03Z"));
+    expect(
+      within(section).getByText(`Смена ${ENTERED.number} · Короб (00)046006820000015001 · ${time}`),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(
+        "Код из этого короба раньше отсканирован в смене OCT26-005/S. На хосте он теперь там, а короб без него: проверьте короб.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(`Смена ${ENTERED.number} · Короб без SSCC · ${time}`),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(/раньше отсканирован этой станцией в смене OCT26-005\/S/),
+    ).toBeTruthy();
+    expect(within(section).getAllByRole("button", { name: "Разобрано" })).toHaveLength(2);
+  });
+
+  // A validation shift's scan names no box (plan РЕЖ): the words speak of the product, never of a
+  // box the person has nowhere to look for.
+  it("words the displaced code of a validation shift without a box", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    displaced(db, "c-2", { sameDevice: true });
+    view(local);
+    const section = await screen.findByRole("region", { name: "Вытесненные коды" });
+    expect(within(section).getAllByText(/^Смена .+ · Без короба · /)).toHaveLength(2);
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(section).getByText(
+        "Этот код раньше отсканирован этой станцией в смене OCT26-005/S. На хосте он теперь там: проверьте изделие.",
+      ),
+    ).toBeTruthy();
+    expect(within(section).queryByText(/проверьте короб/)).toBeNull();
+  });
+
+  it("settles a displaced code on confirmation, guarded the same 400 ms, and tells the status bar", async () => {
+    const { db, local } = await station();
+    displaced(db, "c-1");
+    const clock = { now: 10_000 };
+    const { onChanged } = view(local, { clock: () => clock.now });
+    const section = await screen.findByRole("region", { name: "Вытесненные коды" });
+    fireEvent.click(within(section).getByRole("button", { name: "Разобрано" }));
+    const confirm = await confirmation();
+    expect(within(confirm).getByText(/Отметить вытеснение разобранным\?/)).toBeTruthy();
+    const settle = within(confirm).getByRole("button", { name: "Разобрано" });
+    clock.now = 10_399;
+    fireEvent.click(settle);
+    await act(async () => undefined);
+    expect(rows(db, "SELECT resolved_at FROM floor_displacements")).toEqual([
+      { resolved_at: null },
+    ]);
+    clock.now = 10_400;
+    fireEvent.click(settle);
+    expect(await screen.findByText("Вытеснение отмечено разобранным.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Вытесненных кодов нет.")).toBeTruthy());
+    expect(onChanged).toHaveBeenCalled();
+    expect(rows(db, "SELECT resolved_at, resolved_by FROM floor_displacements")).toEqual([
+      { resolved_at: NOW.toISOString(), resolved_by: OPERATOR_ID },
+    ]);
+  });
+
+  it("says there are none, and shows no conflict the office reviewed", async () => {
+    const { db, local } = await station();
+    const [conflict = ""] = await unsentScans(local, 1);
+    refuse(db, conflict, "conflict", null);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = NULL, " +
+        "office_reviewed_at = ? WHERE id = ?",
+    ).run(NOW.toISOString(), "2026-10-08T08:00:00Z", conflict);
+    view(local);
+    expect(await screen.findByText("Вытесненных кодов нет.")).toBeTruthy();
+    expect(screen.getByText("Конфликтов нет.")).toBeTruthy();
   });
 });

@@ -59,6 +59,7 @@ pub fn features_wire(features: &Features) -> LicenseFeatures {
         inventory: features.inventory,
         commerce_ml: features.commerce_ml,
         handheld: features.handheld,
+        custom_logo: features.custom_logo,
     }
 }
 
@@ -257,7 +258,7 @@ fn quota_list(quotas: &LicenseQuotas) -> [(&'static str, QuotaUse); 4] {
     ]
 }
 
-fn feature_list(features: &LicenseFeatures) -> [(&'static str, bool); 7] {
+fn feature_list(features: &LicenseFeatures) -> [(&'static str, bool); 8] {
     [
         ("labelEditor", features.label_editor),
         ("publicApi", features.public_api),
@@ -266,6 +267,7 @@ fn feature_list(features: &LicenseFeatures) -> [(&'static str, bool); 7] {
         ("inventory", features.inventory),
         ("commerceMl", features.commerce_ml),
         ("handheld", features.handheld),
+        ("customLogo", features.custom_logo),
     ]
 }
 

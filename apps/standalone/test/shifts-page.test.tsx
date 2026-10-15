@@ -33,11 +33,23 @@ import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const SESSION_TOKEN = "office-session-token";
 
-/** The text of the cells of the shift numbered `number`, left to right. */
-function cells(number: string): (string | null)[] {
+/** Where «Дата смены» (beta 3) stands among the cells: right after the production date. */
+const SHIFT_DATE_AT = 2;
+
+/** The text of every cell of the shift numbered `number`, left to right. */
+function allCells(number: string): (string | null)[] {
   return within(shiftRow(number))
     .getAllByRole("cell")
     .map((cell) => cell.textContent);
+}
+
+/**
+ * The text of the cells of the shift numbered `number`, left to right, but the
+ * shift date's: the other columns keep the places these tests name them by, and
+ * the shift date has a test of its own (`allCells`).
+ */
+function cells(number: string): (string | null)[] {
+  return allCells(number).filter((_, at) => at !== SHIFT_DATE_AT);
 }
 
 /** `count` planned shifts numbered OCT26-001… on line 2. */
@@ -274,11 +286,40 @@ describe("office shifts: the list", () => {
     session.api.listShifts.mockRejectedValueOnce(
       new HostError({ kind: "transport", code: "unreachable", message: "x" }),
     );
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     fireEvent.click(await screen.findByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("OCT26-004")).toBeTruthy();
     expect(session.api.listShifts).toHaveBeenCalledTimes(2);
+  });
+
+  it("sorts by a key column, by a click or the keyboard, and again the other way", async () => {
+    await openShifts(shiftsSession());
+    const numbers = () =>
+      shiftRows().map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    const header = (name: string) => screen.getByRole("columnheader", { name });
+    expect(header("Номер").getAttribute("aria-sort")).toBe("none");
+    fireEvent.click(header("Номер"));
+    expect(numbers()).toEqual(["OCT26-001/S", "OCT26-004", "OCT26-005"]);
+    expect(header("Номер").getAttribute("aria-sort")).toBe("ascending");
+    fireEvent.click(header("Номер"));
+    expect(numbers()).toEqual(["OCT26-005", "OCT26-004", "OCT26-001/S"]);
+    expect(header("Номер").getAttribute("aria-sort")).toBe("descending");
+    // The keyboard does what the mouse does: the header is a stop of Tab.
+    expect(header("Выпуск").tabIndex).toBe(0);
+    fireEvent.keyDown(header("Выпуск"), { key: "Enter" });
+    expect(header("Выпуск").getAttribute("aria-sort")).toBe("ascending");
+    // A planned shift put nothing out; the closed one's output is the least of the two after it.
+    expect(numbers()[0]).toBe("OCT26-005");
+  });
+
+  it("sums the shifts the filters keep, whatever the page, in a line over the table", async () => {
+    await openShifts(shiftsSession());
+    const totals = () => screen.getByText(/^Итого по выбранным сменам/).textContent;
+    // OCT26-004 puts 540 in 45 boxes; OCT26-001/S puts its own; the planned one nothing.
+    expect(totals()).toMatch(/^Итого по выбранным сменам: смен 3 · выпуск /);
+    chooseText("Статус", "Запланирована");
+    expect(totals()).toBe("Итого по выбранным сменам: смен 1 · выпуск 0 шт · коробов 0 · паллет 0");
   });
 
   it("filters by status and line and searches the number and the product's name, without case", async () => {
@@ -351,6 +392,47 @@ describe("office shifts: the list", () => {
     await screen.findByText(/Показаны запланированные и активные смены/);
     // The host's own list is cached: shown again at once and read again in the background.
     await waitFor(() => expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN));
+  });
+
+  it("lists the shift date beside the production date, and asks the host for a period of shift dates", async () => {
+    const session = shiftsSession();
+    await openShifts(session);
+    // The planned shift works on 10 October and is produced on 9 October.
+    const row = shiftRow(PLANNED.number);
+    expect(allCells(PLANNED.number).slice(1, 3)).toEqual(["09.10.2026", "10.10.2026"]);
+    expect(within(row).getByText("10.10.2026")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Дата смены" })).toBeTruthy();
+    pickDate("Дата смены с", "8 октября 2026");
+    expect(screen.getByText("Укажите обе даты периода. Пока показан прежний список.")).toBeTruthy();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+    pickDate("Дата смены по", "12 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText("Показаны смены с датой смены с 08.10.2026 по 12.10.2026."),
+    ).toBeTruthy();
+    // Both periods together narrow each other.
+    pickDate("Дата производства с", "1 октября 2026");
+    pickDate("Дата производства по", "9 октября 2026");
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenLastCalledWith(SESSION_TOKEN, {
+        from: "2026-10-01",
+        to: "2026-10-09",
+        plannedFrom: "2026-10-08",
+        plannedTo: "2026-10-12",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Показаны смены с датой производства с 01.10.2026 по 09.10.2026 и датой смены с 08.10.2026 по 12.10.2026.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    await screen.findByText(/Показаны запланированные и активные смены/);
   });
 
   it("refuses a period that ends before it starts or is longer than 366 days, and asks nothing", async () => {
@@ -581,8 +663,8 @@ describe("office shifts: the list, boundaries and states", () => {
   it("shows nothing but «Загрузка…» while the shifts load", async () => {
     const session = shiftsSession();
     session.api.listShifts.mockReturnValue(new Promise(() => undefined));
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     await screen.findByRole("heading", { name: "Смены" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -594,8 +676,8 @@ describe("office shifts: the list, boundaries and states", () => {
     const session = shiftsSession();
     session.api.listShifts.mockRejectedValueOnce(unreachable());
     session.api.listLines.mockRejectedValueOnce(unreachable());
-    renderOffice(session);
-    fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+    renderOffice(session, { initialPath: "/shifts" });
+    await screen.findByRole("link", { name: "Смены" });
     const retry = await screen.findByRole("button", { name: "Повторить" });
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
@@ -706,7 +788,7 @@ describe("office shifts: the list, boundaries and states", () => {
       counterpartyId: NORTH.id,
     };
     await openShifts(shiftsSession([validation, ACTIVE]));
-    expect(within(shiftRow("V-1")).getByText("Валидация").className).toContain("mk-badge--violet");
+    expect(within(shiftRow("V-1")).getByText("Проверка").className).toContain("mk-badge--violet");
     expect(within(shiftRow("OCT26-004")).getByText("Агрегация").className).toContain(
       "mk-badge--teal",
     );

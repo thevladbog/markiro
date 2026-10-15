@@ -11,6 +11,7 @@ import {
   type ShiftExportRows,
 } from "../src/host/protocol.js";
 import {
+  conflictWarnings,
   exportWarnings,
   palletWarnings,
   reportedCountWarnings,
@@ -73,6 +74,7 @@ function pallet(overrides: Partial<OfficePallet> = {}): OfficePallet {
     boxes: 1,
     units: 2,
     boxCountReported: 1,
+    disassembledBoxes: 0,
     printVerifiedAt: null,
     printSkippedAt: null,
     ...overrides,
@@ -255,11 +257,28 @@ describe("the pallets whose box count differs from the station's report (plan Ч
     ).toEqual([{ kind: "pallet_count_mismatch", pallets: 2 }]);
   });
 
+  it("leave out a difference exactly the pallet's own taken-apart boxes account for", () => {
+    // Two at the close, one stands, one taken apart since: the repacking, not a mismatch.
+    expect(
+      reportedCountWarnings([pallet({ boxes: 1, boxCountReported: 2, disassembledBoxes: 1 })]),
+    ).toEqual([]);
+    expect(
+      reportedCountWarnings([pallet({ boxes: 1, boxCountReported: 3, disassembledBoxes: 1 })]),
+    ).toEqual([{ kind: "pallet_count_mismatch", pallets: 1 }]);
+  });
+
   it("ignore a pallet the station reported no count for and one taken apart", () => {
     expect(reportedCountWarnings([pallet({ boxes: 4, boxCountReported: null })])).toEqual([]);
     expect(
       reportedCountWarnings([pallet({ boxes: 0, disassembledAt: "2026-10-08T07:00:00.000Z" })]),
     ).toEqual([]);
     expect(reportedCountWarnings([])).toEqual([]);
+  });
+});
+
+describe("unreviewed conflicts (plan КНФ, ПР-12)", () => {
+  it("warn with their number and never refuse", () => {
+    expect(conflictWarnings(0)).toEqual([]);
+    expect(conflictWarnings(3)).toEqual([{ kind: "unreviewed_conflicts", conflicts: 3 }]);
   });
 });

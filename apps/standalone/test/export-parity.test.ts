@@ -4,7 +4,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { formatShiftNumber, PALLET_EXPORT_FORMATS, SHIFT_EXPORT_FORMATS } from "@markiro/domain";
+import {
+  formatShiftNumber,
+  PALLET_EXPORT_FORMATS,
+  renderShiftExport,
+  SHIFT_EXPORT_FORMATS,
+} from "@markiro/domain";
 
 import { shiftExportRowsSchema, type ShiftExportRows } from "../src/host/protocol.js";
 import { runExport } from "../src/office/exports/run-export.js";
@@ -196,5 +201,69 @@ describe("the office's exports over the parity cases give the cloud's golden (pl
 
   it.each(runs)("%s", (key, parityCase, run) => {
     expect(outcomeOf(parityCase, run)).toEqual(golden[key]);
+  });
+});
+
+describe("the flat export of a validation shift, the office's and the cloud's (plan РЕЖ, A9)", () => {
+  // What the host's `export-source` sends for a closed validation shift: its codes, in the
+  // host's own order, and no box, item or pallet (`proto/fixtures/shift-export-rows.json`, whose
+  // codes include two scanned at one instant, with no boxes). The cloud's source orders a
+  // shift's codes by scan instant, then by hash (`compareAuthoritativeCodes`), and renders them
+  // through the domain; the office's port must give the same bytes and names.
+  const fixture = shiftExportRowsSchema.parse(
+    JSON.parse(
+      readFileSync(new URL("../proto/fixtures/shift-export-rows.json", testModuleUrl), "utf8"),
+    ),
+  );
+  const rows: ShiftExportRows = {
+    ...fixture,
+    shift: { ...fixture.shift, palletsEnabled: false },
+    codes: [...fixture.codes].reverse(),
+    boxes: [],
+    items: [],
+    pallets: [],
+  };
+  const cloudCodes = [...rows.codes]
+    .sort(
+      (left, right) =>
+        Date.parse(left.scannedAt) - Date.parse(right.scannedAt) ||
+        (left.codeHash < right.codeHash ? -1 : left.codeHash > right.codeHash ? 1 : 0),
+    )
+    .map((code) => code.canonical);
+  const flat = SHIFT_EXPORT_FORMATS.filter((format) => format.boxMode === "flat");
+
+  it("are the TXT and CSV flat formats", () => {
+    expect(flat.map((format) => `${format.id}@${format.version}`)).toEqual([
+      "shift_txt_flat@1",
+      "shift_csv_flat@1",
+    ]);
+  });
+
+  it.each(
+    flat.flatMap((format) => [null, 2].map((maxLines) => [format.id, maxLines, format] as const)),
+  )("%s (line limit %s)", (_id, maxLines, format) => {
+    const office = runExport(rows, {
+      formatId: format.id,
+      formatVersion: format.version,
+      maxLines,
+      palletId: null,
+      documentId: parity.documentId,
+      formedAt: parity.fileDateTime,
+    });
+    if (!office.ok) throw new Error(office.failure);
+    const cloud = renderShiftExport({
+      formatId: format.id,
+      formatVersion: format.version,
+      productName: rows.shift.productName,
+      shiftDate: rows.shift.productionDate,
+      maxLines,
+      source: { mode: "flat", codes: cloudCodes },
+    });
+    expect(office.parts.map((part) => part.filename)).toEqual(cloud.map((part) => part.filename));
+    expect(office.parts.map((part) => [...part.bytes])).toEqual(
+      cloud.map((part) => [...part.bytes]),
+    );
+    expect(cloud.reduce((sum, part) => sum + part.codeCount, 0)).toBe(rows.codes.length);
+    expect(cloud.every((part) => part.boxCount === 0)).toBe(true);
   });
 });

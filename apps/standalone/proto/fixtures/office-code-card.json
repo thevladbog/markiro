@@ -79,13 +79,29 @@
       "exception": "undo",
       "reasonCode": null,
       "reasonText": null,
-      "operatorName": "Анна Кузнецова"
+      "operatorName": "Анна Кузнецова",
+      "documentId": null,
+      "documentNo": null,
+      "officeUserName": null
     },
     {
       "type": "displaced",
       "at": "2026-10-08T06:06:30Z",
       "boxId": "b0000000-0000-4000-8000-000000000004",
       "boxSscc": "046006820000015024"
+    },
+    {
+      "type": "removed",
+      "at": "2026-10-08T06:08:00.000Z",
+      "boxId": "b0000000-0000-4000-8000-000000000004",
+      "boxSscc": "046006820000015024",
+      "exception": "disassemble",
+      "reasonCode": null,
+      "reasonText": "Повреждена упаковка",
+      "operatorName": null,
+      "documentId": "6a1f3c5e-7b9d-4e2f-8a4c-1d3e5f7a9b0c",
+      "documentNo": "DSG-26-0007",
+      "officeUserName": "Ирина Смирнова"
     },
     {
       "type": "reprint",

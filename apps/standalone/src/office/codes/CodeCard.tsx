@@ -10,14 +10,19 @@ import type {
   OfficeCodeEvent,
   OfficeCodeItem,
 } from "../../host/code-search.js";
-import { ssccText } from "../shifts/shift-card.js";
+import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
+import { PackTextLink } from "./PackLinks.js";
 
-/** A placement's state in its phase: a code taken out is retired, one taken elsewhere wants a look. */
+/**
+ * A placement's state in its phase: a code taken out is retired, one taken elsewhere wants a
+ * look; a validation shift's accepted code (no box, plan РЕЖ) is done, as a packed one.
+ */
 export const PLACEMENT_PHASE = {
   open_box: "active",
   packed: "done",
   removed: "retired",
   displaced: "attention",
+  checked: "done",
 } as const satisfies Record<CodePlacementState, TagPhase>;
 
 /** An instant the host reported, in the organization's zone, to the second. */
@@ -49,12 +54,32 @@ export function PlacementChip({ state }: { state: CodePlacementState }) {
   );
 }
 
-/** A box as a row names it: its SSCC, or that it is open, and that it was taken apart. */
+/**
+ * A box as a row names it: its SSCC, or that it is open, and that it was taken apart; «—» for a
+ * validation shift's scan, which has no box.
+ */
 export function boxLabel(item: OfficeCodeItem, t: TFunction): string {
+  if (item.boxId === null) return t("office.common.none");
   const sscc = item.boxSscc === null ? t("office.codeSearch.openBox") : ssccText(item.boxSscc);
   return item.boxDisassembledAt === null
     ? sscc
     : t("office.codeSearch.disassembled", { what: sscc });
+}
+
+/**
+ * A scan's box: a link to the box's card, or just «—» for a validation shift's scan, which has
+ * no box and so no card to open (a link built from its null id would be dead).
+ */
+function BoxText({ item }: { item: OfficeCodeItem }) {
+  const { t } = useTranslation();
+  const label = boxLabel(item, t);
+  return item.boxId === null ? (
+    <>{label}</>
+  ) : (
+    <PackTextLink kind="box" id={item.boxId}>
+      {label}
+    </PackTextLink>
+  );
 }
 
 export function palletLabel(item: OfficeCodeItem, t: TFunction): string {
@@ -69,7 +94,7 @@ export function palletLabel(item: OfficeCodeItem, t: TFunction): string {
 /** The link to a shift's card, which a row's click does not also open. */
 export function ShiftLink({ item }: { item: Pick<OfficeCodeItem, "shiftId" | "shiftNumber"> }) {
   return (
-    <Link to={`/shifts/${item.shiftId}`} onClick={(event) => event.stopPropagation()}>
+    <Link to={shiftCardPath(item.shiftId)} onClick={(event) => event.stopPropagation()}>
       {item.shiftNumber}
     </Link>
   );
@@ -79,6 +104,8 @@ function eventText(event: OfficeCodeEvent, t: TFunction): string {
   switch (event.type) {
     case "scan": {
       const verdict = t(`office.codeSearch.verdict.${event.verdict}`);
+      // The earlier scan that took the code may be a validation shift's, in no box (plan
+      // РЕЖ): the event does not say, so neither does the text.
       if (event.verdict === "ok" && !event.placed) {
         return t("office.codeSearch.event.scanLost", { verdict });
       }
@@ -102,7 +129,11 @@ function eventText(event: OfficeCodeEvent, t: TFunction): string {
       return reason === null ? kind : t("office.codeSearch.event.withReason", { kind, reason });
     }
     case "displaced":
-      return t("office.codeSearch.event.displaced");
+      return t(
+        event.boxId === null
+          ? "office.codeSearch.event.displacedUnboxed"
+          : "office.codeSearch.event.displaced",
+      );
     case "reprint":
       return t("office.codeSearch.event.reprint", {
         outcome: t(`office.codeSearch.reprintOutcome.${event.outcome}`, {
@@ -122,7 +153,7 @@ function eventWhere(event: OfficeCodeEvent, t: TFunction): string {
     parts.push(t("office.codeSearch.event.shift", { number: event.shiftNumber }));
     parts.push(event.deviceName);
   }
-  if (event.type === "removed" || event.type === "displaced") {
+  if (event.type === "removed" || (event.type === "displaced" && event.boxId !== null)) {
     parts.push(
       event.boxSscc === null
         ? t("office.codeSearch.event.openBox")
@@ -130,7 +161,11 @@ function eventWhere(event: OfficeCodeEvent, t: TFunction): string {
     );
   }
   if (event.type === "reprint") parts.push(event.deviceName);
+  if (event.type === "removed" && event.documentNo !== null) {
+    parts.push(t("office.codeSearch.event.document", { docNo: event.documentNo }));
+  }
   if ("operatorName" in event && event.operatorName !== null) parts.push(event.operatorName);
+  if (event.type === "removed" && event.officeUserName !== null) parts.push(event.officeUserName);
   return parts.join(" · ");
 }
 
@@ -164,13 +199,20 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
       key: "box",
       title: t("office.codeSearch.table.box"),
       mono: true,
-      render: (item) => boxLabel(item, t),
+      render: (item) => <BoxText item={item} />,
     },
     {
       key: "pallet",
       title: t("office.codeSearch.table.pallet"),
       mono: true,
-      render: (item) => palletLabel(item, t),
+      render: (item) =>
+        item.palletId === null ? (
+          palletLabel(item, t)
+        ) : (
+          <PackTextLink kind="pallet" id={item.palletId}>
+            {palletLabel(item, t)}
+          </PackTextLink>
+        ),
     },
     {
       key: "shift",
@@ -216,7 +258,9 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
               ) : (
                 <span className="shift-cell">
                   <PlacementChip state={owner.state} />
-                  <span className="shift-cell__quiet">{boxLabel(owner, t)}</span>
+                  <span className="shift-cell__quiet">
+                    <BoxText item={owner} />
+                  </span>
                 </span>
               ),
           },

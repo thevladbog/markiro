@@ -1,8 +1,11 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { buildPalletSheetPresets } from "@markiro/domain";
+
+import type { PrintRuntime, SendOutcome } from "../src/floor/print/print-runtime.js";
 import { HostError } from "../src/host/client.js";
-import type { WarehouseLookupResult } from "../src/host/protocol.js";
+import type { PalletSheets, WarehouseLookupResult } from "../src/host/protocol.js";
 import { openLocalDb } from "./support/local-db.js";
 import { HP_A4, setUpPrinting, TSC, ZEBRA } from "./support/printing.js";
 import {
@@ -20,6 +23,32 @@ import {
   rows,
   startedWarehouse,
 } from "./support/warehouse-screen.js";
+
+const [STOCK_SHEET] = buildPalletSheetPresets();
+if (STOCK_SHEET === undefined) throw new Error("no stock sheet");
+const SHEET_SPEC = STOCK_SHEET.spec;
+const SHEET_ID = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
+const HOST_SHEETS: PalletSheets = {
+  sheets: [
+    {
+      id: SHEET_ID,
+      name: "Вертикальная",
+      enabled: true,
+      presetKey: null,
+      revision: 2,
+      spec: SHEET_SPEC,
+    },
+    {
+      id: "6b7c8d9e-0f1a-4b2c-9d3e-4f5a6b7c8d9e",
+      name: "Другая",
+      enabled: true,
+      presetKey: null,
+      revision: 1,
+      spec: SHEET_SPEC,
+    },
+  ],
+  defaultId: SHEET_ID,
+};
 
 const FOUND_BOX = async (): Promise<WarehouseLookupResult> => ({
   status: "found",
@@ -161,29 +190,108 @@ describe("a label that did not go out", () => {
     expect(at.lookup).toHaveBeenCalledTimes(2);
   });
 
-  it("says a pallet printer of A4 sheets is no printer for a reprint, and offers the workstation", async () => {
+  it("prints a pallet's A4 sheet on the printer of sheets, from the sheet the host gives the product by default", async () => {
     const seeded = openLocalDb();
     seedWarehouseCopies(seeded.db);
     await setUpPrinting(seeded.executor, {
       printers: [ZEBRA, TSC, HP_A4],
       assignments: { box: "zebra", pallet: "hp-a4", duplicate: "tsc" },
     });
+    const sends: { paper: string | undefined; bytes: number }[] = [];
+    const printing: PrintRuntime = {
+      send: async (_job, _target, bytes, _mode, paper): Promise<SendOutcome> => {
+        sends.push({ paper, bytes: bytes.length });
+        return { kind: "answered", result: { sent: true } };
+      },
+      isInFlight: () => false,
+      inFlight: () => [],
+      checkWindowsJob: async () => ({ state: "no_receipt" }),
+      supportsWindowsDriver: async () => true,
+    };
+    const palletSheets = vi.fn(async () => HOST_SHEETS);
     const at = await startedWarehouse({
       seeded,
       lookup: async (): Promise<WarehouseLookupResult> => ({
         status: "found",
         source: PALLET_SOURCE,
       }),
+      overrides: { printing, palletSheets },
     });
     await at.scan(PALLET_SSCC);
-    expect(await screen.findByText(/Принтер паллет настроен на листы А4/)).toBeTruthy();
-    expect(screen.getByText("Задание: не отправлено")).toBeTruthy();
-    expect(at.shell.sends).toEqual([]);
-    expect(rows(at.db, "SELECT state, error_code FROM wh_jobs")).toEqual([
-      { state: "failed", error_code: "printer_a4" },
+    expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
+    // The session started on «по умолчанию товара», the sheet the host names for this product.
+    expect(palletSheets).toHaveBeenCalledWith(PALLET_SOURCE.product.id);
+    expect(sends).toEqual([{ paper: "a4", bytes: expect.any(Number) }]);
+    expect(rows(at.db, "SELECT state, template_id, template_rev FROM wh_jobs")).toEqual([
+      { state: "sent", template_id: SHEET_ID, template_rev: 2 },
     ]);
-    await at.press("Рабочее место");
-    expect(at.props.onSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the A4 sheets for pallets on a printer of sheets, the label templates on a label printer, and says when there is no printer", async () => {
+    const choose = async (assignments: {
+      box: string | null;
+      pallet: string | null;
+      duplicate: string | null;
+    }) => {
+      const seeded = openLocalDb();
+      seedWarehouseCopies(seeded.db);
+      await setUpPrinting(seeded.executor, { printers: [ZEBRA, TSC, HP_A4], assignments });
+      const at = await renderWarehouse({
+        seeded,
+        overrides: { palletSheets: async () => HOST_SHEETS },
+      });
+      await screen.findByRole("button", { name: "Начать перепечатку" });
+      await at.press("Шаблоны");
+      await at.press("Паллеты");
+      return at;
+    };
+    // A printer of sheets: «по умолчанию товара» (chosen) and the host's sheets, no label template.
+    const a4 = await choose({ box: "zebra", pallet: "hp-a4", duplicate: "tsc" });
+    expect(await screen.findByRole("button", { name: "По умолчанию товара" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "По умолчанию товара" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: "Вертикальная" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Палета 100×150/ })).toBeNull();
+    await a4.press("Другая");
+    await a4.press("Применить шаблоны");
+    expect(screen.getByText(/Паллеты: Лист А4: Другая/)).toBeTruthy();
+    cleanup();
+    // A label printer: the label templates of the copies, as before.
+    await choose({ box: "zebra", pallet: "zebra", duplicate: "tsc" });
+    expect(screen.getByRole("button", { name: /Палета 100×150/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "По умолчанию товара" })).toBeNull();
+    cleanup();
+    // No printer for pallets: it is said, and nothing is offered.
+    await choose({ box: "zebra", pallet: null, duplicate: "tsc" });
+    expect(screen.getByText(/Принтер паллет не выбран/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Палета 100×150/ })).toBeNull();
+  });
+
+  it("says the host's sheets did not come, and tries again", async () => {
+    const seeded = openLocalDb();
+    seedWarehouseCopies(seeded.db);
+    await setUpPrinting(seeded.executor, {
+      printers: [ZEBRA, TSC, HP_A4],
+      assignments: { box: "zebra", pallet: "hp-a4", duplicate: "tsc" },
+    });
+    let answers = 0;
+    const at = await renderWarehouse({
+      seeded,
+      overrides: {
+        palletSheets: async () => {
+          answers += 1;
+          if (answers === 1) throw new Error("offline");
+          return HOST_SHEETS;
+        },
+      },
+    });
+    await screen.findByRole("button", { name: "Начать перепечатку" });
+    await at.press("Шаблоны");
+    await at.press("Паллеты");
+    expect(await screen.findByText("Листы А4 не получены от хоста. Проверьте связь.")).toBeTruthy();
+    await at.press("Повторить");
+    expect(await screen.findByRole("button", { name: "Вертикальная" })).toBeTruthy();
   });
 
   it("retries a failed job on the printer assigned now, once, and says it is sent", async () => {

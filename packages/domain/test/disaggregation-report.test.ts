@@ -1,0 +1,288 @@
+import { describe, expect, it } from "vitest";
+import {
+  DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+  renderDisaggregationReportHtml,
+  type DisaggregationReportData,
+  type DisaggregationReportLine,
+} from "../src/print-forms/disaggregation-report.js";
+
+/**
+ * GS (ASCII 0x1D) — the real KM segment separator byte (see kiosk-orders.e2e.test.ts
+ * for the full rationale on why fixtures must use it, not a printable stand-in).
+ */
+const GS = String.fromCharCode(0x1d);
+
+/**
+ * `renderDataMatrixSvg` enforces the AI-01 GTIN mod-10 check digit —
+ * "04600682000013" is check-digit VALID (same vector as slip.test.ts).
+ */
+const GTIN = "04600682000013";
+
+function line(n: number, codeCount: number): DisaggregationReportLine {
+  return {
+    n,
+    sscc: `0014600703496700${String(n).padStart(4, "0")}`,
+    productName: `Жигулёвское светлое 0,5 л (партия ${n})`,
+    codeCount,
+    codes: Array.from({ length: codeCount }, (_, index) => ({
+      gtin14: GTIN,
+      serial: `BOX${n}SER${index + 1}`,
+      rawKm: `01${GTIN}21BOX${n}SER${index + 1}${GS}93Abcd`,
+    })),
+    boxes: [],
+  };
+}
+
+/** A PALLET line: its contents are member boxes, never unit codes. */
+function palletLine(n: number, boxCount: number, perBox = 12): DisaggregationReportLine {
+  return {
+    n,
+    sscc: `0014600703496710${String(n).padStart(4, "0")}`,
+    productName: `Жигулёвское светлое 0,5 л (паллета ${n})`,
+    codeCount: boxCount * perBox,
+    codes: [],
+    boxes: Array.from({ length: boxCount }, (_, index) => ({
+      sscc: `0014600703496700${String(index + 1).padStart(4, "0")}`,
+      codeCount: perBox,
+    })),
+  };
+}
+
+function fixture(overrides: Partial<DisaggregationReportData> = {}): DisaggregationReportData {
+  return {
+    docNo: "DSG-26-0007",
+    status: "applied",
+    createdAt: new Date("2026-08-20T09:12:00.000Z"),
+    appliedAt: new Date("2026-08-21T10:30:00.000Z"),
+    org: { name: "ООО «Пивзавод „Заря“»", inn: "5029087641", logo: null },
+    createdByName: "Иванова Мария Сергеевна",
+    appliedByName: "Смирнов Алексей Петрович",
+    reasonName: "Повреждение упаковки",
+    comment: "Короба намокли при разгрузке",
+    includeContents: false,
+    lines: [line(1, 3), line(2, 2)],
+    ...overrides,
+  };
+}
+
+describe("renderDisaggregationReportHtml", () => {
+  it("is a pure function of its input (no I/O): same fixture -> identical HTML", () => {
+    expect(renderDisaggregationReportHtml(fixture())).toBe(
+      renderDisaggregationReportHtml(fixture()),
+    );
+  });
+
+  it("shows the document number, performer, reason and comment", () => {
+    const html = renderDisaggregationReportHtml(fixture());
+    expect(html).toContain("DSG-26-0007");
+    expect(html).toContain("Смирнов Алексей Петрович");
+    expect(html).toContain("Повреждение упаковки");
+    expect(html).toContain("Короба намокли при разгрузке");
+    expect(html).toContain("Операцию провёл");
+  });
+
+  it("boxes variant renders one SSCC barcode per line and no DataMatrix", () => {
+    const html = renderDisaggregationReportHtml(fixture());
+    expect(html.match(/class="sscc-box"/g)).toHaveLength(2);
+    expect(html).not.toContain('class="dm-box"');
+    expect(html).toContain("(00)146007034967000001");
+    expect(html).toContain("(00)146007034967000002");
+    expect(html.match(/class="code128-box"/g)).toHaveLength(1);
+  });
+
+  it("full variant nests one indented DataMatrix code row under each box row", () => {
+    const html = renderDisaggregationReportHtml(fixture({ includeContents: true }));
+    expect(html.match(/class="rep-box-row"/g)).toHaveLength(2);
+    expect(html.match(/class="rep-code-row"/g)).toHaveLength(5);
+    expect(html.match(/class="dm-box"/g)).toHaveLength(5);
+    expect(html).toContain(`01 ${GTIN} 21 BOX1SER1`);
+    expect(html).toContain(`01 ${GTIN} 21 BOX2SER2`);
+    // Tree glyphs: the last code of each box closes with └, the rest use ├.
+    expect(html.match(/class="rep-tree">└/g)).toHaveLength(2);
+    expect(html.match(/class="rep-tree">├/g)).toHaveLength(3);
+  });
+
+  it("never prints prices", () => {
+    const boxesHtml = renderDisaggregationReportHtml(fixture());
+    const fullHtml = renderDisaggregationReportHtml(fixture({ includeContents: true }));
+    for (const html of [boxesHtml, fullHtml]) {
+      expect(html).not.toContain("₽");
+      expect(html).not.toMatch(/[Цц]ена/);
+      expect(html).not.toContain("Итого по заявке");
+    }
+  });
+
+  it("declares an A4 @page", () => {
+    const html = renderDisaggregationReportHtml(fixture());
+    expect(html).toContain("@page");
+    expect(html).toMatch(/size:\s*A4/);
+  });
+
+  it("totals and signatures land once, at the end of the document", () => {
+    const html = renderDisaggregationReportHtml(fixture());
+    expect(html.match(/class="rep-final-blocks"/g)).toHaveLength(1);
+    expect(html).toContain("коробов — 2 · кодов — 5");
+    expect(html.match(/class="signature-line"/g)).toHaveLength(2);
+    expect(html).toMatch(
+      /class="signature-line"[^>]*><\/span>\s*<span class="signature-name">Смирнов Алексей Петрович<\/span>/,
+    );
+  });
+
+  it("paginates a long boxes-only act into numbered pages with repeated furniture", () => {
+    const lines = Array.from({ length: 40 }, (_, index) => ({
+      ...line(index + 1, 1),
+      codes: [],
+    }));
+    const html = renderDisaggregationReportHtml(fixture({ lines }));
+    const pageCount = html.match(/data-report-page="\d+"/g)?.length ?? 0;
+    expect(pageCount).toBeGreaterThan(1);
+    expect(html.match(/class="rep-table-head"/g)).toHaveLength(pageCount);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(pageCount);
+    expect(html).toContain(`стр. 1 из ${pageCount}`);
+    expect(html).toContain(`стр. ${pageCount} из ${pageCount}`);
+    expect(html.match(/class="rep-final-blocks"/g)).toHaveLength(1);
+    const pages = html.match(/<section class="rep-page"[\s\S]*?<\/section>/g) ?? [];
+    const renderedSscc = pages.flatMap((page) =>
+      Array.from(page.matchAll(/\(00\)1460070349670(\d{5})/g), (match) => Number(match[1])),
+    );
+    expect(renderedSscc).toEqual(lines.map((l) => l.n));
+  });
+
+  it("paginates the contents variant without orphaning a box row at a page break", () => {
+    const lines = Array.from({ length: 12 }, (_, index) => line(index + 1, 9));
+    const html = renderDisaggregationReportHtml(fixture({ includeContents: true, lines }));
+    const pages = html.match(/<section class="rep-page"[\s\S]*?<\/section>/g) ?? [];
+    expect(pages.length).toBeGreaterThan(1);
+    for (const page of pages) {
+      // A box row is never the last row of a page: its first code row
+      // always sits under it on the same page.
+      if (!page.includes('class="rep-box-row"')) continue;
+      expect(page.lastIndexOf('class="rep-box-row"')).toBeLessThan(
+        page.lastIndexOf('class="rep-code-row"'),
+      );
+    }
+    expect(html.match(/class="dm-box"/g)).toHaveLength(12 * 9);
+  });
+
+  it("keeps the act printable when one stored code cannot be rendered", () => {
+    const broken = line(1, 1);
+    broken.codes[0]!.rawKm = "not-a-valid-km";
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [broken] }),
+    );
+    expect(html).toContain("Код не отображается");
+    expect(html).toContain("DSG-26-0007");
+  });
+
+  it("draft acts name the author and the draft status instead of an applier", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ status: "draft", appliedAt: null, appliedByName: null }),
+    );
+    expect(html).toContain("Документ составил");
+    expect(html).toContain("Иванова Мария Сергеевна");
+    expect(html).toContain("Черновик");
+  });
+
+  it("uses organization branding when safe and falls back to Markiro for unsafe sources", () => {
+    const organizationHtml = renderDisaggregationReportHtml(
+      fixture({
+        org: {
+          name: "ООО Логотип",
+          inn: "1234567890",
+          logo: "https://assets.example.test/logo.svg?a=1&b=2",
+        },
+      }),
+    );
+    expect(organizationHtml).toContain('src="https://assets.example.test/logo.svg?a=1&amp;b=2"');
+    expect(organizationHtml).not.toContain('data-brand-logo="markiro"');
+
+    const fallbackHtml = renderDisaggregationReportHtml(
+      fixture({
+        org: { name: "ООО Небезопасный URL", inn: null, logo: "javascript:alert(1)" },
+      }),
+    );
+    expect(fallbackHtml).not.toContain("javascript:alert(1)");
+    expect(fallbackHtml).toContain('data-brand-logo="markiro"');
+  });
+});
+
+/**
+ * A pallet line's contents are the boxes it carried. Before this it carried
+ * neither codes nor boxes, so the act printed an empty contents block beneath
+ * a correct unit count — the reader could not tell an empty pallet from one
+ * the report simply could not describe.
+ */
+describe("pallet lines in the act", () => {
+  it("lists member boxes under a pallet line, with their own counts and barcodes", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [palletLine(1, 3)] }),
+    );
+    expect(html).toContain("(00)146007034967100001");
+    for (const index of [1, 2, 3]) {
+      expect(html).toContain(`(00)14600703496700000${index}`);
+    }
+    // Never the "contents unavailable" fallback, and never a unit-code row.
+    expect(html).not.toContain("Содержимое упаковки недоступно");
+    expect(html).not.toContain("01 04600682000013 21 ");
+    // Three member rows, the last one closing the tree. Counted on the row
+    // markup rather than the class name, which also appears in the stylesheet.
+    expect(html.match(/<tr class="rep-code-row">/g)?.length).toBe(3);
+    expect(html).toContain("└");
+  });
+
+  it("keeps the act's wording neutral between a box and a pallet", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [palletLine(1, 2)] }),
+    );
+    // The footnote is printed on every act, so it may not claim the subject
+    // was a box: this document disaggregated a pallet.
+    expect(html).toContain("SSCC расформированной упаковки повторно не используется");
+    expect(html).not.toContain("SSCC расформированного короба");
+  });
+
+  it("still renders unit codes for a box line beside a pallet one", () => {
+    const html = renderDisaggregationReportHtml(
+      fixture({ includeContents: true, lines: [line(1, 2), palletLine(2, 1)] }),
+    );
+    expect(html).toContain("01 04600682000013 21 BOX1SER1");
+    expect(html).toContain("(00)146007034967000001");
+  });
+});
+
+describe("the act's zone and note (plan ДЗГ-О)", () => {
+  const applied = fixture({
+    createdAt: new Date("2026-10-12T09:12:00.000Z"),
+    appliedAt: new Date("2026-10-12T21:30:00.000Z"),
+  });
+
+  it("prints UTC by default, as the cloud does", () => {
+    const html = renderDisaggregationReportHtml(applied);
+    expect(html).toContain("от 12 октября 2026 г.");
+    expect(html).toContain("12.10.2026 21:30");
+  });
+
+  it("prints the organization's day and time when given its zone", () => {
+    const html = renderDisaggregationReportHtml(applied, "Europe/Moscow");
+    expect(html).toContain("от 13 октября 2026 г.");
+    // h23: a minute past midnight is 00:30, never 24:30.
+    expect(html).toContain("13.10.2026 00:30");
+  });
+
+  it("keeps the cloud's sentence without a note and escapes a given one", () => {
+    expect(renderDisaggregationReportHtml(applied)).toContain(
+      "Изменения агрегации передаются в ГИС МТ автоматически.",
+    );
+    const html = renderDisaggregationReportHtml({ ...applied, operationNote: "<b>вручную</b>" });
+    expect(html).not.toContain("передаются в ГИС МТ автоматически");
+    expect(html).toContain("&lt;b&gt;вручную&lt;/b&gt;");
+  });
+
+  it("says the file is uploaded by hand, never that ГИС МТ is told automatically", () => {
+    const html = renderDisaggregationReportHtml({
+      ...applied,
+      operationNote: DISAGGREGATION_MANUAL_UPLOAD_NOTE,
+    });
+    expect(html).toContain("загружается в личный кабинет Честного знака вручную");
+    expect(html).not.toContain("автоматически");
+  });
+});

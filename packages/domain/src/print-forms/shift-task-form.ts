@@ -31,6 +31,12 @@ export interface ShiftTaskFormData {
    * `imageChecksum`.
    */
   imageSrc?: string;
+  /**
+   * The organization's own logo for the blank's header (a `data:image/...;base64`
+   * URL; the standalone office with custom branding). Left out, or not such a
+   * URL, the header carries the Markiro logo.
+   */
+  organizationLogoSrc?: string;
   lineName: string | null;
   plannedDate: string | null;
   productionDate: string | null;
@@ -44,6 +50,18 @@ export interface ShiftTaskFormData {
   validationPrintVerification: "none" | "required";
   allowPreviouslyAcceptedCodes: boolean;
   generatedAt: Date;
+}
+
+/** The header's logo: the organization's own picture when it is a plain data URL, else Markiro's. */
+function headerLogo(data: ShiftTaskFormData): string {
+  const src = data.organizationLogoSrc?.trim();
+  if (
+    src !== undefined &&
+    /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+$/i.test(src)
+  ) {
+    return `<img class="brand-logo brand-logo--organization" style="width:auto;height:auto;max-width:44mm;max-height:12mm;object-fit:contain;object-position:left center" src="${escapeHtml(src)}" alt="${escapeHtml(data.organizationName)}">`;
+  }
+  return taskFormLogoSvg();
 }
 
 const STATUS_LABEL: Record<ShiftTaskFormData["status"], string> = {
@@ -200,7 +218,7 @@ ${SHIFT_FORM_CSS}
 </head>
 <body>
   <main class="page${compact ? " compact" : ""}" data-layout="${compact ? "compact" : "standard"}">
-    <header class="top">${taskFormLogoSvg()}<div class="task-id"><span class="eyebrow">Бланк смены</span><strong>${number}</strong></div></header>
+    <header class="top">${headerLogo(data)}<div class="task-id"><span class="eyebrow">Бланк смены</span><strong>${number}</strong></div></header>
     <section class="task-passport"><section class="hero"><div><h1>Сменное задание</h1><p class="subtitle">${modeTitle} · ${organization}</p></div><div class="status">${STATUS_LABEL[data.status]}</div></section><section class="scan-zone" aria-label="Штрихкод смены"><div class="barcode" data-barcode-symbology="datamatrix" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть смену</div></section></section>
     <section class="product${data.imageChecksum === null ? " product--no-photo" : ""}">${photo}<div><div class="product-eyebrow">Продукция</div><div class="product-name">${product}</div><div class="product-meta">${printNameSegment}GTIN <span>${data.gtin14}</span></div></div></section>
     <section class="parameters"><h2>Параметры смены</h2><dl>${parameters}</dl></section>

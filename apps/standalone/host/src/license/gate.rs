@@ -45,6 +45,23 @@ pub async fn require_new_shifts(
     })))
 }
 
+/// Whether the license allows the organization's own logo on forms and
+/// labels (the feature `customLogo`; the trial and a host with no file allow
+/// it). Read on the same connection as the write it decorates.
+pub async fn custom_branding(
+    app: &AppState,
+    conn: &mut SqliteConnection,
+) -> Result<bool, ApiError> {
+    let snapshot = app
+        .license
+        .snapshot(app, conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(super::state::custom_branding_allowed(
+        &snapshot.evaluation.features,
+    ))
+}
+
 /// Every route the license's state closes (spec §3.3: `restricted`,
 /// `trial_expired`, `inn_mismatch`), with what it closes. A new route goes
 /// into this table or into [`NEVER`]: `tests/license_routes.rs` compares both
@@ -72,15 +89,18 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/device"),
     ("PUT", "/v1/device/line"),
     ("GET", "/v1/device/shifts"),
+    ("GET", "/v1/device/products/{id}/photo"),
     ("POST", "/v1/device/sscc/blocks"),
     ("POST", "/v1/device/sscc/blocks/known"),
     ("POST", "/v1/device/facts"),
     ("GET", "/v1/device/codes/{code_hash}"),
+    ("GET", "/v1/device/pallet-sheets"),
     ("POST", "/v1/device/warehouse/lookup"),
     ("POST", "/v1/device/warehouse/reprints"),
     ("GET", "/v1/changes"),
     ("GET", "/v1/changes/stream"),
     ("GET", "/v1/office/devices"),
+    ("GET", "/v1/office/usage-stats"),
     ("PUT", "/v1/office/devices/{id}"),
     ("POST", "/v1/office/devices/{id}/revoke"),
     ("POST", "/v1/office/login"),
@@ -102,6 +122,14 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/lines"),
     ("POST", "/v1/office/lines"),
     ("PUT", "/v1/office/lines/{id}"),
+    ("GET", "/v1/device/displacements"),
+    ("POST", "/v1/device/conflicts/status"),
+    ("GET", "/v1/office/conflicts"),
+    ("POST", "/v1/office/conflicts/{id}/review"),
+    ("GET", "/v1/office/shifts/{id}/exceptions"),
+    ("GET", "/v1/office/shifts/{id}/rejections"),
+    ("GET", "/v1/office/shifts/{id}/scans"),
+    ("GET", "/v1/office/shifts/{id}/exports"),
     ("GET", "/v1/office/employees"),
     ("POST", "/v1/office/employees"),
     ("PUT", "/v1/office/employees/{id}"),
@@ -140,8 +168,32 @@ pub const NEVER: &[(&str, &str)] = &[
     ("GET", "/v1/office/shifts/{id}/pallets"),
     ("GET", "/v1/office/shifts/{id}/export-source"),
     ("POST", "/v1/office/shifts/{id}/exports"),
+    ("GET", "/v1/office/export-files"),
+    ("POST", "/v1/office/export-files"),
+    ("GET", "/v1/office/export-files/settings"),
+    ("PUT", "/v1/office/export-files/settings"),
+    ("GET", "/v1/office/export-files/{id}/chunks/{seq}"),
+    ("PUT", "/v1/office/export-files/{id}/chunks/{seq}"),
+    ("POST", "/v1/office/export-files/{id}/complete"),
+    ("POST", "/v1/office/export-files/{id}/download"),
     ("GET", "/v1/office/shifts/{id}/pallet-report-data"),
     ("GET", "/v1/office/boxes/{id}/report-data"),
+    ("GET", "/v1/office/disaggregation"),
+    ("POST", "/v1/office/disaggregation"),
+    ("GET", "/v1/office/disaggregation/{id}"),
+    ("PUT", "/v1/office/disaggregation/{id}"),
+    ("POST", "/v1/office/disaggregation/{id}/lines"),
+    ("DELETE", "/v1/office/disaggregation/{id}/lines/{line_id}"),
+    ("POST", "/v1/office/disaggregation/{id}/apply"),
+    ("POST", "/v1/office/disaggregation/{id}/cancel"),
+    ("GET", "/v1/office/disaggregation/{id}/report-data"),
+    ("POST", "/v1/office/disaggregation/{id}/exports"),
+    ("GET", "/v1/office/disaggregation-reasons"),
+    ("POST", "/v1/office/disaggregation-reasons"),
+    ("PUT", "/v1/office/disaggregation-reasons/{id}"),
+    ("GET", "/v1/office/boxes/{id}"),
+    ("GET", "/v1/office/pallets"),
+    ("GET", "/v1/office/pallets/{id}"),
     ("GET", "/v1/office/codes"),
     ("GET", "/v1/office/codes/{code_hash}"),
     ("GET", "/v1/office/backups"),

@@ -19,8 +19,8 @@ use markiro_proto::{
     ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
     ShiftClosedFact, ShiftCreate, ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin,
     ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
-    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, UnitLabelFact,
+    ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -81,16 +81,27 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 4);
+    assert_eq!(hello.protocol, 6);
     assert!(hello.initialized);
 }
 
 #[test]
 fn envelope_decides_compatibility_before_the_rest() {
     let future: HelloEnvelope = serde_json::from_value(fixture("hello-future.json")).unwrap();
+    // The fixture stands for a later host: raising this build's protocol to
+    // it must fail here, so the fixture is raised too and never silently
+    // becomes the current host.
+    assert!(
+        future.protocol > markiro_proto::PROTOCOL_VERSION,
+        "hello-future.json must stay ahead of PROTOCOL_VERSION"
+    );
     assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(5, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(5, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(7, &future), Compatibility::HostTooOld);
+    // A host of a later protocol that still takes this build's.
+    assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
     assert_eq!(compatibility(&current), Compatibility::Compatible);
 }
@@ -1175,6 +1186,23 @@ fn a_shift_with_pallets_names_them_and_its_entry_freezes_the_pallet_template() {
 }
 
 #[test]
+fn a_station_names_the_mode_and_the_print_policy_of_its_shift() {
+    let bare: DeviceShiftCreate = round_trip("device-shift-create.json");
+    assert_eq!((bare.mode, bare.validation_print), (None, None));
+    let validation: DeviceShiftCreate = round_trip("device-shift-create-validation.json");
+    assert_eq!(
+        (validation.mode, validation.validation_print),
+        (Some(ShiftMode::Validation), None)
+    );
+    let printing: DeviceShiftCreate = round_trip("device-shift-create-validation-print.json");
+    assert_eq!(printing.mode, Some(ShiftMode::Validation));
+    assert!(matches!(
+        printing.validation_print,
+        Some(ValidationPrint::DuplicateDm { .. })
+    ));
+}
+
+#[test]
 fn a_shift_close_carries_the_reason_and_the_revision() {
     let close: ShiftClose = round_trip("shift-close.json");
     let office: OfficeShift = serde_json::from_value(fixture("office-shift.json")).unwrap();
@@ -1396,6 +1424,9 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::PalletException => {
                 serde_json::to_value(typed::<PalletExceptionFact>(&record.data)).unwrap()
+            }
+            FactKind::UnitLabel => {
+                serde_json::to_value(typed::<UnitLabelFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);
@@ -1803,4 +1834,95 @@ fn a_shift_update_sends_the_main_sheet_as_null() {
         serde_json::json!({ "palletSheetTemplateId": 7, "expectedRev": 72 })
     )
     .is_err());
+}
+
+#[test]
+fn the_shift_date_travels_beside_the_production_date_and_old_bodies_still_read() {
+    // The cloud's `plannedDate` (beta 3): optional in every request, so a
+    // body of an earlier build (the fixtures without it) still reads.
+    let create: ShiftCreate = round_trip("shift-create-planned-date.json");
+    assert_eq!(
+        (
+            create.production_date.as_str(),
+            create.planned_date.as_deref()
+        ),
+        ("2026-10-08", Some("2026-10-09"))
+    );
+    assert_eq!(
+        round_trip::<ShiftCreate>("shift-create.json").planned_date,
+        None
+    );
+    let update: ShiftUpdate = round_trip("shift-update-planned-date.json");
+    assert_eq!(update.planned_date.as_deref(), Some("2026-10-10"));
+    assert_eq!(
+        round_trip::<ShiftUpdate>("shift-update.json").planned_date,
+        None
+    );
+    let device: DeviceShiftCreate = round_trip("device-shift-create-planned-date.json");
+    assert_eq!(device.planned_date.as_deref(), Some("2026-10-09"));
+    assert_eq!(
+        round_trip::<DeviceShiftCreate>("device-shift-create.json").planned_date,
+        None
+    );
+    // The answers: the office's carries it always, a station's when the host
+    // knows it (a host before beta 3 sends none).
+    let office: OfficeShift = round_trip("office-shift.json");
+    assert_eq!(office.planned_date, office.production_date);
+    let list: DeviceShifts = round_trip("device-shifts-planned-date.json");
+    assert!(list.shifts.iter().all(|shift| shift.planned_date.is_some()));
+    let entered: DeviceShift = round_trip("device-shift-entered-planned-date.json");
+    assert_eq!(entered.planned_date.as_deref(), Some("2026-10-10"));
+    let old: DeviceShifts = round_trip("device-shifts.json");
+    assert!(old.shifts.iter().all(|shift| shift.planned_date.is_none()));
+    // A malformed field is the host's to refuse, not the type's: the type
+    // keeps text, and a non-text value is no date at all.
+    let mut value = fixture("shift-create-planned-date.json");
+    value["plannedDate"] = serde_json::json!(20261009);
+    assert!(serde_json::from_value::<ShiftCreate>(value).is_err());
+}
+
+#[test]
+fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
+    use markiro_proto::usage_stats::{UsageStats, USAGE_MONTHS};
+    let stats: UsageStats = round_trip("usage-stats.json");
+    // Twelve calendar months, the oldest first, each once.
+    assert_eq!(stats.months.len(), USAGE_MONTHS);
+    let keys: Vec<&str> = stats
+        .months
+        .iter()
+        .map(|month| month.month.as_str())
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(keys, sorted);
+    // The only text in the answer is the month key: every other leaf is a count.
+    fn leaves(value: &Value, path: &str, found: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, inner) in map {
+                    leaves(inner, &format!("{path}.{key}"), found);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    leaves(item, &format!("{path}[]"), found);
+                }
+            }
+            Value::Number(number) => {
+                assert!(number.is_u64(), "{path} is not an unsigned count");
+            }
+            Value::String(_) => found.push(path.to_owned()),
+            other => panic!("{path}: {other}"),
+        }
+    }
+    let mut texts = Vec::new();
+    leaves(&fixture("usage-stats.json"), "", &mut texts);
+    texts.sort();
+    texts.dedup();
+    assert_eq!(texts, [".months[].month"]);
+    // A field outside the allowlist is refused, not carried.
+    let mut value = fixture("usage-stats.json");
+    value["months"][0]["shifts"]["productName"] = serde_json::json!("Молоко");
+    assert!(serde_json::from_value::<UsageStats>(value).is_err());
 }

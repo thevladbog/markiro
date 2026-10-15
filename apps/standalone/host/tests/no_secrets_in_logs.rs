@@ -1686,6 +1686,22 @@ async fn secrets_never_reach_the_process_log() {
         sscc_one.as_str(),
         "{pallet_forms}"
     );
+    // The office's review of the shift (plan КНФ): its exceptions (the box
+    // exceptions above name codes by hash), its refused records and the
+    // conflicts list — none reaches the log.
+    let exceptions = office_get(format!("/v1/office/shifts/{shift_id}/exceptions"))
+        .await
+        .unwrap();
+    assert_eq!(exceptions.status(), 200);
+    let exceptions: serde_json::Value = exceptions.json().await.unwrap();
+    assert!(exceptions["total"].as_u64().unwrap() > 0, "{exceptions}");
+    for path in [
+        format!("/v1/office/shifts/{shift_id}/rejections"),
+        "/v1/office/conflicts".to_owned(),
+    ] {
+        let read = office_get(path).await.unwrap();
+        assert_eq!(read.status(), 200);
+    }
 
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
@@ -2135,12 +2151,13 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
             );
         }
     }
-    // The facts path: the 12 files of 2a2 and the five pallet modules of
-    // plan ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
-    // `pallet_exception`); none of them logs. And the warehouse route of
-    // plan СКЛ: the lookup answers a unit's full code and logs nothing, the
+    // The facts path: the 12 files of 2a2, the five pallet modules of plan
+    // ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
+    // `pallet_exception`) and the unit labels of plan РЕЖ part B
+    // (`unit_label`); none of them logs. And the warehouse route of plan
+    // СКЛ: the lookup answers a unit's full code and logs nothing, the
     // records' batch has the one `error!` by device and position.
-    assert_eq!(facts_files, 18);
+    assert_eq!(facts_files, 19);
     assert_eq!(import_files, 2, "the import modules were not found");
     assert_eq!(license_files, 9, "the license's modules were not found");
 }

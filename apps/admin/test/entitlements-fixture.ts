@@ -34,6 +34,7 @@ export const ENTITLEMENT_SNAPSHOT: EntitlementSnapshotV1 = {
       inventory: null,
       commerceMl: false,
       handheld: false,
+      customLogo: false,
     },
   },
   sources: [
@@ -56,6 +57,7 @@ export const ENTITLEMENT_SNAPSHOT: EntitlementSnapshotV1 = {
           inventory: null,
           commerceMl: null,
           handheld: null,
+          customLogo: null,
         },
       },
     },

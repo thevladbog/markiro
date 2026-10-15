@@ -135,7 +135,7 @@ function brandLogo(data: PickupSlipData): string {
   }
   // The brand lockup from apps/admin/src/assets/markiro-logo-on-light.svg,
   // inlined because this HTML must be self-contained for printing. Same
-  // fallback the disaggregation report uses (modules/disaggregation/report.ts).
+  // fallback the disaggregation report uses (packages/domain/src/print-forms/disaggregation-report.ts).
   return `<svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
     <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
     <g fill="#FAFAF8">

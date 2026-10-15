@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type * as Domain from "@markiro/domain";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { disaggregationReportRowsSchema } from "../src/host/disaggregation.js";
 import {
   boxReportRowsSchema,
   palletReportRowsSchema,
@@ -14,7 +15,7 @@ import { ORG_PROFILE } from "./support/office.js";
 import { ACTIVE, LINE_10, LINE_2, MILK, NORTH, PLANNED, WATER } from "./support/shifts.js";
 
 // The domain's box form, counted: what `prepareForm` must not call.
-const drawn = vi.hoisted(() => ({ box: 0 }));
+const drawn = vi.hoisted(() => ({ box: 0, act: 0 }));
 vi.mock("@markiro/domain", async (original) => {
   const domain = await original<typeof Domain>();
   return {
@@ -22,6 +23,12 @@ vi.mock("@markiro/domain", async (original) => {
     renderBoxReportHtml: (...args: Parameters<typeof domain.renderBoxReportHtml>) => {
       drawn.box += 1;
       return domain.renderBoxReportHtml(...args);
+    },
+    renderDisaggregationReportHtml: (
+      ...args: Parameters<typeof domain.renderDisaggregationReportHtml>
+    ) => {
+      drawn.act += 1;
+      return domain.renderDisaggregationReportHtml(...args);
     },
   };
 });
@@ -36,6 +43,7 @@ const PALLET_ROWS = palletReportRowsSchema.parse(fixture("pallet-report-rows.jso
 
 beforeEach(() => {
   drawn.box = 0;
+  drawn.act = 0;
 });
 
 describe("preparing a form apart from drawing it (plan О-Ф)", () => {
@@ -49,6 +57,22 @@ describe("preparing a form apart from drawing it (plan О-Ф)", () => {
     expect(html).toBe(renderForm(request)?.html);
     expect(prepared?.fileName).toBe(renderForm(request)?.fileName);
     expect(prepared?.kind).toBe("box");
+  });
+
+  it("prepares «Акт дезагрегации» without drawing it, and never refuses it (plan ДЗГ-О)", () => {
+    const rows = disaggregationReportRowsSchema.parse(
+      fixture("disaggregation-report-rows-boxes.json"),
+    );
+    const request = { kind: "act", rows, timeZone: "Europe/Moscow" } as const;
+    const prepared = prepareForm(request);
+    expect(prepared?.kind).toBe("act");
+    expect(prepared?.fileName).toBe("Акт дезагрегации DSG-26-0007.html");
+    expect(drawn.act).toBe(0);
+    const html = prepared?.draw();
+    expect(drawn.act).toBe(1);
+    // A draft is printed too, as the cloud prints an act of any status.
+    expect(prepareForm({ ...request, rows: { ...rows, status: "draft" } })).not.toBeNull();
+    expect(html).toContain("Акт дезагрегации");
   });
 
   it("refuses what the cloud refuses, as renderForm does", () => {
@@ -96,6 +120,7 @@ describe("the records a blank is drawn from (plan О-Ф)", () => {
       width: 2,
       height: 1,
       dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      mediaType: "image/jpeg" as const,
       checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
       updatedAt: "2026-10-13T09:00:00.000Z",
     };

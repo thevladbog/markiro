@@ -2,12 +2,14 @@
 //! its earliest accepted scan since the code was last freed, whatever order
 //! the scans arrive in. A scan earlier than the owner takes the code (the
 //! owner's item leaves its box, `displaced_at`); a later one is answered
-//! `conflict` with the owner. Both write a `code_conflicts` row; telling the
-//! displaced device and the office's review come with plan 2b. Exceptions
+//! `conflict` with the owner. Both write a `code_conflicts` row; each row says
+//! how its loser lost (`kind`); the office reviews it and the device learns of
+//! it (plan КНФ). Exceptions
 //! release the codes their items owned: after a release the next scan to
 //! ARRIVE owns the code, not an earlier displaced item or conflict loser
 //! (re-electing the earliest remaining claim is a plan 2b decision).
 
+use markiro_proto::review::ConflictKind;
 use markiro_proto::{CodeOwner, FactOutcome, ShiftOrigin};
 use sqlx::SqliteConnection;
 
@@ -68,12 +70,13 @@ pub async fn owner(
     .transpose()
 }
 
-/// An accepted scan, already in the journal, that claims its code for its
-/// box.
+/// An accepted scan, already in the journal, that claims its code: for its
+/// box in an aggregation shift, without one in a validation shift (plan
+/// РЕЖ).
 pub struct Claim<'a> {
     pub scan_id: &'a str,
     pub code_hash: &'a str,
-    pub box_id: &'a str,
+    pub box_id: Option<&'a str>,
     pub scanned_at: &'a str,
 }
 
@@ -82,16 +85,18 @@ async fn conflict_row(
     code_hash: &str,
     winner: &str,
     loser: &str,
+    kind: ConflictKind,
     at: &str,
 ) -> Result<(), ApiError> {
     sqlx::query(
-        "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, detected_at) \
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO code_conflicts (id, code_hash, winner_scan_id, loser_scan_id, kind, \
+         detected_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(code_hash)
     .bind(winner)
     .bind(loser)
+    .bind(kind.as_str())
     .bind(at)
     .execute(conn)
     .await
@@ -100,8 +105,9 @@ async fn conflict_row(
 }
 
 /// Give the code to `claim` when it is free or owned by a later scan, and
-/// put it in its box; otherwise keep the owner and answer `conflict` with
-/// it. Two scans at the same instant: the owner keeps the code.
+/// put it in its box when it has one; otherwise keep the owner and answer
+/// `conflict` with it. Two scans at the same instant: the owner keeps the
+/// code. An owner displaced leaves its box, if it was in one.
 pub async fn claim(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
@@ -114,6 +120,7 @@ pub async fn claim(
                 claim.code_hash,
                 &owner.scan_id,
                 claim.scan_id,
+                ConflictKind::Late,
                 context.received_at,
             )
             .await?;
@@ -142,6 +149,7 @@ pub async fn claim(
                 claim.code_hash,
                 claim.scan_id,
                 &owner.scan_id,
+                ConflictKind::Displaced,
                 context.received_at,
             )
             .await?;
@@ -175,14 +183,18 @@ pub async fn claim(
             .map_err(ApiError::internal)?;
         }
     }
-    sqlx::query("INSERT INTO box_items (scan_id, box_id, code_hash, added_at) VALUES (?, ?, ?, ?)")
+    if let Some(box_id) = claim.box_id {
+        sqlx::query(
+            "INSERT INTO box_items (scan_id, box_id, code_hash, added_at) VALUES (?, ?, ?, ?)",
+        )
         .bind(claim.scan_id)
-        .bind(claim.box_id)
+        .bind(box_id)
         .bind(claim.code_hash)
         .bind(claim.scanned_at)
         .execute(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
+    }
     Ok(Applied::accepted())
 }
 

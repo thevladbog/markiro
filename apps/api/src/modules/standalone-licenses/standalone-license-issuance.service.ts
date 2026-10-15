@@ -543,6 +543,7 @@ export class StandaloneLicenseIssuanceService {
         inventoryEnabled: schema.planEntitlements.inventoryEnabled,
         commerceMlEnabled: schema.planEntitlements.commerceMlEnabled,
         handheldEnabled: schema.planEntitlements.handheldEnabled,
+        customLogoEnabled: schema.planEntitlements.customLogoEnabled,
       })
       .from(schema.catalogItemVersions)
       .innerJoin(

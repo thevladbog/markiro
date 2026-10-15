@@ -23,9 +23,16 @@
 //! copy, 100 %, simplex; the sheet is drawn whole-number times larger
 //! (`super::sheet`) and refused before `StartDocW` when the device's page or
 //! printable area does not hold it. The label path is unchanged.
+//!
+//! A sheet that does not lie inside the driver's printable area is not refused for that
+//! alone (beta 3.2, an inkjet's bottom edge is a centimetre wide): it is moved the few
+//! millimetres it takes, or drawn a little smaller, and the answer says so (`adjusted`);
+//! a refusal carries the measured numbers (`diagnostic`).
 
 use super::raster::{check_geometry, decode, Caps, Raster, MAX_BYTES};
-use super::sheet::{self, sheet_draw_plan, sheet_orientation, DrawPlan, Orientation, SheetRaster};
+use super::sheet::{
+    self, sheet_draw_plan, sheet_orientation, Adjusted, DrawPlan, Orientation, SheetRaster,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +56,10 @@ pub struct Failure {
     pub phase: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt: Option<Receipt>,
+    /// What the driver reported against what the print needed, numbers only (millimetres,
+    /// dots, the reason): the line the operator copies when a sheet is refused (beta 3.2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 
 impl Failure {
@@ -57,6 +68,7 @@ impl Failure {
             code,
             phase: "before_start",
             receipt: None,
+            diagnostic: None,
         }
     }
 }
@@ -67,8 +79,18 @@ impl Failure {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum Outcome {
-    Success { ok: bool, receipt: Receipt },
-    Failed { ok: bool, error: Failure },
+    Success {
+        ok: bool,
+        receipt: Receipt,
+        /// A sheet that was moved or drawn smaller to fit the driver's printable area
+        /// (beta 3.2); absent when it was drawn whole where it was made.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        adjusted: Option<Adjusted>,
+    },
+    Failed {
+        ok: bool,
+        error: Failure,
+    },
 }
 
 /// What the spooler says of a receipt's job. Diagnostic only: an absent job
@@ -175,8 +197,7 @@ fn request_of(paper: Paper, page: &Raster<'_>) -> Result<Request, Step> {
 }
 
 /// Whether the driver's merged DEVMODE kept what was asked: the orientation,
-/// one copy, 100 %, and for a sheet A4 paper and, if the driver has the
-/// setting at all, simplex.
+/// one copy, 100 %, and for a sheet, if the driver has the setting at all, simplex.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn mode_holds(request: Request, mode: &DriverMode) -> bool {
     let orientation = match request {
@@ -188,28 +209,43 @@ fn mode_holds(request: Request, mode: &DriverMode) -> bool {
         && mode.scale == 100
         && match request {
             Request::Label => true,
-            Request::Sheet(_) => {
-                mode.paper == sheet::DMPAPER_A4
-                    && mode.duplex.is_none_or(|d| d == sheet::DMDUP_SIMPLEX)
-            }
+            // The paper is judged by the device page's real size (`sheet_draw_plan`), not by
+            // `dmPaperSize`: a v4 driver names its forms and may answer another number for the
+            // A4 it was asked for (or Letter, which a sheet is drawn on smaller).
+            Request::Sheet(_) => mode.duplex.is_none_or(|d| d == sheet::DMDUP_SIMPLEX),
         }
 }
 
+/// Why a page is not planned: the failure code, and for a sheet the measured numbers behind it.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct PlanRefusal {
+    code: &'static str,
+    diagnostic: Option<String>,
+}
+
 /// The page against the device context's `Caps`: the label's 1:1 check, or the
-/// sheet's whole-number draw plan. The refusal is the failure code.
+/// sheet's draw plan (whole-number scale, moved or shrunk to the printable area).
+/// The refusal is the failure code, with its numbers for a sheet.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn plan_of(
     request: Request,
     page: &Raster<'_>,
     caps: Caps,
-) -> Result<Option<DrawPlan>, &'static str> {
+) -> Result<Option<DrawPlan>, PlanRefusal> {
     match request {
         Request::Label => check_geometry(page, caps)
             .map(|()| None)
-            .map_err(|()| "geometry_mismatch"),
+            .map_err(|()| PlanRefusal {
+                code: "geometry_mismatch",
+                diagnostic: None,
+            }),
         Request::Sheet(_) => sheet_draw_plan(&SheetRaster::from(page), caps.into())
             .map(Some)
-            .map_err(|e| e.code()),
+            .map_err(|refusal| PlanRefusal {
+                code: refusal.error.code(),
+                diagnostic: Some(refusal.diagnostic),
+            }),
     }
 }
 
@@ -231,8 +267,15 @@ fn sheet_blit_ok(drawn: i32) -> bool {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn sheet_blit_detail(drawn: i32, plan: &DrawPlan) -> String {
     format!(
-        "returned={drawn} expected>0 scale={} at={},{} blit={}x{}",
-        plan.scale, plan.x, plan.y, plan.width, plan.height
+        "returned={drawn} expected>0 scale={} fit_permille={} shift={},{} at={},{} blit={}x{}",
+        plan.scale,
+        plan.fit_permille,
+        plan.shift_x,
+        plan.shift_y,
+        plan.x,
+        plan.y,
+        plan.width,
+        plan.height
     )
 }
 
@@ -301,6 +344,15 @@ fn geometry_line(
         mode.quality,
         mode.y_resolution
     )
+}
+
+/// The diagnostic line a geometry refusal also hands to the webview: the log line without its
+/// prefix (`standalone: driver print `), numbers and names of driver fields only.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn diagnostic_of(line: &str) -> String {
+    line.strip_prefix("standalone: driver print ")
+        .unwrap_or(line)
+        .to_owned()
 }
 
 /// The line of a refusal the print answers with.
@@ -388,7 +440,9 @@ fn print_logged(
         #[cfg(windows)]
         {
             let mut device = native::Device::open(&queue, &page, request, &mut *log)?;
+            let adjusted = device.adjusted();
             submit(&mut device, &page, &queue, &document_name, &mut *log)
+                .map(|receipt| (receipt, adjusted))
         }
         #[cfg(not(windows))]
         {
@@ -397,7 +451,11 @@ fn print_logged(
         }
     })();
     match result {
-        Ok(receipt) => Outcome::Success { ok: true, receipt },
+        Ok((receipt, adjusted)) => Outcome::Success {
+            ok: true,
+            receipt,
+            adjusted,
+        },
         Err(error) => {
             log(refusal_line(&error));
             Outcome::Failed { ok: false, error }
@@ -449,6 +507,7 @@ fn submit(
             code: "driver_failure",
             phase: "delivery_unknown",
             receipt: None,
+            diagnostic: None,
         }
     })?;
     let receipt = Receipt {
@@ -468,6 +527,7 @@ fn submit(
             code: "driver_failure",
             phase: "delivery_unknown",
             receipt: Some(receipt),
+            diagnostic: None,
         });
     }
     Ok(receipt)
@@ -549,6 +609,13 @@ mod native {
         caps: Caps,
         /// How a sheet is drawn; `None` for a label.
         plan: Option<DrawPlan>,
+    }
+
+    impl Device {
+        /// What the plan did to the sheet (moved or drawn smaller), `None` when it drew whole.
+        pub fn adjusted(&self) -> Option<Adjusted> {
+            self.plan.and_then(|plan| plan.adjusted(self.caps.dpi_x))
+        }
     }
 
     impl Drop for Device {
@@ -715,8 +782,12 @@ mod native {
                     duplex: ((*out).dmFields & DM_DUPLEX != 0).then_some((*out).dmDuplex),
                 };
                 if !mode_holds(request, &mode) {
-                    log(geometry_line(p, request, None, &mode));
-                    return Err(Failure::before("geometry_mismatch"));
+                    let line = geometry_line(p, request, None, &mode);
+                    log(line.clone());
+                    return Err(Failure {
+                        diagnostic: Some(diagnostic_of(&line)),
+                        ..Failure::before("geometry_mismatch")
+                    });
                 }
                 let dc = CreateDCW(wide("WINSPOOL").as_ptr(), name.as_ptr(), null(), out);
                 if dc.is_null() {
@@ -742,10 +813,38 @@ mod native {
                     plan: None,
                 };
                 match plan_of(request, p, caps) {
-                    Ok(plan) => device.plan = plan,
-                    Err(code) => {
-                        log(geometry_line(p, request, Some(caps), &mode));
-                        return Err(Failure::before(code));
+                    Ok(plan) => {
+                        if let Some(plan) = plan {
+                            if plan.adjusted(caps.dpi_x).is_some() {
+                                log(format!(
+                                    "standalone: driver print step=sheet_plan error=0 scale={} \
+                                     fit_permille={} shift_dots={},{} at={},{} blit={}x{}",
+                                    plan.scale,
+                                    plan.fit_permille,
+                                    plan.shift_x,
+                                    plan.shift_y,
+                                    plan.x,
+                                    plan.y,
+                                    plan.width,
+                                    plan.height
+                                ));
+                            }
+                        }
+                        device.plan = plan;
+                    }
+                    Err(refusal) => {
+                        let line = geometry_line(p, request, Some(caps), &mode);
+                        log(line.clone());
+                        // The measured numbers of the plan's own refusal first, then the
+                        // driver's mode: one line for the person who helps.
+                        let diagnostic = match refusal.diagnostic {
+                            Some(measured) => format!("{measured} {}", diagnostic_of(&line)),
+                            None => diagnostic_of(&line),
+                        };
+                        return Err(Failure {
+                            diagnostic: Some(diagnostic),
+                            ..Failure::before(refusal.code)
+                        });
                     }
                 }
                 Ok(device)
@@ -817,8 +916,15 @@ mod native {
             };
             let data = dib_pixels(p);
             if let Some(plan) = self.plan {
-                // COLORONCOLOR drops or repeats whole dots: no smoothing, no fit.
-                if unsafe { SetStretchBltMode(self.dc, COLORONCOLOR) } == 0 {
+                // COLORONCOLOR repeats whole dots at the whole-number scale: no smoothing. A
+                // sheet drawn smaller (`fit_permille` < 1000) merges a few rows and columns:
+                // BLACKONWHITE lets black win, so a bar of a barcode never vanishes.
+                let mode = if plan.fit_permille < 1000 {
+                    BLACKONWHITE
+                } else {
+                    COLORONCOLOR
+                };
+                if unsafe { SetStretchBltMode(self.dc, mode) } == 0 {
                     return Err(Step {
                         name: "SetStretchBltMode",
                         error: last_error(),
@@ -1207,12 +1313,31 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Outcome::Success {
                 ok: true,
-                receipt: receipt.clone()
+                receipt: receipt.clone(),
+                adjusted: None,
             })
             .unwrap(),
             serde_json::json!({
                 "ok": true,
                 "receipt": { "queue": "Godex G500", "jobId": 42, "documentName": DOCUMENT }
+            })
+        );
+        // A sheet that was moved or drawn smaller says so (beta 3.2).
+        assert_eq!(
+            serde_json::to_value(Outcome::Success {
+                ok: true,
+                receipt: receipt.clone(),
+                adjusted: Some(Adjusted {
+                    percent: 98,
+                    shift_x_mm: 0.0,
+                    shift_y_mm: -2.7,
+                }),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "ok": true,
+                "receipt": { "queue": "Godex G500", "jobId": 42, "documentName": DOCUMENT },
+                "adjusted": { "percent": 98, "shiftXMm": 0.0, "shiftYMm": -2.7 }
             })
         );
         assert_eq!(
@@ -1222,6 +1347,7 @@ mod tests {
                     code: "driver_failure",
                     phase: "delivery_unknown",
                     receipt: Some(receipt.clone()),
+                    diagnostic: None,
                 }
             })
             .unwrap(),
@@ -1390,6 +1516,7 @@ mod tests {
                 job_id: 9,
                 document_name: DOCUMENT.into(),
             }),
+            diagnostic: None,
         };
         assert_eq!(
             refusal_line(&unknown),
@@ -1600,7 +1727,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sheet_keeps_a4_the_orientation_one_copy_full_scale_and_simplex() {
+    fn a_sheet_keeps_the_orientation_one_copy_full_scale_and_simplex() {
         let portrait = Request::Sheet(Orientation::Portrait);
         let landscape = Request::Sheet(Orientation::Landscape);
         assert!(mode_holds(portrait, &mode()));
@@ -1627,13 +1754,21 @@ mod tests {
                 ..mode()
             }
         ));
+        // The paper is judged by the device page's real size, not by `dmPaperSize` (a v4 driver
+        // answers its own number for the A4 it was given): any number holds here.
+        for free in [8, 256, 0] {
+            assert!(
+                mode_holds(
+                    portrait,
+                    &DriverMode {
+                        paper: free,
+                        ..mode()
+                    }
+                ),
+                "{free}"
+            );
+        }
         for broken in [
-            DriverMode { paper: 8, ..mode() },
-            DriverMode {
-                paper: 256,
-                ..mode()
-            },
-            DriverMode { paper: 0, ..mode() },
             DriverMode {
                 duplex: Some(2),
                 ..mode()
@@ -1687,7 +1822,10 @@ mod tests {
         let off = Caps { dpi_y: 300, ..fits };
         assert_eq!(
             plan_of(Request::Label, &label, off),
-            Err("geometry_mismatch")
+            Err(PlanRefusal {
+                code: "geometry_mismatch",
+                diagnostic: None
+            })
         );
         // A sheet.
         let bytes = a4_page_bytes(Orientation::Portrait, [118, 118, 2362, 3390]);
@@ -1701,17 +1839,29 @@ mod tests {
                 y: -100,
                 width: 4960,
                 height: 7016,
+                fit_permille: 1000,
+                shift_x: 0,
+                shift_y: 0,
             }))
         );
-        let letter = Caps {
+        // A device whose printable area runs past its page is refused, with the numbers.
+        let broken = Caps {
             width: 5100,
             height: 6600,
             ..laser_caps()
         };
-        assert_eq!(plan_of(request, &sheet, letter), Err("geometry_mismatch"));
+        let refusal = plan_of(request, &sheet, broken).unwrap_err();
+        assert_eq!(refusal.code, "geometry_mismatch");
+        assert!(refusal
+            .diagnostic
+            .is_some_and(|d| d.starts_with("reason=device_caps_unusable dpi=600x600")));
         // A label's geometry check does not accept a sheet's device, and the
         // other way round: an 80 dot device is no A4.
-        assert_eq!(plan_of(request, &sheet, fits), Err("geometry_mismatch"));
+        let refusal = plan_of(request, &sheet, fits).unwrap_err();
+        assert_eq!(refusal.code, "geometry_mismatch");
+        assert!(refusal
+            .diagnostic
+            .is_some_and(|d| d.starts_with("reason=dpi_not_a_multiple_of_300")));
     }
 
     #[test]
@@ -1737,10 +1887,13 @@ mod tests {
             y: -90,
             width: 4960,
             height: 7016,
+            fit_permille: 1000,
+            shift_x: 0,
+            shift_y: 0,
         };
         assert_eq!(
             sheet_blit_detail(0, &plan),
-            "returned=0 expected>0 scale=2 at=-100,-90 blit=4960x7016"
+            "returned=0 expected>0 scale=2 fit_permille=1000 shift=0,0 at=-100,-90 blit=4960x7016"
         );
         let step = Step {
             name: "StretchDIBits",
@@ -1750,7 +1903,7 @@ mod tests {
         assert_eq!(
             step_line(&step, Some(5)),
             "standalone: driver print step=StretchDIBits error=87 job=5 returned=-1 \
-             expected>0 scale=2 at=-100,-90 blit=4960x7016"
+             expected>0 scale=2 fit_permille=1000 shift=0,0 at=-100,-90 blit=4960x7016"
         );
     }
 

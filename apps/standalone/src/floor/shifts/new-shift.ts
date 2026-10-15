@@ -40,6 +40,8 @@ export interface NewShiftChoices {
   templates: ShiftTemplate[];
   /** The pallet templates of the copies (plan ПЛ-Ц). */
   palletTemplates: ShiftTemplate[];
+  /** The duplicate templates of the copies, for a validation shift that prints (beta 3.2). */
+  duplicateTemplates: ShiftTemplate[];
   defaults: BoxTemplateDefaults & PalletTemplateDefaults;
   timeZone: string | null;
 }
@@ -94,7 +96,7 @@ export async function readNewShiftChoices(
   );
   const templates = await local.query(
     "SELECT id, name, purpose, enabled, category_codes FROM ref_templates " +
-      "WHERE purpose IN ('box', 'pallet') ORDER BY name, id",
+      "WHERE purpose IN ('box', 'pallet', 'product_duplicate') ORDER BY name, id",
     [],
     templateRow,
   );
@@ -121,6 +123,9 @@ export async function readNewShiftChoices(
     })),
     templates: templates.filter((row) => row.purpose === "box").map(toTemplate),
     palletTemplates: templates.filter((row) => row.purpose === "pallet").map(toTemplate),
+    duplicateTemplates: templates
+      .filter((row) => row.purpose === "product_duplicate")
+      .map(toTemplate),
     defaults: {
       defaultBoxTemplateId: org?.default_box_template_id ?? null,
       defaultPalletTemplateId: org?.default_pallet_template_id ?? null,
@@ -201,6 +206,22 @@ export function fittingPalletTemplates(
 }
 
 /**
+ * The duplicate templates that fit `product`'s group (`templates::fits`), in the
+ * copies' order: enabled, of the `product_duplicate` purpose, covering the group.
+ */
+export function fittingDuplicateTemplates(
+  product: ShiftProduct,
+  templates: readonly ShiftTemplate[],
+): ShiftTemplate[] {
+  return templates.filter((template) =>
+    templateFitsSlot(template, {
+      purpose: "product_duplicate",
+      chzProductGroupCode: product.chzProductGroupCode,
+    }),
+  );
+}
+
+/**
  * The boxes per pallet a new shift of `product` may start with, or `null` when
  * the product offers no shift with pallets: a capacity the host takes (1 to
  * `MAX_PALLET_BOX_CAPACITY`, `pallet_request`) and a pallet
@@ -229,6 +250,7 @@ export type CreateRefusal =
   | "product_inactive"
   | "template"
   | "pallet_template"
+  | "duplicate_template"
   | "invalid"
   | "no_line"
   | "failed";
@@ -278,6 +300,8 @@ export async function createStationShift(
       if (error.field === "lineId") return { kind: "refused", reason: "no_line" };
       if (error.field === "boxTemplateId") return { kind: "refused", reason: "template" };
       if (error.field === "palletTemplateId") return { kind: "refused", reason: "pallet_template" };
+      if (error.field === "validationPrint.templateId")
+        return { kind: "refused", reason: "duplicate_template" };
       return { kind: "refused", reason: "invalid" };
     }
     return { kind: "refused", reason: "failed" };
@@ -301,8 +325,14 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
     shift.productId === input.productId &&
     shift.boxTemplateId === input.boxTemplateId &&
     shift.productionDate === input.productionDate &&
-    shift.boxCapacity === input.boxCapacity &&
+    // A host before beta 3 names no shift date, a body before it sent none: nothing to compare.
+    (shift.plannedDate === undefined ||
+      input.plannedDate === undefined ||
+      shift.plannedDate === input.plannedDate) &&
+    (input.boxCapacity === undefined || shift.boxCapacity === input.boxCapacity) &&
     shift.plannedQty === input.plannedQty &&
+    // A host before beta 3.2 names a station's shift an aggregation one.
+    shift.mode === (input.mode ?? "aggregation") &&
     shift.palletsEnabled === (input.pallets !== undefined) &&
     shift.palletBoxCapacity === input.pallets?.boxCapacity &&
     shift.palletTemplateId === input.pallets?.templateId
@@ -313,6 +343,7 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
 export function createdCopy(shift: DeviceShift): ShiftCopy {
   return {
     ...shift,
+    plannedDate: shift.plannedDate ?? null,
     palletBoxCapacity: shift.palletBoxCapacity ?? null,
     palletTemplateId: shift.palletTemplateId ?? null,
     localState: null,

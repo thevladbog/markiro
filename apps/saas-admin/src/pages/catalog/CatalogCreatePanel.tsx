@@ -173,6 +173,7 @@ export function CatalogCreatePanel({
                 inventoryEnabled: p1Features.inventory,
                 commerceMlEnabled: p1Features.commerceMl,
                 handheldEnabled: p1Features.handheld,
+                customLogoEnabled: p1Features.customLogo,
                 maxLines: lines ? Number(lines) : null,
                 maxStations: stations ? Number(stations) : null,
                 maxKiosks: kiosks ? Number(kiosks) : null,

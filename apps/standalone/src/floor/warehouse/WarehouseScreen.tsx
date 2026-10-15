@@ -17,15 +17,19 @@ import type { FloorSession } from "../../app/shell.js";
 import {
   WAREHOUSE_REASONS,
   WAREHOUSE_SUBJECT_KINDS,
+  type PalletSheets,
   type WarehouseLookup,
   type WarehouseLookupResult,
+  type WarehouseSubjectKind,
 } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
 import type { ScanSource } from "../scan-source.js";
+import { readWorkstationSettings } from "../setup/workstation-settings.js";
 import { createWorkQueue } from "../work/work-queue.js";
-import { TemplatePicker } from "./TemplatePicker.js";
+import { TemplatePicker, type SheetsState } from "./TemplatePicker.js";
+import { sheetChoiceName } from "./warehouse-sheet.js";
 import { WarehousePanel } from "./WarehousePanel.js";
 import "./warehouse.css";
 import { realClock, useViewGuard } from "./view-guard.js";
@@ -44,8 +48,10 @@ import {
 } from "./warehouse-store.js";
 import {
   initialTemplates,
+  palletPaperOf,
   readOrgDefaults,
   readWarehouseTemplates,
+  type PalletPaper,
   type WarehouseTemplate,
 } from "./warehouse-templates.js";
 import {
@@ -77,6 +83,11 @@ export interface WarehouseScreenProps {
   source: ScanSource;
   /** `HostApi.warehouseLookup`. */
   lookup: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
+  /**
+   * `HostApi.getDevicePalletSheets` (beta 3.2): the A4 sheets for a pallet reprinted on a printer of
+   * sheets; none — no sheet is offered and such a pallet is refused.
+   */
+  palletSheets?: (productId?: string) => Promise<PalletSheets>;
   /** A refused key or a changed certificate: the shell's to route. */
   onHostError: (error: unknown) => void;
   /** A record was written: the delivery goes. */
@@ -160,6 +171,7 @@ export function WarehouseScreen({
   isLeaving,
   source,
   lookup,
+  palletSheets,
   onHostError,
   onRecorded,
   printing,
@@ -180,13 +192,17 @@ export function WarehouseScreen({
       now,
       newId,
       ...(render === undefined ? {} : { render }),
+      ...(palletSheets === undefined ? {} : { sheets: palletSheets }),
     }),
-    [local, hostId, deviceId, printing, now, newId, render],
+    [local, hostId, deviceId, printing, now, newId, render, palletSheets],
   );
   const [queue] = useState(createWorkQueue);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [templates, setTemplates] = useState<WarehouseTemplate[]>([]);
+  // What the pallets' printer prints, and the host's A4 sheets when it prints them (beta 3.2).
+  const [palletPaper, setPalletPaper] = useState<PalletPaper>("thermal");
+  const [sheets, setSheets] = useState<SheetsState>({ kind: "loading" });
   const [job, setJob] = useState<WarehouseJob | null>(null);
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [verifying, setVerifying] = useState(false);
@@ -219,7 +235,9 @@ export function WarehouseScreen({
         ? t("floor.warehouse.printerUnconfigured")
         : code === "printer_a4"
           ? t("floor.warehouse.printerA4")
-          : t(`floor.print.codes.${code}`, { defaultValue: code });
+          : code === "printer_not_a4"
+            ? t("floor.warehouse.printerNotA4")
+            : t(`floor.print.codes.${code}`, { defaultValue: code });
 
   const jobSaid = (shown: WarehouseJob, repair: WarehouseRepair | null = null): Said => {
     const note = repair === null ? "" : ` ${t("floor.warehouse.legacyRepair")}`;
@@ -273,29 +291,38 @@ export function WarehouseScreen({
     let cancelled = false;
     const load = async () => {
       const { context: loading, operatorId } = live.current;
-      const [found, copies, defaults] = await Promise.all([
+      const [found, copies, defaults, settings] = await Promise.all([
         readOpenSession(local, { hostId, deviceId }),
         readWarehouseTemplates(local),
         readOrgDefaults(local),
+        readWorkstationSettings(local),
       ]);
+      const paper = palletPaperOf(settings);
       if (found === null) {
         return {
           phase: {
             kind: "setup",
             reason: null,
-            templates: initialTemplates(copies, defaults),
+            templates: initialTemplates(copies, defaults, paper),
           } satisfies Phase,
           copies,
+          paper,
           job: null,
         };
       }
       const open = await recoverWarehouseJob(loading, found.id, operatorId);
-      return { phase: { kind: "working", session: found } satisfies Phase, copies, job: open };
+      return {
+        phase: { kind: "working", session: found } satisfies Phase,
+        copies,
+        paper,
+        job: open,
+      };
     };
     void live.current.track(queue.run(load)).then(
       (loaded) => {
         if (cancelled || !alive.current) return;
         setTemplates(loaded.copies);
+        setPalletPaper(loaded.paper);
         setJob(loaded.job);
         setPhase(loaded.phase);
         if (loaded.phase.kind === "working") {
@@ -317,6 +344,30 @@ export function WarehouseScreen({
       cancelled = true;
     };
   }, [attempt, local, hostId, deviceId, queue, recount, t]);
+
+  // The host's A4 sheets, asked once the screen knows its pallets go to a printer of sheets, and
+  // again on «Повторить»: they are for the picker and its lines; a pallet's job asks them itself.
+  const [sheetsAttempt, setSheetsAttempt] = useState(0);
+  useEffect(() => {
+    if (palletPaper !== "a4") return undefined;
+    if (palletSheets === undefined) {
+      setSheets({ kind: "failed" });
+      return undefined;
+    }
+    let cancelled = false;
+    setSheets({ kind: "loading" });
+    palletSheets().then(
+      (listed) => {
+        if (!cancelled) setSheets({ kind: "ready", sheets: listed });
+      },
+      () => {
+        if (!cancelled) setSheets({ kind: "failed" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [palletPaper, palletSheets, sheetsAttempt]);
 
   const show = (outcome: ScanOutcome): void => {
     switch (outcome.kind) {
@@ -511,15 +562,29 @@ export function WarehouseScreen({
       await recount(after.sessionId);
     });
 
+  /** What the session's choice of `kind` is called: a template's name, or for pallets on sheets the sheet's. */
+  const templateName = (chosen: WarehouseTemplates, kind: WarehouseSubjectKind): string => {
+    if (kind === "pallet" && palletPaper === "a4") {
+      const named = sheetChoiceName(chosen.pallet, sheets.kind === "ready" ? sheets.sheets : null);
+      if (named === null) return t("floor.warehouse.templateNone");
+      if (named.kind === "auto") return t("floor.warehouse.sheets.lineAuto");
+      return named.name === null
+        ? t("floor.warehouse.sheets.lineSome")
+        : t("floor.warehouse.sheets.line", { name: named.name });
+    }
+    return (
+      templates.find((template) => template.id === chosen[kind])?.name ??
+      t("floor.warehouse.templateNone")
+    );
+  };
+
   const templateLines = (chosen: WarehouseTemplates) => (
     <ul className="warehouse-templates">
       {WAREHOUSE_SUBJECT_KINDS.map((kind) => (
         <li key={kind}>
           {t("floor.warehouse.templateLine", {
             kind: t(`floor.warehouse.templateFor.${kind}`),
-            name:
-              templates.find((template) => template.id === chosen[kind])?.name ??
-              t("floor.warehouse.templateNone"),
+            name: templateName(chosen, kind),
           })}
         </li>
       ))}
@@ -638,6 +703,9 @@ export function WarehouseScreen({
     return question(
       <TemplatePicker
         templates={templates}
+        palletPaper={palletPaper}
+        sheets={sheets}
+        onReloadSheets={() => setSheetsAttempt((value) => value + 1)}
         chosen={phase.kind === "setup" ? phase.templates : phase.session.templates}
         source={source}
         clock={clock}
@@ -894,7 +962,8 @@ export function WarehouseScreen({
               {t("floor.warehouse.cancelJob")}
             </Button>
             {(current.errorCode === "printer_unconfigured" ||
-              current.errorCode === "printer_a4") && (
+              current.errorCode === "printer_a4" ||
+              current.errorCode === "printer_not_a4") && (
               <Button size="floor" variant="secondary" {...leave(onSetup)}>
                 {t("floor.warehouse.setup")}
               </Button>

@@ -223,15 +223,49 @@ describe("office shifts: planning a shift", () => {
       productId: MILK.id,
       lineId: LINE_2.id,
       productionDate: "2026-10-12",
+      // The working day starts as today (the test clock) and is its own field.
+      plannedDate: "2026-10-09",
       boxTemplateId: MILK_BOX.id,
       boxCapacity: 12,
       plannedQty: 1200,
       counterpartyId: NORTH.id,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: false,
     });
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("plans the shift for its own working day, apart from the production date, and numbers it by the production date", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    // Both start as today, the organization's day.
+    expect(within(dialog()).getByRole("button", { name: "Дата смены" }).textContent).toBe(
+      "9 октября 2026",
+    );
+    fillMilk();
+    pickDate("Дата смены", "13 октября 2026");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(
+      TOKEN,
+      expect.objectContaining({ productionDate: "2026-10-09", plannedDate: "2026-10-13" }),
+    );
+  });
+
+  it("refuses a shift without its date before asking the host", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Очистить дату: Дата смены" }));
+    submit();
+    await waitFor(() =>
+      expect(screen.getAllByText("Укажите дату смены").length).toBeGreaterThan(0),
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
   });
 
   it("moves the focus to the notice once the shift is planned", async () => {
@@ -256,11 +290,14 @@ describe("office shifts: planning a shift", () => {
       productId: WATER.id,
       lineId: LINE_10.id,
       productionDate: "2026-10-09",
+      plannedDate: "2026-10-09",
       boxTemplateId: BOX_58.id,
       boxCapacity: 20,
       plannedQty: null,
       counterpartyId: null,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: false,
     });
   });
@@ -283,11 +320,14 @@ describe("office shifts: planning a shift", () => {
       productId: MILK.id,
       lineId: LINE_2.id,
       productionDate: "2026-10-09",
+      plannedDate: "2026-10-09",
       boxTemplateId: MILK_BOX.id,
       boxCapacity: 12,
       plannedQty: 1200,
       counterpartyId: NORTH.id,
       mode: "aggregation",
+      // An aggregation prints no duplicate, and says so (plan РЕЖ, Р16).
+      validationPrint: { mode: "none" },
       palletsEnabled: true,
       palletBoxCapacity: 32,
       palletTemplateId: PALLET.id,
@@ -706,11 +746,12 @@ describe("office shifts: planning a shift", () => {
     expect(planFocused).not.toHaveBeenCalled();
     set("Товар", MILK.id);
     submit();
-    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
-    set("Линия", LINE_2.id);
-    submit();
+    // The cloud's order (plan РЕЖ, Р16): the date and the plan come before the line.
     await waitFor(() => expect(document.activeElement).toBe(field("План, шт")));
     set("План, шт", "");
+    submit();
+    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
+    set("Линия", LINE_2.id);
     fireEvent.click(
       within(dialog()).getByRole("button", { name: "Очистить дату: Дата производства" }),
     );
@@ -799,6 +840,14 @@ describe("office shifts: planning a shift", () => {
     fillMilk();
     pickDate("Дата производства", "12 октября 2026");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    // Typed and not saved: the drawer asks first (owner decision after beta 3.2), and the answer
+    // «Закрыть без сохранения» drops it.
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" })).getByRole(
+        "button",
+        { name: "Закрыть без сохранения" },
+      ),
+    );
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
     await screen.findByRole("dialog", { name: "Новая смена" });
@@ -864,11 +913,14 @@ describe("office shifts: planning a shift", () => {
     expect(dialog()).toBeTruthy();
     expect(valueOf("Товар")).toBe(MILK.id);
     expect(valueOf("План, шт")).toBe(" 1200 ");
-    // With the calendar shut, the same key on the date still closes the dialog.
+    // With the calendar shut, the same key on the date still closes the drawer: after asking,
+    // because something was typed.
     fireEvent.keyDown(within(dialog()).getByRole("button", { name: "Дата производства" }), {
       key: "Escape",
     });
-    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+    expect(
+      await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" }),
+    ).toBeTruthy();
   });
 
   it("reads the shifts again behind the dialog after a lost answer, since the shift may have been made", async () => {
