@@ -2671,8 +2671,15 @@ from every `hello` and `app_too_old`/`host_too_old` instead of
 gives a package of its version, this PC is not below `minUpgradeFrom` and
 the manifest's signature checked out (`update_check_manifest`). An office
 PC paired with a host in the network sees «Версии не совпадают»; a station
-keeps working offline, its line says so off a shift's work, and the sign-in
-screen offers «Обновить с хоста» (ЛО16). Releases keep the window of one
+keeps working offline and its line says so off a shift's work. The sign-in
+screen offers «Обновить с хоста» (ЛО16) only when the host refuses the
+station (`app_too_old`); a station that is merely behind gets the text line
+and nothing to press, and the administrator installs the update from the
+office. The webview reads the offer through `HostApi.getDeviceUpdate`
+(`GET /v1/device/update`, which `host_request` lets through, unlike the
+installer route), once per host version and again each time the link comes
+online or the host refuses the app; a link flap keeps the offer, and the
+dialog keeps the last available one while it is open. Releases keep the window of one
 release back: `tools/standalone-release/releases.json` and its contract
 (`releases.mjs`; `prepare.mjs` refuses a release outside the window before it
 writes a draft). Nothing here ran on Windows or over a real Wi-Fi.
@@ -6159,7 +6166,7 @@ Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
 pilot spec's §11 and §22; the procedure is
 `docs/runbooks/standalone-backup-restore.md`). One worker task
 (`backup/worker.rs`, started by `crate::start`) makes every copy of the
-master database, one at a time, on a connection of its own: The update packages in `updates\` (plan ОБН-3) are in no copy and a restore never touches them.
+master database, one at a time, on a connection of its own:
 
 - a copy is `VACUUM INTO <name>.db.partial` while the host runs (a reader:
   it waits for no writer and holds no uncommitted change), then
