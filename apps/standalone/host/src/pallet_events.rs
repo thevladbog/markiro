@@ -16,7 +16,7 @@ use sqlx::SqliteConnection;
 
 use crate::db::next_revision;
 use crate::error::ApiError;
-use crate::facts::{blocks, rules, Applied, Failure, Reject};
+use crate::facts::{blocks, registry_touch, rules, Applied, Failure, Reject};
 use crate::license::seats::{require_feature, Feature};
 use crate::server::AppState;
 use crate::validate;
@@ -389,6 +389,7 @@ async fn box_added(
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
+    registry_touch::box_by_sscc(&mut *conn, &data.box_sscc, context.received_at).await?;
     Ok(Applied::accepted())
 }
 
@@ -416,6 +417,7 @@ async fn box_removed(
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
+    registry_touch::box_by_sscc(&mut *conn, &data.box_sscc, context.received_at).await?;
     Ok(Applied::accepted())
 }
 
@@ -516,6 +518,8 @@ async fn closed(
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
+    registry_touch::warehouse_pallet_boxes(&mut *conn, &data.pallet_id, context.received_at)
+        .await?;
     blocks::consume(&mut *conn, &data.block_id, serial).await?;
     // A pallet's close is an event for the office, as a shift's close is.
     if revision.is_none() {

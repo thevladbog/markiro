@@ -1,4 +1,4 @@
-//! Migrations 0035-0036 of plan ТСД-Х on a database that has the earlier ones (spec 6.4): a host
+//! Migrations 0035-0037 of plan ТСД-Х on a database that has the earlier ones (spec 6.4): a host
 //! with live shifts, boxes and pallets upgrades without losing a row and gets the new tables.
 
 use std::collections::BTreeSet;
@@ -113,5 +113,48 @@ async fn the_warehouse_tables_arrive_beside_a_live_database_and_enforce_their_ru
             "{add} ('p3','046006820000015000','t','r3','d','t2')"
         ))
         .await
+    );
+}
+
+#[tokio::test]
+async fn a_closed_box_of_a_live_database_gets_its_change_time_and_an_open_one_gets_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = pool(&dir.path().join("host.db")).await;
+    through(36).run(&pool).await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for sql in [
+        "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) \
+         VALUES ('open', 's', 'd', '2026-10-08T06:00:00.000Z', '2026-10-08T06:00:00Z')",
+        "INSERT INTO boxes (id, shift_id, device_id, opened_at, closed_at, sscc, block_id, serial, \
+         item_count_reported, membership_digest, digest_matches, received_at) \
+         VALUES ('closed', 's', 'd', '2026-10-08T06:00:00.000Z', '2026-10-08T06:10:00.000Z', \
+         '046006820000015000', 'b', 1500, 1, 'x', 1, '2026-10-08T06:11:00Z')",
+        "INSERT INTO boxes (id, shift_id, device_id, opened_at, closed_at, sscc, block_id, serial, \
+         item_count_reported, membership_digest, digest_matches, disassembled_at, received_at) \
+         VALUES ('apart', 's', 'd', '2026-10-08T06:00:00.000Z', '2026-10-08T06:10:00.000Z', \
+         '046006820000015010', 'b', 1501, 1, 'x', 1, '2026-10-09T08:00:00.000Z', '2026-10-08T06:11:00Z')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    MIGRATOR.run(&pool).await.unwrap();
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, changed_at FROM boxes ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    // The host's own time of receipt for a closed box; a taken-apart box keeps the later of the two.
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "apart".to_owned(),
+                Some("2026-10-09T08:00:00.000Z".to_owned())
+            ),
+            ("closed".to_owned(), Some("2026-10-08T06:11:00Z".to_owned())),
+            ("open".to_owned(), None),
+        ]
     );
 }

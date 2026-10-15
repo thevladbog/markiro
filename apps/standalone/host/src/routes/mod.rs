@@ -3,6 +3,7 @@
 pub mod app_updates;
 pub mod backups;
 pub mod bootstrap;
+pub mod box_registry;
 pub mod changes;
 pub mod cloud_import;
 pub mod codes;

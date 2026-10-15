@@ -258,6 +258,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::pallet_events::receive_events),
         )
         .route(
+            "/v1/device/box-registry",
+            get(crate::routes::box_registry::box_registry),
+        )
+        .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
         )
