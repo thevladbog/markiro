@@ -3,6 +3,7 @@ package app.markiro.handheld.core.host
 import app.markiro.handheld.core.backend.HostBackend
 import app.markiro.handheld.core.box.SsccPool
 import app.markiro.handheld.core.network.RevocationBus
+import app.markiro.handheld.core.network.host.AddressFallbackTransport
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostHttpClient
 import app.markiro.handheld.core.network.host.HostResult
@@ -25,6 +26,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import java.io.IOException
 import javax.inject.Singleton
@@ -34,8 +36,13 @@ import javax.inject.Singleton
  * been paired again to another certificate), and the client is rebuilt only when the pin changes. A device that is not paired with a
  * host reaches nothing.
  */
-class DeviceHostTransport(private val recovery: DeviceRecovery) : HostTransport {
+class DeviceHostTransport(
+    private val recovery: DeviceRecovery,
+    /** The addresses of the pairing payload (`device_config.hostAddresses`), active one first; the port is the owner's. */
+    private val addresses: suspend () -> List<String> = { emptyList() },
+) : HostTransport {
     private var cached: Pair<String, OkHttpClient>? = null
+    private val active = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
     private fun client(pin: String): OkHttpClient = synchronized(this) {
         cached?.takeIf { it.first == pin }?.second ?: HostHttpClient.pinned(pin) { key() }.also { cached = pin to it }
@@ -44,10 +51,17 @@ class DeviceHostTransport(private val recovery: DeviceRecovery) : HostTransport 
     /** Thrown as `IOException` so the transport reports "unreachable", never a crash inside the interceptor chain. */
     private fun key(): String = runCatching { recovery.key(recovery.token()) }.getOrElse { throw IOException("the device key is not available") }
 
-    private fun transport(): HostTransport? {
+    /**
+     * The owner's origin first, then the other addresses of the payload on the owner's port, all through the client pinned to the owner's
+     * certificate: an address that answers with another certificate is refused like one that does not answer.
+     */
+    private suspend fun transport(): HostTransport? {
         val owner = recovery.current().owner ?: return null
         val pin = owner.pinSha256 ?: return null
-        return OkHttpHostTransport(client(pin), { recovery.current().owner?.serverOrigin ?: owner.serverOrigin })
+        val port = owner.serverOrigin.toHttpUrlOrNull()?.port
+        val others = if (port == null) emptyList() else addresses().map { "https://$it:$port" }
+        val origins = (listOf(owner.serverOrigin) + others).distinct()
+        return AddressFallbackTransport(origins, { origin -> OkHttpHostTransport(client(pin), { origin }) }, active)
     }
 
     override suspend fun get(path: String): HostResult = transport()?.get(path) ?: HostResult.Failed(TransportFailure.UNREACHABLE)
@@ -61,7 +75,8 @@ class DeviceHostTransport(private val recovery: DeviceRecovery) : HostTransport 
 object HostModule {
     @Provides
     @Singleton
-    fun hostApi(recovery: DeviceRecovery): HostApi = HostApi(DeviceHostTransport(recovery))
+    fun hostApi(recovery: DeviceRecovery, config: DeviceConfigDao): HostApi =
+        HostApi(DeviceHostTransport(recovery) { config.get()?.hostAddresses?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty() })
 
     @Provides
     @Singleton
@@ -81,9 +96,15 @@ object HostModule {
     @Singleton
     fun hostBoxRegistry(db: HandheldDatabase, meta: MetaStore, api: HostApi): HostBoxRegistry = HostBoxRegistry(db, meta, api)
 
+    /** What a changed epoch asks is done by [HostHeartbeat] with the observation the monitor returns (the callback cannot suspend). */
     @Provides
     @Singleton
     fun hostLinkMonitor(): HostLinkMonitor = HostLinkMonitor(now = System::currentTimeMillis, onRestore = {})
+
+    @Provides
+    @Singleton
+    fun hostHeartbeat(db: HandheldDatabase, monitor: HostLinkMonitor, api: HostApi, config: DeviceConfigDao, blocks: HostBlockSupplier, meta: MetaStore): HostHeartbeat =
+        HostHeartbeat(db, monitor, { api }, config, blocks, meta)
 
     @Provides
     @Singleton
@@ -105,8 +126,8 @@ object HostModule {
 
     @Provides
     @Singleton
-    fun hostSyncEngine(db: HandheldDatabase, config: DeviceConfigDao, api: HostApi, revocation: HostRevocation): HostSyncEngine =
-        HostSyncEngine(db, { api }, HostAckMapper(db), HostCalls { revocation.reject() }, config)
+    fun hostSyncEngine(db: HandheldDatabase, config: DeviceConfigDao, api: HostApi, revocation: HostRevocation, heartbeat: HostHeartbeat): HostSyncEngine =
+        HostSyncEngine(db, { api }, HostAckMapper(db), HostCalls { revocation.reject() }, config, beat = heartbeat::beat)
 
     /** What the consumers of the sync engine hold: the cloud's engine or the host's, by the backend of this device at each call. */
     @Provides

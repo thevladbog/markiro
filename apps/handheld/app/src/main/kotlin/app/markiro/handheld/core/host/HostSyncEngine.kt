@@ -46,6 +46,8 @@ class HostSyncEngine(
     private val clock: () -> Long = System::currentTimeMillis,
     private val heartbeatMs: Long = SyncEngine.HEARTBEAT_MS,
     private val backoff: Backoff = Backoff(),
+    /** The beat of the link with the host (`HostHeartbeat.beat`), once per turn of the loop, before the queue is sent. */
+    private val beat: suspend () -> Unit = {},
 ) : SyncDriver {
     private val nudges = Channel<Unit>(Channel.CONFLATED)
     private val drainMutex = Mutex()
@@ -69,6 +71,13 @@ class HostSyncEngine(
             while (true) {
                 withTimeoutOrNull(delayMs) { nudges.receive() }
                 now.value = clock()
+                try {
+                    beat()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // A beat that failed in some way of its own must not stop the queue from going out.
+                }
                 delayMs = if (drainAll()) {
                     backoff.reset()
                     heartbeatMs

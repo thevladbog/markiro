@@ -78,6 +78,10 @@ data class HubUi(
     val dialog: app.markiro.handheld.feature.shift.ShiftDialog? = null,
     /** A device paired with a host: no inventory and no write-off tiles (spec 8.7). */
     val hostMode: Boolean = false,
+    /** The link with the host, text and icon on the hub; `null` before the first heartbeat and on a cloud device. */
+    val hostLink: app.markiro.handheld.core.host.HostLinkStatus? = null,
+    /** Records the host refused, kept for support: they are not [queue] (nothing is owed for them) but must be seen. */
+    val hostQuarantined: Int = 0,
 )
 
 sealed interface HubEvent {
@@ -129,6 +133,9 @@ class HubViewModel(
     private val shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository? = null,
     /** The seam of the hub's counts; null only in tests that count through [api]. */
     private val backend: app.markiro.handheld.core.backend.StationBackend? = null,
+    /** The host link and its refused records; absent in tests of the cloud's hub. */
+    hostLink: Flow<app.markiro.handheld.core.host.HostLinkStatus?> = flowOf(null),
+    hostQuarantined: Flow<Int> = flowOf(0),
 ) : ViewModel() {
     @Inject
     constructor(
@@ -153,6 +160,8 @@ class HubViewModel(
         shiftRepository: app.markiro.handheld.feature.shift.ShiftRepository,
         replacement: app.markiro.handheld.core.replacement.ReplacementCoordinator,
         backend: app.markiro.handheld.core.backend.StationBackend,
+        hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
+        hostOutbox: app.markiro.handheld.core.storage.HostOutboxDao,
     ) : this(
         recovery,
         api,
@@ -177,6 +186,8 @@ class HubViewModel(
         shiftRepository = shiftRepository,
         replacement = replacement,
         backend = backend,
+        hostLink = hostLink.state.map { app.markiro.handheld.core.host.HostLinkStatus.of(it) },
+        hostQuarantined = hostOutbox.observeQuarantinedCount(),
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -232,6 +243,7 @@ class HubViewModel(
         printers.observeRouting(), boxes.observeUnprintedCount(), writeoffSync.state, writeoffPermission, dialog,
         palletPermission, memberships.observePendingCount(),
         replacement?.state ?: flowOf(null), replacement?.counters ?: flowOf(null), replacement?.targetWaiting ?: flowOf(false),
+        hostLink, hostQuarantined,
     ) { values ->
         val cfg = values[0] as DeviceConfigEntity?
         val ses = values[1] as SessionState
@@ -247,6 +259,7 @@ class HubViewModel(
         val shiftDialog = values[12] as app.markiro.handheld.feature.shift.ShiftDialog?
         val canBuildPallets = values[13] as Boolean?
         val palletsPending = values[14] as Int
+        val link = if (cfg?.backend == "host") values[18] as app.markiro.handheld.core.host.HostLinkStatus? else null
         HubUi(
             printerConfigured = printer.missing.isEmpty() && printer.attention.isEmpty(),
             missingPrinterPurposes = printer.missing,
@@ -259,7 +272,10 @@ class HubViewModel(
             shifts = cfg?.shiftsCount,
             inventories = cfg?.inventoryCount,
             countsAt = cfg?.countsAt,
-            reachable = lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
+            // A host device is reachable as its heartbeat says: the cloud's reachability probe never sees the host's answers.
+            reachable = if (cfg?.backend == "host") link != null && link != app.markiro.handheld.core.host.HostLinkStatus.Offline else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
+            hostLink = link,
+            hostQuarantined = if (cfg?.backend == "host") values[19] as Int else 0,
             scannerLabel = scannerLabel(),
             // `pallet_memberships` is one of the sync engine's own channels, so
             // `syncState.pending` ALREADY counts every unsent membership. Adding

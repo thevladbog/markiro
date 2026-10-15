@@ -131,6 +131,7 @@ object Routes {
     const val CLOSE = "close/{shiftId}"
     const val CONFLICTS = "conflicts/{shiftId}"
     const val LABEL_QUEUE = "label-queue"
+    const val HOST_QUEUE = "host-queue"
     const val EXCEPTIONS = "exceptions/{shiftId}"
     const val DISASSEMBLE = "exceptions/{shiftId}/disassemble"
     const val PALLET_DISASSEMBLE = "exceptions/{shiftId}/pallet-disassemble"
@@ -294,6 +295,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onContinueShift = { vm.continueShift() },
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
+                    onHostQueue = { nav.navigate(Routes.HOST_QUEUE) },
                     onDismissDialog = vm::dismissDialog,
                 )
             }
@@ -595,6 +597,30 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                         onResolveUnknown = vm::resolveUnknown,
                         onReroute = vm::reroute,
                         onManagePrinters = { nav.navigate(Routes.PRINTER_GRAPH) },
+                    ),
+                )
+            }
+            composable(Routes.HOST_QUEUE) {
+                val vm: app.markiro.handheld.feature.settings.HostQueueViewModel = hiltViewModel()
+                val state by vm.state.collectAsStateWithLifecycle()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(Unit) {
+                    // The record goes out as text through the system's share sheet: the app keeps no file provider path for it.
+                    vm.exports.collect { export ->
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_SUBJECT, export.fileName)
+                            putExtra(android.content.Intent.EXTRA_TEXT, export.text)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(send, context.getString(R.string.host_queue_support_title)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+                app.markiro.handheld.feature.settings.HostQueueScreen(
+                    state,
+                    app.markiro.handheld.feature.settings.HostQueueCallbacks(
+                        onBack = { nav.popBackStack() },
+                        onSendNow = vm::sendNow,
+                        onSupport = vm::exportForSupport,
                     ),
                 )
             }

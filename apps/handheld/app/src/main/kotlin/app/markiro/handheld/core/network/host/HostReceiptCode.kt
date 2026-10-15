@@ -29,7 +29,7 @@ object HostReceiptCode {
     )
 
     fun hintOf(code: String?): RejectionHint = when (code) {
-        "not_entered", "unknown_shift" -> RejectionHint.OTHER_DEVICE_OR_CLOSED
+        "not_entered", "unknown_shift", "shift_closed" -> RejectionHint.OTHER_DEVICE_OR_CLOSED
         "payload_mismatch" -> RejectionHint.BUG
         "feature_disabled" -> RejectionHint.LICENSE
         "box_on_pallet" -> RejectionHint.PALLET_CONFLICT

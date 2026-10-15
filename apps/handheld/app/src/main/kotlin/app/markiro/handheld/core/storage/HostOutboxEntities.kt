@@ -124,6 +124,12 @@ interface HostOutboxDao {
     @Query("SELECT * FROM host_outbox WHERE state = 'quarantined' ORDER BY seq")
     fun observeQuarantined(): kotlinx.coroutines.flow.Flow<List<HostOutboxEntity>>
 
+    @Query("SELECT * FROM host_outbox ORDER BY seq")
+    fun observeAll(): kotlinx.coroutines.flow.Flow<List<HostOutboxEntity>>
+
+    @Query("SELECT * FROM host_outbox WHERE recordId = :recordId")
+    suspend fun get(recordId: String): HostOutboxEntity?
+
     @Query("SELECT COUNT(*) FROM host_outbox WHERE sourceKind = :kind AND sourceKey = :key")
     suspend fun frozen(kind: String, key: String): Int
 

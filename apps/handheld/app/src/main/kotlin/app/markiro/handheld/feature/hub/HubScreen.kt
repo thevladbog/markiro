@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RemoveShoppingCart
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WifiOff
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.*
 import app.markiro.handheld.R
+import app.markiro.handheld.core.host.HostLinkStatus
 import app.markiro.handheld.core.design.Banner
 import app.markiro.handheld.core.design.IconAction
 import app.markiro.handheld.core.design.MarkiroSizes
@@ -56,6 +58,7 @@ fun HubScreen(
     onTile: (HubTile) -> Unit,
     onSignOut: () -> Unit,
     onLabelQueue: () -> Unit = {},
+    onHostQueue: () -> Unit = {},
     onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) },
     onDismissDialog: () -> Unit = {},
 ) {
@@ -75,7 +78,15 @@ fun HubScreen(
     Column(Modifier.fillMaxSize().background(c.surfacePage)) {
         StatusStrip(
             listOf(
-                if (state.reachable) {
+                if (state.hostMode && state.hostLink != null) {
+                    // Text and icon both say it: a state is never told by colour alone.
+                    when (state.hostLink) {
+                        HostLinkStatus.Online -> StatusItem(Icons.Outlined.Wifi, stringResource(R.string.host_link_online))
+                        HostLinkStatus.Offline -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_offline), Tone.Warn)
+                        HostLinkStatus.Restoring -> StatusItem(Icons.Outlined.Sync, stringResource(R.string.host_link_restoring), Tone.Warn)
+                        HostLinkStatus.ClockSkew -> StatusItem(Icons.Outlined.Schedule, stringResource(R.string.host_link_clock_skew), Tone.Warn)
+                    }
+                } else if (state.reachable) {
                     StatusItem(Icons.Outlined.Wifi, stringResource(R.string.hub_network))
                 } else {
                     StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.hub_offline), Tone.Warn)
@@ -87,6 +98,14 @@ fun HubScreen(
         )
         if (state.stuck) {
             Banner(stringResource(R.string.hub_sync_stuck), Tone.Err, Icons.Outlined.Sync)
+        } else if (state.hostMode && state.hostLink != null) {
+            // The work goes on in every state of the link; the banner says why the queue is not going out.
+            when (state.hostLink) {
+                HostLinkStatus.Online -> Unit
+                HostLinkStatus.Offline -> Banner(stringResource(R.string.host_link_offline_banner), Tone.Warn, Icons.Outlined.WifiOff)
+                HostLinkStatus.Restoring -> Banner(stringResource(R.string.host_link_restoring_banner), Tone.Warn, Icons.Outlined.Sync)
+                HostLinkStatus.ClockSkew -> Banner(stringResource(R.string.host_link_clock_skew_banner), Tone.Warn, Icons.Outlined.Schedule)
+            }
         } else if (!state.reachable) {
             val text = if (state.queue > 0) {
                 stringResource(R.string.hub_offline_banner_queue, pluralStringResource(R.plurals.scans_queued, state.queue, state.queue))
@@ -94,6 +113,16 @@ fun HubScreen(
                 stringResource(R.string.hub_offline_banner)
             }
             Banner(text, Tone.Warn, Icons.Outlined.WifiOff)
+        }
+        // What the host refused stays for support and is one tap from here; a refused record never stops the line.
+        if (state.hostMode && (state.queue > 0 || state.hostQuarantined > 0)) {
+            Box(Modifier.fillMaxWidth().clickable(onClick = onHostQueue)) {
+                Banner(
+                    stringResource(R.string.host_queue_banner, state.queue, state.hostQuarantined),
+                    if (state.hostQuarantined > 0) Tone.Warn else Tone.Neutral,
+                    Icons.Outlined.Sync,
+                )
+            }
         }
         // Labels owed on boxes already closed and reported. Shown on the hub
         // because the queue belongs to the device, not to any one shift.

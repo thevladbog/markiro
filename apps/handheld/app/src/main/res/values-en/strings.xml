@@ -782,4 +782,34 @@
     <string name="host_pairing_error_certificate_mismatch">The server presented a different certificate than at the check. The code was not sent.</string>
     <string name="host_pairing_error_other">Could not pair the device. Try again.</string>
     <string name="host_pairing_error_sync_failed">The device is paired, but reference data did not load. Retry loading. No new code is needed.</string>
+
+    <!-- Link with the host and its queue (host mode) -->
+    <string name="host_link_online">Host online</string>
+    <string name="host_link_offline">No link</string>
+    <string name="host_link_restoring">Host restoring</string>
+    <string name="host_link_clock_skew">Clock differs</string>
+    <string name="host_link_offline_banner">No link to the host — work continues</string>
+    <string name="host_link_restoring_banner">The host is being restored from a backup — work continues</string>
+    <string name="host_link_clock_skew_banner">The device clock differs from the host — check the time on the handheld</string>
+    <string name="host_queue_banner">Host queue: %1$d waiting, %2$d refused</string>
+    <string name="host_queue_title">Host queue</string>
+    <string name="host_queue_empty">The queue is empty</string>
+    <string name="host_queue_waiting">Waiting to be sent</string>
+    <string name="host_queue_refused">Refused by the host</string>
+    <string name="host_queue_send_now">Send now</string>
+    <string name="host_queue_support">Send to support</string>
+    <string name="host_queue_support_title">Markiro queue record</string>
+    <string name="host_queue_kind_scan">Scan</string>
+    <string name="host_queue_kind_box">Box</string>
+    <string name="host_queue_kind_pallet">Shift pallet</string>
+    <string name="host_queue_kind_shift_close">Shift close</string>
+    <string name="host_queue_kind_wh_open">Warehouse pallet: opened</string>
+    <string name="host_queue_kind_wh_add">Box put on a pallet</string>
+    <string name="host_queue_kind_wh_remove">Box taken off a pallet</string>
+    <string name="host_queue_kind_wh_close">Warehouse pallet: closed</string>
+    <string name="host_reject_other_device">The shift is closed on the host or in use by another device</string>
+    <string name="host_reject_bug">The record changed after it was first sent — tell support</string>
+    <string name="host_reject_license">The host\'s license has no pallet mode</string>
+    <string name="host_reject_pallet_conflict">The box is already on another pallet</string>
+    <string name="host_reject_data">The host did not accept the record\'s data</string>
 </resources>
