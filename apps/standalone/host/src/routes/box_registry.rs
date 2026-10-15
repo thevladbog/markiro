@@ -9,12 +9,19 @@ use markiro_proto::{BoxRegistryItem, BoxRegistryKind, BoxRegistryPage};
 use serde::Deserialize;
 
 use crate::auth::AskingDevice;
-use crate::clock::parse_timestamp;
+use crate::clock::{format_timestamp, parse_timestamp};
 use crate::error::{ApiError, ApiQuery};
 use crate::server::AppState;
 
 const DEFAULT_LIMIT: u32 = 250;
 const MAX_LIMIT: u32 = 500;
+
+/// How far below "now" a walk's window closes. A writer stamps a box's `changed_at` with the time
+/// it received the batch and commits a moment later; a walk that read its snapshot in between
+/// would close its window above the stamp, and the next walk (which starts at that `until`) would
+/// never see the change. The window closes this much earlier, so such a change is delivered again
+/// by the next walk. A delta is idempotent for the handheld, so a repeat is harmless.
+const WINDOW_MARGIN: time::Duration = time::Duration::seconds(5);
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +81,7 @@ pub async fn box_registry(
                 "required after the first page",
             ))
         }
-        (None, None) => (state.timestamp(), None),
+        (None, None) => (format_timestamp(state.now() - WINDOW_MARGIN), None),
         (Some(cursor), Some(until)) => {
             timestamp("until", until)?;
             let (changed_at, sscc) = cursor

@@ -57,6 +57,8 @@ async fn a_walk_lists_closed_boxes_in_pages_without_a_code_of_theirs() {
     let setup = shift_setup(&admin).await;
     closed_boxes(&admin, &setup, 3).await;
     let key = pair_handheld(&admin).await;
+    // The window closes a margin below now, so the boxes closed just now are inside it after a while.
+    admin.app.clock.advance(Duration::seconds(10));
     let (until, items) = walk(&admin, &key, None, 2).await;
     assert_eq!(items.len(), 3);
     let sscc: Vec<&str> = items
@@ -105,8 +107,8 @@ async fn a_change_moves_a_box_into_the_next_window_with_its_pallet() {
     closed_boxes(&admin, &setup, 2).await;
     let key = pair_handheld(&admin).await;
     // The window is closed at both ends: a change in the very second of `until` is delivered again
-    // by the next walk (harmless), so the test lets a second pass first.
-    admin.app.clock.advance(Duration::seconds(5));
+    // by the next walk (harmless), so the test lets time pass first (the window closes a margin below now).
+    admin.app.clock.advance(Duration::seconds(10));
     let (until, _) = walk(&admin, &key, None, 100).await;
     admin.app.clock.advance(Duration::seconds(30));
     let block = pallet_block(&admin, &key, "8f7e6d5c-4b3a-4f2e-8d1c-9b8a7f6e5d4c").await;
@@ -119,8 +121,8 @@ async fn a_change_moves_a_box_into_the_next_window_with_its_pallet() {
         ],
     )
     .await;
-    // A second passes, so the next window starts after the add (it is closed at both ends).
-    admin.app.clock.advance(Duration::seconds(5));
+    // Time passes (the window closes a margin below now), so the next window reaches the add.
+    admin.app.clock.advance(Duration::seconds(10));
     // Only the box that was put on the pallet is in the next window, standing on an open pallet.
     let (next, items) = walk(&admin, &key, Some(&until), 100).await;
     let on_pallet: Vec<&Value> = items
@@ -149,6 +151,7 @@ async fn a_change_moves_a_box_into_the_next_window_with_its_pallet() {
         )],
     )
     .await;
+    admin.app.clock.advance(Duration::seconds(10));
     let (_, items) = walk(&admin, &key, Some(&next), 100).await;
     assert_eq!(items[0]["palletSscc"], json!(pallet_sscc(40)));
 }
@@ -159,7 +162,7 @@ async fn a_taken_apart_box_is_a_removal_and_the_restore_epoch_rides_every_page()
     let setup = shift_setup(&admin).await;
     let floor = closed_boxes(&admin, &setup, 2).await;
     let key = pair_handheld(&admin).await;
-    admin.app.clock.advance(Duration::seconds(5));
+    admin.app.clock.advance(Duration::seconds(10));
     let (until, _) = walk(&admin, &key, None, 100).await;
     admin.app.clock.advance(Duration::seconds(30));
     let exception = fact(
@@ -181,6 +184,7 @@ async fn a_taken_apart_box_is_a_removal_and_the_restore_epoch_rides_every_page()
         .await;
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert_eq!(sent["receipts"][0]["outcome"], json!("accepted"), "{sent}");
+    admin.app.clock.advance(Duration::seconds(10));
     let (_, items) = walk(&admin, &key, Some(&until), 100).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["kind"], json!("remove"));
@@ -230,7 +234,7 @@ async fn a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time() {
     let setup = shift_setup(&admin).await;
     closed_boxes(&admin, &setup, 3).await;
     let key = pair_handheld(&admin).await;
-    admin.app.clock.advance(Duration::seconds(5));
+    admin.app.clock.advance(Duration::seconds(10));
     // Page one of a walk of three boxes; its window closes at `until`.
     let (status, first) = registry(&admin, &key, "?limit=1").await;
     assert_eq!(status, StatusCode::OK, "{first}");
@@ -272,6 +276,7 @@ async fn a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time() {
     assert_eq!(sscc, vec![box_sscc(1501)], "{rest}");
     assert_eq!(rest["until"], json!(until));
     assert!(rest.get("nextCursor").is_none());
+    admin.app.clock.advance(Duration::seconds(10));
     // The next walk lists the changes by when they happened, not by SSCC: 1502 first, then 1500.
     let (_, next) = walk(&admin, &key, Some(&until), 100).await;
     let order: Vec<&str> = next
@@ -285,4 +290,34 @@ async fn a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time() {
         (status, refused["error"]["details"]["field"].clone()),
         (StatusCode::BAD_REQUEST, json!("until"))
     );
+}
+
+#[tokio::test]
+async fn a_change_stamped_just_before_the_window_closed_is_delivered_by_the_next_walk() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 2).await;
+    let key = pair_handheld(&admin).await;
+    admin.app.clock.advance(Duration::seconds(60));
+    // A writer stamped its change two seconds before this walk and commits after the walk read
+    // its snapshot: the window must close below the stamp, or the change is never delivered.
+    let stamped = markiro_host::clock::format_timestamp(
+        markiro_host::clock::parse_timestamp(&admin.app.state.timestamp()).unwrap()
+            - Duration::seconds(2),
+    );
+    let (until, first) = walk(&admin, &key, None, 100).await;
+    assert_eq!(first.len(), 2);
+    sqlx::query("UPDATE boxes SET changed_at = ? WHERE sscc = ?")
+        .bind(&stamped)
+        .bind(box_sscc(1501))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    admin.app.clock.advance(Duration::seconds(60));
+    let (_, next) = walk(&admin, &key, Some(&until), 100).await;
+    let sscc: Vec<&str> = next
+        .iter()
+        .map(|item| item["sscc"].as_str().unwrap())
+        .collect();
+    assert_eq!(sscc, vec![box_sscc(1501)], "{next:?}");
 }
