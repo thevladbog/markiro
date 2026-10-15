@@ -41,12 +41,25 @@ export function daysAgo(iso: string, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - Date.parse(iso)) / DAY_MS));
 }
 
-/** Every `YYYY-MM` from the first to the last month, so a gap stays a row that says «no data». */
+/** The longest span (months) whose gaps are filled in; a wider one is listed as it came. */
+export const MAX_FILLED_MONTHS = 60;
+
+/**
+ * Every `YYYY-MM` from the first to the last month, so a gap stays a row that says «no data».
+ * The server keeps months near the report's date, but the page must not trust that: a span
+ * wider than `MAX_FILLED_MONTHS` is not expanded, only the months that exist are listed.
+ */
 export function monthRange(months: readonly string[]): string[] {
-  const sorted = [...months].sort();
+  const sorted = [...new Set(months)].sort();
   const first = sorted[0];
   const last = sorted.at(-1);
   if (first === undefined || last === undefined) return [];
+  const span =
+    (Number(last.slice(0, 4)) - Number(first.slice(0, 4))) * 12 +
+    Number(last.slice(5, 7)) -
+    Number(first.slice(5, 7)) +
+    1;
+  if (!(span <= MAX_FILLED_MONTHS)) return sorted;
   const range: string[] = [];
   let year = Number(first.slice(0, 4));
   let month = Number(first.slice(5, 7));
@@ -60,6 +73,14 @@ export function monthRange(months: readonly string[]): string[] {
       year += 1;
     }
   }
+}
+
+/** The chart's ceiling (at least 1); a loop, because spreading a long array into `Math.max` throws. */
+export function barMax(series: readonly { values: readonly (number | null)[] }[]): number {
+  let max = 1;
+  for (const item of series)
+    for (const value of item.values) if (value !== null && value > max) max = value;
+  return max;
 }
 
 /** «2 из 3», «занято 4 из 3» over the limit, «0 из ∞» without a limit. */

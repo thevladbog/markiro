@@ -1,6 +1,8 @@
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
+import { barMax } from "./diagnostics-format.js";
+
 export interface BarSeries {
   key: string;
   label: string;
@@ -30,7 +32,7 @@ export function DiagnosticsBars({
 }) {
   const { t } = useTranslation();
   const titleId = useId();
-  const max = Math.max(1, ...series.flatMap((item) => item.values.map((value) => value ?? 0)));
+  const max = barMax(series);
   const slot = (WIDTH - PAD_X * 2) / Math.max(1, months.length);
   const bar = slot / (series.length + 1);
   const plotHeight = HEIGHT - PAD_TOP - PAD_BOTTOM;

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nextProvider } from "react-i18next";
@@ -124,6 +124,36 @@ describe("tenant diagnostics tab (plan ДИАГ У1)", () => {
     expect((input as HTMLTextAreaElement).value).toBe("");
     expect(document.body.innerHTML).not.toContain("MKS1.sup-d11c3182");
     expect(location.search).not.toContain("MKS1");
+  });
+
+  it("keeps the text typed while a report is being sent: no editing during the send, no clearing of the next report", async () => {
+    let finish: () => void = () => undefined;
+    stubApi(standard());
+    vi.mocked(fetch).mockImplementation(async (input, init = {}) => {
+      const key = `${init.method ?? "GET"} ${String(input)}`;
+      if (key === `POST ${BASE}`) {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return jsonResponse(200, DIAG_INGESTED);
+      }
+      const route = (standard() as Record<string, Array<() => Response>>)[key];
+      if (!route?.[0]) throw new Error(`Unexpected request: ${key}`);
+      return route[0]();
+    });
+    renderPanel(true);
+    const input = (await screen.findByLabelText(
+      /Текст «Сведения для поддержки»/u,
+    )) as HTMLTextAreaElement;
+    await userEvent.type(input, "MKS1.report-A");
+    await userEvent.click(screen.getByRole("button", { name: /Разобрать и сохранить/u }));
+    await waitFor(() => expect(input.readOnly).toBe(true));
+    // Report B arrives in the field anyway (a paste event, an autofill): A's success must not wipe it.
+    fireEvent.change(input, { target: { value: "MKS1.report-B" } });
+    finish();
+    expect(await screen.findByText(/Сохранено/u)).toBeDefined();
+    expect(input.value).toBe("MKS1.report-B");
+    expect(input.readOnly).toBe(false);
   });
 
   it("asks to confirm an unbound host and repeats the request with the flag", async () => {

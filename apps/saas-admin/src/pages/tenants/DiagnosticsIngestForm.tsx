@@ -21,13 +21,14 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState<StandaloneDiagnosticsIngestResponse | null>(null);
   const ingest = useMutation({
-    mutationFn: (acknowledgeUnboundHost: boolean) =>
+    mutationFn: (sent: { text: string; acknowledgeUnboundHost: boolean }) =>
       ingestDiagnostics(tenantId, {
-        text,
-        ...(acknowledgeUnboundHost ? { acknowledgeUnboundHost } : {}),
+        text: sent.text,
+        ...(sent.acknowledgeUnboundHost ? { acknowledgeUnboundHost: true } : {}),
       }),
-    onSuccess: async (response) => {
-      setText("");
+    onSuccess: async (response, sent) => {
+      // Clear only what was sent: text that replaced it while the request ran is the next report.
+      setText((current) => (current === sent.text ? "" : current));
       setSaved(response);
       await queryClient.invalidateQueries({ queryKey: diagnosticsKey(tenantId) });
     },
@@ -37,7 +38,7 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
   const unbound = ingest.isError && diagnosticsErrorCode(ingest.error) === UNBOUND;
   const submit = (acknowledge: boolean) => {
     setSaved(null);
-    ingest.mutate(acknowledge);
+    ingest.mutate({ text, acknowledgeUnboundHost: acknowledge });
   };
   return (
     <Card title={t(`${prefix}.title`)} titleAs="h3" className="diagnostics-ingest">
@@ -53,6 +54,7 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
           className="diagnostics-ingest__text mono"
           rows={6}
           value={text}
+          readOnly={ingest.isPending}
           spellCheck={false}
           autoComplete="off"
           onChange={(event) => {
