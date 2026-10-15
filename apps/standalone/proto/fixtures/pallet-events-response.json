@@ -1,0 +1,27 @@
+{
+  "receipts": [
+    { "id": "e1000000-0000-4000-8000-000000000001", "outcome": "accepted" },
+    { "id": "e1000000-0000-4000-8000-000000000002", "outcome": "accepted" },
+    {
+      "id": "e1000000-0000-4000-8000-000000000003",
+      "outcome": "rejected",
+      "code": "box_on_pallet",
+      "details": {
+        "palletSscc": "146006820000000409",
+        "palletId": "a1000000-0000-4000-8000-0000000000b2"
+      }
+    },
+    { "id": "e1000000-0000-4000-8000-000000000004", "outcome": "accepted" },
+    {
+      "id": "e1000000-0000-4000-8000-000000000005",
+      "outcome": "rejected",
+      "code": "pallet_count_mismatch",
+      "details": { "counted": 2 }
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000006",
+      "outcome": "rejected",
+      "code": "feature_disabled"
+    }
+  ]
+}

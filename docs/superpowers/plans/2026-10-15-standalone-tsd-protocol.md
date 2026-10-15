@@ -2425,3 +2425,13 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 «Отклонения при исполнении» в `2026-10-13-standalone-shift-modes.md`). Обязательно назвать: тесты, чьё ожидание
 изменилось решением владельца (число шагов мастера, список задач CI для `hello.json`, `PROTOCOL_VERSION`), и любое поле
 фикстур, которое пришлось изменить после первого запуска, с причиной.
+
+### Задача П1
+
+- Закреплённые версией ожидания, которых не было в плане, подняты с 5 до 6 (число протокола, не ослабление проверок):
+  `proto/tests/shifts.rs` и `proto/tests/validation_print.rs` (`PROTOCOL_VERSION`), `host/tests/hello.rs`,
+  `host/tests/platform.rs` (`protocol` в `/v1/hello`), `host/tests/claim.rs` (`devices.protocol` после claim = 6),
+  юнит-тесты `host/src/server.rs` (`a_supported_version_passes` принимает 6; верхняя граница 6, отказ — 7 и 8 вместо 6 и 7).
+- Zod/Vitest (`PROTOCOL_VERSION`, `FACT_RECEIPT_CODES`, фикстуры `hello*.json`) задача П1 не трогает: они
+  краснеют до П2.
+- Фикстуры из плана в этих блоках не потребовали правок после первого запуска.

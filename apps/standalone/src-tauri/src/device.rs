@@ -365,6 +365,7 @@ impl DeviceState {
             name: name.to_owned(),
             app_version: app_version.to_owned(),
             capabilities: Vec::new(),
+            recover_device_id: None,
         };
         let body = serde_json::to_value(&request).expect("ClaimRequest serializes");
         let response = client

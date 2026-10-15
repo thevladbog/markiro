@@ -801,9 +801,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 5 (the duplicate print, plan РЕЖ part B) is this build's;
-        // 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
+        // Protocol 6 (handhelds on the host, plan ТСД) is this build's;
+        // 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
         // (stage 1) are still taken.
+        assert_eq!(call(Some("6")).await.0, StatusCode::OK);
         assert_eq!(call(Some("5")).await.0, StatusCode::OK);
         assert_eq!(call(Some("4")).await.0, StatusCode::OK);
         assert_eq!(call(Some("3")).await.0, StatusCode::OK);
@@ -818,16 +819,16 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 5);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 6);
     }
 
     #[tokio::test]
     async fn an_out_of_range_or_garbled_version_is_refused() {
-        let (status, body) = call(Some("7")).await;
+        let (status, body) = call(Some("8")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"]["details"]["protocol"], 7);
+        assert_eq!(body["error"]["details"]["protocol"], 8);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("6")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("7")).await.0, StatusCode::BAD_REQUEST);
     }
 }
