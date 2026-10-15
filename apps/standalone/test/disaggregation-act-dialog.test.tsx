@@ -165,15 +165,14 @@ describe("«Акт дезагрегации» of a document (plan ДЗГ-О)", (
       ),
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Открыть в браузере" }));
-    await within(dialog).findByText(/Форма открыта в браузере\./);
     const folder = ["Формы", "Дезагрегация", "DSG-26-0007", "2026-10-08_18-30-00_act_full"];
     const name = "Акт дезагрегации DSG-26-0007.html";
+    await waitFor(() => expect(files.openFile).toHaveBeenCalledWith(folder, name));
     expect(files.save).toHaveBeenCalledWith(folder, [
       { name, bytes: new TextEncoder().encode(expectedHtml(FULL)) },
     ]);
-    expect(files.openFile).toHaveBeenCalledWith(folder, name);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Показать папку" }));
-    await waitFor(() => expect(files.open).toHaveBeenCalledWith(folder));
+    // The browser has the act: the dialog goes by itself (beta 3.2).
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: TITLE })).toBeNull());
   });
 
   it("keeps the act's exact HTML on the host as a file of its document, printed or not, and still prints without the host", async () => {
@@ -193,14 +192,24 @@ describe("«Акт дезагрегации» of a document (plan ДЗГ-О)", (
     });
     const bytes = Uint8Array.from(atob(begin?.contentBase64 ?? ""), (c) => c.charCodeAt(0));
     expect(new TextDecoder().decode(bytes)).toBe(expectedHtml(BOXES));
-    // A host that cannot keep it never stops the print.
+    // The print window is up: the dialog closes by itself (beta 3.2).
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: TITLE })).toBeNull());
+    // A host that cannot keep it never stops the print; its warning keeps the dialog open.
     session.api.beginExportFile.mockRejectedValue(
       new HostError({ kind: "transport", code: "unreachable", message: "x" }),
     );
     await afterPaint();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Печать" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Акт дезагрегации" }));
+    const again = await screen.findByRole("dialog", { name: TITLE });
+    await waitFor(() =>
+      expect(within(again).getByRole("button", { name: "Печать" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
+    fireEvent.click(within(again).getByRole("button", { name: "Печать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
-    await within(dialog).findByText(/^Копия на хосте не сохранена: /);
+    await within(again).findByText(/^Копия на хосте не сохранена: /);
   });
 
   it("says why the act was not saved, and opens nothing", async () => {
@@ -286,9 +295,8 @@ describe("«Акт дезагрегации» of a document (plan ДЗГ-О)", (
     await act(async () => {
       read.resolve(BOXES);
     });
-    await waitFor(() =>
-      expect(within(dialog).getAllByRole("radio")[0]).toHaveProperty("disabled", false),
-    );
+    // The print window opened: the dialog closes by itself (beta 3.2).
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: TITLE })).toBeNull());
   });
 
   it("is as available to a technologist and to a draft as to an administrator", async () => {

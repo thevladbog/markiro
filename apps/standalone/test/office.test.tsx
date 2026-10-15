@@ -112,8 +112,6 @@ describe("Office", () => {
     expect(await screen.findByText("Ирина Смирнова")).toBeTruthy();
     expect(screen.getByText("администратор")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Обзор" })).toBeTruthy();
-    expect(screen.getByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
-    expect(screen.getByText("Роль: администратор.")).toBeTruthy();
   });
 
   it("names the technologist role", async () => {
@@ -126,9 +124,29 @@ describe("Office", () => {
     renderOffice(session);
     fireEvent.click(await screen.findByRole("button", { name: "Выйти в цех" }));
     expect(session.logout).toHaveBeenCalledTimes(1);
-    // One way out: no button that would hide the office and keep the session.
+    expect(session.signOut).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+  });
+
+  it("signs out to the office sign-in from «Выйти», beside «Сменить пароль» (beta 3.2)", async () => {
+    const session = fakeOfficeSession();
+    renderOffice(session);
+    const signOut = await screen.findByRole("button", { name: "Выйти" });
+    // Beside «Сменить пароль» in the header's user area.
+    expect(signOut.parentElement).toBe(
+      screen.getByRole("button", { name: "Сменить пароль" }).parentElement,
+    );
+    fireEvent.click(signOut);
+    expect(session.signOut).toHaveBeenCalledTimes(1);
+    expect(session.logout).not.toHaveBeenCalled();
+  });
+
+  it("has one way out on an office PC, which has no floor: «Выйти»", async () => {
+    const session = { ...fakeOfficeSession(), exitTo: "sign_in" as const };
+    renderOffice(session);
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    expect(session.logout).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
   });
 
   it("switches the theme", async () => {
@@ -152,8 +170,9 @@ describe("Office", () => {
     const view = renderOffice(session, { hostRevision: 3 });
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await screen.findByLabelText("Название организации");
-    // The revision the office opened with is not news.
-    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+    // The revision the office opened with is not news. (The overview and the profile each read
+    // the organization once; what is asked later is what counts.)
+    const reads = session.api.getOrg.mock.calls.length;
     expect(session.refreshUser).not.toHaveBeenCalled();
 
     view.rerender(
@@ -163,7 +182,7 @@ describe("Office", () => {
     );
     await waitFor(() => expect(session.refreshUser).toHaveBeenCalledTimes(1));
     // The open form is not reloaded under the user.
-    expect(session.api.getOrg).toHaveBeenCalledTimes(1);
+    expect(session.api.getOrg).toHaveBeenCalledTimes(reads);
   });
 
   it("moves focus to the page after a menu navigation", async () => {
@@ -453,7 +472,7 @@ describe("ChangePasswordDialog", () => {
     await screen.findByRole("heading", { name: "Профиль организации" });
     expect(screen.queryByText(notice)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
-    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    await screen.findByRole("heading", { level: 1, name: "Обзор" });
     expect(screen.queryByText(notice)).toBeNull();
   });
 });

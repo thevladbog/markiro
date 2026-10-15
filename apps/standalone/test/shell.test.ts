@@ -244,6 +244,17 @@ describe("shellReducer", () => {
     });
   });
 
+  it("returns to the office sign-in, with no notice, when the header's «Выйти» ends the session", () => {
+    const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
+    expect(shellReducer(open, { type: "office_signed_out" }).office).toEqual({
+      kind: "signing_in",
+      notice: null,
+    });
+    // Nothing to sign out of: the press changes nothing.
+    const closed = paired();
+    expect(shellReducer(closed, { type: "office_signed_out" })).toBe(closed);
+  });
+
   it("asks for a new sign-in when its own session ends", () => {
     const open = shellReducer(paired(), { type: "office_opened", session: SESSION });
     expect(shellReducer(open, { type: "session_ended", token: SESSION.token }).office).toEqual({
@@ -849,6 +860,8 @@ describe("the operator session: every action and every late answer", () => {
     // action itself ends the operator's session (D4).
     office_opened: [{ action: { type: "office_opened", session: SESSION }, survives: false }],
     office_closed: [{ action: { type: "office_closed" }, survives: true }],
+    // The office is not open on a floor with an operator: a late «Выйти» is ignored.
+    office_signed_out: [{ action: { type: "office_signed_out" }, survives: true }],
     // The office is not open on a floor with an operator: a late failure is ignored.
     session_ended: [{ action: { type: "session_ended", token: SESSION.token }, survives: true }],
     device_rejected: [

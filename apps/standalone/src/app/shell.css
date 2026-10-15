@@ -269,6 +269,40 @@
   overflow-y: auto;
 }
 
+/*
+ * The settings groups (Организация, Доступ, Сервис) at the foot of the menu: set apart by a
+ * rule and quieter than the operations above them.
+ */
+.office-menu-settings {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.office-menu-settings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.office-menu-settings .mk-sidebar__section {
+  padding-top: 8px;
+}
+
+.office-menu-settings .mk-sidebar__link {
+  padding: 6px 10px;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.office-menu-settings .mk-sidebar__link:hover,
+.office-menu-settings .mk-sidebar__link--active {
+  color: var(--fg-1);
+}
+
 .office-shell__main {
   flex: 1;
   display: flex;
@@ -1194,4 +1228,291 @@
 .shift-drawer .office-stack,
 .shift-drawer .shift-card__section {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* «Обзор»: cards in a grid that wraps by whole cards, a card never narrower than 320 px. */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.overview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.overview-list--quiet {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.overview-shift {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: baseline;
+}
+
+.overview-shift__what {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-shift__progress {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.overview-bar {
+  flex: 1;
+  min-width: 80px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.overview-bar__fill {
+  display: block;
+  height: 100%;
+  background: var(--ok-solid);
+}
+
+.overview-device-kind {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.overview-figure {
+  margin: 0;
+  font: 600 32px/1.1 var(--font-mono);
+}
+
+/*
+ * The office sign-in (beta 3.2, variants B and C): a centred composition on the page colour
+ * with two soft, static colour orbs behind it; the brand on top, a flat form card (a hairline,
+ * a 24px radius, a faint top highlight) and, from 1100px, the card of recent users beside it.
+ * It fits the smallest window (960 x 600) without scrolling.
+ */
+.office-login {
+  position: relative;
+  isolation: isolate;
+  width: min(900px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+
+.office-login::before,
+.office-login::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.office-login::before {
+  top: -120px;
+  left: -100px;
+  background: var(--accent-module);
+}
+
+.office-login::after {
+  right: -120px;
+  bottom: -140px;
+  background: var(--warn-solid);
+}
+
+.office-login__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.office-login__wordmark {
+  font: 600 22px/1 var(--font-mono);
+}
+
+.office-login__edition {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.office-login__host {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-login__row {
+  display: grid;
+  grid-template-columns: minmax(0, 440px);
+  justify-content: center;
+  align-items: start;
+  gap: 16px;
+  width: 100%;
+}
+
+.office-login__card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface-card);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-1) 8%, transparent);
+}
+
+.office-login__title {
+  margin: 0;
+  font: var(--text-h2);
+}
+
+.office-login__tagline {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-login__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.office-login .office-login__ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+}
+
+.office-login .office-login__submit {
+  margin-left: auto;
+  border-radius: 999px;
+  padding-right: 6px;
+  gap: 12px;
+}
+
+.office-login__arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-card);
+  color: var(--fg-1);
+}
+
+.office-login__recent-title {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.office-login__recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.office-login .office-login__recent-pick {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.office-login .office-login__recent-pick--selected {
+  background: var(--surface-panel);
+  border-color: var(--ok-solid);
+}
+
+.office-login__avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: 600 11px/1 var(--font-mono);
+}
+
+.office-login__recent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-login__check {
+  color: var(--ok-fg);
+}
+
+.office-login__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+/* From 1100px the recent users stand to the right of the form; below, under it. */
+@media (min-width: 1100px) {
+  .office-login__row {
+    grid-template-columns: minmax(0, 440px) minmax(0, 300px);
+  }
+}
+
+/* The smallest window: a tighter card, so the form and the brand fit in 600px. */
+@media (max-height: 700px) {
+  .office-login {
+    gap: 10px;
+  }
+
+  .office-login__card {
+    padding: 20px;
+    gap: 10px;
+  }
+}
+
+@media (max-width: 1099px) {
+  .office-login__recent-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-height: 700px) {
+  .office-login__tagline,
+  .office-login__recent .office-note {
+    display: none;
+  }
 }

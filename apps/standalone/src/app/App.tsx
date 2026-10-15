@@ -793,6 +793,10 @@ export function App({
       call,
       refreshUser,
       exitTo: officePc ? "sign_in" : "floor",
+      signOut: () => {
+        dispatch({ type: "office_signed_out" });
+        void hostApi.officeLogout(session.token).catch(() => undefined);
+      },
       logout: () => {
         dispatch({ type: "office_closed" });
         // The token is already gone from this device; if the host cannot be
@@ -982,6 +986,7 @@ export function App({
           onBack={officePc ? null : () => dispatch({ type: "office_closed" })}
           hostAddress={remoteAddress}
           onChangeAddress={changeAddress}
+          link={state.link}
         />
       )}
     </main>

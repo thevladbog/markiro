@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { Button, ConfirmDialog, SidePanel, type SidePanelSize } from "@markiro/ui";
 
+import { useReportDirty } from "./dirty-guard.js";
+
 export interface EntityDrawerProps {
   title: string;
   /** The submit button's text. */
@@ -61,6 +63,8 @@ export function EntityDrawer({
   const inFlight = useRef(false);
   const [sending, setSending] = useState(false);
   const [asking, setAsking] = useState(false);
+  // The header's «Выйти» asks before it throws away what is typed here.
+  useReportDirty(dirty);
   const close = () => {
     if (inFlight.current) return;
     if (dirty) setAsking(true);
