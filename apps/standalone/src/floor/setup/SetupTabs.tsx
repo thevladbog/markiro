@@ -2,8 +2,11 @@ import type { ReactNode } from "react";
 
 import { DataTabs } from "@markiro/ui";
 
-/** The setup's three panels, in the cloud station's order. */
-export type SetupTabId = "scanner" | "printer" | "sound";
+/**
+ * The setup's panels, in the cloud station's order, with the scanner's check beside the
+ * scanner (beta 3.2: under the connection it was out of the screen's reach).
+ */
+export type SetupTabId = "scanner" | "check" | "printer" | "sound";
 
 export interface SetupTab {
   id: SetupTabId;

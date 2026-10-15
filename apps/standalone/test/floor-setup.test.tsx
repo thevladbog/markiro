@@ -77,7 +77,7 @@ interface Options {
   /** The floor's real scan source, where the test needs the keyboard wedge itself. */
   source?: ScanSource;
   /** The tab to go to once the setup is read («Принтеры» is where it opens). */
-  tab?: "Сканер" | "Звук";
+  tab?: "Сканер" | "Проверка сканера" | "Звук";
 }
 
 async function setup(options: Options = {}) {
@@ -105,7 +105,7 @@ async function setup(options: Options = {}) {
 }
 
 /** A press of one of the setup's tabs (ported from the cloud station: «Сканер», «Принтеры», «Звук»). */
-function tab(name: "Сканер" | "Принтеры" | "Звук"): void {
+function tab(name: "Сканер" | "Проверка сканера" | "Принтеры" | "Звук"): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 
@@ -1562,6 +1562,11 @@ describe("the setup's tabs (the cloud station's layout)", () => {
     expect(screen.queryByLabelText("COM-порт сканера")).toBeNull();
     act(() => printers.focus());
     fireEvent.keyDown(printers, { key: "ArrowLeft" });
+    // The scanner's check has its own tab beside the scanner (beta 3.2).
+    const check = screen.getByRole("tab", { name: "Проверка сканера" });
+    expect(check.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Проверить сканер" })).toBeTruthy();
+    fireEvent.keyDown(check, { key: "Home" });
     const scanners = screen.getByRole("tab", { name: "Сканер" });
     expect(scanners.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(scanners);
@@ -1722,23 +1727,30 @@ describe("a new printer's name (owner feedback, beta 3)", () => {
   });
 });
 
-describe("«Проверить сканер» on the scanner tab", () => {
-  it("is under «Сканер» and judges its scans there only", async () => {
+describe("«Проверить сканер» on its own tab", () => {
+  it("is a button on «Сканер» that opens «Проверка сканера», and judges its scans there only", async () => {
     const { scanner } = await setup({ tab: "Сканер" });
+    // Not under the connection, out of reach (beta 3.2): a prominent button opens the check.
+    expect(screen.queryByRole("heading", { name: "Проверить сканер" })).toBeNull();
+    click("Проверить сканер");
+    expect(
+      screen.getByRole("tab", { name: "Проверка сканера" }).getAttribute("aria-selected"),
+    ).toBe("true");
     expect(screen.getByRole("heading", { name: "Проверить сканер" })).toBeTruthy();
     const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
     await scanner.read(code);
     expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
-    tab("Принтеры");
-    await scanner.read("not-for-the-self-test");
+    // The connection tab is not the check's business.
     tab("Сканер");
+    await scanner.read("not-for-the-self-test");
+    tab("Проверка сканера");
     expect(screen.getByTestId("self-test-history").children).toHaveLength(1);
   });
 
   it("prints the test DataMatrix on a label printer through the label model (GS1 framed), marked TEST", async () => {
     const local = openLocalDb().executor;
     await setUpPrinting(local);
-    const { shell } = await setup({ local, render: realRender, tab: "Сканер" });
+    const { shell } = await setup({ local, render: realRender, tab: "Проверка сканера" });
     await act(async () => {
       click("Печать");
     });

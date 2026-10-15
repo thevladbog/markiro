@@ -290,9 +290,9 @@ export function WorkstationSetup({
   const testGeneration = useRef(0);
   useEffect(() => {
     const listen = (raw: string, channel: ScanChannel) => {
-      // The self-test judges the scans of the scanner tab against the code it showed (a label's
+      // The self-test judges the scans of its own tab against the code it showed (a label's
       // test scan on the printers tab is not its business); the text stays here.
-      if (scannersOnly || activeTabRef.current === "scanner") selfTestScan(raw, channel);
+      if (scannersOnly || activeTabRef.current === "check") selfTestScan(raw, channel);
       // The scanner check says what any scan read, never its text.
       if (scannersOnly) setScanCheck(checkScan(raw));
       const now = testRef.current;
@@ -388,7 +388,10 @@ export function WorkstationSetup({
   // The scanner tab and the serial printer's form show the COM ports of this PC: ask for them once.
   const wantsPorts =
     draft !== null &&
-    (scannersOnly || activeTab === "scanner" || (editor !== null && editor.kind === "serial"));
+    (scannersOnly ||
+      activeTab === "scanner" ||
+      activeTab === "check" ||
+      (editor !== null && editor.kind === "serial"));
   useEffect(() => {
     if (wantsPorts && serialPorts === null && serialAsk.current === 0) refreshSerial();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- asked once, by the first need
@@ -1112,6 +1115,16 @@ export function WorkstationSetup({
     return settled.state === "sent" ? "sent" : "failed";
   };
 
+  const selfTestPanel = (
+    <ScannerSelfTest
+      state={selfTest}
+      printers={draft.printers
+        .filter((printer) => printer.paper !== "a4")
+        .map((printer) => ({ id: printer.id, name: printer.name }))}
+      print={selfTestPrint}
+    />
+  );
+
   const scannerPanel = (
     <div className="setup-scanner-stack">
       <div
@@ -1248,15 +1261,23 @@ export function WorkstationSetup({
           </section>
         )}
       </div>
-      <ScannerSelfTest
-        state={selfTest}
-        printers={draft.printers
-          .filter((printer) => printer.paper !== "a4")
-          .map((printer) => ({ id: printer.id, name: printer.name }))}
-        print={selfTestPrint}
-      />
+      {/* Before the pairing there are no tabs: the check stands under the connection. */}
+      {scannersOnly && selfTestPanel}
+      {!scannersOnly && (
+        <section className="setup-card setup-card--check-cta" aria-labelledby="setup-check-cta">
+          <h2 id="setup-check-cta" className="setup-card__title">
+            {t("floor.setup.selfTestCta.title")}
+          </h2>
+          <p className="setup-card__hint">{t("floor.setup.selfTestCta.body")}</p>
+          <Button size="floor" onClick={() => setActiveTab("check")}>
+            {t("floor.setup.selfTestCta.open")}
+          </Button>
+        </section>
+      )}
     </div>
   );
+
+  const checkPanel = <div className="setup-panel setup-panel--check">{selfTestPanel}</div>;
 
   const soundPanel = (
     <div className="setup-panel setup-panel--sound setup-card">
@@ -1319,6 +1340,7 @@ export function WorkstationSetup({
 
   const tabs = [
     { id: "scanner" as const, label: t("floor.setup.tabs.scanner"), panel: scannerPanel },
+    { id: "check" as const, label: t("floor.setup.tabs.check"), panel: checkPanel },
     { id: "printer" as const, label: t("floor.setup.tabs.printer"), panel: printersPanel },
     { id: "sound" as const, label: t("floor.setup.tabs.sound"), panel: soundPanel },
   ];
@@ -1333,7 +1355,9 @@ export function WorkstationSetup({
         : t("floor.setup.check.later")
       : shownTab === "scanner"
         ? t("floor.setup.hint.scanner")
-        : t("floor.setup.hint.sound");
+        : shownTab === "check"
+          ? t("floor.setup.hint.check")
+          : t("floor.setup.hint.sound");
 
   return (
     <section className="workstation-setup" aria-labelledby="workstation-setup-title">
