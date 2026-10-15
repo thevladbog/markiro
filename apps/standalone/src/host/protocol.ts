@@ -140,6 +140,8 @@ export const hostStatusSchema = z
         "key_rejected",
         "stream_refused",
         "stream_ended",
+        "host_too_old",
+        "app_too_old",
       ])
       .nullable(),
     /** Grows with every status the shell publishes. */
@@ -151,6 +153,10 @@ export const hostStatusSchema = z
      * come online.
      */
     restoreEpoch: z.uuid().optional(),
+    /** The host's `hello.version`, `protocol` and `minProtocol` as the last read named them (plan ОБН-3). */
+    hostVersion: z.string().min(1).optional(),
+    hostProtocol: z.number().int().nonnegative().optional(),
+    hostMinProtocol: z.number().int().nonnegative().optional(),
   })
   .strict();
 export type HostStatus = z.infer<typeof hostStatusSchema>;

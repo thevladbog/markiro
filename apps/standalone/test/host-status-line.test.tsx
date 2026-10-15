@@ -106,9 +106,24 @@ describe("HostStatusLine", () => {
     expect(screen.getByText("Хост не принимает это устройство.")).toBeTruthy();
   });
 
+  it("says which side to update when the versions do not match", () => {
+    render(
+      <HostStatusLine
+        status={status({
+          state: "offline",
+          lastContactAt: null,
+          lastError: "app_too_old",
+          hostVersion: "0.3.0",
+        })}
+        sync={null}
+      />,
+    );
+    expect(screen.getByText("Это приложение старее хоста: обновите его с хоста.")).toBeTruthy();
+  });
+
   it("has a text for every reason the shell reports", () => {
     const reasons = hostStatusSchema.shape.lastError.unwrap().options;
-    expect(reasons).toHaveLength(5);
+    expect(reasons).toHaveLength(7);
     for (const reason of reasons) {
       expect(i18n.exists(`errors.link.${reason}`), reason).toBe(true);
     }

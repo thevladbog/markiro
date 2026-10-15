@@ -18,7 +18,7 @@ use crate::device::HostLink;
 use crate::host_client::{
     Credentials, HostResponse, PinnedClient, RequestError, StreamClient, StreamOpen,
 };
-use crate::host_probe::classify_hello;
+use crate::host_probe::{classify_hello, read_versions, HostVersions, ProbeError};
 
 pub const STATUS_EVENT: &str = "standalone://host-status";
 pub const REVISION_EVENT: &str = "standalone://host-revision";
@@ -55,6 +55,13 @@ pub enum LinkError {
     StreamRefused,
     /// The stream closed, went silent or carried something unreadable.
     StreamEnded,
+    /// The host's `hello` says it is older than this app (plan ОБН-3): the
+    /// host is updated first.
+    HostTooOld,
+    /// The host's `hello` says this app is older than it takes (plan
+    /// ОБН-3): this PC updates from the host (`GET /v1/device/update`,
+    /// outside the protocol guard).
+    AppTooOld,
 }
 
 /// `standalone://host-status` and the answer of `connection_status`.
@@ -85,6 +92,16 @@ pub struct HostStatus {
     /// this host is known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restore_epoch: Option<String>,
+    /// The host's `hello.version`, `protocol` and `minProtocol` as the last
+    /// `hello` of this pairing's host read them (plan ОБН-3, spec
+    /// §10.11.3): an incompatible host's too, so the webview can offer the
+    /// update. Absent until one was read; cleared with the pairing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_protocol: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_min_protocol: Option<u32>,
 }
 
 impl Default for HostStatus {
@@ -95,6 +112,9 @@ impl Default for HostStatus {
             last_error: None,
             seq: 0,
             restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
         }
     }
 }
@@ -128,6 +148,18 @@ impl ConnectionState {
         self.0.lock().expect("status lock").last_contact_at = Some(now_ms());
     }
 
+    /// Keep what a `hello` told of the host's versions without publishing:
+    /// the next status carries it. A read that told nothing keeps the last.
+    fn note_host(&self, versions: Option<HostVersions>) {
+        let Some(versions) = versions else {
+            return;
+        };
+        let mut current = self.0.lock().expect("status lock");
+        current.host_version = versions.version;
+        current.host_protocol = Some(versions.protocol);
+        current.host_min_protocol = Some(versions.min_protocol);
+    }
+
     fn publish(&self, events: &dyn LinkEvents, state: LinkState, last_error: Option<LinkError>) {
         self.publish_with(events, |current| {
             current.state = state;
@@ -156,6 +188,9 @@ impl ConnectionState {
             current.last_error = None;
             current.last_contact_at = None;
             current.restore_epoch = None;
+            current.host_version = None;
+            current.host_protocol = None;
+            current.host_min_protocol = None;
         });
     }
 }
@@ -240,6 +275,9 @@ async fn hold(
             if fresh_link {
                 current.last_contact_at = None;
                 current.restore_epoch = None;
+                current.host_version = None;
+                current.host_protocol = None;
+                current.host_min_protocol = None;
             }
         });
         fresh_link = false;
@@ -267,7 +305,9 @@ async fn follow(
     // event publishes already carries it; without it no `Online` (plan РК-С:
     // the outbox goes only once the station knows whether the host was
     // restored).
-    let mut epoch = match restore_epoch(link).await {
+    let (versions, epoch) = read_hello(link).await;
+    state.note_host(versions);
+    let mut epoch = match epoch {
         Ok(epoch) => epoch,
         Err(error) => return (error, false),
     };
@@ -305,15 +345,28 @@ async fn follow(
 }
 
 /// `GET /v1/hello` with the pinned certificate and no key: the host's restore
-/// epoch, `None` when it names none. A transport failure is the link's
+/// epoch, `None` when it names none, and what it tells of the host's versions
+/// whatever the verdict. A transport failure is the link's
 /// (`request_error`, so a changed certificate is told apart).
-async fn restore_epoch(link: &HostLink) -> Result<Option<String>, LinkError> {
-    let client = PinnedClient::new(&link.address, &link.fingerprint).map_err(request_error)?;
-    let response = client
+async fn read_hello(link: &HostLink) -> (Option<HostVersions>, Result<Option<String>, LinkError>) {
+    let client = match PinnedClient::new(&link.address, &link.fingerprint) {
+        Ok(client) => client,
+        Err(error) => return (None, Err(request_error(error))),
+    };
+    match client
         .send("GET", HELLO_PATH, None, Credentials::default())
         .await
-        .map_err(request_error)?;
-    epoch_of(&response)
+    {
+        Ok(response) => (versions_of(&response), epoch_of(&response)),
+        Err(error) => (None, Err(request_error(error))),
+    }
+}
+
+/// The versions a `hello` of a Markiro host names, whatever its protocol
+/// (`host_probe::read_versions`, plan ОБН-2); `None` for anything else.
+fn versions_of(response: &HostResponse) -> Option<HostVersions> {
+    let body = response.body.as_ref().filter(|_| response.status == 200)?;
+    read_versions(body).ok()
 }
 
 /// The `restoreEpoch` of a `hello` answer: only from a 200 that reads as a
@@ -329,7 +382,11 @@ fn epoch_of(response: &HostResponse) -> Result<Option<String>, LinkError> {
     let body = response.body.clone().ok_or(LinkError::StreamRefused)?;
     classify_hello(body)
         .map(|hello| hello.restore_epoch)
-        .map_err(|_| LinkError::StreamRefused)
+        .map_err(|error| match error {
+            ProbeError::HostTooOld => LinkError::HostTooOld,
+            ProbeError::AppTooOld => LinkError::AppTooOld,
+            _ => LinkError::StreamRefused,
+        })
 }
 
 fn request_error(error: RequestError) -> LinkError {
@@ -587,6 +644,8 @@ mod tests {
             (LinkError::KeyRejected, "key_rejected"),
             (LinkError::StreamRefused, "stream_refused"),
             (LinkError::StreamEnded, "stream_ended"),
+            (LinkError::HostTooOld, "host_too_old"),
+            (LinkError::AppTooOld, "app_too_old"),
         ];
         for (error, wire) in errors {
             assert_eq!(serde_json::to_value(error).unwrap(), json!(wire));
@@ -601,6 +660,9 @@ mod tests {
             last_error: Some(LinkError::CertificateMismatch),
             seq: 4,
             restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
         };
         assert_eq!(
             serde_json::to_value(&status).unwrap(),
@@ -612,10 +674,30 @@ mod tests {
             last_error: None,
             seq: 5,
             restore_epoch: Some(EPOCH.to_owned()),
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
         };
         assert_eq!(
             serde_json::to_value(&restored).unwrap(),
             json!({ "state": "online", "lastContactAt": 1_700_000_000_000u64, "lastError": null, "seq": 5, "restoreEpoch": EPOCH })
+        );
+        let known = HostStatus {
+            state: LinkState::Offline,
+            last_contact_at: None,
+            last_error: Some(LinkError::AppTooOld),
+            seq: 6,
+            restore_epoch: None,
+            host_version: Some("0.3.0".to_owned()),
+            host_protocol: Some(4),
+            host_min_protocol: Some(4),
+        };
+        assert_eq!(
+            serde_json::to_value(&known).unwrap(),
+            json!({
+                "state": "offline", "lastContactAt": null, "lastError": "app_too_old", "seq": 6,
+                "hostVersion": "0.3.0", "hostProtocol": 4, "hostMinProtocol": 4
+            })
         );
         assert_eq!(
             serde_json::to_value(HostRevision { rev: 12 }).unwrap(),
@@ -625,6 +707,41 @@ mod tests {
 
     /// `restoreEpoch` of `proto/fixtures/hello-restored.json`.
     const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+
+    #[test]
+    fn a_hello_of_an_incompatible_host_names_why_and_still_tells_its_versions() {
+        let hello: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/hello.json")).unwrap();
+        let answer = |body: serde_json::Value| HostResponse {
+            status: 200,
+            body: Some(body),
+        };
+        let mut old = hello.clone();
+        old["protocol"] = json!(1);
+        old["minProtocol"] = json!(1);
+        assert_eq!(epoch_of(&answer(old.clone())), Err(LinkError::HostTooOld));
+        assert_eq!(
+            versions_of(&answer(old)),
+            Some(HostVersions {
+                version: Some("0.1.0".to_owned()),
+                protocol: 1,
+                min_protocol: 1
+            })
+        );
+        let mut newer = hello.clone();
+        newer["protocol"] = json!(99);
+        newer["minProtocol"] = json!(99);
+        newer["version"] = json!("9.0.0");
+        assert_eq!(epoch_of(&answer(newer.clone())), Err(LinkError::AppTooOld));
+        assert_eq!(
+            versions_of(&answer(newer)).and_then(|seen| seen.version),
+            Some("9.0.0".to_owned())
+        );
+        // Not a Markiro host: no versions at all.
+        let mut foreign = hello;
+        foreign["product"] = json!("other");
+        assert_eq!(versions_of(&answer(foreign)), None);
+    }
 
     #[test]
     fn the_epoch_comes_only_from_a_hello_that_reads() {

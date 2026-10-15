@@ -51,6 +51,24 @@ describe("connection to the host", () => {
     expect(onStatus).toHaveBeenCalledWith(status(1));
   });
 
+  it("reads the host's version, protocol and minimum the shell took from hello", async () => {
+    const events = fakeEvents();
+    const known: HostStatus = {
+      ...status(3, "offline"),
+      lastError: "app_too_old",
+      hostVersion: "0.3.0",
+      hostProtocol: 4,
+      hostMinProtocol: 4,
+    };
+    const call = vi.fn(async () => known);
+    const seen: HostStatus[] = [];
+    await createTauriConnectionApi(call, events.listen).watch({
+      onStatus: (next) => seen.push(next),
+      onRevision: () => undefined,
+    });
+    expect(seen).toEqual([known]);
+  });
+
   it("keeps only statuses newer than the newest seen", async () => {
     const events = fakeEvents();
     const onStatus = vi.fn();
