@@ -371,3 +371,44 @@ fn the_hourly_promotion_never_sees_a_staged_package_being_replaced() {
         "promote saw a half-replaced staged: {seen:?}"
     );
 }
+
+#[test]
+fn the_quick_open_serves_nothing_until_the_background_check_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    write_package(&updates, STAGED, "0.3.0");
+    write_package(&updates, CURRENT, "0.2.0");
+    std::fs::write(updates.join("notes.txt"), b"stray").unwrap();
+    let store = store(dir.path(), "0.3.0");
+    // No package is read here: a valid current package is still `verifying`
+    // and `staged\` is not promoted yet.
+    store.open_quick_blocking().unwrap();
+    assert_eq!(names(&updates), [CURRENT, STAGED]);
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Verifying)
+    ));
+    assert_eq!(store.status_blocking().state, PackageState::Verifying);
+    // The background part promotes, verifies whole and reports as the full open.
+    let report = store.finish_start_blocking();
+    assert_eq!(
+        report.promotion,
+        Promotion::Promoted {
+            version: "0.3.0".to_owned(),
+            previous: Some("0.2.0".to_owned())
+        }
+    );
+    assert_eq!(report.current, PackageState::Ok);
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+}
+
+#[test]
+fn the_quick_open_of_a_site_without_packages_is_missing_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store(dir.path(), "0.3.0");
+    store.open_quick_blocking().unwrap();
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Missing)
+    ));
+}
