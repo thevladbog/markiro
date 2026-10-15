@@ -9,6 +9,7 @@ pub mod backup;
 pub mod conflicts;
 pub mod disaggregation;
 pub mod license;
+pub mod routes;
 
 use std::sync::Arc;
 

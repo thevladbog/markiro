@@ -4178,3 +4178,17 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 существующие тесты изменены решением владельца (`only_a_station_reads_and_creates_shifts`,
 `an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift`, все тесты вида `office` на закрытых
 теперь маршрутах), какое поле реестра коробов пришлось добавить и какие номера миграций пришлось сдвинуть.
+
+- **Х1.** Строки `ROUTE_KINDS` для смен (`GET /v1/device/shifts`, `POST .../{id}/enter`), `POST /v1/device/sscc/blocks`
+  и `.../known` оставлены `Station`, а не `Station, Handheld`: обработчики ещё зовут `require_station`, и тест
+  «допущенный вид не получает `forbidden`» был бы красным до Х2. Х2 снимает `require_station` и расширяет эти
+  четыре строки в одном коммите.
+- **Х1.** Строка `GET /v1/device/codes/{code_hash}` включает `Office` (`Station, Handheld, Office`): существующие тесты
+  `codes.rs` сознательно проверяют, что офисный ПК читает проверку кода; закрывать чтение не нужно.
+- **Х1.** Изменённые существующие тесты: `facts.rs::a_record_names_a_shift_the_device_entered_and_a_batch_holds_1_to_100`
+  (офисный ПК на `POST /v1/device/facts` теперь `403 forbidden` вместо квитанции `not_entered`) и
+  `cloud_import.rs::nobody_without_an_office_session_of_their_own_device_imports` (два случая ТСД теперь `403 forbidden`
+  по виду вместо `401 session`). Остальные тесты хоста не менялись.
+- **Х1.** Тест `a_handheld_key_is_refused_on_every_office_route_of_the_router` добавлен сверх плана: перебирает все
+  офисные маршруты роутера (в том числе `host-network`) и требует `forbidden` для ключа ТСД.
+- **Х1.** `concrete()` в тесте подставляет любые `{...}`-сегменты, а не только `{id}`/`{code_hash}`.

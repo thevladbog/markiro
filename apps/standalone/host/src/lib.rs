@@ -9,6 +9,7 @@ pub mod clock;
 pub mod cloud_import;
 pub mod config;
 pub mod db;
+pub mod device_kinds;
 pub mod disaggregation;
 pub mod error;
 pub mod facts;

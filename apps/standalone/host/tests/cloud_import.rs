@@ -777,7 +777,7 @@ async fn nobody_without_an_office_session_of_their_own_device_imports() {
         (
             "a handheld's key without a session",
             with_body(with_device(request("POST", IMPORT), &handheld), body()),
-            "session",
+            "kind",
         ),
         (
             "a handheld with the administrator's token",
@@ -785,7 +785,7 @@ async fn nobody_without_an_office_session_of_their_own_device_imports() {
                 with_session(request("POST", IMPORT), &handheld, &admin.token),
                 body(),
             ),
-            "session",
+            "kind",
         ),
         (
             "another station with the administrator's token",
@@ -811,11 +811,18 @@ async fn nobody_without_an_office_session_of_their_own_device_imports() {
     ];
     for (label, call, credential) in attempts {
         let (status, error) = admin.app.send(call).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{label}: {error}");
-        assert_eq!(
-            error["error"]["details"]["credential"], credential,
-            "{label}"
-        );
+        if credential == "kind" {
+            // A handheld's key opens no office route (plan ТСД-Х, task Х1): refused by its
+            // kind before any session is looked at.
+            assert_eq!(status, StatusCode::FORBIDDEN, "{label}: {error}");
+            assert_eq!(error["error"]["code"], "forbidden", "{label}");
+        } else {
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{label}: {error}");
+            assert_eq!(
+                error["error"]["details"]["credential"], credential,
+                "{label}"
+            );
+        }
         assert_untouched(&admin, label, before, audits, &salt).await;
     }
     // A GET is no import either.
