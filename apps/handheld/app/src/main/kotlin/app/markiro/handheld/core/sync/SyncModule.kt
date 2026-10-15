@@ -45,7 +45,7 @@ object SyncModule {
     @Singleton
     fun connectivityNudger(
         @ApplicationContext context: Context,
-        engine: SyncEngine,
+        engine: SyncDriver,
         inventory: InventorySyncEngine,
         writeoff: app.markiro.handheld.core.writeoff.WriteoffSyncEngine,
         grants: app.markiro.handheld.core.grants.GrantRefresher,

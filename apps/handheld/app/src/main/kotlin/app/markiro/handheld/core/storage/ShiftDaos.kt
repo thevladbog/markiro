@@ -104,6 +104,10 @@ interface OutboxDao {
     @Query("DELETE FROM outbox WHERE id <= :ceiling")
     suspend fun deleteThrough(ceiling: Long)
 
+    /** One acknowledged row (the host answers per record, not per prefix). */
+    @Query("DELETE FROM outbox WHERE id = :id")
+    suspend fun delete(id: Long)
+
     @Query("SELECT COUNT(*) FROM outbox")
     fun count(): Flow<Int>
 

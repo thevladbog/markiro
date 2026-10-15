@@ -13,7 +13,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.PalletEntity
 import app.markiro.handheld.core.storage.PalletMembershipEntity
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.core.writeoff.MirrorOutcome
 import dagger.Module
 import dagger.Provides
@@ -111,7 +111,7 @@ class PalletsRepository(
     private val mirror: PalletBootstrapMirror,
     private val printer: PalletPrinter,
     private val exceptions: ExceptionEngine,
-    private val sync: SyncEngine,
+    private val sync: SyncDriver,
 ) : PalletsGateway {
     override suspend fun canBuildPallets(operatorId: String): Boolean? =
         db.palletPermissionDao().get(operatorId)?.canBuildPallets
@@ -187,6 +187,6 @@ object PalletsFeatureModule {
         mirror: PalletBootstrapMirror,
         printer: PalletPrinter,
         exceptions: ExceptionEngine,
-        sync: SyncEngine,
+        sync: SyncDriver,
     ): PalletsGateway = PalletsRepository(db, meta, pallets, mirror, printer, exceptions, sync)
 }

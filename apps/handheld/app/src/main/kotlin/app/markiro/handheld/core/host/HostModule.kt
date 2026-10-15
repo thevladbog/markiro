@@ -15,7 +15,12 @@ import app.markiro.handheld.core.storage.DeviceRecovery
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.OperatorDao
+import app.markiro.handheld.core.sync.SyncDriver
+import app.markiro.handheld.core.sync.SyncEngine
 import app.markiro.handheld.feature.pairing.HostBootstrap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -87,6 +92,17 @@ object HostModule {
         reference: HostReferenceSync,
         operators: OperatorDao,
     ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls { revocation.reject() }, reference, operators)
+
+    @Provides
+    @Singleton
+    fun hostSyncEngine(db: HandheldDatabase, config: DeviceConfigDao, api: HostApi, revocation: HostRevocation): HostSyncEngine =
+        HostSyncEngine(db, { api }, HostAckMapper(db), HostCalls { revocation.reject() }, config)
+
+    /** What the consumers of the sync engine hold: the cloud's engine or the host's, by the backend of this device at each call. */
+    @Provides
+    @Singleton
+    fun syncDriver(config: DeviceConfigDao, cloud: SyncEngine, host: HostSyncEngine): SyncDriver =
+        BackendSyncDriver(config, cloud, host, CoroutineScope(SupervisorJob() + Dispatchers.IO))
 
     @Provides
     fun hostBootstrap(

@@ -18,7 +18,7 @@ import app.markiro.handheld.core.storage.InventoryTaskDao
 import app.markiro.handheld.core.storage.InventoryTaskEntity
 import app.markiro.handheld.core.storage.ShiftDao
 import app.markiro.handheld.core.storage.ShiftEntity
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.core.sync.SyncState
 import app.markiro.handheld.feature.work.TeamRefresher
 import app.markiro.handheld.feature.work.TeamState
@@ -103,7 +103,7 @@ class HubViewModel(
     private val config: DeviceConfigDao,
     private val session: SessionHolder,
     reachability: ReachabilityTracker,
-    sync: SyncEngine,
+    sync: SyncDriver,
     shifts: ShiftDao,
     inventorySync: InventorySyncEngine,
     inventories: InventoryTaskDao,
@@ -137,7 +137,7 @@ class HubViewModel(
         config: DeviceConfigDao,
         session: SessionHolder,
         reachability: ReachabilityTracker,
-        sync: SyncEngine,
+        sync: SyncDriver,
         shifts: ShiftDao,
         inventorySync: InventorySyncEngine,
         inventories: InventoryTaskDao,

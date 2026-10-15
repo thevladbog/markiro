@@ -4,7 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.markiro.handheld.core.storage.HandheldDatabase
-import app.markiro.handheld.core.sync.SyncEngine
+import app.markiro.handheld.core.sync.SyncDriver
 import app.markiro.handheld.feature.signin.SessionHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +36,7 @@ sealed interface CloseStep {
 class CloseViewModel @Inject constructor(
     handle: SavedStateHandle,
     private val closer: ShiftCloser,
-    private val sync: SyncEngine,
+    private val sync: SyncDriver,
     private val db: HandheldDatabase,
     private val session: SessionHolder,
 ) : ViewModel() {

@@ -44,8 +44,59 @@ interface HostOutboxDao {
     @Query("SELECT * FROM host_outbox WHERE state = 'queued' ORDER BY seq LIMIT :limit")
     suspend fun queued(limit: Int): List<HostOutboxEntity>
 
+    /** The head of one channel's queue, in the order the records were frozen (`seq`): a quarantined record is never sent again. */
+    @Query("SELECT * FROM host_outbox WHERE target = :target AND state = 'queued' ORDER BY seq LIMIT :limit")
+    suspend fun queuedFor(target: String, limit: Int): List<HostOutboxEntity>
+
     @Query("SELECT COUNT(*) FROM host_outbox WHERE state = 'queued'")
     suspend fun queuedCount(): Int
+
+    @Query("SELECT COUNT(*) FROM host_outbox WHERE state = 'quarantined'")
+    suspend fun quarantinedCount(): Int
+
+    @Query("SELECT * FROM host_outbox WHERE state = 'quarantined' ORDER BY seq")
+    suspend fun quarantined(): List<HostOutboxEntity>
+
+    // Sources not yet frozen: a row of its own table with no `host_outbox` row naming it. A source stays frozen (and is never frozen
+    // twice) for as long as its record is queued or quarantined; an acknowledged record removes its row together with the source.
+
+    @Query("SELECT * FROM outbox WHERE CAST(id AS TEXT) NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'scan') ORDER BY id")
+    suspend fun unfrozenScans(): List<OutboxEntity>
+
+    @Query(
+        "SELECT * FROM boxes WHERE closedAt IS NOT NULL AND ackedAt IS NULL AND sscc IS NOT NULL " +
+            "AND boxId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'box') ORDER BY closedAt, boxId",
+    )
+    suspend fun unfrozenBoxes(): List<BoxEntity>
+
+    /** Pallets of a shift only: a warehouse pallet belongs to no shift and travels on the pallet-events channel. */
+    @Query(
+        "SELECT * FROM pallets WHERE kind = 'production' AND shiftId IS NOT NULL AND closedAt IS NOT NULL AND ackedAt IS NULL " +
+            "AND sscc IS NOT NULL AND palletId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'pallet') ORDER BY closedAt, palletId",
+    )
+    suspend fun unfrozenPallets(): List<PalletEntity>
+
+    @Query(
+        "SELECT * FROM shift_close_outbox WHERE state = 'pending' " +
+            "AND eventId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'shift_close') ORDER BY closedAt",
+    )
+    suspend fun unfrozenCloses(): List<ShiftCloseEntity>
+
+    @Query("SELECT codeHash FROM codes_mirror WHERE boxId = :boxId")
+    suspend fun codeHashesIn(boxId: String): List<String>
+
+    /** Everything the host is still owed on the facts and events channels: frozen and unsent, plus not yet frozen. */
+    @Query(
+        "SELECT (SELECT COUNT(*) FROM host_outbox WHERE state = 'queued') " +
+            "+ (SELECT COUNT(*) FROM outbox WHERE CAST(id AS TEXT) NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'scan')) " +
+            "+ (SELECT COUNT(*) FROM boxes WHERE closedAt IS NOT NULL AND ackedAt IS NULL AND sscc IS NOT NULL " +
+            "AND boxId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'box')) " +
+            "+ (SELECT COUNT(*) FROM pallets WHERE kind = 'production' AND shiftId IS NOT NULL AND closedAt IS NOT NULL AND ackedAt IS NULL " +
+            "AND sscc IS NOT NULL AND palletId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'pallet')) " +
+            "+ (SELECT COUNT(*) FROM shift_close_outbox WHERE state = 'pending' " +
+            "AND eventId NOT IN (SELECT sourceKey FROM host_outbox WHERE sourceKind = 'shift_close'))",
+    )
+    fun observeOwed(): kotlinx.coroutines.flow.Flow<Int>
 
     @Query("SELECT COUNT(*) FROM host_outbox WHERE state = 'quarantined'")
     fun observeQuarantinedCount(): kotlinx.coroutines.flow.Flow<Int>
