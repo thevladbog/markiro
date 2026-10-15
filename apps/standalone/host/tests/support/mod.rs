@@ -10,8 +10,8 @@ pub mod conflicts;
 pub mod disaggregation;
 pub mod handheld;
 pub mod license;
-pub mod update;
 pub mod routes;
+pub mod update;
 
 use std::sync::Arc;
 
