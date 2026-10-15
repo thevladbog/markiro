@@ -9,6 +9,7 @@
 //! rests on its signature, which every device checks itself.
 
 pub mod store;
+pub mod worker;
 
 pub use store::{
     check_manifest, CheckedManifest, FileStamp, ManifestRefusal, Package, Promotion, Serve,

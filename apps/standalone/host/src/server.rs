@@ -684,7 +684,7 @@ async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hell
         protocol: markiro_proto::PROTOCOL_VERSION,
         min_protocol: markiro_proto::MIN_PROTOCOL_VERSION,
         host_id: state.host_id.clone(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: crate::HOST_VERSION.to_owned(),
         time: state.timestamp(),
         initialized,
         restore_epoch,
