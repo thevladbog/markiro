@@ -1,5 +1,5 @@
 {
-  "id": "4c9a5275-152d-44d8-b8fc-5ff7958df7f6",
+  "id": "1ad0d1c9-8b87-4948-94cc-efc86db345ce",
   "prevId": "97797866-f51c-4dc9-a9e3-143eec3301e7",
   "version": "7",
   "dialect": "postgresql",
@@ -38955,6 +38955,93 @@
         "standalone_support_diagnostics_json_check": {
           "name": "standalone_support_diagnostics_json_check",
           "value": "jsonb_typeof(\"standalone_support_diagnostics\".\"payload\") = 'object' and octet_length(\"standalone_support_diagnostics\".\"payload\"::text) <= 65536 and (\"standalone_support_diagnostics\".\"license\" is null or (jsonb_typeof(\"standalone_support_diagnostics\".\"license\") = 'object' and octet_length(\"standalone_support_diagnostics\".\"license\"::text) <= 8192))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.standalone_support_token_aliases": {
+      "name": "standalone_support_token_aliases",
+      "schema": "",
+      "columns": {
+        "blob_sha256": {
+          "name": "blob_sha256",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "diagnostic_id": {
+          "name": "diagnostic_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "standalone_support_token_aliases_diagnostic_idx": {
+          "name": "standalone_support_token_aliases_diagnostic_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "diagnostic_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "standalone_support_token_aliases_tenant_id_organization_id_fk": {
+          "name": "standalone_support_token_aliases_tenant_id_organization_id_fk",
+          "tableFrom": "standalone_support_token_aliases",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "standalone_support_token_aliases_diagnostic_fk": {
+          "name": "standalone_support_token_aliases_diagnostic_fk",
+          "tableFrom": "standalone_support_token_aliases",
+          "tableTo": "standalone_support_diagnostics",
+          "columnsFrom": [
+            "tenant_id",
+            "diagnostic_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "standalone_support_token_aliases_blob_check": {
+          "name": "standalone_support_token_aliases_blob_check",
+          "value": "\"standalone_support_token_aliases\".\"blob_sha256\" ~ '^[0-9a-f]{64}$'"
         }
       },
       "isRLSEnabled": false

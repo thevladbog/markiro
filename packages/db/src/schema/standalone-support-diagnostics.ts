@@ -139,3 +139,28 @@ export const standaloneSupportUsageMonths = pgTable(
     ),
   ],
 );
+
+/**
+ * A token hash reserved for a report it did not create: a token re-made for the same host and
+ * instant is a repeat of that report, and its hash belongs to the report's tenant exactly as the
+ * first token's (`blob_sha256`) does. Goes with the report (retention, tenant deletion).
+ */
+export const standaloneSupportTokenAliases = pgTable(
+  "standalone_support_token_aliases",
+  {
+    blobSha256: text("blob_sha256").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    diagnosticId: uuid("diagnostic_id").notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "standalone_support_token_aliases_diagnostic_fk",
+      columns: [t.tenantId, t.diagnosticId],
+      foreignColumns: [standaloneSupportDiagnostics.tenantId, standaloneSupportDiagnostics.id],
+    }).onDelete("cascade"),
+    index("standalone_support_token_aliases_diagnostic_idx").on(t.tenantId, t.diagnosticId),
+    check("standalone_support_token_aliases_blob_check", sql`${t.blobSha256} ~ '^[0-9a-f]{64}$'`),
+  ],
+);

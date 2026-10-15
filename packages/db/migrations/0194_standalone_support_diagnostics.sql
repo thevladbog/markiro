@@ -30,6 +30,13 @@ CREATE TABLE "standalone_support_diagnostics" (
 	CONSTRAINT "standalone_support_diagnostics_json_check" CHECK (jsonb_typeof("standalone_support_diagnostics"."payload") = 'object' and octet_length("standalone_support_diagnostics"."payload"::text) <= 65536 and ("standalone_support_diagnostics"."license" is null or (jsonb_typeof("standalone_support_diagnostics"."license") = 'object' and octet_length("standalone_support_diagnostics"."license"::text) <= 8192)))
 );
 --> statement-breakpoint
+CREATE TABLE "standalone_support_token_aliases" (
+	"blob_sha256" text PRIMARY KEY NOT NULL,
+	"tenant_id" text NOT NULL,
+	"diagnostic_id" uuid NOT NULL,
+	CONSTRAINT "standalone_support_token_aliases_blob_check" CHECK ("standalone_support_token_aliases"."blob_sha256" ~ '^[0-9a-f]{64}$')
+);
+--> statement-breakpoint
 CREATE TABLE "standalone_support_usage_months" (
 	"tenant_id" text NOT NULL,
 	"host_key" text NOT NULL,
@@ -46,8 +53,11 @@ CREATE TABLE "standalone_support_usage_months" (
 ALTER TABLE "standalone_support_diagnostics" ADD CONSTRAINT "standalone_support_diagnostics_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "standalone_support_diagnostics" ADD CONSTRAINT "standalone_support_diagnostics_received_by_platform_user_id_platform_users_id_fk" FOREIGN KEY ("received_by_platform_user_id") REFERENCES "public"."platform_users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "standalone_support_diagnostics" ADD CONSTRAINT "standalone_support_diagnostics_tenant_site_fk" FOREIGN KEY ("tenant_id","site_id") REFERENCES "public"."standalone_sites"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "standalone_support_token_aliases" ADD CONSTRAINT "standalone_support_token_aliases_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "standalone_support_token_aliases" ADD CONSTRAINT "standalone_support_token_aliases_diagnostic_fk" FOREIGN KEY ("tenant_id","diagnostic_id") REFERENCES "public"."standalone_support_diagnostics"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "standalone_support_usage_months" ADD CONSTRAINT "standalone_support_usage_months_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "standalone_support_usage_months" ADD CONSTRAINT "standalone_support_usage_months_source_fk" FOREIGN KEY ("tenant_id","source_diagnostic_id") REFERENCES "public"."standalone_support_diagnostics"("tenant_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "standalone_support_diagnostics_tenant_generated_idx" ON "standalone_support_diagnostics" USING btree ("tenant_id","generated_at" DESC NULLS LAST,"id" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "standalone_support_diagnostics_tenant_host_generated_idx" ON "standalone_support_diagnostics" USING btree ("tenant_id","host_key","generated_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE INDEX "standalone_support_diagnostics_received_idx" ON "standalone_support_diagnostics" USING btree ("received_at");
+CREATE INDEX "standalone_support_diagnostics_received_idx" ON "standalone_support_diagnostics" USING btree ("received_at");--> statement-breakpoint
+CREATE INDEX "standalone_support_token_aliases_diagnostic_idx" ON "standalone_support_token_aliases" USING btree ("tenant_id","diagnostic_id");

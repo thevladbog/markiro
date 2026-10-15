@@ -159,6 +159,34 @@ describe.skipIf(!databaseUrl)("standalone support diagnostics tables (plan ДИ�
     });
   });
 
+  it("reserves a hash once, only for a same-tenant report, and drops it with the report", async () => {
+    const source = await diagnostic({ hash: HASH(13), generatedAt: "2026-10-21T09:00:00Z" });
+    const alias = (hash: string, tenant: string, report: string) =>
+      pool.query(
+        "INSERT INTO standalone_support_token_aliases (blob_sha256, tenant_id, diagnostic_id) VALUES ($1, $2, $3)",
+        [hash, tenant, report],
+      );
+    await alias(HASH(14), "diag-a", source);
+    await expect(alias(HASH(14), "diag-a", source)).rejects.toMatchObject({
+      code: "23505",
+      constraint: "standalone_support_token_aliases_pkey",
+    });
+    await expect(alias(HASH(15), "diag-b", source)).rejects.toMatchObject({
+      code: "23503",
+      constraint: "standalone_support_token_aliases_diagnostic_fk",
+    });
+    await expect(alias("not-a-hash", "diag-a", source)).rejects.toMatchObject({
+      code: "23514",
+      constraint: "standalone_support_token_aliases_blob_check",
+    });
+    await pool.query("DELETE FROM standalone_support_diagnostics WHERE id = $1", [source]);
+    const left = await pool.query(
+      "SELECT count(*)::int AS n FROM standalone_support_token_aliases WHERE blob_sha256 = $1",
+      [HASH(14)],
+    );
+    expect(left.rows[0]).toEqual({ n: 0 });
+  });
+
   it("deletes the months with their source and everything with the tenant", async () => {
     const source = await diagnostic({ hash: HASH(11), generatedAt: "2026-10-19T09:00:00Z" });
     await month("diag-a", hostA, "2026-09", source);

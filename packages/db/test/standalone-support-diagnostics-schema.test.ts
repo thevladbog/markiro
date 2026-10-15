@@ -55,10 +55,27 @@ describe("standalone support diagnostics schema (plan ДИАГ Д1)", () => {
     ]);
   });
 
+  it("reserves a re-made token's hash globally and drops it with its report", () => {
+    const aliases = getTableConfig(schema.standaloneSupportTokenAliases);
+    expect(aliases.columns.find((column) => column.name === "blob_sha256")?.primary).toBe(true);
+    expect(
+      aliases.foreignKeys.some(
+        (key) =>
+          key.getName() === "standalone_support_token_aliases_diagnostic_fk" &&
+          key.onDelete === "cascade" &&
+          key
+            .reference()
+            .columns.map((column) => column.name)
+            .join(",") === "tenant_id,diagnostic_id",
+      ),
+    ).toBe(true);
+  });
+
   it("deletes with the tenant", () => {
     for (const table of [
       schema.standaloneSupportDiagnostics,
       schema.standaloneSupportUsageMonths,
+      schema.standaloneSupportTokenAliases,
     ]) {
       const tenantFk = getTableConfig(table).foreignKeys.find(
         (key) => key.reference().foreignTable === schema.organization,
