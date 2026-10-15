@@ -156,6 +156,7 @@ describe.skipIf(!process.env.DATABASE_URL)("catalog sales without lifecycle poli
                   inventoryEnabled: true,
                   commerceMlEnabled: false,
                   handheldEnabled: true,
+                  customLogoEnabled: false,
                   demoDurationDays: null,
                 },
               };

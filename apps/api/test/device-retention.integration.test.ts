@@ -553,6 +553,7 @@ describe.skipIf(!process.env.DATABASE_URL)("device retention temporal intent", (
           maxKiosks: 1,
           maxCabinetUsers: 1,
           handheldEnabled: false,
+          customLogoEnabled: false,
         });
         await db
           .update(schema.catalogItemVersions)

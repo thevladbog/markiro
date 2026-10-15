@@ -50,10 +50,11 @@ const NO_FEATURES = {
   inventory: false,
   commerceMl: false,
   handheld: false,
+  customLogo: false,
 };
-const UNMAPPED = (["chzIntegration", "inventory", "commerceMl", "handheld"] as const).map(
-  (feature) => ({ code: "feature_unmapped" as const, feature }),
-);
+const UNMAPPED = (
+  ["chzIntegration", "inventory", "commerceMl", "handheld", "customLogo"] as const
+).map((feature) => ({ code: "feature_unmapped" as const, feature }));
 
 async function httpRefusal(promise: Promise<unknown>): Promise<{ status: number; body: unknown }> {
   const error = await promise.then(

@@ -24,9 +24,10 @@ const p1Fields = new Set([
   "inventoryEnabled",
   "commerceMlEnabled",
   "handheldEnabled",
+  "customLogoEnabled",
   "lifecyclePolicyId",
 ]);
-const p1Effects = new Set(["chzIntegration", "inventory", "commerceMl", "handheld"]);
+const p1Effects = new Set(["chzIntegration", "inventory", "commerceMl", "handheld", "customLogo"]);
 export function projectCommercialResponse(version: CommercialVersion, value: unknown): unknown {
   if (version === 4) return value;
   assertNoV4CommercialRepresentation(value);
