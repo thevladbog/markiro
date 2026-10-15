@@ -3,7 +3,12 @@ import { schema } from "@markiro/db";
 import { receivingFinalizationSnapshotV3Schema } from "@markiro/platform-contracts";
 import { eq, sql } from "drizzle-orm";
 import { ServiceUnavailableException } from "@nestjs/common";
-import { traceCandidateQuery } from "../src/modules/traceability/trace/us-trace-query";
+import {
+  traceCandidateQuery,
+  traceRelations,
+  assertTraceRelations,
+} from "../src/modules/traceability/trace/us-trace-query";
+import { snapshotUsDatasetTables } from "./support/us-dataset-snapshot";
 import { UsShippingStore } from "../src/modules/traceability/shipping/us-shipping-draft";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -431,6 +436,177 @@ describe.skipIf(!url)("Current trace frozen evidence", () => {
     ).toThrow(ServiceUnavailableException);
   });
 
+  it("bounds narrow candidate work with stale statistics and unrelated lot children", async () => {
+    const c = await seedShippingLifecycle(f.db);
+    for (const table of ["receiving_event_roots", "traceability_events", "receiving_event_items"])
+      await f.db.execute(sql`ALTER TABLE ${sql.identifier(table)} SET (autovacuum_enabled=false)`);
+    const [event] = await f.db
+      .select()
+      .from(schema.traceabilityEvents)
+      .where(eq(schema.traceabilityEvents.tenantId, c.tenant));
+    if (!event) throw new Error("Missing seed event");
+    const [root] = await f.db
+      .select()
+      .from(schema.receivingEventRoots)
+      .where(eq(schema.receivingEventRoots.id, event.id));
+    const items = await f.db
+      .select()
+      .from(schema.receivingEventItems)
+      .where(eq(schema.receivingEventItems.eventId, event.id));
+    const unrelated = items.find((item) => item.lotId !== c.lot)?.lotId;
+    if (!root || !unrelated) throw new Error("Missing selector fixture");
+    for (const table of ["receiving_event_roots", "traceability_events", "receiving_event_items"])
+      await f.db.execute(sql`ANALYZE ${sql.identifier(table)}`);
+    // Selector-only rows: unrelated child bindings are deliberately not complete
+    // business snapshots. Public readers never consume these unrelated groups.
+    const copies = Array.from({ length: 260 }, (_, index) => ({
+      id: randomUUID(),
+      number: `REC-26-${700000 + index}`,
+    }));
+    await f.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+      await tx
+        .insert(schema.traceabilityEvents)
+        .values(
+          copies.map(({ id, number }) => ({ ...event, id, rootEventId: id, eventNumber: number })),
+        );
+      await tx.insert(schema.receivingEventRoots).values(
+        copies.map(({ id, number }) => ({
+          ...root,
+          id,
+          currentEventId: id,
+          eventNumber: number,
+        })),
+      );
+      await tx
+        .insert(schema.receivingEventItems)
+        .values(
+          copies.flatMap(({ id }) =>
+            items.map((item) => ({ ...item, eventId: id, lotId: unrelated })),
+          ),
+        );
+    });
+    const before = await snapshotUsDatasetTables(f.pool);
+    const actual = await f.db.execute<{ id: string }>(
+      traceCandidateQuery(c.tenant, [c.lot, c.lot], "both", 20),
+    );
+    const legacy = await f.db.execute<{ id: string }>(
+      legacyTraceCandidate(c.tenant, [c.lot, c.lot], "both", 20),
+    );
+    expect(actual.rows).toEqual(legacy.rows);
+    expect(actual.rows).toEqual([{ id: event.id }]);
+    const explained = await f.db.execute<{ "QUERY PLAN": { Plan: TraceCandidatePlan }[] }>(
+      sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${traceCandidateQuery(c.tenant, [c.lot], "both", 20)}`,
+    );
+    const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+    const work = plan ? traceCandidateWork(plan) : Infinity;
+    console.info("Narrow Trace candidate plan work", { groups: 260, work });
+    expect(await snapshotUsDatasetTables(f.pool)).toEqual(before);
+    expect(work).toBeLessThan(260 * 64);
+  });
+
+  it("keeps legacy candidate directions, duplicates, sentinels and broken-root exclusion", async () => {
+    const c = await seedTwoByTwoGenealogy(f);
+    const other = await seedShippingLifecycle(f.db);
+    const ids = [
+      ...c.origin.snapshot.items.map((line) => line.lotId),
+      ...c.revision.snapshot.outputs.map((line) => line.lotId),
+      other.lot,
+    ];
+    const check = async (tx: Parameters<Parameters<typeof f.db.transaction>[0]>[0]) => {
+      for (const direction of ["backward", "forward", "both"] as const)
+        for (const limit of [1, 20]) {
+          const actual = await tx.execute<{ id: string }>(
+            traceCandidateQuery(c.tenant, [...ids, ...ids], direction, limit),
+          );
+          const legacy = await tx.execute<{ id: string }>(
+            legacyTraceCandidate(c.tenant, [...ids, ...ids], direction, limit),
+          );
+          expect(actual.rows).toEqual(legacy.rows);
+          expect(new Set(actual.rows.map((row) => row.id)).size).toBe(actual.rows.length);
+        }
+    };
+    await f.db.transaction(check);
+    await c.store.amend(
+      c.tenant,
+      c.actor,
+      c.revision.id,
+      {
+        operationKey: randomUUID(),
+        expectedLifecycleVersion: 4,
+        reason: "Pending candidate differential",
+      },
+      "candidate-pending",
+    );
+    await f.db.transaction(check);
+    for (const state of ["null", "foreign", "missing", "wrong-type", "draft", "amended"] as const) {
+      const rollback = new Error("candidate differential rollback");
+      await expect(
+        f.db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+          if (state === "null")
+            await tx
+              .update(schema.receivingEventRoots)
+              .set({ currentEventId: null })
+              .where(eq(schema.receivingEventRoots.id, c.origin.id));
+          else if (state === "foreign")
+            await tx
+              .update(schema.receivingEventRoots)
+              .set({ tenantId: other.tenant, eventNumber: "REC-26-999998" })
+              .where(eq(schema.receivingEventRoots.id, c.origin.id));
+          else if (state === "missing")
+            await tx
+              .delete(schema.receivingEventRoots)
+              .where(eq(schema.receivingEventRoots.id, c.origin.id));
+          else if (state === "wrong-type")
+            await tx
+              .update(schema.traceabilityEvents)
+              .set({ type: "shipping", eventNumber: "SHP-26-999998" })
+              .where(eq(schema.traceabilityEvents.id, c.origin.id));
+          else
+            await tx
+              .update(schema.traceabilityEvents)
+              .set(
+                state === "draft"
+                  ? {
+                      status: state,
+                      finalizedAt: null,
+                      finalizedBy: null,
+                      finalizationSnapshot: null,
+                    }
+                  : {
+                      status: state,
+                      supersededByEventId: randomUUID(),
+                      supersededAt: new Date(),
+                      supersededBy: c.actor,
+                    },
+              )
+              .where(eq(schema.traceabilityEvents.id, c.origin.id));
+          await check(tx);
+          throw rollback;
+        }),
+      ).rejects.toBe(rollback);
+    }
+    const rollback = new Error("wrong child type rollback");
+    await expect(
+      f.db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+        await tx
+          .update(schema.transformationEventInputs)
+          .set({ eventId: c.origin.id })
+          .where(eq(schema.transformationEventInputs.eventId, c.revision.id));
+        await check(tx); // Candidate EXISTS intentionally matches event ID, not child type.
+        await expect(assertTraceRelations(tx, c.tenant, ids)).rejects.toBeInstanceOf(
+          ServiceUnavailableException,
+        );
+        await expect(
+          readCurrentTraceFrontier(tx, c.tenant, ids, "both", 20),
+        ).rejects.toBeInstanceOf(ServiceUnavailableException);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
   it("rejects an invalid saved Receiving timezone even though old snapshots have no timezone field", async () => {
     const c = await seedFinalizableTransformation(f);
     const [row] = await f.db
@@ -455,3 +631,35 @@ describe.skipIf(!url)("Current trace frozen evidence", () => {
     ).toThrow(ServiceUnavailableException);
   });
 });
+
+// Frozen pre-change selector: differential oracle, never a production fallback.
+function legacyTraceCandidate(
+  tenant: string,
+  ids: readonly string[],
+  direction: "backward" | "forward" | "both",
+  limit: number,
+) {
+  return sql`${traceRelations(tenant, ids)} SELECT e.id FROM traceability_events e
+    JOIN roots r ON r.id=e.root_event_id AND r.type=e.type AND r.current_event_id=e.id
+    WHERE e.tenant_id=${tenant} AND e.status='finalized' AND e.superseded_by_event_id IS NULL
+      AND EXISTS (SELECT 1 FROM children c WHERE c.event_id=e.id ${direction === "both" ? sql`` : sql`AND c.direction=${direction}`})
+    ORDER BY e.event_date,e.id LIMIT ${limit + 1}`;
+}
+type TraceCandidatePlan = {
+  "Actual Rows": number;
+  "Actual Loops": number;
+  "Rows Removed by Filter"?: number;
+  "Rows Removed by Index Recheck"?: number;
+  "Rows Removed by Join Filter"?: number;
+  Plans?: TraceCandidatePlan[];
+};
+function traceCandidateWork(plan: TraceCandidatePlan): number {
+  return (
+    (plan["Actual Rows"] +
+      (plan["Rows Removed by Filter"] ?? 0) +
+      (plan["Rows Removed by Index Recheck"] ?? 0) +
+      (plan["Rows Removed by Join Filter"] ?? 0)) *
+      plan["Actual Loops"] +
+    (plan.Plans ?? []).reduce((sum, child) => sum + traceCandidateWork(child), 0)
+  );
+}

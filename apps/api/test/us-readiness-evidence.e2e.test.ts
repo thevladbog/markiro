@@ -27,6 +27,7 @@ import {
 import { seedCaseBridge, caseState } from "./support/us-case-bridge-fixture";
 import { seedFinalizableTransformation } from "./support/us-transformation-finalization-fixture";
 import { seedCompleteReceiving } from "./support/us-receiving-fixture";
+import { snapshotUsDatasetTables } from "./support/us-dataset-snapshot";
 import {
   createStoredAmendment,
   finalizeStoredAmendment,
@@ -1068,6 +1069,237 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     expect(await read(other.tenant)).toEqual(otherBefore);
   });
 
+  it("bounds narrow readiness candidate work with stale unrelated lot children", async () => {
+    const c = await seedShippingLifecycle(f.db);
+    for (const table of ["receiving_event_roots", "traceability_events", "receiving_event_items"])
+      await f.db.execute(sql`ALTER TABLE ${sql.identifier(table)} SET (autovacuum_enabled=false)`);
+    const [event] = await f.db
+      .select()
+      .from(schema.traceabilityEvents)
+      .where(eq(schema.traceabilityEvents.tenantId, c.tenant));
+    if (!event) throw new Error("Missing seed event");
+    const [root] = await f.db
+      .select()
+      .from(schema.receivingEventRoots)
+      .where(eq(schema.receivingEventRoots.id, event.id));
+    const items = await f.db
+      .select()
+      .from(schema.receivingEventItems)
+      .where(eq(schema.receivingEventItems.eventId, event.id));
+    const unrelated = items.find((item) => item.lotId !== c.lot)?.lotId;
+    if (!root || !unrelated) throw new Error("Missing selector fixture");
+    for (const table of ["receiving_event_roots", "traceability_events", "receiving_event_items"])
+      await f.db.execute(sql`ANALYZE ${sql.identifier(table)}`);
+    // Selector-only rows, not business snapshots: none of these unrelated
+    // child bindings are consumed through the public evidence reader.
+    const copies = Array.from({ length: 260 }, (_, index) => ({
+      id: randomUUID(),
+      number: `REC-26-${700000 + index}`,
+    }));
+    await f.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+      await tx
+        .insert(schema.traceabilityEvents)
+        .values(
+          copies.map(({ id, number }) => ({ ...event, id, rootEventId: id, eventNumber: number })),
+        );
+      await tx.insert(schema.receivingEventRoots).values(
+        copies.map(({ id, number }) => ({
+          ...root,
+          id,
+          currentEventId: id,
+          eventNumber: number,
+        })),
+      );
+      await tx
+        .insert(schema.receivingEventItems)
+        .values(
+          copies.flatMap(({ id }) =>
+            items.map((item) => ({ ...item, eventId: id, lotId: unrelated })),
+          ),
+        );
+    });
+    const narrow = { ...scope, lotId: c.lot };
+    const before = await snapshotUsDatasetTables(f.pool);
+    const actual = await f.db.execute<{ id: string }>(
+      readinessEventSelectionQuery(c.tenant, narrow),
+    );
+    expect(actual.rows).toEqual(
+      (await f.db.execute<{ id: string }>(legacyReadinessSelection(c.tenant, narrow))).rows,
+    );
+    expect(actual.rows).toEqual([{ id: event.id }]);
+    const explained = await f.db.execute<{ "QUERY PLAN": { Plan: ReadinessQueryPlan }[] }>(
+      sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${readinessEventSelectionQuery(c.tenant, narrow)}`,
+    );
+    const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+    const work = plan ? queryPlanWork(plan) : Infinity;
+    console.info("Narrow readiness candidate plan work", { groups: 260, work });
+    expect(await snapshotUsDatasetTables(f.pool)).toEqual(before);
+    expect(work).toBeLessThan(260 * 64);
+  });
+
+  it("keeps narrow readiness legacy product, date and broken-root selection", async () => {
+    const c = await seedFinalizableTransformation(f);
+    const outputProduct = randomUUID();
+    const [profile] = await f.db
+      .select()
+      .from(schema.productTraceabilityProfiles)
+      .where(eq(schema.productTraceabilityProfiles.productId, c.product));
+    if (!profile) throw new Error("Missing profile");
+    await f.db
+      .insert(schema.products)
+      .values({ id: outputProduct, tenantId: c.tenant, name: "Different output product" });
+    await f.db
+      .insert(schema.productTraceabilityProfiles)
+      .values({ ...profile, productId: outputProduct, productName: "Different output product" });
+    const saved = await c.store.saveDraft(
+      c.tenant,
+      c.actor,
+      c.saved.id,
+      {
+        operationKey: randomUUID(),
+        expectedDraftVersion: 1,
+        draft: {
+          ...c.saved.draft,
+          outputs: c.saved.draft.outputs.map((line) => ({ ...line, productId: outputProduct })),
+        },
+      },
+      "candidate-different-product",
+    );
+    const ready = await c.store.checkReadiness(c.tenant, c.actor, saved.id, {
+      expectedDraftVersion: saved.draftVersion,
+    });
+    const transformed = await c.store.finalize(
+      c.tenant,
+      c.actor,
+      saved.id,
+      {
+        operationKey: randomUUID(),
+        expectedDraftVersion: saved.draftVersion,
+        expectedInputDigest: ready.inputDigest,
+      },
+      "candidate-different-product-finalize",
+    );
+    const shipping = await seedShippingLifecycle(f.db);
+    const shipment = await finalizeFixtureShipment(shipping, "20");
+    const inputLot = c.origin.snapshot.items[0]?.lotId;
+    if (!inputLot) throw new Error("Missing input lot");
+    const check = async (tx: Parameters<Parameters<typeof f.db.transaction>[0]>[0]) => {
+      for (const lotId of [
+        inputLot,
+        ...transformed.snapshot.outputs.map((line) => line.lotId),
+        shipping.lot,
+      ])
+        for (const productId of [null, c.product, outputProduct])
+          for (const [eventDateFrom, eventDateTo] of [
+            ["2026-09-01", "2026-09-28"],
+            ["2026-09-26", "2026-09-26"],
+            ["2026-09-27", "2026-09-28"],
+          ]) {
+            if (!eventDateFrom || !eventDateTo) throw new Error("Missing date bound");
+            const selected = { ...scope, lotId, productId, eventDateFrom, eventDateTo };
+            const actual = await tx.execute<{ id: string }>(
+              readinessEventSelectionQuery(c.tenant, selected),
+            );
+            expect(actual.rows).toEqual(
+              (await tx.execute<{ id: string }>(legacyReadinessSelection(c.tenant, selected))).rows,
+            );
+            expect(new Set(actual.rows.map((row) => row.id)).size).toBe(actual.rows.length);
+          }
+    };
+    await f.db.transaction(check);
+    // The selected input lot and matching output product are different lines.
+    expect(
+      (
+        await f.db.execute<{ id: string }>(
+          readinessEventSelectionQuery(c.tenant, {
+            ...scope,
+            lotId: inputLot,
+            productId: outputProduct,
+          }),
+        )
+      ).rows,
+    ).toEqual([{ id: transformed.id }]);
+    expect(
+      (
+        await f.db.execute<{ id: string }>(
+          readinessEventSelectionQuery(shipping.tenant, { ...scope, lotId: shipping.lot }),
+        )
+      ).rows.map((row) => row.id),
+    ).toContain(shipment.id);
+    for (const state of [
+      "null",
+      "foreign",
+      "missing",
+      "draft",
+      "amended",
+      "frozen-only",
+    ] as const) {
+      const rollback = new Error("readiness candidate differential rollback");
+      await expect(
+        f.db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+          if (state === "null")
+            await tx
+              .update(schema.transformationEventRoots)
+              .set({ currentEventId: null })
+              .where(eq(schema.transformationEventRoots.id, transformed.id));
+          else if (state === "foreign")
+            await tx
+              .update(schema.transformationEventRoots)
+              .set({ tenantId: shipping.tenant })
+              .where(eq(schema.transformationEventRoots.id, transformed.id));
+          else if (state === "missing")
+            await tx
+              .delete(schema.transformationEventRoots)
+              .where(eq(schema.transformationEventRoots.id, transformed.id));
+          else if (state === "frozen-only") {
+            await tx
+              .update(schema.transformationEventOutputs)
+              .set({ productId: c.product })
+              .where(eq(schema.transformationEventOutputs.eventId, transformed.id));
+            for (const line of transformed.snapshot.outputs)
+              await tx
+                .update(schema.traceabilityLots)
+                .set({ productId: c.product })
+                .where(eq(schema.traceabilityLots.id, line.lotId));
+            expect(
+              (
+                await tx.execute<{ id: string }>(
+                  readinessEventSelectionQuery(c.tenant, {
+                    ...scope,
+                    lotId: inputLot,
+                    productId: outputProduct,
+                  }),
+                )
+              ).rows,
+            ).toEqual([{ id: transformed.id }]);
+          } else
+            await tx
+              .update(schema.traceabilityEvents)
+              .set(
+                state === "draft"
+                  ? {
+                      status: state,
+                      finalizedAt: null,
+                      finalizedBy: null,
+                      finalizationSnapshot: null,
+                    }
+                  : {
+                      status: state,
+                      supersededByEventId: randomUUID(),
+                      supersededAt: new Date(),
+                      supersededBy: c.actor,
+                    },
+              )
+              .where(eq(schema.traceabilityEvents.id, transformed.id));
+          await check(tx);
+          throw rollback;
+        }),
+      ).rejects.toBe(rollback);
+    }
+  });
+
   it("reads 2001 current events without the graph cap and refuses the 10001 sentinel", async () => {
     // A freshly bulk-loaded tenant can have stale statistics in production too.
     // Keep all three disposable tables' statistics stale so maintenance cannot
@@ -1188,6 +1420,33 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     });
   }, 60_000);
 });
+
+// Frozen pre-change selector, including the whole lot/product predicate. It is
+// an independent differential oracle, never a production compatibility branch.
+function legacyReadinessSelection(tenant: string, selected: UsReadinessScope) {
+  return sql`WITH lines AS (
+    SELECT tenant_id,event_id,line_no,lot_id,product_id,'receiving' AS type,true AS origin FROM receiving_event_items WHERE tenant_id=${tenant}
+    UNION ALL SELECT tenant_id,event_id,line_no,lot_id,product_id,'transformation',false FROM transformation_event_inputs WHERE tenant_id=${tenant}
+    UNION ALL SELECT tenant_id,event_id,line_no,lot_id,product_id,'transformation',true FROM transformation_event_outputs WHERE tenant_id=${tenant}
+    UNION ALL SELECT tenant_id,event_id,line_no,lot_id,NULL::uuid,'shipping',false FROM shipping_event_items WHERE tenant_id=${tenant}
+  ) SELECT e.id FROM traceability_events e
+    WHERE e.tenant_id=${tenant} AND e.status='finalized' AND e.superseded_by_event_id IS NULL
+      AND ((e.type='receiving' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM receiving_event_roots r WHERE r.tenant_id=${tenant}))
+        OR (e.type='transformation' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM transformation_event_roots r WHERE r.tenant_id=${tenant}))
+        OR (e.type='shipping' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM shipping_event_roots r WHERE r.tenant_id=${tenant})))
+      AND e.event_date BETWEEN ${selected.eventDateFrom}::date AND ${selected.eventDateTo}::date
+      AND (${selected.lotId === null ? sql`true` : sql`EXISTS (SELECT 1 FROM lines l WHERE l.tenant_id=e.tenant_id AND l.event_id=e.id AND l.lot_id=${selected.lotId})`}
+      AND ${
+        selected.productId === null
+          ? sql`true`
+          : sql`(EXISTS (
+        SELECT 1 FROM lines l LEFT JOIN traceability_lots lot ON lot.tenant_id=l.tenant_id AND lot.id=l.lot_id
+        WHERE l.tenant_id=e.tenant_id AND l.event_id=e.id AND (l.product_id=${selected.productId} OR lot.product_id=${selected.productId}))
+        OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(e.finalization_snapshot->'items','[]'::jsonb) || COALESCE(e.finalization_snapshot->'inputs','[]'::jsonb) || COALESCE(e.finalization_snapshot->'outputs','[]'::jsonb)) frozen
+        WHERE frozen->>'productId'=${selected.productId} OR frozen->'product'->>'id'=${selected.productId}))`
+      })
+    ORDER BY e.event_date,e.id LIMIT 10001`;
+}
 
 type ReadinessQueryPlan = {
   "Node Type"?: string;

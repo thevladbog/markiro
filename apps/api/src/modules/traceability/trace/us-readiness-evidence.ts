@@ -869,6 +869,22 @@ function eventFilter(scope: UsReadinessScope) {
 
 /** Shared with controlled EXPLAIN checks so the measured query is the executed selector. */
 export function readinessEventSelectionQuery(tenantId: string, scope: UsReadinessScope) {
+  if (scope.lotId !== null) {
+    // Only seed by lot: product may match a different line or frozen snapshot.
+    // Keep the full original filter and current-root truth conditions below.
+    return sql`${relations(tenantId)}, scoped_event_ids AS MATERIALIZED (
+      SELECT DISTINCT event_id FROM lines WHERE tenant_id=${tenantId} AND lot_id=${scope.lotId}
+    ) SELECT e.id FROM scoped_event_ids selected
+    JOIN LATERAL (SELECT * FROM traceability_events WHERE id=selected.event_id LIMIT 1) e ON true
+    WHERE e.tenant_id=${tenantId} AND e.status='finalized' AND e.superseded_by_event_id IS NULL
+      AND (
+        (e.type='receiving' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM receiving_event_roots r WHERE r.tenant_id=${tenantId}))
+        OR (e.type='transformation' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM transformation_event_roots r WHERE r.tenant_id=${tenantId}))
+        OR (e.type='shipping' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM shipping_event_roots r WHERE r.tenant_id=${tenantId}))
+      )
+      AND e.event_date BETWEEN ${scope.eventDateFrom}::date AND ${scope.eventDateTo}::date AND (${eventFilter(scope)})
+    ORDER BY e.event_date,e.id LIMIT ${MAX_RECORDS + 1}`;
+  }
   // Uncorrelated tuple membership lets PostgreSQL hash each tenant's current
   // root pointers once. Correlated EXISTS under OR can repeatedly scan a whole
   // tenant when bulk inserts have outpaced the planner's statistics.

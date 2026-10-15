@@ -80,11 +80,24 @@ export function traceCandidateQuery(
   direction: TraceDirection,
   limit: number,
 ) {
-  return sql`${traceRelations(tenantId, lotIds)}
-    SELECT e.id FROM traceability_events e
-    JOIN roots r ON r.id=e.root_event_id AND r.type=e.type AND r.current_event_id=e.id
+  // Distinct child IDs preserve EXISTS multiplicity; fences keep stale tenant
+  // statistics from replaying every event/root for each selected child.
+  return sql`${traceRelations(tenantId, lotIds)}, candidate_ids AS MATERIALIZED (
+      SELECT DISTINCT event_id FROM children c
+      ${direction === "both" ? sql`` : sql`WHERE c.direction=${direction}`}
+    )
+    SELECT e.id FROM candidate_ids c
+    JOIN LATERAL (SELECT * FROM traceability_events WHERE id=c.event_id LIMIT 1) e ON true
+    JOIN LATERAL (
+      SELECT * FROM (
+        SELECT tenant_id,id,current_event_id,'receiving' AS type FROM receiving_event_roots
+          WHERE id=e.root_event_id AND e.type='receiving'
+        UNION ALL SELECT tenant_id,id,current_event_id,'transformation' FROM transformation_event_roots
+          WHERE id=e.root_event_id AND e.type='transformation'
+        UNION ALL SELECT tenant_id,id,current_event_id,'shipping' FROM shipping_event_roots
+          WHERE id=e.root_event_id AND e.type='shipping'
+      ) keyed LIMIT 1
+    ) r ON r.tenant_id=${tenantId} AND r.id=e.root_event_id AND r.type=e.type AND r.current_event_id=e.id
     WHERE e.tenant_id=${tenantId} AND e.status='finalized' AND e.superseded_by_event_id IS NULL
-      AND EXISTS (SELECT 1 FROM children c WHERE c.event_id=e.id
-        ${direction === "both" ? sql`` : sql`AND c.direction=${direction}`})
     ORDER BY e.event_date,e.id LIMIT ${limit + 1}`;
 }
