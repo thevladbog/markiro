@@ -87,6 +87,7 @@ import {
   shellReducer,
   type FloorNotice,
 } from "./shell.js";
+import { INITIAL_HOST_HOME, startView, type HostHome } from "./start-screen.js";
 
 /**
  * The shortest wait between two syncs the floor's sign-in asks for. Each
@@ -277,13 +278,18 @@ export function App({
   // An office PC has no floor: whatever pairing its disk holds, the station's
   // screens are not shown there, and the office sign-in is the home (plan УСТ).
   const shellView = nextShellView(state, address);
-  const view: ShellView =
-    role === "office" &&
-    (shellView.kind === "floor" ||
-      shellView.kind === "floor_operator" ||
-      shellView.kind === "line_select")
-      ? { kind: "office_login", notice: null }
-      : shellView;
+  const [hostHome, setHostHome] = useState<HostHome>(INITIAL_HOST_HOME);
+  const view: ShellView = startView(shellView, role, hostHome);
+  // The office button of the floor, and «В цех» of the office sign-in. On a
+  // host PC they also move the session-only home (`start-screen.ts`).
+  const openOffice = () => {
+    setHostHome("office");
+    dispatch({ type: "office_requested" });
+  };
+  const openFloor = () => {
+    setHostHome("floor");
+    dispatch({ type: "office_closed" });
+  };
   const unsentHere = unsent !== null && unsent.view === view.kind ? unsent : null;
   const owedHere = owed !== null && owed === view.kind;
   const localName = t("device.localName");
@@ -792,7 +798,7 @@ export function App({
       api: hostApi,
       call,
       refreshUser,
-      exitTo: officePc ? "sign_in" : "floor",
+      exitTo: officePc || role === "host" ? "sign_in" : "floor",
       logout: () => {
         dispatch({ type: "office_closed" });
         // The token is already gone from this device; if the host cannot be
@@ -800,7 +806,7 @@ export function App({
         void hostApi.officeLogout(session.token).catch(() => undefined);
       },
     };
-  }, [session, hostApi, officePc]);
+  }, [session, hostApi, officePc, role]);
 
   if (session && officeSession) {
     return (
@@ -904,7 +910,7 @@ export function App({
           link={state.link}
           onSelect={selectLine}
           onSync={requestSync}
-          onOffice={() => dispatch({ type: "office_requested" })}
+          onOffice={openOffice}
         />
       )}
       {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
@@ -939,7 +945,7 @@ export function App({
               source={floorGate.source}
               onSignedIn={operatorSignedIn}
               onSync={signInSync.request}
-              onOffice={() => dispatch({ type: "office_requested" })}
+              onOffice={openOffice}
               watchScanners={hardwareApi.watchScanners}
             />
           ) : (
@@ -979,7 +985,7 @@ export function App({
         <OfficeLogin
           notice={view.notice}
           onLogin={login}
-          onBack={officePc ? null : () => dispatch({ type: "office_closed" })}
+          onBack={officePc ? null : openFloor}
           hostAddress={remoteAddress}
           onChangeAddress={changeAddress}
         />
