@@ -2435,3 +2435,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Zod/Vitest (`PROTOCOL_VERSION`, `FACT_RECEIPT_CODES`, фикстуры `hello*.json`) задача П1 не трогает: они
   краснеют до П2.
 - Фикстуры из плана в этих блоках не потребовали правок после первого запуска.
+- П2: `test/floor-queue-screen.test.tsx` («has words for every code of refusal the host gives») читает `FACT_RECEIPT_CODES`
+  и краснел на семи новых кодах — в `src/i18n/ru.json` (`floor.queue.code`) добавлены русские формулировки для
+  `box_not_found`, `box_not_closed`, `box_on_pallet`, `product_mismatch`, `pallet_not_open`, `pallet_count_mismatch`,
+  `feature_disabled`; сам тест не менялся. Формулировки рабочие — владельцу сверить текст.

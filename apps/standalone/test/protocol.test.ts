@@ -50,6 +50,8 @@ import {
   lineRecordSchema,
   lineUpdateSchema,
   officeBoxSchema,
+  officeWarehousePalletSchema,
+  officeWarehousePalletsSchema,
   officeLineSchema,
   officeLoginRequestSchema,
   officeOperatorSchema,
@@ -314,6 +316,7 @@ const RESPONSES = [
   ["counterparty-record.json", counterpartyRecordSchema],
   ["employee-record.json", employeeRecordSchema],
   ["office-line.json", officeLineSchema],
+  ["office-warehouse-pallets.json", officeWarehousePalletsSchema],
   ["office-operator.json", officeOperatorSchema],
   ["badge-salt.json", badgeSaltSchema],
   ["product-group.json", productGroupSchema],
@@ -527,11 +530,12 @@ describe("protocol 4: the shift modes (plan РЕЖ)", () => {
   };
 
   it("speaks protocol 4 and enters a shift naming what this station works", () => {
-    // Protocol 4 brought the modes; 5 (part B, below) keeps them.
-    expect(PROTOCOL_VERSION).toBe(5);
+    // Protocol 4 brought the modes, 5 the duplicate print, 6 the handheld on the host.
+    expect(PROTOCOL_VERSION).toBe(6);
     expect(SHIFT_SUPPORTS).toStrictEqual({
       validation: "validation-v1",
       validationDmDuplicate: "validation-dm-duplicate-v1",
+      handheldHost: "handheld-host-v1",
     });
     // The station of part A works validation, and says so on every entry.
     expect(STATION_SHIFT_ENTER).toStrictEqual(fixture("shift-enter.json"));
@@ -3420,7 +3424,7 @@ describe("protocol 5: the duplicate print (plan РЕЖ, part B)", () => {
   const frozen = entered.snapshot.validationPrint;
 
   it("speaks protocol 5 with the domain's names", () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+    expect(PROTOCOL_VERSION).toBe(6);
     expect(LABEL_VERIFICATIONS).toStrictEqual(["none", "required"]);
     expect(REPRINT_REASONS).toStrictEqual(["not_printed", "damaged", "lost"]);
     expect(UNIT_LABEL_EVENTS).toStrictEqual([
@@ -3813,5 +3817,51 @@ describe("the usage statistics (beta 3)", () => {
         months: Array.from({ length: 13 }, () => base.months[0]),
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("protocol 6: the handheld on the host (plan ТСД-П)", () => {
+  type Row = Record<string, unknown>;
+
+  it("is the version of the current hello fixtures, and the future one stays ahead", () => {
+    expect(PROTOCOL_VERSION).toBe(6);
+    for (const name of ["hello.json", "hello-restored.json"]) {
+      expect((fixture(name) as Row).protocol, name).toBe(PROTOCOL_VERSION);
+    }
+    expect((fixture("hello-future.json") as Row).protocol as number).toBeGreaterThan(
+      PROTOCOL_VERSION,
+    );
+  });
+
+  it("names the capability a handheld enters a shift with, as the Rust fixture does", () => {
+    const enter = fixture("shift-enter-handheld.json");
+    expect(shiftEnterSchema.parse(enter)).toStrictEqual({
+      supports: [SHIFT_SUPPORTS.handheldHost],
+    });
+  });
+
+  it("knows the seven receipt codes the pallet events added", () => {
+    for (const code of [
+      "box_not_found",
+      "box_not_closed",
+      "box_on_pallet",
+      "product_mismatch",
+      "pallet_not_open",
+      "pallet_count_mismatch",
+      "feature_disabled",
+    ]) {
+      expect(FACT_RECEIPT_CODES as readonly string[]).toContain(code);
+    }
+    expect(FACT_RECEIPT_CODES).toHaveLength(23);
+  });
+
+  it("reads the office's list of warehouse pallets and refuses a row that lacks a count", () => {
+    const list = officeWarehousePalletsSchema.parse(fixture("office-warehouse-pallets.json"));
+    expect(list.pallets.map((pallet) => pallet.sscc)).toStrictEqual([null, "146006820000000409"]);
+    const [open] = list.pallets;
+    expect(officeWarehousePalletSchema.safeParse({ ...open, boxes: undefined }).success).toBe(
+      false,
+    );
+    expect(officeWarehousePalletSchema.safeParse({ ...open, sscc: "12" }).success).toBe(false);
   });
 });
