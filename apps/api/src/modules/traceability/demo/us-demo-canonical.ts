@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 
 // Bootstrap assumes the standard runtime. Private ownership/metadata operations
 // retain these identities even when caller code later changes global intrinsics.
@@ -25,6 +26,8 @@ const safeFinite = Number.isFinite;
 const safeArray = Array.isArray;
 const safeString = String;
 const plainPrototype: unknown = Object.prototype;
+const arrayPrototype: unknown = Array.prototype;
+const safeProxy = types.isProxy;
 
 type Guard = { target: object; key: PropertyKey; descriptor: PropertyDescriptor };
 const guards: Guard[] = [];
@@ -231,6 +234,76 @@ export function canonicalExportJson(input: unknown): string {
   return serialize(input, true);
 }
 
+/** Per-call admission only: no caller value or validation result is retained. */
+function admitEquality(input: unknown): boolean {
+  const active = new SafeSet<object>();
+  const complete = new SafeSet<object>();
+  let steps = 0;
+  const visit = (value: unknown, depth: number): boolean => {
+    if (++steps > 4096 || depth > 64) return false;
+    if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+    if (typeof value === "number") return safeFinite(value);
+    if (typeof value !== "object" || safeProxy(value)) return false;
+    if (safeApply(setHas, active, [value])) return false;
+    if (safeApply(setHas, complete, [value])) return true;
+    const array = safeArray(value);
+    const prototype: unknown = safePrototype(value);
+    if (array ? prototype !== arrayPrototype : prototype !== plainPrototype && prototype !== null)
+      return false;
+    safeApply(setAdd, active, [value]);
+    const keys = safeKeys(value);
+    let count = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (array && key === "length") continue;
+      if (typeof key !== "string") return false;
+      const item = safeDescriptor(value, key);
+      const data = item && safeDescriptor(item, "value");
+      if (!item?.enumerable || !data) return false;
+      if (array && key !== safeString(count)) return false;
+      // Root selection arrays use sorted canonical bytes, not source order.
+      if (
+        depth === 0 &&
+        !array &&
+        (key === "events" || key === "findings") &&
+        (safeProxy(data.value) || safeArray(data.value))
+      )
+        return false;
+      if (!visit(data.value, depth + 1)) return false;
+      count++;
+    }
+    if (array && count !== safeDescriptor(value, "length")?.value) return false;
+    safeApply(setDelete, active, [value]);
+    safeApply(setAdd, complete, [value]);
+    return true;
+  };
+  return visit(input, 0);
+}
+
+/** Undefined means a work cap was reached; the original serializer then decides. */
+function compareAdmitted(left: unknown, right: unknown): boolean | undefined {
+  let steps = 0;
+  const compare = (a: unknown, b: unknown, depth: number): boolean | undefined => {
+    if (++steps > 16384 || depth > 64) return undefined;
+    if (a === b) return true;
+    if (a === null || typeof a !== "object" || b === null || typeof b !== "object") return a === b;
+    if (safeArray(a) !== safeArray(b)) return false;
+    const keys = safeKeys(a);
+    if (keys.length !== safeKeys(b).length) return false;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === undefined) return undefined;
+      const av = safeDescriptor(a, key);
+      const bv = safeDescriptor(b, key);
+      if (!bv) return false;
+      const result = compare(av?.value, bv.value, depth + 1);
+      if (result !== true) return result;
+    }
+    return true;
+  };
+  return compare(left, right, 0);
+}
+
 export function canonicalExportEqual(left: unknown, right: unknown): boolean {
   const primitive = (value: unknown): boolean =>
     value === null ||
@@ -238,6 +311,10 @@ export function canonicalExportEqual(left: unknown, right: unknown): boolean {
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value));
   if (primitive(left) && primitive(right)) return left === right;
+  if (stableIntrinsics() && admitEquality(left) && admitEquality(right)) {
+    const equal = compareAdmitted(left, right);
+    if (equal !== undefined) return equal;
+  }
   return canonicalExportJson(left) === canonicalExportJson(right);
 }
 

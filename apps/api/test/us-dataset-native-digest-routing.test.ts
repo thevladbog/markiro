@@ -7,6 +7,213 @@ import { describe, expect, it, vi } from "vitest";
 
 const demoDirectory = join(__dirname, "../src/modules/traceability/demo");
 
+describe("bounded structural canonical equality", () => {
+  it("compares freshly admitted values without serializing either operand", async () => {
+    vi.resetModules();
+    const descriptors = vi.spyOn(Object, "getOwnPropertyDescriptors");
+    try {
+      const { canonicalExportEqual: equal } =
+        await import("../src/modules/traceability/demo/us-demo-canonical.js");
+      const shared = { text: "é\n", number: -0 };
+      const left = { a: shared, b: shared, ordered: [1, 2] };
+      const right = { ordered: [1, 2], b: { number: 0, text: "é\n" }, a: shared };
+      descriptors.mockClear();
+      const same = equal(left, right);
+      const sameReads = descriptors.mock.calls.length;
+      expect(same).toBe(true);
+      expect(sameReads).toBe(0);
+      right.ordered[1] = 3;
+      descriptors.mockClear();
+      const different = equal(left, right);
+      const differentReads = descriptors.mock.calls.length;
+      expect(different).toBe(false);
+      expect(differentReads).toBe(0);
+      const { shippingResultFixture } =
+        await import("./support/us-dataset-shipping-result-fixture.js");
+      const { correctedShippingFixture } =
+        await import("./support/us-dataset-corrected-shipping-result-fixture.js");
+      for (const fixture of [shippingResultFixture(0), correctedShippingFixture()]) {
+        const decoded: unknown = JSON.parse(JSON.stringify(fixture));
+        for (const value of [fixture, decoded]) {
+          const other: unknown = structuredClone(value);
+          descriptors.mockClear();
+          const sameFixture = equal(value, other);
+          const fixtureReads = descriptors.mock.calls.length;
+          expect(sameFixture).toBe(true);
+          expect(fixtureReads).toBe(0);
+        }
+      }
+    } finally {
+      descriptors.mockRestore();
+    }
+  });
+
+  it("fully validates both operands before mismatches and preserves reference errors", async () => {
+    const { canonicalExportEqual: equal } =
+      await import("../src/modules/traceability/demo/us-demo-canonical.js");
+    const outcome = (run: () => unknown) => {
+      try {
+        return { value: run() };
+      } catch (error) {
+        return error instanceof Error ? { name: error.name, message: error.message } : { error };
+      }
+    };
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    const hidden = Object.defineProperty({}, "hidden", { value: 1 });
+    const getter = Object.defineProperty({}, "late", {
+      enumerable: true,
+      get() {
+        throw new Error("must not run");
+      },
+    });
+    const customArray = Object.setPrototypeOf([1], {
+      [Symbol.iterator]: function* () {
+        yield 2;
+      },
+    });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const revokedRoot = { a: undefined, events: revoked.proxy };
+    expect(outcome(() => equal(revokedRoot, {}))).toEqual(
+      outcome(() => referenceJson(revokedRoot) === referenceJson({})),
+    );
+    const invalidSelf = { early: 1, late: undefined };
+    expect(outcome(() => equal(invalidSelf, invalidSelf))).toEqual(
+      outcome(() => referenceJson(invalidSelf) === referenceJson(invalidSelf)),
+    );
+    for (const invalid of [
+      NaN,
+      undefined,
+      1n,
+      cycle,
+      hidden,
+      getter,
+      new Date(0),
+      new Array(2),
+      { [Symbol("x")]: 1 },
+      customArray,
+    ]) {
+      for (const [left, right] of [
+        [
+          { first: 1, late: invalid },
+          { first: 2, late: 0 },
+        ],
+        [
+          { first: 1, late: 0 },
+          { first: 2, late: invalid },
+        ],
+      ])
+        expect(outcome(() => equal(left, right))).toEqual(
+          outcome(() => referenceJson(left) === referenceJson(right)),
+        );
+    }
+  });
+
+  it("retains root unordered selection, nested order, null prototypes and proxy effects", async () => {
+    const { canonicalExportEqual: equal } =
+      await import("../src/modules/traceability/demo/us-demo-canonical.js");
+    for (const [left, right, expected] of [
+      [{ events: [2, 1] }, { events: [1, 2] }, true],
+      [{ findings: [2, 1] }, { findings: [1, 2] }, true],
+      [{ nested: { events: [2, 1] } }, { nested: { events: [1, 2] } }, false],
+      [Object.assign(Object.create(null), { a: "é\n" }), { a: "é\n" }, true],
+      [0, -0, true],
+    ] as const)
+      expect(equal(left, right)).toBe(expected);
+    const effects: string[] = [];
+    const make = (name: string) =>
+      new Proxy(
+        { a: 1 },
+        {
+          getPrototypeOf(target) {
+            effects.push(name);
+            return Reflect.getPrototypeOf(target);
+          },
+        },
+      );
+    equal(make("left"), make("right"));
+    const actual = effects.slice();
+    effects.length = 0;
+    const expected = referenceJson(make("left")) === referenceJson(make("right"));
+    expect(expected).toBe(true);
+    expect(actual).toEqual(effects);
+    let getterCalls = 0;
+    const left = Object.defineProperty({}, "a", {
+      enumerable: true,
+      get() {
+        getterCalls++;
+        return 1;
+      },
+    });
+    effects.length = 0;
+    expect(() => equal(left, make("right"))).toThrow("cannot evaluate getters");
+    expect(getterCalls).toBe(0);
+    expect(effects).toEqual([]);
+  });
+
+  it("falls back for bounded traversal and changed runtime intrinsics", async () => {
+    vi.resetModules();
+    const descriptors = vi.spyOn(Object, "getOwnPropertyDescriptors");
+    try {
+      const { canonicalExportEqual: equal } =
+        await import("../src/modules/traceability/demo/us-demo-canonical.js");
+      let deep: unknown = 1;
+      for (let i = 0; i < 80; i++) deep = { child: deep };
+      const wide = Array.from({ length: 5000 }, () => ({ a: 1 }));
+      let dag: unknown = { a: 1 };
+      for (let i = 0; i < 15; i++) dag = { a: dag, b: dag };
+      for (const value of [deep, wide, dag]) {
+        descriptors.mockClear();
+        const actual = equal(value, structuredClone(value));
+        const traversed = descriptors.mock.calls.length > 0;
+        expect(actual).toBe(true);
+        expect(traversed).toBe(true);
+      }
+      // Completed shallow nodes can hide a deeper path during admission.
+      const chain = () => {
+        const nodes: object[] = [{ v: 1 }];
+        for (let i = 0; i < 80; i++) nodes[nodes.length] = { next: nodes[nodes.length - 1] };
+        return nodes;
+      };
+      const leftNodes = chain(),
+        rightNodes = chain();
+      const warmup = [...leftNodes, ...rightNodes];
+      const left = { warmup, actual: leftNodes[leftNodes.length - 1] };
+      const right = { warmup, actual: rightNodes[rightNodes.length - 1] };
+      descriptors.mockClear();
+      const actual = equal(left, right);
+      const traversed = descriptors.mock.calls.some(([node]) => node === left);
+      expect(actual).toBe(referenceJson(left) === referenceJson(right));
+      expect(traversed).toBe(true);
+      const original = Object.getOwnPropertyDescriptor(Array.prototype, "sort");
+      if (!original || typeof original.value !== "function") throw new Error("Missing sort");
+      try {
+        Object.defineProperty(Array.prototype, "sort", {
+          ...original,
+          value() {
+            throw new Error("changed sort");
+          },
+        });
+        const actual = (() => {
+          try {
+            equal({ a: 1 }, { a: 1 });
+            return "returned";
+          } catch (error) {
+            return error instanceof Error ? error.message : "unknown";
+          }
+        })();
+        Object.defineProperty(Array.prototype, "sort", original);
+        expect(actual).toBe("changed sort");
+      } finally {
+        Object.defineProperty(Array.prototype, "sort", original);
+      }
+    } finally {
+      descriptors.mockRestore();
+    }
+  });
+});
+
 describe("server-only US demo digest routing", () => {
   it("routes actual definition and journal construction hashes through the native helper without connecting", async () => {
     vi.resetModules();

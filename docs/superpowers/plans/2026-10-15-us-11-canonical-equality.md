@@ -67,3 +67,53 @@ increment and review; no additional cold filtered gate or serializer probe.
   normal DROP verified, zero new databases remaining, service listener closed.
 - Original full 260-chain verification and the complete prepared-services group
   remain separate exact-SHA GitHub CI gates. No release or deployment is included.
+
+## Remaining structural-equality increment
+
+The pushed `ee3a32273` full262 gate is now green; prepared services has five
+timeouts. Do not repeat that SHA's CI or run another whole-worker profile. Reject
+full-codec validation memoization and the unsuccessful byte-content prototype.
+Implement only the appended callback-free structural equality design.
+
+1. Independent review of the appended design, then a separate executor adds RED
+   witnesses in the existing native-digest-routing test file (already CI-owned).
+   Preserve both original frozen canonical files. Cover actual no-serialization
+   admission, fresh mutation, object/array order, aliases, signed zero, Unicode,
+   root unordered selections, late invalid values, proxy/getter effects, changed
+   intrinsics and depth/node/comparison-cap fallback against the domain oracle.
+2. Implement the backend helper only, run new plus frozen pure tests and API
+   typecheck/lint/build serially. Independently review the exact final delta.
+3. Controller runs the unchanged original composition/coordinator 29 tests once
+   on the substantive candidate. If they fail, retain the specific evidence; do
+   not run broader gates or repeat unchanged. If green, run full isolated API,
+   formatting/diff checks, scoped US-only commit/push and exact-SHA GitHub CI.
+
+No timeout, assertion, test selection, release, deployment or unrelated document
+changes are authorized by this increment. Full262 must remain green on the final
+SHA; a pure speedup alone is not completion.
+
+### Structural local evidence
+
+Independent final source review approved the bounded per-call implementation.
+The unchanged frozen canonical suites plus new routing/structural witnesses pass
+87 tests; actual regular/corrected Shipping payloads (aliased and JSON-decoded)
+exercise the fast path. API typecheck, lint and build pass. Original whole29 passes
+in 89.22 seconds with all assertions and deadlines intact. M11's complete body is
+4350.353 ms, compared with the earlier local 4933.985 ms; this is local evidence,
+not a promise of CI timing. Both invocation-owned databases were verified absent.
+The first sandboxed attempt stopped at loopback EPERM before creating a database
+or executing any tests; the permission-corrected run is the acceptance invocation.
+
+Full isolated API and exact-final-SHA GitHub CI remain pending at this checkpoint.
+
+The subsequent full isolated API attempt completed in 702.62 seconds with
+330 files / 4780 tests passed, 189 files / 3952 tests skipped and three original
+5000 ms PDF timeouts in `us-plan-pdf.test.ts`. Its renderer uses the unchanged
+domain digest rather than the modified backend helper. The owned database was
+verified absent, zero new databases remained, and the refusal listener closed.
+One original-file diagnostic then passed all 25 PDF tests in 879 ms with unchanged
+source hashes. Its renderer/font interception was ineffective, so the earlier
+timing cause remains unproved; a successful focused retry is not full API proof.
+Retain the red full-run evidence. No PDF/font/layout or test changes are made.
+The scoped US push preserves the verified optimization for independent CI; it
+does not declare the complete local API gate green or authorize any release.

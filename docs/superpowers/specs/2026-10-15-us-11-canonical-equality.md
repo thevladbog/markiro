@@ -120,3 +120,37 @@ Route only US server comparison/JSON imports to this helper, preserving expressi
 evaluation order. Domain reference bodies and persisted byte/hash formats stay
 unchanged. Original SQL, authority, lifecycle, balance and freshness checks remain
 mandatory; owned JSON provenance is never a business-state certificate.
+
+## Callback-free structural equality
+
+At `ee3a32273`, exact-SHA CI passes the original full262 trace run (62 tests,
+791681 ms under the unchanged 900000 ms body) and six isolation groups. Prepared
+services remains red on five original 5000 ms deadlines. Retain these failures;
+do not retry unchanged. A source-unchanged whole-worker CPU capture identifies
+canonical serialization as substantial remaining work. A single pure diagnostic
+rejects content-addressed byte caching (1.51--2.34x, inconsistent) and measures
+callback-free structural equality at 2.18--2.56x across twelve regular/corrected,
+equal/unequal/aliased, both-order workloads, with original reference parity. These
+are diagnostic measurements, not end-to-end acceptance.
+
+Change only backend `canonicalExportEqual`. Keep its existing primitive path,
+serializer, digests, owned-byte cache, codecs, SQL and authorization unchanged.
+For ordinary finite JSON, compare object own-key sets without sorting and arrays
+in source order, with exact primitive equality (including canonical `0`/`-0`).
+Before any unequal-value shortcut, completely admit both operands using captured
+descriptor-only operations. Reject proxies before invoking any traps, accessors,
+hidden/symbol properties, nonstandard prototypes/iterators, sparse arrays, cycles
+and nonfinite/non-JSON values to the unchanged left-then-right serializer path.
+Admit ordinary aliases as values, not identities: per-call active/completed sets
+distinguish cycles from completed DAG nodes. Check each root's unordered
+`events`/`findings` policy before any completed-node shortcut and fall back when
+that policy applies. Do not reuse admission across calls. Bound admission and
+comparison work; exceeding a depth/node/step bound must fall back, never introduce
+a rejection or skip original validation.
+
+Guard all existing serializer runtime dependencies with captured descriptors.
+Use captured safe own-descriptor operations for the new comparison itself, not
+inherited lookup or caller hooks. A changed intrinsic executes the original path.
+No schema validation result, canonical byte content key, DB observation or
+business-state proof is cached. Caller mutation is reread on every invocation.
+Original tests, clocks, SQL counts/ownership and error order remain protected.
