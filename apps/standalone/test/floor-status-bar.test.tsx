@@ -236,21 +236,21 @@ describe("the floor's status bar", () => {
     const view = render(bar({ local, link: online }));
     expect(
       (await screen.findByRole("button", { name: "Связь с хостом: На связи с хостом" })).innerHTML,
-    ).toContain('data-tone=\"ok\"');
+    ).toContain('data-tone="ok"');
     view.rerender(
       bar({ local, link: online, sync: { ...SYNCED, kind: "failed", failure: "host" } }),
     );
     expect(
       screen.getByRole("button", { name: "Связь с хостом: На связи с хостом" }).innerHTML,
-    ).toContain('data-tone=\"warn\"');
+    ).toContain('data-tone="warn"');
     view.rerender(bar({ local, link: { ...online, state: "connecting" } }));
     expect(
       screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
-    ).toContain('data-tone=\"warn\"');
+    ).toContain('data-tone="warn"');
     view.rerender(bar({ local, link: null }));
     expect(
       screen.getByRole("button", { name: "Связь с хостом: Подключение к хосту…" }).innerHTML,
-    ).toContain('data-tone=\"neutral\"');
+    ).toContain('data-tone="neutral"');
   });
 
   it("reads the names again after every sync", async () => {

@@ -940,8 +940,16 @@ describe("request builders produce their fixtures exactly", () => {
     });
     expect(aggregation).toStrictEqual(fixture("device-shift-create.json"));
     // The hidden box capacity of a validation shift is the product's: left out.
-    const { boxCapacity: _hidden, ...hidden } = typed;
-    expect(deviceShiftCreate({ ...hidden, mode: "validation" })).not.toHaveProperty("boxCapacity");
+    expect(
+      deviceShiftCreate({
+        requestId: typed.requestId,
+        productId: typed.productId,
+        boxTemplateId: typed.boxTemplateId,
+        productionDate: typed.productionDate,
+        plannedQty: null,
+        mode: "validation",
+      }),
+    ).not.toHaveProperty("boxCapacity");
     // A duplicate is printed only by a validation shift.
     expect(deviceShiftCreateSchema.safeParse({ ...policy, mode: "aggregation" }).success).toBe(
       false,

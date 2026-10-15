@@ -84,7 +84,7 @@ const cache = new Map<string, PhotoAccent | null>();
  */
 export async function accentOfPhoto(src: string, checksum: string): Promise<PhotoAccent | null> {
   if (cache.has(checksum)) return cache.get(checksum) ?? null;
-  let accent: PhotoAccent | null = null;
+  let accent: PhotoAccent | null;
   try {
     const image = new Image();
     image.src = src;
