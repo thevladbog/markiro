@@ -31,6 +31,7 @@
 - `platform-contracts`: 41 файл, 409 тестов, typecheck, lint, build.
 - `db`: `pnpm test` — 77 файлов прошли, 59 пропущено (БД); typecheck, lint, build. Схемный тест Д1 (4) зелёный.
 - `api`: typecheck, lint, build; чистые тесты (blob 11, keys 5, env, payload 4, views 4, retention 2, routes 3, OpenAPI с 266 схемами, инвентарь маршрутов с `.env.example`) зелёные; мутант «убрать `maxOutputLength`» убит.
+- `api`, полный `pnpm test` (без БД и без переменных окружения): 233 файла прошли, 196 пропущено (БД), 28 упали — все из-за окружения (ZodError `loadEnv` без обязательных переменных, `db` не создан, `listen EPERM` на loopback), ни один не относится к диагностике; `openapi-docs.test.ts` (шлюз покрытия документации по всем маршрутам) и `platform-http-boundary` не удалось выполнить из-за `listen EPERM` — прогнать вне песочницы.
 - `standalone`: полный Vitest 276 файлов / 7265 тестов (до Ч1; Ч1 отдельно 2 из 2), typecheck, lint; `pnpm test:standalone-support:contract` и `node --test tools/standalone-support/test/decrypt.test.mjs` зелёные.
 - `saas-admin`: полный Vitest 63 файла / 641 тест, typecheck, lint, build. `@markiro/ui`: 263 теста, typecheck, lint, build.
 - `deploy/yandex`: `node --test deploy/yandex/test/*.test.mjs` — 122 из 122.
