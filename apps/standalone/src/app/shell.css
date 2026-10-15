@@ -503,6 +503,10 @@
   padding: 12px 24px 0;
 }
 
+.floor-update {
+  margin-top: var(--sp-3);
+}
+
 .office-banner:empty {
   position: absolute;
   width: 0;

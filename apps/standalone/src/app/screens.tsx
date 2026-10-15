@@ -33,6 +33,7 @@ export function HostMissingScreen({
   address,
   onRetry,
   onNetwork,
+  onUpdate = null,
 }: {
   reason: HostProbeErrorCode;
   address: string;
@@ -40,6 +41,8 @@ export function HostMissingScreen({
   onRetry: () => void;
   /** Pair with a host in the network instead; `null` for a device that is already paired. */
   onNetwork: (() => void) | null;
+  /** «Обновить с хоста» (plan ОБН-3, ЛО16): only for `app_too_old` with a package on offer. */
+  onUpdate?: (() => void) | null;
 }) {
   const { t } = useTranslation();
   const versionMismatch = reason === "host_too_old" || reason === "app_too_old";
@@ -56,6 +59,9 @@ export function HostMissingScreen({
           <Button variant="secondary" onClick={onNetwork}>
             {t("shell.hostMissing.network")}
           </Button>
+        )}
+        {reason === "app_too_old" && onUpdate !== null && (
+          <Button onClick={onUpdate}>{t("shell.version.fromHost")}</Button>
         )}
         <Button onClick={onRetry}>{t("shell.hostMissing.retry")}</Button>
       </div>

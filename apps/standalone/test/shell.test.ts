@@ -221,6 +221,39 @@ describe("nextShellView", () => {
   });
 });
 
+describe("a PC paired with a host in the network, when the versions do not match (plan ОБН-3)", () => {
+  const remote: DeviceStatus = { ...DEVICE_STATUS, hostAddress: "https://192.168.1.10:45710" };
+  const refused = linkStatus({
+    state: "offline",
+    lastContactAt: null,
+    lastError: "app_too_old",
+    hostVersion: "0.3.0",
+    hostProtocol: 4,
+    hostMinProtocol: 4,
+  });
+
+  it("shows an office PC the version screen: the office is closed to it", () => {
+    const state = paired({
+      device: { kind: "ready", status: { ...remote, kind: "office" } },
+      link: refused,
+    });
+    expect(nextShellView(state, ADDRESS)).toEqual({
+      kind: "host_missing",
+      reason: "app_too_old",
+    });
+    const older = { ...state, link: { ...refused, lastError: "host_too_old" } } as ShellState;
+    expect(nextShellView(older, ADDRESS)).toEqual({
+      kind: "host_missing",
+      reason: "host_too_old",
+    });
+  });
+
+  it("keeps a station on its floor: it works offline, and the floor offers the update", () => {
+    const state = paired({ device: { kind: "ready", status: remote }, link: refused });
+    expect(nextShellView(state, ADDRESS)).toEqual({ kind: "floor" });
+  });
+});
+
 describe("shellReducer", () => {
   it("opens the office sign-in, with a note when there is one", () => {
     expect(shellReducer(paired(), { type: "office_requested" }).office).toEqual({

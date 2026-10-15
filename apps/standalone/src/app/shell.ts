@@ -323,6 +323,14 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
       // stays offline-first and a stale probe never blocks the floor.
       return { kind: "host_missing", reason: localHost.reason };
     }
+  } else if (status.kind === "office" && state.office.kind !== "open") {
+    // Plan ОБН-3: an office PC paired with a host in the network has no
+    // floor and no office its host takes; it says why. A station keeps its
+    // floor offline, and the floor offers the update (`FloorUpdateLine`).
+    const refusal = state.link?.lastError;
+    if (refusal === "app_too_old" || refusal === "host_too_old") {
+      return { kind: "host_missing", reason: refusal };
+    }
   }
   switch (state.office.kind) {
     case "closed":

@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 
 import { FloorApp } from "../floor/FloorApp.js";
 import { FloorStatusBar, type FloorBarTools } from "../floor/FloorStatusBar.js";
+import { FloorUpdatePanel } from "../floor/FloorUpdatePanel.js";
 import { createGatedScanSource } from "../floor/gated-scan-source.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import {
@@ -54,7 +55,9 @@ import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.
 import { countUnsentRecords } from "../local/outbox.js";
 import type { UpdatesApi } from "../update/updates-api.js";
 import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
+import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
 import { useHostUpdateOffer } from "../update/use-host-offer.js";
+import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
 import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
@@ -319,6 +322,11 @@ function AppScreens({
     host: hostApi,
     updates,
   });
+  // «Обновить с хоста» where no office opens (the version screen, a station
+  // the host refuses): the dialog, and the shell's own install after it.
+  const updateShell = useUpdateShell();
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const offerToInstall = updateOffer.kind === "available" ? updateOffer : null;
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
@@ -888,6 +896,9 @@ function AppScreens({
           address={address}
           onRetry={retryProbe}
           onNetwork={unpaired ? () => dispatch({ type: "network_pairing_requested" }) : null}
+          onUpdate={
+            offerToInstall === null || pairedStatus === null ? null : () => setUpdateOpen(true)
+          }
         />
       )}
       {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
@@ -975,6 +986,7 @@ function AppScreens({
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
             license={stationLicense}
+            updateOffer={updateOffer}
             watchScanners={hardwareApi.watchScanners}
             tools={floorTools}
             {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
@@ -991,21 +1003,26 @@ function AppScreens({
               onBack={() => setScannerSetup(false)}
             />
           ) : view.kind === "floor" ? (
-            <OperatorSignIn
-              // A number or PIN typed under another pairing or line is not kept.
-              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
-              local={localDb}
-              pairing={pairedStatus}
-              lineId={pairedStatus.lineId}
-              sync={state.sync}
-              notice={state.floorNotice}
-              source={floorGate.source}
-              onSignedIn={operatorSignedIn}
-              onSync={signInSync.request}
-              onOffice={openOffice}
-              watchScanners={hardwareApi.watchScanners}
-              onScannerSettings={() => setScannerSetup(true)}
-            />
+            <>
+              {offerToInstall?.required === true && (
+                <FloorUpdatePanel offer={offerToInstall} onUpdate={() => setUpdateOpen(true)} />
+              )}
+              <OperatorSignIn
+                // A number or PIN typed under another pairing or line is not kept.
+                key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
+                local={localDb}
+                pairing={pairedStatus}
+                lineId={pairedStatus.lineId}
+                sync={state.sync}
+                notice={state.floorNotice}
+                source={floorGate.source}
+                onSignedIn={operatorSignedIn}
+                onSync={signInSync.request}
+                onOffice={openOffice}
+                watchScanners={hardwareApi.watchScanners}
+                onScannerSettings={() => setScannerSetup(true)}
+              />
+            </>
           ) : (
             <UnpairContext.Provider value={unpairApi}>
               <FloorApp
@@ -1049,6 +1066,16 @@ function AppScreens({
           hostAddress={remoteAddress}
           onChangeAddress={changeAddress}
           link={state.link}
+        />
+      )}
+      {offerToInstall !== null && (
+        <UpdateFromHostDialog
+          open={updateOpen}
+          offer={offerToInstall}
+          onClose={() => setUpdateOpen(false)}
+          // No office here: no `app.update.start` report (its route is the
+          // office's); Windows' administrator prompt is the permission.
+          start={(report) => updateShell.install(report.path, report.confirmations)}
         />
       )}
     </main>
