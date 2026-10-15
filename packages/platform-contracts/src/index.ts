@@ -743,6 +743,8 @@ export type { PublicApiScope } from "./public-api.js";
 export * from "./offline-grants.js";
 export * from "./standalone-license.js";
 export * from "./standalone-licenses.js";
+export * from "./standalone-support.js";
+export * from "./standalone-diagnostics.js";
 
 export {
   publicInventoryStatusSchema,
