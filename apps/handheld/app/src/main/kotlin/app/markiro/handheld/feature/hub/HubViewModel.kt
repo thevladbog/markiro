@@ -76,6 +76,8 @@ data class HubUi(
     val palletsPending: Int = 0,
     /** The entry «Продолжить» is going through, or how it was refused; the list's own states. */
     val dialog: app.markiro.handheld.feature.shift.ShiftDialog? = null,
+    /** A device paired with a host: no inventory and no write-off tiles (spec 8.7). */
+    val hostMode: Boolean = false,
 )
 
 sealed interface HubEvent {
@@ -251,6 +253,7 @@ class HubViewModel(
             printerAttentionPurposes = printer.attention,
             unprintedLabels = unprinted,
             organization = cfg?.organizationName.orEmpty(),
+            hostMode = cfg?.backend == "host",
             operatorName = ses.operator?.name.orEmpty(),
             lineName = cfg?.lineName,
             shifts = cfg?.shiftsCount,

@@ -140,8 +140,8 @@ fun HubScreen(
                 val stamp = state.countsAt?.takeIf { !state.reachable }
                     ?.let { " · " + stringResource(R.string.common_data_as_of, TimeText.hhmm(it)) }
                     .orEmpty()
-                val tiles: List<@Composable (Modifier) -> Unit> = listOf(
-                    { modifier ->
+                val byTile: Map<HubTile, @Composable (Modifier) -> Unit> = mapOf(
+                    HubTile.SHIFT to { modifier ->
                         Tile(
                             Icons.Outlined.Factory,
                             stringResource(R.string.hub_tile_shift),
@@ -152,7 +152,7 @@ fun HubScreen(
                             statusTone = Tone.Neutral,
                         )
                     },
-                    { modifier ->
+                    HubTile.INVENTORY to { modifier ->
                         Tile(
                             Icons.Outlined.Inventory2,
                             stringResource(R.string.hub_tile_inventory),
@@ -163,7 +163,7 @@ fun HubScreen(
                             statusTone = if (state.continueInventoryNumber != null) Tone.Ok else Tone.Neutral,
                         )
                     },
-                    { modifier ->
+                    HubTile.WRITEOFF to { modifier ->
                         Tile(
                             Icons.Outlined.RemoveShoppingCart,
                             stringResource(R.string.hub_tile_writeoff),
@@ -179,7 +179,7 @@ fun HubScreen(
                             statusTone = if (state.canWriteoff == false || state.writeoffPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },
-                    { modifier ->
+                    HubTile.PALLETS to { modifier ->
                         Tile(
                             Icons.Outlined.Layers,
                             stringResource(R.string.hub_tile_pallets),
@@ -194,7 +194,7 @@ fun HubScreen(
                             statusTone = if (state.canBuildPallets == false || state.palletsPending > 0) Tone.Warn else Tone.Neutral,
                         )
                     },
-                    { modifier ->
+                    HubTile.SETTINGS to { modifier ->
                         Tile(
                             Icons.Outlined.Settings,
                             stringResource(R.string.hub_tile_settings),
@@ -209,6 +209,7 @@ fun HubScreen(
                         )
                     },
                 )
+                val tiles = visibleTiles(state.hostMode).map { byTile.getValue(it) }
                 // A narrow handheld (or enlarged system text) needs the full width
                 // for names such as «Инвентаризация» instead of splitting a word.
                 tiles.chunked(columns).forEach { rowTiles ->
@@ -221,6 +222,11 @@ fun HubScreen(
         }
     }
 }
+
+/** The tiles of the hub: a host has no inventory and no write-off (spec 8.7: hidden by `backend`, not deleted). */
+internal fun visibleTiles(hostMode: Boolean): List<HubTile> =
+    if (hostMode) listOf(HubTile.SHIFT, HubTile.PALLETS, HubTile.SETTINGS)
+    else listOf(HubTile.SHIFT, HubTile.INVENTORY, HubTile.WRITEOFF, HubTile.PALLETS, HubTile.SETTINGS)
 
 @Composable
 internal fun shiftsLabel(count: Int?): String = when (count) {

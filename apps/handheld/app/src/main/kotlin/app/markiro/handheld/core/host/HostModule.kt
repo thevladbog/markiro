@@ -2,6 +2,7 @@ package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.backend.HostBackend
 import app.markiro.handheld.core.box.SsccPool
+import app.markiro.handheld.core.network.RevocationBus
 import app.markiro.handheld.core.network.host.HostApi
 import app.markiro.handheld.core.network.host.HostHttpClient
 import app.markiro.handheld.core.network.host.HostResult
@@ -73,7 +74,19 @@ object HostModule {
 
     @Provides
     @Singleton
-    fun hostBackend(reference: HostReferenceSync, operators: OperatorDao): HostBackend = HostBackend(reference, operators)
+    fun hostRevocation(recovery: DeviceRecovery, bus: RevocationBus): HostRevocation = HostRevocation(recovery, bus)
+
+    @Provides
+    @Singleton
+    fun hostBackend(
+        api: HostApi,
+        config: DeviceConfigDao,
+        db: HandheldDatabase,
+        supplier: HostBlockSupplier,
+        revocation: HostRevocation,
+        reference: HostReferenceSync,
+        operators: OperatorDao,
+    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls { revocation.reject() }, reference, operators)
 
     @Provides
     fun hostBootstrap(

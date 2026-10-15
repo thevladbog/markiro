@@ -172,6 +172,9 @@ interface SsccPoolDao {
     )
     suspend fun rangeOf(prefix: String, extension: Int, serial: Long): SsccRangeEntity?
 
+    @Query("SELECT * FROM sscc_pool WHERE issuerPrefix = :prefix AND extensionDigit = :extension ORDER BY fromSerial")
+    suspend fun ranges(prefix: String, extension: Int): List<SsccRangeEntity>
+
     @Query("SELECT * FROM sscc_pool WHERE blockId IS NOT NULL")
     suspend fun allWithBlockId(): List<SsccRangeEntity>
 
