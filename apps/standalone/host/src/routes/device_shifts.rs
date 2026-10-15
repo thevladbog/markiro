@@ -463,7 +463,8 @@ pub async fn enter_shift(
             // Opening is the one move a license that ran out closes (plan
             // ЛЦ-2, spec §3.3); the owner's entry again above never is.
             crate::license::gate::require_new_shifts(&state, &mut tx).await?;
-            shifts::snapshot(
+            let own_logo = crate::license::gate::custom_branding(&state, &mut tx).await?;
+            let snapshot = shifts::snapshot(
                 &mut tx,
                 &shift.product_id,
                 &shift.box_template_id,
@@ -472,7 +473,14 @@ pub async fn enter_shift(
                 shift.pallet_sheet_template_id.as_deref(),
                 duplicate,
             )
-            .await?
+            .await?;
+            // Custom branding is a license feature: without it the shift freezes no
+            // logo, and every print of it falls back to the bundled Markiro one.
+            if own_logo {
+                snapshot
+            } else {
+                shifts::without_logo(snapshot)
+            }
         }
     };
     // After the templates, so a template that no longer fits is named first.

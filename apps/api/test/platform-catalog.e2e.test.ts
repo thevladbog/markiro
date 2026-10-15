@@ -559,6 +559,7 @@ describe.skipIf(!ready)("platform catalog", () => {
         inventoryEnabled: false,
         commerceMlEnabled: false,
         handheldEnabled: false,
+        customLogoEnabled: false,
       },
     };
     await admin.post(path).set("X-Markiro-Commercial-Version", "2").send(plan).expect(409);

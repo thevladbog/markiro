@@ -288,6 +288,7 @@ mod tests {
                 inventory: flags[4],
                 commerce_ml: flags[5],
                 handheld: flags[6],
+                custom_logo: true,
             };
             for other in Feature::ALL {
                 assert_eq!(other.enabled(&only), other != *feature, "{}", other.key());

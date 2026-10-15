@@ -45,6 +45,23 @@ pub async fn require_new_shifts(
     })))
 }
 
+/// Whether the license allows the organization's own logo on forms and
+/// labels (the feature `customLogo`; the trial and a host with no file allow
+/// it). Read on the same connection as the write it decorates.
+pub async fn custom_branding(
+    app: &AppState,
+    conn: &mut SqliteConnection,
+) -> Result<bool, ApiError> {
+    let snapshot = app
+        .license
+        .snapshot(app, conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(super::state::custom_branding_allowed(
+        &snapshot.evaluation.features,
+    ))
+}
+
 /// Every route the license's state closes (spec §3.3: `restricted`,
 /// `trial_expired`, `inn_mismatch`), with what it closes. A new route goes
 /// into this table or into [`NEVER`]: `tests/license_routes.rs` compares both

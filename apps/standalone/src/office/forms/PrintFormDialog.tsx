@@ -17,6 +17,7 @@ import type {
 } from "../../host/protocol.js";
 import { useOfficeFiles } from "../exports/office-files-context.js";
 import { OfficeFilesError, type SavedFolder } from "../exports/office-files.js";
+import { readFormLogo } from "../branding.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -275,7 +276,10 @@ export function PrintFormDialog({
       if (!alive.current) return;
       // Prepared again from the rows just read, at the moment of printing.
       const asked = formRequest(target, fresh, timeZone, format, new Date());
-      const form = asked === null ? null : prepareForm(asked);
+      // The organization's own logo, when the license allows custom branding; else Markiro's.
+      const logo = asked === null ? null : await readFormLogo(queryClient, api, call);
+      if (!alive.current) return;
+      const form = asked === null ? null : prepareForm({ ...asked, logo });
       // Nothing to draw: the rows just read were also the dialog's own, which now says why.
       if (form === null) return;
       const html = form.draw();

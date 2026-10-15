@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useSearchParams } from "react-router";
 
 import {
@@ -17,11 +18,12 @@ import {
 
 import { HostError } from "../../host/client.js";
 import { CODE_MAX_PAGE, type OfficeCodeItem } from "../../host/code-search.js";
-import { isCivilDate } from "../../lib/civil-date.js";
+import { civilToday, isCivilDate } from "../../lib/civil-date.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { civilDateLabel } from "../shifts/shift-list.js";
 import { datePickerTexts } from "../shifts/shift-text.js";
 import {
   boxLabel,
@@ -33,7 +35,17 @@ import {
   ShiftLink,
   type FormatInstant,
 } from "./CodeCard.js";
-import { classifySearchInput, searchQuery, type SearchInput } from "./code-query.js";
+import {
+  classifySearchInput,
+  DEFAULT_PRESET,
+  PERIOD_PRESETS,
+  presetOf,
+  presetPeriod,
+  searchQuery,
+  type CivilPeriod,
+  type PeriodPreset,
+  type SearchInput,
+} from "./code-query.js";
 import { RegistryTabs } from "./RegistryTabs.js";
 
 /** Counts with the thousands apart by a no-break space: «10 000». */
@@ -54,6 +66,8 @@ function askedOf(params: URLSearchParams): {
   input: SearchInput;
   from: string;
   to: string;
+  /** `?period=all`: every scan day, asked for on purpose. */
+  all: boolean;
   page: number;
 } {
   const codeHash = params.get("codeHash");
@@ -75,6 +89,7 @@ function askedOf(params: URLSearchParams): {
     input,
     from: isCivilDate(from) ? from : "",
     to: isCivilDate(to) ? to : "",
+    all: params.get("period") === "all",
     page: Number.isInteger(page) && page > 1 && page <= CODE_MAX_PAGE ? page : 1,
   };
 }
@@ -93,7 +108,13 @@ function inputText(input: SearchInput): string {
   }
 }
 
-function paramsOf(input: SearchInput, from: string, to: string, page: number): URLSearchParams {
+function paramsOf(
+  input: SearchInput,
+  from: string,
+  to: string,
+  page: number,
+  all = false,
+): URLSearchParams {
   const params = new URLSearchParams();
   if (input.kind === "code") params.set("codeHash", input.codeHash);
   if (input.kind === "gtin") params.set("gtin", input.gtin14);
@@ -101,8 +122,23 @@ function paramsOf(input: SearchInput, from: string, to: string, page: number): U
   if (input.kind === "shift") params.set("shift", input.number);
   if (from !== "") params.set("from", from);
   if (to !== "") params.set("to", to);
+  if (all) params.set("period", "all");
   if (page > 1) params.set("page", String(page));
   return params;
+}
+
+/** «Период: 03.10.2026 — 09.10.2026», or «всё время» without days. */
+function periodSentence(t: TFunction, period: CivilPeriod): string {
+  if (period.from === "" && period.to === "") return t("office.codeSearch.period.everything");
+  if (period.from !== "" && period.to !== "") {
+    return t("office.codeSearch.period.range", {
+      from: civilDateLabel(period.from),
+      to: civilDateLabel(period.to),
+    });
+  }
+  return period.from !== ""
+    ? t("office.codeSearch.period.since", { from: civilDateLabel(period.from) })
+    : t("office.codeSearch.period.until", { to: civilDateLabel(period.to) });
 }
 
 function isNotFound(error: unknown): boolean {
@@ -123,8 +159,8 @@ export function CodeSearchPage() {
   const [params, setParams] = useSearchParams();
   const asked = askedOf(params);
   const [text, setText] = useState(() => inputText(asked.input));
-  const [from, setFrom] = useState(asked.from);
-  const [to, setTo] = useState(asked.to);
+  // The days the user typed into the pickers; `null` follows the address.
+  const [edit, setEdit] = useState<CivilPeriod | null>(null);
   const [inputError, setInputError] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
@@ -132,7 +168,24 @@ export function CodeSearchPage() {
   const zoneReady = !org.isPending;
   const zone = formTimeZone(org.data);
   const format = instantFormat(zone);
-  const query = searchQuery(asked.input, asked.from, asked.to, zone, asked.page);
+  const today = civilToday(zone);
+  // «Поиск кодов» opens on the last seven days: with no criterion and no period
+  // in the address the default period applies. An explicit search is unchanged.
+  const defaulted =
+    asked.input.kind === "empty" && asked.from === "" && asked.to === "" && !asked.all;
+  const applied: CivilPeriod = defaulted
+    ? presetPeriod(DEFAULT_PRESET, today)
+    : { from: asked.from, to: asked.to };
+  const typing = classifySearchInput(text).kind !== "empty";
+  // A criterion typed over the default period is searched over all the time.
+  const shown: CivilPeriod = edit ?? (typing && defaulted ? { from: "", to: "" } : applied);
+  const from = shown.from;
+  const to = shown.to;
+  const query = searchQuery(asked.input, applied.from, applied.to, zone, asked.page, asked.all);
+  const activeShifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) =>
+    api.listShifts(token),
+  );
+  const activeShift = activeShifts.data?.find((shift) => shift.status === "active") ?? null;
   const codeHash = asked.input.kind === "code" ? asked.input.codeHash : null;
   const card = useOfficeQuery(
     codeKeys.card(codeHash ?? ""),
@@ -158,15 +211,29 @@ export function CodeSearchPage() {
     }
     setInputError(false);
     if (periodError) return;
-    setParams(paramsOf(input, from, to, 1));
+    // No criterion and no days: every day, on purpose (the host wants one of them).
+    const everything = input.kind === "empty" && from === "" && to === "";
+    setEdit(null);
+    setParams(paramsOf(input, from, to, 1, everything));
+  };
+  const choosePreset = (preset: PeriodPreset) => {
+    const input = classifySearchInput(text);
+    if (input.kind === "unknown") {
+      setInputError(true);
+      return;
+    }
+    setInputError(false);
+    const period = presetPeriod(preset, today);
+    setEdit(null);
+    setParams(paramsOf(input, period.from, period.to, 1, preset === "all"));
   };
   const reset = () => {
     setText("");
-    setFrom("");
-    setTo("");
+    setEdit(null);
     setInputError(false);
     setParams(new URLSearchParams());
   };
+  const activePreset = presetOf(shown, today);
 
   const columns: TableColumn<OfficeCodeItem>[] = [
     {
@@ -237,10 +304,20 @@ export function CodeSearchPage() {
         />
       );
     }
+    const periodNote = applied.from === "" && applied.to === "" ? null : periodSentence(t, applied);
     if (page.isPending) return <PageLoading />;
     if (page.isError) return <LoadError error={page.error} onRetry={() => void page.refetch()} />;
     if (page.data.total === 0) {
-      return <EmptyState title={t("office.codeSearch.nothingFound")} hint={notHere} />;
+      return (
+        <EmptyState
+          title={t("office.codeSearch.nothingFound")}
+          hint={
+            periodNote === null
+              ? notHere
+              : `${t("office.codeSearch.nothingInPeriod", { period: periodNote })} ${notHere}`
+          }
+        />
+      );
     }
     return (
       <Card>
@@ -257,7 +334,9 @@ export function CodeSearchPage() {
             label={t("office.codeSearch.pager")}
             page={page.data.page}
             pageCount={page.data.pageCount}
-            onPage={(next) => setParams(paramsOf(asked.input, asked.from, asked.to, next))}
+            onPage={(next) =>
+              setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all))
+            }
           />
         )}
       </Card>
@@ -294,14 +373,14 @@ export function CodeSearchPage() {
             label={t("office.codeSearch.from")}
             {...datePickerTexts(t)}
             {...(from === "" ? {} : { value: from })}
-            onValueChange={(value) => setFrom(value ?? "")}
+            onValueChange={(value) => setEdit({ from: value ?? "", to })}
           />
           <DatePicker
             label={t("office.codeSearch.to")}
             {...datePickerTexts(t)}
             {...(to === "" ? {} : { value: to })}
             {...(periodError ? { error: t("office.codeSearch.periodBackwards") } : {})}
-            onValueChange={(value) => setTo(value ?? "")}
+            onValueChange={(value) => setEdit({ from, to: value ?? "" })}
           />
           <Button type="submit">{t("office.codeSearch.submit")}</Button>
           {/* As tall as the fields beside it: the filter bar's own reset button is the compact one. */}
@@ -309,7 +388,34 @@ export function CodeSearchPage() {
             {t("office.codeSearch.reset")}
           </Button>
         </FilterBar>
+        <div className="code-period" role="group" aria-label={t("office.codeSearch.period.label")}>
+          {PERIOD_PRESETS.map((preset) => (
+            <Button
+              key={preset}
+              type="button"
+              variant={activePreset === preset ? "primary" : "secondary"}
+              aria-pressed={activePreset === preset}
+              onClick={() => choosePreset(preset)}
+            >
+              {t(`office.codeSearch.period.${preset}`)}
+            </Button>
+          ))}
+        </div>
       </form>
+      {codeHash === null && query !== null && (
+        <p className="office-note" data-testid="code-period-note">
+          {[
+            t("office.codeSearch.period.applied", { period: periodSentence(t, applied) }),
+            defaulted ? t("office.codeSearch.period.default") : null,
+            t("office.codeSearch.period.todayIs", { date: civilDateLabel(today) }),
+            activeShift === null
+              ? null
+              : t("office.codeSearch.period.activeShift", { number: activeShift.number }),
+          ]
+            .filter((part) => part !== null)
+            .join(". ")}
+        </p>
+      )}
       {codeHash !== null && (asked.from !== "" || asked.to !== "") && (
         <p className="office-note">{t("office.codeSearch.periodIgnored")}</p>
       )}

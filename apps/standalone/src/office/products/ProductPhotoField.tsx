@@ -109,7 +109,7 @@ function PhotoCard({
         ) : (
           <img
             className="product-photo-field__preview"
-            src={`data:image/jpeg;base64,${photo.dataBase64}`}
+            src={`data:${photo.mediaType};base64,${photo.dataBase64}`}
             alt={alt}
             width={photo.width}
             height={photo.height}

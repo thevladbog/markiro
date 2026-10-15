@@ -132,6 +132,7 @@ describe("usageWarnings (plan Д10)", () => {
       inventory: false,
       commerceMl: false,
       handheld: false,
+      customLogo: false,
     },
   };
 

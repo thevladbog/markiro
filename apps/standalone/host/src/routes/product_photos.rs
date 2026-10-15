@@ -1,8 +1,11 @@
 //! A product's photo (plan ТОВ): `GET /v1/office/products/{id}/photo` (every
 //! office role), `PUT` and `DELETE` (administrators and technologists, as
 //! every catalog write). The office makes the photo a JPEG of at most
-//! 640 × 640 and 300 000 bytes in its webview; the host checks the sides, the
-//! length and the JPEG signature (`validate::product_photo`) and keeps one row
+//! 640 × 640 and 300 000 bytes in its webview (a JPEG, or a PNG / WebP when
+//! the picture has transparency); the host checks the sides, the length and
+//! the magic bytes (`validate::product_photo`), stores the true media type
+//! (the answer carries it as `mediaType`; the picture goes as base64 inside
+//! JSON, so no content-type or sniffing is involved) and keeps one row
 //! per product or none. It never parses the picture, as the organization's
 //! logo (`org_logo.rs`).
 //!
@@ -48,23 +51,24 @@ pub async fn read_photo(
     id: &str,
 ) -> Result<Option<ProductPhoto>, ApiError> {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    let row: Option<(u32, u32, Vec<u8>, String, String)> = sqlx::query_as(
-        "SELECT width, height, data, checksum, updated_at FROM product_photos \
+    let row: Option<(u32, u32, Vec<u8>, String, String, String)> = sqlx::query_as(
+        "SELECT width, height, data, checksum, updated_at, media_type FROM product_photos \
          WHERE product_id = ?",
     )
     .bind(id)
     .fetch_optional(conn)
     .await
     .map_err(ApiError::internal)?;
-    Ok(
-        row.map(|(width, height, data, checksum, updated_at)| ProductPhoto {
+    Ok(row.map(
+        |(width, height, data, checksum, updated_at, media_type)| ProductPhoto {
             width,
             height,
             data_base64: STANDARD.encode(data),
+            media_type,
             checksum,
             updated_at,
-        }),
-    )
+        },
+    ))
 }
 
 pub async fn get_photo(
@@ -86,7 +90,7 @@ pub async fn put_photo(
     ApiJson(put): ApiJson<ProductPhotoPut>,
 ) -> Result<Json<ProductPhotoState>, ApiError> {
     context.require_catalog()?;
-    let bytes = validate::product_photo(put.width, put.height, &put.data_base64)?;
+    let (bytes, media_type) = validate::product_photo(put.width, put.height, &put.data_base64)?;
     let checksum = crate::backup::identity::sha256_hex(&bytes);
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
@@ -104,10 +108,12 @@ pub async fn put_photo(
         }
     }
     sqlx::query(
-        "INSERT INTO product_photos (product_id, width, height, data, checksum, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (product_id) DO UPDATE SET \
+        "INSERT INTO product_photos \
+         (product_id, width, height, data, checksum, updated_at, media_type) \
+         VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (product_id) DO UPDATE SET \
          width = excluded.width, height = excluded.height, data = excluded.data, \
-         checksum = excluded.checksum, updated_at = excluded.updated_at",
+         checksum = excluded.checksum, updated_at = excluded.updated_at, \
+         media_type = excluded.media_type",
     )
     .bind(&id)
     .bind(put.width)
@@ -115,6 +121,7 @@ pub async fn put_photo(
     .bind(&bytes)
     .bind(&checksum)
     .bind(&at)
+    .bind(media_type)
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
@@ -128,7 +135,7 @@ pub async fn put_photo(
             target_type: Some("product"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "width": put.width, "height": put.height, "bytes": bytes.len() }),
+            details: json!({ "width": put.width, "height": put.height, "bytes": bytes.len(), "mediaType": media_type }),
         },
     )
     .await
@@ -141,6 +148,7 @@ pub async fn put_photo(
             width: put.width,
             height: put.height,
             data_base64: put.data_base64,
+            media_type: media_type.to_owned(),
             checksum,
             updated_at: at,
         }),

@@ -40,6 +40,7 @@ export function exportStandaloneRights(snapshot: EntitlementSnapshotV1): {
         inventory: features.inventory === true,
         commerceMl: features.commerceMl === true,
         handheld: features.handheld === true,
+        customLogo: features.customLogo === true,
       },
     },
     unmapped: STANDALONE_FEATURE_KEYS.filter((key) => features[key] === null),
@@ -111,6 +112,7 @@ export interface PlanEntitlementRow {
   inventoryEnabled: boolean | null;
   commerceMlEnabled: boolean | null;
   handheldEnabled: boolean | null;
+  customLogoEnabled: boolean | null;
 }
 
 /**
@@ -131,6 +133,7 @@ export function exportPlanRights(plan: PlanEntitlementRow): {
     inventory: plan.inventoryEnabled,
     commerceMl: plan.commerceMlEnabled,
     handheld: plan.handheldEnabled,
+    customLogo: plan.customLogoEnabled,
   } satisfies Record<StandaloneFeatureKey, boolean | null>;
   return {
     rights: {
@@ -148,6 +151,7 @@ export function exportPlanRights(plan: PlanEntitlementRow): {
         inventory: features.inventory === true,
         commerceMl: features.commerceMl === true,
         handheld: features.handheld === true,
+        customLogo: features.customLogo === true,
       },
     },
     unmapped: STANDALONE_FEATURE_KEYS.filter((key) => features[key] === null),

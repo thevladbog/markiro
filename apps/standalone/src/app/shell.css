@@ -1230,6 +1230,14 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* «Поиск кодов»: the quick periods under the filters, one row. */
+.code-period {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* «Обзор»: cards in a grid that wraps by whole cards, a card never narrower than 320 px. */
 .overview-grid {
   display: grid;

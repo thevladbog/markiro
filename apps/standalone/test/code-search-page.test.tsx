@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { canonicalizeKm, kmHash } from "@markiro/domain";
 
 import { HostError } from "../src/host/client.js";
+import type { OfficeShift } from "../src/host/protocol.js";
 import type { OfficeCodeCard, OfficeCodePage } from "../src/host/code-search.js";
 import {
   fakeOfficeSession,
@@ -26,6 +27,12 @@ const CARD = fixture<OfficeCodeCard>("office-code-card.json");
 const VALIDATION_CARD = fixture<OfficeCodeCard>("office-code-card-validation.json");
 const GS = "\u001d";
 const KM = `010460068200001321S000002${GS}93Tail`;
+
+const ACTIVE_SHIFT = {
+  id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  number: "OCT26-004",
+  status: "active",
+} as unknown as OfficeShift;
 
 function session(user = fakeOfficeSession().user): FakeOfficeSession {
   const value = fakeOfficeSession({ user });
@@ -59,17 +66,109 @@ describe("«Поиск кодов» in the office", () => {
   });
 
   it("is open to a technologist", async () => {
+    freezeToday();
     const value = session(TECHNOLOGIST);
+    value.api.searchCodes.mockResolvedValue(PAGE);
     await openSearch(value);
-    expect(screen.getByText("Введите код, GTIN, SSCC или номер смены")).toBeTruthy();
+    await screen.findByText("Найдено: 2");
   });
 
-  it("asks the host nothing until a criterion is given, and says what to give", async () => {
+  it("opens on the last seven days of the organization's zone, newest first, and says so", async () => {
+    freezeToday();
     const value = session();
+    value.api.searchCodes.mockResolvedValue(PAGE);
+    value.api.listShifts.mockResolvedValue([
+      { ...ACTIVE_SHIFT, status: "closed", number: "OCT26-001" },
+      ACTIVE_SHIFT,
+    ]);
     await openSearch(value);
+    await screen.findByText("Найдено: 2");
     expect(screen.getByText(/история облака при переносе не переносится/)).toBeTruthy();
-    expect(value.api.searchCodes).not.toHaveBeenCalled();
+    // 2026-10-03 … 2026-10-09 in the site's zone (UTC+3), the later midnight excluded.
+    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+      fromMs: Date.parse("2026-10-02T21:00:00.000Z"),
+      toMs: Date.parse("2026-10-09T21:00:00.000Z"),
+    });
     expect(value.api.getCodeCard).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "7 дней" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Сегодня" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    const note = await screen.findByTestId("code-period-note");
+    await waitFor(() => expect(note.textContent).toContain("Активная смена: OCT26-004"));
+    expect(note.textContent).toContain("Период: 03.10.2026 — 09.10.2026");
+    expect(note.textContent).toContain("По умолчанию показаны последние 7 дней");
+    expect(note.textContent).toContain("Сегодня: 09.10.2026");
+  });
+
+  it("switches the period with the quick chips: today, 30 days, all the time, 7 days again", async () => {
+    freezeToday();
+    const value = session();
+    value.api.searchCodes.mockResolvedValue(PAGE);
+    await openSearch(value);
+    await screen.findByText("Найдено: 2");
+    const lastCall = () => value.api.searchCodes.mock.calls.at(-1)?.[1];
+    fireEvent.click(screen.getByRole("button", { name: "Сегодня" }));
+    await waitFor(() =>
+      expect(lastCall()).toEqual({
+        fromMs: Date.parse("2026-10-08T21:00:00.000Z"),
+        toMs: Date.parse("2026-10-09T21:00:00.000Z"),
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "30 дней" }));
+    await waitFor(() =>
+      expect(lastCall()).toEqual({
+        fromMs: Date.parse("2026-09-09T21:00:00.000Z"),
+        toMs: Date.parse("2026-10-09T21:00:00.000Z"),
+      }),
+    );
+    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Всё время" }));
+    await waitFor(() => expect(lastCall()).toEqual({ fromMs: 0 }));
+    expect(screen.getByTestId("code-period-note").textContent).toContain("Период: всё время");
+    fireEvent.click(screen.getByRole("button", { name: "7 дней" }));
+    await waitFor(() =>
+      expect(lastCall()).toEqual({
+        fromMs: Date.parse("2026-10-02T21:00:00.000Z"),
+        toMs: Date.parse("2026-10-09T21:00:00.000Z"),
+      }),
+    );
+  });
+
+  it("says which period found nothing, and offers all the time", async () => {
+    freezeToday();
+    const value = session();
+    value.api.searchCodes.mockResolvedValue({ ...PAGE, items: [], total: 0 });
+    await openSearch(value);
+    await screen.findByText("Ничего не найдено");
+    expect(
+      screen.getByText(/За период 03\.10\.2026 — 09\.10\.2026 ничего не нашлось/),
+    ).toBeTruthy();
+  });
+
+  it("does not narrow an explicit search to the default days", async () => {
+    freezeToday();
+    const value = session();
+    value.api.searchCodes.mockResolvedValue(PAGE);
+    await openSearch(value);
+    await screen.findByText("Найдено: 2");
+    fireEvent.change(screen.getByLabelText("Код, GTIN, SSCC или номер смены"), {
+      target: { value: "(00)046006820000015000" },
+    });
+    // Typing a criterion over the untouched default days leaves the pickers empty.
+    expect(screen.getByRole("button", { name: "Всё время" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Найти" }));
+    await waitFor(() =>
+      expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+        sscc: "046006820000015000",
+      }),
+    );
   });
 
   it("opens a scanned code's card by its hash: its full text, where it is, every box and its history", async () => {
@@ -82,7 +181,10 @@ describe("«Поиск кодов» in the office", () => {
       "office-session-token",
       kmHash(canonicalizeKm(KM)),
     );
-    expect(value.api.searchCodes).not.toHaveBeenCalled();
+    // Only the default period was searched; a code is asked for by its card.
+    expect(
+      value.api.searchCodes.mock.calls.every(([, query]) => query.codeHash === undefined),
+    ).toBe(true);
     // The code goes to the host as its hash only.
     expect(JSON.stringify(value.api.getCodeCard.mock.calls)).not.toContain("S000002");
     // The scan that owns it now is in a closed box.
@@ -223,9 +325,10 @@ describe("«Поиск кодов» in the office", () => {
   it("refuses what is no criterion without asking the host", async () => {
     const value = session();
     await openSearch(value);
+    await waitFor(() => expect(value.api.searchCodes).toHaveBeenCalledTimes(1));
     search("молоко");
     await screen.findByText(/Это не код маркировки, не GTIN, не SSCC и не номер смены/);
-    expect(value.api.searchCodes).not.toHaveBeenCalled();
+    expect(value.api.searchCodes).toHaveBeenCalledTimes(1);
   });
 
   it("sends a GTIN with the period's days as the organization's midnights", async () => {
@@ -252,9 +355,13 @@ describe("«Поиск кодов» in the office", () => {
     pickDate("Сканирован с", "8 октября 2026");
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));
     await screen.findByText("Найдено: 2");
-    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
-      fromMs: Date.parse("2026-10-07T21:00:00.000Z"),
-    });
+    // The other end stays the default's: today.
+    await waitFor(() =>
+      expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+        fromMs: Date.parse("2026-10-07T21:00:00.000Z"),
+        toMs: Date.parse("2026-10-09T21:00:00.000Z"),
+      }),
+    );
   });
 
   it("searches by a shift's number typed in any case", async () => {
@@ -299,7 +406,6 @@ describe("«Поиск кодов» in the office", () => {
       )
       .mockResolvedValueOnce(PAGE);
     await openSearch(value);
-    search("04600682000013");
     fireEvent.click(await screen.findByRole("button", { name: "Повторить" }));
     await screen.findByText("Найдено: 2");
   });

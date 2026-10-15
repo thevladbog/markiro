@@ -43,7 +43,8 @@
     "chzIntegration": true,
     "inventory": false,
     "commerceMl": false,
-    "handheld": true
+    "handheld": true,
+    "customLogo": true
   },
   "emergency": { "available": false, "until": null }
 }

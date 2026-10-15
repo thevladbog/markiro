@@ -101,6 +101,7 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
       width: 2,
       height: 1,
       dataBase64: "/9j/4AAQSkZJRgABAQ==",
+      mediaType: "image/jpeg" as const,
       checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
       updatedAt: "2026-10-13T09:00:00.000Z",
     };

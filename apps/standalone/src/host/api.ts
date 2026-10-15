@@ -666,7 +666,8 @@ export function createHostApi(client: HostClient): HostApi {
       }),
     putProductPhoto: (token, id, put) =>
       client.request("PUT", `/v1/office/products/${id}/photo`, {
-        body: put,
+        // Only the wire's three fields: the host derives the media type from the bytes.
+        body: { width: put.width, height: put.height, dataBase64: put.dataBase64 },
         officeToken: token,
         schema: productPhotoStateSchema,
       }),

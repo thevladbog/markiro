@@ -5,11 +5,17 @@ import userEvent from "@testing-library/user-event";
 import "../src/i18n/index.js";
 import { CatalogP1Fields } from "../src/pages/catalog/CatalogP1Fields.js";
 afterEach(cleanup);
-it("preserves four unresolved choices and only offers server-approved named policies", () => {
+it("preserves five unresolved choices and only offers server-approved named policies", () => {
   render(
     <ThemeProvider>
       <CatalogP1Fields
-        values={{ chzIntegration: null, inventory: null, commerceMl: null, handheld: null }}
+        values={{
+          chzIntegration: null,
+          inventory: null,
+          commerceMl: null,
+          handheld: null,
+          customLogo: null,
+        }}
         policyId={null}
         policies={[]}
         onFeatureChange={vi.fn()}
@@ -17,7 +23,7 @@ it("preserves four unresolved choices and only offers server-approved named poli
       />
     </ThemeProvider>,
   );
-  expect(screen.getAllByRole("combobox")).toHaveLength(5);
+  expect(screen.getAllByRole("combobox")).toHaveLength(6);
   expect(screen.queryByText(/Публикация недоступна/)).toBeNull();
   expect(screen.getByRole("combobox", { name: /Правила действия лицензии/ }).textContent).toContain(
     "Без дополнительных правил",

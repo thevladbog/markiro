@@ -1,0 +1,5 @@
+ALTER TYPE "public"."saas_entitlement_key" ADD VALUE 'customLogo';--> statement-breakpoint
+ALTER TABLE "addon_entitlements" DROP CONSTRAINT "addon_entitlements_key_shape_check";--> statement-breakpoint
+ALTER TABLE "plan_entitlements" ADD COLUMN "custom_logo_enabled" boolean;--> statement-breakpoint
+ALTER TABLE "addon_entitlements" ADD CONSTRAINT "addon_entitlements_key_shape_check" CHECK (("addon_entitlements"."entitlement_key"::text in ('lines', 'stations', 'kiosks', 'cabinetUsers') and "addon_entitlements"."quota_increment" is not null)
+        or ("addon_entitlements"."entitlement_key"::text in ('labelEditor', 'publicApi', 'pallets', 'chzIntegration', 'inventory', 'commerceMl', 'handheld', 'customLogo') and "addon_entitlements"."quota_increment" is null and "addon_entitlements"."feature_enabled" = true));

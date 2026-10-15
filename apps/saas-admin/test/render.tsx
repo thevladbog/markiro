@@ -211,6 +211,7 @@ export const DRAFT_PLAN = {
     inventoryEnabled: false,
     commerceMlEnabled: false,
     handheldEnabled: false,
+    customLogoEnabled: false,
     demoDurationDays: 14,
   },
 } satisfies CatalogVersionDto;
@@ -573,6 +574,7 @@ const SCHEDULED_PLAN = {
     inventoryEnabled: false,
     commerceMlEnabled: false,
     handheldEnabled: false,
+    customLogoEnabled: false,
     demoDurationDays: null,
   },
 } satisfies CatalogVersionDto;
@@ -666,6 +668,7 @@ export const TENANT_DETAIL = {
         inventoryEnabled: false,
         commerceMlEnabled: false,
         handheldEnabled: false,
+        customLogoEnabled: false,
         demoDurationDays: 14,
       },
     },
@@ -714,6 +717,7 @@ export const TENANT_DETAIL = {
         inventoryEnabled: false,
         commerceMlEnabled: false,
         handheldEnabled: false,
+        customLogoEnabled: false,
         demoDurationDays: null,
       },
     },

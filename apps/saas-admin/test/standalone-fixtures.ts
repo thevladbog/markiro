@@ -23,6 +23,7 @@ const RIGHTS = {
     inventory: false,
     commerceMl: false,
     handheld: false,
+    customLogo: false,
   },
 };
 

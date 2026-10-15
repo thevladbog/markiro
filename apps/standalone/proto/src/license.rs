@@ -100,7 +100,7 @@ pub mod plans {
 /// The file's quota keys, as the cloud names them (`ENTITLEMENT_QUOTA_KEYS`).
 pub const QUOTA_KEYS: [&str; 4] = ["lines", "stations", "kiosks", "cabinetUsers"];
 /// The file's feature keys (`ENTITLEMENT_FEATURE_KEYS`).
-pub const FEATURE_KEYS: [&str; 7] = [
+pub const FEATURE_KEYS: [&str; 8] = [
     "labelEditor",
     "publicApi",
     "pallets",
@@ -108,6 +108,7 @@ pub const FEATURE_KEYS: [&str; 7] = [
     "inventory",
     "commerceMl",
     "handheld",
+    "customLogo",
 ];
 
 /// A quota: the file's limit (`None`: no limit), what the site uses, and
@@ -141,6 +142,7 @@ pub struct LicenseFeatures {
     pub inventory: bool,
     pub commerce_ml: bool,
     pub handheld: bool,
+    pub custom_logo: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

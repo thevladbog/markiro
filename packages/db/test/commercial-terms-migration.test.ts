@@ -142,6 +142,7 @@ describe.skipIf(!databaseUrl)("commercial terms additive migration", () => {
         "inventory_enabled",
         "commerce_ml_enabled",
         "handheld_enabled",
+        "custom_logo_enabled",
       ],
       commercial_offer_lines: ["commercial_terms"],
       tenant_subscriptions: ["commercial_period"],

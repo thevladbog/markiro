@@ -208,6 +208,7 @@ export const LICENSE_FEATURE_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const;
 /**
  * The most a license file may hold (`verify::MAX_FILE_BYTES`). Zod's `.max()`
@@ -235,6 +236,8 @@ export const licenseFeaturesSchema = z.object({
   inventory: z.boolean(),
   commerceMl: z.boolean(),
   handheld: z.boolean(),
+  /** Custom branding: the organization's own logo on printed forms and labels. */
+  customLogo: z.boolean(),
 });
 
 /** `GET /v1/office/license`, and the answers of a load and of the emergency extension. */
@@ -768,15 +771,21 @@ export const officeProductSchema = z.object({
 });
 export type OfficeProduct = z.infer<typeof officeProductSchema>;
 
+/** The picture types a photo is kept as (beta 3.2: PNG and WebP keep transparency). */
+export const photoMediaTypeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
+export type PhotoMediaType = z.infer<typeof photoMediaTypeSchema>;
+
 /**
- * Mirrors `markiro_proto::ProductPhoto` (plan ТОВ): a JPEG the office made, at
- * most 640 × 640 and 300 000 bytes, in standard base64; `checksum` is SHA-256
- * of the bytes.
+ * Mirrors `markiro_proto::ProductPhoto` (plan ТОВ): a JPEG, PNG or WebP the
+ * office made, at most 640 × 640 and 300 000 bytes, in standard base64;
+ * `mediaType` is the host's reading of the magic bytes (a host before beta 3.2
+ * names none: a JPEG); `checksum` is SHA-256 of the bytes.
  */
 export const productPhotoSchema = z.object({
   width: z.number().int().min(1).max(640),
   height: z.number().int().min(1).max(640),
   dataBase64: base64Schema,
+  mediaType: photoMediaTypeSchema.default("image/jpeg"),
   checksum: sha256HexSchema,
   updatedAt: z.string(),
 });

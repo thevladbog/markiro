@@ -58,6 +58,7 @@ it("reads the current V4 catalog without widening saved V2 documents", async () 
       inventoryEnabled: false,
       commerceMlEnabled: false,
       handheldEnabled: false,
+      customLogoEnabled: false,
     },
   };
   const fetch = vi.fn(async () => jsonResponse(200, { items: [plan] }));
@@ -77,6 +78,7 @@ it("clones fully legacy unknown mapping through frozen V2 and preserves nulls in
       inventoryEnabled: null,
       commerceMlEnabled: null,
       handheldEnabled: null,
+      customLogoEnabled: null,
     },
   };
   const calls: RequestInit[] = [];
@@ -90,6 +92,7 @@ it("clones fully legacy unknown mapping through frozen V2 and preserves nulls in
         inventoryEnabled: _i,
         commerceMlEnabled: _m,
         handheldEnabled: _h,
+        customLogoEnabled: _l,
         ...plan
       } = v2.plan;
       void _;
@@ -97,6 +100,7 @@ it("clones fully legacy unknown mapping through frozen V2 and preserves nulls in
       void _i;
       void _m;
       void _h;
+      void _l;
       return jsonResponse(201, { ...v2, plan });
     }),
   );
@@ -118,6 +122,7 @@ it("does not silently clone partial or policy-bound unknown mapping using legacy
       inventoryEnabled: true,
       commerceMlEnabled: null,
       handheldEnabled: null,
+      customLogoEnabled: null,
     },
   };
   expect(() => catalogVersionToCreateInput(legacy)).toThrow();

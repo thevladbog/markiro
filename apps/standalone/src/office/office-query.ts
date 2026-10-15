@@ -21,6 +21,8 @@ import { useOfficeSession } from "./office-session.js";
 export const officeKeys = {
   org: ["office", "org"],
   orgLogo: ["office", "org-logo"],
+  /** The site's license (`GET /v1/office/license`): custom branding reads its features. */
+  license: ["office", "license"],
   palletSheets: ["office", "pallet-sheets"],
   sscc: ["office", "sscc"],
   users: ["office", "users"],

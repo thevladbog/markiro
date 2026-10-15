@@ -228,7 +228,7 @@ async fn setting_audits_the_size_without_the_bytes_and_clearing_audits_once() {
             "product.photo.set",
             "product",
             &id,
-            json!({ "width": 2, "height": 1, "bytes": 13 })
+            json!({ "width": 2, "height": 1, "bytes": 13, "mediaType": "image/jpeg" })
         )]
     );
     let details: Vec<String> = sqlx::query_scalar("SELECT details FROM audit_log")
@@ -566,4 +566,93 @@ async fn deleting_the_photo_of_an_unknown_product_is_not_found() {
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
     assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// A real 2 x 1 RGBA PNG: an opaque red pixel and a fully transparent one.
+const TRANSPARENT_PNG: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAD0lEQVR4nGP4z8AARAwMAAz8Af9c/RSVAAAAAElFTkSuQmCC";
+
+/// A real 1 x 1 lossless WebP.
+const LOSSLESS_WEBP: &str = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
+
+#[tokio::test]
+async fn a_transparent_png_is_kept_byte_for_byte_with_its_media_type() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let put = json!({ "width": 2, "height": 1, "dataBase64": TRANSPARENT_PNG });
+    let (status, body) = admin.call("PUT", &path(&id), Some(put)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["photo"]["mediaType"], "image/png");
+    assert_eq!(body["photo"]["dataBase64"], TRANSPARENT_PNG);
+    // The stored bytes are the sent bytes (the alpha channel is the PNG's own).
+    let (status, read) = admin.call("GET", &path(&id), None).await;
+    assert_eq!((status, read), (StatusCode::OK, body));
+    let kept: (String, Vec<u8>) =
+        sqlx::query_as("SELECT media_type, data FROM product_photos WHERE product_id = ?")
+            .bind(&id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(kept.0, "image/png");
+    assert_eq!(kept.1, STANDARD.decode(TRANSPARENT_PNG).unwrap());
+    // The audit row names the type, never the bytes.
+    let set = audit_trail(&admin.app, "product.photo.set").await;
+    assert_eq!(set[0].6["mediaType"], "image/png");
+    // A station reads the same type.
+    let (status, read) = admin
+        .app
+        .send(empty(with_device(
+            request("GET", &format!("/v1/device/products/{id}/photo")),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["photo"]["mediaType"], "image/png");
+}
+
+#[tokio::test]
+async fn a_webp_is_kept_and_a_jpeg_still_reads_as_jpeg() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let put = json!({ "width": 1, "height": 1, "dataBase64": LOSSLESS_WEBP });
+    let (status, body) = admin.call("PUT", &path(&id), Some(put)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["photo"]["mediaType"], "image/webp");
+    let (status, body) = admin.call("PUT", &path(&id), Some(photo())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["photo"]["mediaType"], "image/jpeg");
+}
+
+#[tokio::test]
+async fn pictures_that_are_not_a_photo_are_refused_by_their_own_header() {
+    let admin = admin().await;
+    let id = product(&admin).await;
+    let svg = STANDARD.encode("<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+    // The header's sides differ from the sent ones: a bomb hides behind a claim.
+    let png = json!({ "width": 1, "height": 1, "dataBase64": TRANSPARENT_PNG });
+    let mut huge = STANDARD.decode(TRANSPARENT_PNG).unwrap();
+    huge[16..20].copy_from_slice(&60_000u32.to_be_bytes());
+    let huge = json!({ "width": 2, "height": 1, "dataBase64": STANDARD.encode(huge) });
+    let gif = json!({ "width": 1, "height": 1, "dataBase64": STANDARD.encode(b"GIF89a\x01\x00\x01\x00") });
+    for (put, field) in [
+        (
+            json!({ "width": 1, "height": 1, "dataBase64": svg }),
+            "dataBase64",
+        ),
+        (png, "dataBase64"),
+        (huge, "dataBase64"),
+        (gif, "dataBase64"),
+    ] {
+        let (status, body) = admin.call("PUT", &path(&id), Some(put)).await;
+        assert_eq!(
+            refusal(status, &body),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!(field)
+            ),
+            "{body}"
+        );
+    }
+    assert_eq!(stored(&admin, &id).await, None);
 }

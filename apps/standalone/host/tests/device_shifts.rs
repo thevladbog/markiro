@@ -2552,6 +2552,49 @@ async fn the_entry_freezes_the_sheet_and_the_organization_with_its_logo() {
     assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), snapshot);
 }
 
+/// Custom branding is a license feature (`customLogo`): a file that lacks it
+/// (switched off, or issued before the key existed) freezes no logo, so every
+/// print falls back to the Markiro one; a file with it, the trial and a host
+/// with no file freeze the organization's own.
+#[tokio::test]
+async fn the_logo_is_frozen_only_when_the_license_allows_custom_branding() {
+    use support::license::load_ok;
+    let own = json!({ "width": 10, "height": 2, "pixelsBase64": LOGO });
+    // (what the file says about customLogo, the logo the entry freezes)
+    let cases: [(Option<bool>, Value); 4] = [
+        (None, Value::Null),
+        (Some(false), Value::Null),
+        (Some(true), own.clone()),
+        (Some(true), own.clone()),
+    ];
+    for (n, (feature, expected)) in cases.into_iter().enumerate() {
+        let admin = admin().await;
+        let setup = shift_setup(&admin).await;
+        set_logo(&admin).await;
+        // The last case is the trial: no file at all.
+        if n < 3 {
+            let host = admin.app.state.host_id.clone();
+            let signed = support::license::file(&host, |terms| match feature {
+                Some(on) => terms["features"]["customLogo"] = json!(on),
+                None => {
+                    terms["features"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("customLogo");
+                }
+            });
+            load_ok(&admin, &signed).await;
+        }
+        let (_, shift) = planned_with_sheet(&admin, &setup, None).await;
+        let (status, entered) = enter(&admin, &admin.key, &shift).await;
+        assert_eq!(status, StatusCode::OK, "{entered}");
+        assert_eq!(
+            entered["snapshot"]["organization"]["logo"], expected,
+            "case {n}: {feature:?}"
+        );
+    }
+}
+
 /// A later change of the sheet, the organization or the logo never reaches
 /// a shift that is open: its snapshot owns them.
 #[tokio::test]

@@ -16,7 +16,12 @@ import { fakeOfficeSession, type FakeOfficeSession } from "./support/office.js";
 
 const PRODUCT_ID = "6f1c2a7e-3b4d-4c5e-8f90-1a2b3c4d5e6f";
 const NAME = "Пиво светлое 0,5 л";
-const ENCODED = { width: 2, height: 1, dataBase64: "/9j/4AAQSkZJRgABAQ==" };
+const ENCODED = {
+  width: 2,
+  height: 1,
+  dataBase64: "/9j/4AAQSkZJRgABAQ==",
+  mediaType: "image/jpeg" as const,
+};
 const PHOTO: ProductPhoto = {
   ...ENCODED,
   checksum: "ae0e381fa858d6782d6859eb9337b80e670dc0021361fdd55d49299f1b4c26fd",
@@ -79,7 +84,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     expect(screen.getByRole("button", { name: /Загрузить фото/u })).toBeTruthy();
     expect(
       screen.getByText(
-        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ (JPEG).",
+        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ; прозрачный фон PNG и WebP сохраняется.",
       ),
     ).toBeTruthy();
     pick(JPEG);
@@ -94,6 +99,21 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     expect(fake.api.putProductPhoto).not.toHaveBeenCalled();
   });
 
+  it("shows a stored transparent PNG as a PNG, and puts only the wire's fields to the host", async () => {
+    const png: ProductPhoto = { ...PHOTO, mediaType: "image/png" };
+    const fake = session(png);
+    show(
+      fake,
+      PRODUCT_ID,
+      vi.fn<PhotoEncoder>(async () => ({ ...ENCODED, mediaType: "image/png" })),
+    );
+    const image = await screen.findByRole("img", { name: `Фото товара ${NAME}` });
+    expect(image.getAttribute("src")).toBe(`data:image/png;base64,${PHOTO.dataBase64}`);
+    fake.api.putProductPhoto.mockResolvedValue({ photo: png });
+    pick(JPEG);
+    await waitFor(() => expect(fake.api.putProductPhoto).toHaveBeenCalled());
+  });
+
   it("encodes a picked picture, writes it at once and shows it by the product's name", async () => {
     const fake = session();
     fake.api.putProductPhoto.mockResolvedValue({ photo: PHOTO });
@@ -103,7 +123,7 @@ describe("a product's photo in the office (plan ТОВ)", () => {
     expect(choose.tabIndex).toBe(0);
     expect(
       screen.getByText(
-        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ (JPEG).",
+        "JPEG, PNG или WebP. Фото уменьшается до 640 × 640 точек и сжимается до 300 КБ; прозрачный фон PNG и WebP сохраняется.",
       ),
     ).toBeTruthy();
     expect(

@@ -194,6 +194,7 @@ export async function readEntitlementFacts(
             inventory: plan.inventoryEnabled,
             commerceMl: plan.commerceMlEnabled,
             handheld: plan.handheldEnabled,
+            customLogo: plan.customLogoEnabled,
           },
         },
       }),

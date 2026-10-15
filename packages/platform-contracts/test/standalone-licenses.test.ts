@@ -90,6 +90,7 @@ describe("standalone license rights", () => {
         inventory: false,
         commerceMl: false,
         handheld: true,
+        customLogo: false,
       },
     };
     expect(standaloneLicenseRightsSchema.parse(rights)).toEqual(rights);
@@ -128,6 +129,7 @@ describe("standalone license payload tenant id (owner decision 2026-10-13)", () 
       inventory: false,
       commerceMl: false,
       handheld: true,
+      customLogo: false,
     },
     replaces: null,
   };
@@ -277,6 +279,7 @@ describe("standalone issuance confirmation and file", () => {
           inventory: false,
           commerceMl: false,
           handheld: true,
+          customLogo: false,
         },
       },
     };

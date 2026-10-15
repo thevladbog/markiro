@@ -20,7 +20,7 @@ use support::license::{
 fn all_features() -> Value {
     json!({
         "labelEditor": true, "publicApi": true, "pallets": true, "chzIntegration": true,
-        "inventory": true, "commerceMl": true, "handheld": true
+        "inventory": true, "commerceMl": true, "handheld": true, "customLogo": true
     })
 }
 

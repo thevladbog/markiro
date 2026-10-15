@@ -1005,9 +1005,17 @@ pub struct ProductPhoto {
     pub width: u32,
     pub height: u32,
     pub data_base64: String,
+    /// `image/jpeg`, `image/png` or `image/webp`, derived by the host from
+    /// the magic bytes; a host before beta 3.2 sends none (a JPEG).
+    #[serde(default = "jpeg_media_type")]
+    pub media_type: String,
     /// SHA-256 of the bytes in lower-case hex.
     pub checksum: String,
     pub updated_at: String,
+}
+
+fn jpeg_media_type() -> String {
+    "image/jpeg".to_owned()
 }
 
 /// `GET`, `PUT` and `DELETE /v1/office/products/{id}/photo`: the photo, or

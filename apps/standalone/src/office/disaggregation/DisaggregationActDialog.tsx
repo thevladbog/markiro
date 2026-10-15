@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,6 +13,7 @@ import { usePrintForm } from "../forms/form-printer-context.js";
 import { actFolder, openInBrowser, paint } from "../forms/print-form.js";
 import { storeForm } from "../forms/store-form.js";
 import { prepareForm } from "../forms/render-form.js";
+import { readFormLogo } from "../branding.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -54,6 +56,7 @@ export function DisaggregationActDialog({
   const files = useOfficeFiles();
   const print = usePrintForm();
   const session = useOfficeSession();
+  const queryClient = useQueryClient();
   const refreshFiles = useRefreshStoredFiles();
   const [hostCopy, setHostCopy] = useState<string | null>(null);
   const [variant, setVariant] = useState<DisaggregationReportVariant>("boxes");
@@ -103,7 +106,10 @@ export function DisaggregationActDialog({
       setStage(at);
       await paint();
       if (!alive.current) return;
-      const form = prepareForm({ kind: "act", rows: answer.data, timeZone });
+      // The organization's own logo, when the license allows custom branding; else Markiro's.
+      const logo = await readFormLogo(queryClient, session.api, session.call);
+      if (!alive.current) return;
+      const form = prepareForm({ kind: "act", rows: answer.data, timeZone, logo });
       if (form === null) return;
       const html = form.draw();
       // The host keeps the exact HTML first, printed or opened; a host that cannot never stops the act.
