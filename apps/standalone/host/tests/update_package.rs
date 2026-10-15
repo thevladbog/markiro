@@ -302,3 +302,27 @@ async fn a_host_without_packages_answers_not_found() {
         (StatusCode::NOT_FOUND, &json!("not_found"))
     );
 }
+
+#[tokio::test]
+async fn a_non_administrator_put_is_refused_before_the_body_and_keeps_the_upload() {
+    let admin = host_of("0.2.0").await;
+    let tech = admin.technologist().await;
+    let bytes = installer_bytes("0.3.0");
+    let (_, upload) = post_manifest(&admin, &admin.token, &signed_manifest("0.3.0", &bytes)).await;
+    let id = upload["uploadId"].as_str().unwrap().to_owned();
+    // A well-formed body: only the early check keeps it from being consumed
+    // (and the administrator's upload from being abandoned by the late one).
+    let (status, body) = put_installer(&admin, &tech, &id, bytes.clone(), Some(bytes.len())).await;
+    assert_eq!(
+        (status, &body["error"]["code"]),
+        (StatusCode::FORBIDDEN, &json!("forbidden"))
+    );
+    let (status, staged) =
+        put_installer(&admin, &admin.token, &id, bytes.clone(), Some(bytes.len())).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the administrator still finishes: {staged}"
+    );
+    assert_eq!(names(&updates(&admin)), [STAGED]);
+}
