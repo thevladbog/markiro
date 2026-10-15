@@ -2545,7 +2545,8 @@
             "update.package.stage": "{{actor}} загрузил(а) пакет {{version}} на хост",
             "update.package.promote": "пакет {{version}} стал текущим",
             "update.download": "{{actor}} скачал(о) пакет {{version}}",
-            "app.update.start": "{{actor}}: установка {{from}} → {{to}}"
+            "app.update.start": "{{actor}}: установка {{from}} → {{to}}",
+            "unknown": "другое событие обновления"
           }
         },
         "support": {

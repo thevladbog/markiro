@@ -20,7 +20,7 @@ export const updateDistributionContributor: SupportContributor = async ({ t, rea
       ...status.devices.map(
         (device) =>
           [
-            `${device.name} (${device.kind})`,
+            `${device.name} (${t(`office.about.update.devices.kind.${device.kind}`)})`,
             t("office.about.update.support.device", {
               version: device.appVersion,
               protocol: device.protocol,

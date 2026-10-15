@@ -133,6 +133,25 @@ describe("«Устройства и версии»", () => {
   });
 });
 
+describe("the update history", () => {
+  it("lists equal entries without a duplicate key and words an unknown action generically", async () => {
+    const entry = STATUS.history[0];
+    if (entry === undefined) throw new Error("no history in the fixture");
+    const session = sessionOf(TECHNOLOGIST);
+    session.api.getUpdateStatus.mockResolvedValue({
+      ...STATUS,
+      history: [entry, entry, { ...entry, action: "update.from.the.future" }],
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    renderWith(<DeviceVersionsBlock />, { session });
+    await screen.findByRole("heading", { name: "История обновлений", level: 4 });
+    expect(screen.getAllByText(/другое событие обновления/)).toHaveLength(1);
+    expect(screen.queryByText(/update\.from\.the\.future/)).toBeNull();
+    expect(errors.mock.calls.flat().join(" ")).not.toContain("same key");
+    errors.mockRestore();
+  });
+});
+
 describe("«С хоста»", () => {
   it("offers the administrator the update and opens «Обновить с хоста»", async () => {
     renderWith(<HostUpdateBlock />);

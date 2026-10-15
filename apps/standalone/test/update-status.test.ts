@@ -45,7 +45,7 @@ describe("«Устройства и версии»", () => {
     expect(block?.title).toBe("Раздача обновления");
     expect(block?.lines).toContainEqual(["Пакет на хосте", "проверен, 0.3.0"]);
     expect(block?.lines).toContainEqual([
-      "Станция линии 2 (station)",
+      "Станция линии 2 (станция)",
       "0.2.1 · протокол 3 · отстаёт",
     ]);
     expect(JSON.stringify(block)).not.toContain("7863191b");

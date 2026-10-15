@@ -1,4 +1,4 @@
-import type { TFunction } from "i18next";
+import type { i18n, TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { Card, StatusChip, Table, type TableColumn } from "@markiro/ui";
@@ -51,6 +51,12 @@ function summaryText(status: OfficeUpdateStatus, t: TFunction): string {
   return parts.join("; ");
 }
 
+/** An action a newer host names and this app does not know reads as a generic event. */
+function historyActionKey(action: string, i18n: i18n): string {
+  const key = `office.about.update.history.action.${action}`;
+  return i18n.exists(key) ? key : "office.about.update.history.action.unknown";
+}
+
 function Versions({
   status,
   format,
@@ -58,7 +64,7 @@ function Versions({
   status: OfficeUpdateStatus;
   format: (instant: string) => string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const columns: TableColumn<DeviceVersion>[] = [
     {
       key: "name",
@@ -138,10 +144,11 @@ function Versions({
         <p className="office-note">{t("office.about.update.history.empty")}</p>
       ) : (
         <ul className="update-history">
-          {status.history.map((item) => (
-            <li key={`${item.at}:${item.action}:${item.actor ?? ""}`}>
+          {status.history.map((item, index) => (
+            // Equal entries can repeat (one second, one actor): the order is the identity.
+            <li key={`${index}:${item.at}:${item.action}:${item.actor ?? ""}`}>
               {format(item.at)} —{" "}
-              {t(`office.about.update.history.action.${item.action}`, {
+              {t(historyActionKey(item.action, i18n), {
                 actor: item.actor ?? "—",
                 version: item.version ?? item.to ?? "",
                 from: item.from ?? "",
