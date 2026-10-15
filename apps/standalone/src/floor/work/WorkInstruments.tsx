@@ -307,22 +307,29 @@ export function LastScan({ text, tone, cued, lineRef }: LastScanProps) {
 
 export interface WorkFactsProps {
   facts: readonly { term: string; value: string }[];
+  /** The shift's scan history, under the figures (beta 3.2: it stands where the plan row stood). */
+  history?: ReactNode;
 }
 
 /** The shift's figures beside the box (the cloud's journal column, in its row style). */
-export function WorkFacts({ facts }: WorkFactsProps) {
+export function WorkFacts({ facts, history }: WorkFactsProps) {
   const { t } = useTranslation();
   return (
     <section className="work-instrument work-facts" aria-labelledby="work-facts-title">
-      <h2 id="work-facts-title">{t("floor.work.layout.summary")}</h2>
-      <dl>
-        {facts.map((fact) => (
-          <div key={fact.term}>
-            <dt>{fact.term}</dt>
-            <dd>{fact.value}</dd>
-          </div>
-        ))}
-      </dl>
+      {facts.length > 0 && (
+        <>
+          <h2 id="work-facts-title">{t("floor.work.layout.summary")}</h2>
+          <dl>
+            {facts.map((fact) => (
+              <div key={fact.term}>
+                <dt>{fact.term}</dt>
+                <dd>{fact.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+      {history}
     </section>
   );
 }

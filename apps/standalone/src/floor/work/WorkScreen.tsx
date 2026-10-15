@@ -106,6 +106,7 @@ import {
 } from "../unit-labels/use-unit-label-work.js";
 import { UnitLabelRefusedError } from "../unit-labels/unit-label-work.js";
 import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
+import { ScanHistory, ScanHistoryScreen } from "./ScanHistory.js";
 import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
 import { UnitLabelVerification } from "../unit-labels/UnitLabelVerification.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
@@ -280,6 +281,8 @@ type Stop =
    */
   | { kind: "system_error"; cause: "write" | "read" | "label" }
   | { kind: "confirm_close" }
+  /** The full scan history (beta 3.2), over the instruments. */
+  | { kind: "scan_history" }
   | { kind: "no_serials"; reason: "offline" | "exhausted" | "failed"; full: boolean }
   /**
    * Plan ПЛ-Ц: the shift works with pallets, but this station's copy has no
@@ -2287,17 +2290,15 @@ export function WorkScreen(props: WorkScreenProps) {
     stop?.kind === "closed" ||
     stop?.kind === "label" ||
     stop?.kind === "unit_label" ||
-    stop?.kind === "unit_history";
-  const planFact = {
-    term: t("floor.work.plan"),
-    value: plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty),
-  };
-  // A validation shift has no box to count (plan РЕЖ): its figures are in its panel.
+    stop?.kind === "unit_history" ||
+    stop?.kind === "scan_history";
+  // The plan is in the shift band at the top; a second row of it here repeated it (beta 3.2),
+  // and the scan history stands in its place. A validation shift has no box to count (plan РЕЖ):
+  // its figures are in its panel.
   const facts = validation
-    ? [planFact]
+    ? []
     : [
         { term: t("floor.work.closedBoxes"), value: formatQuantity(totals?.closedBoxes ?? 0) },
-        planFact,
         ...(totals !== null && totals.lastSscc !== null
           ? [{ term: t("floor.work.lastSscc"), value: formatSsccHri(totals.lastSscc) }]
           : []),
@@ -2351,7 +2352,9 @@ export function WorkScreen(props: WorkScreenProps) {
             counterpartyName={shift.snapshot.counterpartyName}
             accepted={totals?.accepted ?? 0}
             plannedQty={plannedQty}
-            local={props.local}
+            // The photo is read after the screen's own first read, so a failed first read stops
+            // the line as it did, whatever the band asks.
+            {...(totals === null ? {} : { local: props.local })}
             productId={shift.copy.productId}
           />
           {officeClosed && stop?.kind !== "closed" && (
@@ -2459,7 +2462,19 @@ export function WorkScreen(props: WorkScreenProps) {
                 cued={cued}
                 lineRef={lastRef}
               />
-              <WorkFacts facts={facts} />
+              <WorkFacts
+                facts={facts}
+                history={
+                  <ScanHistory
+                    local={props.local}
+                    pairing={props.pairing}
+                    shiftId={shift.copy.id}
+                    refreshKey={last}
+                    enabled={totals !== null}
+                    onOpenAll={() => setStop({ kind: "scan_history" })}
+                  />
+                }
+              />
             </div>
           </div>
         </div>
@@ -2667,6 +2682,17 @@ export function WorkScreen(props: WorkScreenProps) {
                   ? { start: "clear" as const }
                   : {})}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          </div>
+        )}
+        {stop?.kind === "scan_history" && (
+          <div className="work-screen__stage">
+            <ScanHistoryScreen
+              local={props.local}
+              pairing={props.pairing}
+              shiftId={shift.copy.id}
+              refreshKey={last}
+              onBack={() => setStop(null)}
             />
           </div>
         )}
