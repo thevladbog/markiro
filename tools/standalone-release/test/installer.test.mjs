@@ -231,7 +231,7 @@ test("the three roles are the only ones /ROLE= accepts, and every external comma
       .find((later) => !/^(?:\$\{(?:Else|EndIf)\}|nsExec::ExecToLog .*)$/.test(later));
     assert.equal(next, "Pop $0", line);
   });
-  assert.equal(calls, 6);
+  assert.equal(calls, 7);
 });
 
 test("the root script runs these contracts", async () => {
