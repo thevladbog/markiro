@@ -1,4 +1,8 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import {
+  canonicalExportDigest,
+  canonicalExportEqual,
+  ownedUsDemoJsonCopy,
+} from "./us-demo-canonical.js";
 import {
   platformUuidSchema,
   receivingLiveRecordSchema,
@@ -171,7 +175,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_special_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 /** Only validated module-owned structured copies enter this helper. */
 function freezeOwned<T>(value: T): T {
@@ -233,7 +237,7 @@ export function parseUsDatasetSpecialInput(raw: unknown): UsDatasetSpecialInput 
       valid(input.receiving.unitKey === unitKey(input.kind));
       valid(input.receiving.operationKey !== input.references.operationKey);
     }
-    return freezeOwned(structuredClone(input));
+    return ownedUsDemoJsonCopy(input);
   } catch (cause) {
     throw datasetSpecialError(
       "us_dataset_special_input_invalid",
@@ -580,6 +584,10 @@ function checkLifecycle(result: UsDatasetSpecialLifecycleResult): void {
   );
 }
 
+// Only detached, deeply frozen outputs of the complete result codec are admitted.
+// This provenance certifies JSON consistency, never current database state.
+const ownedSpecialResults = new WeakSet<UsDatasetSpecialResult>();
+
 export function parseUsDatasetSpecialResult(raw: unknown): UsDatasetSpecialResult {
   let context: ReturnType<typeof safeContext> = { unit: "unknown", stage: "receiving" };
   try {
@@ -598,7 +606,9 @@ export function parseUsDatasetSpecialResult(raw: unknown): UsDatasetSpecialResul
       checkLifecycle(result);
     }
     valid(equal(raw, result));
-    return freezeOwned(structuredClone(result));
+    const owned = ownedUsDemoJsonCopy(result);
+    ownedSpecialResults.add(owned);
+    return owned;
   } catch (cause) {
     throw datasetSpecialError(
       "us_dataset_special_result_invalid",
@@ -659,5 +669,9 @@ export function makeUsDatasetSpecialStageIdentity(
   }
 }
 export function usDatasetSpecialRecordIds(result: UsDatasetSpecialResult): readonly string[] {
-  return Object.freeze(checkCanonicalIds(parseUsDatasetSpecialResult(result)));
+  return Object.freeze(
+    checkCanonicalIds(
+      ownedSpecialResults.has(result) ? result : parseUsDatasetSpecialResult(result),
+    ),
+  );
 }

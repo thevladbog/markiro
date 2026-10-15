@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual, ownedUsDemoJsonCopy } from "./us-demo-canonical.js";
+
 import { platformUuidSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import { parseUsDatasetIntent } from "./us-dataset-contract.js";
@@ -103,15 +104,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_corrected_transformation_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
-}
-/** Traverses only validated module-owned copies. */
-function freezeOwned<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeOwned(child);
-    Object.freeze(value);
-  }
-  return value;
+  return canonicalExportEqual(a, b);
 }
 
 export function assertUsDatasetCorrectedTransformationJson(raw: unknown): void {
@@ -147,7 +140,7 @@ export function parseUsDatasetCorrectedTransformationInput(
       ...origin.inputLots.map(({ lotId }) => lotId),
     ];
     valid(new Set(originIds).size === originIds.length);
-    return freezeOwned(structuredClone(input));
+    return ownedUsDemoJsonCopy(input);
   } catch (cause) {
     throw datasetCorrectedTransformationError(
       "us_dataset_corrected_transformation_input_invalid",

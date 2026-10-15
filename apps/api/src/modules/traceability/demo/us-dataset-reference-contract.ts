@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   productTraceabilityProfileSchema,
@@ -89,7 +90,7 @@ export function parseUsDatasetReferenceResult(raw: unknown): UsDatasetReferenceR
       result.evidence.profiles.some(
         (profile, index) => profile.productId !== result.bindings.products[index]?.id,
       ) ||
-      canonicalExportDigest(raw) !== canonicalExportDigest(result)
+      !canonicalExportEqual(raw, result)
     )
       throw datasetReferenceError("us_dataset_reference_mismatch");
     return result;

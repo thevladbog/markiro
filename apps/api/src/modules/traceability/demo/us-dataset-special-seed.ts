@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
 import { UsLotStore } from "../lots/us-lot-store.js";
@@ -31,7 +32,7 @@ import {
 } from "./us-dataset-special-verify.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
 
-const same = (a: unknown, b: unknown) => canonicalExportDigest(a) === canonicalExportDigest(b);
+const same = (a: unknown, b: unknown) => canonicalExportEqual(a, b);
 /** Internal executor; existing references and original ownership are prerequisites. */
 export class UsDatasetSpecialSeedStore {
   private readonly stores: UsDatasetSpecialStores;

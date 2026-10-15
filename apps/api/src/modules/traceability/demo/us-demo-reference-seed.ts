@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportJson } from "./us-demo-canonical.js";
 import { eq } from "drizzle-orm";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
@@ -30,7 +31,7 @@ function references(journal: UsDemoJournal, recipe: UsDemoReferenceRecipe) {
   if (
     stage &&
     (stage.intent.inputDigest !== canonicalExportDigest(recipe) ||
-      canonicalExportDigest(stage.intent.input) !== canonicalExportDigest(recipe))
+      canonicalExportJson(stage.intent.input) !== canonicalExportJson(recipe))
   )
     throw new Error("us_demo_reference_mismatch");
   return stage;

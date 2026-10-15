@@ -1,5 +1,6 @@
+import { canonicalExportJson } from "./us-demo-canonical.js";
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
@@ -33,10 +34,10 @@ export async function lockUsDatasetTransformation(
     datasetTransformationError("us_dataset_transformation_mismatch", receiving.input.chain.unitKey);
   if (
     transformation &&
-    (canonicalExportDigest(transformation.input.chain) !==
-      canonicalExportDigest(receiving.input.chain) ||
-      canonicalExportDigest(transformation.input.references) !==
-        canonicalExportDigest(receiving.input.references) ||
+    (canonicalExportJson(transformation.input.chain) !==
+      canonicalExportJson(receiving.input.chain) ||
+      canonicalExportJson(transformation.input.references) !==
+        canonicalExportJson(receiving.input.references) ||
       transformation.inputLots.some((line, i) => line.lotId !== receiving.lots[i]?.id))
   )
     throw fail();
@@ -98,6 +99,5 @@ export async function lockUsDatasetTransformationRows(
     .where(and(eq(lots.tenantId, context.tenantId), inArray(lots.id, lotIds)))
     .orderBy(asc(lots.id))
     .for("update");
-  if (canonicalExportDigest(owned.map((row) => row.id)) !== canonicalExportDigest(lotIds))
-    throw fail();
+  if (canonicalExportJson(owned.map((row) => row.id)) !== canonicalExportJson(lotIds)) throw fail();
 }

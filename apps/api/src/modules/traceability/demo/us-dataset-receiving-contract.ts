@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   receivingOperationReceiptV2Schema,
@@ -109,7 +110,7 @@ const expectedReferenceInputDigest = canonicalExportDigest(
 );
 
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_receiving_evidence_invalid");

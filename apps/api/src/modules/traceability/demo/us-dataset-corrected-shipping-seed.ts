@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportJson } from "./us-demo-canonical.js";
 import type { CreateShippingDraftInput } from "@markiro/platform-contracts";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
@@ -607,8 +608,8 @@ export class UsDatasetCorrectedShippingSeedStore {
           stage &&
           (stage.unitKey !== unitKey ||
             stage.stage !== "shipping" ||
-            canonicalExportDigest(parseUsDatasetCorrectedShippingInput(stage.intent.input)) !==
-              canonicalExportDigest(input))
+            canonicalExportJson(parseUsDatasetCorrectedShippingInput(stage.intent.input)) !==
+              canonicalExportJson(input))
         )
           throw datasetCorrectedShippingError("us_dataset_corrected_shipping_conflict");
         return stage;

@@ -1,5 +1,6 @@
 import { verifyUsDatasetTransformationContentCore } from "./us-dataset-transformation-verify-content.js";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { UsTransformationStore } from "../transformation/us-transformation-store.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
@@ -73,7 +74,7 @@ export async function verifyUsDatasetTransformationOriginCore(
   const mismatch = (cause?: unknown) =>
     datasetTransformationError("us_dataset_transformation_mismatch", intent.unitKey, cause);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   equal(intent.stage, "transformation");
   equal(intent.unitKey, result.input.chain.unitKey);

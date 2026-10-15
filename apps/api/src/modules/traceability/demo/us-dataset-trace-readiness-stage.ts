@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportJson } from "./us-demo-canonical.js";
 import type { UsDatasetContext, UsDatasetStageRow } from "./us-dataset-contract.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import {
@@ -93,8 +94,7 @@ async function recordProgress(
         row.stage !== "trace_readiness" ||
         row.intent.inputDigest !== inputDigest ||
         canonicalExportDigest(row.intent.input) !== inputDigest ||
-        (row.receipt !== null &&
-          canonicalExportDigest(row.receipt) !== canonicalExportDigest(receipt)))
+        (row.receipt !== null && canonicalExportJson(row.receipt) !== canonicalExportJson(receipt)))
     )
       throw progressError("conflict", unitKey);
     return row;

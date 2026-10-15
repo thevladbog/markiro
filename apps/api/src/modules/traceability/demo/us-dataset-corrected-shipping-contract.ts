@@ -1,4 +1,8 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import {
+  canonicalExportDigest,
+  canonicalExportEqual,
+  ownedUsDemoJsonCopy,
+} from "./us-demo-canonical.js";
 import { platformUuidSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import {
@@ -95,7 +99,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_corrected_shipping_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 /** Only traverses owned copies after complete descriptor-safe validation. */
 function freezeOwned<T>(value: T): T {
@@ -118,7 +122,7 @@ export function parseUsDatasetCorrectedShippingInput(
     valid(input.cases.datasetId === casesInput.references.datasetId);
     valid(input.cases.inputDigest === canonicalExportDigest(casesInput));
     valid(equal(input.chain, makeUsSixMonthSpecialExamples().correction.correctedChain));
-    return freezeOwned(structuredClone(input));
+    return ownedUsDemoJsonCopy(input);
   } catch (cause) {
     throw shippingError("us_dataset_corrected_shipping_input_invalid", cause);
   }

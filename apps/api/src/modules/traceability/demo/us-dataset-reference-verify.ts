@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import {
   usLocationSchema,
@@ -36,7 +37,7 @@ export type UsDatasetReferenceStores = Readonly<{
 }>;
 
 function equal(left: unknown, right: unknown): void {
-  if (canonicalExportDigest(left) !== canonicalExportDigest(right))
+  if (!canonicalExportEqual(left, right))
     throw datasetReferenceError("us_dataset_reference_mismatch");
 }
 

@@ -1,4 +1,4 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext, UsDatasetIntent, UsDatasetReceipt } from "./us-dataset-contract.js";
 import { parseUsDatasetIntent } from "./us-dataset-contract.js";
@@ -50,7 +50,7 @@ export async function verifyUsDatasetCorrectedCasesCore(
   const mismatch = (cause?: unknown) =>
     datasetCorrectedCasesError("us_dataset_corrected_cases_mismatch", cause);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   try {
     const intent = parseUsDatasetIntent(rawIntent),

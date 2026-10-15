@@ -1,4 +1,5 @@
-import { canonicalExportDigest, isValidSscc } from "@markiro/domain";
+import { canonicalExportEqual, ownedUsDemoJsonCopy } from "./us-demo-canonical.js";
+import { isValidSscc } from "@markiro/domain";
 import { platformUuidSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import type { UsDatasetCasesSupportInput } from "./us-dataset-cases-contract.js";
@@ -132,15 +133,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_corrected_cases_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
-}
-/** Traverses only module-owned copies after descriptor-safe validation. */
-function freezeOwned<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeOwned(child);
-    Object.freeze(value);
-  }
-  return value;
+  return canonicalExportEqual(a, b);
 }
 function supportIds(input: UsDatasetCorrectedCasesInput): readonly string[] {
   return [input.support.shiftId, ...input.support.boxes.map(({ id }) => id)];
@@ -211,7 +204,7 @@ export function parseUsDatasetCorrectedCasesInput(raw: unknown): UsDatasetCorrec
       input.support.numberMonthKey ===
         `${month}${String(captured.getUTCFullYear() % 100).padStart(2, "0")}`,
     );
-    return freezeOwned(structuredClone(input));
+    return ownedUsDemoJsonCopy(input);
   } catch (cause) {
     throw casesError("us_dataset_corrected_cases_input_invalid", cause);
   }

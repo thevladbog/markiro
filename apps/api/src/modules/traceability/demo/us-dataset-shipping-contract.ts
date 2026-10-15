@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   referenceDocumentSchema,
@@ -166,7 +167,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_shipping_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 function freezeOwned<T>(value: T): T {
   if (value !== null && typeof value === "object") {

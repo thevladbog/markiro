@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { UsCatalogStore } from "../catalog/us-catalog-store.js";
@@ -72,7 +73,7 @@ export async function verifyUsDatasetReceivingResultCore(
   const mismatch = (cause?: unknown) =>
     datasetReceivingError("us_dataset_receiving_mismatch", intent.unitKey, cause);
   const equal = (left: unknown, right: unknown) => {
-    if (canonicalExportDigest(left) !== canonicalExportDigest(right)) throw mismatch();
+    if (!canonicalExportEqual(left, right)) throw mismatch();
   };
   equal(intent.stage, "receiving");
   equal(intent.unitKey, result.input.chain.unitKey);

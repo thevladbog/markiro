@@ -1,5 +1,6 @@
+import { canonicalExportEqual } from "./us-demo-canonical.js";
 import { schema, type Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { assertUsDemoTarget } from "./us-demo-target.js";
@@ -60,7 +61,7 @@ function parseContext(raw: UsDemoJournalContext): UsDemoJournalContext {
   return result.data;
 }
 function same(left: UsDemoIntent | UsDemoReceipt, right: UsDemoIntent | UsDemoReceipt): boolean {
-  return canonicalExportDigest(left) === canonicalExportDigest(right);
+  return canonicalExportEqual(left, right);
 }
 
 /** Internal bookkeeping only. Trusted callers supply an already validated target

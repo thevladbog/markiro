@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   createShippingDraftSchema,
   finalizeShippingSchema,
@@ -74,7 +75,7 @@ export async function verifyUsDatasetShippingOriginStatusCore(
   const unitKey = result.input.chain.unitKey;
   const fail = () => datasetTransformationError("us_dataset_transformation_mismatch", unitKey);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   assertBoundedSyntheticJson(current);
   const lot = traceabilityLotSchema.parse(current);
@@ -82,7 +83,7 @@ export async function verifyUsDatasetShippingOriginStatusCore(
   const original = result.outputLot;
   const originalIdentity = usDatasetReceivingLotIdentity(original);
   const actualIdentity = usDatasetReceivingLotIdentity(lot);
-  if (canonicalExportDigest(actualIdentity) === canonicalExportDigest(originalIdentity)) return;
+  if (canonicalExportEqual(actualIdentity, originalIdentity)) return;
   equal(original.status, "active");
   equal(original.revision, 1);
   equal(actualIdentity, { ...originalIdentity, status: "shipped", revision: 2 });

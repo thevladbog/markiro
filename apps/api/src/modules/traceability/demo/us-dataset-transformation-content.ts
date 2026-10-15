@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   referenceDocumentSchema,
@@ -49,7 +50,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_transformation_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 /** Stored response coherence; actual tenant/catalogue/operation ownership requires the verifier. */
 export function checkUsDatasetTransformationEvidence(

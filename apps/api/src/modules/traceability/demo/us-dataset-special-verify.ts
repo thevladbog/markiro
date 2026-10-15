@@ -1,5 +1,5 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { UsDatasetAtomicStageWork } from "./us-dataset-atomic-stage-contract.js";

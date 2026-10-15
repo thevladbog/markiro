@@ -1,5 +1,6 @@
+import { canonicalExportEqual } from "./us-demo-canonical.js";
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
@@ -21,7 +22,7 @@ export async function verifyUsDatasetCasesContent(
 ): Promise<void> {
   const mismatch = () => error("us_dataset_cases_mismatch");
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   await lockUsDatasetCasesSupport(tx, context, result.input, error);
   equal(await readUsDatasetCasesSupport(tx, context, result.input, error), result.support);

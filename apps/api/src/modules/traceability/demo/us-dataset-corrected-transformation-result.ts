@@ -1,4 +1,9 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import {
+  canonicalExportEqual,
+  canonicalExportJson,
+  ownedUsDemoJsonCopy,
+} from "./us-demo-canonical.js";
+
 import { platformUuidSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import {
@@ -25,14 +30,6 @@ const uuid = z
 function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_corrected_transformation_evidence_invalid");
 }
-/** Walks only module-owned copies after descriptor-safe validation. */
-function freezeOwned<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeOwned(child);
-    Object.freeze(value);
-  }
-  return value;
-}
 
 /** Stored coherence only; the executor separately proves persisted ownership/current origin. */
 export function parseUsDatasetCorrectedTransformationResult(
@@ -43,11 +40,11 @@ export function parseUsDatasetCorrectedTransformationResult(
     const parsed = schema.parse(raw);
     const input = parseUsDatasetCorrectedTransformationInput(parsed.input);
     const result = { ...parsed, input };
-    valid(canonicalExportDigest(raw) === canonicalExportDigest(result));
+    valid(canonicalExportEqual(raw, result));
     checkUsDatasetTransformationEvidence(result);
     valid(
-      canonicalExportDigest(result.inputLots) ===
-        canonicalExportDigest(input.receivingOrigin.inputLots),
+      canonicalExportJson(result.inputLots) ===
+        canonicalExportJson(input.receivingOrigin.inputLots),
     );
     const ownedIds = usDatasetTransformationEvidenceRecordIds(result);
     const upstreamIds = new Set([input.receivingOrigin.rootId, input.receivingOrigin.eventId]);
@@ -58,7 +55,7 @@ export function parseUsDatasetCorrectedTransformationResult(
       result.finalizeInput.operationKey,
     ])
       uuid.parse(id);
-    return freezeOwned(structuredClone(result));
+    return ownedUsDemoJsonCopy(result);
   } catch (cause) {
     throw datasetCorrectedTransformationError(
       "us_dataset_corrected_transformation_result_invalid",

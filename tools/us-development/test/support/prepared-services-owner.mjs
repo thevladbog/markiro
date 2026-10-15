@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 import { load } from "js-yaml";
+import {
+  withoutCanonicalTestsOwner,
+  withoutCanonicalTestsOwnerBytes,
+} from "./canonical-tests-owner.mjs";
 
 export const preparedServicesJobId = "dataset_prepared_services";
 export const preparedServicesFiles = [
@@ -139,8 +143,9 @@ export function hasExactPreparedServicesOwner(workflow) {
 }
 
 export function withoutPreparedServicesOwner(workflow) {
-  const result = structuredClone(workflow);
-  if (hasExactPreparedServicesOwner(result)) delete result.jobs[preparedServicesJobId];
+  if (!hasExactPreparedServicesOwner(workflow)) return structuredClone(workflow);
+  const result = withoutCanonicalTestsOwner(workflow);
+  delete result.jobs[preparedServicesJobId];
   return result;
 }
 
@@ -151,5 +156,5 @@ export function withoutPreparedServicesOwnerBytes(source) {
     !source.endsWith(preparedServicesJobBlock)
   )
     return source;
-  return source.slice(0, -preparedServicesJobBlock.length);
+  return withoutCanonicalTestsOwnerBytes(source).slice(0, -preparedServicesJobBlock.length);
 }

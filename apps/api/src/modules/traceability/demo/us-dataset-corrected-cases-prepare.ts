@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest, US_CAPABILITY } from "@markiro/domain";
+import { US_CAPABILITY } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { and, eq, sql } from "drizzle-orm";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
@@ -133,7 +134,7 @@ export async function prepareUsDatasetCorrectedCasesCore(
   );
   const fail = () => datasetCorrectedCasesError("us_dataset_corrected_cases_conflict");
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   if (!cases)
     throw datasetCorrectedCasesError("us_dataset_corrected_cases_prerequisite_incomplete");

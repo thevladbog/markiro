@@ -1,4 +1,5 @@
-import { buildSscc, canonicalExportDigest } from "@markiro/domain";
+import { buildSscc } from "@markiro/domain";
+import { canonicalExportDigest, ownedUsDemoJsonCopy } from "./us-demo-canonical.js";
 import {
   referenceDocumentInputSchema,
   type ReferenceDocumentInput,
@@ -137,21 +138,19 @@ export function makeUsSixMonthSpecialExamples(): UsSixMonthSpecialExamples {
     })),
   };
   const orphan = receipt("orphan_0001", "2026-08-10", 3, ["200", "200"]);
-  return freezeOwned(
-    structuredClone({
-      correction: {
-        initialReceiving,
-        amendmentReason: "Correct synthetic receiving quantity before downstream use.",
-        correctedChain,
-      },
-      orphan: {
-        unitKey: "orphan_0001" as const,
-        receiving: orphan.receiving,
-        documents: orphan.documents,
-        voidReason: "Void synthetic receipt before downstream use.",
-      },
-    }),
-  );
+  return ownedUsDemoJsonCopy({
+    correction: {
+      initialReceiving,
+      amendmentReason: "Correct synthetic receiving quantity before downstream use.",
+      correctedChain,
+    },
+    orphan: {
+      unitKey: "orphan_0001" as const,
+      receiving: orphan.receiving,
+      documents: orphan.documents,
+      voidReason: "Void synthetic receipt before downstream use.",
+    },
+  });
 }
 
 function chainKeys(start: number, count: number): string[] {

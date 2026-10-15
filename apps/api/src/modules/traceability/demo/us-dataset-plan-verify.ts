@@ -1,9 +1,6 @@
 import { schema, type Db } from "@markiro/db";
-import {
-  canonicalExportDigest,
-  usPlanApprovalRequestDigest,
-  usPlanIdempotencyKeyHash,
-} from "@markiro/domain";
+import { usPlanApprovalRequestDigest, usPlanIdempotencyKeyHash } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { and, eq, ne } from "drizzle-orm";
 import { UsDevelopmentOwnerStore } from "../../../deployment/us-development-owner.js";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";

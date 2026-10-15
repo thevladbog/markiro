@@ -1,4 +1,8 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import {
+  canonicalExportDigest,
+  canonicalExportEqual,
+  ownedUsDemoJsonCopy,
+} from "./us-demo-canonical.js";
 import { platformUuidSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import {
@@ -34,14 +38,6 @@ const uuid = z
 function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_corrected_cases_evidence_invalid");
 }
-/** Traverses only module-owned copies after descriptor-safe validation. */
-function freezeOwned<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeOwned(child);
-    Object.freeze(value);
-  }
-  return value;
-}
 function ownedIds(result: UsDatasetCorrectedCasesResult): readonly string[] {
   return [
     result.support.shift.id,
@@ -57,7 +53,7 @@ export function parseUsDatasetCorrectedCasesResult(raw: unknown): UsDatasetCorre
     const parsed = schema.parse(raw);
     const input = parseUsDatasetCorrectedCasesInput(parsed.input);
     const result = { ...parsed, input };
-    valid(canonicalExportDigest(raw) === canonicalExportDigest(result));
+    valid(canonicalExportEqual(raw, result));
     checkUsDatasetCasesEvidence(result);
     const ids = ownedIds(result);
     const knownIds = new Set([
@@ -73,7 +69,7 @@ export function parseUsDatasetCorrectedCasesResult(raw: unknown): UsDatasetCorre
     valid(ids.length === 121 && new Set(ids).size === ids.length);
     valid(ids.every((id) => !knownIds.has(id)));
     for (const id of [...ids, result.operationKey]) uuid.parse(id);
-    return freezeOwned(structuredClone(result));
+    return ownedUsDemoJsonCopy(result);
   } catch (cause) {
     throw datasetCorrectedCasesError("us_dataset_corrected_cases_result_invalid", cause);
   }

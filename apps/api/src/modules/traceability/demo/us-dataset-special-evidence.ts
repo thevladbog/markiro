@@ -1,9 +1,6 @@
 import { schema } from "@markiro/db";
-import {
-  canonicalExportDigest,
-  classifyReceivingAmendment,
-  type ReceivingMaterialRevision,
-} from "@markiro/domain";
+import { classifyReceivingAmendment, type ReceivingMaterialRevision } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import type { ReceivingLiveRecord, ReceivingOperationReceiptV2 } from "@markiro/platform-contracts";
 import { and, asc, eq, inArray, or } from "drizzle-orm";
 import { readReceivingSavedInput } from "../receiving/us-receiving-persistence.js";
@@ -26,7 +23,7 @@ export function specialEqual(
   b: unknown,
   original: UsDatasetSpecialReceivingResult,
 ): void {
-  if (canonicalExportDigest(a) !== canonicalExportDigest(b))
+  if (!canonicalExportEqual(a, b))
     throw datasetSpecialError(
       "us_dataset_special_mismatch",
       original.input.kind === "correction" ? "correction_0001" : "orphan_0001",

@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { lockTransformationOperation } from "../transformation/us-transformation-operations.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext, UsDatasetIntent } from "./us-dataset-contract.js";
@@ -69,7 +70,7 @@ export async function prepareUsDatasetCorrectedTransformationCore(
   const mismatch = (cause?: unknown) =>
     datasetCorrectedTransformationError("us_dataset_corrected_transformation_mismatch", cause);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   equal(intent.unitKey, "correction_0001");
   equal(intent.stage, "transformation");

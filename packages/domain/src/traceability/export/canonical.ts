@@ -54,3 +54,14 @@ export function canonicalExportJson(input: unknown): string {
 export function canonicalExportDigest(input: unknown): string {
   return bytesToHex(sha256(utf8ToBytes(canonicalExportJson(input))));
 }
+
+/** Compare validated canonical JSON without allocating comparison-only hashes. */
+export function canonicalExportEqual(left: unknown, right: unknown): boolean {
+  const primitive = (value: unknown): boolean =>
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value));
+  if (primitive(left) && primitive(right)) return left === right;
+  return canonicalExportJson(left) === canonicalExportJson(right);
+}

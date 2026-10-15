@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   type TraceabilityLot,
@@ -27,7 +28,7 @@ function valid(condition: boolean): asserts condition {
   if (!condition) throw new Error("us_dataset_shipping_evidence_invalid");
 }
 function equal(a: unknown, b: unknown): boolean {
-  return canonicalExportDigest(a) === canonicalExportDigest(b);
+  return canonicalExportEqual(a, b);
 }
 
 function atOrAfter(later: string, earlier: string): boolean {

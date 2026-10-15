@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual, ownedUsDemoJsonCopy } from "./us-demo-canonical.js";
+
 import {
   platformUuidSchema,
   referenceDocumentSchema,
@@ -69,15 +70,6 @@ const schema = z
   })
   .strict();
 
-/** Traverse only an owned copy after complete descriptor-safe validation. */
-function freezeOwned<T>(value: T): T {
-  if (value !== null && typeof value === "object") {
-    for (const child of Object.values(value)) freezeOwned(child);
-    Object.freeze(value);
-  }
-  return value;
-}
-
 /** Frozen native evidence; current ownership and balance require the executor/verifier. */
 export function parseUsDatasetCorrectedShippingResult(
   raw: unknown,
@@ -87,7 +79,7 @@ export function parseUsDatasetCorrectedShippingResult(
     const parsed = schema.parse(raw);
     const input = parseUsDatasetCorrectedShippingInput(parsed.input);
     const result = { ...parsed, input };
-    if (canonicalExportDigest(raw) !== canonicalExportDigest(result)) {
+    if (!canonicalExportEqual(raw, result)) {
       throw new Error("us_dataset_corrected_shipping_evidence_invalid");
     }
     checkUsDatasetShippingResultContent({
@@ -100,7 +92,7 @@ export function parseUsDatasetCorrectedShippingResult(
       shipments: result.shipments,
       operationKeyForShipment: usDatasetShippingOperationKey,
     });
-    return freezeOwned(structuredClone(result));
+    return ownedUsDemoJsonCopy(result);
   } catch (cause) {
     throw datasetCorrectedShippingError("us_dataset_corrected_shipping_result_invalid", cause);
   }

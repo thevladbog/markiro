@@ -2,7 +2,8 @@ import { verifyUsDatasetTransformationFinal } from "./us-dataset-native-final-ve
 import { applyUsDatasetTransformationContent } from "./us-dataset-transformation-apply-content.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
 import { UsLotStore } from "../lots/us-lot-store.js";
@@ -39,7 +40,7 @@ import { type UsDatasetTransformationStores } from "./us-dataset-transformation-
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
 import { makeUsSixMonthRegularChain } from "./us-six-month-chains.js";
 
-const same = (a: unknown, b: unknown) => canonicalExportDigest(a) === canonicalExportDigest(b);
+const same = (a: unknown, b: unknown) => canonicalExportEqual(a, b);
 function checkedStage(stage: UsDatasetStageRow | null, input: UsDatasetTransformationInput) {
   if (
     stage &&

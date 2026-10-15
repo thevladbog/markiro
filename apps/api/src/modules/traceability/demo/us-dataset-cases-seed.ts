@@ -1,7 +1,8 @@
 import { verifyUsDatasetCasesFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { UsCaseStore } from "../cases/us-case-store.js";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
@@ -84,7 +85,7 @@ export class UsDatasetCasesSeedStore {
           if (
             stage.unitKey !== unitKey ||
             stage.stage !== "cases" ||
-            canonicalExportDigest(captured) !== canonicalExportDigest(expected)
+            !canonicalExportEqual(captured, expected)
           )
             throw datasetCasesError("us_dataset_cases_dependency_conflict", unitKey);
         } catch (cause) {

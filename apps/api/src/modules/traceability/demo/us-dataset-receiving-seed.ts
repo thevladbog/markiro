@@ -1,7 +1,8 @@
 import { verifyUsDatasetReceivingFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import type { ReceivingDraft } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
@@ -33,7 +34,7 @@ import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.j
 import { verifyUsDatasetReferences } from "./us-dataset-reference-verify.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
 
-const same = (a: unknown, b: unknown) => canonicalExportDigest(a) === canonicalExportDigest(b);
+const same = (a: unknown, b: unknown) => canonicalExportEqual(a, b);
 function checkedStage(stage: UsDatasetStageRow | null, input: UsDatasetReceivingInput) {
   if (
     stage &&

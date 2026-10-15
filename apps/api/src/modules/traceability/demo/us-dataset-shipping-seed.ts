@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportJson } from "./us-demo-canonical.js";
 import type { CreateShippingDraftInput } from "@markiro/platform-contracts";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
@@ -121,8 +122,8 @@ export class UsDatasetShippingSeedStore {
           stage &&
           (stage.unitKey !== unitKey ||
             stage.stage !== "shipping" ||
-            canonicalExportDigest(parseUsDatasetShippingInput(stage.intent.input)) !==
-              canonicalExportDigest(input))
+            canonicalExportJson(parseUsDatasetShippingInput(stage.intent.input)) !==
+              canonicalExportJson(input))
         )
           throw datasetShippingError("us_dataset_shipping_dependency_conflict", unitKey);
         return stage;

@@ -462,7 +462,11 @@ export type {
   TraceExportSheet,
   TraceExportSheetKey,
 } from "./traceability/export/registry-v1.js";
-export { canonicalExportDigest, canonicalExportJson } from "./traceability/export/canonical.js";
+export {
+  canonicalExportDigest,
+  canonicalExportEqual,
+  canonicalExportJson,
+} from "./traceability/export/canonical.js";
 export { buildUsExportWorkbook } from "./traceability/export/workbook.js";
 export { ExportWorkbookInputError } from "./traceability/export/validation.js";
 export { validateUsPlanApproval } from "./traceability/plan/validation.js";

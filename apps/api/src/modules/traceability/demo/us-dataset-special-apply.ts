@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { receivingAmendmentDraftSchema, type ReceivingDraft } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import type { UsDatasetAtomicStageWork } from "./us-dataset-atomic-stage-contract.js";
@@ -29,7 +30,7 @@ export async function applyUsDatasetSpecial(
     datasetSpecialError("us_dataset_special_conflict", intent.unitKey, input.stage);
   const dependency = () =>
     datasetSpecialError("us_dataset_special_dependency_conflict", intent.unitKey, input.stage);
-  const same = (a: unknown, b: unknown) => canonicalExportDigest(a) === canonicalExportDigest(b);
+  const same = (a: unknown, b: unknown) => canonicalExportEqual(a, b);
   const references = await stores.journal.readStageInTransaction(
     tx,
     context,

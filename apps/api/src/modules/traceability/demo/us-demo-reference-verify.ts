@@ -1,4 +1,4 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import type { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
@@ -25,8 +25,7 @@ export type UsDemoReferenceStores = Readonly<{
 }>;
 
 function equal(left: unknown, right: unknown): void {
-  if (canonicalExportDigest(left) !== canonicalExportDigest(right))
-    throw new Error("us_demo_reference_mismatch");
+  if (!canonicalExportEqual(left, right)) throw new Error("us_demo_reference_mismatch");
 }
 
 export async function verifyUsDemoReferences(

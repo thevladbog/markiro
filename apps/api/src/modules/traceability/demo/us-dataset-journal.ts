@@ -1,5 +1,6 @@
 import { schema, type Db } from "@markiro/db";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { assertUsDemoTarget } from "./us-demo-target.js";
@@ -45,7 +46,7 @@ function fail(code: string): never {
   throw new Error(code);
 }
 function same(left: unknown, right: unknown) {
-  return canonicalExportDigest(left) === canonicalExportDigest(right);
+  return canonicalExportEqual(left, right);
 }
 function context(raw: UsDatasetContext): UsDatasetContext {
   if (

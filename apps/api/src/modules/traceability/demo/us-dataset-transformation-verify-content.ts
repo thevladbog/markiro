@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import {
   createTransformationDraftSchema,
   finalizeTransformationSchema,
@@ -55,7 +56,7 @@ export async function verifyUsDatasetTransformationContentCore(
 ): Promise<void> {
   const { tenantId, actorUserId } = context;
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   const bound = (entries: readonly { key: string; id: string }[], key: string) => {
     const entry = entries.find((e) => e.key === key);

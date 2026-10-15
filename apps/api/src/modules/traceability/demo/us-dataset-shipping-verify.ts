@@ -1,5 +1,6 @@
 import { verifyUsDatasetShippingContentCore } from "./us-dataset-shipping-verify-content.js";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import {
   parseUsDatasetIntent,
@@ -66,7 +67,7 @@ export async function verifyUsDatasetShippingProjectionCore(
     receipt = parseUsDemoReceipt(rawReceipt);
   const fail = () => datasetShippingError("us_dataset_shipping_mismatch", intent.unitKey);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   const result = parseUsDatasetShippingResult(receipt.result);
   const prepared = await prepareUsDatasetShippingCore(

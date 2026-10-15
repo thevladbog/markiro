@@ -1,5 +1,5 @@
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { z } from "zod";
 import { UsTraceStore } from "../trace/us-trace-store.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";

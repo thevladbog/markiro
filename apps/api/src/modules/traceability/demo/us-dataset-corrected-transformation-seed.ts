@@ -1,7 +1,8 @@
 import { verifyUsDatasetCorrectedTransformationFinal } from "./us-dataset-native-final-verify.js";
 import { randomUUID } from "node:crypto";
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportJson } from "./us-demo-canonical.js";
 import { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import { UsReferenceDocumentStore } from "../documents/us-reference-document-store.js";
 import { UsLotStore } from "../lots/us-lot-store.js";
@@ -68,7 +69,7 @@ export class UsDatasetCorrectedTransformationSeedStore {
           stage &&
           (stage.unitKey !== "correction_0001" ||
             stage.stage !== "transformation" ||
-            canonicalExportDigest(stage.intent.input) !== canonicalExportDigest(input))
+            canonicalExportJson(stage.intent.input) !== canonicalExportJson(input))
         )
           throw datasetCorrectedTransformationError(
             "us_dataset_corrected_transformation_dependency_conflict",

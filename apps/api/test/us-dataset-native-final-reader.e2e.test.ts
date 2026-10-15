@@ -8,6 +8,11 @@ import * as casesVerification from "../src/modules/traceability/demo/us-dataset-
 import * as correctedCasesVerification from "../src/modules/traceability/demo/us-dataset-corrected-cases-verify";
 import * as finalVerification from "../src/modules/traceability/demo/us-dataset-native-final-verify";
 import * as correctedShippingVerification from "../src/modules/traceability/demo/us-dataset-corrected-shipping-verify";
+import * as journalContract from "../src/modules/traceability/demo/us-demo-journal-contract";
+import {
+  parseUsDatasetSpecialResult,
+  usDatasetSpecialRecordIds,
+} from "../src/modules/traceability/demo/us-dataset-special-contract";
 import { UsDatasetReferenceSeedStore } from "../src/modules/traceability/demo/us-dataset-reference-seed";
 import { UsDatasetReceivingSeedStore } from "../src/modules/traceability/demo/us-dataset-receiving-seed";
 import { UsDatasetTransformationSeedStore } from "../src/modules/traceability/demo/us-dataset-transformation-seed";
@@ -66,6 +71,51 @@ describe.skipIf(!base)("native final-verifier protected raw rows", () => {
       await new UsDatasetTransformationSeedStore(h.f.db).initialize(h.context, 0);
     }),
     60_000,
+  );
+
+  it(
+    "extracts exact IDs from its own immutable Special result without reparsing and distrusts copies",
+    h.phase(async () => {
+      const result = parseUsDatasetSpecialResult(
+        await new UsDatasetSpecialSeedStore(h.f.db).initialize(h.context, "correction"),
+      );
+      if (result.stage !== "amend_receiving") throw new Error("Missing real amendment");
+      const expected = [
+        ...result.original.documents.map(({ record }) => record.id),
+        result.original.created.eventId,
+        ...result.original.lots.map(({ id }) => id),
+        result.finalized.eventId,
+      ];
+      const callerCopy = structuredClone(result);
+      const frozenCopy = Object.freeze(structuredClone(result));
+      const proxy = new Proxy(result, {});
+      const guard = vi
+        .spyOn(journalContract, "assertBoundedSyntheticJson")
+        .mockImplementation(() => {
+          throw new Error("untrusted_special_json_witness");
+        });
+      try {
+        const first = usDatasetSpecialRecordIds(result);
+        const second = usDatasetSpecialRecordIds(result);
+        expect(first).toEqual(expected);
+        expect(second).toEqual(expected);
+        expect(first).not.toBe(second);
+        expect(Object.isFrozen(first)).toBe(true);
+        expect(guard).not.toHaveBeenCalled();
+        for (const untrusted of [callerCopy, frozenCopy, proxy]) {
+          expect(() => usDatasetSpecialRecordIds(untrusted)).toThrow(
+            "us_dataset_special_result_invalid",
+          );
+        }
+        expect(guard).toHaveBeenCalledTimes(3);
+      } finally {
+        guard.mockRestore();
+      }
+      expect(Reflect.set(callerCopy, "stage", "untrusted")).toBe(true);
+      expect(() => usDatasetSpecialRecordIds(callerCopy)).toThrow(
+        "us_dataset_special_result_invalid",
+      );
+    }),
   );
 
   it(

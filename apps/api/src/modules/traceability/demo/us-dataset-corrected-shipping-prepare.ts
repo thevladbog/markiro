@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest, US_CAPABILITY } from "@markiro/domain";
+import { US_CAPABILITY } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
 import { lockShippingOperation } from "../shipping/us-shipping-draft.js";
@@ -128,7 +129,7 @@ export async function prepareUsDatasetCorrectedShippingCore(
   const datasetId = await authorizeUsDatasetCorrectedShippingCore(tx, context, stores);
   const fail = () => datasetCorrectedShippingError("us_dataset_corrected_shipping_conflict");
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${context.tenantId + ":us-processor-demo-v1"}, 0))`,

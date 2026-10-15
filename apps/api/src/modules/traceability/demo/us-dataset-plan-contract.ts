@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { usPlanInternalApproveInputSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import { assertBoundedSyntheticJson } from "./us-demo-journal-contract.js";
@@ -17,8 +18,7 @@ export function datasetPlanError(code: "incomplete" | "conflict", cause?: unknow
   );
 }
 export function equalPlan(left: unknown, right: unknown): void {
-  if (canonicalExportDigest(left) !== canonicalExportDigest(right))
-    throw datasetPlanError("conflict");
+  if (!canonicalExportEqual(left, right)) throw datasetPlanError("conflict");
 }
 export const planInputSchema = z
   .object({

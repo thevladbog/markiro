@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { eq } from "drizzle-orm";
 import type { UsPlanArtifactStore } from "../plans/us-plan-artifacts.js";
 import { UsPlanStore } from "../plans/us-plan-store.js";

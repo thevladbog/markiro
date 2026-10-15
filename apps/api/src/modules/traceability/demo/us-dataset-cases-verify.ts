@@ -2,7 +2,8 @@ import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext, UsDatasetIntent, UsDatasetReceipt } from "./us-dataset-contract.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { eq } from "drizzle-orm";
 import { parseUsDatasetIntent } from "./us-dataset-contract.js";
 import { parseUsDemoReceipt } from "./us-demo-journal-contract.js";
@@ -70,7 +71,7 @@ export async function verifyUsDatasetCasesOriginCore(
   const mismatch = (cause?: unknown) =>
     datasetCasesError("us_dataset_cases_mismatch", intent.unitKey, cause);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   try {
     const result = parseUsDatasetCasesResult(receipt.result);

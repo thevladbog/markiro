@@ -1,5 +1,5 @@
 import type { Db } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
 import { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import { UsDatasetReferenceSeedStore } from "./us-dataset-reference-seed.js";

@@ -1,6 +1,7 @@
 import { schema } from "@markiro/db";
 import { US_CAPABILITY } from "@markiro/domain";
-import { canonicalExportDigest } from "./us-demo-canonical.js";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
+
 import { and, asc, eq, sql } from "drizzle-orm";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
 import { lockShippingOperation, type UsShippingStore } from "../shipping/us-shipping-draft.js";
@@ -120,7 +121,7 @@ export async function prepareUsDatasetShippingCore(
     input = parseUsDatasetShippingInput(intent.input);
   const origin = parseUsDatasetTransformationResult(transformation.receipt.result);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   equal(
     input,

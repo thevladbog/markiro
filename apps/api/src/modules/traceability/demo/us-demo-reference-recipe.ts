@@ -1,4 +1,5 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportEqual } from "./us-demo-canonical.js";
+
 import {
   createUsLocationSchema,
   createUsPartySchema,
@@ -131,7 +132,7 @@ export function parseUsDemoReferenceResult(raw: unknown): UsDemoReferenceResult 
     result.evidence.profiles.some(
       (profile, index) => profile.productId !== result.evidence.products[index]?.id,
     ) ||
-    canonicalExportDigest(raw) !== canonicalExportDigest(result)
+    !canonicalExportEqual(raw, result)
   )
     throw new Error("us_demo_reference_mismatch");
   return result;

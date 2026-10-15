@@ -1,4 +1,4 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import type {
   ReceivingLiveRecord,
   TraceabilityLot,
@@ -122,7 +122,7 @@ export function checkDatasetTraceEvidence(
       stage,
     });
   };
-  const same = (a: unknown, b: unknown) => canonicalExportDigest(a) === canonicalExportDigest(b);
+  const same = (a: unknown, b: unknown) => canonicalExportEqual(a, b);
   const ordered = <T>(values: readonly T[]) =>
     [...values].sort((a, b) => canonicalExportDigest(a).localeCompare(canonicalExportDigest(b)));
   const orphan = expected.events.length === 0;

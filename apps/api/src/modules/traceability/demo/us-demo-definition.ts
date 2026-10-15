@@ -1,4 +1,5 @@
-import { buildSscc, canonicalExportDigest } from "@markiro/domain";
+import { buildSscc } from "@markiro/domain";
+import { canonicalExportDigest } from "./us-demo-canonical.js";
 
 export const US_DEMO_VERSION = "us-processor-demo-v1";
 

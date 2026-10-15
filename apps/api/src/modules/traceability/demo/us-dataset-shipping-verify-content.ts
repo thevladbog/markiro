@@ -1,5 +1,6 @@
 import { schema } from "@markiro/db";
-import { canonicalExportDigest } from "@markiro/domain";
+
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { createShippingDraftSchema, finalizeShippingSchema } from "@markiro/platform-contracts";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { shippingCommandDigest } from "../shipping/us-shipping-draft.js";
@@ -49,7 +50,7 @@ export async function verifyUsDatasetShippingContentCore(
   fail: () => Error,
 ): Promise<void> {
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw fail();
+    if (!canonicalExportEqual(a, b)) throw fail();
   };
   const plan = result.plan;
   const bound = (rows: readonly { key: string; id: string }[], key: string) => {

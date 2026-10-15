@@ -1,4 +1,4 @@
-import { canonicalExportDigest } from "@markiro/domain";
+import { canonicalExportDigest, canonicalExportEqual } from "./us-demo-canonical.js";
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import {
@@ -49,7 +49,7 @@ export async function verifyUsDatasetCorrectedTransformationCore(
   const mismatch = (cause?: unknown) =>
     datasetCorrectedTransformationError("us_dataset_corrected_transformation_mismatch", cause);
   const equal = (a: unknown, b: unknown) => {
-    if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
+    if (!canonicalExportEqual(a, b)) throw mismatch();
   };
   const intent = parseUsDatasetIntent(rawIntent);
   const receipt = parseUsDemoReceipt(rawReceipt);
