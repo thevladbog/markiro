@@ -12,7 +12,6 @@ import {
   Input,
   PageHeader,
   Select,
-  StatusChip,
   Table,
   type TableColumn,
 } from "@markiro/ui";
@@ -23,7 +22,8 @@ import { officeKeys, useOfficeInfiniteQuery, useOfficeQuery } from "../office-qu
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import { searchableSelect } from "../select-search.js";
-import { packState, palletCountDiffers } from "../shifts/shift-card.js";
+import { PalletCountTag } from "../shifts/PalletCountTag.js";
+import { packState } from "../shifts/shift-card.js";
 import { datePickerTexts } from "../shifts/shift-text.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
 import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
@@ -123,9 +123,7 @@ export function PalletsTab() {
               {t("office.palletList.disassembledAt", { at: format(pallet.disassembledAt) })}
             </span>
           )}
-          {palletCountDiffers(pallet) && (
-            <StatusChip phase="attention" wrap label={t("office.palletList.changedAfterClose")} />
-          )}
+          <PalletCountTag pallet={pallet} differsLabel={t("office.palletList.changedAfterClose")} />
         </span>
       ),
     },

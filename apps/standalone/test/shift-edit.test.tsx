@@ -23,6 +23,7 @@ import {
   PLANNED,
   shiftRow,
   shiftsSession,
+  startEditing,
   SOUTH_ARCHIVED,
   stockSheets,
   WATER,
@@ -88,14 +89,18 @@ function save(name: string): HTMLButtonElement {
 
 async function openEdit(session: FakeOfficeSession, shift: OfficeShift): Promise<string> {
   await openShifts(session);
-  fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
-  const name = `Смена ${shift.number}`;
-  await screen.findByRole("dialog", { name });
+  const name = await startEditing(shift.number);
   // The template choice waits for the product's record.
   await waitFor(() =>
     expect((field(name, "Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(false),
   );
   return name;
+}
+
+/** The form is gone and the card of the shift (still open) is back, read-only. */
+async function leftForCard(name: string): Promise<void> {
+  await within(dialog(name)).findByRole("button", { name: /^Изменить смену / });
+  expect(within(dialog(name)).queryByLabelText("План, шт")).toBeNull();
 }
 
 async function openPlan(session: FakeOfficeSession, shift: OfficeShift): Promise<string> {
@@ -123,7 +128,7 @@ describe("office shifts: changing a shift", () => {
         within(shiftRow("OCT26-005"))
           .getAllByRole("button")
           .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Изменить смену OCT26-005", "Удалить смену OCT26-005"]);
+      ).toEqual(["Открыть смену OCT26-005", "Удалить смену OCT26-005"]);
       expect(
         within(shiftRow("OCT26-004"))
           .getAllByRole("button")
@@ -289,14 +294,14 @@ describe("office shifts: changing a shift", () => {
     });
   });
 
-  it("offers to load the list again after a stale save, which closes the dialog and drops the edits", async () => {
+  it("offers to load the list again after a stale save, which leaves the form for the card and drops the edits", async () => {
     const session = shiftsSession();
     session.api.updateShift.mockRejectedValue(api("stale_revision", { currentRev: 95 }));
     const name = await openEdit(session, PLANNED);
     fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
     fireEvent.click(save(name));
     fireEvent.click(await within(dialog(name)).findByRole("button", { name: "Загрузить заново" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    await leftForCard(name);
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
     expect(session.api.updateShift).toHaveBeenCalledTimes(1);
   });
@@ -466,11 +471,13 @@ describe("office shifts: changing a shift, the edges", () => {
       expectedRev: 72,
     });
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
-    fireEvent.click(
-      await screen.findByRole("button", { name: `Изменить смену ${PLANNED.number}` }),
-    );
+    // The card is back from the form, with the notice; «Изменить» turns it into the form again.
     name = `Смена ${PLANNED.number}`;
-    await screen.findByRole("dialog", { name });
+    fireEvent.click(
+      await within(await screen.findByRole("dialog", { name })).findByRole("button", {
+        name: `Изменить смену ${PLANNED.number}`,
+      }),
+    );
     await waitFor(() => expect(valueOf(name, "Коробов на паллете")).toBe("40"));
     fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
     expect(within(dialog(name)).queryByLabelText("Коробов на паллете")).toBeNull();
@@ -562,9 +569,7 @@ describe("office shifts: changing a shift, the edges", () => {
     const session = shiftsSession([withPallets, ACTIVE, CLOSED]);
     session.api.listTemplates.mockRejectedValue(api("internal"));
     await openShifts(session);
-    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${withPallets.number}` }));
-    const name = `Смена ${withPallets.number}`;
-    await screen.findByRole("dialog", { name });
+    const name = await startEditing(withPallets.number);
     await waitFor(() =>
       expect(messageOf(name, "Шаблон этикетки паллеты")).toBe(
         "Список шаблонов не загрузился. Закройте окно и откройте его снова.",
@@ -587,8 +592,9 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.getOrg.mockReturnValue(new Promise(() => undefined));
     const name = await openEdit(session, PLANNED);
     expect(valueOf(name, "План, шт")).toBe("");
-    // Not even asked for: a changed shift has no use for «today».
-    expect(session.api.getOrg).not.toHaveBeenCalled();
+    // The card reads the profile for its times, but the form never waits for it: a changed
+    // shift has no use for «today».
+    expect(session.api.getOrg).toHaveBeenCalled();
   });
 
   it("lets the person go back to the shift's own marked choices after leaving them", async () => {
@@ -663,9 +669,7 @@ describe("office shifts: changing a shift, the edges", () => {
     ] as const) {
       const shift: OfficeShift = { ...PLANNED, productId: product.id };
       const view = await openShifts(shiftsSession([shift]));
-      fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
-      const name = `Смена ${shift.number}`;
-      await screen.findByRole("dialog", { name });
+      const name = await startEditing(shift.number);
       expect(await within(dialog(name)).findByText(text)).toBeTruthy();
       view.unmount();
     }
@@ -704,9 +708,7 @@ describe("office shifts: changing a shift, the edges", () => {
     session.api.listLines.mockRejectedValue(api("internal"));
     session.api.listCounterparties.mockRejectedValue(api("internal"));
     await openShifts(session);
-    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
-    const name = `Смена ${shift.number}`;
-    await screen.findByRole("dialog", { name });
+    const name = await startEditing(shift.number);
     await waitFor(() =>
       expect(messageOf(name, "Контрагент")).toBe(
         "Список контрагентов не загрузился: контрагент смены не меняется.",
@@ -735,17 +737,54 @@ describe("office shifts: changing a shift, the edges", () => {
     expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
   });
 
-  it("drops what was typed when the dialog is closed, sends nothing and opens on the shift's own values", async () => {
+  it("asks before «Отмена» drops what was typed, then shows the card, sends nothing and opens the form on the shift's own values", async () => {
     const session = shiftsSession();
     const name = await openEdit(session, PLANNED);
     fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
     fireEvent.click(within(dialog(name)).getByRole("button", { name: "Отмена" }));
-    expect(screen.queryByRole("dialog", { name })).toBeNull();
+    // Typed and not saved: the question first, and answering «Вернуться» keeps the form as it was.
+    const question = await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Вернуться к правке" }));
+    expect(valueOf(name, "План, шт")).toBe("900");
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" })).getByRole(
+        "button",
+        { name: "Закрыть без сохранения" },
+      ),
+    );
+    // The card is back (read-only), not the list: the shift's fields are text again.
+    await within(dialog(name)).findByRole("button", { name: `Изменить смену ${PLANNED.number}` });
+    expect(within(dialog(name)).queryByLabelText("План, шт")).toBeNull();
     expect(session.api.updateShift).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${PLANNED.number}` }));
-    await screen.findByRole("dialog", { name });
+    fireEvent.click(
+      within(dialog(name)).getByRole("button", { name: `Изменить смену ${PLANNED.number}` }),
+    );
+    await within(dialog(name)).findByRole("button", { name: "Сохранить" });
     expect(valueOf(name, "План, шт")).toBe("");
     expect(save(name).disabled).toBe(true);
+  });
+
+  it("goes back to the card from an untouched form without asking, and closes the drawer from the × only after asking when something was typed", async () => {
+    const session = shiftsSession();
+    const name = await openEdit(session, PLANNED);
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await within(dialog(name)).findByRole("button", { name: `Изменить смену ${PLANNED.number}` });
+    fireEvent.click(
+      within(dialog(name)).getByRole("button", { name: `Изменить смену ${PLANNED.number}` }),
+    );
+    await within(dialog(name)).findByRole("button", { name: "Сохранить" });
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Закрыть карточку смены" }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog", { name: "Закрыть без сохранения?" })).getByRole(
+        "button",
+        { name: "Закрыть без сохранения" },
+      ),
+    );
+    expect(screen.queryByRole("dialog", { name })).toBeNull();
+    expect(session.api.updateShift).not.toHaveBeenCalled();
   });
 
   it("puts a line the host refused under the line, with the focus, and reads the lines again", async () => {
@@ -841,7 +880,7 @@ describe("office shifts: changing a shift, the edges", () => {
     fireEvent.change(field(name, "План, шт"), { target: { value: " " } });
     await waitFor(() => expect(save(name).disabled).toBe(false));
     fireEvent.click(save(name));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    await leftForCard(name);
     expect(session.api.updateShift).not.toHaveBeenCalled();
     expect(screen.queryByText("Изменения сохранены.")).toBeNull();
     expect(session.api.listShifts).toHaveBeenCalledTimes(1);
@@ -869,7 +908,7 @@ describe("office shifts: changing a shift, the edges", () => {
       // What was typed stays to be read; the way out is the alert's button.
       expect(valueOf(name, "План, шт")).toBe("900");
       fireEvent.click(reload);
-      await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+      await leftForCard(name);
       expect(session.api.updateShift).toHaveBeenCalledTimes(1);
     },
   );
@@ -1232,12 +1271,16 @@ describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", (
     const name = await openEdit(session, WITH_SHEET);
     await waitForList(() => expect(options(name, "Лист А4")).toHaveLength(4));
     setField(name, "Лист А4", TWO_A5.id);
+    // The card and the form share the list; only the refusal reads it once more.
+    const readBefore = session.api.listPalletSheets.mock.calls.length;
     fireEvent.click(save(name));
     await waitFor(() =>
       expect(messageOf(name, "Лист А4")).toBe(
         "Лист выключен, удалён или не подходит смене. Выберите другой.",
       ),
     );
-    await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(session.api.listPalletSheets.mock.calls.length).toBeGreaterThan(readBefore),
+    );
   });
 });

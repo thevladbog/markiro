@@ -12,6 +12,7 @@ import {
   labelState,
   packState,
   palletCountDiffers,
+  palletCountState,
   ssccTail,
 } from "../src/office/shifts/shift-card.js";
 import { ORG_PROFILE, renderOffice, type FakeOfficeSession } from "./support/office.js";
@@ -70,6 +71,7 @@ const PALLET_1: OfficePallet = {
   boxes: 1,
   units: 12,
   boxCountReported: 2,
+  disassembledBoxes: 0,
   printVerifiedAt: "2026-10-08T06:20:51.300Z",
   printSkippedAt: null,
 };
@@ -353,7 +355,10 @@ describe("the card of a shift (plan О-Ф)", () => {
       Режим: "Агрегация",
       "План, шт": "1\u00a0200",
       "Вместимость короба, шт": "12",
+      "Шаблон этикетки короба": "Молоко 100×72",
       Паллеты: "По 40 кор.",
+      "Шаблон паллеты": "Паллета 100×150",
+      "Лист паллеты А4": "По умолчанию (стандартный лист)",
       Выпуск: "540 шт · 45 кор.",
       Открыта: "08.10.2026, 18:02",
       Закрыта: "—",
@@ -545,6 +550,40 @@ describe("the card of a shift (plan О-Ф)", () => {
       "✓Закрыта!Счёт коробов станции другой",
       "✓Закрыта!Счёт коробов станции другой",
     ]);
+  });
+
+  it("shows a closed pallet's difference as neutral «Состав изменён расформированием» when a taken-apart box accounts for it, and says in plain words what the numbers are", async () => {
+    const repacked: OfficePallet = {
+      ...PALLET_1,
+      boxes: 1,
+      boxCountReported: 2,
+      disassembledBoxes: 1,
+    };
+    const real: OfficePallet = {
+      ...PALLET_1,
+      id: "a0000000-0000-4000-8000-000000000103",
+      sscc: "146006820000000403",
+      boxes: 1,
+      boxCountReported: 3,
+      disassembledBoxes: 1,
+    };
+    await openCard(cardSession(WITH_PALLETS, [], [repacked, real]), "OCT26-004", "Паллеты");
+    await waitFor(() => expect(within(section("Паллеты")).getAllByRole("row")).toHaveLength(3));
+    expect(rowsOf("Паллеты").map((row) => row[4])).toEqual([
+      "✓Закрыта·Состав изменён расформированием",
+      "✓Закрыта!Счёт коробов станции другой",
+    ]);
+    const neutral = screen.getByText("Состав изменён расформированием").closest("[title]");
+    const note =
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. После расформирования коробов числа расходятся (расформировано: 1). Это не ошибка.";
+    expect(neutral?.getAttribute("title")).toBe(note);
+    expect(neutral?.getAttribute("aria-description")).toBe(note);
+    // The other is a warning that says the disassembly does not account for all of it.
+    expect(
+      screen.getByText("Счёт коробов станции другой").closest("[title]")?.getAttribute("title"),
+    ).toBe(
+      "Станция насчитала при закрытии коробов: 3, в базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 1): проверьте состав паллеты.",
+    );
   });
 
   it("flags a box the station closed after its pallet, to the millisecond, and no other", async () => {
@@ -866,6 +905,7 @@ describe("what the card says of a box or a pallet", () => {
       disassembledAt: null,
       boxes: 2,
       boxCountReported: 3,
+      disassembledBoxes: 0,
     };
     expect(palletCountDiffers(pallet)).toBe(true);
     expect(palletCountDiffers({ ...pallet, boxCountReported: 1 })).toBe(true);
@@ -874,6 +914,30 @@ describe("what the card says of a box or a pallet", () => {
     expect(palletCountDiffers({ ...pallet, closedAt: null })).toBe(false);
     expect(palletCountDiffers({ ...pallet, disassembledAt: "2026-10-08T07:00:00.000Z" })).toBe(
       false,
+    );
+  });
+
+  it("tells a difference a disassembly accounts for from a real one (the owner's repacking, plan КРТ-4)", () => {
+    const pallet = {
+      closedAt: "2026-10-08T06:20:44.650Z",
+      disassembledAt: null,
+      boxes: 1,
+      boxCountReported: 2,
+      disassembledBoxes: 1,
+    };
+    // Two boxes at the close, one taken apart since: the composition changed legitimately.
+    expect(palletCountState(pallet)).toBe("explained");
+    expect(palletCountDiffers(pallet)).toBe(false);
+    // The disassembly has to be the whole difference.
+    expect(palletCountState({ ...pallet, disassembledBoxes: 0 })).toBe("differs");
+    expect(palletCountState({ ...pallet, disassembledBoxes: 2 })).toBe("differs");
+    expect(palletCountState({ ...pallet, boxes: 0, disassembledBoxes: 1 })).toBe("differs");
+    // Nothing to explain when the counts agree, none was counted, or the pallet is not closed.
+    expect(palletCountState({ ...pallet, boxes: 2, disassembledBoxes: 1 })).toBe("same");
+    expect(palletCountState({ ...pallet, boxCountReported: null })).toBe("same");
+    expect(palletCountState({ ...pallet, closedAt: null })).toBe("same");
+    expect(palletCountState({ ...pallet, disassembledAt: "2026-10-08T07:00:00.000Z" })).toBe(
+      "same",
     );
   });
 

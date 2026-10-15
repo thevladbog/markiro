@@ -234,14 +234,21 @@ export function palletWarnings(rows: ShiftExportRows, palletId: string): ExportW
 /**
  * Pallets (the office's list of a shift's pallets) whose live box count is
  * not what the station counted when it closed them. A pallet taken apart is
- * left out: its count is stale by design.
+ * left out: its count is stale by design. A difference that exactly equals the
+ * pallet's boxes taken apart since the close is no warning either.
  */
 export function reportedCountWarnings(pallets: readonly OfficePallet[]): ExportWarning[] {
   const differing = pallets.filter(
     (pallet) =>
       pallet.disassembledAt === null &&
       pallet.boxCountReported !== null &&
-      pallet.boxCountReported !== pallet.boxes,
+      pallet.boxCountReported !== pallet.boxes &&
+      // A difference the pallet's own taken-apart boxes account for is the card's neutral tag,
+      // not a warning (`palletCountState`).
+      !(
+        pallet.disassembledBoxes > 0 &&
+        pallet.boxCountReported === pallet.boxes + pallet.disassembledBoxes
+      ),
   ).length;
   return differing > 0 ? [{ kind: "pallet_count_mismatch", pallets: differing }] : [];
 }

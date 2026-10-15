@@ -689,6 +689,7 @@ function listedPallet(boxes: number, reported: number | null): OfficePallet {
     boxes,
     units: 2,
     boxCountReported: reported,
+    disassembledBoxes: 0,
     printVerifiedAt: null,
     printSkippedAt: null,
   };

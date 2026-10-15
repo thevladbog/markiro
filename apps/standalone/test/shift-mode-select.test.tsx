@@ -6,7 +6,8 @@ import { HostError } from "../src/host/client.js";
 import type { OfficeShift } from "../src/host/protocol.js";
 import { createOfficeQueryClient } from "../src/office/office-query.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
-import { ShiftDialog } from "../src/office/shifts/ShiftDialog.js";
+import { SidePanel } from "@markiro/ui";
+import { ShiftEditBody } from "../src/office/shifts/ShiftEditor.js";
 import {
   ACTIVE,
   BOX_58,
@@ -23,6 +24,7 @@ import {
   PALLET,
   PLANNED,
   shiftsSession,
+  startEditing,
   WATER,
 } from "./support/shifts.js";
 import {
@@ -102,9 +104,7 @@ async function openCreate(session = shiftsSession()): Promise<typeof session> {
 
 async function openEdit(session: ReturnType<typeof shiftsSession>, shift: OfficeShift) {
   await openShifts(session);
-  fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
-  const name = `Смена ${shift.number}`;
-  await screen.findByRole("dialog", { name });
+  const name = await startEditing(shift.number);
   await waitFor(() =>
     expect((field(name, "Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(false),
   );
@@ -270,13 +270,7 @@ describe("office shifts: a shift's mode (plan РЕЖ)", () => {
         const view = render(
           <QueryClientProvider client={createOfficeQueryClient()}>
             <OfficeSessionProvider value={session}>
-              <ShiftDialog
-                shift={{ ...base, mode: shown }}
-                onClose={() => undefined}
-                onSaved={() => undefined}
-                onReload={() => undefined}
-                onOutdated={() => undefined}
-              />
+              <EditorHarness shift={{ ...base, mode: shown }} />
             </OfficeSessionProvider>
           </QueryClientProvider>,
         );
@@ -381,17 +375,28 @@ function printingShift(verification: "none" | "required" = "none"): OfficeShift 
   };
 }
 
+/** The shift's form as the card holds it, without the page around it. */
+function EditorHarness({ shift }: { shift: OfficeShift }) {
+  return (
+    <SidePanel open title={`Смена ${shift.number}`} closeLabel="Закрыть" onClose={() => undefined}>
+      <ShiftEditBody
+        shift={shift}
+        formId="harness-form"
+        onStatus={() => undefined}
+        onClose={() => undefined}
+        onSaved={() => undefined}
+        onReload={() => undefined}
+        onOutdated={() => undefined}
+      />
+    </SidePanel>
+  );
+}
+
 function renderDialog(session: ReturnType<typeof shiftsSession>, shift: OfficeShift) {
   return render(
     <QueryClientProvider client={createOfficeQueryClient()}>
       <OfficeSessionProvider value={session}>
-        <ShiftDialog
-          shift={shift}
-          onClose={() => undefined}
-          onSaved={() => undefined}
-          onReload={() => undefined}
-          onOutdated={() => undefined}
-        />
+        <EditorHarness shift={shift} />
       </OfficeSessionProvider>
     </QueryClientProvider>,
   );

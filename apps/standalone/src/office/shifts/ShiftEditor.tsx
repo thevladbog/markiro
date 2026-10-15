@@ -1,5 +1,13 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -19,7 +27,7 @@ import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
-import { FormDialog } from "../FormDialog.js";
+import { EntityDrawer } from "../EntityDrawer.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { PageLoading, StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
@@ -42,9 +50,10 @@ import { defaultSheetFor } from "../sheet-choice.js";
 import { sheetOptions } from "./sheet-options.js";
 import { datePickerTexts } from "./shift-text.js";
 
-export interface ShiftDialogProps {
+export interface ShiftEditorProps {
   /** `null` plans a new shift; a planned shift is changed. */
   shift: OfficeShift | null;
+  /** Leaves the editor: nothing was saved (or there was nothing to save). */
   onClose: () => void;
   onSaved: (shift: OfficeShift) => void;
   /** The shift changed on the host: close and load the list again. */
@@ -54,56 +63,33 @@ export interface ShiftDialogProps {
 }
 
 /**
- * Plans a shift, or changes a planned one (stage 2a spec §5.6), with pallets
- * or without (plan О-Ф: their capacity from the product, their template by
- * decision 7 for the purpose `pallet`, both changeable). A new shift's
- * production date starts as today in the organization's time zone, so the
- * dialog waits for the organization's profile; when the profile does not
- * load, or names a zone this PC does not know, it starts as this PC's date
- * and says so. A changed shift needs no "today": it starts on its own values.
- *
- * «Режим работы» (plan РЕЖ, Р2, Р16) comes right after the product:
- * «Проверка» or «Агрегация», aggregation unless chosen. A validation shift
- * keeps its box template, with a word that it prints no box label (Р4), and
- * hides the box capacity and the pallets, whose values the form keeps for an
- * aggregation chosen again. The mode of a shift that is no longer planned is
- * shown, never changed (Р1): the page opens this dialog for planned shifts
- * only, so that is a guard.
- *
- * «Проверка» offers «Печатать дубликат Data Matrix» (part B, Р16, the cloud
- * station's flag). Turned on, it opens «Печать дубликата» after the line and
- * the counterparty: the duplicate template (enabled, of the purpose
- * `product_duplicate`, covering the product's group) and «Обязательная
- * проверка этикетки», off unless chosen (the owner's default). «Агрегация»
- * drops all three; the flag turned off drops the template. The fields come
- * in the cloud's order (Р16): the product, the mode and its flag, the date
- * and the plan, the line and the counterparty, «Печать дубликата», the box
- * template, then the box capacity and the pallets.
+ * Plans a shift in a side drawer (owner decision after beta 3.2: the form is
+ * no modal), the way the other records open: «Запланировать смену» opens
+ * `EntityDrawer` around the shift's fields. A new shift's production date
+ * starts as today in the organization's time zone, so the drawer waits for
+ * the organization's profile; when the profile does not load, or names a zone
+ * this PC does not know, it starts as this PC's date and says so.
  */
-export function ShiftDialog(props: ShiftDialogProps) {
+export function ShiftCreateDrawer(props: Omit<ShiftEditorProps, "shift">) {
   const { t } = useTranslation();
-  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token), {
-    enabled: props.shift === null,
-  });
-  if (props.shift !== null) {
-    return <ShiftForm {...props} today={props.shift.productionDate} dateNote={null} />;
-  }
+  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   if (org.isPending) {
     return (
-      <FormDialog
+      <EntityDrawer
         title={t("office.shifts.createTitle")}
         submitLabel={t("office.shifts.create")}
         submitDisabled
+        dirty={false}
         onSubmit={() => Promise.resolve()}
         onClose={props.onClose}
       >
         <PageLoading />
-      </FormDialog>
+      </EntityDrawer>
     );
   }
   const zone = org.isSuccess && isKnownTimeZone(org.data.timeZone) ? org.data.timeZone : null;
   return (
-    <ShiftForm
+    <ShiftCreateForm
       {...props}
       today={civilToday(zone)}
       dateNote={zone !== null ? null : org.isSuccess ? "localDateZone" : "localDate"}
@@ -111,18 +97,102 @@ export function ShiftDialog(props: ShiftDialogProps) {
   );
 }
 
+function ShiftCreateForm({
+  today,
+  dateNote,
+  ...props
+}: Omit<ShiftEditorProps, "shift"> & { today: string; dateNote: DateNote }) {
+  const { t } = useTranslation();
+  const editor = useShiftEditor({ ...props, shift: null, today, dateNote });
+  return (
+    <EntityDrawer
+      title={t("office.shifts.createTitle")}
+      submitLabel={t("office.shifts.create")}
+      dirty={editor.dirty}
+      onSubmit={editor.submit}
+      onClose={props.onClose}
+      alert={editor.alert}
+    >
+      {editor.fields}
+    </EntityDrawer>
+  );
+}
+
+/** What the editor tells the drawer that holds it, for the drawer's footer and its close. */
+export interface ShiftEditStatus {
+  dirty: boolean;
+  /** «Сохранить» stays off: nothing changed, or the shift was opened, closed or deleted meanwhile. */
+  submitDisabled: boolean;
+  sending: boolean;
+}
+
+/**
+ * A planned shift's form inside the shift's own drawer (owner decision after
+ * beta 3.2: «Изменить» switches the card to its fields). The drawer owns the
+ * footer («Отмена», «Сохранить» with `form={formId}`) and the confirmation of
+ * leaving with unsaved changes, so the editor reports its state through
+ * `onStatus` after every change of it.
+ */
+export function ShiftEditBody({
+  shift,
+  formId,
+  onStatus,
+  ...callbacks
+}: Omit<ShiftEditorProps, "shift"> & {
+  shift: OfficeShift;
+  formId: string;
+  onStatus: (status: ShiftEditStatus) => void;
+}) {
+  const editor = useShiftEditor({
+    ...callbacks,
+    shift,
+    today: shift.productionDate,
+    dateNote: null,
+  });
+  const { dirty, submitDisabled, sending } = editor;
+  useEffect(() => {
+    onStatus({ dirty, submitDisabled, sending });
+  }, [dirty, submitDisabled, sending, onStatus]);
+  return (
+    <form
+      id={formId}
+      className="standalone-form"
+      onSubmit={(event) => void editor.submit(event)}
+      noValidate
+    >
+      {editor.alert}
+      {editor.fields}
+    </form>
+  );
+}
+
+type DateNote = "localDate" | "localDateZone" | null;
+
 /** An Escape the open calendar has handled closes the calendar only, not the dialog around it. */
 function keepCalendarEscape(event: KeyboardEvent<HTMLElement>): void {
   if (event.key === "Escape" && event.defaultPrevented) event.stopPropagation();
 }
 
-interface ShiftFormProps extends ShiftDialogProps {
+interface ShiftEditorInput extends ShiftEditorProps {
   today: string;
   /** Why `today` is this PC's date, not the organization's; `null` when it is the organization's. */
-  dateNote: "localDate" | "localDateZone" | null;
+  dateNote: DateNote;
 }
 
-function ShiftForm({
+/**
+ * The shift form's state, rules and fields, shared by the drawer that plans a
+ * shift and the card that changes a planned one (plan О-Ф: pallets with
+ * their capacity from the product, their template by decision 7 for the
+ * purpose `pallet`, both changeable). The rules are the dialog's of stage 2a:
+ * «Режим работы» (plan РЕЖ, Р2, Р16) comes right after the product,
+ * aggregation unless chosen; a validation shift keeps its box template and
+ * hides the box capacity and the pallets; «Проверка» offers «Печатать
+ * дубликат Data Matrix» with the duplicate template and «Обязательная
+ * проверка этикетки»; a shift that is no longer planned shows its mode, never
+ * changes it (Р1) — the card offers the change for planned shifts only, so
+ * that is a guard.
+ */
+function useShiftEditor({
   shift,
   onClose,
   onSaved,
@@ -130,7 +200,7 @@ function ShiftForm({
   onOutdated,
   today: todayAtOpen,
   dateNote: dateNoteAtOpen,
-}: ShiftFormProps) {
+}: ShiftEditorInput) {
   const { t } = useTranslation();
   // The date the form started on and the note about where it came from are fixed when the
   // dialog opens: the profile read again later (failing, or arriving after a failure)
@@ -485,26 +555,15 @@ function ShiftForm({
     },
   );
 
-  return (
-    <FormDialog
-      title={
-        shift === null
-          ? t("office.shifts.createTitle")
-          : t("office.shifts.editTitle", { number: shift.number })
-      }
-      submitLabel={shift === null ? t("office.shifts.create") : t("office.common.save")}
-      submitDisabled={shift !== null && (!isDirty || outdatedMessage !== null)}
-      width={560}
-      onSubmit={submit}
-      onClose={onClose}
-      alert={
-        outdatedMessage !== null ? (
-          <StaleAlert onReload={onReload} message={outdatedMessage} />
-        ) : (
-          <WriteFailureAlert failure={failure} onReload={onReload} />
-        )
-      }
-    >
+  const submitDisabled = shift !== null && (!isDirty || outdatedMessage !== null);
+  const alert: ReactNode =
+    outdatedMessage !== null ? (
+      <StaleAlert onReload={onReload} message={outdatedMessage} />
+    ) : (
+      <WriteFailureAlert failure={failure} onReload={onReload} />
+    );
+  const fields = (
+    <>
       {shift !== null ? (
         // The product never changes: a changed shift names it.
         <>
@@ -882,6 +941,14 @@ function ShiftForm({
           />
         </>
       )}
-    </FormDialog>
+    </>
   );
+  return {
+    fields,
+    alert,
+    submit: submit as (event: FormEvent<HTMLFormElement>) => Promise<void>,
+    dirty: isDirty,
+    submitDisabled,
+    sending: isSubmitting,
+  };
 }

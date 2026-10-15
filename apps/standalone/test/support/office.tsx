@@ -229,6 +229,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
+    listShiftScans: vi.fn<HostApi["listShiftScans"]>(async () => ({
+      items: [],
+      nextCursor: null,
+    })),
     // The station's link reads them at every revision (plan КНФ): nothing to tell by default.
     conflictStatus: vi.fn<HostApi["conflictStatus"]>(async () => ({ reviewed: [] })),
     listDisplacements: vi.fn<HostApi["listDisplacements"]>(async () => ({

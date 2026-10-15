@@ -108,6 +108,96 @@ export const officeShiftRejectionsSchema = z.object({
 });
 export type OfficeShiftRejections = z.infer<typeof officeShiftRejectionsSchema>;
 
+/** The rows of one page of a shift's scan history (`SCAN_HISTORY_PAGE_SIZE`), the most a page may ask. */
+export const SCAN_HISTORY_PAGE_SIZE = 50;
+export const SCAN_HISTORY_MAX_PAGE_SIZE = 100;
+
+/**
+ * What the journal says of a scan of the work screen: `ok` — accepted; `duplicate` — the code
+ * was scanned before; `wrong_gtin` — another product's code; `invalid` — not a readable code.
+ */
+export const SCAN_VERDICTS = ["ok", "duplicate", "wrong_gtin", "invalid"] as const;
+export type ScanVerdict = (typeof SCAN_VERDICTS)[number];
+
+/**
+ * One scan of a shift's history (`GET /v1/office/shifts/{id}/scans`), mirroring
+ * `markiro_proto::review::OfficeScanHistoryItem`. The code never arrives whole: only its GTIN
+ * and at most the last four characters of its serial.
+ */
+export const officeScanHistoryItemSchema = z.object({
+  id: z.string(),
+  scannedAt: instant,
+  receivedAt: instant,
+  deviceId: z.string(),
+  deviceName: z.string(),
+  operatorName: z.string().nullable(),
+  verdict: z.enum(SCAN_VERDICTS),
+  /** `local`: the station's own journal knew the code; `host`: the host's. */
+  duplicateSource: z.string().nullable(),
+  gtin14: z.string().nullable(),
+  serialTail: z.string().max(4).nullable(),
+  boxId: z.string().nullable(),
+  boxSscc: z.string().nullable(),
+  palletId: z.string().nullable(),
+  palletSscc: z.string().nullable(),
+});
+export type OfficeScanHistoryItem = z.infer<typeof officeScanHistoryItemSchema>;
+
+export const officeScanHistoryPageSchema = z.object({
+  items: z.array(officeScanHistoryItemSchema),
+  /** Opaque: sent back as `cursor` for the next page; `null` on the last. */
+  nextCursor: z.string().nullable(),
+});
+export type OfficeScanHistoryPage = z.infer<typeof officeScanHistoryPageSchema>;
+
+/** What `GET /v1/office/shifts/{id}/scans` narrows to; every field is optional. */
+export interface ScanHistoryQuery {
+  result?: ScanVerdict;
+  /** A station's id. */
+  device?: string;
+  /** A box's id. */
+  box?: string;
+  /** The device's instants in milliseconds since 1970: `fromMs` inclusive, `toMs` exclusive. */
+  fromMs?: number;
+  toMs?: number;
+  /** The last characters of the serial (1–32 letters, digits and `-_.~`). */
+  q?: string;
+}
+
+const SCAN_PARAMS = ["result", "device", "box", "fromMs", "toMs", "q"] as const;
+
+/** A serial tail the shell lets through to the host: plain URL characters only. */
+export const SCAN_TAIL_PATTERN = /^[0-9A-Za-z._~-]{1,32}$/;
+
+/**
+ * The path of one page of a shift's scans: the filters in a fixed order (one cache key per
+ * query), then the limit and the cursor. The shell lets only plain URL characters through, so
+ * a value outside them is refused here first.
+ */
+export function shiftScansPath(
+  shiftId: string,
+  query: ScanHistoryQuery,
+  cursor: string | null,
+  limit?: number,
+): string {
+  const parts: string[] = [];
+  for (const name of SCAN_PARAMS) {
+    const value = query[name];
+    if (value === undefined) continue;
+    const text = String(value);
+    const fits = name === "q" ? SCAN_TAIL_PATTERN.test(text) : /^[0-9a-z_-]+$/.test(text);
+    if (!fits) throw new RangeError(`not a list value: ${name}`);
+    parts.push(`${name}=${text}`);
+  }
+  if (limit !== undefined) parts.push(`limit=${limit}`);
+  if (cursor !== null) {
+    if (!/^[0-9]{1,15}~[0-9a-f-]{36}$/.test(cursor)) throw new RangeError("not a cursor");
+    parts.push(`cursor=${cursor}`);
+  }
+  const base = `/v1/office/shifts/${shiftId}/scans`;
+  return parts.length === 0 ? base : `${base}?${parts.join("&")}`;
+}
+
 /**
  * Mirrors `markiro_proto::review::OfficeShiftExports`: `GET /v1/office/shifts/{id}/exports`,
  * the exports of the shift the office saved (the audit trail's `shift.export` rows), newest first.
