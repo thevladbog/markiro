@@ -5,7 +5,7 @@ import type { AboutData } from "./about-data.js";
 import { licenseSupportBlock } from "./license/license-support.js";
 import { BUILT_IN_SUPPORT_KEYS } from "./support-keys.js";
 import type { SupportBlock, SupportFacts } from "./support-report.js";
-import { createUsageContributor, type UsageLoad } from "./support-usage.js";
+import { createUsageContributor, type LicenseLoad, type UsageLoad } from "./support-usage.js";
 
 /** What a contributor may read: the facts the base text already carries, what the page learned, and the host. */
 export interface SupportContext {
@@ -20,6 +20,8 @@ export interface SupportContext {
   read: <T>(operation: (api: HostApi, token: string) => Promise<T>) => Promise<T>;
   /** What the page learned of the host's usage statistics; absent where it was not asked. */
   usage?: UsageLoad;
+  /** What the page learned of the host's license (for the encrypted summary); absent where it was not asked. */
+  license?: LicenseLoad;
 }
 
 /**

@@ -1,12 +1,18 @@
+import type { InstallRole } from "../../host/device.js";
 import { HostError } from "../../host/client.js";
+import {
+  LICENSE_FEATURE_KEYS,
+  LICENSE_QUOTA_KEYS,
+  type OfficeLicense,
+} from "../../host/protocol.js";
 import type { UsageMonth, UsageStats } from "../../host/usage-stats.js";
 import { encryptSupportPayload } from "./support-crypto.js";
 import { activeSupportKey, type SupportKeyset } from "./support-keys.js";
-import type { SupportBlock } from "./support-report.js";
+import { safeValue, type SupportBlock } from "./support-report.js";
 import type { SupportContext } from "./support-blocks.js";
 
 /** The version of the statistics' JSON, for the one who reads it. */
-export const USAGE_PAYLOAD_VERSION = 1;
+export const USAGE_PAYLOAD_VERSION = 2;
 
 /** How the page learned the statistics: the host's counts, or why there are none. */
 export type UsageLoad =
@@ -19,6 +25,62 @@ export function usageLoadOf(result: PromiseSettledResult<UsageStats>): UsageLoad
   return error instanceof HostError && error.code === "forbidden"
     ? { kind: "forbidden" }
     : { kind: "failed" };
+}
+
+/** How the page learned the license: the host's answer, or why there is none. */
+export type LicenseLoad =
+  { kind: "ok"; license: OfficeLicense } | { kind: "forbidden" } | { kind: "failed" };
+
+/** The answer of `getLicense` as `LicenseLoad` says it. */
+export function licenseLoadOf(result: PromiseSettledResult<OfficeLicense>): LicenseLoad {
+  if (result.status === "fulfilled") return { kind: "ok", license: result.value };
+  const error: unknown = result.reason;
+  return error instanceof HostError && error.code === "forbidden"
+    ? { kind: "forbidden" }
+    : { kind: "failed" };
+}
+
+/** The license summary, field by field: never the customer, the INN, the fingerprint or the file. */
+function pickLicense(license: OfficeLicense) {
+  const file = license.license;
+  const quota = (key: (typeof LICENSE_QUOTA_KEYS)[number]) => ({
+    limit: license.quotas[key].limit,
+    used: license.quotas[key].used,
+    over: license.quotas[key].over,
+  });
+  return {
+    state: license.state,
+    plan: file?.plan ?? null,
+    licenseId: file?.licenseId.toLowerCase() ?? null,
+    sequence: file?.sequence ?? null,
+    kid: file?.kid ?? null,
+    validFrom: file?.validFrom ?? null,
+    validUntil: file?.validUntil ?? null,
+    graceDays: file?.graceDays ?? null,
+    daysLeft: license.daysLeft,
+    quotas: Object.fromEntries(LICENSE_QUOTA_KEYS.map((key) => [key, quota(key)])),
+    features: Object.fromEntries(LICENSE_FEATURE_KEYS.map((key) => [key, license.features[key]])),
+    innMatches: license.binding.innMatches,
+  };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const system = (value: string | null): string | null => {
+  if (value === null) return null;
+  const text = safeValue(value);
+  return text === "" ? null : text;
+};
+
+export interface UsagePayloadAbout {
+  generatedAt: Date;
+  appVersion: string | null;
+  hostVersion: string | null;
+  hostId: string | null;
+  role: InstallRole | "unknown";
+  os: string | null;
+  arch: string | null;
+  webview: string | null;
+  license: OfficeLicense | null;
 }
 
 /** One month, field by field: the allowlist of what the statistics may say. */
@@ -65,14 +127,12 @@ function pickMonth(month: UsageMonth) {
 
 /**
  * What is encrypted: the generation instant, the versions of the app and the
- * host, and the host's counts, copied field by field. A field the host's
+ * host, the host's id, the PC role, the system (OS, architecture, WebView2), a
+ * license summary and the host's counts, copied field by field. A field the host's
  * answer holds beyond these (it is read loosely) cannot reach it; no name,
  * code, hash, SSCC, path or secret has a place here.
  */
-export function usagePayload(
-  stats: UsageStats,
-  about: { generatedAt: Date; appVersion: string | null; hostVersion: string | null },
-): string {
+export function usagePayload(stats: UsageStats, about: UsagePayloadAbout): string {
   return JSON.stringify({
     v: USAGE_PAYLOAD_VERSION,
     generatedAt: about.generatedAt.toISOString(),
@@ -84,6 +144,12 @@ export function usagePayload(
       office: stats.devices.office,
       handheld: stats.devices.handheld,
     },
+    hostId: about.hostId !== null && UUID.test(about.hostId) ? about.hostId.toLowerCase() : null,
+    role: about.role === "unknown" ? null : about.role,
+    os: system(about.os),
+    arch: system(about.arch),
+    webview: system(about.webview),
+    license: about.license === null ? null : pickLicense(about.license),
   });
 }
 
@@ -110,10 +176,17 @@ export function createUsageContributor(keyset: SupportKeyset) {
     if (context.usage.kind === "forbidden") return absent();
     if (context.usage.kind === "failed") return absent();
     const stats = context.usage.stats;
+    const license = context.license?.kind === "ok" ? context.license.license : null;
     const payload = usagePayload(stats, {
       generatedAt: facts.generatedAt,
       appVersion: facts.appVersion,
       hostVersion: facts.hostVersion,
+      hostId: facts.hostId,
+      role: facts.role,
+      os: facts.os,
+      arch: facts.arch,
+      webview: facts.webview,
+      license,
     });
     let opaque: string;
     try {
