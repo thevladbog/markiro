@@ -312,6 +312,8 @@ export interface HostApi {
    * in `proto/src/lib.rs`, `create_code` in `host/src/routes/pairing.rs`).
    */
   createPairingCode: (token: string, request?: PairingCodeRequest) => Promise<PairingCode>;
+  /** A code that pairs device `id` again with its own `deviceId` (plan ТСД-Х, task Х6). */
+  createDevicePairingCode: (token: string, id: string) => Promise<PairingCode>;
   listCounterparties: (token: string) => Promise<CounterpartyRecord[]>;
   createCounterparty: (token: string, create: CounterpartyCreate) => Promise<CounterpartyRecord>;
   updateCounterparty: (
@@ -800,6 +802,11 @@ export function createHostApi(client: HostClient): HostApi {
     createPairingCode: (token, request) =>
       client.request("POST", "/v1/office/pairing-codes", {
         body: request,
+        officeToken: token,
+        schema: pairingCodeSchema,
+      }),
+    createDevicePairingCode: (token, id) =>
+      client.request("POST", `/v1/office/devices/${id}/pairing-code`, {
         officeToken: token,
         schema: pairingCodeSchema,
       }),

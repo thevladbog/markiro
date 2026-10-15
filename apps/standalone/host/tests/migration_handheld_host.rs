@@ -1,4 +1,4 @@
-//! Migrations 0035-0037 of plan ТСД-Х on a database that has the earlier ones (spec 6.4): a host
+//! Migrations 0035-0038 of plan ТСД-Х on a database that has the earlier ones (spec 6.4): a host
 //! with live shifts, boxes and pallets upgrades without losing a row and gets the new tables.
 
 use std::collections::BTreeSet;
@@ -157,4 +157,40 @@ async fn a_closed_box_of_a_live_database_gets_its_change_time_and_an_open_one_ge
             ("open".to_owned(), None),
         ]
     );
+}
+
+#[tokio::test]
+async fn a_pairing_code_may_name_a_device() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = pool(&dir.path().join("host.db")).await;
+    through(37).run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
+         VALUES ('u', 'admin', 'A', 'admin', 'x', 1, 't', 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at) \
+         VALUES ('c', 'h', 'u', 't', 't2')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    MIGRATOR.run(&pool).await.unwrap();
+    let device: Option<String> =
+        sqlx::query_scalar("SELECT device_id FROM pairing_codes WHERE id = 'c'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(device, None, "an existing code names no device");
+    // A code can name only a device that exists.
+    let named = sqlx::query(
+        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at, device_id) \
+         VALUES ('d', 'h2', 'u', 't', 't2', 'nobody')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(named.is_err(), "device_id references devices");
 }

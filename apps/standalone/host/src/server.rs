@@ -308,6 +308,10 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::devices::update_device),
         )
         .route(
+            "/v1/office/devices/{id}/pairing-code",
+            post(crate::routes::pairing::create_device_code),
+        )
+        .route(
             "/v1/office/devices/{id}/revoke",
             post(crate::routes::devices::revoke_device),
         )

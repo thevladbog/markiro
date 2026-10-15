@@ -76,6 +76,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateDevice: vi.fn<HostApi["updateDevice"]>(() => unexpected("updateDevice")),
     revokeDevice: vi.fn<HostApi["revokeDevice"]>(() => unexpected("revokeDevice")),
     createPairingCode: vi.fn<HostApi["createPairingCode"]>(() => unexpected("createPairingCode")),
+    createDevicePairingCode: vi.fn<HostApi["createDevicePairingCode"]>(() =>
+      unexpected("createDevicePairingCode"),
+    ),
     listCounterparties: vi.fn<HostApi["listCounterparties"]>(() =>
       unexpected("listCounterparties"),
     ),

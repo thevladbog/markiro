@@ -77,6 +77,8 @@ export interface PairingCodeDialogProps {
   regenerating: boolean;
   /** Why a new code could not be created, as an i18n key. */
   failure: string | null;
+  /** The name of the device this code re-pairs; unset for a code of a new device. */
+  repairFor?: string | undefined;
   onRegenerate: () => void;
   onClose: () => void;
   /** Draws the card for the PDF; the webview's canvas by default, a test's mock otherwise. */
@@ -93,6 +95,7 @@ export function PairingCodeDialog({
   deadline,
   regenerating,
   failure,
+  repairFor,
   onRegenerate,
   onClose,
   rasterize = rasterizeCard,
@@ -111,9 +114,12 @@ export function PairingCodeDialog({
   }, []);
   // A claim does not raise the host revision, so no event announces the new
   // device: the list is read again every few seconds while the code shows.
-  useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
-    refetchInterval: DEVICE_POLL_MS,
-  });
+  // A re-pairing adds no device, so the list is not polled for it.
+  useOfficeQuery(
+    officeKeys.devices,
+    (api, token) => api.listDevices(token),
+    repairFor === undefined ? { refetchInterval: DEVICE_POLL_MS } : {},
+  );
   const remainingMs = useRemainingMs(deadline, codeLifetimeMs(code));
   const payload = parsePairingPayload(code.payload);
   // The card is drawn when a button is pressed, from this code, and handed on
@@ -168,7 +174,11 @@ export function PairingCodeDialog({
   return (
     <Modal
       open
-      title={t("office.devices.pairing.title")}
+      title={
+        repairFor === undefined
+          ? t("office.devices.pairing.title")
+          : t("office.devices.repair.title", { name: repairFor })
+      }
       onClose={onClose}
       closeLabel={t("office.common.close")}
       footer={
@@ -201,7 +211,11 @@ export function PairingCodeDialog({
             <Alert tone="warn">{t("office.devices.pairing.expired")}</Alert>
           ) : (
             <>
-              <p>{t("office.devices.pairing.intro")}</p>
+              <p>
+                {repairFor === undefined
+                  ? t("office.devices.pairing.intro")
+                  : t("office.devices.repair.intro")}
+              </p>
               <div className="pairing-code">
                 <Suspense fallback={<Spinner label={t("office.devices.pairing.matrixLoading")} />}>
                   <PairingDataMatrix

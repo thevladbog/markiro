@@ -35,6 +35,8 @@ pub mod actions {
     pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";
     pub const PAIRING_CODE_CREATE: &str = "pairing_code.create";
     pub const DEVICE_CLAIM: &str = "device.claim";
+    /// A device paired again with its own `deviceId` (plan ТСД-Х, task Х6).
+    pub const DEVICE_REKEY: &str = "device.rekey";
     pub const DEVICE_LINE: &str = "device.line";
     pub const COUNTERPARTY_CREATE: &str = "counterparty.create";
     pub const COUNTERPARTY_UPDATE: &str = "counterparty.update";
@@ -148,6 +150,8 @@ pub mod reasons {
     pub const WRONG_CURRENT_PASSWORD: &str = "wrong_current_password";
     /// No live code matches (or the input is not a code at all).
     pub const UNKNOWN_CODE: &str = "unknown_code";
+    /// A code made for one device was claimed for another, or without a device, or the reverse.
+    pub const RECOVERY_MISMATCH: &str = "recovery_mismatch";
     pub const CODE_USED: &str = "code_used";
     pub const TOO_MANY_ATTEMPTS: &str = "too_many_attempts";
     pub const CODE_EXPIRED: &str = "code_expired";

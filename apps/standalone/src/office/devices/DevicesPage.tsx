@@ -41,6 +41,8 @@ interface Pairing {
    * no host timestamp is ever compared with this PC's clock.
    */
   deadline: number;
+  /** Set when the code re-pairs this device with its own `deviceId` (plan ТСД-Х, task Х6). */
+  repairFor?: DeviceRecord;
 }
 
 type DevicesDialog =
@@ -58,10 +60,13 @@ export function DevicesPage() {
   const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const storeDevice = useStoreRecord<DeviceRecord>(officeKeys.devices);
-  const create = useOfficeMutation((api, token, replaces: string | null) =>
-    replaces === null
-      ? api.createPairingCode(token)
-      : api.createPairingCode(token, pairingCodeRequest(replaces)),
+  const create = useOfficeMutation(
+    (api, token, ask: { replaces: string | null; device: string | null }) =>
+      ask.device !== null
+        ? api.createDevicePairingCode(token, ask.device)
+        : ask.replaces === null
+          ? api.createPairingCode(token)
+          : api.createPairingCode(token, pairingCodeRequest(ask.replaces)),
   );
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -69,7 +74,7 @@ export function DevicesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   // The dialog closes itself once a device paired after its code was issued.
   const joined =
-    pairing === null
+    pairing === null || pairing.repairFor !== undefined
       ? undefined
       : devices.data?.find((device) => Date.parse(device.pairedAt) >= pairing.issuedAt);
   const dialogOpen = pairing !== null && joined === undefined;
@@ -96,7 +101,7 @@ export function DevicesPage() {
   // `isPending`, which disables the buttons, reaches React a tick later.
   const requesting = useRef(false);
 
-  const newCode = async () => {
+  const newCode = async (device?: DeviceRecord) => {
     if (requesting.current) return;
     requesting.current = true;
     setFailure(null);
@@ -104,6 +109,8 @@ export function DevicesPage() {
     // «Новый код» names the code on screen, and the host ends it at once;
     // with no code on screen the request has no body.
     const shown = pairing !== null && dialogOpen ? pairing.code.id : null;
+    // A device's code is asked for that device again; the host replaces nothing.
+    const target = device ?? (dialogOpen ? pairing?.repairFor : undefined);
     // A new attempt from the page drops the last notice.
     if (!dialogOpen) setPairing(null);
     const generation = ++requestGeneration.current;
@@ -114,12 +121,16 @@ export function DevicesPage() {
     // this PC's deadline at or before the host's.
     const requestedAt = Date.now();
     try {
-      const code = await create.mutateAsync(shown);
+      const code = await create.mutateAsync({
+        replaces: target === undefined ? shown : null,
+        device: target?.id ?? null,
+      });
       if (generation !== requestGeneration.current) return;
       setPairing({
         code,
         issuedAt: Date.parse(code.createdAt),
         deadline: requestedAt + codeLifetimeMs(code),
+        ...(target === undefined ? {} : { repairFor: target }),
       });
     } catch (error) {
       if (generation !== requestGeneration.current) return;
@@ -211,7 +222,8 @@ export function DevicesPage() {
     },
     {
       // A revoked device is a dead record: its key is refused for good and a
-      // new pairing makes a new device, so it offers nothing to change.
+      // new pairing makes a new device, so it offers nothing to change. A live
+      // station or handheld may pair again with its own `deviceId`.
       key: "actions",
       stickyEnd: true,
       title: t("office.devices.table.actions"),
@@ -234,6 +246,16 @@ export function DevicesPage() {
             >
               {t("office.devices.revoke")}
             </Button>
+            {device.kind !== "office" && (
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.devices.repairNamed", { name: device.name })}
+                onClick={() => void newCode(device)}
+              >
+                {t("office.devices.repair.button")}
+              </Button>
+            )}
           </RowActions>
         ) : null,
     },
@@ -280,6 +302,7 @@ export function DevicesPage() {
           deadline={pairing.deadline}
           regenerating={create.isPending}
           failure={failure}
+          repairFor={pairing.repairFor?.name}
           onRegenerate={() => void newCode()}
           onClose={close}
         />
