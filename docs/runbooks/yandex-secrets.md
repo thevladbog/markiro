@@ -92,6 +92,25 @@ activation и tenant smoke описан в `docs/runbooks/national-catalog-live-
 `STANDALONE_LICENSE_KEYSET_JSON`. Порядок включения и ротация — в
 [`docs/operations/standalone-licenses.md`](../operations/standalone-licenses.md).
 
+## Диагностика автонома («Сведения для поддержки»)
+
+Закрытый ключ поддержки хранится только в Lockbox `markiro-production-runtime` под именем
+`STANDALONE_SUPPORT_KEYS_JSON` — необязательной записью (Lockbox не сохраняет пустые значения, поэтому
+пока приём выключен, запись отсутствует целиком; API при этом работает, а вкладка «Диагностика» в
+SaaS-админке отвечает «приём не настроен»). Значение — одна строка JSON:
+`[{"kid":"sup-d11c3182","pem":"-----BEGIN EC PRIVATE KEY-----\n…\n-----END EC PRIVATE KEY-----\n"}]`.
+Формат PEM — тот, что выдаёт `openssl ecparam -name prime256v1 -genkey -noout` (SEC1,
+`BEGIN EC PRIVATE KEY`); PKCS8 тоже принимается. Переводы строк внутри PEM записываются как
+`\n` внутри JSON-строки — значение целиком остаётся одной строкой (инвентарь отвергает значения с
+переводом строки). `kid` должен совпадать с `sup-` + 8 hex SHA-256 открытой точки (его печатает
+`node tools/standalone-support/decrypt.mjs --public-jwk --key <pem>`); несовпадение API пишет
+предупреждением при старте и не падает. Ротация: сначала новая запись добавляется в массив (старая
+остаётся, пока живы клиенты со старым открытым ключом), потом открытый ключ уходит в сборку
+(`apps/standalone/proto/fixtures/support-keys.json`), старая запись удаляется последней. Ключ
+поддержки — отдельный от ключей лицензий и грантов. Значение не печатать и не хранить в Git.
+После публикации версии секрета повторить остановленный на `runtime-inventory` deployment для того
+же immutable release SHA; вручную materialization и перезапуск API не запускать.
+
 ## Офлайн-гранты устройств
 
 Lockbox не сохраняет записи с пустым значением, поэтому до включения подписывания

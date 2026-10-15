@@ -166,3 +166,44 @@ test("the table says the average codes per box", () => {
   empty.months[0].boxes = { closed: 0, disassembled: 0, codes: 0 };
   assert.match(table(empty), /—/u);
 });
+
+test("table() prints the host, the system and the license summary of a v2 payload", () => {
+  const output = table({
+    v: 2,
+    generatedAt: "2026-10-14T09:00:00.000Z",
+    appVersion: "0.2.0",
+    hostVersion: "0.2.0",
+    months: [],
+    devices: { station: 3, office: 2, handheld: 1 },
+    hostId: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+    role: "host",
+    os: "Windows 11",
+    arch: "x64",
+    webview: "WebView2 130",
+    license: {
+      state: "active",
+      plan: "subscription",
+      sequence: 3,
+      validUntil: "2027-10-01T00:00:00Z",
+      daysLeft: 350,
+      quotas: { stations: { limit: 3, used: 2, over: false } },
+    },
+  });
+  assert.match(
+    output,
+    /Хост: 3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f; роль host; Windows 11, x64, WebView2 130/u,
+  );
+  assert.match(output, /Лицензия: active, subscription, №3, до 2027-10-01T00:00:00Z/u);
+  assert.match(output, /stations 2\/3/u);
+  assert.doesNotMatch(
+    table({
+      v: 1,
+      generatedAt: "x",
+      appVersion: null,
+      hostVersion: null,
+      months: [],
+      devices: { station: 0, office: 0, handheld: 0 },
+    }),
+    /Лицензия/u,
+  );
+});

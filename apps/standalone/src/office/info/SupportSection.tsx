@@ -17,7 +17,7 @@ import { copyText } from "./clipboard.js";
 import { ALTERNATIVE_SUPPORT_EMAIL, PRIMARY_SUPPORT_EMAIL, supportMailLink } from "./contacts.js";
 import { buildSupportReport, type SupportFacts } from "./support-report.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "./support-blocks.js";
-import { usageLoadOf } from "./support-usage.js";
+import { licenseLoadOf, usageLoadOf } from "./support-usage.js";
 
 /** The folder under `Документы\Markiro\Выгрузки` the support text is saved into. */
 const SAVE_SEGMENTS = ["Выгрузки", "Сведения для поддержки"] as const;
@@ -84,8 +84,9 @@ export function SupportSection() {
       lastBackupAt: backupState?.local.copies[0]?.createdAt ?? null,
     };
     // The counts by month, as of this click: an administrator's, else the block says why not.
-    const [usageResult] = await Promise.allSettled([
+    const [usageResult, licenseResult] = await Promise.allSettled([
       session.call((token) => session.api.getUsageStats(token)),
+      session.call((token) => session.api.getLicense(token)),
     ]);
     const blocks = await collectSupportBlocks(SUPPORT_CONTRIBUTORS, {
       t,
@@ -93,6 +94,7 @@ export function SupportSection() {
       about: fresh,
       read: readHost,
       ...(usageResult === undefined ? {} : { usage: usageLoadOf(usageResult) }),
+      ...(licenseResult === undefined ? {} : { license: licenseLoadOf(licenseResult) }),
     });
     const report = buildSupportReport(facts, t, blocks);
     setText(report);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Opens the usage statistics of a Markiro Автоном support text (beta 3
-// feedback). The webview encrypts them for the maker's public key
+// feedback; payload v2 since plan ДИАГ also carries the host id, the PC role,
+// the system and a license summary). The webview encrypts them for the maker's public key
 // (`apps/standalone/src/office/info/support-crypto.ts`); this tool, run with
 // the PRIVATE key, prints the JSON and a table by month.
 //
@@ -152,7 +153,17 @@ const COLUMNS = [
   ["Ошибок синхр.", (m) => m.syncRejected],
 ];
 
-/** A readable table of the months and the devices. */
+function licenseLine(license) {
+  if (!license) return "Лицензия: нет данных";
+  const quotas = Object.entries(license.quotas ?? {})
+    .map(([name, q]) => `${name} ${q.used}/${q.limit ?? "∞"}${q.over ? " (сверх)" : ""}`)
+    .join(", ");
+  return `Лицензия: ${license.state}, ${license.plan ?? "без файла"}, ${
+    license.sequence === null ? "без номера" : `№${license.sequence}`
+  }, до ${license.validUntil ?? "—"}; ${quotas}`;
+}
+
+/** A readable table of the months and the devices (v2: also the host, the system and the license). */
 export function table(payload) {
   const rows = payload.months.map((month) => COLUMNS.map(([, cell]) => String(cell(month))));
   const heads = COLUMNS.map(([head]) => head);
@@ -164,6 +175,15 @@ export function table(payload) {
   return [
     `Сформировано: ${payload.generatedAt}; приложение ${payload.appVersion ?? "?"}, хост ${payload.hostVersion ?? "?"}`,
     `Устройства: станций ${devices.station}, офисов ${devices.office}, ТСД ${devices.handheld}`,
+    ...(payload.v === 2
+      ? [
+          `Хост: ${payload.hostId ?? "?"}; роль ${payload.role ?? "разработческая сборка"}; ${
+            [payload.os, payload.arch, payload.webview].filter(Boolean).join(", ") ||
+            "система неизвестна"
+          }`,
+          licenseLine(payload.license),
+        ]
+      : []),
     "",
     line(heads),
     ...rows.map(line),

@@ -170,3 +170,21 @@ describe("standalone license signing environment (plan ЛЦ-0)", () => {
     ).toThrow(/must not reuse an offline grant key/u);
   });
 });
+
+describe("standalone support keys environment (plan ДИАГ А1)", () => {
+  it("boots without the keys and with a SEC1 key, and refuses a broken value without echoing it", () => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const pem = privateKey.export({ type: "sec1", format: "pem" }).toString();
+    expect(loadEnv(requiredEnv).STANDALONE_SUPPORT_KEYS_JSON).toBeUndefined();
+    const value = JSON.stringify([{ kid: "sup-1", pem }]);
+    expect(loadEnv({ ...requiredEnv, STANDALONE_SUPPORT_KEYS_JSON: value })).toBeTruthy();
+    let message = "";
+    try {
+      loadEnv({ ...requiredEnv, STANDALONE_SUPPORT_KEYS_JSON: '[{"kid":"sup-1","pem":"BROKEN"}]' });
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
+    }
+    expect(message).toContain("STANDALONE_SUPPORT_KEYS_JSON");
+    expect(message).not.toContain("BROKEN");
+  });
+});

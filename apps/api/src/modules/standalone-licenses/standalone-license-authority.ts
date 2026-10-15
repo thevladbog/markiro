@@ -26,6 +26,7 @@ export async function requireStandaloneLicenseActor(
   principal: PlatformPrincipal | undefined,
   tenantId: string,
   write: boolean,
+  required: readonly PlatformCapability[] = STANDALONE_LICENSE_CAPABILITIES,
 ) {
   if (!principal?.twoFactorReady) throw new ForbiddenException();
   const factorQuery = tx
@@ -47,9 +48,7 @@ export async function requireStandaloneLicenseActor(
     !user ||
     user.status !== "active" ||
     !user.twoFactorEnabled ||
-    !STANDALONE_LICENSE_CAPABILITIES.every((capability) =>
-      platformCapabilitiesForRole(user.role).includes(capability),
-    )
+    !required.every((capability) => platformCapabilitiesForRole(user.role).includes(capability))
   )
     throw new ForbiddenException();
   // The cabinet access decides the issuance path; a write holds it FOR SHARE so

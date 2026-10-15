@@ -1317,6 +1317,13 @@
       "when": 1792023187111,
       "tag": "0193_custom_logo_entitlement",
       "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1792046534553,
+      "tag": "0194_standalone_support_diagnostics",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import type { HostApi } from "../src/host/api.js";
 import type { OfficeLicense } from "../src/host/protocol.js";
 import { decryptBlob, findBlob } from "../../../tools/standalone-support/decrypt.mjs";
 import { HostError } from "../src/host/client.js";
+import { standaloneSupportPayloadSchema } from "../../../packages/platform-contracts/src/standalone-support";
 import { usageStatsSchema } from "../src/host/usage-stats.js";
 import type { AboutData } from "../src/office/info/about-data.js";
 import { licenseSupportBlock } from "../src/office/info/license/license-support.js";
@@ -29,9 +30,12 @@ import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "../src/office/info/s
 import type { SupportKeyset } from "../src/office/info/support-keys.js";
 import {
   createUsageContributor,
+  licenseLoadOf,
   usageLoadOf,
   usagePayload,
+  type LicenseLoad,
   type UsageLoad,
+  type UsagePayloadAbout,
 } from "../src/office/info/support-usage.js";
 import {
   buildSupportReport,
@@ -61,6 +65,18 @@ const FACTS: SupportFacts = {
   hostAddress: "https://127.0.0.1:45710",
   hostId: HOST_ID,
   lastBackupAt: "2026-10-13T08:00:00Z",
+};
+
+const ABOUT: UsagePayloadAbout = {
+  generatedAt: FACTS.generatedAt,
+  appVersion: FACTS.appVersion,
+  hostVersion: FACTS.hostVersion,
+  hostId: HOST_ID,
+  role: "host",
+  os: FACTS.os,
+  arch: FACTS.arch,
+  webview: FACTS.webview,
+  license: null,
 };
 
 /** Secrets as the app holds them, in every field a careless copy of a record would carry. */
@@ -369,11 +385,17 @@ describe("Статистика использования в сведениях 
     // And the maker's tool opens the token to the allowlisted JSON.
     const opened = decryptBlob(findBlob(text), pem);
     expect(opened.json).toMatchObject({
-      v: 1,
+      v: 2,
       generatedAt: "2026-10-13T09:41:05.000Z",
       appVersion: "0.1.0",
       hostVersion: "0.1.0",
       devices: { station: 3, office: 2, handheld: 1 },
+      hostId: HOST_ID,
+      role: "host",
+      os: "Windows 11",
+      arch: "x64",
+      webview: "WebView2 130.0.2849.80",
+      license: null,
     });
     expect((opened.json as { months: unknown[] }).months).toHaveLength(12);
   });
@@ -388,18 +410,8 @@ describe("Статистика использования в сведениях 
         shifts: { ...month.shifts, operatorPin: "123456" },
       })),
     } as typeof stats;
-    const payload = usagePayload(polluted, {
-      generatedAt: FACTS.generatedAt,
-      appVersion: FACTS.appVersion,
-      hostVersion: FACTS.hostVersion,
-    });
-    expect(payload).toBe(
-      usagePayload(stats, {
-        generatedAt: FACTS.generatedAt,
-        appVersion: FACTS.appVersion,
-        hostVersion: FACTS.hostVersion,
-      }),
-    );
+    const payload = usagePayload(polluted, ABOUT);
+    expect(payload).toBe(usagePayload(stats, ABOUT));
     for (const word of ["Молоко", "Север", "123456", "productName", "secretName", "operatorPin"]) {
       expect(payload).not.toContain(word);
     }
@@ -466,5 +478,108 @@ describe("Статистика использования в сведениях 
     expect(text).not.toContain("МОЛОКО");
     expect(text).not.toContain("B".repeat(40));
     expect(text).toContain(`MKS1.sup-t1.${"A".repeat(200)}`);
+  });
+});
+
+describe("Нагрузка v2 для приёма в SaaS-админке (план ДИАГ Т1)", () => {
+  const stats = usageStatsSchema.parse(
+    JSON.parse(readFileSync(new URL("../proto/fixtures/usage-stats.json", testModuleUrl), "utf8")),
+  );
+
+  it("builds v2 that the cloud's strict schema accepts, with the license summary only", () => {
+    const license = {
+      ...ACTIVE_LICENSE,
+      // Fields the host knows and the summary must never copy.
+      customer: { name: "Атолл", inn: "7707083893" },
+      binding: { ...ACTIVE_LICENSE.binding, fingerprint: HOST_FINGERPRINT, orgInn: "7707083893" },
+    } as typeof ACTIVE_LICENSE;
+    const json = usagePayload(stats, { ...ABOUT, license });
+    const parsed = standaloneSupportPayloadSchema.parse(JSON.parse(json));
+    expect(parsed).toMatchObject({ v: 2, hostId: HOST_ID, role: "host" });
+    expect(parsed.v === 2 && parsed.license?.quotas.stations).toEqual(license.quotas.stations);
+    for (const secret of [
+      "Атолл",
+      "7707083893",
+      HOST_FINGERPRINT,
+      "customer",
+      "fingerprint",
+      "orgInn",
+      "planVersionId",
+    ]) {
+      expect(json).not.toContain(secret);
+    }
+  });
+
+  it("copies a license field by field: a field the host adds cannot reach the token", () => {
+    const polluted = {
+      ...ACTIVE_LICENSE,
+      secretNote: "x",
+      quotas: { ...ACTIVE_LICENSE.quotas, extra: 1 },
+    } as typeof ACTIVE_LICENSE;
+    const json = usagePayload(stats, { ...ABOUT, license: polluted });
+    expect(json).not.toContain("secretNote");
+    expect(standaloneSupportPayloadSchema.safeParse(JSON.parse(json)).success).toBe(true);
+  });
+
+  it("says license null when the host did not answer or the user is no administrator, and a trial has no file fields", () => {
+    expect(
+      licenseLoadOf({
+        status: "rejected",
+        reason: new HostError({
+          kind: "api",
+          code: "forbidden",
+          status: 403,
+          message: "forbidden",
+          details: {},
+        }),
+      }),
+    ).toEqual({ kind: "forbidden" });
+    expect(licenseLoadOf({ status: "rejected", reason: new Error("down") })).toEqual({
+      kind: "failed",
+    });
+    const trial = JSON.parse(usagePayload(stats, { ...ABOUT, license: TRIAL })) as {
+      license: { plan: unknown; sequence: unknown };
+    };
+    expect(trial.license.plan).toBeNull();
+    expect(trial.license.sequence).toBeNull();
+    expect(JSON.parse(usagePayload(stats, ABOUT))).toMatchObject({ license: null });
+  });
+
+  it("maps the role and a development build to null, and refuses a malformed host id", () => {
+    const parse = (about: Partial<UsagePayloadAbout>) =>
+      JSON.parse(usagePayload(stats, { ...ABOUT, ...about })) as { role: unknown; hostId: unknown };
+    expect(parse({ role: "unknown" }).role).toBeNull();
+    expect(parse({ role: null }).role).toBeNull();
+    expect(parse({ role: "office" }).role).toBe("office");
+    expect(parse({ hostId: "not-a-uuid" }).hostId).toBeNull();
+    expect(parse({ hostId: HOST_ID.toUpperCase() }).hostId).toBe(HOST_ID);
+  });
+
+  it("puts the license summary of an answering host into the token, and null for forbidden or failed", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const jwk = publicKey.export({ format: "jwk" });
+    const keys: SupportKeyset = {
+      keys: [{ kid: "sup-t1", jwk: { kty: "EC", crv: "P-256", x: jwk.x ?? "", y: jwk.y ?? "" } }],
+      retiredKids: [],
+    };
+    const pem = privateKey.export({ type: "sec1", format: "pem" }).toString();
+    const open = async (license: LicenseLoad | undefined) => {
+      const block = await createUsageContributor(keys)({
+        t: i18n.t,
+        facts: FACTS,
+        about: {} as AboutData,
+        read: () => Promise.reject(new Error("the usage block reads nothing")),
+        usage: { kind: "ok", stats },
+        ...(license === undefined ? {} : { license }),
+      });
+      const text = buildSupportReport(FACTS, i18n.t, block === null ? [] : [block]);
+      return decryptBlob(findBlob(text), pem).json as { license: { state: string } | null };
+    };
+    expect((await open({ kind: "ok", license: ACTIVE_LICENSE })).license?.state).toBe(
+      ACTIVE_LICENSE.state,
+    );
+    expect((await open({ kind: "forbidden" })).license).toBeNull();
+    expect((await open({ kind: "failed" })).license).toBeNull();
+    expect((await open(undefined)).license).toBeNull();
   });
 });
