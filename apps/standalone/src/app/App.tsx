@@ -319,8 +319,6 @@ function AppScreens({
     host: hostApi,
     updates,
   });
-  // Task 13 hands the offer down; until then nothing reads it.
-  void updateOffer;
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
@@ -863,6 +861,8 @@ function AppScreens({
         hostRevision={state.hostRevision}
         deviceId={pairedStatus?.deviceId ?? null}
         windowMode={windowMode}
+        updateOffer={updateOffer}
+        updates={updates}
       />
     );
   }

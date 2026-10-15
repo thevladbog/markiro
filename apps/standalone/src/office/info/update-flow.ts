@@ -174,6 +174,7 @@ export async function runUpdate(
   deps: RunDeps,
   report: VerifiedReport,
   role: InstallRole | "unknown",
+  source: "file" | "host" = "file",
 ): Promise<void> {
   if (role === "host") {
     deps.onPhase("backup");
@@ -191,7 +192,7 @@ export async function runUpdate(
             to: report.manifest.version,
             installerSha256: report.manifest.installer.sha256,
           },
-          "file",
+          source,
         ),
       ),
     );

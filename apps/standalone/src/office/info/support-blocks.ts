@@ -6,6 +6,7 @@ import { licenseSupportBlock } from "./license/license-support.js";
 import { BUILT_IN_SUPPORT_KEYS } from "./support-keys.js";
 import type { SupportBlock, SupportFacts } from "./support-report.js";
 import { createUsageContributor, type UsageLoad } from "./support-usage.js";
+import { updateDistributionContributor } from "./update-support.js";
 
 /** What a contributor may read: the facts the base text already carries, what the page learned, and the host. */
 export interface SupportContext {
@@ -39,6 +40,7 @@ export type SupportContributor = (
 export const SUPPORT_CONTRIBUTORS: readonly SupportContributor[] = [
   licenseSupportBlock,
   createUsageContributor(BUILT_IN_SUPPORT_KEYS),
+  updateDistributionContributor,
 ];
 
 /** The blocks of `contributors`, each isolated from the others' failures. */

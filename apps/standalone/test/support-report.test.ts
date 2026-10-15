@@ -27,6 +27,7 @@ import { fakeHostApi } from "./support/office.js";
 import { PROGRAM_ROWS } from "../src/office/info/ProgramSection.js";
 import { collectSupportBlocks, SUPPORT_CONTRIBUTORS } from "../src/office/info/support-blocks.js";
 import type { SupportKeyset } from "../src/office/info/support-keys.js";
+import { updateDistributionContributor } from "../src/office/info/update-support.js";
 import {
   createUsageContributor,
   usageLoadOf,
@@ -220,9 +221,10 @@ describe("Блоки сведений для поддержки (точка ра
     expect(blocks.map((block) => block.title)).toEqual(["Первый", "Пятый"]);
   });
 
-  it("has the usage statistics after the license's contributor and no extra program rows", () => {
-    expect(SUPPORT_CONTRIBUTORS).toHaveLength(2);
+  it("has the usage statistics and the update distribution after the license's contributor, and no extra program rows", () => {
+    expect(SUPPORT_CONTRIBUTORS).toHaveLength(3);
     expect(SUPPORT_CONTRIBUTORS[0]).toBe(licenseSupportBlock);
+    expect(SUPPORT_CONTRIBUTORS[2]).toBe(updateDistributionContributor);
     expect(PROGRAM_ROWS).toEqual([]);
   });
 });

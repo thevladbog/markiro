@@ -375,6 +375,20 @@
   font: var(--text-body);
 }
 
+/* «Обновление» through the host (plan ОБН-3): the history, the notes and the upload. */
+.update-history,
+.update-notes {
+  margin: 0;
+  padding: 0 0 0 var(--sp-2);
+  list-style: none;
+}
+
+.update-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
 /*
  * The rhythm of the office page. The page's own parts (header, notices, filter
  * bar, cards) sit one sp-4 apart (`.office-shell__content`); the parts of a card

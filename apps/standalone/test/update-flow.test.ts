@@ -251,6 +251,20 @@ describe("an update the office starts (spec §10.4)", () => {
     expect(install.mock.invocationCallOrder[0]).toBeGreaterThan(recorded);
   });
 
+  it("a package from the host reports its source as «host», with no copy on a station", async () => {
+    const { deps: run, phases, install } = deps({});
+    await runUpdate(run, report(), "station", "host");
+    expect(phases).toEqual(["reporting", "launching"]);
+    expect(run.api.startBackup).not.toHaveBeenCalled();
+    expect(run.api.recordUpdateStarted).toHaveBeenCalledWith("office-session-token", {
+      from: "0.1.0",
+      to: "0.2.0",
+      installerSha256: SHA,
+      source: "host",
+    });
+    expect(install).toHaveBeenCalledTimes(1);
+  });
+
   it("on the host's PC: a fresh copy first; a failed copy stops everything", async () => {
     const { deps: run, phases, install } = deps({});
     await runUpdate(run, report(), "host");

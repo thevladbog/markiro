@@ -11,6 +11,10 @@ import {
   FormPrinterProvider,
   type PrintForm,
 } from "./forms/form-printer-context.js";
+import type { HostUpdateOffer } from "../update/host-offer.js";
+import { UpdateOfferProvider } from "../update/offer-context.js";
+import type { UpdatesApi } from "../update/updates-api.js";
+import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
 import { LicenseDismissalsProvider } from "./info/license/LicenseNotices.js";
 import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient, officeKeys } from "./office-query.js";
@@ -64,7 +68,13 @@ export interface OfficeProps {
   windowMode?: WindowMode | null;
   /** The page the office opens on: the overview by default; a test may open another. */
   initialPath?: string;
+  /** The update the host offers this PC (plan ОБН-3); none outside the app. */
+  updateOffer?: HostUpdateOffer;
+  /** The shell's update commands (plan ОБН-3); a test passes its own. */
+  updates?: UpdatesApi;
 }
+
+const NO_UPDATE: HostUpdateOffer = { kind: "none" };
 
 /**
  * The office: an in-memory router (a desktop window has no address bar) and
@@ -82,6 +92,8 @@ export function Office({
   printForm = FRAME_PRINT_FORM,
   windowMode = null,
   initialPath = "/",
+  updateOffer = NO_UPDATE,
+  updates = TAURI_UPDATES,
 }: OfficeProps) {
   const [router] = useState(() =>
     createMemoryRouter(officeRoutes, { initialEntries: [initialPath] }),
@@ -112,7 +124,11 @@ export function Office({
                   <WindowModeProvider value={windowMode}>
                     {/* The license's warnings hidden for this session: the band's and «Обзор»'s. */}
                     <LicenseDismissalsProvider>
-                      <RouterProvider router={router} />
+                      <UpdatesProvider value={updates}>
+                        <UpdateOfferProvider value={updateOffer}>
+                          <RouterProvider router={router} />
+                        </UpdateOfferProvider>
+                      </UpdatesProvider>
                     </LicenseDismissalsProvider>
                   </WindowModeProvider>
                 </FormPrinterProvider>
