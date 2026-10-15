@@ -35,7 +35,11 @@ export function FloorUpdateLine({
   if (appTooOld) {
     return (
       <Alert tone="warn" role="presentation">
-        {t("floor.update.requiredNoPackage")}
+        {offer.kind === "needs_intermediate"
+          ? t("floor.update.requiredIntermediate", { min: offer.minUpgradeFrom })
+          : offer.kind === "unavailable" && offer.reason === "verifying"
+            ? t("floor.update.requiredVerifying")
+            : t("floor.update.requiredNoPackage")}
       </Alert>
     );
   }

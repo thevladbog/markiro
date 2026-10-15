@@ -61,6 +61,30 @@ describe("the station's line (spec §10.11.5)", () => {
     expect(screen.getByText(/пакета обновления на хосте нет/)).toBeTruthy();
   });
 
+  it("names an intermediate version when this station is below the package's floor", () => {
+    inTheme(
+      <FloorUpdateLine
+        offer={{ kind: "needs_intermediate", hostVersion: "0.3.0", minUpgradeFrom: "0.2.5" }}
+        appTooOld
+        inShift={false}
+      />,
+    );
+    expect(screen.getByText(/промежуточная версия 0\.2\.5/)).toBeTruthy();
+    expect(screen.queryByText(/пакета обновления на хосте нет/)).toBeNull();
+  });
+
+  it("says the host is still checking its package", () => {
+    inTheme(
+      <FloorUpdateLine
+        offer={{ kind: "unavailable", hostVersion: "0.3.0", reason: "verifying" }}
+        appTooOld
+        inShift={false}
+      />,
+    );
+    expect(screen.getByText(/хост проверяет пакет/)).toBeTruthy();
+    expect(screen.queryByText(/пакета обновления на хосте нет/)).toBeNull();
+  });
+
   it("says nothing on a shift's work even when the host refuses the station", () => {
     inTheme(<FloorUpdateLine offer={REQUIRED} appTooOld inShift />);
     expect(screen.queryByText(/слишком старая/)).toBeNull();
