@@ -328,3 +328,16 @@ async fn the_hold_is_in_the_database_not_in_the_process() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
+
+#[tokio::test]
+async fn a_held_host_holds_pallet_events_like_facts() {
+    let (admin, _) = held().await;
+    let (status, body) = admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/pallet-events"), &admin.key),
+            json!({ "records": [] }),
+        ))
+        .await;
+    assert_eq!(refusal(status, &body), restore_pending(), "{body}");
+}

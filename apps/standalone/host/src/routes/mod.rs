@@ -35,6 +35,7 @@ pub mod operators;
 pub mod org;
 pub mod org_logo;
 pub mod pairing;
+pub mod pallet_events;
 pub mod pallet_sheets;
 pub mod product_photos;
 pub mod products;

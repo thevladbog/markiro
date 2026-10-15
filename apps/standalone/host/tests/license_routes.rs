@@ -205,6 +205,7 @@ fn the_limited_routes_are_the_additions_tasks_10_and_11_close() {
             ("POST", "/v1/local-pair"),
             ("POST", "/v1/pairing/claim"),
             ("POST", "/v1/device/shifts"),
+            ("POST", "/v1/device/pallet-events"),
             ("POST", "/v1/office/users"),
             ("PUT", "/v1/office/users/{id}"),
             ("POST", "/v1/office/lines"),

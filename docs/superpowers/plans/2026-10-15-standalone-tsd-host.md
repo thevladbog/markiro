@@ -4203,3 +4203,12 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
   `sscc_blocks.rs::a_pallet_block_is_for_a_current_station_and_a_known_pallet_counter`: ТСД убран из перечня отказов
   (офисный ПК и подмена вида в транзакции проверяются по-прежнему), добавлено, что ТСД проходит проверку вида и
   упирается в тело (не `forbidden`).
+- **Х3.** Тест миграции из плана вставлял `box_sscc = 's'`, что нарушает `CHECK (length(box_sscc) = 18)`: в тесте
+  подставлен 18-значный SSCC. Тест ошибки БД (`only_a_handheld_sends_pallet_events_…`) в плане не создавал короб, и
+  `added` получал `box_not_found` (200) вместо 500: добавлен `closed_boxes` до `DROP TABLE`. В `migration_handheld_host.rs`
+  «0035-0037» исправлено на «0035-0036».
+- **Х3.** Сверх плана добавлены тесты изоляции и мутаций: `one_device_never_touches_another_devices_pallet_or_receipts`
+  (чужая паллета — `pallet_unknown`, открытие паллеты с чужим id — `invalid_record data.palletId`, квитанции и
+  идемпотентность по паре `(device, id)`) и `a_box_block_does_not_close_a_pallet` (блок расширения 0 с серийником внутри
+  диапазона не закрывает паллету: `sscc_not_issued`).
+- **Х3.** В базе уже есть миграция `0045_host_address.sql` (поток П4): версии 35–36 свободны, пробел 37–44 sqlx не мешает.

@@ -93,6 +93,7 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/device/sscc/blocks"),
     ("POST", "/v1/device/sscc/blocks/known"),
     ("POST", "/v1/device/facts"),
+    ("POST", "/v1/device/pallet-events"),
     ("GET", "/v1/device/codes/{code_hash}"),
     ("GET", "/v1/device/pallet-sheets"),
     ("POST", "/v1/device/warehouse/lookup"),
@@ -227,6 +228,11 @@ pub const LIMITED: &[(&str, &str, &str)] = &[
         "a seat of stations (a station or a handheld); handheld",
     ),
     ("POST", "/v1/device/shifts", "pallets"),
+    (
+        "POST",
+        "/v1/device/pallet-events",
+        "pallets: a new warehouse pallet",
+    ),
     ("POST", "/v1/office/users", "a seat of office users"),
     (
         "PUT",

@@ -23,6 +23,7 @@ pub mod logging;
 pub mod network;
 pub mod network_profile;
 pub mod pairing_code;
+pub mod pallet_events;
 pub mod rate_limit;
 pub mod restore;
 pub mod routes;

@@ -8,6 +8,7 @@ pub mod app;
 pub mod backup;
 pub mod conflicts;
 pub mod disaggregation;
+pub mod handheld;
 pub mod license;
 pub mod routes;
 
