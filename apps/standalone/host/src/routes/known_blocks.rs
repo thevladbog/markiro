@@ -54,7 +54,7 @@ pub const MAX_BLOCKS: usize = 64;
 /// digit: `range_invalid`, not a counter that is merely missing.
 const MAX_EXTENSION: u8 = 9;
 
-const FORBIDDEN: &str = "only a station registers SSCC blocks";
+const FORBIDDEN: &str = "only a station or a handheld registers SSCC blocks";
 
 fn refused(id: &str, code: &str) -> KnownBlockResult {
     KnownBlockResult {
@@ -171,7 +171,7 @@ pub async fn register_known_blocks(
     device: AuthDevice,
     ApiJson(request): ApiJson<KnownBlocksRequest>,
 ) -> Result<Json<KnownBlocksResponse>, ApiError> {
-    if device.kind != DeviceKind::Station {
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
         return Err(ApiError::forbidden(FORBIDDEN));
     }
     if request.blocks.len() > MAX_BLOCKS || (request.blocks.is_empty() && request.more) {
@@ -185,7 +185,13 @@ pub async fn register_known_blocks(
     }
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    device.require_station_in(&mut tx, FORBIDDEN).await?;
+    device
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            FORBIDDEN,
+        )
+        .await?;
     let epoch: Option<String> = sqlx::query_scalar("SELECT restore_epoch FROM site WHERE id = 1")
         .fetch_one(&mut *tx)
         .await

@@ -14,40 +14,47 @@ function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
-function next(): void {
+export function next(): void {
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
 }
 
 /**
- * Fill every step with valid answers, up to the review. The GLN has a
+ * Fill every step with valid answers, up to the address step. The GLN has a
  * correct check digit: 4600682000013.
  */
-export async function reachReview(): Promise<void> {
-  await screen.findByText("Шаг 1 из 5 · Администратор");
+export async function reachAddress(): Promise<void> {
+  await screen.findByText("Шаг 1 из 6 · Администратор");
   type("Логин", " admin ");
   type("Имя и фамилия", " Ирина Смирнова ");
   type("Пароль", "correct horse battery");
   type("Повторите пароль", "correct horse battery");
   next();
 
-  await screen.findByText("Шаг 2 из 5 · Организация");
+  await screen.findByText("Шаг 2 из 6 · Организация");
   type("Название организации", " ООО «Атолл» ");
   type("ИНН", "7707083893");
   type("GLN организации", "4600682000013");
   type("Префиксы GS1", "4600682, 4607091");
   next();
 
-  await screen.findByText("Шаг 3 из 5 · Номера SSCC");
+  await screen.findByText("Шаг 3 из 6 · Номера SSCC");
   type("Следующий номер короба", "1500");
   type("Следующий номер паллеты", "40");
   next();
 
-  await screen.findByText("Шаг 4 из 5 · Линии");
+  await screen.findByText("Шаг 4 из 6 · Линии");
   fireEvent.click(screen.getByRole("button", { name: "Добавить линию" }));
   type("Линия 2", "Линия 2");
   next();
 
-  await screen.findByText("Шаг 5 из 5 · Проверка");
+  await screen.findByText("Шаг 5 из 6 · Адрес хоста");
+}
+
+/** The address step passed unticked, up to the review. */
+export async function reachReview(): Promise<void> {
+  await reachAddress();
+  next();
+  await screen.findByText("Шаг 6 из 6 · Проверка");
 }
 
 /** Fill every step with valid answers and press «Создать». */

@@ -57,8 +57,10 @@ pub async fn issue_block(
     device: AuthDevice,
     ApiJson(request): ApiJson<SsccBlockRequest>,
 ) -> Result<Json<SsccBlock>, ApiError> {
-    if device.kind != DeviceKind::Station {
-        return Err(ApiError::forbidden("only a station gets SSCC blocks"));
+    if !matches!(device.kind, DeviceKind::Station | DeviceKind::Handheld) {
+        return Err(ApiError::forbidden(
+            "only a station or a handheld gets SSCC blocks",
+        ));
     }
     validate::client_uuid("requestId", &request.request_id)?;
     // Boxes take extension 0, pallets 1, each with its own counter and size.
@@ -75,7 +77,11 @@ pub async fn issue_block(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     device
-        .require_station_in(&mut tx, "only a station gets SSCC blocks")
+        .require_kinds_in(
+            &mut tx,
+            &[DeviceKind::Station, DeviceKind::Handheld],
+            "only a station or a handheld gets SSCC blocks",
+        )
         .await?;
     if let Some(block) = read(&mut tx, &device.id, &request.request_id).await? {
         // A request id names one block of one prefix and extension (the

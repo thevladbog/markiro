@@ -35,6 +35,7 @@ import {
   type PalletFilters,
 } from "./pallet-query.js";
 import { RegistryTabs } from "./RegistryTabs.js";
+import { WarehousePalletsSection } from "./WarehousePalletsSection.js";
 
 /** Counts with the thousands apart by a no-break space: «1 200». */
 const COUNT = new Intl.NumberFormat("ru");
@@ -290,6 +291,7 @@ export function PalletsTab() {
         </FilterBar>
       </form>
       {content()}
+      <WarehousePalletsSection zone={zone} />
     </div>
   );
 }

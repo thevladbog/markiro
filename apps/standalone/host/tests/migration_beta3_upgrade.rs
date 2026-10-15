@@ -1,6 +1,9 @@
 //! A database of the third beta (commit `917f92ab4`) meets this build.
 //!
 //! Beta 3 shipped host migrations `0001`–`0012`, `0015`–`0025`, `0030` and `0031`.
+//! `0035`–`0038` (plan ТСД-Х: warehouse pallets, device event receipts, the box registry's change
+//! time, a pairing code's device) and `0045` (the address mark) come after `0034`; the last test
+//! of this file upgrades a database that has everything up to `0034`.
 //! Three later ones are new: `0027` (the audit trail's index by target), `0028` (the
 //! shift's own date, with a trigger and an index) and `0032` (the product's
 //! `photo_rev`). sqlx applies every migration the database lacks, lowest first, even
@@ -395,6 +398,148 @@ async fn a_beta33_database_keeps_its_data_and_takes_0033_and_0034() {
             "no {expected}"
         );
     }
+    let violations: i64 = sqlx::query_scalar("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(violations, 0);
+    let integrity: Vec<String> = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(integrity, ["ok"]);
+}
+
+/// A database that has everything up to `0034` (the last host migration before the handheld's).
+fn through_0034(version: i64) -> bool {
+    version <= 34
+}
+
+/// A live database of a build before the handheld meets `0035`–`0038` and `0045`: every row
+/// stays, a closed box gets its change time (an open one none), a pairing code names no device,
+/// the warehouse tables are empty, and the schema is the one a new database has.
+#[tokio::test]
+async fn a_database_before_the_handheld_takes_0035_to_0038_and_0045_and_keeps_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = pool(&dir.path().join("host.db")).await;
+    Migrator {
+        migrations: MIGRATOR
+            .iter()
+            .filter(|migration| through_0034(migration.version))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    }
+    .run(&pool)
+    .await
+    .unwrap();
+
+    execute(
+        &pool,
+        &[
+            "INSERT INTO lines (id, name, name_key, rev) VALUES ('line-1', 'Линия 1', 'линия 1', 1)",
+            "INSERT INTO devices (id, kind, name, line_id, key_hash, app_version, protocol, \
+             paired_at) VALUES ('device-1', 'station', 'Станция 1', 'line-1', printf('%064x', 7), \
+             '1.0.0', 5, '2026-10-01T08:00:00Z')",
+            "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
+             VALUES ('user-1', 'admin', 'A', 'admin', 'x', 1, '2026-10-01T08:00:00Z', 1)",
+            "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at) \
+             VALUES ('code-1', 'h', 'user-1', '2026-10-01T08:00:00Z', '2026-10-01T08:10:00Z')",
+            "INSERT INTO products (id, gtin14, name, rev, photo_rev) \
+             VALUES ('product-1', '04600682000013', 'Сок яблочный', 7, 0)",
+            "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
+             created_by, status, mode, product_id, line_id, production_date, box_capacity, \
+             box_template_id, owner_device_id, snapshot, opened_at, created_at, rev) \
+             VALUES ('shift-a', 'OCT26', 1, 'office', 'office_user', 'user-1', 'active', \
+             'aggregation', 'product-1', 'line-1', '2026-10-09', 12, 'template-1', \
+             'device-1', '{}', '2026-10-09T08:00:00Z', '2026-10-08T17:00:00Z', 1)",
+            "INSERT INTO sscc_counters (issuer_prefix, extension, next_serial, rev) \
+             VALUES ('460068200', 0, 3500, 1)",
+            "INSERT INTO sscc_blocks (id, issuer_prefix, extension, device_id, request_id, \
+             from_serial, to_serial, issued_at) \
+             VALUES ('block-1', '460068200', 0, 'device-1', 'r1', 1500, 3499, '2026-10-09T08:00:00Z')",
+            "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) \
+             VALUES ('box-open', 'shift-a', 'device-1', '2026-10-09T08:00:00.000Z', \
+             '2026-10-09T08:00:00Z')",
+            "INSERT INTO boxes (id, shift_id, device_id, opened_at, closed_at, sscc, block_id, \
+             serial, item_count_reported, membership_digest, digest_matches, received_at) \
+             VALUES ('box-closed', 'shift-a', 'device-1', '2026-10-09T08:00:00.000Z', \
+             '2026-10-09T08:10:00.000Z', '046006820000015000', 'block-1', 1500, 1, 'x', 1, \
+             '2026-10-09T08:11:00Z')",
+        ],
+    )
+    .await;
+
+    let mut connection = pool.acquire().await.unwrap();
+    let pending = upgrade::pending(&mut connection, &MIGRATOR)
+        .await
+        .unwrap()
+        .expect("a database before the handheld has pending migrations");
+    drop(connection);
+    let lacking: Vec<i64> = MIGRATOR
+        .iter()
+        .map(|migration| migration.version)
+        .filter(|version| !through_0034(*version))
+        .collect();
+    assert_eq!(pending.migrations, lacking.len());
+    for expected in [35, 36, 37, 38, 45] {
+        assert!(lacking.contains(&expected), "{expected} is not pending");
+    }
+
+    MIGRATOR.run(&pool).await.unwrap();
+    let all: Vec<i64> = MIGRATOR.iter().map(|migration| migration.version).collect();
+    let rows: Vec<(i64, bool)> =
+        sqlx::query_as("SELECT version, success FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.iter().map(|row| row.0).collect::<Vec<_>>(), all);
+    assert!(rows.iter().all(|row| row.1));
+
+    for (table, expected) in [
+        ("devices", 1_i64),
+        ("shifts", 1),
+        ("boxes", 2),
+        ("sscc_blocks", 1),
+        ("pairing_codes", 1),
+        ("warehouse_pallets", 0),
+        ("warehouse_pallet_boxes", 0),
+        ("device_event_receipts", 0),
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, expected, "{table}");
+    }
+    let changed: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, changed_at FROM boxes ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        changed,
+        [
+            (
+                "box-closed".to_owned(),
+                Some("2026-10-09T08:11:00Z".to_owned())
+            ),
+            ("box-open".to_owned(), None)
+        ]
+    );
+    let device: Option<String> =
+        sqlx::query_scalar("SELECT device_id FROM pairing_codes WHERE id = 'code-1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(device, None);
+
+    let fresh_dir = tempfile::tempdir().unwrap();
+    let fresh = self::pool(&fresh_dir.path().join("fresh.db")).await;
+    MIGRATOR.run(&fresh).await.unwrap();
+    assert_eq!(columns(&pool).await, columns(&fresh).await);
+    assert_eq!(objects(&pool).await, objects(&fresh).await);
     let violations: i64 = sqlx::query_scalar("SELECT count(*) FROM pragma_foreign_key_check")
         .fetch_one(&pool)
         .await

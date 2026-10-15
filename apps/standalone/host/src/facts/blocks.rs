@@ -19,13 +19,34 @@ pub async fn issued(
     extension: u8,
     serial: i64,
 ) -> Result<bool, ApiError> {
+    issued_to(
+        conn,
+        context.device_id,
+        &context.shift.issuer_prefix,
+        block_id,
+        extension,
+        serial,
+    )
+    .await
+}
+
+/// [`issued`] for a record outside a shift: the device and the issuer prefix are named, not read
+/// from the shift's context (a warehouse pallet has no shift).
+pub async fn issued_to(
+    conn: &mut SqliteConnection,
+    device_id: &str,
+    issuer_prefix: &str,
+    block_id: &str,
+    extension: u8,
+    serial: i64,
+) -> Result<bool, ApiError> {
     let found: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM sscc_blocks WHERE id = ? AND device_id = ? AND issuer_prefix = ? \
          AND extension = ? AND from_serial <= ? AND to_serial >= ? AND revoked_at IS NULL",
     )
     .bind(block_id)
-    .bind(context.device_id)
-    .bind(&context.shift.issuer_prefix)
+    .bind(device_id)
+    .bind(issuer_prefix)
     .bind(i64::from(extension))
     .bind(serial)
     .bind(serial)

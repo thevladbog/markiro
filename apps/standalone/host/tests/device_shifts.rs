@@ -240,13 +240,32 @@ async fn only_a_station_reads_and_creates_shifts() {
         ("GET", None),
         ("POST", Some(device_create(&setup, REQUEST))),
     ] {
-        for (kind, key) in [("office", &office_pc), ("handheld", &handheld)] {
-            let (status, refused) =
-                device_call(&admin, key, method, "/v1/device/shifts", body.clone()).await;
+        let (status, refused) = device_call(
+            &admin,
+            &office_pc,
+            method,
+            "/v1/device/shifts",
+            body.clone(),
+        )
+        .await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::FORBIDDEN, json!("forbidden")),
+            "office {method}"
+        );
+        let (status, answer) =
+            device_call(&admin, &handheld, method, "/v1/device/shifts", body.clone()).await;
+        if method == "GET" {
+            // A handheld reads its line's shifts (spec 6.3); this one has no line.
             assert_eq!(
-                (status, refused["error"]["code"].clone()),
+                (status, answer["shifts"].clone()),
+                (StatusCode::OK, json!([]))
+            );
+        } else {
+            assert_eq!(
+                (status, answer["error"]["code"].clone()),
                 (StatusCode::FORBIDDEN, json!("forbidden")),
-                "{kind} {method}"
+                "handheld creates no shift"
             );
         }
         let builder = request(method, "/v1/device/shifts");
@@ -1269,12 +1288,8 @@ async fn an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift()
     // (both are broken here).
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
-    // Only a station enters, whatever its line (a handheld has none).
-    let (status, refused) = enter(&admin, &handheld, &shift).await;
-    assert_eq!(
-        (status, refused["error"]["code"].clone()),
-        (StatusCode::FORBIDDEN, json!("forbidden"))
-    );
+    // A handheld enters like a station: without a line it is the line that refuses.
+    assert_eq!(refused_entry(&admin, &handheld, &shift).await, line);
     assert_eq!(refused_entry(&admin, &elsewhere, &shift).await, line);
     assert_eq!(refused_entry(&admin, &unassigned, &shift).await, line);
     assert_eq!(

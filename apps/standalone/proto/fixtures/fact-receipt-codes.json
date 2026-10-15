@@ -15,6 +15,13 @@
     "pallet_unknown",
     "pallet_already_closed",
     "pallet_state",
-    "subject_unknown"
+    "subject_unknown",
+    "box_not_found",
+    "box_not_closed",
+    "box_on_pallet",
+    "product_mismatch",
+    "pallet_not_open",
+    "pallet_count_mismatch",
+    "feature_disabled"
   ]
 }

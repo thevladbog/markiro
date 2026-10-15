@@ -87,6 +87,12 @@ async fn authenticate(
             ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
         })?;
     let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
+    // The kind's right to this route, before anything is written for the request (not even
+    // `last_seen_at`) and before a handler reads the body. A call outside the router (a unit test
+    // calling a handler) has no matched path and skips the check: the router always has one.
+    if let Some(route) = parts.extensions.get::<axum::extract::MatchedPath>() {
+        crate::device_kinds::check(parts.method.as_str(), route.as_str(), kind)?;
+    }
     // Record activity at most once a minute per device to keep writes rare.
     // Even an `UPDATE` that matches no row takes SQLite's write lock, so it
     // runs only when the stored time is due. The request that finds it due
@@ -193,6 +199,23 @@ impl AuthDevice {
         })?
         .parse()
         .map_err(ApiError::internal)
+    }
+
+    /// The device is still paired and not revoked, and its kind (as stored) is one of `kinds`; the
+    /// kind is returned. `forbidden` is the text for another kind. A station or a handheld works on
+    /// shifts and gets blocks (plan ТСД-Х, Х2).
+    pub async fn require_kinds_in(
+        &self,
+        conn: &mut SqliteConnection,
+        kinds: &[DeviceKind],
+        forbidden: &str,
+    ) -> Result<DeviceKind, ApiError> {
+        let kind = self.require_live_in(conn).await?;
+        if kinds.contains(&kind) {
+            Ok(kind)
+        } else {
+            Err(ApiError::forbidden(forbidden))
+        }
     }
 
     /// The device is still a paired, unrevoked station, read inside the

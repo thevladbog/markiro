@@ -9,7 +9,7 @@ use markiro_proto::{exception_reasons, receipt_codes, BoxExceptionFact, Exceptio
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
-use super::{boxes, registry, rules, Applied, Context, Failure, Reject};
+use super::{boxes, registry, registry_touch, rules, Applied, Context, Failure, Reject};
 use crate::error::ApiError;
 use crate::validate;
 
@@ -123,6 +123,7 @@ pub async fn apply(
             .execute(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+        registry_touch::box_by_id(&mut *conn, &exception.box_id, context.received_at).await?;
     }
     sqlx::query(
         "INSERT INTO box_exceptions (id, record_id, kind, box_id, code_hash, target_scanned_at, \

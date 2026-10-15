@@ -793,10 +793,12 @@ async fn a_record_names_a_shift_the_device_entered_and_a_batch_holds_1_to_100() 
             rejected(Some(&record_id(3)), "not_entered", None),
         ]
     );
-    // A device of another kind enters no shift at all.
+    // An office PC sends no facts at all: refused by its kind (plan ТСД-Х, task Х1) before the
+    // batch is read, so no receipt is kept.
+    let (status, refused) = send_facts(&admin.app, &office_pc, &[scan(4, &floor.shift)]).await;
     assert_eq!(
-        receipts(&admin.app, &office_pc, &[scan(4, &floor.shift)]).await,
-        vec![rejected(Some(&record_id(4)), "not_entered", None)]
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::FORBIDDEN, json!("forbidden"))
     );
     assert_eq!(scan_rows(&admin).await, Vec::<Value>::new());
 

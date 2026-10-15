@@ -6,9 +6,11 @@ import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
 /**
  * Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto): 4 since
- * plan РЕЖ part A (the shift modes), 5 since its part B (the duplicate print).
+ * plan РЕЖ part A (the shift modes), 5 since its part B (the duplicate print),
+ * 6 since plan ТСД (the handheld on the host: pallet events, the box registry,
+ * `handheld-host-v1`).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
@@ -1122,6 +1124,33 @@ export const officeBoxSchema = z.object({
 });
 export type OfficeBox = z.infer<typeof officeBoxSchema>;
 
+/** `markiro_proto::OfficeWarehousePallet`: a pallet a handheld built outside a shift (plan ТСД-Х). */
+export const officeWarehousePalletSchema = z.object({
+  id: z.uuid(),
+  deviceId: z.uuid(),
+  deviceName: z.string(),
+  productId: z.uuid(),
+  productName: z.string(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  /** `null` while the pallet is open. */
+  sscc: z
+    .string()
+    .regex(/^\d{18}$/)
+    .nullable(),
+  /** The boxes standing on it now. */
+  boxes: z.number().int().nonnegative(),
+  /** The count the handheld reported when it closed the pallet. */
+  boxCountReported: z.number().int().positive().nullable(),
+});
+export type OfficeWarehousePallet = z.infer<typeof officeWarehousePalletSchema>;
+
+/** `GET /v1/office/warehouse-pallets`: open pallets first, then closed ones, newest first. */
+export const officeWarehousePalletsSchema = z.object({
+  pallets: z.array(officeWarehousePalletSchema),
+});
+export type OfficeWarehousePallets = z.infer<typeof officeWarehousePalletsSchema>;
+
 /**
  * Mirrors `markiro_proto::OfficePallet`: a pallet of `GET
  * /v1/office/shifts/{id}/pallets` (plan ЧЗ, for plan О-Ф). `boxes` are its
@@ -1362,10 +1391,12 @@ export type EnteredShift = z.infer<typeof enteredShiftSchema>;
  * What a station can work, as it names it entering a shift (mirrors
  * `markiro_proto::shift_supports`, plan РЕЖ). `validationDmDuplicate` is
  * declared with protocol 4 and checked by the host from protocol 5 (part B).
+ * `handheldHost` is a handheld's; a station never names it.
  */
 export const SHIFT_SUPPORTS = {
   validation: "validation-v1",
   validationDmDuplicate: "validation-dm-duplicate-v1",
+  handheldHost: "handheld-host-v1",
 } as const;
 
 /**
@@ -1440,6 +1471,13 @@ export const FACT_RECEIPT_CODES = [
   "pallet_already_closed",
   "pallet_state",
   "subject_unknown",
+  "box_not_found",
+  "box_not_closed",
+  "box_on_pallet",
+  "product_mismatch",
+  "pallet_not_open",
+  "pallet_count_mismatch",
+  "feature_disabled",
 ] as const;
 
 /**
@@ -1596,6 +1634,28 @@ export const stockTemplateSchema = z
 export type StockTemplate = z.infer<typeof stockTemplateSchema>;
 
 /** `templates` may be left out (a wizard before plan 1e3), never `null`. */
+/** `markiro_proto::AddressMode`: how the host's address was got. */
+export const ADDRESS_MODES = ["dhcp", "static", "unknown"] as const;
+
+/** `GET` and `PUT /v1/office/host-network` (`markiro_proto::HostNetwork`). */
+export const hostNetworkSchema = z.object({
+  addresses: z.array(
+    z.object({
+      address: z.string(),
+      mode: z.enum(ADDRESS_MODES),
+      mac: z.string().nullable(),
+      alias: z.string().nullable(),
+    }),
+  ),
+  port: z.number().int().positive(),
+  confirmedAt: z.iso.datetime().nullable(),
+});
+export type HostNetwork = z.infer<typeof hostNetworkSchema>;
+
+/** The body of `PUT /v1/office/host-network`. */
+export const hostNetworkConfirmSchema = z.strictObject({ confirmed: z.boolean() });
+export type HostNetworkConfirm = z.infer<typeof hostNetworkConfirmSchema>;
+
 export const bootstrapRequestSchema = z
   .object({
     admin: newOfficeUserSchema,
@@ -1603,6 +1663,8 @@ export const bootstrapRequestSchema = z
     sscc: ssccStartSchema,
     lines: z.array(z.string()),
     templates: z.array(stockTemplateSchema).optional(),
+    /** Left out when the box «I reserved the address» was not ticked. */
+    addressConfirmed: z.boolean().optional(),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;

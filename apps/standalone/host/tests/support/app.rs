@@ -154,6 +154,28 @@ pub async fn pair_device(app: &TestApp, kind: &str) -> (String, String) {
     )
 }
 
+/// A handheld paired with a code from the office, as the office hands one out (it cannot pair
+/// locally); returns its key.
+pub async fn pair_handheld(admin: &Admin) -> String {
+    let (status, code) = admin.call("POST", "/v1/office/pairing-codes", None).await;
+    assert_eq!(status, StatusCode::OK, "{code}");
+    let (status, paired) = admin
+        .app
+        .send_from(
+            LAN,
+            json(
+                request("POST", "/v1/pairing/claim"),
+                serde_json::json!({
+                    "code": code["code"], "kind": "handheld", "name": "ТСД 1",
+                    "appVersion": "1.2.0", "capabilities": ["handheld-host-v1"]
+                }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paired}");
+    paired["deviceKey"].as_str().unwrap().to_owned()
+}
+
 /// Insert an active office user directly; returns its id.
 pub async fn seed_office_user(app: &TestApp, login: &str, role: &str, password: &str) -> String {
     let id = uuid::Uuid::new_v4().to_string();

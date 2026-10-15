@@ -224,10 +224,10 @@ pub async fn update_device(
             current.line_id.clone()
         }
         Some(Some(line_id)) => {
-            if current.kind != DeviceKind::Station {
+            if !matches!(current.kind, DeviceKind::Station | DeviceKind::Handheld) {
                 return Err(ApiError::validation(
                     "lineId",
-                    "only a station works on a line",
+                    "only a station or a handheld works on a line",
                 ));
             }
             require_active_line(&mut tx, line_id).await?;

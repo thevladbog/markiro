@@ -2154,10 +2154,10 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
     // The facts path: the 12 files of 2a2, the five pallet modules of plan
     // ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
     // `pallet_exception`) and the unit labels of plan РЕЖ part B
-    // (`unit_label`); none of them logs. And the warehouse route of plan
+    // (`unit_label`) and `registry_touch` of plan ТСД-Х; none of them logs. And the warehouse route of plan
     // СКЛ: the lookup answers a unit's full code and logs nothing, the
     // records' batch has the one `error!` by device and position.
-    assert_eq!(facts_files, 19);
+    assert_eq!(facts_files, 20);
     assert_eq!(import_files, 2, "the import modules were not found");
     assert_eq!(license_files, 9, "the license's modules were not found");
 }

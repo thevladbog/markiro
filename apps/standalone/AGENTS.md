@@ -26,6 +26,10 @@ separate installation.
 Office users (login and password, a session bound to a device), operators
 (PIN and badge, verified on the device) and devices (a per-device key) never
 grant each other's rights. A device key alone never opens office routes.
+The rule is enforced per route and per kind, not only by the office session: `host/src/device_kinds.rs`
+lists the kinds that may call each `/v1/device/*` and `/v1/changes*` route, `/v1/office/*` and `/v1/bootstrap`
+take a station or an office PC, and a route with no rule is `forbidden`. A handheld's key opens no office
+route even with an administrator's password (plan ТСД-Х).
 
 ## Local pairing trust
 
@@ -79,6 +83,12 @@ address's Cyrillic characters are read by key position under the Russian
 layout, and everything else is kept — nothing counts against an address and
 the fingerprint is confirmed — and a comma reads as a dot (the keypad's
 decimal key).
+
+A code the office makes for one device (`POST /v1/office/devices/{id}/pairing-code`, stored in
+`pairing_codes.device_id`) re-pairs that device with its own `deviceId`: the claim names `recoverDeviceId`, the
+host gives the device a new key, ends the old key and the device's office sessions, takes no seat and writes
+`device.rekey`. A code for one device used without that id, or an ordinary code with one, is
+`pairing_code_invalid` and stays whole.
 
 ## Audit
 
@@ -1693,6 +1703,18 @@ plan 5, and the coupling of the block sizes to a fail-closed record to plan 2a
 and the owner. The `product`, `protocol` and `minProtocol` fields of `hello`
 never change shape: read `HelloEnvelope` first and decide compatibility
 (`host_too_old`, `app_too_old`) before parsing the rest.
+
+### Handhelds on the host
+
+Protocol 6. The capability `handheld-host-v1` is named in `claim` and in `ShiftEnter.supports`; the host
+requires it of a handheld on every entry into a shift. A handheld reads the shifts of its line (the office
+assigns the line), gets blocks of both extensions, sends facts and closes the shift. Warehouse pallets go through
+`POST /v1/device/pallet-events` (five kinds of records, a receipt for each, `device_event_receipts`, codes
+`box_not_found`, `box_not_closed`, `box_on_pallet`, `product_mismatch`, `pallet_not_open`,
+`pallet_count_mismatch`, `feature_disabled`); the closed boxes are read through `GET /v1/device/box-registry`
+(`boxes.changed_at`, window `since..until`, no codes) and the organization's print data through
+`GET /v1/device/org/print`. The hold after a restore covers `pallet-events` too. `tests/box_registry_touch.rs`
+knows every writer into `boxes`; a new writer must touch `changed_at`.
 
 ## Signed documents and trust keys
 

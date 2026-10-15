@@ -94,7 +94,7 @@ async fn a_device_in_the_network_pairs_with_a_code_typed_in_any_case() {
         .unwrap();
     assert_eq!(
         (kind.as_str(), name.as_str(), protocol, paired_at),
-        ("station", "Станция 2", 5, app.state.timestamp())
+        ("station", "Станция 2", 6, app.state.timestamp())
     );
     assert_eq!(stored_hash, key_hash(&device_key));
     let used_at: Option<String> =

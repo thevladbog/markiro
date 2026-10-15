@@ -108,12 +108,14 @@ import {
   officeUserSchema,
   orgLogoStateSchema,
   productPhotoStateSchema,
+  hostNetworkSchema,
   orgProfileSchema,
   palletSheetSchema,
   palletSheetsSchema,
   pairingCodeSchema,
   productGroupSchema,
   officeShiftSchema,
+  officeWarehousePalletsSchema,
   ssccBlockSchema,
   shiftExportRowsSchema,
   boxReportRowsSchema,
@@ -165,6 +167,8 @@ import {
   type OperatorCreate,
   type OperatorUpdate,
   type OrgLogoPut,
+  type HostNetwork,
+  type HostNetworkConfirm,
   type OrgLogoState,
   type ProductPhotoPut,
   type ProductPhotoState,
@@ -200,6 +204,7 @@ import {
   type TemplateDefaultsUpdate,
   type TemplateUpdate,
   type UpdateStarted,
+  type OfficeWarehousePallets,
   type WarehouseLookup,
   type WarehouseLookupResult,
 } from "./protocol.js";
@@ -275,6 +280,8 @@ export interface HostApi {
   officeMe: (token: string) => Promise<OfficeUser>;
   officeChangePassword: (token: string, request: PasswordChange) => Promise<void>;
   getOrg: (token: string) => Promise<OrgProfile>;
+  getHostNetwork: (token: string) => Promise<HostNetwork>;
+  confirmHostNetwork: (token: string, request: HostNetworkConfirm) => Promise<HostNetwork>;
   updateOrg: (token: string, update: OrgProfileUpdate) => Promise<OrgProfile>;
   getOrgLogo: (token: string) => Promise<OrgLogoState>;
   putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
@@ -311,6 +318,8 @@ export interface HostApi {
    * in `proto/src/lib.rs`, `create_code` in `host/src/routes/pairing.rs`).
    */
   createPairingCode: (token: string, request?: PairingCodeRequest) => Promise<PairingCode>;
+  /** A code that pairs device `id` again with its own `deviceId` (plan ТСД-Х, task Х6). */
+  createDevicePairingCode: (token: string, id: string) => Promise<PairingCode>;
   listCounterparties: (token: string) => Promise<CounterpartyRecord[]>;
   createCounterparty: (token: string, create: CounterpartyCreate) => Promise<CounterpartyRecord>;
   updateCounterparty: (
@@ -456,6 +465,8 @@ export interface HostApi {
     query: PalletListQuery,
     cursor: string | null,
   ) => Promise<OfficePalletPage>;
+  /** The pallets handhelds built outside shifts (plan ТСД-Х, Х5): open first, the latest 200. */
+  listWarehousePallets: (token: string) => Promise<OfficeWarehousePallets>;
   /**
    * Of the station's records it names (1–200), those whose conflict the office
    * marked reviewed (plan КНФ), with the device key only; a host before plan
@@ -663,6 +674,17 @@ export function createHostApi(client: HostClient): HostApi {
     },
     getOrg: (token) =>
       client.request("GET", "/v1/office/org", { officeToken: token, schema: orgProfileSchema }),
+    getHostNetwork: (token) =>
+      client.request("GET", "/v1/office/host-network", {
+        officeToken: token,
+        schema: hostNetworkSchema,
+      }),
+    confirmHostNetwork: (token, request) =>
+      client.request("PUT", "/v1/office/host-network", {
+        body: request,
+        officeToken: token,
+        schema: hostNetworkSchema,
+      }),
     updateOrg: (token, update) =>
       client.request("PUT", "/v1/office/org", {
         body: update,
@@ -790,6 +812,11 @@ export function createHostApi(client: HostClient): HostApi {
     createPairingCode: (token, request) =>
       client.request("POST", "/v1/office/pairing-codes", {
         body: request,
+        officeToken: token,
+        schema: pairingCodeSchema,
+      }),
+    createDevicePairingCode: (token, id) =>
+      client.request("POST", `/v1/office/devices/${id}/pairing-code`, {
         officeToken: token,
         schema: pairingCodeSchema,
       }),
@@ -1250,6 +1277,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", palletListPath(query, cursor), {
         officeToken: token,
         schema: officePalletPageSchema,
+      }),
+    listWarehousePallets: (token) =>
+      client.request("GET", "/v1/office/warehouse-pallets", {
+        officeToken: token,
+        schema: officeWarehousePalletsSchema,
       }),
     getBackups: (token) =>
       client.request("GET", "/v1/office/backups", {

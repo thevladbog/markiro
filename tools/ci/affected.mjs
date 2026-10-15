@@ -182,7 +182,7 @@ function jobsForPath(path) {
   }
 
   // Host and shell crates run only the Rust jobs; everything else in the app
-  // (webview, protocol fixtures read by both suites, package files) also runs
+  // (webview, protocol fixtures read by the webview, the host, the shell and the Android app, package files) also runs
   // the JavaScript gates: the static checks and the app's own Vitest job
   // (verify-app-tests leaves the standalone suite out). Two directories inside the shell crate are also
   // inputs to the webview's Vitest suite, so they must run both: sqlx
@@ -191,6 +191,11 @@ function jobsForPath(path) {
   // `src-tauri/tests/fixtures/` (`local-sql.json`) are asserted by both a
   // Rust unit test and `test/local-executor.test.ts`.
   if (path.startsWith("apps/standalone/")) {
+    // The handheld's unit tests read these files (`apps/handheld/app/build.gradle.kts` adds the directory to the test
+    // resources): a changed wire fixture must run its Kotlin consumers, or a protocol change passes with Android untested.
+    if (path.startsWith("apps/standalone/proto/fixtures/")) {
+      return ["verify_static", ...standaloneJobs, standaloneAppTests, "handheld_android"];
+    }
     if (
       path.startsWith("apps/standalone/src-tauri/migrations/") ||
       path.startsWith("apps/standalone/src-tauri/tests/fixtures/")

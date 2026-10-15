@@ -11,7 +11,7 @@ use markiro_proto::{receipt_codes, BoxClosedFact};
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
-use super::{blocks, boxes, pallets, rules, Applied, Context, Failure, Reject};
+use super::{blocks, boxes, pallets, registry_touch, rules, Applied, Context, Failure, Reject};
 use crate::error::ApiError;
 use crate::validate;
 
@@ -132,6 +132,7 @@ pub async fn apply(
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
+    registry_touch::box_by_id(&mut *conn, &closed.box_id, context.received_at).await?;
     blocks::consume(&mut *conn, &closed.block_id, serial).await?;
     Ok(Applied::accepted())
 }

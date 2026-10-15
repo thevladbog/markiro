@@ -32,6 +32,8 @@ pub struct Endpoint {
     pub port: u16,
     /// This host's addresses in the local network, read for every new code.
     pub addresses: Arc<dyn Fn() -> Vec<Ipv4Addr> + Send + Sync>,
+    /// How each address was got (the office's notice about a floating address, plan ТСД-П).
+    pub details: Arc<dyn Fn() -> Vec<markiro_proto::HostAddress> + Send + Sync>,
 }
 
 #[derive(Clone)]
@@ -104,6 +106,7 @@ impl AppState {
                 fingerprint: String::new(),
                 port: markiro_proto::DEFAULT_PORT,
                 addresses: Arc::new(crate::network::lan_ipv4_addresses),
+                details: Arc::new(crate::address_check::detect),
             },
             revisions: Arc::new(watch::channel(0).0),
             stopping: Arc::new(watch::channel(false).0),
@@ -144,6 +147,15 @@ impl AppState {
         addresses: impl Fn() -> Vec<Ipv4Addr> + Send + Sync + 'static,
     ) -> Self {
         self.endpoint.addresses = Arc::new(addresses);
+        self
+    }
+
+    /// Replace the lookup of how the addresses were got; tests name them.
+    pub fn with_address_details(
+        mut self,
+        details: impl Fn() -> Vec<markiro_proto::HostAddress> + Send + Sync + 'static,
+    ) -> Self {
+        self.endpoint.details = Arc::new(details);
         self
     }
 
@@ -221,6 +233,8 @@ pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
 /// displacements, never wrong ones.
 fn held_by_a_restore(path: &str) -> bool {
     path == "/v1/device/facts"
+        // Its records lean on boxes and blocks a copy may lack (plan ТСД-Х).
+        || path == "/v1/device/pallet-events"
         || path.starts_with("/v1/device/codes/")
         // A reprint looks up and records against shifts, boxes and codes a
         // copy may lack (plan СКЛ).
@@ -288,6 +302,18 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::facts::receive_facts),
         )
         .route(
+            "/v1/device/pallet-events",
+            post(crate::routes::pallet_events::receive_events),
+        )
+        .route(
+            "/v1/device/box-registry",
+            get(crate::routes::box_registry::box_registry),
+        )
+        .route(
+            "/v1/device/org/print",
+            get(crate::routes::org_print::org_print),
+        )
+        .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
         )
@@ -330,6 +356,10 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::devices::update_device),
         )
         .route(
+            "/v1/office/devices/{id}/pairing-code",
+            post(crate::routes::pairing::create_device_code),
+        )
+        .route(
             "/v1/office/devices/{id}/revoke",
             post(crate::routes::devices::revoke_device),
         )
@@ -349,10 +379,19 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::org::get_org).put(crate::routes::org::put_org),
         )
         .route(
+            "/v1/office/host-network",
+            get(crate::routes::host_network::get_network)
+                .put(crate::routes::host_network::put_network),
+        )
+        .route(
             "/v1/office/org/logo",
             get(crate::routes::org_logo::get_logo)
                 .put(crate::routes::org_logo::put_logo)
                 .delete(crate::routes::org_logo::delete_logo),
+        )
+        .route(
+            "/v1/office/warehouse-pallets",
+            get(crate::routes::office_warehouse_pallets::list),
         )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(
@@ -867,9 +906,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
-        // Protocol 5 (the duplicate print, plan РЕЖ part B) is this build's;
-        // 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
+        // Protocol 6 (handhelds on the host, plan ТСД) is this build's;
+        // 5 (the duplicate print, plan РЕЖ part B), 4 (shift modes, part A), 3 (pallets, plan ПЛ-Х), 2 (stage 2a) and 1
         // (stage 1) are still taken.
+        assert_eq!(call(Some("6")).await.0, StatusCode::OK);
         assert_eq!(call(Some("5")).await.0, StatusCode::OK);
         assert_eq!(call(Some("4")).await.0, StatusCode::OK);
         assert_eq!(call(Some("3")).await.0, StatusCode::OK);
@@ -884,16 +924,16 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 5);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 6);
     }
 
     #[tokio::test]
     async fn an_out_of_range_or_garbled_version_is_refused() {
-        let (status, body) = call(Some("7")).await;
+        let (status, body) = call(Some("8")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body["error"]["details"]["protocol"], 7);
+        assert_eq!(body["error"]["details"]["protocol"], 8);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
-        assert_eq!(call(Some("6")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("7")).await.0, StatusCode::BAD_REQUEST);
     }
 }

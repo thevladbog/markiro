@@ -118,6 +118,7 @@ pub async fn apply_targets(
             .fetch_one(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+            crate::facts::registry_touch::box_by_id(&mut *conn, box_id, at).await?;
             sqlx::query(
                 "INSERT INTO code_releases (box_id, shift_id, document_id, code_count, \
                  released_at, rev) VALUES (?, ?, ?, ?, ?, ?)",
@@ -148,6 +149,7 @@ pub async fn apply_targets(
             let Some(shift_id) = shift_id else {
                 return Err(ApiError::internal("a pallet taken apart twice"));
             };
+            crate::facts::registry_touch::pallet_boxes(&mut *conn, pallet_id, at).await?;
             shifts.insert(shift_id);
             applied.pallets += 1;
         }

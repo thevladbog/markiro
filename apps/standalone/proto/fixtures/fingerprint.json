@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "derHex": "",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "display": "E3B0 C442 98FC 1C14 9AFB F4C8 996F B924"
+    },
+    {
+      "derHex": "00",
+      "fingerprint": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+      "display": "6E34 0B9C FFB3 7A98 9CA5 44E6 BB78 0A2C"
+    },
+    {
+      "derHex": "616263",
+      "fingerprint": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "display": "BA78 16BF 8F01 CFEA 4141 40DE 5DAE 2223"
+    },
+    {
+      "derHex": "3082010a02820101",
+      "fingerprint": "31a2314b018c0e23d8a5845d9fe8bc675e8358dbe7b76a9f3f387c3b658b573c",
+      "display": "31A2 314B 018C 0E23 D8A5 845D 9FE8 BC67"
+    }
+  ]
+}

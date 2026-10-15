@@ -18,7 +18,7 @@ use crate::audit::{self, actions, reasons, Actor, Entry, Outcome};
 use crate::auth::{require_loopback, OfficeContext};
 use crate::clock::format_timestamp;
 use crate::db::begin_write;
-use crate::error::{ApiError, ApiJson};
+use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::pairing_code;
 use crate::secrets::{key_hash, random_key};
 use crate::server::{AppState, ClientProtocol};
@@ -124,6 +124,7 @@ struct StoredCode {
     expires_at: String,
     used_at: Option<String>,
     failed_attempts: i64,
+    device_id: Option<String>,
 }
 
 /// `POST /v1/pairing/claim`: a device in the local network pairs with a
@@ -139,12 +140,15 @@ pub async fn claim(
     state.claim_limiter.check(peer.ip())?;
     let (name, app_version) =
         validate::device_registration(&request.name, &request.app_version, &request.capabilities)?;
+    if let Some(id) = &request.recover_device_id {
+        validate::client_uuid("recoverDeviceId", id)?;
+    }
     let address = peer.ip().to_canonical().to_string();
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     let found: Option<StoredCode> = match pairing_code::normalize(request.code.expose()) {
         Some(code) => sqlx::query_as(
-            "SELECT id, expires_at, used_at, failed_attempts FROM pairing_codes WHERE code_hash = ?",
+            "SELECT id, expires_at, used_at, failed_attempts, device_id FROM pairing_codes WHERE code_hash = ?",
         )
         .bind(key_hash(&code))
         .fetch_optional(&mut *tx)
@@ -213,6 +217,82 @@ pub async fn claim(
             return Err(ApiError::new(StatusCode::BAD_REQUEST, error_code, message));
         }
     };
+    // Re-pairing: a code made for one device is that device's, and an ordinary code never
+    // re-keys one. A mistake of the app is not a guess at the code: the code stays whole.
+    let recovered = match (&code.device_id, &request.recover_device_id) {
+        (None, None) => false,
+        (Some(bound), Some(asked)) if bound == asked => {
+            let kind: Option<String> =
+                sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
+                    .bind(bound)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(ApiError::internal)?;
+            let kind = kind
+                .map(|kind| kind.parse::<DeviceKind>())
+                .transpose()
+                .map_err(ApiError::internal)?;
+            if kind != Some(request.kind) {
+                return Err(deny_recovery(tx, &at, &code.id, &request, name, &address).await);
+            }
+            true
+        }
+        _ => return Err(deny_recovery(tx, &at, &code.id, &request, name, &address).await),
+    };
+    if recovered {
+        let device_id = code.device_id.clone().expect("a recovery names its device");
+        sqlx::query("UPDATE pairing_codes SET used_at = ? WHERE id = ?")
+            .bind(&at)
+            .bind(&code.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        let key = random_key();
+        sqlx::query(
+            "UPDATE devices SET key_hash = ?, app_version = ?, protocol = ?, capabilities = ?, \
+             last_seen_at = ?, version_seen_at = ? WHERE id = ?",
+        )
+        .bind(key_hash(&key))
+        .bind(app_version)
+        .bind(i64::from(protocol))
+        .bind(serde_json::to_string(&request.capabilities).map_err(ApiError::internal)?)
+        .bind(&at)
+        .bind(&at)
+        .bind(&device_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+        // The key lost with a PC may have left a session behind.
+        sqlx::query("DELETE FROM office_sessions WHERE device_id = ?")
+            .bind(&device_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+        audit::record(
+            &mut tx,
+            &at,
+            Entry {
+                actor: Actor::Device(&device_id),
+                action: actions::DEVICE_REKEY,
+                target_type: Some("device"),
+                target_id: Some(&device_id),
+                outcome: Outcome::Ok,
+                details: json!({
+                    "kind": request.kind.as_str(),
+                    "pairingCodeId": code.id,
+                    "address": address,
+                }),
+            },
+        )
+        .await
+        .map_err(ApiError::internal)?;
+        tx.commit().await.map_err(ApiError::internal)?;
+        return Ok(Json(PairResponse {
+            device_id,
+            device_key: key.into(),
+            host_id: state.host_id.clone(),
+        }));
+    }
     // The license's feature and seat (plan ЛЦ-2 Д8, Д9, spec §4.7), after
     // the code is verified and before it is used up: a refused device keeps
     // the code for its next try, and the refusal writes no row.
@@ -274,6 +354,48 @@ pub async fn claim(
     }))
 }
 
+/// A refused re-pairing: audited as a denied claim and committed (the audit row stays, the code is
+/// untouched), answered like any invalid code.
+async fn deny_recovery(
+    mut tx: sqlx::Transaction<'static, sqlx::Sqlite>,
+    at: &str,
+    code_id: &str,
+    request: &ClaimRequest,
+    name: &str,
+    address: &str,
+) -> ApiError {
+    let written = async {
+        audit::record(
+            &mut tx,
+            at,
+            Entry {
+                actor: Actor::System,
+                action: actions::DEVICE_CLAIM,
+                target_type: Some("pairing_code"),
+                target_id: Some(code_id),
+                outcome: Outcome::Denied,
+                details: json!({
+                    "reason": reasons::RECOVERY_MISMATCH,
+                    "kind": request.kind.as_str(),
+                    "name": name,
+                    "address": address,
+                }),
+            },
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    match written {
+        Ok(()) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            codes::PAIRING_CODE_INVALID,
+            "the pairing code is not valid",
+        ),
+        Err(error) => ApiError::internal(error),
+    }
+}
+
 /// `POST /v1/office/pairing-codes` (administrators): a one-time code for a
 /// device in the local network. Only its hash is stored; the code and the
 /// payload are returned once. «Новый код» sends `{ replaces: <id> }` (owner
@@ -288,6 +410,27 @@ pub async fn create_code(
 ) -> Result<Json<PairingCode>, ApiError> {
     context.require_admin()?;
     let replaces = request.and_then(|ApiJson(request)| request.replaces);
+    issue_code(&state, &context, None, replaces).await
+}
+
+/// `POST /v1/office/devices/{id}/pairing-code` (administrators): a one-time code that re-pairs
+/// device `{id}` with its own `deviceId` (plan ТСД-Х, task Х6).
+pub async fn create_device_code(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(device): ApiPath<String>,
+) -> Result<Json<PairingCode>, ApiError> {
+    context.require_admin()?;
+    validate::client_uuid("id", &device)?;
+    issue_code(&state, &context, Some(&device), None).await
+}
+
+async fn issue_code(
+    state: &AppState,
+    context: &OfficeContext,
+    device: Option<&str>,
+    replaces: Option<String>,
+) -> Result<Json<PairingCode>, ApiError> {
     let code = pairing_code::generate();
     let now = state.now();
     let at = format_timestamp(now);
@@ -295,6 +438,24 @@ pub async fn create_code(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
+    if let Some(device) = device {
+        let kind: Option<String> =
+            sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
+                .bind(device)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        let kind: DeviceKind = kind
+            .ok_or_else(|| ApiError::not_found("no such live device"))?
+            .parse()
+            .map_err(ApiError::internal)?;
+        if !matches!(kind, DeviceKind::Station | DeviceKind::Handheld) {
+            return Err(ApiError::validation(
+                "id",
+                "only a station or a handheld pairs again with a code",
+            ));
+        }
+    }
     // Expiring the replaced code now makes a claim refuse it as expired and
     // takes it out of the live codes a wrong guess counts against.
     let replaced = match replaces.as_deref() {
@@ -316,13 +477,15 @@ pub async fn create_code(
         None => None,
     };
     sqlx::query(
-        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at, device_id) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(key_hash(&code))
     .bind(&context.user.id)
     .bind(&at)
     .bind(&expires)
+    .bind(device)
     .execute(&mut *tx)
     .await
     .map_err(ApiError::internal)?;
@@ -335,9 +498,10 @@ pub async fn create_code(
             target_type: Some("pairing_code"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: match replaced {
-                Some(old) => json!({ "expiresAt": expires, "replaces": old }),
-                None => json!({ "expiresAt": expires }),
+            details: match (replaced, device) {
+                (Some(old), _) => json!({ "expiresAt": expires, "replaces": old }),
+                (None, Some(device)) => json!({ "expiresAt": expires, "deviceId": device }),
+                (None, None) => json!({ "expiresAt": expires }),
             },
         },
     )

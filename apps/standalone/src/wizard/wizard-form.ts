@@ -24,8 +24,11 @@ import {
 } from "../lib/rules.js";
 import { DEFAULT_TIME_ZONE } from "../lib/time-zones.js";
 
-/** Administrator, organization, SSCC starts and lines (stage 1 spec §1), then a review. */
-export const WIZARD_STEPS = ["admin", "org", "sscc", "lines", "review"] as const;
+/**
+ * Administrator, organization, SSCC starts and lines (stage 1 spec §1), the host's address (plan
+ * ТСД-П), then a review.
+ */
+export const WIZARD_STEPS = ["admin", "org", "sscc", "lines", "address", "review"] as const;
 export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 /** At most 20 lines, as on the host. */
@@ -45,6 +48,8 @@ export interface WizardValues {
   boxNextSerial: number;
   palletNextSerial: number;
   lines: { name: string }[];
+  /** «Я зарезервировал адрес»: only a mark, the setup is never blocked by it. */
+  addressConfirmed: boolean;
 }
 
 const PLAIN_FIELDS = [
@@ -84,6 +89,7 @@ export function defaultWizardValues(firstLineName: string): WizardValues {
     boxNextSerial: 1,
     palletNextSerial: 0,
     lines: [{ name: firstLineName }],
+    addressConfirmed: false,
   };
 }
 
@@ -180,8 +186,10 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
       return ssccIssues(values);
     case "lines":
       return lineIssues(values.lines);
+    case "address":
+      return [];
     case "review":
-      return (["admin", "org", "sscc", "lines"] as const).flatMap((each) =>
+      return (["admin", "org", "sscc", "lines", "address"] as const).flatMap((each) =>
         validateStep(each, values),
       );
   }
@@ -244,6 +252,8 @@ export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
     sscc: { boxNextSerial: values.boxNextSerial, palletNextSerial: values.palletNextSerial },
     lines: values.lines.map((line) => line.name.trim()),
     templates: stockTemplates(),
+    // With `exactOptionalPropertyTypes` the field is left out while the box is not ticked.
+    ...(values.addressConfirmed ? { addressConfirmed: true } : {}),
   };
 }
 

@@ -138,4 +138,32 @@ describe("pairing payload", () => {
   ])("refuses %s", (_name, text) => {
     expect(parsePairingPayload(text)).toBeNull();
   });
+
+  it("reads the payload cases of the shared fixture, which the Android app reads too", () => {
+    const parsed = z
+      .object({
+        valid: z.array(
+          z.object({
+            text: z.string(),
+            canonical: z.boolean(),
+            parsed: z.object({
+              addresses: z.array(z.string()),
+              port: z.number(),
+              fingerprint: z.string(),
+              code: z.string(),
+            }),
+          }),
+        ),
+        invalid: z.array(z.string()),
+      })
+      .strict()
+      .parse(fixture("pairing-payloads.json"));
+    expect(parsed.valid.length).toBeGreaterThanOrEqual(5);
+    for (const { text, parsed: expected } of parsed.valid) {
+      expect(parsePairingPayload(text), text).toStrictEqual(expected);
+    }
+    for (const text of parsed.invalid) {
+      expect(parsePairingPayload(text), text).toBeNull();
+    }
+  });
 });

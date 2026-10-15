@@ -13,7 +13,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks: 5 since part B of plan РЕЖ (the
+/// Protocol version this build speaks: 6 since plan ТСД (handhelds on the
+/// host): the channel `POST /v1/device/pallet-events`, `GET
+/// /v1/device/box-registry`, `GET /v1/device/org/print`, `recoverDeviceId` of
+/// a claim and the capability `handheld-host-v1`; a handheld of protocol 6
+/// against a host of 5 is `host_too_old`. 5 came with part B of plan РЕЖ (the
 /// duplicate print of a validation shift: its [`ValidationPrint`] policy, the
 /// snapshot's [`SnapshotValidationPrint`] and the `unit_label` fact,
 /// [`UnitLabelFact`]); 4 came with part A (the shift modes: the body of a
@@ -23,7 +27,7 @@ use sha2::{Digest, Sha256};
 /// box's `palletId`). A new fact kind, a new field of a fact's `data` or a
 /// new meaning of one raises it, because an older host refuses such a record
 /// for good.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -163,6 +167,21 @@ pub mod receipt_codes {
     /// РЕЖ, part B) of a code this station has no accepted scan of in this
     /// shift.
     pub const SUBJECT_UNKNOWN: &str = "subject_unknown";
+    /// No closed box has this SSCC (a pallet event names a box the host never closed).
+    pub const BOX_NOT_FOUND: &str = "box_not_found";
+    /// The box exists but is taken apart: it is no closed box any more.
+    pub const BOX_NOT_CLOSED: &str = "box_not_closed";
+    /// The box stands on another pallet; `details.palletSscc` (`null` while that pallet is open) and
+    /// `details.palletId` name it.
+    pub const BOX_ON_PALLET: &str = "box_on_pallet";
+    /// The box is of another product than the pallet.
+    pub const PRODUCT_MISMATCH: &str = "product_mismatch";
+    /// The pallet is closed (or taken apart): a box neither joins nor leaves it.
+    pub const PALLET_NOT_OPEN: &str = "pallet_not_open";
+    /// A warehouse pallet closed with a box count the host does not hold; `details.counted` is its own.
+    pub const PALLET_COUNT_MISMATCH: &str = "pallet_count_mismatch";
+    /// The license has no `pallets` feature: a new warehouse pallet is refused (open ones go on).
+    pub const FEATURE_DISABLED: &str = "feature_disabled";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -182,6 +201,13 @@ pub mod receipt_codes {
         PALLET_ALREADY_CLOSED,
         PALLET_STATE,
         SUBJECT_UNKNOWN,
+        BOX_NOT_FOUND,
+        BOX_NOT_CLOSED,
+        BOX_ON_PALLET,
+        PRODUCT_MISMATCH,
+        PALLET_NOT_OPEN,
+        PALLET_COUNT_MISMATCH,
+        FEATURE_DISABLED,
     ];
 }
 
@@ -228,6 +254,7 @@ pub mod cloud_import;
 pub mod code_search;
 pub mod disaggregation;
 pub mod export_files;
+pub mod handheld;
 pub mod license;
 pub mod pack_cards;
 pub mod pairing;
@@ -235,6 +262,8 @@ pub mod review;
 pub mod trust;
 pub mod update;
 pub mod usage_stats;
+
+pub use handheld::*;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
 /// value), `null` (clear it) or a value (set it): an `Option<Option<T>>` with
@@ -486,6 +515,10 @@ pub struct ClaimRequest {
     pub app_version: String,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// The `deviceId` of the device this claim re-pairs (plan ТСД-Х, task Х6): the host gives that
+    /// device a new key when the code was made for it. Left out, a claim pairs a new device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recover_device_id: Option<String>,
 }
 
 /// Response of `local-pair` and `pairing/claim`. The device key is shown
@@ -927,6 +960,10 @@ pub struct BootstrapRequest {
     /// 1e3); a wizard from before then sends none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<StockTemplate>,
+    /// The wizard's mark «I reserved the host's address» (plan ТСД-П, task П4); left out, nothing
+    /// was confirmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address_confirmed: Option<bool>,
 }
 
 /// A stock label template of the wizard: enabled, for every category, and
@@ -1775,6 +1812,9 @@ pub mod shift_supports {
     /// code (part B of plan РЕЖ; declared with protocol 4, checked by the
     /// host from protocol 5).
     pub const VALIDATION_DM_DUPLICATE: &str = "validation-dm-duplicate-v1";
+    /// A handheld that speaks the host's protocol (plan ТСД, protocol 6): named in its claim's
+    /// `capabilities` and on every entry into a shift, which the host always asks of a handheld.
+    pub const HANDHELD_HOST: &str = "handheld-host-v1";
 }
 
 /// Whether the operator must scan a printed duplicate before the next unit

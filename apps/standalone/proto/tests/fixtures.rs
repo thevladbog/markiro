@@ -22,6 +22,12 @@ use markiro_proto::{
     SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, UnitLabelFact,
     ValidationPrint, HOST_PRODUCT, PROTOCOL_VERSION,
 };
+use markiro_proto::{
+    receipt_codes, shift_supports, BoxRegistryItem, BoxRegistryKind, BoxRegistryPage,
+    OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData, PalletEventBatch,
+    PalletEventKind, WarehousePalletClosedData, WarehousePalletLabelData,
+    WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
@@ -81,7 +87,7 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 6);
+    assert_eq!(hello.protocol, 7);
     assert!(hello.initialized);
 }
 
@@ -97,9 +103,9 @@ fn envelope_decides_compatibility_before_the_rest() {
     );
     assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
     assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(5, &future), Compatibility::Compatible);
     assert_eq!(compatibility_for(6, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(7, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(7, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(8, &future), Compatibility::HostTooOld);
     // A host of a later protocol that still takes this build's.
     assert_eq!(compatibility(&future), Compatibility::Compatible);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
@@ -1925,4 +1931,259 @@ fn the_usage_statistics_hold_counts_by_month_and_nothing_else() {
     let mut value = fixture("usage-stats.json");
     value["months"][0]["shifts"]["productName"] = serde_json::json!("Молоко");
     assert!(serde_json::from_value::<UsageStats>(value).is_err());
+}
+
+#[test]
+fn this_build_speaks_protocol_six_and_the_current_hello_fixtures_say_so() {
+    assert_eq!(PROTOCOL_VERSION, 6);
+    assert_eq!(MIN_PROTOCOL_VERSION, 1);
+    for name in ["hello.json", "hello-restored.json"] {
+        let hello: Hello = serde_json::from_value(fixture(name)).unwrap();
+        assert_eq!(hello.protocol, PROTOCOL_VERSION, "{name}");
+        assert_eq!(hello.min_protocol, MIN_PROTOCOL_VERSION, "{name}");
+    }
+}
+
+#[test]
+fn a_handheld_names_the_capability_in_its_claim_and_its_entry() {
+    assert_eq!(shift_supports::HANDHELD_HOST, "handheld-host-v1");
+    let claim: ClaimRequest = round_trip("claim-request-handheld.json");
+    assert_eq!(claim.kind, DeviceKind::Handheld);
+    assert_eq!(
+        claim.capabilities,
+        vec![shift_supports::HANDHELD_HOST.to_owned()]
+    );
+    assert_eq!(claim.recover_device_id, None);
+    let enter: markiro_proto::ShiftEnter = round_trip("shift-enter-handheld.json");
+    assert_eq!(
+        enter.supports,
+        vec![shift_supports::HANDHELD_HOST.to_owned()]
+    );
+}
+
+#[test]
+fn a_re_pairing_claim_names_the_device_and_an_ordinary_one_names_none() {
+    let recover: ClaimRequest = round_trip("claim-request-recover.json");
+    assert_eq!(
+        recover.recover_device_id.as_deref(),
+        Some("2c1f0b7e-8a4d-4c3b-9e2f-1a0b9c8d7e6f")
+    );
+    let ordinary: ClaimRequest = round_trip("claim-request.json");
+    assert_eq!(ordinary.recover_device_id, None);
+    // The request is strict: a misspelt field is refused, not ignored.
+    let mut value = fixture("claim-request-recover.json");
+    value["recoverDevice"] = Value::String("x".into());
+    assert!(serde_json::from_value::<ClaimRequest>(value).is_err());
+}
+
+#[test]
+fn the_pallet_event_batch_holds_every_kind_with_the_data_its_kind_reads() {
+    let batch: PalletEventBatch = round_trip("pallet-events-request.json");
+    let kinds: Vec<_> = batch.records.iter().map(|record| record.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            PalletEventKind::WarehousePalletOpened,
+            PalletEventKind::PalletBoxAdded,
+            PalletEventKind::PalletBoxAdded,
+            PalletEventKind::PalletBoxRemoved,
+            PalletEventKind::WarehousePalletClosed,
+            PalletEventKind::WarehousePalletLabel,
+        ]
+    );
+    for record in &batch.records {
+        let data = record.data.clone();
+        match record.kind {
+            PalletEventKind::WarehousePalletOpened => {
+                serde_json::from_value::<WarehousePalletOpenedData>(data).unwrap();
+            }
+            PalletEventKind::PalletBoxAdded => {
+                serde_json::from_value::<PalletBoxAddedData>(data).unwrap();
+            }
+            PalletEventKind::PalletBoxRemoved => {
+                serde_json::from_value::<PalletBoxRemovedData>(data).unwrap();
+            }
+            PalletEventKind::WarehousePalletClosed => {
+                let closed: WarehousePalletClosedData = serde_json::from_value(data).unwrap();
+                assert_eq!((closed.serial, closed.box_count), (40, 1));
+            }
+            PalletEventKind::WarehousePalletLabel => {
+                serde_json::from_value::<WarehousePalletLabelData>(data).unwrap();
+            }
+        }
+    }
+    // The last record carries no operator; the first carries one.
+    assert!(batch.records[0].operator_id.is_some());
+    assert!(batch.records[5].operator_id.is_none());
+    for kind in kinds {
+        assert_eq!(kind.as_str().parse::<PalletEventKind>().unwrap(), kind);
+    }
+    assert!("pallet_exploded".parse::<PalletEventKind>().is_err());
+    // A data object with a field it does not know is refused.
+    let mut data = batch.records[1].data.clone();
+    data["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<PalletBoxAddedData>(data).is_err());
+}
+
+#[test]
+fn the_pallet_event_receipts_are_fact_receipts_with_codes_of_the_shared_list() {
+    let receipts: FactReceipts = round_trip("pallet-events-response.json");
+    assert_eq!(receipts.receipts.len(), 6);
+    let rejected: Vec<_> = receipts
+        .receipts
+        .iter()
+        .filter_map(|receipt| receipt.code.as_deref())
+        .collect();
+    assert_eq!(
+        rejected,
+        vec!["box_on_pallet", "pallet_count_mismatch", "feature_disabled"]
+    );
+    for code in rejected {
+        assert!(receipt_codes::ALL.contains(&code), "{code}");
+    }
+    assert_eq!(
+        receipts.receipts[1]
+            .details
+            .as_ref()
+            .map(|details| details.len()),
+        None,
+        "an accepted receipt has no details"
+    );
+}
+
+#[test]
+fn the_box_registry_page_is_a_delta_with_removals_and_the_restore_epoch() {
+    let page: BoxRegistryPage = round_trip("box-registry-page.json");
+    assert_eq!(page.items.len(), 3);
+    assert_eq!(page.items[0].kind, BoxRegistryKind::Upsert);
+    assert_eq!(page.items[0].pallet_active, Some(true));
+    assert_eq!(page.items[1].pallet_id, None);
+    assert_eq!(page.items[1].pallet_active, Some(false));
+    // A removal carries only what names the box and when.
+    assert_eq!(
+        page.items[2],
+        BoxRegistryItem::remove("046006820000015024".into(), "2026-10-08T07:10:00Z".into())
+    );
+    assert!(page.next_cursor.is_some() && page.restore_epoch.is_some());
+    let last: BoxRegistryPage = round_trip("box-registry-last-page.json");
+    assert!(last.next_cursor.is_none() && last.restore_epoch.is_none() && last.items.is_empty());
+    // No code of a unit is in a registry item: the type has no field for one.
+    let text = serde_json::to_string(&page).unwrap();
+    assert!(!text.contains("contentKeys") && !text.contains("codeHash"));
+}
+
+#[test]
+fn the_organization_to_print_has_a_logo_or_leaves_it_to_the_bundled_one() {
+    let own: OrgPrint = round_trip("org-print.json");
+    assert_eq!(own.issuer_prefix, "460068200");
+    assert_eq!(
+        own.logo.as_ref().map(|logo| (logo.width, logo.height)),
+        Some((10, 2))
+    );
+    let bundled: OrgPrint = round_trip("org-print-bundled.json");
+    assert!(bundled.logo.is_none() && bundled.inn.is_none());
+}
+
+#[test]
+fn the_office_lists_warehouse_pallets_open_ones_first() {
+    let list: OfficeWarehousePallets = round_trip("office-warehouse-pallets.json");
+    assert_eq!(list.pallets.len(), 2);
+    assert!(list.pallets[0].sscc.is_none() && list.pallets[0].closed_at.is_none());
+    assert_eq!(list.pallets[1].box_count_reported, Some(40));
+}
+
+#[test]
+fn a_pairing_code_made_for_a_device_has_the_shape_of_any_code() {
+    let code: PairingCode = round_trip("pairing-code-device.json");
+    assert_eq!(code.code.expose().len(), 10);
+}
+
+#[test]
+fn the_receipt_codes_of_the_fixture_are_the_codes_of_the_crate() {
+    let codes = fixture("fact-receipt-codes.json");
+    let listed: Vec<&str> = codes["codes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|code| code.as_str().unwrap())
+        .collect();
+    assert_eq!(listed, receipt_codes::ALL);
+    for new in [
+        "box_not_found",
+        "box_not_closed",
+        "box_on_pallet",
+        "product_mismatch",
+        "pallet_not_open",
+        "pallet_count_mismatch",
+        "feature_disabled",
+    ] {
+        assert!(receipt_codes::ALL.contains(&new), "{new}");
+    }
+}
+
+fn bytes_of(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+#[test]
+fn the_fingerprint_cases_are_the_sha256_of_the_der_and_their_display_form() {
+    let cases = fixture("fingerprint.json");
+    let cases = cases["cases"].as_array().unwrap();
+    assert!(cases.len() >= 4);
+    for case in cases {
+        let fingerprint = certificate_fingerprint(&bytes_of(case["derHex"].as_str().unwrap()));
+        assert_eq!(fingerprint, case["fingerprint"].as_str().unwrap());
+        assert_eq!(
+            display_fingerprint(&fingerprint),
+            case["display"].as_str().unwrap()
+        );
+    }
+}
+
+#[test]
+fn the_compatibility_cases_say_who_must_update() {
+    let cases = fixture("compatibility.json");
+    for case in cases["cases"].as_array().unwrap() {
+        let host = HelloEnvelope {
+            product: "markiro-host".into(),
+            protocol: case["host"]["protocol"].as_u64().unwrap() as u32,
+            min_protocol: case["host"]["minProtocol"].as_u64().unwrap() as u32,
+        };
+        let client = case["client"].as_u64().unwrap() as u32;
+        let expected = match case["expected"].as_str().unwrap() {
+            "compatible" => Compatibility::Compatible,
+            "host_too_old" => Compatibility::HostTooOld,
+            "app_too_old" => Compatibility::AppTooOld,
+            other => panic!("unknown expectation {other}"),
+        };
+        assert_eq!(compatibility_for(client, &host), expected, "{case}");
+    }
+}
+
+#[test]
+fn the_host_network_lists_each_address_with_how_it_was_got() {
+    let network: markiro_proto::HostNetwork = round_trip("host-network.json");
+    assert_eq!(network.port, 45710);
+    assert_eq!(network.addresses[0].mode, markiro_proto::AddressMode::Dhcp);
+    assert_eq!(
+        network.addresses[1].mode,
+        markiro_proto::AddressMode::Static
+    );
+    assert!(network.confirmed_at.is_none());
+    let confirm: markiro_proto::HostNetworkConfirm = round_trip("host-network-confirm.json");
+    assert!(confirm.confirmed);
+    let mut value = fixture("host-network-confirm.json");
+    value["extra"] = Value::Bool(true);
+    assert!(serde_json::from_value::<markiro_proto::HostNetworkConfirm>(value).is_err());
+}
+
+#[test]
+fn a_wizard_may_say_the_address_is_reserved_and_an_older_one_says_nothing() {
+    let sent: BootstrapRequest = round_trip("bootstrap-request-address.json");
+    assert_eq!(sent.address_confirmed, Some(true));
+    let plain: BootstrapRequest = round_trip("bootstrap-request.json");
+    assert_eq!(plain.address_confirmed, None);
 }

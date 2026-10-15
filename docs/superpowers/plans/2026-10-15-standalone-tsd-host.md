@@ -4178,3 +4178,63 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 существующие тесты изменены решением владельца (`only_a_station_reads_and_creates_shifts`,
 `an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift`, все тесты вида `office` на закрытых
 теперь маршрутах), какое поле реестра коробов пришлось добавить и какие номера миграций пришлось сдвинуть.
+
+- **Х1.** Строки `ROUTE_KINDS` для смен (`GET /v1/device/shifts`, `POST .../{id}/enter`), `POST /v1/device/sscc/blocks`
+  и `.../known` оставлены `Station`, а не `Station, Handheld`: обработчики ещё зовут `require_station`, и тест
+  «допущенный вид не получает `forbidden`» был бы красным до Х2. Х2 снимает `require_station` и расширяет эти
+  четыре строки в одном коммите.
+- **Х1.** Строка `GET /v1/device/codes/{code_hash}` включает `Office` (`Station, Handheld, Office`): существующие тесты
+  `codes.rs` сознательно проверяют, что офисный ПК читает проверку кода; закрывать чтение не нужно.
+- **Х1.** Изменённые существующие тесты: `facts.rs::a_record_names_a_shift_the_device_entered_and_a_batch_holds_1_to_100`
+  (офисный ПК на `POST /v1/device/facts` теперь `403 forbidden` вместо квитанции `not_entered`) и
+  `cloud_import.rs::nobody_without_an_office_session_of_their_own_device_imports` (два случая ТСД теперь `403 forbidden`
+  по виду вместо `401 session`). Остальные тесты хоста не менялись.
+- **Х1.** Тест `a_handheld_key_is_refused_on_every_office_route_of_the_router` добавлен сверх плана: перебирает все
+  офисные маршруты роутера (в том числе `host-network`) и требует `forbidden` для ключа ТСД.
+- **Х1.** `concrete()` в тесте подставляет любые `{...}`-сегменты, а не только `{id}`/`{code_hash}`.
+- **Х2.** Четыре строки `ROUTE_KINDS` (`GET /v1/device/shifts`, `POST .../{id}/enter`, `POST /v1/device/sscc/blocks`,
+  `.../known`) расширены до `Station, Handheld` в одном коммите со снятием `require_station` в обработчиках; создание
+  смены (`POST /v1/device/shifts`) и `PUT /v1/device/line` остаются станционными (`require_station` в
+  `create_device_shift` сохранён).
+- **Х2.** Изменённые существующие тесты (решение владельца, утверждение заменено, не ослаблено):
+  `device_shifts.rs::only_a_station_reads_and_creates_shifts` (ТСД читает список — пустой без линии, смену не создаёт),
+  `device_shifts.rs::an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift` (ТСД без линии — `shift_line`);
+  сверх плана — `sscc_blocks.rs::only_a_station_asks_whatever_the_body_says` и
+  `sscc_blocks.rs::a_pallet_block_is_for_a_current_station_and_a_known_pallet_counter`: ТСД убран из перечня отказов
+  (офисный ПК и подмена вида в транзакции проверяются по-прежнему), добавлено, что ТСД проходит проверку вида и
+  упирается в тело (не `forbidden`).
+- **Х3.** Тест миграции из плана вставлял `box_sscc = 's'`, что нарушает `CHECK (length(box_sscc) = 18)`: в тесте
+  подставлен 18-значный SSCC. Тест ошибки БД (`only_a_handheld_sends_pallet_events_…`) в плане не создавал короб, и
+  `added` получал `box_not_found` (200) вместо 500: добавлен `closed_boxes` до `DROP TABLE`. В `migration_handheld_host.rs`
+  «0035-0037» исправлено на «0035-0036».
+- **Х3.** Сверх плана добавлены тесты изоляции и мутаций: `one_device_never_touches_another_devices_pallet_or_receipts`
+  (чужая паллета — `pallet_unknown`, открытие паллеты с чужим id — `invalid_record data.palletId`, квитанции и
+  идемпотентность по паре `(device, id)`) и `a_box_block_does_not_close_a_pallet` (блок расширения 0 с серийником внутри
+  диапазона не закрывает паллету: `sscc_not_issued`).
+- **Х3.** В базе уже есть миграция `0045_host_address.sql` (поток П4): версии 35–36 свободны, пробел 37–44 sqlx не мешает.
+- **Х4.** Окно реестра закрыто с обоих концов (`since <= changed_at <= until`, как в плане), поэтому тесты плана с замороженными часами
+  теряли различие «до/после»: перед первым обходом в тестах добавлен `clock.advance(5 с)` (и перед обходом после добавления короба
+  на паллету, иначе мутант «нет `warehouse_pallet_boxes` при закрытии» выживал). Утверждения не ослаблены.
+- **Х4.** Изменён существующий `no_secrets_in_logs.rs`: число файлов `facts/` 19 → 20 (новый `facts/registry_touch.rs`, он не логирует).
+- **Х4.** Сверх плана: `tests/box_registry_sites.rs` (по тесту на каждый вызов `registry_touch`: закрытие короба, закрытие и
+  расформирование производственной паллеты, дезагрегация короба и паллеты офисом, снятие короба со складской паллеты) и тест
+  `a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time` (окно обхода, порядок по времени изменения, курсор без `until`).
+  Мутанты (20, скрипт перебора) все убиты: границы окна, курсор `>=`/только время, сортировка, полная выгрузка без `remove`, `restoreEpoch`,
+  `limit+1`, каждый вызов `registry_touch` и мёртвые `box_by_id`/`box_by_sscc`.
+- **Х4.** `GET /v1/device/box-registry` не включён в `held_by_a_restore`: это чтение, после восстановления меняется `restoreEpoch`
+  (ТСД обходит заново), а повторно присланные станцией факты получают новое `changed_at` и попадают в следующее окно.
+- **Х4.** `cargo clippy -D warnings` на хосте не доходит до цели: падает на `markiro-proto` (старые замечания `map_or`/`large_enum_variant`
+  нового тулчейна 1.93, не из этой задачи); замечаний в тронутых файлах хоста нет.
+- **Х5.** `scrollLabel` таблицы складских паллет в плане совпадал с именем секции («Складские паллеты»): `findByRole("region")` находил два региона. Подпись таблицы — «Список складских паллет». Тест веб-части открывает `/codes/pallets` (в плане `chooseTab`) и ждёт таблицу внутри секции.
+- **Х5.** `orgPrintSchema` в `src/host/protocol.ts` не добавлялся и не нужен: приложение читает `org/print` на Kotlin, офису этот маршрут не нужен; `officeWarehousePalletsSchema` уже был (П2), `HostApi.listWarehousePallets` берёт её. Существующие тесты не менялись; `cargo clippy -D warnings` по-прежнему красный только на `markiro-proto` (до хоста не доходит).
+- **Х6.** `ClaimRequest.recover_device_id` и литерал `src-tauri/src/device.rs` (`recover_device_id: None`) уже были с П1: правок в `proto` и оболочке не потребовалось. Миграция `0038` встала как есть (в базе есть и `0045_host_address.sql`, пробел 38–44 sqlx не мешает).
+- **Х6.** Тест плана `a_code_works_only_for_its_own_device…` выбирал код `ORDER BY created_at DESC LIMIT 1`: часы в тесте заморожены, `created_at` кода `pair_handheld` совпадает, и строка выходила другая. Заменено на `WHERE device_id IS NOT NULL`. Сверх плана: тест «полный пул мест + истёкший код» (перепривязка не занимает места при `stations = 1`, истёкший код ничего не меняет и не пишет `device.rekey`), тест `recoverDeviceId` не UUID (`validation_failed`, старый ключ жив), проверка внешнего ключа `pairing_codes.device_id` в тесте миграции; веб: диалог остаётся открытым при устройстве «позже кода» и ошибка хоста.
+- **Х6.** Мутанты (19, скрипт перебора, критерий — код возврата cargo): все убиты, кроме эквивалентного: удаление раннего `require_admin()` в `create_device_code` (тот же отказ даёт `require_admin_in` в транзакции). Веб-мутанты: `joined` для перепривязки, кнопка для офисного ПК, повтор запроса для того же устройства убиты; `replaces: shown` при заданном устройстве эквивалентен (мутация на устройство не смотрит на `replaces`).
+- **Х6.** Открытое: «Новый код» в диалоге перепривязки не гасит прежний живой код того же устройства (хост для кода устройства `replaces` не принимает, как в плане); старый код живёт до истечения (10 минут) и привязан к тому же устройству и администратору.
+- **Х8.** Сценарий ТСД прошёл с первого запуска (реализация Х2–Х6 уже была): упавшего шага «до» нет, как для любого теста поверх готового кода. Пересечение с кодом: в `support/handheld.rs` импорты расширены (`empty`, `pair_handheld`, `pallet_shift_body`, `pallet_template`, `plan_shift`), `open_handheld_pallet_floor` добавлен как в плане.
+- **Х8.** Апгрейд баз `0035`–`0038` уже покрыт `migration_handheld_host.rs` (Х3, Х4, Х6). Сверх плана в `migration_beta3_upgrade.rs` добавлен тест `a_database_before_the_handheld_takes_0035_to_0038_and_0045_and_keeps_every_row`: живая база до `0034` (линия, устройство, смена, блок, открытый и закрытый короб, код сопряжения) принимает `0035`–`0038` и `0045`, строки целы, `changed_at` закрытого короба заполнен, у открытого нет, у кода нет устройства, схема и индексы равны свежей базе, FK и `integrity_check` чисты. Комментарий в шапке файла говорит про `0035`–`0038` и `0045` (в плане `0035`–`0039`: `0039` занята другим потоком, адрес хоста — `0045`).
+- **Х8.** Раздел «Handhelds on the host» в `apps/standalone/AGENTS.md` добавлен подразделом `###` внутри «Protocol»; абзац о перепривязке вынесен в конец «Local pairing trust». В `ROADMAP.md` строки «ТСД» в плановом виде не было, три плана вписаны в пункт 10 раздела «После MVP».
+- **Х8.** `pnpm test:production-bundle:contract` и Vitest пакета в рамках этого поручения не гонялись (поручение ограничено хостом и документами).
+- **Ревью, реестр коробов.** Ревьюер нашёл гонку: `until` брался как «сейчас» до чтения снимка, а писатели ставят `changed_at` (= `received_at`) до коммита, поэтому пакет, закоммитившийся позже со штампом T0 < `until`, никогда не доставлялся следующим обходом (`since = until`). Исправлено: окно закрывается на `WINDOW_MARGIN` (5 с) ниже «сейчас» (`host/src/routes/box_registry.rs`); дельта идемпотентна для ТСД, повтор безвреден. В тестах реестра добавлено `clock.advance(10 с)` там, где раньше хватало 0–5 с (окно закрывается на запас ниже «сейчас»); новый тест `a_change_stamped_just_before_the_window_closed_is_delivered_by_the_next_walk`.
+- **Ревью, события паллет.** Запись с `id` не-UUID превращалась в `None` для квитанции, но применялась с сырым `record.id` (попадал в `warehouse_pallet_boxes.record_id`), а квитанция не сохранялась. Исправлено в `host/src/pallet_events.rs::receive`: такая запись отклоняется до применения квитанцией `rejected`/`invalid_record` (без `details`, как у нечитаемой записи; существующий тест этого вида не менялся), ничего не пишется. Тест `a_record_whose_id_is_not_a_uuid_is_rejected_before_it_is_applied`.
+- **Ревью, разобранный короб на паллете.** Короб, разобранный производством (`boxes.disassembled_at`, `facts/exception.rs`/`disaggregation.rs`), оставлял живую строку `warehouse_pallet_boxes` (`removed_at IS NULL`): закрытие паллеты считало её (`pallet_count_mismatch`, который ТСД не мог снять), список паллет в офисе тоже. Исправлено: оба подсчёта (`pallet_events::closed`, `routes/office_warehouse_pallets.rs`) соединяются с `boxes` и пропускают строки с `disassembled_at`; закрытие с оставшимся числом принимается. Тесты `a_box_taken_apart_after_it_was_scanned_is_not_counted_at_the_close` и `a_box_taken_apart_is_not_counted_on_the_pallet`.

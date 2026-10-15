@@ -1,0 +1,13 @@
+{
+  "addresses": [
+    {
+      "address": "192.168.1.10",
+      "mode": "dhcp",
+      "mac": "AA-BB-CC-DD-EE-FF",
+      "alias": "Беспроводная сеть"
+    },
+    { "address": "10.0.0.5", "mode": "static", "mac": null, "alias": null }
+  ],
+  "port": 45710,
+  "confirmedAt": null
+}

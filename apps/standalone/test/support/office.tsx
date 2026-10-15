@@ -44,6 +44,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("officeChangePassword"),
     ),
     getOrg: vi.fn<HostApi["getOrg"]>(() => unexpected("getOrg")),
+    getHostNetwork: vi.fn<HostApi["getHostNetwork"]>(() => unexpected("getHostNetwork")),
+    confirmHostNetwork: vi.fn<HostApi["confirmHostNetwork"]>(() =>
+      unexpected("confirmHostNetwork"),
+    ),
     updateOrg: vi.fn<HostApi["updateOrg"]>(() => unexpected("updateOrg")),
     getOrgLogo: vi.fn<HostApi["getOrgLogo"]>(async () => ({ logo: null })),
     putOrgLogo: vi.fn<HostApi["putOrgLogo"]>(() => unexpected("putOrgLogo")),
@@ -72,6 +76,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateDevice: vi.fn<HostApi["updateDevice"]>(() => unexpected("updateDevice")),
     revokeDevice: vi.fn<HostApi["revokeDevice"]>(() => unexpected("revokeDevice")),
     createPairingCode: vi.fn<HostApi["createPairingCode"]>(() => unexpected("createPairingCode")),
+    createDevicePairingCode: vi.fn<HostApi["createDevicePairingCode"]>(() =>
+      unexpected("createDevicePairingCode"),
+    ),
     listCounterparties: vi.fn<HostApi["listCounterparties"]>(() =>
       unexpected("listCounterparties"),
     ),
@@ -251,6 +258,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getBoxCard: vi.fn<HostApi["getBoxCard"]>(() => unexpected("getBoxCard")),
     getPalletCard: vi.fn<HostApi["getPalletCard"]>(() => unexpected("getPalletCard")),
     listPallets: vi.fn<HostApi["listPallets"]>(() => unexpected("listPallets")),
+    listWarehousePallets: vi.fn<HostApi["listWarehousePallets"]>(() =>
+      unexpected("listWarehousePallets"),
+    ),
     // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
     getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
     getUsageStats: vi.fn<HostApi["getUsageStats"]>(() => unexpected("getUsageStats")),

@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn an_app_older_than_the_host_accepts_is_rejected() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 6})),
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 9, "minProtocol": 7})),
             Err(ProbeError::AppTooOld)
         );
     }

@@ -9,7 +9,7 @@ use markiro_proto::{exception_reasons, receipt_codes, PalletExceptionFact, Palle
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
-use super::{pallets, rules, Applied, Context, Failure, Reject};
+use super::{pallets, registry_touch, rules, Applied, Context, Failure, Reject};
 use crate::error::ApiError;
 use crate::validate;
 
@@ -62,6 +62,7 @@ pub async fn apply(
             .execute(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
+        registry_touch::pallet_boxes(&mut *conn, &exception.pallet_id, context.received_at).await?;
     }
     sqlx::query(
         "INSERT INTO pallet_exceptions (id, record_id, kind, pallet_id, reason_code, \
