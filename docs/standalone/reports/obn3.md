@@ -4,22 +4,22 @@
 
 ## Что сделано
 
-| Задача | Коммит | Суть |
-| --- | --- | --- |
-| 1 Провод | 28e590867 | `markiro_proto::update::distribution`, коды `package_verifying`/`update_busy`, фикстуры, Zod `src/host/distribution.ts` |
-| 2 Хранилище | 88e27de34 | `HostPaths::updates_dir`, `UpdateStore`: проверка, уборка, продвижение staged→current→previous |
-| 3 Загрузка | 8e5525b4a, edda27682 | `POST /v1/office/update-package/manifest`, `PUT .../{uploadId}/installer`, аудит `update.package.stage` |
-| 4 Старт | 843c2ce1c | `worker.rs`: продвижение при старте и ежечасно, `HOST_VERSION`, `update.package.promote` |
-| 5 Чтение | ab809c039 | `GET /v1/device/update` (вне `protocol_guard`), `GET /v1/office/update-status` |
-| 6 Скачивание | 3ab399baf | `GET /v1/device/update/installer`: Range/If-Range/ETag, ограничители, `update.download` |
-| 7 Гигиена | ba867b900 | пакет не в копиях и не трогается restore, журнал без секретов |
-| 8 Оболочка: скачивание | b59f2733b | `TransferClient::download`, `update_fetch`, `update_check_manifest` |
-| 9 Оболочка: загрузка | 03b7952b6 | `TransferClient::upload`, `update_stage`, `found_path` для скачанного, `Refusal::HostDiffers`, уборка в `take_outcome` |
-| 10 Статус связи | 894ea10ad | версии хоста из `hello`, `app_too_old`/`host_too_old` |
-| 11 Вебвью: правило | 2b53ae46a | правило «доступно обновление», `UpdatesApi`, `useHostUpdateOffer`, `UpdateFromHostDialog` |
-| 12 Раздел «Обновление» | 990f3f493 | «С хоста», «Загрузить пакет на хост», «Устройства и версии», вкладчик поддержки |
-| 13 Полоса/хаб/экран | 037b1de98 | `UpdateBanner`, строка станции вне смены, панель входа оператора, «Версии не совпадают» для ПК офиса |
-| 14 Окно N−1 | 4e945fc97 | `releases.json/.mjs`, проверка в `prepare.mjs`, AGENTS.md, памятка, §23 спецификации |
+| Задача                 | Коммит               | Суть                                                                                                                    |
+| ---------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1 Провод               | 28e590867            | `markiro_proto::update::distribution`, коды `package_verifying`/`update_busy`, фикстуры, Zod `src/host/distribution.ts` |
+| 2 Хранилище            | 88e27de34            | `HostPaths::updates_dir`, `UpdateStore`: проверка, уборка, продвижение staged→current→previous                          |
+| 3 Загрузка             | 8e5525b4a, edda27682 | `POST /v1/office/update-package/manifest`, `PUT .../{uploadId}/installer`, аудит `update.package.stage`                 |
+| 4 Старт                | 843c2ce1c            | `worker.rs`: продвижение при старте и ежечасно, `HOST_VERSION`, `update.package.promote`                                |
+| 5 Чтение               | ab809c039            | `GET /v1/device/update` (вне `protocol_guard`), `GET /v1/office/update-status`                                          |
+| 6 Скачивание           | 3ab399baf            | `GET /v1/device/update/installer`: Range/If-Range/ETag, ограничители, `update.download`                                 |
+| 7 Гигиена              | ba867b900            | пакет не в копиях и не трогается restore, журнал без секретов                                                           |
+| 8 Оболочка: скачивание | b59f2733b            | `TransferClient::download`, `update_fetch`, `update_check_manifest`                                                     |
+| 9 Оболочка: загрузка   | 03b7952b6            | `TransferClient::upload`, `update_stage`, `found_path` для скачанного, `Refusal::HostDiffers`, уборка в `take_outcome`  |
+| 10 Статус связи        | 894ea10ad            | версии хоста из `hello`, `app_too_old`/`host_too_old`                                                                   |
+| 11 Вебвью: правило     | 2b53ae46a            | правило «доступно обновление», `UpdatesApi`, `useHostUpdateOffer`, `UpdateFromHostDialog`                               |
+| 12 Раздел «Обновление» | 990f3f493            | «С хоста», «Загрузить пакет на хост», «Устройства и версии», вкладчик поддержки                                         |
+| 13 Полоса/хаб/экран    | 037b1de98            | `UpdateBanner`, строка станции вне смены, панель входа оператора, «Версии не совпадают» для ПК офиса                    |
+| 14 Окно N−1            | 4e945fc97            | `releases.json/.mjs`, проверка в `prepare.mjs`, AGENTS.md, памятка, §23 спецификации                                    |
 
 Две волны ревью (fresh sonnet): Rust (e2b364e7b, 30f9e4631, b88c0534e, c631b3b28) и вебвью (cc41290df, 52ed2b1f3, ece8efeb3, ace6e04e9, 8d0531857, 8f295957e).
 Миграций хоста и оболочки ОБН-3 не добавляет. Все пять новых маршрутов в `NEVER` в `host/src/license/gate.rs` (мягкое применение: лицензия их не закрывает). Ключевого материала не создавалось и не коммитилось; производственные наборы ключей пусты, тесты подписываются тестовым ключом из фикстур ЛЦ-1.
