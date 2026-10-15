@@ -52,6 +52,9 @@ import {
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { countUnsentRecords } from "../local/outbox.js";
+import type { UpdatesApi } from "../update/updates-api.js";
+import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
+import { useHostUpdateOffer } from "../update/use-host-offer.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
 import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
@@ -171,9 +174,21 @@ export interface AppProps {
    * screen's own field, so the keyboard is not a source here.
    */
   pairingScanSource?: ScanSource;
+  /** The shell's update commands (plan ОБН-3); tests give their own. */
+  updates?: UpdatesApi;
 }
 
-export function App({
+/** The app, with the shell's update commands in reach of every screen below it. */
+export function App(props: AppProps) {
+  const updates = props.updates ?? TAURI_UPDATES;
+  return (
+    <UpdatesProvider value={updates}>
+      <AppScreens {...props} updates={updates} />
+    </UpdatesProvider>
+  );
+}
+
+function AppScreens({
   probe,
   device,
   host,
@@ -188,6 +203,7 @@ export function App({
   lockdown,
   kioskPolicy,
   pairingScanSource,
+  updates = TAURI_UPDATES,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -295,6 +311,16 @@ export function App({
   const owedHere = owed !== null && owed === view.kind;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
+  // The update the host offers this PC (plan ОБН-3): the office's banner, the
+  // station's line off the work screen and the version screen read it.
+  const updateOffer = useHostUpdateOffer({
+    link: state.link,
+    paired: pairedStatus !== null,
+    host: hostApi,
+    updates,
+  });
+  // Task 13 hands the offer down; until then nothing reads it.
+  void updateOffer;
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;

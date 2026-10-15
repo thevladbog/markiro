@@ -1374,3 +1374,18 @@ describe("the station's own record (plan ЛЦ-3)", () => {
     ).resolves.not.toHaveProperty("license");
   });
 });
+
+describe("update distribution (plan ОБН-3)", () => {
+  it("reads the device's update offer and the office's update status", async () => {
+    const offer = recording(fixture("device-update-offer.json"));
+    expect((await offer.api.getDeviceUpdate()).package.state).toBe("ok");
+    expect(offer.sent).toEqual([
+      { method: "GET", path: "/v1/device/update", body: undefined, officeToken: undefined },
+    ]);
+    const status = recording(fixture("office-update-status.json"));
+    expect((await status.api.getUpdateStatus(TOKEN)).devices).toHaveLength(5);
+    expect(status.sent).toEqual([
+      { method: "GET", path: "/v1/office/update-status", body: undefined, officeToken: TOKEN },
+    ]);
+  });
+});
