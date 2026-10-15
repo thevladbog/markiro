@@ -53,6 +53,7 @@ function snapshot(tenantId: string): EntitlementSnapshotV1 {
             inventory: true,
             commerceMl: false,
             handheld: false,
+            customLogo: null,
           },
         },
       },

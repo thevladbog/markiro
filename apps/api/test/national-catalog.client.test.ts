@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   NATIONAL_CATALOG_RESPONSE_BYTE_LIMITS,
@@ -98,6 +101,15 @@ const productPayload = {
     },
   ],
 };
+
+// The INN cases the domain, the API and the standalone host answer alike.
+const innCases = z
+  .array(z.object({ input: z.string(), normalized: z.string().nullable() }).strict())
+  .parse(
+    JSON.parse(
+      readFileSync(join(__dirname, "../../../packages/domain/fixtures/inn-cases.json"), "utf8"),
+    ),
+  );
 
 describe("NationalCatalogClient", () => {
   it("does not interpret an oversized period as an empty catalogue", async () => {
@@ -592,6 +604,37 @@ describe("NationalCatalogClient", () => {
       "National Catalog ownerInn must be a valid INN",
     );
     expect(calls).toHaveLength(1);
+  });
+
+  it("takes an owner INN exactly when the shared domain fixture calls it a bare valid INN", async () => {
+    const calls: string[] = [];
+    const client = new NationalCatalogClient(
+      dependencies(async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify({ apiversion: 3, result: {} }), { status: 200 });
+      }),
+    );
+    let accepted = 0;
+    for (const { input, normalized } of innCases) {
+      const request = client.listEtags(auth, { ownerInn: input });
+      if (normalized === input) {
+        accepted += 1;
+        await expect(request).resolves.toBeDefined();
+      } else {
+        await expect(request).rejects.toThrow("National Catalog ownerInn must be a valid INN");
+      }
+    }
+    expect(accepted).toBeGreaterThan(3);
+    expect(calls).toHaveLength(accepted);
+  });
+
+  it("checks an owner INN with the domain's isValidInn, not a copy of its own", () => {
+    const source = readFileSync(
+      join(__dirname, "../src/modules/national-catalog/national-catalog.client.ts"),
+      "utf8",
+    );
+    expect(source).toMatch(/import \{[^}]*\bisValidInn\b[^}]*\} from "@markiro\/domain";/);
+    expect(source).not.toMatch(/function isValidInn\(/);
   });
 
   it("rejects oversized, inconsistent, and malformed etagslist pages", async () => {

@@ -54,6 +54,7 @@ describe("P1 commercial projection", () => {
           inventoryEnabled: null,
           commerceMlEnabled: null,
           handheldEnabled: null,
+          customLogoEnabled: null,
           maxLines: 1,
         },
       }),
@@ -64,6 +65,8 @@ describe("P1 commercial projection", () => {
     (version) => {
       for (const value of [
         { plan: { inventoryEnabled: false } },
+        { plan: { customLogoEnabled: false } },
+        { addon: { effects: [{ key: "customLogo", featureEnabled: true }] } },
         { lifecyclePolicyId: "policy" },
         { addon: { effects: [{ key: "inventory", featureEnabled: true }] } },
         {

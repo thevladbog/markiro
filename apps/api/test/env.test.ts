@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { loadEnv } from "../src/env";
@@ -116,4 +117,74 @@ describe("National Catalog import rollout configuration", () => {
       ).toThrow();
     },
   );
+});
+
+describe("standalone license signing environment (plan ЛЦ-0)", () => {
+  function key() {
+    const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const jwk = publicKey.export({ format: "jwk" });
+    return {
+      pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      jwk: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y },
+    };
+  }
+  const origin = "https://api.example.invalid";
+  const licenseVars = (k: ReturnType<typeof key>) => ({
+    STANDALONE_LICENSE_ISSUER: origin,
+    STANDALONE_LICENSE_KID: "lic-1",
+    STANDALONE_LICENSE_PRIVATE_KEY_PEM: k.pem,
+    STANDALONE_LICENSE_KEYSET_JSON: JSON.stringify({
+      protocol: "standalone-license-v1",
+      origin,
+      revision: "lic-v1",
+      keys: [{ kid: "lic-1", jwk: k.jwk }],
+      retiredKids: [],
+    }),
+  });
+
+  it("boots without the license key and with a complete one", () => {
+    expect(loadEnv(requiredEnv).STANDALONE_LICENSE_KID).toBeUndefined();
+    expect(loadEnv({ ...requiredEnv, ...licenseVars(key()) }).STANDALONE_LICENSE_KID).toBe("lic-1");
+  });
+
+  it("refuses a partial license key and a license key shared with offline grants", () => {
+    expect(() => loadEnv({ ...requiredEnv, STANDALONE_LICENSE_KID: "lic-1" })).toThrow(
+      /Invalid standalone license signing configuration/u,
+    );
+    const shared = key();
+    expect(() =>
+      loadEnv({
+        ...requiredEnv,
+        ...licenseVars(shared),
+        OFFLINE_GRANT_ORIGIN: origin,
+        OFFLINE_GRANT_KID: "grant-1",
+        OFFLINE_GRANT_PRIVATE_KEY_PEM: shared.pem,
+        OFFLINE_GRANT_KEYSET_JSON: JSON.stringify({
+          protocol: "offline-grants-v1",
+          origin,
+          revision: "g-v1",
+          keys: [{ kid: "grant-1", jwk: shared.jwk }],
+          retiredKids: [],
+        }),
+      }),
+    ).toThrow(/must not reuse an offline grant key/u);
+  });
+});
+
+describe("standalone support keys environment (plan ДИАГ А1)", () => {
+  it("boots without the keys and with a SEC1 key, and refuses a broken value without echoing it", () => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const pem = privateKey.export({ type: "sec1", format: "pem" }).toString();
+    expect(loadEnv(requiredEnv).STANDALONE_SUPPORT_KEYS_JSON).toBeUndefined();
+    const value = JSON.stringify([{ kid: "sup-1", pem }]);
+    expect(loadEnv({ ...requiredEnv, STANDALONE_SUPPORT_KEYS_JSON: value })).toBeTruthy();
+    let message = "";
+    try {
+      loadEnv({ ...requiredEnv, STANDALONE_SUPPORT_KEYS_JSON: '[{"kid":"sup-1","pem":"BROKEN"}]' });
+    } catch (error) {
+      message = error instanceof Error ? error.message : "";
+    }
+    expect(message).toContain("STANDALONE_SUPPORT_KEYS_JSON");
+    expect(message).not.toContain("BROKEN");
+  });
 });

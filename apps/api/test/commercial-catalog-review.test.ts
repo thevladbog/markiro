@@ -119,6 +119,7 @@ describe.skipIf(!ready)("commercial catalog publication review", () => {
         inventoryEnabled: true,
         commerceMlEnabled: false,
         handheldEnabled: false,
+        customLogoEnabled: false,
       },
     };
     const version = await catalog.createVersion(actor, code, input, 3);
