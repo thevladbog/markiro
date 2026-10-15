@@ -117,7 +117,7 @@ object StorageModule {
 
     @Provides
     @Singleton
-    fun rosterStore(dao: OperatorDao, recovery: DeviceRecovery): RosterStore = RosterStore(dao, recovery)
+    fun rosterStore(dao: OperatorDao, recovery: DeviceRecovery, badges: OperatorBadgeDao): RosterStore = RosterStore(dao, recovery, badges)
 
     @Provides
     fun roster(store: RosterStore): OperatorRoster = store

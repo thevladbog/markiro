@@ -89,6 +89,37 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
         return parse(transport.post("/v1/device/sscc/blocks", body), SsccBlockDto.serializer())
     }
 
+    /**
+     * Tells the host the blocks this device holds, 64 to a request (`more: true` on every request but the last). The results of all
+     * the batches are returned together; the first failing batch ends the call.
+     */
+    suspend fun knownBlocks(blocks: List<KnownBlock>): Result<List<KnownBlockResultDto>> {
+        val batches = blocks.chunked(KNOWN_BLOCKS_BATCH).ifEmpty { listOf(emptyList()) }
+        val results = mutableListOf<KnownBlockResultDto>()
+        for ((index, batch) in batches.withIndex()) {
+            val body = buildJsonObject {
+                put(
+                    "blocks",
+                    JsonArray(
+                        batch.map {
+                            buildJsonObject {
+                                put("id", it.id)
+                                put("issuerPrefix", it.issuerPrefix)
+                                put("extension", it.extension)
+                                put("fromSerial", it.fromSerial)
+                                put("toSerial", it.toSerial)
+                            }
+                        },
+                    ),
+                )
+                if (index < batches.lastIndex) put("more", true)
+            }.toString()
+            val answer = parse(transport.post("/v1/device/sscc/blocks/known", body), KnownBlocksResponseDto.serializer())
+            results += answer.getOrElse { return Result.failure(it) }.results
+        }
+        return Result.success(results)
+    }
+
     /** `body` is the batch as frozen by the caller (`{"records":[…]}`): sent as it is, so a retry is byte-identical. */
     suspend fun postFacts(body: String): Result<List<FactReceiptDto>> =
         parse(transport.post("/v1/device/facts", body), FactReceiptsDto.serializer()).map { it.receipts }
@@ -111,6 +142,7 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
 
     companion object {
         const val CAPABILITY = "handheld-host-v1"
+        const val KNOWN_BLOCKS_BATCH = 64
 
         /**
          * `GET /v1/hello` through the observing client, the certificate recorded by `client`'s trust manager. The only thing a host that

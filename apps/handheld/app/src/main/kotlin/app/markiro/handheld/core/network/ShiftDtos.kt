@@ -46,6 +46,8 @@ data class BundleSsccDto(
     val fromSerial: Long,
     val toSerial: Long,
     val consumedThroughSerial: Long? = null,
+    /** The host's id of the block (a cloud block has none). */
+    val blockId: String? = null,
 )
 
 /** `POST /shifts/:id/sscc/top-up`: every live box block, not only the newest one. */

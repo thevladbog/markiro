@@ -19,8 +19,4 @@ object PairingModule {
 
     @Provides
     fun hostPairingGateway(): HostPairingGateway = RealHostPairingGateway()
-
-    /** A placeholder until task С5 provides the real first read of the host's feed: pairing succeeds with nothing to wait for. */
-    @Provides
-    fun hostBootstrap(): HostBootstrap = HostBootstrap { Result.success(Unit) }
 }

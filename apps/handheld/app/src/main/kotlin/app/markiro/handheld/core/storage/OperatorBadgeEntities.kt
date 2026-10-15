@@ -29,6 +29,9 @@ interface OperatorBadgeDao {
     @Query("DELETE FROM operator_badges WHERE badgeId = :badgeId")
     suspend fun delete(badgeId: String)
 
+    @Query("DELETE FROM operator_badges WHERE operatorId = :operatorId")
+    suspend fun deleteOf(operatorId: String)
+
     @Query("DELETE FROM operator_badges")
     suspend fun clear()
 }

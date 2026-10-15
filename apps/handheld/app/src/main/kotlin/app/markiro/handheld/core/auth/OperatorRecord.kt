@@ -9,6 +9,8 @@ data class OperatorRecord(
     val pinHash: String,
     val badgeHash: String?,
     val active: Boolean,
+    /** The host's badges (an operator may hold several); the cloud's single [badgeHash] stays as it was. */
+    val badgeHashes: List<String> = emptyList(),
 )
 
 interface OperatorRoster {

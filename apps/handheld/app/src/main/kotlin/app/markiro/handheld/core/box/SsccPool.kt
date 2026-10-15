@@ -19,6 +19,7 @@ data class ServerRange(
     val fromSerial: Long,
     val toSerial: Long,
     val consumedThroughSerial: Long?,
+    val blockId: String? = null,
 )
 
 /**
@@ -60,6 +61,7 @@ class SsccPool(private val db: HandheldDatabase) {
                     fromSerial = range.fromSerial,
                     toSerial = range.toSerial,
                     nextSerial = seeded,
+                    blockId = range.blockId,
                 ),
             )
             dao.advance(range.issuerPrefix, range.extensionDigit, range.fromSerial, seeded)

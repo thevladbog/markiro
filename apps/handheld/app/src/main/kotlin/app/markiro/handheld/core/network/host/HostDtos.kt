@@ -31,6 +31,15 @@ data class ChangesDto(val hostId: String, val rev: Long, val hasMore: Boolean, v
 @Serializable
 data class SsccBlockDto(val id: String, val issuerPrefix: String, val extension: Int, val fromSerial: Long, val toSerial: Long)
 
+/** A block this device holds, told to a host restored from a copy (`POST /v1/device/sscc/blocks/known`). */
+data class KnownBlock(val id: String, val issuerPrefix: String, val extension: Int, val fromSerial: Long, val toSerial: Long)
+
+@Serializable
+data class KnownBlockResultDto(val id: String, val outcome: String, val code: String? = null)
+
+@Serializable
+data class KnownBlocksResponseDto(val results: List<KnownBlockResultDto>)
+
 @Serializable
 data class ShiftSnapshotDto(
     val product: JsonObject,

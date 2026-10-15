@@ -25,9 +25,9 @@ class OperatorAuth(
 
     suspend fun byBadge(code: String): OperatorRecord? {
         if (code.isEmpty()) return null
-        val candidates = roster.operators().filter { it.active && it.badgeHash != null }
+        val candidates = roster.operators().filter { it.active && (it.badgeHash != null || it.badgeHashes.isNotEmpty()) }
         return withContext(hashDispatcher) {
-            candidates.firstOrNull { verifier(code, it.badgeHash!!) }
+            candidates.firstOrNull { operator -> (listOfNotNull(operator.badgeHash) + operator.badgeHashes).any { verifier(code, it) } }
         }
     }
 

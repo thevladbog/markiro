@@ -37,6 +37,12 @@ interface OperatorDao {
     @Query("DELETE FROM operators")
     suspend fun clear()
 
+    @Upsert
+    suspend fun upsert(row: OperatorEntity)
+
+    @Query("DELETE FROM operators WHERE operatorId = :id")
+    suspend fun delete(id: String)
+
     @Transaction
     suspend fun replaceAll(rows: List<OperatorEntity>) {
         clear()

@@ -26,6 +26,12 @@ class RosterRefresher @Inject constructor(
     ) : this(recovery, CloudBackend(api), roster, config, branding)
 
     suspend fun refresh(now: Long = System.currentTimeMillis()) = recovery.work {
+        if (backend.kindNow() == BackendKind.HOST) {
+            // The feed writes the operators; the refresh only asks for it and stamps the time.
+            runCatching { backend.operators() }.getOrNull() ?: return@work
+            recovery.commit { config.get()?.let { config.upsert(it.copy(rosterFetchedAt = now)) } }
+            return@work
+        }
         val items = runCatching { backend.operators().items }.getOrNull() ?: return@work
         roster.replace(items.map { it.toRecord() })
         recovery.commit { config.get()?.let { config.upsert(it.copy(rosterFetchedAt = now)) } }

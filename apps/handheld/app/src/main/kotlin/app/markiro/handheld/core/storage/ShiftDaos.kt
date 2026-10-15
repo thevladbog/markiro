@@ -181,6 +181,9 @@ interface MetaDao {
     @Query("DELETE FROM meta WHERE `key` = :key")
     suspend fun remove(key: String)
 
+    @Query("SELECT * FROM meta WHERE `key` LIKE :prefix || '%'")
+    suspend fun withPrefix(prefix: String): List<MetaEntity>
+
     @Query("DELETE FROM meta")
     suspend fun clear()
 }
