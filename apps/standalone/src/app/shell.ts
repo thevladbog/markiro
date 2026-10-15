@@ -193,6 +193,8 @@ export type ShellAction =
   | { type: "office_requested"; notice?: Exclude<OfficeLoginNotice, "session_ended"> }
   | { type: "office_opened"; session: OfficeSession }
   | { type: "office_closed" }
+  // «Выйти» of the office header: the session ends and the sign-in comes back, with no notice.
+  | { type: "office_signed_out" }
   | { type: "session_ended"; token: string }
   | { type: "device_rejected"; reason: RejectionReason; token?: string }
   | { type: "office_user_refreshed"; token: string; user: OfficeUser }
@@ -484,6 +486,11 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       };
     case "office_closed":
       return { ...state, office: CLOSED_OFFICE };
+    case "office_signed_out":
+      // Only an open session signs out; a late press on a closed office changes nothing.
+      return state.office.kind === "open"
+        ? { ...state, office: { kind: "signing_in", notice: null } }
+        : state;
     case "session_ended": {
       // A late failure from a session the user already left or replaced
       // (by leaving the office, or signing back in) must not disturb the

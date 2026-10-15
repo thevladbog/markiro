@@ -225,13 +225,13 @@ async fn the_lists_name_the_shifts_boxes_and_pallets_with_what_is_live_on_them()
                 // counted two boxes at its close.
                 "id": p1, "deviceId": station, "sscc": pallet_sscc(40),
                 "openedAt": instant(20, 0), "closedAt": instant(41, 500), "disassembledAt": null,
-                "boxes": 1, "units": 1, "boxCountReported": 2,
+                "boxes": 1, "units": 1, "boxCountReported": 2, "disassembledBoxes": 1,
                 "printVerifiedAt": instant(42, 0), "printSkippedAt": null,
             },
             {
                 "id": p2, "deviceId": station, "sscc": null,
                 "openedAt": instant(75, 0), "closedAt": null, "disassembledAt": null,
-                "boxes": 1, "units": 1, "boxCountReported": null,
+                "boxes": 1, "units": 1, "boxCountReported": null, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": null,
             },
         ])
@@ -455,7 +455,7 @@ async fn a_late_box_and_a_count_that_disagrees_can_be_told_from_the_lists() {
             {
                 "id": p1, "deviceId": station, "sscc": pallet_sscc(40),
                 "openedAt": instant(40, 0), "closedAt": instant(80, 0), "disassembledAt": null,
-                "boxes": 2, "units": 2, "boxCountReported": 1,
+                "boxes": 2, "units": 2, "boxCountReported": 1, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": instant(95, 0),
             },
             {
@@ -464,7 +464,7 @@ async fn a_late_box_and_a_count_that_disagrees_can_be_told_from_the_lists() {
                 "id": p2, "deviceId": station, "sscc": pallet_sscc(41),
                 "openedAt": instant(105, 0), "closedAt": instant(110, 0),
                 "disassembledAt": instant(120, 0),
-                "boxes": 1, "units": 1, "boxCountReported": 1,
+                "boxes": 1, "units": 1, "boxCountReported": 1, "disassembledBoxes": 0,
                 "printVerifiedAt": null, "printSkippedAt": null,
             },
         ])

@@ -34,7 +34,9 @@ pub const PALLETS_SQL: &str = "SELECT p.id, p.device_id, p.sscc, p.opened_at, p.
       AND i.removed_at IS NULL AND i.displaced_at IS NULL \
       WHERE b.pallet_id = p.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) \
       AS units, \
-     p.box_count_reported, p.print_verified_at, p.print_skipped_at \
+     p.box_count_reported, p.print_verified_at, p.print_skipped_at, \
+     (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
+      AND b.disassembled_at IS NOT NULL) AS disassembled_boxes \
      FROM pallets p WHERE p.shift_id = ? ORDER BY p.opened_at, p.id";
 
 #[derive(sqlx::FromRow)]
@@ -67,6 +69,7 @@ struct PalletRow {
     box_count_reported: Option<u32>,
     print_verified_at: Option<String>,
     print_skipped_at: Option<String>,
+    disassembled_boxes: i64,
 }
 
 /// `not_found` for a shift the host does not have (also plan КНФ's review).
@@ -151,6 +154,8 @@ pub async fn list_pallets(
                 boxes: u32::try_from(row.boxes).map_err(ApiError::internal)?,
                 units: u64::try_from(row.units).map_err(ApiError::internal)?,
                 box_count_reported: row.box_count_reported,
+                disassembled_boxes: u32::try_from(row.disassembled_boxes)
+                    .map_err(ApiError::internal)?,
                 print_verified_at: row.print_verified_at,
                 print_skipped_at: row.print_skipped_at,
             })

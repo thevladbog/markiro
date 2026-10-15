@@ -138,8 +138,8 @@ function dialog(): HTMLElement {
 }
 
 async function openProducts(fake: FakeOfficeSession): Promise<void> {
-  renderOffice(fake);
-  fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+  renderOffice(fake, { initialPath: "/products" });
+  await screen.findByRole("link", { name: "Товары" });
   await screen.findByText("Молоко 3,2% 0,9 л");
 }
 
@@ -165,8 +165,8 @@ describe("office product dialog", () => {
 
   it("lets both office roles add and change products", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
-      const view = renderOffice(session(user));
-      fireEvent.click(await screen.findByRole("link", { name: "Товары" }));
+      const view = renderOffice(session(user), { initialPath: "/products" });
+      await screen.findByRole("link", { name: "Товары" });
       expect(
         await screen.findByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }),
       ).toBeTruthy();

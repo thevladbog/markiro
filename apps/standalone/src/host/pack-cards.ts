@@ -104,6 +104,8 @@ const standing = {
   boxes: count,
   units: count,
   boxCountReported: z.number().int().positive().nullable(),
+  /** Boxes that stood on the pallet and were taken apart since; see `OfficePallet`. */
+  disassembledBoxes: count.default(0),
 };
 export const officePalletCardSchema = z.object({
   ...pack,

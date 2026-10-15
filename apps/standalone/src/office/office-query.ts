@@ -14,7 +14,7 @@ import {
 import type { HostApi } from "../host/api.js";
 import type { DisaggregationFilter } from "../host/disaggregation.js";
 import type { PalletListQuery } from "../host/pack-cards.js";
-import type { ConflictQuery } from "../host/review.js";
+import type { ConflictQuery, ScanHistoryQuery } from "../host/review.js";
 import { useOfficeSession } from "./office-session.js";
 
 /** Query keys of office data, one per host resource. */
@@ -106,6 +106,8 @@ export const officeKeys = {
   shiftExceptions: (id: string) => ["office", "shift-exceptions", id],
   /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
   shiftRejections: (id: string) => ["office", "shift-rejections", id],
+  /** Every page of one query of a shift's scan history (`GET /v1/office/shifts/{id}/scans`). */
+  shiftScans: (id: string, query: ScanHistoryQuery) => ["office", "shift-scans", id, query],
   /** A shift's saved exports (`GET /v1/office/shifts/{id}/exports`), for the drawer's history. */
   shiftExports: (id: string) => ["office", "shift-exports", id],
   /** Every list of stored files (host migration `0029`): a new export or form reads them all again. */

@@ -35,6 +35,8 @@ macro_rules! pallet_list {
              sh.production_date, sh.product_id, pr.name AS product_name, sh.line_id, \
              l.name AS line_name, \
              (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
+              AND b.disassembled_at IS NOT NULL) AS disassembled_boxes, \
+             (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
               AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) AS boxes, \
              (SELECT COUNT(*) FROM boxes b JOIN box_items i ON i.box_id = b.id \
               AND i.removed_at IS NULL AND i.displaced_at IS NULL \
@@ -86,6 +88,7 @@ struct PalletRow {
     closed_at: Option<String>,
     disassembled_at: Option<String>,
     box_count_reported: Option<u32>,
+    disassembled_boxes: i64,
     device_id: String,
     device_name: String,
     shift_id: String,
@@ -171,6 +174,8 @@ impl PalletRow {
             closed_at: self.closed_at,
             disassembled_at: self.disassembled_at,
             box_count_reported: self.box_count_reported,
+            disassembled_boxes: u32::try_from(self.disassembled_boxes)
+                .map_err(ApiError::internal)?,
         })
     }
 }

@@ -69,12 +69,13 @@ async function rowsOf(name: string): Promise<string[][]> {
 }
 
 describe("a shift's review on its card (plan КНФ)", () => {
-  it("adds «Исключения», «Отклонённые записи» and «Конфликты» after the boxes, each read when it is opened", async () => {
+  it("adds «Сканирования», «Исключения», «Отклонённые записи» and «Конфликты» after the boxes, each read when it is opened", async () => {
     const session = cardSession(ACTIVE);
     await openCard(session, ACTIVE.number);
     expect(tabs()).toEqual([
       "Итоги",
       "Короба",
+      "Сканирования",
       "Исключения",
       "Отклонённые записи",
       "Конфликты",
@@ -106,6 +107,7 @@ describe("a shift's review on its card (plan КНФ)", () => {
       "Итоги",
       "Короба",
       "Паллеты",
+      "Сканирования",
       "Исключения",
       "Отклонённые записи",
       "Конфликты",
@@ -120,7 +122,13 @@ describe("a shift's review on its card (plan КНФ)", () => {
     const validation: OfficeShift = { ...ACTIVE, mode: "validation" };
     const session = cardSession(validation);
     await openCard(session, validation.number);
-    expect(tabs()).toEqual(["Итоги", "Отклонённые записи", "Конфликты", "Выгрузки"]);
+    expect(tabs()).toEqual([
+      "Итоги",
+      "Сканирования",
+      "Отклонённые записи",
+      "Конфликты",
+      "Выгрузки",
+    ]);
     openTab("Отклонённые записи");
     await waitFor(() =>
       expect(session.api.listShiftRejections).toHaveBeenCalledWith(TOKEN, validation.id),

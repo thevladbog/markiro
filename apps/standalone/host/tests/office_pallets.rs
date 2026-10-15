@@ -252,6 +252,8 @@ async fn the_list_runs_across_shifts_open_first_then_closed_newest_first() {
         (json!(1), json!(2))
     );
     assert_eq!(row["units"], 1);
+    assert_eq!(row["disassembledBoxes"], 1);
+    assert_eq!(first["items"][0]["disassembledBoxes"], 0);
     assert_eq!(first["items"][0]["sscc"], Value::Null);
     assert_eq!(first["items"][0]["lineName"], "Линия 2");
     let stations: Vec<&str> = first["stations"]

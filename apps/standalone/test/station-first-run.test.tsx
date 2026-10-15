@@ -212,13 +212,17 @@ async function settle(): Promise<void> {
   });
 }
 
-async function signInToOffice(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+async function signIn(): Promise<void> {
   await screen.findByText("Вход в офис");
   fireEvent.change(screen.getByLabelText("Логин"), { target: { value: "admin" } });
   fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "correct horse battery" } });
   fireEvent.click(screen.getByRole("button", { name: "Войти" }));
   await screen.findByText("Вы вошли как Ирина Смирнова.");
+}
+
+async function signInToOffice(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+  await signIn();
 }
 
 describe("a station PC before its configuration", () => {
@@ -304,15 +308,34 @@ describe("a configured station", () => {
 });
 
 describe("the host's PC", () => {
-  it("never locks: not on the floor, not in the office, not on leaving it", async () => {
+  // Owner requirement (beta 3.2): the host's PC starts in the office, and the
+  // floor on this PC is one «В цех» away; it replaced «starts on the floor».
+  it("never locks: not in the office, not on the floor, not on leaving it", async () => {
     const { kiosk } = renderStation({ status: DEVICE_STATUS, role: "host" });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
+    await signIn();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "В цех" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    // The floor asks for the office again, and a floor left once stays left.
     await signInToOffice();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await settle();
     expect(kiosk.commands).toEqual([]);
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+  });
+
+  it("starts in the office again at the next launch, whatever the last session chose", async () => {
+    const first = renderStation({ status: DEVICE_STATUS, role: "host" });
+    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    cleanup();
+    expect(first.kiosk.commands).toEqual([]);
+    renderStation({ status: DEVICE_STATUS, role: "host" });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Вход оператора")).toBeNull();
+    cleanup();
   });
 
   it("never locks before its pairing either", async () => {

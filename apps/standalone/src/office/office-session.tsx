@@ -29,6 +29,12 @@ export interface OfficeSessionValue {
    */
   logout: () => void;
   /**
+   * «Выйти»: ends the session and returns to the office sign-in, whatever the
+   * PC's role, the token dropped and the host told in the background. Absent
+   * where the shell has no sign-in to return to.
+   */
+  signOut?: () => void;
+  /**
    * Where `logout` leads: the floor (the default), or the office sign-in on
    * an office PC, which has no floor (plan УСТ); the header names it so.
    */

@@ -6,6 +6,7 @@ pub mod connection;
 pub mod device;
 pub mod device_config;
 pub mod external_link;
+pub mod folder_dialog;
 pub mod host_client;
 pub mod host_probe;
 pub mod installation;
@@ -322,6 +323,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         office_files::save_office_files,
         office_files::open_office_folder,
         office_files::open_office_file,
+        office_files::get_exports_folder,
+        office_files::set_exports_folder,
+        folder_dialog::pick_folder,
         external_link::open_external_link,
         update::update_scan,
         update::update_verify,
@@ -369,9 +373,10 @@ where
         args,
     ));
     app.manage(power::SystemAwakeState::default());
-    app.manage(office_files::OfficeFilesState::from_documents(
-        app.path().document_dir().ok(),
-    ));
+    app.manage(
+        office_files::OfficeFilesState::from_documents(app.path().document_dir().ok())
+            .with_settings(dir.join("office-files.json")),
+    );
     let handle = app.clone();
     app.manage(update::UpdateState::load(update::UpdateConfig {
         installed: app.package_info().version.to_string(),

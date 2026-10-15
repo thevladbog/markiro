@@ -47,6 +47,37 @@ describe("«Паллеты» (plan КРТ)", () => {
     expect(rows()[2]?.textContent).not.toContain("Состав изменился после закрытия");
   });
 
+  it("shows the difference neutrally, saying why, when a box taken apart accounts for it, and as a real one when none does", async () => {
+    const value = packSession();
+    const [first, second, third] = PALLET_PAGE.items;
+    value.api.listPallets.mockResolvedValue({
+      ...PALLET_PAGE,
+      items: [
+        first ?? (undefined as never),
+        // Two boxes at the close, one stands, one was taken apart: the owner's repacking.
+        { ...(second ?? (undefined as never)), disassembledBoxes: 1 },
+        third ?? (undefined as never),
+      ],
+    });
+    await palletsOf(value);
+    expect(rows()[1]?.textContent).toContain("Состав изменён расформированием");
+    expect(rows()[1]?.textContent).not.toContain("Состав изменился после закрытия");
+    const tag = within(rows()[1] as HTMLElement)
+      .getByText("Состав изменён расформированием")
+      .closest("[title]");
+    expect(tag?.getAttribute("title")).toContain("Это не ошибка.");
+  });
+
+  it("says a count that differs with no disassembly is a real discrepancy", async () => {
+    await palletsOf();
+    const tag = within(rows()[1] as HTMLElement)
+      .getByText("Состав изменился после закрытия")
+      .closest("[title]");
+    expect(tag?.getAttribute("title")).toBe(
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этой паллеты нет, поэтому расхождение настоящее: проверьте состав паллеты.",
+    );
+  });
+
   it("narrows the list by a product and starts again from the first page", async () => {
     const value = await palletsOf();
     chooseText("Товар", "Молоко 3,2% 0,9 л");

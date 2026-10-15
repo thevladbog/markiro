@@ -9,6 +9,7 @@ import type { ExportSettings } from "../../host/export-files.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { ExportsFolderSetting } from "./ExportsFolderSetting.js";
 import { fileSize } from "./StoredFiles.js";
 
 /** «Хранить всегда» and the terms an administrator picks from, in days. */
@@ -81,6 +82,7 @@ export function StoreSettings() {
 
   return (
     <div className="stored-files">
+      <ExportsFolderSetting />
       <p className="office-note">
         {t("office.storedFiles.settings.holds", {
           count: current.fileCount,

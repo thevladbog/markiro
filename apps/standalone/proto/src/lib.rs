@@ -3028,6 +3028,11 @@ pub struct OfficePallet {
     pub boxes: u32,
     pub units: u64,
     pub box_count_reported: Option<u32>,
+    /// How many of the boxes that stood on the pallet were taken apart since
+    /// (by a station or an applied disaggregation document): they explain a
+    /// `boxCountReported` above `boxes`.
+    #[serde(default)]
+    pub disassembled_boxes: u32,
     pub print_verified_at: Option<String>,
     pub print_skipped_at: Option<String>,
 }

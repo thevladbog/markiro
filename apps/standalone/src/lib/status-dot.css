@@ -1,0 +1,55 @@
+/*
+ * A status dot: a filled circle in the tone's colour, quiet enough for a header.
+ * The colour is never alone: the dot carries an accessible name (and its owner a
+ * tooltip or a popover that says the state in words).
+ */
+.status-dot {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--status-dot-solid);
+  background: var(--status-dot-solid);
+  color: var(--surface-page);
+}
+
+.status-dot--lg {
+  width: 16px;
+  height: 16px;
+}
+
+.status-dot--ok {
+  --status-dot-solid: var(--ok-solid);
+}
+
+.status-dot--warn {
+  --status-dot-solid: var(--warn-solid);
+}
+
+.status-dot--error {
+  --status-dot-solid: var(--err-solid);
+}
+
+.status-dot--neutral {
+  --status-dot-solid: var(--fg-3);
+}
+
+/* The dot of a pending state breathes; a person who asks for less motion gets it still. */
+.status-dot--pulse {
+  animation: status-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes status-dot-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot--pulse {
+    animation: none;
+  }
+}

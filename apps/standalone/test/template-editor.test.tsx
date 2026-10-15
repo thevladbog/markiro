@@ -113,8 +113,8 @@ async function settle(): Promise<void> {
 }
 
 async function openTemplates(fake: FakeOfficeSession): Promise<RenderResult> {
-  const view = renderOffice(fake);
-  fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+  const view = renderOffice(fake, { initialPath: "/templates" });
+  await screen.findByRole("link", { name: "Шаблоны" });
   await screen.findByRole("heading", { name: "Шаблоны этикеток" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
   return view;

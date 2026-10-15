@@ -2495,6 +2495,20 @@ home is the office sign-in, which has no «В цех», its header says «Вый
 (`OfficeSessionValue.exitTo`), and nobody signs in on its floor. It still
 syncs the reference copies like a station (see «Перенесено» of plan УСТ).
 
+The start screen by role (owner requirement, beta 3.2; `src/app/start-screen.ts`,
+`startView`): a `host` PC starts on the office sign-in at every launch (after
+the first-run wizard, which still comes first) and reaches the floor on this PC
+through «В цех» on that screen; the floor's «Офис» comes back. The choice
+(`hostHome` in `App`) lives in the page's memory only and is never stored, so the
+next launch starts in the office again; the host office's «Выйти» (not «Выйти в
+цех») returns to the sign-in. An `office` PC never shows a floor screen; a
+`station` PC, or one whose role the shell could not read, starts as the shell's
+view says (pairing and line choice, then the operator sign-in) and keeps the
+«Офис» button: the administrator's office session on a configured station is the
+documented path above (ordinary window, «Оконный режим»), so it is intentional.
+While the role is unknown a floor screen waits («loading»), so a host PC never
+flashes the operator sign-in.
+
 `device_change_address` (`DeviceState::change_address`) moves a pairing to
 the host's new address: the address is first reduced to `https://host[:port]`
 (no user name, password, path, query, fragment or white space, `host_origin`),

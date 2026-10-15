@@ -399,6 +399,8 @@ async fn a_pallet_card_lists_every_box_that_joined_it() {
         (card["boxes"].clone(), card["boxCountReported"].clone()),
         (json!(1), json!(2))
     );
+    // The missing box is explained: it stands taken apart on the pallet.
+    assert_eq!(card["disassembledBoxes"], 1);
     assert_eq!(
         card["units"], 1,
         "box 1's code 1; code 2 is the colleague's now"

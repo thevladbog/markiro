@@ -16,24 +16,6 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     roles: ["admin", "technologist"],
   },
   {
-    to: "/org",
-    labelKey: "office.nav.orgProfile",
-    sectionKey: "office.nav.sections.organization",
-    roles: ["admin", "technologist"],
-  },
-  {
-    to: "/sscc",
-    labelKey: "office.nav.sscc",
-    sectionKey: "office.nav.sections.organization",
-    roles: ["admin", "technologist"],
-  },
-  {
-    to: "/counterparties",
-    labelKey: "office.nav.counterparties",
-    sectionKey: "office.nav.sections.organization",
-    roles: ["admin", "technologist"],
-  },
-  {
     to: "/lines",
     labelKey: "office.nav.lines",
     sectionKey: "office.nav.sections.production",
@@ -88,6 +70,24 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     roles: ["admin", "technologist"],
   },
   {
+    to: "/org",
+    labelKey: "office.nav.orgProfile",
+    sectionKey: "office.nav.sections.organization",
+    roles: ["admin", "technologist"],
+  },
+  {
+    to: "/sscc",
+    labelKey: "office.nav.sscc",
+    sectionKey: "office.nav.sections.organization",
+    roles: ["admin", "technologist"],
+  },
+  {
+    to: "/counterparties",
+    labelKey: "office.nav.counterparties",
+    sectionKey: "office.nav.sections.organization",
+    roles: ["admin", "technologist"],
+  },
+  {
     to: "/users",
     labelKey: "office.nav.users",
     sectionKey: "office.nav.sections.access",
@@ -112,3 +112,18 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     roles: ["admin", "technologist"],
   },
 ];
+
+/**
+ * The sections of settings (beta 3.2): the menu lists them last, apart and
+ * quieter, under the operational ones. Routes are the same.
+ */
+export const SETTINGS_SECTION_KEYS: ReadonlySet<string> = new Set([
+  "office.nav.sections.organization",
+  "office.nav.sections.access",
+  "office.nav.sections.service",
+]);
+
+/** Whether an item belongs to the settings block at the foot of the menu. */
+export function isSettingsItem(item: OfficeNavItem): boolean {
+  return SETTINGS_SECTION_KEYS.has(item.sectionKey);
+}

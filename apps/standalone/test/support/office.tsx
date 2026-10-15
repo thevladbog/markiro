@@ -245,6 +245,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       items: [],
       total: 0,
     })),
+    listShiftScans: vi.fn<HostApi["listShiftScans"]>(async () => ({
+      items: [],
+      nextCursor: null,
+    })),
     // The station's link reads them at every revision (plan КНФ): nothing to tell by default.
     conflictStatus: vi.fn<HostApi["conflictStatus"]>(async () => ({ reviewed: [] })),
     listDisplacements: vi.fn<HostApi["listDisplacements"]>(async () => ({
@@ -283,6 +287,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
 export type FakeOfficeSession = OfficeSessionValue & {
   api: FakeHostApi;
   logout: Mock<OfficeSessionValue["logout"]>;
+  signOut: Mock<NonNullable<OfficeSessionValue["signOut"]>>;
   refreshUser: Mock<OfficeSessionValue["refreshUser"]>;
 };
 
@@ -295,6 +300,7 @@ export function fakeOfficeSession(
     api: options.api ?? fakeHostApi(),
     call: <T,>(operation: (token: string) => Promise<T>) => operation(SESSION.token),
     logout: vi.fn<OfficeSessionValue["logout"]>(),
+    signOut: vi.fn<NonNullable<OfficeSessionValue["signOut"]>>(),
     refreshUser: vi.fn<OfficeSessionValue["refreshUser"]>(async () => undefined),
   };
 }

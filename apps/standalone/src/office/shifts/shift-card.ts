@@ -50,18 +50,41 @@ export function isLateBox(
 }
 
 /**
- * Whether the boxes the station counted when it closed a pallet differ from
- * the host's own count now. A pallet taken apart is left out: its count is
- * stale by design, and the card says when it was taken apart instead.
+ * How the boxes the station counted when it closed a pallet compare with the
+ * host's own count now:
+ * - `same`: they agree, or there is nothing to compare (no reported count, a
+ *   pallet still open, a pallet taken apart: its count is stale by design and
+ *   the card says when it was taken apart instead);
+ * - `explained`: they differ, and the difference is exactly the pallet's boxes
+ *   taken apart since the close (a station's or a disaggregation document's):
+ *   the composition changed legitimately, as the owner repacked a box;
+ * - `differs`: they differ and a disassembly does not account for it — a real
+ *   discrepancy.
  */
-export function palletCountDiffers(
-  pallet: Pick<OfficePallet, "boxCountReported" | "boxes" | "closedAt" | "disassembledAt">,
-): boolean {
-  return (
-    packState(pallet) === "closed" &&
-    pallet.boxCountReported !== null &&
-    pallet.boxCountReported !== pallet.boxes
-  );
+export type PalletCountState = "same" | "explained" | "differs";
+
+export function palletCountState(
+  pallet: Pick<
+    OfficePallet,
+    "boxCountReported" | "boxes" | "closedAt" | "disassembledAt" | "disassembledBoxes"
+  >,
+): PalletCountState {
+  if (
+    packState(pallet) !== "closed" ||
+    pallet.boxCountReported === null ||
+    pallet.boxCountReported === pallet.boxes
+  ) {
+    return "same";
+  }
+  return pallet.disassembledBoxes > 0 &&
+    pallet.boxCountReported === pallet.boxes + pallet.disassembledBoxes
+    ? "explained"
+    : "differs";
+}
+
+/** Whether the counts differ with no disassembly to account for it (a real discrepancy). */
+export function palletCountDiffers(pallet: Parameters<typeof palletCountState>[0]): boolean {
+  return palletCountState(pallet) === "differs";
 }
 
 /** The digits a filter by the SSCC's last digits keeps: anything else typed is dropped. */

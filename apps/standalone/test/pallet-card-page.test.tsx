@@ -54,9 +54,48 @@ describe("the card of a pallet (plan КРТ)", () => {
     expect(rows[1]?.textContent).not.toContain("Короб расформирован");
   });
 
-  it("says in words that the station counted other boxes at the close than stand now", async () => {
+  it("says in plain words, and neutrally, that a box taken apart is the whole difference from the station's count", async () => {
     await palletCard();
-    expect(screen.getAllByText("Состав изменился после закрытия")).toHaveLength(1);
+    // The fixture is the owner's repacking: two boxes at the close, one taken apart since.
+    expect(screen.queryByText("Состав изменился после закрытия")).toBeNull();
+    const tag = screen.getByText("Состав изменён расформированием").closest("[title]");
+    const hint =
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. После расформирования коробов числа расходятся (расформировано: 1). Это не ошибка.";
+    expect(tag?.getAttribute("title")).toBe(hint);
+    expect(tag?.getAttribute("aria-description")).toBe(hint);
+    // A neutral tag, not the warning's: no «!» glyph.
+    expect(tag?.textContent).not.toContain("!");
+  });
+
+  it.each([
+    [
+      "no box taken apart",
+      0,
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирований коробов этой паллеты нет, поэтому расхождение настоящее: проверьте состав паллеты.",
+    ],
+    [
+      "a taken-apart box that does not account for it",
+      3,
+      "Станция насчитала при закрытии коробов: 2, в базе хоста сейчас: 1. Расформирование объясняет не всё расхождение (расформировано: 3): проверьте состав паллеты.",
+    ],
+  ])("keeps the warning, saying the difference is real, with %s", async (_what, taken, hint) => {
+    const value = packSession();
+    value.api.getPalletCard.mockResolvedValue({ ...PALLET_CARD, disassembledBoxes: taken });
+    value.api.getPalletReportRows.mockResolvedValue(PALLET_ROWS);
+    renderOffice(value, { initialPath: PATH });
+    const tag = (await screen.findByText("Состав изменился после закрытия")).closest("[title]");
+    expect(screen.queryByText("Состав изменён расформированием")).toBeNull();
+    expect(tag?.getAttribute("title")).toBe(hint);
+    expect(tag?.getAttribute("aria-description")).toBe(hint);
+  });
+
+  it("says in words that the station counted other boxes at the close than stand now", async () => {
+    const value = packSession();
+    value.api.getPalletCard.mockResolvedValue({ ...PALLET_CARD, disassembledBoxes: 0 });
+    value.api.getPalletReportRows.mockResolvedValue(PALLET_ROWS);
+    renderOffice(value, { initialPath: PATH });
+    await screen.findByRole("heading", { name: /Паллета/ });
+    expect(await screen.findAllByText("Состав изменился после закрытия")).toHaveLength(1);
     const facts = Object.fromEntries(
       screen
         .getAllByRole("term")

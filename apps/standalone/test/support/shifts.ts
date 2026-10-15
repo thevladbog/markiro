@@ -304,6 +304,19 @@ export function shiftsSession(
     OLD_DUPLICATE,
   ]);
   session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+  // The shift's card reads the shift it opens: the one the list holds. A test that answers the
+  // list with other shifts (`listShifts.mockResolvedValue`) changes what the card reads too.
+  let held = shifts;
+  const answerList = session.api.listShifts.mockResolvedValue.bind(session.api.listShifts);
+  session.api.listShifts.mockResolvedValue = (next) => {
+    held = next;
+    return answerList(next);
+  };
+  session.api.getShift.mockImplementation(async (_token, id) => {
+    const found = held.find((shift) => shift.id === id);
+    if (found === undefined) throw new Error(`no shift ${id}`);
+    return found;
+  });
   session.api.getTemplateDefaults.mockResolvedValue(DEFAULTS);
   // A shift with pallets reads the A4 sheets; a test about something else finds none.
   session.api.listPalletSheets.mockResolvedValue({ sheets: [], defaultId: null });
@@ -312,11 +325,25 @@ export function shiftsSession(
 
 /** Opens «Смены» from the menu and waits for the list. */
 export async function openShifts(session: FakeOfficeSession): Promise<RenderResult> {
-  const view = renderOffice(session);
-  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  // Opened on «Смены» itself: the overview reads the shifts too, which would be one call more.
+  const view = renderOffice(session, { initialPath: "/shifts" });
   await screen.findByRole("heading", { name: "Смены" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
   return view;
+}
+
+/**
+ * Opens a planned shift's card from the list and turns it into its form: «Открыть» on the row,
+ * then «Изменить» in the card (owner decision after beta 3.2: no modal for a shift's fields).
+ * Resolves with the card's name, which the form keeps as its dialog's.
+ */
+export async function startEditing(number: string): Promise<string> {
+  fireEvent.click(screen.getByRole("button", { name: `Открыть смену ${number}` }));
+  const name = `Смена ${number}`;
+  const card = await screen.findByRole("dialog", { name });
+  fireEvent.click(await within(card).findByRole("button", { name: `Изменить смену ${number}` }));
+  await within(screen.getByRole("dialog", { name })).findByRole("button", { name: "Сохранить" });
+  return name;
 }
 
 /** The rows of the list, without the header. */

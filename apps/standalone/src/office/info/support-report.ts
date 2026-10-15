@@ -181,7 +181,10 @@ export function buildSupportReport(
   const extra = blocks.flatMap((block) => [
     "",
     safeValue(block.title),
-    ...block.lines.map(([label, value]) => `${safeValue(label)}: ${safeValue(value)}`),
+    ...block.lines.map(([label, value]) =>
+      // A line with no label is the value alone.
+      label === "" ? safeValue(value) : `${safeValue(label)}: ${safeValue(value)}`,
+    ),
     ...(block.opaque !== undefined && BLOB_PATTERN.test(block.opaque) ? [block.opaque] : []),
   ]);
   return [

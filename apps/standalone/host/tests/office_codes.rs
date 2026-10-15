@@ -613,16 +613,23 @@ async fn every_query_searches_by_an_index() {
         let driving = match name {
             "code" | "card scans" | "card exceptions" => Some("scans_code_hash"),
             "box" | "pallet" => Some("scans_ok_box"),
+            // `scans_shift_time` (migration 0033) is `scans_shift` with the instant after the shift:
+            // the planner takes it when a period narrows the shift, and either drives the query.
             "shift" => Some("scans_shift"),
             "gtin" => Some("scans_ok_gtin"),
             "period" => Some("scans_ok_scanned"),
             _ => None,
         };
         if let Some(index) = driving {
+            let accepted: Vec<String> = if index == "scans_shift" {
+                vec!["scans_shift".to_owned(), "scans_shift_time".to_owned()]
+            } else {
+                vec![index.to_owned()]
+            };
             assert!(
-                steps
+                steps.iter().any(|step| accepted
                     .iter()
-                    .any(|step| step.contains(&format!("INDEX {index} "))),
+                    .any(|index| step.contains(&format!("INDEX {index} ")))),
                 "{name} is not driven by {index}: {steps:?}"
             );
         }
