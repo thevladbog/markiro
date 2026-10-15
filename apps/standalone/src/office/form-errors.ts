@@ -7,7 +7,7 @@ import { errorMessageKey } from "../host/errors.js";
 export type WriteFailure<F extends string> =
   | { kind: "field"; field: F; message: string }
   | { kind: "stale" }
-  | { kind: "alert"; message: string };
+  | { kind: "alert"; message: string; values?: Readonly<Record<string, string | number>> };
 
 /** A failed write shown above the form rather than under a field (`WriteFailureAlert`). */
 export type AlertFailure = Exclude<WriteFailure<string>, { kind: "field" }>;
@@ -69,7 +69,46 @@ export function writeFailure<F extends string>(
  */
 export function alertFailure(error: unknown): AlertFailure {
   if (error instanceof HostError && error.code === "stale_revision") return { kind: "stale" };
+  const license = licenseRefusal(error);
+  if (license !== null) return { kind: "alert", ...license };
   return { kind: "alert", message: errorMessageKey(error) };
+}
+
+/** The features whose refusal the office says by name (license spec §4.7, ЛО23). */
+const NAMED_FEATURES: ReadonlySet<string> = new Set(["labelEditor", "pallets", "handheld"]);
+
+/**
+ * A write the site's license refuses (plan ЛЦ-3): `conflict` on `seat_limit`
+ * with its figures (a user or a line over the license) or on
+ * `feature_disabled` (a template without `labelEditor`, a shift with pallets
+ * without `pallets`). `null` for anything else, and for a seat refusal without
+ * its figures, which the code then explains.
+ */
+function licenseRefusal(error: unknown): {
+  message: string;
+  values?: Record<string, number>;
+} | null {
+  if (!(error instanceof HostError) || error.code !== "conflict") return null;
+  const { constraint, used, limit, feature } = error.details;
+  if (constraint === "seat_limit" && typeof used === "number" && typeof limit === "number") {
+    return { message: "office.about.license.refusals.seatLimit", values: { used, limit } };
+  }
+  if (constraint === "feature_disabled") {
+    return {
+      message:
+        typeof feature === "string" && NAMED_FEATURES.has(feature)
+          ? `office.about.license.refusals.feature.${feature}`
+          : "office.about.license.refusals.featureDisabled",
+    };
+  }
+  return null;
+}
+
+/** The values of an alert's text (the seats of a refusal over the license); none for the rest. */
+export function failureValues(
+  failure: AlertFailure,
+): Readonly<Record<string, string | number>> | undefined {
+  return failure.kind === "alert" ? failure.values : undefined;
 }
 
 /** The alert text for a failure that is not a field error; a stale write reads as `stale_revision`. */

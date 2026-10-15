@@ -26,6 +26,9 @@ export const DEVICE_ERROR_CODES = [
   "request_failed",
   "unsent_facts",
   "address_other_host",
+  // The site's license refused the pairing (plan ЛЦ-3): no seat left, or not this kind of device.
+  "seat_limit",
+  "feature_disabled",
 ] as const;
 export type DeviceErrorCode = (typeof DEVICE_ERROR_CODES)[number];
 

@@ -120,6 +120,13 @@ pub enum DeviceError {
     /// The address given for the paired host answers with another
     /// certificate: another host lives there.
     AddressOtherHost,
+    /// The site's license has no seat left for this device (`conflict` on
+    /// `seat_limit`, license spec §4.7): an administrator frees one in the
+    /// office or extends the license. The pairing code is not spent.
+    SeatLimit,
+    /// The site's license does not include this kind of device (`conflict`
+    /// on `feature_disabled`: a handheld without `handheld`).
+    FeatureDisabled,
 }
 
 impl DeviceError {
@@ -141,6 +148,8 @@ impl DeviceError {
             DeviceError::KeyRejected => "key_rejected",
             DeviceError::RequestFailed => "request_failed",
             DeviceError::AddressOtherHost => "address_other_host",
+            DeviceError::SeatLimit => "seat_limit",
+            DeviceError::FeatureDisabled => "feature_disabled",
         }
     }
 }
@@ -301,7 +310,9 @@ impl DeviceState {
             .await
             .map_err(DeviceError::Request)?;
         if response.status != 200 {
-            return Err(DeviceError::PairRejected);
+            return Err(
+                license_refusal(response.body.as_ref()).unwrap_or(DeviceError::PairRejected)
+            );
         }
         self.remember(
             address,
@@ -696,9 +707,28 @@ fn is_fingerprint(value: &str) -> bool {
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// The error for a refused claim: the host's reason when it is one the
-/// webview explains, a plain refusal otherwise.
+/// The license's refusal of a pairing (license spec §4.7): `conflict` with
+/// `details.constraint` `seat_limit` (no seat left in the pool of stations
+/// and handhelds) or `feature_disabled`; `None` for any other answer. The
+/// host refuses before it spends the code (plan ЛЦ-2, Д9): the code stays good.
+fn license_refusal(body: Option<&Value>) -> Option<DeviceError> {
+    let body = serde_json::from_value::<ErrorBody>(body?.clone()).ok()?;
+    if body.error.code != codes::CONFLICT {
+        return None;
+    }
+    match body.error.details.as_ref()?.get("constraint")?.as_str()? {
+        "seat_limit" => Some(DeviceError::SeatLimit),
+        "feature_disabled" => Some(DeviceError::FeatureDisabled),
+        _ => None,
+    }
+}
+
+/// The error for a refused claim: the license's refusal, the host's reason
+/// when it is one the webview explains, a plain refusal otherwise.
 fn claim_refusal(body: Option<&Value>) -> DeviceError {
+    if let Some(refusal) = license_refusal(body) {
+        return refusal;
+    }
     let code = body
         .and_then(|body| serde_json::from_value::<ErrorBody>(body.clone()).ok())
         .map(|body| body.error.code);
@@ -913,6 +943,46 @@ mod tests {
             DeviceError::PairRejected
         );
         assert_eq!(claim_refusal(None), DeviceError::PairRejected);
+    }
+
+    #[test]
+    fn license_refusals_of_a_pairing_keep_their_reason() {
+        let conflict = |constraint: &str| {
+            json!({ "error": { "code": "conflict", "message": "refused", "details": {
+                "constraint": constraint, "quota": "stations", "used": 3, "limit": 3
+            } } })
+        };
+        assert_eq!(
+            claim_refusal(Some(&conflict("seat_limit"))),
+            DeviceError::SeatLimit
+        );
+        assert_eq!(
+            claim_refusal(Some(&conflict("feature_disabled"))),
+            DeviceError::FeatureDisabled
+        );
+        assert_eq!(
+            claim_refusal(Some(&conflict("license_restricted"))),
+            DeviceError::PairRejected
+        );
+        assert_eq!(
+            license_refusal(Some(&conflict("seat_limit"))),
+            Some(DeviceError::SeatLimit)
+        );
+        // A constraint under another code is no license refusal.
+        assert_eq!(
+            license_refusal(Some(&json!({ "error": { "code": "validation_failed",
+                "message": "", "details": { "constraint": "seat_limit" } } }))),
+            None
+        );
+        assert_eq!(
+            license_refusal(Some(
+                &json!({ "error": { "code": "conflict", "message": "" } })
+            )),
+            None
+        );
+        assert_eq!(license_refusal(None), None);
+        assert_eq!(DeviceError::SeatLimit.code(), "seat_limit");
+        assert_eq!(DeviceError::FeatureDisabled.code(), "feature_disabled");
     }
 
     #[test]

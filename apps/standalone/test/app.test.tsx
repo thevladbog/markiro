@@ -1028,6 +1028,18 @@ describe("App", () => {
     expect(device.pairLocally).toHaveBeenCalledTimes(2);
   });
 
+  it("explains a local pairing the license has no seat for", async () => {
+    const device = fakeDevice(null);
+    device.pairLocally.mockRejectedValueOnce(new DeviceError("seat_limit", "no seat"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    expect(await screen.findByText("Не удалось подключиться к хосту")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Все рабочие места лицензии заняты. Освободите место в офисе («Устройства» → «Отозвать») или расширьте лицензию.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("recovers from a reinstalled host: rejects, reconnects, re-pairs and reaches the floor", async () => {
     // The local host now presents a different identity than the one pinned
     // at pairing (a reinstall).
