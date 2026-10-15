@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
+import { smokeDiagnosticOf } from "./smoke-diagnostic.mjs";
 import { landingDemoSubmissionState, productionBaseUrls, runSmoke } from "./smoke.mjs";
 import { latestHealthyVbtechRelease, validateVbtechSelector } from "./vbtech-release-state.mjs";
 import { releaseRecordKeys, validReleaseScope } from "./release-scope.mjs";
@@ -1156,8 +1157,13 @@ export async function deployRelease(options, supplied = {}) {
         expectedReleaseSha: tag,
         landingDemoSubmissionState: demoSubmissionState,
       });
-    } catch {
-      throw new Error("Public smoke failed");
+    } catch (error) {
+      // Keep the sanitized smoke cause (recorded by smoke.mjs only) in the failure.
+      const diagnostic = smokeDiagnosticOf(error);
+      throw new Error(
+        diagnostic === undefined ? "Public smoke failed" : `Public smoke failed: ${diagnostic}`,
+        { cause: error },
+      );
     }
     release.state = "healthy";
     await dependencies.writeRelease(releaseDirectory, release);

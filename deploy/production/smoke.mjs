@@ -6,6 +6,7 @@ import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
 import { validateProductionDomains, validateVbtechDomains } from "./production-domain.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
+import { recordSmokeDiagnostic } from "./smoke-diagnostic.mjs";
 
 const APPLICATION_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
@@ -767,9 +768,31 @@ async function getText(response) {
   return response.text();
 }
 
-async function publicRequest(client, url, init) {
-  const signal = AbortSignal.timeout(5_000);
+export const PUBLIC_REQUEST_TIMEOUT_MS = 5_000;
+// /openapi.json is a multi-megabyte document; headers and body share one deadline.
+export const OPENAPI_REQUEST_TIMEOUT_MS = 30_000;
+const OPENAPI_PATH = "/openapi.json";
+
+async function publicRequest(client, url, init, timeoutMs = PUBLIC_REQUEST_TIMEOUT_MS) {
+  const signal = AbortSignal.timeout(timeoutMs);
   return client.request(url, init, signal);
+}
+
+function isAbortError(error) {
+  const names = [error?.name, error?.cause?.name];
+  return names.includes("TimeoutError") || names.includes("AbortError");
+}
+
+// One retry, and only when the deadline aborted the request or the body read.
+async function requestWithAbortRetry(client, url, init, timeoutMs) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await publicRequest(client, url, init, timeoutMs);
+      return { response, body: await getText(response) };
+    } catch (error) {
+      if (attempt >= 2 || !isAbortError(error)) throw error;
+    }
+  }
 }
 
 async function waitForPublicEndpoints(
@@ -1194,9 +1217,22 @@ async function runAdminSmoke(options, client) {
               headers: { "content-type": "application/json" },
             }
           : { method: check.method };
-    const response =
-      check.path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), init);
-    const body = check.path === "/" ? rootHtml : await getText(response);
+    let response;
+    let body;
+    if (check.path === "/") {
+      response = root;
+      body = rootHtml;
+    } else if (check.path === OPENAPI_PATH) {
+      ({ response, body } = await requestWithAbortRetry(
+        client,
+        new URL(path, baseUrl),
+        init,
+        OPENAPI_REQUEST_TIMEOUT_MS,
+      ));
+    } else {
+      response = await publicRequest(client, new URL(path, baseUrl), init);
+      body = await getText(response);
+    }
     assertHeaders(response, new URL(baseUrl).protocol === "https:", `admin ${path}`);
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
@@ -1490,6 +1526,14 @@ export async function runVbtechSmoke(options, client = requestClient()) {
 }
 
 export async function runPublicSmoke(options, client = requestClient()) {
+  try {
+    await runPublicSmokeChecks(options, client);
+  } catch (error) {
+    throw recordSmokeDiagnostic(error);
+  }
+}
+
+async function runPublicSmokeChecks(options, client) {
   const landingState = landingDemoSubmissionState(options.landingDemoSubmissionState ?? "disabled");
   const smokeOptions = { ...options, landingDemoSubmissionState: landingState };
   const admin = await runAdminSmoke(smokeOptions, client);
@@ -1519,6 +1563,14 @@ export async function runPublicSmoke(options, client = requestClient()) {
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */
 export async function runSmoke(options, client = requestClient(), docker) {
+  try {
+    await runSmokeChecks(options, client, docker);
+  } catch (error) {
+    throw recordSmokeDiagnostic(error);
+  }
+}
+
+async function runSmokeChecks(options, client, docker) {
   const environment = options.environment || process.env;
   const runtimeOptions = {
     commandTimeoutMs: options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS,
