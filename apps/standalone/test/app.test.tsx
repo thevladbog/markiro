@@ -4364,10 +4364,13 @@ describe("an office PC and the host's address (plan УСТ)", () => {
         }),
     );
     renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
-    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    // A floor screen waits for the role (a host PC must not flash the operator
+    // sign-in before the office), so nothing locks and nothing shows meanwhile.
     await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(kiosk.commands).toEqual([]);
     act(() => answer("station"));
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
   });
 
