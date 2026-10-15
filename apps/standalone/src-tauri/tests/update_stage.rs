@@ -172,3 +172,33 @@ async fn a_wrong_file_stops_here_and_an_old_package_at_the_host() {
         .join("staged")
         .exists());
 }
+
+/// A manifest file over the limit is refused after at most one byte more than
+/// the limit is read: not only a big file, a file that never ends (a device).
+#[tokio::test]
+async fn an_oversized_manifest_is_refused_without_reading_it_whole() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let app_dir = tempfile::tempdir().unwrap();
+    let (station, token) = office(&host, app_dir.path()).await;
+    let link = station.watch_link().borrow().clone().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let big = files.path().join("big.update.jws");
+    std::fs::write(&big, "x".repeat(64 * 1024 + 10)).unwrap();
+    assert_eq!(
+        stage(&link, &token, &big).await.unwrap_err(),
+        StageError::ManifestRefused
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            stage(&link, &token, Path::new("/dev/zero"))
+        )
+        .await
+        .expect("the read is capped")
+        .unwrap_err(),
+        StageError::ManifestRefused
+    );
+    host.stop().await.unwrap();
+}

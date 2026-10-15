@@ -92,6 +92,24 @@ fn refusal(answer: &HostResponse) -> StageError {
     }
 }
 
+/// The manifest's text, at most one byte more than a manifest may have is
+/// ever read: a file of any size (or a device that never ends) stops here.
+async fn read_manifest_text(path: &Path) -> Result<String, StageError> {
+    use tokio::io::AsyncReadExt;
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|_| StageError::NotFound)?;
+    let mut text = String::new();
+    file.take(MAX_MANIFEST_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .await
+        .map_err(|_| StageError::NotFound)?;
+    if text.len() > MAX_MANIFEST_BYTES {
+        return Err(StageError::ManifestRefused);
+    }
+    Ok(text)
+}
+
 /// The package of `manifest_path` (its installer beside it, by the
 /// manifest's name) to the host of `link`, with `office_token`'s session.
 pub async fn stage(
@@ -99,12 +117,7 @@ pub async fn stage(
     office_token: &str,
     manifest_path: &Path,
 ) -> Result<Staged, StageError> {
-    let text = tokio::fs::read_to_string(manifest_path)
-        .await
-        .map_err(|_| StageError::NotFound)?;
-    if text.len() > MAX_MANIFEST_BYTES {
-        return Err(StageError::ManifestRefused);
-    }
+    let text = read_manifest_text(manifest_path).await?;
     let manifest =
         read_manifest(&text, &trust::update_keyset()).map_err(|_| StageError::ManifestRefused)?;
     let folder = manifest_path.parent().ok_or(StageError::InvalidRequest)?;
