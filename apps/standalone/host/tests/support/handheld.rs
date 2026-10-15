@@ -6,8 +6,9 @@ use markiro_host::facts::rules::box_membership_digest;
 use serde_json::{json, Value};
 
 use super::app::{
-    box_id, code_hash, fact, instant, issue_block, json as json_request, ok_scan, open_floor,
-    receipts, record_id, request, with_device, Admin, Floor, ShiftSetup,
+    box_id, code_hash, empty, fact, instant, issue_block, json as json_request, ok_scan,
+    open_floor, pair_handheld, pallet_shift_body, pallet_template, plan_shift, receipts, record_id,
+    request, with_device, Admin, Floor, ShiftSetup,
 };
 
 pub const PALLET_A: &str = "a1000000-0000-4000-8000-000000000001";
@@ -122,4 +123,41 @@ pub async fn pallet_block(admin: &Admin, key: &str, request_id: &str) -> Value {
 
 pub fn product_of(setup: &ShiftSetup) -> &str {
     &setup.product
+}
+
+/// A handheld on `setup`'s line (the office gives it the line), a shift with pallets planned on that
+/// line and entered by the handheld naming `handheld-host-v1`: the handheld is the shift's owner.
+pub async fn open_handheld_pallet_floor(admin: &Admin, setup: &ShiftSetup) -> Floor {
+    let key = pair_handheld(admin).await;
+    let (status, info) = admin
+        .app
+        .send(empty(with_device(request("GET", "/v1/device"), &key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    let id = info["id"].as_str().unwrap().to_owned();
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/devices/{id}"),
+            Some(json!({ "name": "ТСД 1", "lineId": setup.line })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let template = pallet_template(admin).await;
+    let shift = plan_shift(admin, pallet_shift_body(setup, &template)).await;
+    let path = format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap());
+    let (status, entered) = admin
+        .app
+        .send(json_request(
+            with_device(request("POST", &path), &key),
+            json!({ "supports": ["handheld-host-v1"] }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    Floor {
+        shift: shift["id"].as_str().unwrap().to_owned(),
+        number: shift["number"].as_str().unwrap().to_owned(),
+        station: id,
+        key,
+    }
 }
