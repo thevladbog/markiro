@@ -1,4 +1,31 @@
 {
-  "license": { "origin": null, "keys": [], "retiredKids": [] },
-  "update": { "keys": [], "retiredKids": [] }
+  "license": {
+    "origin": "https://saas-admin.markiro.app",
+    "keys": [
+      {
+        "kid": "lic-2026-10",
+        "jwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "MtZ0tNUEdp3GGPwtv0k8aZ6x0q0nL4NqjKVhnQPNW0E",
+          "y": "UT3s_jJ4Rutp7tv-nXoWKw2BN9_Vw5DfbAmRJdZUDLY"
+        }
+      }
+    ],
+    "retiredKids": []
+  },
+  "update": {
+    "keys": [
+      {
+        "kid": "upd-2026-10",
+        "jwk": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "dXQob2nZ4ybIsfeAWqK44Q0tUhdSjzAITaPdg7lp-EU",
+          "y": "F-xp6WIQK3CPUGJVoq9YX4lcjtJxztziGhLzUsbR-t8"
+        }
+      }
+    ],
+    "retiredKids": []
+  }
 }
