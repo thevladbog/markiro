@@ -15,7 +15,8 @@ pub mod worker;
 
 pub use store::{
     check_manifest, CheckedManifest, FileStamp, ManifestRefusal, Package, Promotion, Serve,
-    StartReport, UpdateStore, Upload, UploadError, CURRENT, MANIFEST_FILE, PREVIOUS, STAGED,
+    StartReport, UpdateStore, Upload, UploadError, Verification, CURRENT, MANIFEST_FILE, PREVIOUS,
+    STAGED,
 };
 
 use std::sync::Arc;
@@ -31,7 +32,14 @@ pub async fn serve(store: &Arc<UpdateStore>) -> Result<Package, PackageState> {
         Ok(Serve::Ready(package)) => Ok(package),
         Ok(Serve::Changed) => {
             let verifying = store.clone();
-            tokio::task::spawn_blocking(move || verifying.reverify_blocking());
+            let check = tokio::task::spawn_blocking(move || verifying.reverify_blocking());
+            // A check that panicked must not leave `verifying` for good.
+            let store = store.clone();
+            tokio::spawn(async move {
+                if check.await.is_err() {
+                    store.fail_verifying();
+                }
+            });
             Err(PackageState::Verifying)
         }
         Ok(Serve::Unavailable(state)) => Err(state),

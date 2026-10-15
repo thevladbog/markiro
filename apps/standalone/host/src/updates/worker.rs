@@ -98,18 +98,24 @@ pub async fn record_promotion(
     write(pool, at, promotion_row(promotion)).await
 }
 
-/// One pass: promote, verify what became current, write the row.
+/// One pass: promote, then verify again what became current or what a
+/// transient failure left `invalid`, `mismatch` or `verifying`, write the
+/// row. Only a promotion writes a row: a retry that recovers the package or
+/// fails again again is no promotion (plan ОБН-3, Д15), and a row an hour
+/// for a file an antivirus holds would bury the log.
 pub async fn tick(store: &Arc<UpdateStore>, pool: &SqlitePool, clock: &dyn Clock) {
-    let promoting = store.clone();
-    let Ok(promotion) = tokio::task::spawn_blocking(move || {
-        let promotion = promoting.promote_blocking();
-        if matches!(promotion, Promotion::Promoted { .. }) {
-            promoting.reverify_blocking();
+    let checking = store.clone();
+    let pass = tokio::task::spawn_blocking(move || {
+        let promotion = checking.promote_blocking();
+        if matches!(promotion, Promotion::Promoted { .. }) || checking.needs_recheck() {
+            checking.reverify_blocking();
         }
         promotion
     })
-    .await
-    else {
+    .await;
+    let Ok(promotion) = pass else {
+        // A panic: whatever hung in `verifying` is checked by the next pass.
+        store.fail_verifying();
         return;
     };
     if let Err(error) = record_promotion(pool, &format_timestamp(clock.now()), &promotion).await {

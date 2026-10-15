@@ -4,6 +4,7 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::SystemTime;
 
@@ -246,6 +247,16 @@ impl Upload {
 struct Inner {
     current: Current,
     upload: Option<Upload>,
+    /// The generation of the newest check whose result is in `current`.
+    applied: u64,
+}
+
+/// The result of one full check of `current\`, not yet remembered: a check
+/// that began before another one ended is dropped by
+/// [`UpdateStore::apply_verification`].
+pub struct Verification {
+    generation: u64,
+    result: Current,
 }
 
 /// What the start and each hourly pass did with `staged\` (spec §10.11.2).
@@ -296,6 +307,12 @@ pub struct UpdateStore {
     host_version: String,
     max_installer: u64,
     inner: Mutex<Inner>,
+    /// The number of the latest check begun.
+    generation: AtomicU64,
+    /// Held across a promotion and across the end of an upload — both
+    /// replace folders of `updates\` — but never across the long hashing of
+    /// a check, so the hourly pass never sees a half-replaced `staged\`.
+    swap: Mutex<()>,
 }
 
 impl UpdateStore {
@@ -310,7 +327,10 @@ impl UpdateStore {
             inner: Mutex::new(Inner {
                 current: Current::Missing,
                 upload: None,
+                applied: 0,
             }),
+            generation: AtomicU64::new(0),
+            swap: Mutex::new(()),
         }
     }
 
@@ -335,6 +355,12 @@ impl UpdateStore {
     fn lock(&self) -> MutexGuard<'_, Inner> {
         // A panic while the lock was held leaves plain data behind.
         self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_swap(&self) -> MutexGuard<'_, ()> {
+        self.swap
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
@@ -378,6 +404,7 @@ impl UpdateStore {
     /// `previous\` (the previous one goes); an older or broken `staged\`
     /// goes; a newer one waits.
     pub fn promote_blocking(&self) -> Promotion {
+        let _swap = self.lock_swap();
         let staged = self.dir.join(STAGED);
         if !staged.is_dir() {
             return Promotion::None;
@@ -428,9 +455,10 @@ impl UpdateStore {
         }
     }
 
-    /// Verify `current\` whole and remember the result.
-    pub fn reverify_blocking(&self) {
-        let next = match read_package(&self.dir.join(CURRENT), &self.keyset, self.max_installer) {
+    /// Verify `current\` whole, without remembering the result yet.
+    pub fn verify_current_blocking(&self) -> Verification {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let result = match read_package(&self.dir.join(CURRENT), &self.keyset, self.max_installer) {
             Ok((package, stamps)) => {
                 let host = self.host_version.parse::<AppVersion>().ok();
                 if host.is_some() && package.version.parse::<AppVersion>().ok() == host {
@@ -442,7 +470,43 @@ impl UpdateStore {
             Err(Fault::Missing) => Current::Missing,
             Err(Fault::Invalid) => Current::Invalid,
         };
-        self.lock().current = next;
+        Verification { generation, result }
+    }
+
+    /// Remember a check's result unless a newer check's is in already (an
+    /// older run must not undo a newer one). Whether it was remembered.
+    pub fn apply_verification(&self, verification: Verification) -> bool {
+        let mut inner = self.lock();
+        if verification.generation <= inner.applied {
+            return false;
+        }
+        inner.applied = verification.generation;
+        inner.current = verification.result;
+        true
+    }
+
+    /// Verify `current\` whole and remember the result.
+    pub fn reverify_blocking(&self) {
+        self.apply_verification(self.verify_current_blocking());
+    }
+
+    /// Whether the state of `current\` is one a new look can change: a
+    /// transient read failure (a file an antivirus holds) leaves `invalid`,
+    /// and a check that never ended leaves `verifying`.
+    pub fn needs_recheck(&self) -> bool {
+        matches!(
+            self.lock().current,
+            Current::Invalid | Current::Mismatch(_) | Current::Verifying
+        )
+    }
+
+    /// A check that began after a change failed to end (its task panicked):
+    /// `verifying` becomes `invalid`, which the hourly pass checks again.
+    pub fn fail_verifying(&self) {
+        let mut inner = self.lock();
+        if matches!(inner.current, Current::Verifying) {
+            inner.current = Current::Invalid;
+        }
     }
 
     fn current_state(&self) -> (PackageState, Option<String>) {
@@ -537,6 +601,7 @@ impl UpdateStore {
     /// The installer arrived whole and checked: it takes its name, and the
     /// upload's folder replaces `staged\`.
     pub fn finish_upload_blocking(&self, id: &str) -> Result<Upload, UploadError> {
+        let _swap = self.lock_swap();
         let upload = self.take_upload(id).ok_or(UploadError::Unknown)?;
         let installed = (|| -> io::Result<()> {
             fs::rename(

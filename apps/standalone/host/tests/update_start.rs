@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use markiro_host::clock::ManualClock;
 use markiro_host::updates::{worker, Serve, UpdateStore, CURRENT, STAGED};
+use markiro_proto::update::distribution::PackageState;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use support::app::START;
@@ -160,4 +161,41 @@ async fn the_hourly_pass_promotes_what_the_start_could_not_and_serves_it() {
 fn the_pass_runs_every_hour() {
     assert_eq!(worker::PROMOTE_EVERY, std::time::Duration::from_secs(3600));
     assert_eq!(markiro_host::HOST_VERSION, env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
+async fn the_hourly_pass_checks_a_bad_current_package_again_and_writes_no_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    write_package(&updates, CURRENT, "0.3.0");
+    let installer = updates.join(CURRENT).join(installer_name("0.3.0"));
+    // A file an antivirus held at the start reads as broken.
+    flip_byte(&installer, 10);
+    let (pool, store) = started(dir.path(), "0.3.0").await;
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Invalid)
+    ));
+    let rows = promote_rows(&pool).await;
+    assert_eq!(rows.len(), 1, "the start wrote its one failed row");
+    // The file is readable again (the same flip undoes itself).
+    flip_byte(&installer, 10);
+    let clock = ManualClock::new(time::OffsetDateTime::from_unix_timestamp(START).unwrap());
+    worker::tick(&store, &pool, &clock).await;
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+    assert_eq!(
+        promote_rows(&pool).await,
+        rows,
+        "a retry is no promotion: no row, recovered or not"
+    );
+    // Still broken on the next pass: the state is Invalid again, no new row.
+    flip_byte(&installer, 10);
+    assert!(matches!(store.serve_blocking(), Serve::Changed));
+    worker::tick(&store, &pool, &clock).await;
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Invalid)
+    ));
+    worker::tick(&store, &pool, &clock).await;
+    assert_eq!(promote_rows(&pool).await, rows);
 }

@@ -286,3 +286,88 @@ fn the_data_folder_has_an_updates_folder_from_the_first_start() {
     assert_eq!(paths.updates_dir(), dir.path().join("updates"));
     assert!(paths.updates_dir().is_dir());
 }
+
+#[test]
+fn a_bad_state_is_rechecked_and_an_older_check_never_overwrites_a_newer_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    write_package(&updates, CURRENT, "0.3.0");
+    let installer = updates.join(CURRENT).join(installer_name("0.3.0"));
+    flip_byte(&installer, 10);
+    let store = store(dir.path(), "0.3.0");
+    store.open_blocking().unwrap();
+    assert!(store.needs_recheck(), "invalid wants another look");
+    let older = store.verify_current_blocking();
+    flip_byte(&installer, 10);
+    let newer = store.verify_current_blocking();
+    assert!(store.apply_verification(newer));
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+    assert!(!store.needs_recheck());
+    assert!(
+        !store.apply_verification(older),
+        "the older run read the broken file and lost"
+    );
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+}
+
+#[test]
+fn a_check_that_never_ended_leaves_invalid_not_verifying_forever() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    write_package(&updates, CURRENT, "0.3.0");
+    let store = store(dir.path(), "0.3.0");
+    store.open_blocking().unwrap();
+    flip_byte(&updates.join(CURRENT).join(installer_name("0.3.0")), 10);
+    assert!(matches!(store.serve_blocking(), Serve::Changed));
+    assert!(store.needs_recheck(), "verifying is rechecked too");
+    store.fail_verifying();
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Invalid)
+    ));
+    // Nothing to fail once a result is in.
+    flip_byte(&updates.join(CURRENT).join(installer_name("0.3.0")), 10);
+    store.reverify_blocking();
+    store.fail_verifying();
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+}
+
+#[test]
+fn the_hourly_promotion_never_sees_a_staged_package_being_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    let store = std::sync::Arc::new(store(dir.path(), "0.3.0"));
+    store.open_blocking().unwrap();
+    let bytes = installer_bytes("0.4.0");
+    let manifest = store
+        .check_manifest(&signed_manifest("0.4.0", &bytes))
+        .unwrap();
+    // A staged package already waits, so every finish replaces a real folder.
+    write_package(&updates, STAGED, "0.4.0");
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let promoting = {
+        let (store, done) = (store.clone(), done.clone());
+        std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                match store.promote_blocking() {
+                    Promotion::Waiting { .. } | Promotion::None => {}
+                    other => seen.push(other),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            seen
+        })
+    };
+    for _ in 0..60 {
+        let upload = store.begin_upload_blocking(manifest.clone()).unwrap();
+        std::fs::write(upload.partial(), &bytes).unwrap();
+        store.finish_upload_blocking(&upload.id).unwrap();
+    }
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    let seen = promoting.join().unwrap();
+    assert!(
+        seen.is_empty(),
+        "promote saw a half-replaced staged: {seen:?}"
+    );
+}
