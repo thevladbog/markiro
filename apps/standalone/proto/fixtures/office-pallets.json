@@ -9,6 +9,7 @@
     "boxes": 1,
     "units": 2,
     "boxCountReported": 1,
+    "disassembledBoxes": 0,
     "printVerifiedAt": "2026-10-08T06:20:51.300Z",
     "printSkippedAt": null
   }

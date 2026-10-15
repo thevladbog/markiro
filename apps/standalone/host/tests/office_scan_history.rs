@@ -11,6 +11,14 @@ use support::app::{
 const BLOCK: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
 const PALLETS: &str = "5e4d3c2b-1a09-4f8e-9d7c-6b5a4f3e2d1c";
 
+/// An instant of `instant(m, s)` in milliseconds since 1970, as the list asks them.
+fn ms(at: &str) -> i128 {
+    time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)
+        .unwrap()
+        .unix_timestamp_nanos()
+        / 1_000_000
+}
+
 fn other_scan(verdict: &str, raw_kind: &str, code: Value, source: Value, at: &str) -> Value {
     json!({
         "scannedAt": at, "verdict": verdict, "duplicateSource": source, "rawKind": raw_kind,
@@ -226,7 +234,7 @@ async fn the_cursor_pages_the_scans_without_a_repeat_or_a_gap() {
         match body["nextCursor"].as_str() {
             Some(next) => {
                 assert_eq!(items.len(), 2);
-                cursor = format!("&cursor={}", next.replace('|', "%7C"));
+                cursor = format!("&cursor={next}");
             }
             None => break,
         }
@@ -264,7 +272,11 @@ async fn the_filters_narrow_by_result_station_box_time_and_serial_tail() {
     let (_, body) = scans(&admin, &floor.shift, &format!("?box={}", box_id(1))).await;
     assert_eq!(ids(&body), [instant(11, 0), instant(10, 0)]);
     // From is inclusive, to is exclusive.
-    let query = format!("?from={}&to={}", instant(11, 0), instant(41, 0));
+    let query = format!(
+        "?fromMs={}&toMs={}",
+        ms(&instant(11, 0)),
+        ms(&instant(41, 0))
+    );
     let (_, body) = scans(&admin, &floor.shift, &query).await;
     assert_eq!(ids(&body), [instant(40, 0), instant(11, 0)]);
     // The tail of a serial; a tail longer than four characters still matches
@@ -293,8 +305,11 @@ async fn an_unknown_shift_is_not_found_and_a_malformed_parameter_is_named() {
         ("?result=bad", "result"),
         ("?device=x", "device"),
         ("?box=x", "box"),
-        ("?from=yesterday", "from"),
-        ("?to=2026-10-08", "to"),
+        ("?fromMs=yesterday", "fromMs"),
+        ("?toMs=2026-10-08", "toMs"),
+        ("?fromMs=2000&toMs=1000", "toMs"),
+        ("?cursor=2026-10-08T06%3A41%3A10Z%7Cx", "cursor"),
+        ("?cursor=1000~not-a-uuid", "cursor"),
         ("?q=", "q"),
         ("?cursor=nope", "cursor"),
         ("?limit=0", "limit"),

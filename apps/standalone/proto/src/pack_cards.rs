@@ -156,6 +156,10 @@ pub struct OfficePalletCard {
     pub boxes: u32,
     pub units: u64,
     pub box_count_reported: Option<u32>,
+    /// Boxes that stood on the pallet and were taken apart since; see
+    /// `OfficePallet::disassembled_boxes`.
+    #[serde(default)]
+    pub disassembled_boxes: u32,
     pub print_verified_at: Option<String>,
     pub print_skipped_at: Option<String>,
     pub members: Vec<OfficePalletBox>,
@@ -186,6 +190,8 @@ pub struct OfficePalletRow {
     pub boxes: u32,
     pub units: u64,
     pub box_count_reported: Option<u32>,
+    #[serde(default)]
+    pub disassembled_boxes: u32,
 }
 
 /// A station the list can be narrowed to (`GET /v1/office/devices` is the

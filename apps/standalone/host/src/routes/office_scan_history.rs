@@ -3,9 +3,11 @@
 //! (`scans`) keeps them, newest first, a page at a time by a cursor — the
 //! last row's instant and id — so a page costs the same however long the
 //! shift was. Narrowed by the verdict (`result`), the station (`device`), the
-//! box (`box`), a range of the device's instants (`from` inclusive, `to`
-//! exclusive) and the last characters of the serial (`q`). The code never
-//! travels whole: its GTIN and the last four characters of its serial.
+//! box (`box`), a range of the device's instants in milliseconds since 1970
+//! (`fromMs` inclusive, `toMs` exclusive) and the last characters of the
+//! serial (`q`). The code never travels whole: its GTIN and the last four
+//! characters of its serial. Every parameter and the cursor are plain URL
+//! characters, because the shell lets only those through to the host.
 
 use axum::extract::State;
 use axum::Json;
@@ -19,6 +21,7 @@ use crate::auth::OfficeContext;
 use crate::error::{ApiError, ApiPath, ApiQuery};
 use crate::facts::rules::device_instant;
 use crate::routes::office_boxes::require_shift;
+use crate::routes::office_codes::period_end;
 use crate::server::AppState;
 use crate::validate;
 
@@ -40,13 +43,13 @@ pub const SCANS_SQL: &str = "SELECT s.id, s.scanned_at, s.received_at, s.device_
      ORDER BY s.scanned_at DESC, s.id DESC LIMIT ?10";
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ScanHistoryQuery {
     result: Option<String>,
     device: Option<String>,
     r#box: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
+    from_ms: Option<String>,
+    to_ms: Option<String>,
     q: Option<String>,
     cursor: Option<String>,
     limit: Option<String>,
@@ -70,26 +73,22 @@ struct ScanRow {
     pallet_sscc: Option<String>,
 }
 
-fn instant_of(field: &str, text: &Option<String>) -> Result<Option<String>, ApiError> {
-    match text {
-        None => Ok(None),
-        Some(text) => device_instant(text)
-            .map(|_| Some(text.clone()))
-            .ok_or_else(|| ApiError::validation(field, "an instant as YYYY-MM-DDTHH:MM:SS.sssZ")),
-    }
-}
-
-/// `scannedAt|id`: the instant of a scan and its id.
-fn cursor_of(text: &Option<String>) -> Result<(Option<String>, Option<String>), ApiError> {
+/// `<ms>~<id>`: the instant of the last scan of a page in milliseconds, and its id.
+fn decode_cursor(text: &Option<String>) -> Result<(Option<String>, Option<String>), ApiError> {
     let Some(text) = text else {
         return Ok((None, None));
     };
-    let invalid = || ApiError::validation("cursor", "a cursor of a previous answer");
-    let (at, id) = text.split_once('|').ok_or_else(invalid)?;
-    if device_instant(at).is_none() || id.is_empty() || id.len() > 64 {
-        return Err(invalid());
-    }
-    Ok((Some(at.to_owned()), Some(id.to_owned())))
+    let refused = || ApiError::validation("cursor", "a cursor this list gave");
+    let (millis, id) = text.split_once('~').ok_or_else(refused)?;
+    validate::client_uuid("cursor", id).map_err(|_| refused())?;
+    let at = period_end("cursor", millis).map_err(|_| refused())?;
+    Ok((Some(at), Some(id.to_owned())))
+}
+
+fn encode_cursor(scanned_at: &str, id: &str) -> Result<String, ApiError> {
+    let at = device_instant(scanned_at)
+        .ok_or_else(|| ApiError::internal("a scan's instant is no device instant"))?;
+    Ok(format!("{}~{id}", at.unix_timestamp_nanos() / 1_000_000))
 }
 
 pub async fn list_scans(
@@ -112,8 +111,24 @@ pub async fn list_scans(
     if let Some(found) = &query.r#box {
         validate::client_uuid("box", found)?;
     }
-    let from = instant_of("from", &query.from)?;
-    let to = instant_of("to", &query.to)?;
+    let from = query
+        .from_ms
+        .as_deref()
+        .map(|value| period_end("fromMs", value))
+        .transpose()?;
+    let to = query
+        .to_ms
+        .as_deref()
+        .map(|value| period_end("toMs", value))
+        .transpose()?;
+    if let (Some(from), Some(to)) = (&from, &to) {
+        if from >= to {
+            return Err(ApiError::validation(
+                "toMs",
+                "the period ends before it starts",
+            ));
+        }
+    }
     let tail = match &query.q {
         None => None,
         Some(text) => {
@@ -124,7 +139,7 @@ pub async fn list_scans(
             Some(text.clone())
         }
     };
-    let (cursor_at, cursor_id) = cursor_of(&query.cursor)?;
+    let (cursor_at, cursor_id) = decode_cursor(&query.cursor)?;
     let size = match &query.limit {
         None => SCAN_HISTORY_PAGE_SIZE,
         Some(text) => text
@@ -159,11 +174,9 @@ pub async fn list_scans(
     let mut rows = read?;
     let more = rows.len() > size as usize;
     rows.truncate(size as usize);
-    let next_cursor = if more {
-        rows.last()
-            .map(|row| format!("{}|{}", row.scanned_at, row.id))
-    } else {
-        None
+    let next_cursor = match rows.last() {
+        Some(row) if more => Some(encode_cursor(&row.scanned_at, &row.id)?),
+        _ => None,
     };
     let items = rows
         .into_iter()

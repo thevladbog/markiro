@@ -61,6 +61,8 @@ pub const PALLET_SQL: &str = "SELECT p.id, p.sscc, p.opened_at, p.closed_at, \
      p.disassembled_at, p.box_count_reported, p.print_verified_at, p.print_skipped_at, \
      p.device_id, d.name AS device_name, op.name AS operator_name, \
      (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
+      AND b.disassembled_at IS NOT NULL) AS disassembled_boxes, \
+     (SELECT COUNT(*) FROM boxes b WHERE b.pallet_id = p.id \
       AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) AS boxes, \
      (SELECT COUNT(*) FROM boxes b JOIN box_items i ON i.box_id = b.id \
       AND i.removed_at IS NULL AND i.displaced_at IS NULL \
@@ -194,6 +196,7 @@ struct PalletRow {
     closed_at: Option<String>,
     disassembled_at: Option<String>,
     box_count_reported: Option<u32>,
+    disassembled_boxes: i64,
     print_verified_at: Option<String>,
     print_skipped_at: Option<String>,
     device_id: String,
@@ -507,6 +510,7 @@ async fn read_pallet(
         closed_at: row.closed_at,
         disassembled_at: row.disassembled_at,
         box_count_reported: row.box_count_reported,
+        disassembled_boxes: u32::try_from(row.disassembled_boxes).map_err(ApiError::internal)?,
         print_verified_at: row.print_verified_at,
         print_skipped_at: row.print_skipped_at,
         members,

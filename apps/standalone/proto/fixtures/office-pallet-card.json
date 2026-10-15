@@ -18,6 +18,7 @@
   "boxes": 1,
   "units": 1,
   "boxCountReported": 2,
+  "disassembledBoxes": 1,
   "printVerifiedAt": "2026-10-08T06:00:43.000Z",
   "printSkippedAt": null,
   "members": [
