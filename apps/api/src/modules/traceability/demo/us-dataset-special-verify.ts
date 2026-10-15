@@ -15,9 +15,11 @@ import {
 } from "./us-dataset-special-contract.js";
 import {
   specialEqual,
-  verifySpecialBindings,
+  verifySpecialBindingsCore,
   verifySpecialOperationsAndAudits,
 } from "./us-dataset-special-evidence.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetReceivingDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export type UsDatasetSpecialStores = UsDatasetReceivingStores;
 /** Joint verification never recurses. The explicit lifecycle candidate precedes journal persistence. */
@@ -25,6 +27,20 @@ export async function verifyUsDatasetSpecial(
   ...[tx, context, rawIntent, rawReceipt, stores]: [
     ...Parameters<UsDatasetAtomicStageWork["verify"]>,
     UsDatasetSpecialStores,
+  ]
+): ReturnType<UsDatasetAtomicStageWork["verify"]> {
+  return verifyUsDatasetSpecialCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+export async function verifyUsDatasetSpecialCore(
+  ...[tx, context, rawIntent, rawReceipt, stores]: [
+    ...Parameters<UsDatasetAtomicStageWork["verify"]>,
+    UsDatasetReceivingDependencies,
   ]
 ): ReturnType<UsDatasetAtomicStageWork["verify"]> {
   const intent = parseUsDatasetIntent(rawIntent);
@@ -181,7 +197,7 @@ export async function verifyUsDatasetSpecial(
         ),
         lifecycle.finalized.record,
       );
-    await verifySpecialBindings(tx, context, original, lifecycle, revisions, stores);
+    await verifySpecialBindingsCore(tx, context, original, lifecycle, revisions, stores);
     await verifySpecialOperationsAndAudits(tx, context, original, lifecycle);
   } catch (cause) {
     if (

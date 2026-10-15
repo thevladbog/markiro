@@ -155,12 +155,50 @@ export async function authorizeUsMasterDataDetails(
   actorUserId: string,
   required: UsCapability | readonly UsCapability[],
 ): Promise<Pick<ProvisionUsTraceabilityProfileInput, "code" | "timeZone">> {
+  return authorizeUsMasterDataDetailsCore(tx, tenantId, actorUserId, required, {
+    membership: readUsMasterDataMembership,
+    profile: readUsMasterDataProfile,
+  });
+}
+
+type Membership = { role: string } | undefined;
+export type UsMasterDataRawProfile = {
+  code: unknown;
+  baselineVersion: unknown;
+  retentionYears: unknown;
+  timeZone: unknown;
+};
+
+export type UsMasterDataAuthorizationReaders = Readonly<{
+  membership(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+  ): Promise<Membership>;
+  profile(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+  ): Promise<UsMasterDataRawProfile | undefined>;
+}>;
+
+export async function readUsMasterDataMembership(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+): Promise<Membership> {
   const [membership] = await tx
     .select({ role: schema.member.role })
     .from(schema.member)
     .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, actorUserId)))
     .limit(1)
     .for("share");
+  return membership;
+}
+
+export function assertUsMasterDataCapabilities(
+  membership: Membership,
+  required: UsCapability | readonly UsCapability[],
+): void {
   const access = resolveUsAccess(membership?.role ?? "");
   const alternatives = typeof required === "string" ? [required] : required;
   if (
@@ -169,15 +207,15 @@ export async function authorizeUsMasterDataDetails(
   ) {
     throw new ForbiddenException({ code: "insufficient_permission" });
   }
+}
 
+export async function readUsMasterDataProfile(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+): Promise<UsMasterDataRawProfile | undefined> {
   // The lateral read depends on the already locked profile row. An absent or
   // blocked profile cannot acquire the later organization-profile lock.
-  const result = await tx.execute<{
-    code: unknown;
-    baselineVersion: unknown;
-    retentionYears: unknown;
-    timeZone: unknown;
-  }>(sql`
+  const result = await tx.execute<UsMasterDataRawProfile>(sql`
     WITH locked_profile AS MATERIALIZED (
       SELECT tenant_id, code, baseline_version, retention_years
       FROM traceability_profiles WHERE tenant_id = ${tenantId}
@@ -195,6 +233,12 @@ export async function authorizeUsMasterDataDetails(
     FROM locked_profile
   `);
   const [profile] = result.rows;
+  return profile;
+}
+
+export function validateUsMasterDataProfile(
+  profile: UsMasterDataRawProfile | undefined,
+): Pick<ProvisionUsTraceabilityProfileInput, "code" | "timeZone"> {
   if (!profile) throw new ForbiddenException({ code: "traceability_profile_required" });
   if (
     typeof profile.code !== "string" ||
@@ -213,4 +257,28 @@ export async function authorizeUsMasterDataDetails(
     throw new ServiceUnavailableException({ code: "traceability_profile_invalid" });
   }
   return { code: valid.data.code, timeZone: valid.data.timeZone };
+}
+
+export async function authorizeUsMasterDataDetailsCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  required: UsCapability | readonly UsCapability[],
+  readers: UsMasterDataAuthorizationReaders,
+): Promise<Pick<ProvisionUsTraceabilityProfileInput, "code" | "timeZone">> {
+  const membership = await readers.membership(tx, tenantId, actorUserId);
+  assertUsMasterDataCapabilities(membership, required);
+  const profile = await readers.profile(tx, tenantId);
+  return validateUsMasterDataProfile(profile);
+}
+
+export async function authorizeUsMasterDataCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  required: UsCapability | readonly UsCapability[],
+  readers: UsMasterDataAuthorizationReaders,
+): Promise<ProvisionUsTraceabilityProfileInput["code"]> {
+  return (await authorizeUsMasterDataDetailsCore(tx, tenantId, actorUserId, required, readers))
+    .code;
 }

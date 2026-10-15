@@ -2,7 +2,6 @@ import { schema } from "@markiro/db";
 import { US_CAPABILITY } from "@markiro/domain";
 import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { and, eq, sql } from "drizzle-orm";
-import { authorizeUsMasterData } from "../master-data/us-master-data-support.js";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type {
@@ -23,12 +22,13 @@ import {
 } from "./us-dataset-cases-contract.js";
 import { parseUsDatasetReceivingResult } from "./us-dataset-receiving-contract.js";
 import { parseUsDatasetTransformationResult } from "./us-dataset-transformation-contract.js";
-import { lockUsDatasetTransformation } from "./us-dataset-transformation-locks.js";
 import {
-  verifyUsDatasetTransformationOrigin,
+  verifyUsDatasetTransformationOriginCore,
   type UsDatasetTransformationStores,
 } from "./us-dataset-transformation-verify.js";
 import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export type UsDatasetCasesPrepared = Readonly<{
   input: UsDatasetCasesInput;
@@ -53,9 +53,27 @@ export async function prepareUsDatasetCases(
   phase: UsDatasetCasesPreparation,
   stores: UsDatasetTransformationStores,
 ): Promise<UsDatasetCasesPrepared> {
+  return prepareUsDatasetCasesCore(
+    tx,
+    context,
+    datasetId,
+    unitKey,
+    phase,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function prepareUsDatasetCasesCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  datasetId: string,
+  unitKey: string,
+  phase: UsDatasetCasesPreparation,
+  stores: UsDatasetTransformationDependencies,
+): Promise<UsDatasetCasesPrepared> {
   // Constant stage first: current actual-target/owner/profile authorization precedes raw unit input.
   await stores.journal.readStageInTransaction(tx, context, datasetId, "references", "references");
-  await authorizeUsMasterData(
+  await stores.authorize(
     tx,
     context.tenantId,
     context.actorUserId,
@@ -145,11 +163,11 @@ export async function prepareUsDatasetCases(
     );
     if (result.linked.created.some((row) => row.linkedBy !== context.actorUserId)) throw fail();
   } else if (operation) throw fail();
-  await lockUsDatasetTransformation(tx, context, {
+  await stores.locks.transformation(tx, context, {
     receiving: parseUsDatasetReceivingResult(receiving.receipt.result),
     transformation: parseUsDatasetTransformationResult(transformation.receipt.result),
   });
-  const verifiedOrigin = await verifyUsDatasetTransformationOrigin(
+  const verifiedOrigin = await verifyUsDatasetTransformationOriginCore(
     tx,
     context,
     transformation.intent,

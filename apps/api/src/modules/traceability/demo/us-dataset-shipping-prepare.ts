@@ -1,9 +1,8 @@
 import { schema } from "@markiro/db";
 import { US_CAPABILITY } from "@markiro/domain";
 import { canonicalExportDigest } from "./us-demo-canonical.js";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
-import { authorizeUsMasterData } from "../master-data/us-master-data-support.js";
 import { lockShippingOperation, type UsShippingStore } from "../shipping/us-shipping-draft.js";
 import { readCurrentShippingBalance } from "../shipping/us-shipping-balance.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
@@ -16,7 +15,7 @@ import {
   parseUsDatasetCasesResult,
   makeUsDatasetTransformationIdentity,
 } from "./us-dataset-cases-contract.js";
-import { verifyUsDatasetCasesOrigin } from "./us-dataset-cases-verify.js";
+import { verifyUsDatasetCasesOriginCore } from "./us-dataset-cases-verify.js";
 import {
   makeUsDatasetReferenceIdentity,
   parseUsDatasetReceivingResult,
@@ -35,9 +34,10 @@ import {
   usDatasetShippingOperationKey,
   type UsDatasetShippingInput,
 } from "./us-dataset-shipping-contract.js";
-import { lockUsDatasetShipping } from "./us-dataset-shipping-locks.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
 import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetShippingDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export type UsDatasetShippingStores = UsDatasetTransformationStores &
   Readonly<{ shipping: UsShippingStore }>;
@@ -60,15 +60,28 @@ export async function prepareUsDatasetShipping(
   phase: "application" | "verification",
   stores: UsDatasetShippingStores,
 ): Promise<UsDatasetShippingPrepared> {
+  return prepareUsDatasetShippingCore(
+    tx,
+    context,
+    datasetId,
+    unitKey,
+    phase,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function prepareUsDatasetShippingCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  datasetId: string,
+  unitKey: string,
+  phase: "application" | "verification",
+  stores: UsDatasetShippingDependencies,
+): Promise<UsDatasetShippingPrepared> {
   const header = await stores.journal.readHeaderInTransaction(tx, context);
   const fail = () => datasetShippingError("us_dataset_shipping_conflict", unitKey);
   if (!header || header.id !== datasetId) throw fail();
-  await authorizeUsMasterData(
-    tx,
-    context.tenantId,
-    context.actorUserId,
-    US_CAPABILITY.SHIPPING_WRITE,
-  );
+  await stores.authorize(tx, context.tenantId, context.actorUserId, US_CAPABILITY.SHIPPING_WRITE);
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${context.tenantId + ":us-processor-demo-v1"}, 0))`,
   );
@@ -135,7 +148,7 @@ export async function prepareUsDatasetShipping(
   }
   if (phase === "application" && shipping.receipt) throw fail();
   const saved = shipping.receipt ? parseUsDatasetShippingResult(shipping.receipt.result) : null;
-  await lockUsDatasetShipping(
+  await stores.locks.shipping(
     tx,
     context,
     parseUsDatasetReceivingResult(receiving.receipt.result),
@@ -145,46 +158,9 @@ export async function prepareUsDatasetShipping(
   // Retain public reference shares and ALL known document shares before final
   // case-support locks. Upstream verification will reacquire already held locks.
   const bindings = parseUsDatasetReferenceResult(references.receipt.result).bindings;
-  for (const [table, owned] of [
-    [schema.traceabilityParties, bindings.parties],
-    [schema.traceabilityLocations, bindings.locations],
-    [schema.products, bindings.products],
-  ] as const) {
-    const shares = await tx
-      .select({ id: table.id })
-      .from(table)
-      .where(
-        and(
-          eq(table.tenantId, context.tenantId),
-          inArray(
-            table.id,
-            owned.map((row) => row.id),
-          ),
-        ),
-      )
-      .orderBy(asc(table.id))
-      .for("share");
-    if (shares.length !== owned.length) throw fail();
-  }
-  const profiles = schema.productTraceabilityProfiles;
-  const profileShares = await tx
-    .select({ id: profiles.productId })
-    .from(profiles)
-    .where(
-      and(
-        eq(profiles.tenantId, context.tenantId),
-        inArray(
-          profiles.productId,
-          bindings.products.map((row) => row.id),
-        ),
-      ),
-    )
-    .orderBy(asc(profiles.productId))
-    .for("share");
-  if (profileShares.length !== bindings.products.length) throw fail();
+  await stores.locks.shippingReferences(tx, context.tenantId, unitKey, bindings);
   // Cases' upstream verifier still validates every canonical reference fact;
   // this tier only acquires those same shares early, without repeating reads.
-  const docs = schema.referenceDocuments;
   const numbers = makeUsDatasetShippingPlan(input).flatMap((row) => row.references);
   const parties = bindings.parties;
   const definitions = input.chain.documents
@@ -200,27 +176,13 @@ export async function prepareUsDatasetShipping(
     ...origin.documents.map((row) => row.record.id),
     ...(saved?.shipments.flatMap((row) => row.documents.map((doc) => doc.record.id)) ?? []),
   ];
-  const existing = await tx
-    .select({ id: docs.id, type: docs.type, number: docs.number, partyId: docs.partyId })
-    .from(docs)
-    .where(
-      and(
-        eq(docs.tenantId, context.tenantId),
-        or(
-          inArray(docs.id, ownedIds),
-          ...definitions.map((row) =>
-            and(
-              eq(docs.type, row.type),
-              eq(docs.number, row.number),
-              eq(docs.partyId, row.partyId),
-            ),
-          ),
-        ),
-      ),
-    )
-    .orderBy(asc(docs.id))
-    .for("share");
-  const verifiedOrigin = await verifyUsDatasetCasesOrigin(
+  const existing = await stores.locks.shippingDocuments(
+    tx,
+    context.tenantId,
+    ownedIds,
+    definitions,
+  );
+  const verifiedOrigin = await verifyUsDatasetCasesOriginCore(
     tx,
     context,
     cases.intent,

@@ -11,11 +11,13 @@ import {
   usDatasetCorrectedCasesRecordIds,
 } from "./us-dataset-corrected-cases-result.js";
 import {
-  authorizeUsDatasetCorrectedCases,
-  prepareUsDatasetCorrectedCases,
+  authorizeUsDatasetCorrectedCasesCore,
+  prepareUsDatasetCorrectedCasesCore,
 } from "./us-dataset-corrected-cases-prepare.js";
 import { verifyUsDatasetCasesContent } from "./us-dataset-cases-verify-content.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 /** A fresh candidate is available only after this invocation's private business writes. */
 export async function verifyUsDatasetCorrectedCases(
@@ -26,7 +28,25 @@ export async function verifyUsDatasetCorrectedCases(
   mode: "fresh" | "replay",
   stores: UsDatasetTransformationStores,
 ): Promise<void> {
-  await authorizeUsDatasetCorrectedCases(tx, context, stores);
+  return verifyUsDatasetCorrectedCasesCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    mode,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function verifyUsDatasetCorrectedCasesCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  mode: "fresh" | "replay",
+  stores: UsDatasetTransformationDependencies,
+): Promise<void> {
+  await authorizeUsDatasetCorrectedCasesCore(tx, context, stores);
   const mismatch = (cause?: unknown) =>
     datasetCorrectedCasesError("us_dataset_corrected_cases_mismatch", cause);
   const equal = (a: unknown, b: unknown) => {
@@ -36,7 +56,7 @@ export async function verifyUsDatasetCorrectedCases(
     const intent = parseUsDatasetIntent(rawIntent),
       receipt = parseUsDemoReceipt(rawReceipt),
       result = parseUsDatasetCorrectedCasesResult(receipt.result);
-    const prepared = await prepareUsDatasetCorrectedCases(
+    const prepared = await prepareUsDatasetCorrectedCasesCore(
       tx,
       context,
       intent,

@@ -8,8 +8,9 @@ import {
 } from "./us-dataset-contract.js";
 import { parseUsDemoReceipt } from "./us-demo-journal-contract.js";
 import {
-  authorizeUsDatasetCorrectedShipping,
-  prepareUsDatasetCorrectedShipping,
+  authorizeUsDatasetCorrectedShippingCore,
+  prepareUsDatasetCorrectedShippingCore,
+  freshUsDatasetCorrectedTerminalDependencies,
 } from "./us-dataset-corrected-shipping-prepare.js";
 import {
   datasetCorrectedShippingError,
@@ -19,7 +20,8 @@ import {
 import { makeUsDatasetCorrectedShippingPlan } from "./us-dataset-corrected-shipping-contract.js";
 import { usDatasetShippingOperationKey } from "./us-dataset-shipping-contract.js";
 import type { UsDatasetShippingStores } from "./us-dataset-shipping-prepare.js";
-import { verifyUsDatasetShippingContent } from "./us-dataset-shipping-verify-content.js";
+import { verifyUsDatasetShippingContentCore } from "./us-dataset-shipping-verify-content.js";
+import type { UsDatasetCorrectedTerminalDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export async function verifyUsDatasetCorrectedShipping(
   tx: UsDemoTransaction,
@@ -29,7 +31,25 @@ export async function verifyUsDatasetCorrectedShipping(
   stores: UsDatasetShippingStores,
   mode: "fresh" | "replay",
 ): Promise<void> {
-  await authorizeUsDatasetCorrectedShipping(tx, context, stores);
+  return verifyUsDatasetCorrectedShippingCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    freshUsDatasetCorrectedTerminalDependencies(stores),
+    mode,
+  );
+}
+
+export async function verifyUsDatasetCorrectedShippingCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  stores: UsDatasetCorrectedTerminalDependencies,
+  mode: "fresh" | "replay",
+): Promise<void> {
+  await authorizeUsDatasetCorrectedShippingCore(tx, context, stores);
   const fail = (cause?: unknown) =>
     datasetCorrectedShippingError("us_dataset_corrected_shipping_mismatch", cause);
   const equal = (a: unknown, b: unknown) => {
@@ -39,7 +59,7 @@ export async function verifyUsDatasetCorrectedShipping(
     const intent = parseUsDatasetIntent(rawIntent),
       receipt = parseUsDemoReceipt(rawReceipt),
       result = parseUsDatasetCorrectedShippingResult(receipt.result);
-    const prepared = await prepareUsDatasetCorrectedShipping(
+    const prepared = await prepareUsDatasetCorrectedShippingCore(
       tx,
       context,
       intent,
@@ -59,7 +79,7 @@ export async function verifyUsDatasetCorrectedShipping(
       ),
       result.outputLotAfter,
     );
-    await verifyUsDatasetShippingContent(
+    await verifyUsDatasetShippingContentCore(
       tx,
       context,
       intent,

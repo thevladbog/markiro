@@ -3,7 +3,6 @@ import { US_CAPABILITY } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import {
   listReferenceDocumentsQuerySchema,
-  platformUuidSchema,
   referenceDocumentInputSchema,
   type ReferenceDocument,
   type ReferenceDocumentList,
@@ -17,6 +16,10 @@ import {
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { referenceDocumentResponse } from "./us-reference-document-support";
+import {
+  freshUsReferenceDocumentReaders,
+  readUsReferenceDocumentCore,
+} from "./us-reference-document-read";
 
 const documents = schema.referenceDocuments;
 const writers = [
@@ -82,15 +85,13 @@ export class UsReferenceDocumentStore {
     actorUserId: string,
     id: unknown,
   ): Promise<ReferenceDocument> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const documentId = parseMasterDataInput(platformUuidSchema, id);
-    const [row] = await tx
-      .select()
-      .from(documents)
-      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
-      .limit(1);
-    if (!row) throw new NotFoundException({ code: "document_not_found" });
-    return referenceDocumentResponse(row);
+    return readUsReferenceDocumentCore(
+      tx,
+      tenantId,
+      actorUserId,
+      id,
+      freshUsReferenceDocumentReaders,
+    );
   }
 
   async createDocument(

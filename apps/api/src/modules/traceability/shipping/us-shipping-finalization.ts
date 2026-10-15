@@ -40,6 +40,42 @@ import {
 
 const unavailable = () => new ServiceUnavailableException({ code: "us_database_unavailable" });
 
+type ShippingEvent = typeof schema.traceabilityEvents.$inferSelect;
+type ShippingRoot = typeof schema.shippingEventRoots.$inferSelect;
+export type ShippingSnapshotReaders = Readonly<{
+  event(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    eventId: string,
+  ): Promise<ShippingEvent | undefined>;
+  root(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    rootId: string,
+  ): Promise<ShippingRoot | undefined>;
+}>;
+
+export const freshShippingSnapshotReaders: ShippingSnapshotReaders = {
+  async event(tx, tenantId, eventId) {
+    const events = schema.traceabilityEvents;
+    const [event] = await tx
+      .select()
+      .from(events)
+      .where(
+        and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")),
+      );
+    return event;
+  },
+  async root(tx, tenantId, rootId) {
+    const roots = schema.shippingEventRoots;
+    const [root] = await tx
+      .select()
+      .from(roots)
+      .where(and(eq(roots.tenantId, tenantId), eq(roots.id, rootId)));
+    return root;
+  },
+};
+
 function locationDescription(row: typeof schema.traceabilityLocations.$inferSelect) {
   const built = buildLocationDescriptionSnapshot(locationResponse(row));
   if (!built.ok) throw unavailable();
@@ -147,23 +183,20 @@ export async function readShippingSnapshotRecord(
   tenantId: string,
   eventId: string,
 ): Promise<ShippingHistoricalRecord> {
-  const events = schema.traceabilityEvents;
-  const [event] = await tx
-    .select()
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")));
+  return readShippingSnapshotRecordCore(tx, tenantId, eventId, freshShippingSnapshotReaders);
+}
+
+export async function readShippingSnapshotRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  readers: ShippingSnapshotReaders,
+): Promise<ShippingHistoricalRecord> {
+  const event = await readers.event(tx, tenantId, eventId);
   if (!event) throw new NotFoundException({ code: "shipping_not_found" });
   if (event.status !== "finalized" && event.status !== "amended" && event.status !== "void")
     throw new ConflictException({ code: "shipping_not_draft" });
-  const [root] = await tx
-    .select()
-    .from(schema.shippingEventRoots)
-    .where(
-      and(
-        eq(schema.shippingEventRoots.tenantId, tenantId),
-        eq(schema.shippingEventRoots.id, event.rootEventId),
-      ),
-    );
+  const root = await readers.root(tx, tenantId, event.rootEventId);
   const snapshot = shippingFinalizationSnapshotV1Schema.safeParse(event.finalizationSnapshot);
   if (!root || !snapshot.success) throw unavailable();
   const data = snapshot.data;

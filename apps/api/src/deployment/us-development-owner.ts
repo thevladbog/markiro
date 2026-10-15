@@ -36,6 +36,103 @@ function conflict(): never {
   throw new Error("us_development_owner_conflict");
 }
 
+type OwnerFacts = {
+  codec: "us-development-owner-provenance-v1";
+  organization: { id: string; name: string; metadata: string | null };
+  user: { id: string; name: string };
+  memberships: { count: number; soleRole: string | null };
+  credentials: { count: number; soleAccountId: string | null; nonemptyPassword: boolean };
+  audits: {
+    count: number;
+    sole: {
+      actorUserId: string | null;
+      outcome: string;
+      targetType: string;
+      targetId: string | null;
+      before: unknown;
+      after: unknown;
+    } | null;
+  };
+};
+
+function validPgIdentity(value: string): boolean {
+  if (value.includes("\0")) return false;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(++i);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
+}
+
+function encodeActor(actor: unknown): string | null {
+  if (actor === undefined) return null;
+  return JSON.stringify(typeof actor === "string" && validPgIdentity(actor) ? actor : null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function nullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function invalidFacts(): never {
+  throw new Error("us_development_owner_provenance_contract_invalid");
+}
+
+function decodeOwnerFacts(value: unknown): OwnerFacts | null {
+  if (value === null) return null;
+  if (
+    !hasKeys(value, ["codec", "organization", "user", "memberships", "credentials", "audits"]) ||
+    value.codec !== "us-development-owner-provenance-v1" ||
+    !hasKeys(value.organization, ["id", "name", "metadata"]) ||
+    typeof value.organization.id !== "string" ||
+    typeof value.organization.name !== "string" ||
+    !nullableString(value.organization.metadata) ||
+    !hasKeys(value.user, ["id", "name"]) ||
+    typeof value.user.id !== "string" ||
+    typeof value.user.name !== "string" ||
+    !hasKeys(value.memberships, ["count", "soleRole"]) ||
+    !count(value.memberships.count) ||
+    !nullableString(value.memberships.soleRole) ||
+    !hasKeys(value.credentials, ["count", "soleAccountId", "nonemptyPassword"]) ||
+    !count(value.credentials.count) ||
+    !nullableString(value.credentials.soleAccountId) ||
+    typeof value.credentials.nonemptyPassword !== "boolean" ||
+    !hasKeys(value.audits, ["count", "sole"]) ||
+    !count(value.audits.count)
+  )
+    return invalidFacts();
+  const sole = value.audits.sole;
+  if (
+    sole !== null &&
+    (!hasKeys(sole, ["actorUserId", "outcome", "targetType", "targetId", "before", "after"]) ||
+      !nullableString(sole.actorUserId) ||
+      typeof sole.outcome !== "string" ||
+      typeof sole.targetType !== "string" ||
+      !nullableString(sole.targetId))
+  )
+    return invalidFacts();
+  if ((value.audits.count === 1) !== (sole !== null)) return invalidFacts();
+  return value as OwnerFacts;
+}
+
 /** Internal local CLI store, not an HTTP endpoint or a production provisioner.
  * The command must validate edition, loopback target and actual DB identity first.
  */
@@ -62,7 +159,47 @@ export class UsDevelopmentOwnerStore {
     verifiedAt: Date,
     transaction: Transaction,
   ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
-    return this.readTrustedSeed(transaction, tenantId, verifiedAt, true, actorUserId);
+    return this.readLockedTrustedSeed(transaction, tenantId, verifiedAt, actorUserId);
+  }
+
+  private async readLockedTrustedSeed(
+    transaction: Transaction,
+    tenantId: string,
+    verifiedAt: Date,
+    actorUserId: string,
+  ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
+    if (!Number.isFinite(verifiedAt.getTime())) return null;
+    const encodedActor = encodeActor(actorUserId);
+    const native = await transaction.execute<{ facts: unknown }>(sql`
+      SELECT public.us_development_owner_provenance_v1(
+        ${tenantId}::pg_catalog.text, ${encodedActor}::pg_catalog.jsonb
+      ) AS facts
+    `);
+    if (native.rows.length !== 1 || !Object.hasOwn(native.rows[0] ?? {}, "facts"))
+      return invalidFacts();
+    const facts = decodeOwnerFacts(native.rows[0]?.facts);
+    if (facts === null) return null;
+    if (
+      facts.organization.id !== tenantId ||
+      facts.organization.metadata !== METADATA ||
+      facts.organization.name !== "Synthetic US development" ||
+      facts.user.name !== "Synthetic US development owner" ||
+      (actorUserId !== undefined && facts.user.id !== actorUserId) ||
+      facts.memberships.count !== 1 ||
+      facts.memberships.soleRole !== "owner" ||
+      facts.credentials.count !== 1 ||
+      facts.credentials.soleAccountId !== facts.user.id ||
+      !facts.credentials.nonemptyPassword ||
+      facts.audits.count !== 1 ||
+      facts.audits.sole?.actorUserId !== facts.user.id ||
+      facts.audits.sole.outcome !== "success" ||
+      facts.audits.sole.targetType !== "tenant" ||
+      facts.audits.sole.targetId !== tenantId ||
+      facts.audits.sole.before !== null ||
+      JSON.stringify(facts.audits.sole.after) !== METADATA
+    )
+      return null;
+    return { seedId: tenantId, verifiedBy: SEED_VERSION, verifiedAt: verifiedAt.toISOString() };
   }
 
   private async readTrustedSeed(

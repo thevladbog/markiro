@@ -1,4 +1,3 @@
-import { schema } from "@markiro/db";
 import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import {
@@ -7,7 +6,6 @@ import {
   usProductSchema,
   productTraceabilityProfileSchema,
 } from "@markiro/platform-contracts";
-import { and, asc, eq, inArray } from "drizzle-orm";
 import type { UsCatalogStore } from "../catalog/us-catalog-store.js";
 import type { UsMasterDataStore } from "../master-data/us-master-data-store.js";
 import type { UsProductProfileStore } from "../products/us-product-profile-store.js";
@@ -20,6 +18,8 @@ import {
 } from "./us-dataset-reference-contract.js";
 import { usSixMonthDefinition } from "./us-six-month-definition.js";
 import { makeUsSixMonthCatalogue } from "./us-six-month-references.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetReferenceDependencies } from "./us-dataset-terminal-read-contract.js";
 
 const catalogue = makeUsSixMonthCatalogue();
 const expectedInput = Object.freeze({
@@ -48,6 +48,22 @@ export async function verifyUsDatasetReferences(
   receipt: UsDatasetReceipt,
   stores: UsDatasetReferenceStores,
 ): Promise<void> {
+  return verifyUsDatasetReferencesCore(
+    tx,
+    context,
+    intent,
+    receipt,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function verifyUsDatasetReferencesCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  intent: UsDatasetIntent,
+  receipt: UsDatasetReceipt,
+  stores: UsDatasetReferenceDependencies,
+): Promise<void> {
   if (intent.unitKey !== "references" || intent.stage !== "references")
     throw datasetReferenceError("us_dataset_reference_mismatch");
   if (canonicalExportDigest(intent.input) !== expectedInputDigest)
@@ -64,22 +80,7 @@ export async function verifyUsDatasetReferences(
   const { tenantId, actorUserId } = context;
   // Native ordinary getters do not lock these rows. Lock all owned parents first,
   // then locations, then products; profile writers serialize on their product.
-  for (const [table, bindings] of [
-    [schema.traceabilityParties, result.bindings.parties],
-    [schema.traceabilityLocations, result.bindings.locations],
-    [schema.products, result.bindings.products],
-  ] as const) {
-    const owned = await tx
-      .select({ id: table.id })
-      .from(table)
-      .where(
-        and(eq(table.tenantId, tenantId), inArray(table.id, bindings.map(({ id }) => id).sort())),
-      )
-      .orderBy(asc(table.id))
-      .for("share");
-    if (owned.length !== bindings.length)
-      throw datasetReferenceError("us_dataset_reference_mismatch");
-  }
+  await stores.locks.referenceParents(tx, tenantId, result.bindings);
   try {
     const parties = await stores.master.getPartiesInTransaction(
       tx,

@@ -376,8 +376,8 @@ describe.skipIf(!base)("Shipping prerequisite batch native boundaries", () => {
         prepared.transformation,
         prepared.cases,
       ]);
-      expect(scalar.count).toBe(48);
-      expect(batch.count).toBe(12);
+      expect(scalar.count).toBe(32);
+      expect(batch.count).toBe(8);
       expect(await f.snapshot()).toEqual(before);
       const initialize = await countActualQueries(f.pool, () => seed().initialize(context, index));
       const after = await f.snapshot();
@@ -428,8 +428,8 @@ describe.skipIf(!base)("Shipping prerequisite batch native boundaries", () => {
           journal.readStages(context, prepared[position]!.datasetId, rows),
         );
         expect(batch.value).toEqual(scalar.value);
-        expect(scalar.count).toBe(48);
-        expect(batch.count).toBe(12);
+        expect(scalar.count).toBe(32);
+        expect(batch.count).toBe(8);
         console.info("Shipping populated range prerequisite", {
           index,
           scalarCount: scalar.count,

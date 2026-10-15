@@ -8,15 +8,17 @@ import {
   type UsDatasetReceipt,
 } from "./us-dataset-contract.js";
 import { datasetCorrectedTransformationError } from "./us-dataset-corrected-transformation-contract.js";
-import { prepareUsDatasetCorrectedTransformation } from "./us-dataset-corrected-transformation-prepare.js";
+import { prepareUsDatasetCorrectedTransformationCore } from "./us-dataset-corrected-transformation-prepare.js";
 import {
   parseUsDatasetCorrectedTransformationResult,
   usDatasetCorrectedTransformationRecordIds,
 } from "./us-dataset-corrected-transformation-result.js";
 import { parseUsDemoReceipt } from "./us-demo-journal-contract.js";
 import { usDatasetReceivingLotIdentity } from "./us-dataset-receiving-contract.js";
-import { verifyUsDatasetTransformationContent } from "./us-dataset-transformation-verify-content.js";
+import { verifyUsDatasetTransformationContentCore } from "./us-dataset-transformation-verify-content.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 /** Fresh mode is restricted to this invocation's successfully applied private native rows. */
 export async function verifyUsDatasetCorrectedTransformation(
@@ -25,6 +27,23 @@ export async function verifyUsDatasetCorrectedTransformation(
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetTransformationStores,
+  mode: "fresh" | "replay",
+): Promise<void> {
+  return verifyUsDatasetCorrectedTransformationCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    freshUsDatasetTerminalDependencies(stores),
+    mode,
+  );
+}
+export async function verifyUsDatasetCorrectedTransformationCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  stores: UsDatasetTransformationDependencies,
   mode: "fresh" | "replay",
 ): Promise<void> {
   const mismatch = (cause?: unknown) =>
@@ -43,14 +62,14 @@ export async function verifyUsDatasetCorrectedTransformation(
   equal(receipt.recordIds, usDatasetCorrectedTransformationRecordIds(result));
   equal(receipt.resultDigest, canonicalExportDigest(result));
   try {
-    const prepared = await prepareUsDatasetCorrectedTransformation(
+    const prepared = await prepareUsDatasetCorrectedTransformationCore(
       tx,
       context,
       intent,
       stores,
       mode === "replay" ? result : null,
     );
-    await verifyUsDatasetTransformationContent(
+    await verifyUsDatasetTransformationContentCore(
       tx,
       context,
       intent,

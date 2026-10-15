@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { createDb } from "@markiro/db";
+import { canonicalExportDigest } from "@markiro/domain";
+import { describe, expect, it, vi } from "vitest";
 import { makeUsDatasetNativeAssemblyInput } from "../src/modules/traceability/demo/us-dataset-native-assembly-contract";
 import { usSixMonthDefinition } from "../src/modules/traceability/demo/us-six-month-definition";
+import type { UsDatasetContext } from "../src/modules/traceability/demo/us-dataset-contract";
+import { UsDatasetNativeSeedStore } from "../src/modules/traceability/demo/us-dataset-native-seed";
+import { UsDatasetTraceReadinessStageStore } from "../src/modules/traceability/demo/us-dataset-trace-readiness-stage";
+import { UsDatasetTraceReadinessSeedStore } from "../src/modules/traceability/demo/us-dataset-trace-readiness-seed";
+import {
+  UsDatasetUnitCompositionStore,
+  type UsDatasetUnitCompositionResult,
+} from "../src/modules/traceability/demo/us-dataset-unit-composition";
+import type {
+  UsDatasetTraceReadinessResult,
+  UsDatasetTraceReadinessUnit,
+} from "../src/modules/traceability/demo/us-dataset-trace-readiness";
 
 const invalid = new Error("us_dataset_native_assembly_input_invalid");
 const datasetId = "11111111-1111-4111-8111-111111111111";
@@ -454,4 +468,261 @@ describe("pure full-native assembly input", () => {
     );
     expect(reads).toBe(0);
   });
+});
+
+// These full262 vectors prove only adapter structure and ownership, never native proof.
+function syntheticAdapterVector() {
+  const summaries = syntheticSummaries();
+  const trace = (unitKey: string, index: number): UsDatasetTraceReadinessResult => ({
+    datasetId,
+    version: "us-processor-six-month-v1",
+    definitionDigest: usSixMonthDefinition.digest,
+    unitKey,
+    state: "trace_readiness_verified",
+    datasetComplete: false,
+    lotIds: [`00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`],
+    currentEventIds: [`11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`],
+    evidence: [
+      {
+        lotId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        traceDigest: syntheticDigest(`trace ${unitKey}`),
+        readinessDigest: syntheticDigest(`readiness ${unitKey}`),
+        historyDigest: syntheticDigest(`history ${unitKey}`),
+        originGap: unitKey === "orphan_0001",
+      },
+    ],
+  });
+  const outputs: UsDatasetUnitCompositionResult[] = summaries.regular.chains.map((native) => ({
+    kind: "regular",
+    native,
+    trace: trace(native.unitKey, native.index),
+  }));
+  outputs.push(
+    {
+      kind: "correction",
+      native: { ...summaries.special.correction, unitKey: "correction_0001", shipmentCount: 1 },
+      trace: trace("correction_0001", 260),
+    },
+    {
+      kind: "orphan",
+      native: { ...summaries.special.orphan, unitKey: "orphan_0001" },
+      trace: trace("orphan_0001", 261),
+    },
+  );
+  const selectors: UsDatasetTraceReadinessUnit[] = Array.from({ length: 260 }, (_, index) => ({
+    kind: "regular",
+    index,
+  }));
+  selectors.push({ kind: "correction" }, { kind: "orphan" });
+  return { summaries, outputs, selectors };
+}
+
+describe("pure full262 unit coordinator adapter", () => {
+  const context: UsDatasetContext = {
+    tenantId: "structural-tenant",
+    actorUserId: "structural-owner",
+    expectedDatabaseName: "structural_no_io",
+    expectedDatabaseUser: "markiro_us",
+  };
+  async function adapterCase(
+    mode: "initialize" | "verify",
+    run: (
+      input: ReturnType<typeof syntheticAdapterVector> & {
+        coordinator: UsDatasetTraceReadinessSeedStore;
+        calls: UsDatasetTraceReadinessUnit[];
+        contexts: UsDatasetContext[];
+      },
+    ) => Promise<void>,
+    failure?: { index: number; error: Error },
+  ) {
+    const vector = syntheticAdapterVector();
+    expect(vector.outputs).toHaveLength(262);
+    const connection = createDb("postgres://structural:unused@127.0.0.1:1/structural_no_io");
+    let acquired = 0;
+    connection.pool.on("acquire", () => acquired++);
+    const connect = vi.spyOn(connection.pool, "connect").mockImplementation(() => {
+      throw new Error("Pure structural adapter must not acquire a client");
+    });
+    const oldNativeI = vi
+      .spyOn(UsDatasetNativeSeedStore.prototype, "initialize")
+      .mockImplementation(() => {
+        throw new Error("Unexpected old native path");
+      });
+    const oldNativeV = vi
+      .spyOn(UsDatasetNativeSeedStore.prototype, "verify")
+      .mockImplementation(() => {
+        throw new Error("Unexpected old native path");
+      });
+    const oldStageI = vi
+      .spyOn(UsDatasetTraceReadinessStageStore.prototype, "initialize")
+      .mockImplementation(() => {
+        throw new Error("Unexpected standalone stage path");
+      });
+    const oldStageV = vi
+      .spyOn(UsDatasetTraceReadinessStageStore.prototype, "verify")
+      .mockImplementation(() => {
+        throw new Error("Unexpected standalone stage path");
+      });
+    const otherMode = mode === "initialize" ? "verify" : "initialize";
+    const opposite = vi
+      .spyOn(UsDatasetUnitCompositionStore.prototype, otherMode)
+      .mockImplementation(() => {
+        throw new Error("Unexpected opposite owner mode");
+      });
+    const calls: UsDatasetTraceReadinessUnit[] = [];
+    const contexts: UsDatasetContext[] = [];
+    const selected = vi
+      .spyOn(UsDatasetUnitCompositionStore.prototype, mode)
+      .mockImplementation(async (actualContext, unit) => {
+        calls.push(unit);
+        contexts.push(actualContext);
+        const index = unit.kind === "regular" ? unit.index : unit.kind === "correction" ? 260 : 261;
+        if (index === failure?.index) throw failure.error;
+        return required(vector.outputs[index]);
+      });
+    try {
+      await run({
+        ...vector,
+        coordinator: new UsDatasetTraceReadinessSeedStore(connection.db),
+        calls,
+        contexts,
+      });
+      expect(opposite).not.toHaveBeenCalled();
+      for (const spy of [oldNativeI, oldNativeV, oldStageI, oldStageV])
+        expect(spy).not.toHaveBeenCalled();
+    } finally {
+      selected.mockRestore();
+      opposite.mockRestore();
+      oldNativeI.mockRestore();
+      oldNativeV.mockRestore();
+      oldStageI.mockRestore();
+      oldStageV.mockRestore();
+      try {
+        expect(acquired).toBe(0);
+        expect(connect).not.toHaveBeenCalled();
+      } finally {
+        connect.mockRestore();
+        await connection.pool.end();
+      }
+    }
+  }
+
+  for (const mode of ["initialize", "verify"] as const)
+    it(`adapter-${mode}-all262`, async () => {
+      await adapterCase(
+        mode,
+        async ({ coordinator, calls, contexts, outputs, selectors, summaries }) => {
+          const expected = makeUsDatasetNativeAssemblyInput(summaries.regular, summaries.special);
+          const first = await coordinator[mode](context);
+          expect(calls).toEqual(selectors);
+          expect(contexts.every((actual) => actual === context)).toBe(true);
+          expect(first).toEqual({
+            datasetId,
+            version: "us-processor-six-month-v1",
+            definitionDigest: usSixMonthDefinition.digest,
+            state: "native_chains_trace_readiness_verified",
+            datasetComplete: false,
+            native: { ...expected, state: "native_chains_shipping_verified" },
+            units: outputs.map((output) => ({
+              unitKey: output.trace.unitKey,
+              resultDigest: canonicalExportDigest(output.trace),
+            })),
+          });
+          expect(Object.keys(first).sort()).toEqual([
+            "datasetComplete",
+            "datasetId",
+            "definitionDigest",
+            "native",
+            "state",
+            "units",
+            "version",
+          ]);
+          expect(
+            first.native.regular.chains.reduce((count, row) => count + row.shipmentCount, 0),
+          ).toBe(440);
+          expect(first.native.special.correction.shipmentCount).toBe(1);
+          expect(first.units[0]?.resultDigest).not.toBe(
+            canonicalExportDigest(required(outputs[0])),
+          );
+          assertFrozenOwned(first.native.regular, summaries.regular);
+          assertFrozenOwned(first.native.special, summaries.special);
+          assertFrozenOwned(first.units, outputs);
+          expect(Object.isFrozen(first)).toBe(true);
+          expect(Object.isFrozen(first.native)).toBe(true);
+          expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThan(256 * 1024);
+          const second = await coordinator[mode](context);
+          expect(calls).toEqual([...selectors, ...selectors]);
+          expect(second).toEqual(first);
+          assertFrozenOwned(second, first);
+          expect(contexts.every((actual) => actual === context)).toBe(true);
+          const saved = JSON.stringify(first);
+          expect(Object.isFrozen(outputs)).toBe(false);
+          expect(Object.isFrozen(summaries.regular.chains)).toBe(false);
+          Object.assign(required(outputs[0]).native, {
+            shippingResultDigest: syntheticDigest("later source mutation"),
+          });
+          Object.assign(required(outputs[0]).trace, { unitKey: "later_source_mutation" });
+          summaries.regular.chains.pop();
+          expect(JSON.stringify(first)).toBe(saved);
+          expect(JSON.stringify(second)).toBe(saved);
+        },
+      );
+    });
+
+  for (const [name, corrupt] of [
+    [
+      "adapter-rejects-regular-kind-mismatch",
+      (outputs: UsDatasetUnitCompositionResult[]) =>
+        Object.assign(required(outputs[1]), { kind: "orphan" }),
+    ],
+    [
+      "adapter-rejects-trace-identity-mismatch",
+      (outputs: UsDatasetUnitCompositionResult[]) =>
+        Object.assign(required(outputs[1]).trace, {
+          datasetId: "22222222-2222-4222-8222-222222222222",
+        }),
+    ],
+    [
+      "adapter-rejects-trace-unit-key-mismatch",
+      (outputs: UsDatasetUnitCompositionResult[]) =>
+        Object.assign(required(outputs[1]).trace, { unitKey: "chain_0002" }),
+    ],
+    [
+      "adapter-rejects-regular-native-row-order-mismatch",
+      (outputs: UsDatasetUnitCompositionResult[]) =>
+        Object.assign(required(outputs[0]), { native: required(outputs[1]).native }),
+    ],
+  ] as const)
+    it(name, async () => {
+      await adapterCase("initialize", async ({ coordinator, outputs }) => {
+        corrupt(outputs);
+        const failed = await coordinator.initialize(context).then(
+          (value) => ({ value, error: undefined }),
+          (error: unknown) => ({ value: undefined, error }),
+        );
+        expect(failed.value).toBeUndefined();
+        expect(failed.error).toEqual(invalid);
+      });
+    });
+
+  for (const [name, index] of [
+    ["adapter-propagates-regular259-rejection", 259],
+    ["adapter-propagates-correction-rejection-before-orphan", 260],
+  ] as const)
+    it(name, async () => {
+      const error = new Error("Saved structural boundary rejection");
+      await adapterCase(
+        "initialize",
+        async ({ coordinator, calls, selectors }) => {
+          const failed = await coordinator.initialize(context).then(
+            (value) => ({ value, error: undefined }),
+            (caught: unknown) => ({ value: undefined, error: caught }),
+          );
+          expect(failed.value).toBeUndefined();
+          expect(failed.error).toBe(error);
+          expect(calls).toEqual(selectors.slice(0, index + 1));
+        },
+        { index, error },
+      );
+    });
 });

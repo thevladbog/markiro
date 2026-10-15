@@ -14,6 +14,8 @@ import type { UsDatasetContext, UsDatasetIntent } from "./us-dataset-contract.js
 import type { UsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
 import type { UsDatasetTransformationEvidence } from "./us-dataset-transformation-content.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 /** Shared exact native proof; wrappers own dependencies, lock schedule and error translation. */
 export async function verifyUsDatasetTransformationContent(
@@ -27,6 +29,30 @@ export async function verifyUsDatasetTransformationContent(
   verifyOutputLot: (current: TraceabilityLot) => Promise<void>,
   mismatch: (cause?: unknown) => Error,
 ): Promise<void> {
+  return verifyUsDatasetTransformationContentCore(
+    tx,
+    context,
+    intent,
+    result,
+    bindings,
+    inputLots,
+    freshUsDatasetTerminalDependencies(stores),
+    verifyOutputLot,
+    mismatch,
+  );
+}
+
+export async function verifyUsDatasetTransformationContentCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  intent: UsDatasetIntent,
+  result: UsDatasetTransformationEvidence,
+  bindings: UsDatasetReferenceResult["bindings"],
+  inputLots: readonly TraceabilityLot[],
+  stores: UsDatasetTransformationDependencies,
+  verifyOutputLot: (current: TraceabilityLot) => Promise<void>,
+  mismatch: (cause?: unknown) => Error,
+): Promise<void> {
   const { tenantId, actorUserId } = context;
   const equal = (a: unknown, b: unknown) => {
     if (canonicalExportDigest(a) !== canonicalExportDigest(b)) throw mismatch();
@@ -37,12 +63,7 @@ export async function verifyUsDatasetTransformationContent(
     return entry.id;
   };
   const rootId = result.created.id;
-  const roots = schema.transformationEventRoots,
-    events = schema.traceabilityEvents;
-  const [root] = await tx
-    .select()
-    .from(roots)
-    .where(and(eq(roots.tenantId, tenantId), eq(roots.id, rootId)));
+  const root = await stores.points.transformationRoot(tx, tenantId, rootId);
   if (!root) throw mismatch();
   equal(
     {
@@ -54,21 +75,8 @@ export async function verifyUsDatasetTransformationContent(
     },
     { current: rootId, pending: null, version: 2, next: 2, number: result.finalized.eventNumber },
   );
-  const revisions = await tx
-    .select()
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.rootEventId, rootId)))
-    .orderBy(asc(events.id));
-  if (revisions.length !== 1) throw mismatch();
-  const event = revisions[0];
-  if (
-    !event ||
-    event.id !== rootId ||
-    event.type !== "transformation" ||
-    event.status !== "finalized" ||
-    event.revision !== 1
-  )
-    throw mismatch();
+  const event = await stores.locks.transformationRevision(tx, tenantId, rootId);
+  if (!event) throw mismatch();
   equal(await readTransformationSavedDraft(tx, tenantId, rootId, event), result.createInput.draft);
   equal(
     await stores.transformation.getRecordInTransaction(tx, tenantId, actorUserId, rootId),
@@ -128,21 +136,11 @@ export async function verifyUsDatasetTransformationContent(
   );
   // Native documents are insertion-only today. Share locks also retain metadata
   // stability through receipt commit if an existing row is corrected externally.
-  const docs = schema.referenceDocuments;
-  const locked = await tx
-    .select({ id: docs.id })
-    .from(docs)
-    .where(
-      and(
-        eq(docs.tenantId, tenantId),
-        inArray(
-          docs.id,
-          result.documents.map((d) => d.record.id),
-        ),
-      ),
-    )
-    .orderBy(asc(docs.id))
-    .for("share");
+  const locked = await stores.locks.transformationDocuments(
+    tx,
+    tenantId,
+    result.documents.map((d) => d.record.id),
+  );
   equal(locked.length, 2);
   for (const saved of result.documents) {
     const definition = result.input.chain.documents.find((d) => d.key === saved.key);

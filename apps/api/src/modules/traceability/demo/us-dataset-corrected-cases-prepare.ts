@@ -2,7 +2,6 @@ import { schema } from "@markiro/db";
 import { canonicalExportDigest, US_CAPABILITY } from "@markiro/domain";
 import { and, eq, sql } from "drizzle-orm";
 import { lockCaseOperation } from "../cases/us-case-operations.js";
-import { authorizeUsMasterData } from "../master-data/us-master-data-support.js";
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext, UsDatasetIntent, UsDatasetReceipt } from "./us-dataset-contract.js";
 import { parseUsDatasetIntent } from "./us-dataset-contract.js";
@@ -17,11 +16,13 @@ import {
   parseUsDatasetCorrectedCasesResult,
   usDatasetCorrectedCasesRecordIds,
 } from "./us-dataset-corrected-cases-result.js";
-import { verifyUsDatasetCorrectedTransformation } from "./us-dataset-corrected-transformation-verify.js";
+import { verifyUsDatasetCorrectedTransformationCore } from "./us-dataset-corrected-transformation-verify.js";
 import { makeUsDatasetReferenceIdentity } from "./us-dataset-receiving-contract.js";
 import type { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
 import type { UsDatasetCasesPreparation } from "./us-dataset-cases-prepare.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 /** Actual target/owner/profile and current capability precede any caller evidence. */
 export async function authorizeUsDatasetCorrectedCases(
@@ -29,8 +30,19 @@ export async function authorizeUsDatasetCorrectedCases(
   context: UsDatasetContext,
   stores: UsDatasetTransformationStores,
 ): Promise<string> {
+  return authorizeUsDatasetCorrectedCasesCore(
+    tx,
+    context,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+export async function authorizeUsDatasetCorrectedCasesCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  stores: UsDatasetTransformationDependencies,
+): Promise<string> {
   const header = await stores.journal.readHeaderInTransaction(tx, context);
-  await authorizeUsMasterData(
+  await stores.authorize(
     tx,
     context.tenantId,
     context.actorUserId,
@@ -74,7 +86,22 @@ export async function prepareUsDatasetCorrectedCases(
   phase: UsDatasetCasesPreparation,
   stores: UsDatasetTransformationStores,
 ) {
-  const datasetId = await authorizeUsDatasetCorrectedCases(tx, context, stores);
+  return prepareUsDatasetCorrectedCasesCore(
+    tx,
+    context,
+    rawIntent,
+    phase,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+export async function prepareUsDatasetCorrectedCasesCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  phase: UsDatasetCasesPreparation,
+  stores: UsDatasetTransformationDependencies,
+) {
+  const datasetId = await authorizeUsDatasetCorrectedCasesCore(tx, context, stores);
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${context.tenantId + ":us-processor-demo-v1"}, 0))`,
   );
@@ -173,7 +200,7 @@ export async function prepareUsDatasetCorrectedCases(
     );
     if (result.linked.created.some((row) => row.linkedBy !== context.actorUserId)) throw fail();
   } else if (operation) throw fail();
-  await verifyUsDatasetCorrectedTransformation(
+  await verifyUsDatasetCorrectedTransformationCore(
     tx,
     context,
     transformation.intent,

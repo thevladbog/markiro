@@ -33,8 +33,17 @@ import {
 import { readReceivingReadiness } from "./us-receiving-readiness";
 import { readReceivingDraft, readReceivingRecord, unavailable } from "./us-receiving-persistence";
 import { finalizeReceiving } from "./us-receiving-finalization";
-import { readReceivingBasis } from "./us-receiving-basis";
-import { readReceivingLiveRecord, readReceivingRevisions } from "./us-receiving-history";
+import {
+  freshReceivingBasisReaders,
+  readReceivingBasisCore,
+  type ReceivingBasisReaders,
+} from "./us-receiving-basis";
+import {
+  freshReceivingHistoryReaders,
+  readReceivingLiveRecordCore,
+  readReceivingRevisions,
+  type ReceivingHistoryReaders,
+} from "./us-receiving-history";
 import {
   executeReceivingLifecycle,
   executeReceivingLifecycleInTransaction,
@@ -60,6 +69,52 @@ import { exportReceivingCsv } from "./us-receiving-csv-export";
 const events = schema.traceabilityEvents,
   items = schema.receivingEventItems,
   documents = schema.receivingEventDocuments;
+
+export type UsReceivingNativeReaders = Readonly<{
+  authorize: typeof authorizeUsMasterData;
+  history: ReceivingHistoryReaders;
+  basis: ReceivingBasisReaders;
+}>;
+
+export const freshUsReceivingNativeReaders: UsReceivingNativeReaders = {
+  authorize: authorizeUsMasterData,
+  history: freshReceivingHistoryReaders,
+  basis: freshReceivingBasisReaders,
+};
+
+export async function readUsReceivingLiveRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  readers: UsReceivingNativeReaders,
+): Promise<ReceivingLiveRecord> {
+  await readers.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+  return readReceivingLiveRecordCore(
+    tx,
+    tenantId,
+    parseMasterDataInput(platformUuidSchema, id),
+    readers.history,
+  );
+}
+
+export async function readUsReceivingBasisCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  lotId: unknown,
+  query: unknown,
+  readers: UsReceivingNativeReaders,
+): Promise<ReceivingBasis> {
+  await readers.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+  return readReceivingBasisCore(
+    tx,
+    tenantId,
+    parseMasterDataInput(platformUuidSchema, lotId),
+    parseMasterDataInput(receivingBasisQuerySchema, query),
+    readers.basis,
+  );
+}
 
 export class UsReceivingStore {
   constructor(private readonly db: Db) {}
@@ -250,8 +305,13 @@ export class UsReceivingStore {
     actorUserId: string,
     id: unknown,
   ): Promise<ReceivingLiveRecord> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    return readReceivingLiveRecord(tx, tenantId, parseMasterDataInput(platformUuidSchema, id));
+    return readUsReceivingLiveRecordCore(
+      tx,
+      tenantId,
+      actorUserId,
+      id,
+      freshUsReceivingNativeReaders,
+    );
   }
 
   async listRevisions(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
@@ -277,12 +337,13 @@ export class UsReceivingStore {
     lotId: unknown,
     query: unknown,
   ): Promise<ReceivingBasis> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    return readReceivingBasis(
+    return readUsReceivingBasisCore(
       tx,
       tenantId,
-      parseMasterDataInput(platformUuidSchema, lotId),
-      parseMasterDataInput(receivingBasisQuerySchema, query),
+      actorUserId,
+      lotId,
+      query,
+      freshUsReceivingNativeReaders,
     );
   }
 

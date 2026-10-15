@@ -26,6 +26,7 @@ import {
   sourceIdentityPredicate,
 } from "./us-lot-support";
 import { invalidateShippingStatusEffect } from "../shipping/us-shipping-status-effects";
+import { freshUsLotReaders, readUsLotCore } from "./us-lot-read";
 
 const lots = schema.traceabilityLots;
 
@@ -81,15 +82,7 @@ export class UsLotStore {
     actorUserId: string,
     id: unknown,
   ): Promise<TraceabilityLot> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const lotId = parseMasterDataInput(platformUuidSchema, id);
-    const [row] = await tx
-      .select()
-      .from(lots)
-      .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)))
-      .limit(1);
-    if (!row) throw new NotFoundException({ code: "lot_not_found" });
-    return lotResponse(row);
+    return readUsLotCore(tx, tenantId, actorUserId, id, freshUsLotReaders);
   }
 
   async createLot(

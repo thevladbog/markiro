@@ -10,13 +10,60 @@ import {
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
-import { readShippingDraft } from "./us-shipping-draft";
-import { readShippingSnapshotRecord } from "./us-shipping-finalization";
+import {
+  freshShippingDraftReaders,
+  readShippingDraftCore,
+  type ShippingDraftReaders,
+} from "./us-shipping-draft";
+import {
+  freshShippingSnapshotReaders,
+  readShippingSnapshotRecordCore,
+  type ShippingSnapshotReaders,
+} from "./us-shipping-finalization";
 
 const unavailable = () => new ServiceUnavailableException({ code: "us_database_unavailable" });
 const notFound = () => new NotFoundException({ code: "shipping_not_found" });
 const events = schema.traceabilityEvents;
 const roots = schema.shippingEventRoots;
+
+type ShippingEvent = typeof events.$inferSelect;
+export type ShippingHistoryReaders = Readonly<{
+  event(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    eventId: string,
+  ): Promise<ShippingEvent | undefined>;
+  anchor(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    eventId: string,
+  ): Promise<{ rootId: string } | undefined>;
+  draft: ShippingDraftReaders;
+  snapshot: ShippingSnapshotReaders;
+}>;
+
+export const freshShippingHistoryReaders = (): ShippingHistoryReaders => ({
+  async event(tx, tenantId, eventId) {
+    const [row] = await tx
+      .select()
+      .from(events)
+      .where(
+        and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")),
+      );
+    return row;
+  },
+  async anchor(tx, tenantId, eventId) {
+    const [anchor] = await tx
+      .select({ rootId: events.rootEventId })
+      .from(events)
+      .where(
+        and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")),
+      );
+    return anchor;
+  },
+  draft: freshShippingDraftReaders,
+  snapshot: freshShippingSnapshotReaders,
+});
 
 /** A historical revision reads its saved child rows or frozen snapshot only. */
 export async function readShippingRecord(
@@ -24,13 +71,21 @@ export async function readShippingRecord(
   tenantId: string,
   eventId: string,
 ): Promise<ShippingHistoricalRecord> {
-  const [row] = await tx
-    .select()
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")));
+  return readShippingRecordCore(tx, tenantId, eventId, freshShippingHistoryReaders());
+}
+
+export async function readShippingRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  readers: ShippingHistoryReaders,
+): Promise<ShippingHistoricalRecord> {
+  const row = await readers.event(tx, tenantId, eventId);
   if (!row) throw notFound();
-  if (row.status === "draft") return readShippingDraft(tx, tenantId, eventId);
-  if (row.finalizationSnapshot !== null) return readShippingSnapshotRecord(tx, tenantId, eventId);
+  if (row.status === "draft")
+    return readShippingDraftCore(tx, tenantId, eventId, "share", readers.draft);
+  if (row.finalizationSnapshot !== null)
+    return readShippingSnapshotRecordCore(tx, tenantId, eventId, readers.snapshot);
   if (row.status !== "void") throw unavailable();
   const [root] = await tx
     .select()
@@ -132,10 +187,17 @@ export async function readShippingRevisions(
   eventId: string,
   query: ShippingRevisionListQuery,
 ): Promise<ShippingRevisionList> {
-  const [anchor] = await tx
-    .select({ rootId: events.rootEventId })
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")));
+  return readShippingRevisionsCore(tx, tenantId, eventId, query, freshShippingHistoryReaders());
+}
+
+export async function readShippingRevisionsCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  query: ShippingRevisionListQuery,
+  readers: ShippingHistoryReaders,
+): Promise<ShippingRevisionList> {
+  const anchor = await readers.anchor(tx, tenantId, eventId);
   if (!anchor) throw notFound();
   const [root] = await tx
     .select()

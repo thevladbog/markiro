@@ -9,8 +9,7 @@ import {
   type UsProduct,
   type UsProductList,
 } from "@markiro/platform-contracts";
-import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
-import { orderedMasterDataRows, parseMasterDataIds } from "../master-data/us-master-data-batch";
+import { and, asc, eq, ilike, or } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import {
   authorizeUsMasterData,
@@ -20,16 +19,14 @@ import {
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { productResponse } from "./us-catalog-support";
+import {
+  freshUsCatalogReaders,
+  productColumns,
+  readUsProductCore,
+  readUsProductsCore,
+} from "./us-catalog-read";
 
 const ACTIVE_GTIN_CONSTRAINT = "products_tenant_gtin_unarchived_uq";
-const productColumns = {
-  id: schema.products.id,
-  name: schema.products.name,
-  gtin14: schema.products.gtin14,
-  archived: schema.products.archived,
-  createdAt: schema.products.createdAt,
-  updatedAt: schema.products.updatedAt,
-};
 
 /** US-only catalog access over the shared product table. */
 export class UsCatalogStore {
@@ -75,15 +72,7 @@ export class UsCatalogStore {
     actorUserId: string,
     id: unknown,
   ): Promise<UsProduct> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const productId = parseMasterDataInput(platformUuidSchema, id);
-    const [row] = await tx
-      .select(productColumns)
-      .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)))
-      .limit(1);
-    if (!row) throw new NotFoundException({ code: "product_not_found" });
-    return productResponse(row);
+    return readUsProductCore(tx, tenantId, actorUserId, id, freshUsCatalogReaders);
   }
 
   async getProductsInTransaction(
@@ -92,16 +81,7 @@ export class UsCatalogStore {
     actorUserId: string,
     inputIds: unknown,
   ): Promise<UsProduct[]> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const ids = parseMasterDataIds(inputIds);
-    if (ids.length === 0) return [];
-    const rows = await tx
-      .select(productColumns)
-      .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.id, ids)));
-    return orderedMasterDataRows(ids, rows, (row) => row.id, "product_not_found").map(
-      productResponse,
-    );
+    return readUsProductsCore(tx, tenantId, actorUserId, inputIds, freshUsCatalogReaders);
   }
 
   async createProduct(

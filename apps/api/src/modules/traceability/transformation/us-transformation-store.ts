@@ -18,7 +18,12 @@ import {
   saveTransformationDraft,
 } from "./us-transformation-draft";
 import { transformationTransaction } from "./us-transformation-operations";
-import { readTransformationDraft, readTransformationRecord } from "./us-transformation-persistence";
+import {
+  freshTransformationRecordReaders,
+  readTransformationDraft,
+  readTransformationRecordCore,
+  type TransformationRecordReaders,
+} from "./us-transformation-persistence";
 import { readTransformationReadiness } from "./us-transformation-readiness";
 import {
   finalizeTransformation,
@@ -31,6 +36,33 @@ import { readTransformationRevisions } from "./us-transformation-revisions";
 const readinessQuery = z
   .object({ expectedDraftVersion: z.number().int().min(1).max(2147483647) })
   .strict();
+export type UsTransformationNativeReaders = Readonly<{
+  authorize: typeof authorizeUsMasterData;
+  record: TransformationRecordReaders;
+}>;
+
+export const freshUsTransformationNativeReaders: UsTransformationNativeReaders = {
+  authorize: authorizeUsMasterData,
+  record: freshTransformationRecordReaders,
+};
+
+export async function readUsTransformationRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  eventId: unknown,
+  readers: UsTransformationNativeReaders,
+): Promise<Awaited<ReturnType<typeof readTransformationRecordCore>>> {
+  await readers.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+  return readTransformationRecordCore(
+    tx,
+    tenantId,
+    parseMasterDataInput(platformUuidSchema, eventId),
+    "share",
+    readers.record,
+  );
+}
+
 /** Internal US command boundary. No HTTP surface or runtime registration. */
 export class UsTransformationStore {
   constructor(private readonly db: Db) {}
@@ -128,12 +160,13 @@ export class UsTransformationStore {
     tenantId: string,
     actorUserId: string,
     eventId: unknown,
-  ): Promise<Awaited<ReturnType<typeof readTransformationRecord>>> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    return readTransformationRecord(
+  ): Promise<Awaited<ReturnType<typeof readTransformationRecordCore>>> {
+    return readUsTransformationRecordCore(
       tx,
       tenantId,
-      parseMasterDataInput(platformUuidSchema, eventId),
+      actorUserId,
+      eventId,
+      freshUsTransformationNativeReaders,
     );
   }
   checkReadiness(tenantId: string, actorUserId: string, eventId: unknown, input: unknown) {

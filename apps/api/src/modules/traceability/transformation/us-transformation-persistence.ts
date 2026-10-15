@@ -19,12 +19,19 @@ export const transformationHeader = (draft: TransformationDraft) => ({
   notes: draft.notes,
 });
 
-/** Resolve type/tenant before inspecting a typed root. Locks are always root then header. */
-export async function readTransformationRecord(
+type TransformationIdentity = { id: string; rootEventId: string };
+export type TransformationRecordReaders = Readonly<{
+  identity(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    eventId: string,
+  ): Promise<TransformationIdentity | undefined>;
+}>;
+
+async function freshTransformationIdentity(
   tx: UsMasterDataTransaction,
   tenantId: string,
   eventId: string,
-  lock: "share" | "update" = "share",
 ) {
   const predicate = and(
     eq(events.tenantId, tenantId),
@@ -35,6 +42,42 @@ export async function readTransformationRecord(
     .select({ id: events.id, rootEventId: events.rootEventId })
     .from(events)
     .where(predicate);
+  return identity;
+}
+
+export const freshTransformationRecordReaders: TransformationRecordReaders = {
+  identity: freshTransformationIdentity,
+};
+
+/** Resolve type/tenant before inspecting a typed root. Locks are always root then header. */
+export async function readTransformationRecord(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  lock: "share" | "update" = "share",
+) {
+  return readTransformationRecordCore(
+    tx,
+    tenantId,
+    eventId,
+    lock,
+    freshTransformationRecordReaders,
+  );
+}
+
+export async function readTransformationRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  lock: "share" | "update",
+  readers: TransformationRecordReaders,
+) {
+  const predicate = and(
+    eq(events.tenantId, tenantId),
+    eq(events.id, eventId),
+    eq(events.type, "transformation"),
+  );
+  const identity = await readers.identity(tx, tenantId, eventId);
   if (!identity) throw new NotFoundException({ code: "transformation_not_found" });
   const roots = schema.transformationEventRoots;
   const [root] = await tx

@@ -1,4 +1,4 @@
-import { verifyUsDatasetTransformationContent } from "./us-dataset-transformation-verify-content.js";
+import { verifyUsDatasetTransformationContentCore } from "./us-dataset-transformation-verify-content.js";
 import { canonicalExportDigest } from "./us-demo-canonical.js";
 import { NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import type { UsTransformationStore } from "../transformation/us-transformation-store.js";
@@ -15,7 +15,7 @@ import {
   parseUsDatasetReceivingResult,
 } from "./us-dataset-receiving-contract.js";
 import {
-  verifyUsDatasetReceivingResult,
+  verifyUsDatasetReceivingResultCore,
   type UsDatasetReceivingStores,
 } from "./us-dataset-receiving-verify.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
@@ -25,9 +25,10 @@ import {
   parseUsDatasetTransformationResult,
   usDatasetTransformationRecordIds,
 } from "./us-dataset-transformation-contract.js";
-import { lockUsDatasetTransformation } from "./us-dataset-transformation-locks.js";
-import { verifyUsDatasetShippingOriginStatus } from "./us-dataset-shipping-origin-status.js";
+import { verifyUsDatasetShippingOriginStatusCore } from "./us-dataset-shipping-origin-status.js";
 import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export type UsDatasetTransformationStores = UsDatasetReceivingStores &
   Readonly<{ transformation: UsTransformationStore }>;
@@ -46,6 +47,24 @@ export async function verifyUsDatasetTransformationOrigin(
   rawIntent: UsDatasetIntent,
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetTransformationStores,
+  mode: "fresh" | "replay",
+): Promise<UsDatasetVerifiedOrigin> {
+  return verifyUsDatasetTransformationOriginCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    freshUsDatasetTerminalDependencies(stores),
+    mode,
+  );
+}
+
+export async function verifyUsDatasetTransformationOriginCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  stores: UsDatasetTransformationDependencies,
   mode: "fresh" | "replay",
 ): Promise<UsDatasetVerifiedOrigin> {
   const intent = parseUsDatasetIntent(rawIntent);
@@ -91,18 +110,18 @@ export async function verifyUsDatasetTransformationOrigin(
   );
   const bindings = parseUsDatasetReferenceResult(references.receipt.result).bindings;
   try {
-    await lockUsDatasetTransformation(tx, context, {
+    await stores.locks.transformation(tx, context, {
       receiving: upstream,
       transformation: mode === "replay" ? result : null,
     });
-    const verifiedReceiving = await verifyUsDatasetReceivingResult(
+    const verifiedReceiving = await verifyUsDatasetReceivingResultCore(
       tx,
       context,
       receiving.intent,
       receiving.receipt,
       stores,
     );
-    await verifyUsDatasetTransformationContent(
+    await verifyUsDatasetTransformationContentCore(
       tx,
       context,
       intent,
@@ -110,8 +129,7 @@ export async function verifyUsDatasetTransformationOrigin(
       bindings,
       upstream.lots,
       stores,
-      (current) =>
-        verifyUsDatasetShippingOriginStatus(tx, context, stores.journal, result, current),
+      (current) => verifyUsDatasetShippingOriginStatusCore(tx, context, stores, result, current),
       mismatch,
     );
     return { receiving: verifiedReceiving, transformation: result };

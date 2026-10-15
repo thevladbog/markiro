@@ -3,7 +3,6 @@ import { canonicalExportDigest } from "@markiro/domain";
 import { createShippingDraftSchema, finalizeShippingSchema } from "@markiro/platform-contracts";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { shippingCommandDigest } from "../shipping/us-shipping-draft.js";
-import { readShippingRevisions } from "../shipping/us-shipping-history.js";
 import {
   readCurrentShippingBalance,
   listCurrentDownstreamConsumers,
@@ -14,6 +13,8 @@ import { usDatasetShippingOperationKey } from "./us-dataset-shipping-contract.js
 import type { UsDatasetShippingStores } from "./us-dataset-shipping-prepare.js";
 import type { UsDatasetShippingResultContent } from "./us-dataset-shipping-result-content.js";
 import type { UsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetShippingDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export async function verifyUsDatasetShippingContent(
   tx: UsDemoTransaction,
@@ -23,6 +24,28 @@ export async function verifyUsDatasetShippingContent(
   bindings: UsDatasetReferenceResult["bindings"],
   mode: "fresh" | "replay",
   stores: UsDatasetShippingStores,
+  fail: () => Error,
+): Promise<void> {
+  return verifyUsDatasetShippingContentCore(
+    tx,
+    context,
+    intent,
+    result,
+    bindings,
+    mode,
+    freshUsDatasetTerminalDependencies(stores),
+    fail,
+  );
+}
+
+export async function verifyUsDatasetShippingContentCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  intent: UsDatasetIntent,
+  result: UsDatasetShippingResultContent,
+  bindings: UsDatasetReferenceResult["bindings"],
+  mode: "fresh" | "replay",
+  stores: UsDatasetShippingDependencies,
   fail: () => Error,
 ): Promise<void> {
   const equal = (a: unknown, b: unknown) => {
@@ -158,22 +181,14 @@ export async function verifyUsDatasetShippingContent(
       ),
       shipment.finalized,
     );
-    const revisions = await readShippingRevisions(tx, context.tenantId, shipment.created.id, {
+    const revisions = await stores.shippingRevisions(tx, context.tenantId, shipment.created.id, {
       limit: 100,
       offset: 0,
     });
     equal(revisions.items.length, 1);
     equal(revisions.lifecycleVersion, 2);
-    const roots = schema.shippingEventRoots,
-      events = schema.traceabilityEvents;
-    const [root] = await tx
-      .select()
-      .from(roots)
-      .where(and(eq(roots.tenantId, context.tenantId), eq(roots.id, shipment.created.id)));
-    const [event] = await tx
-      .select()
-      .from(events)
-      .where(and(eq(events.tenantId, context.tenantId), eq(events.id, shipment.created.id)));
+    const root = await stores.points.shippingRoot(tx, context.tenantId, shipment.created.id);
+    const event = await stores.points.event(tx, context.tenantId, shipment.created.id);
     if (!root || !event) throw fail();
     equal(root.nextRevision, 2);
     equal(event.finalizedBy, context.actorUserId);

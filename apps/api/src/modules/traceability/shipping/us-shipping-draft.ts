@@ -16,6 +16,8 @@ import {
   type ShippingReadiness,
   type ShippingHistoricalRecord,
   type ShippingFinalizedRecord,
+  type ShippingRevisionList,
+  type ShippingRevisionListQuery,
 } from "@markiro/platform-contracts";
 import { ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -26,7 +28,12 @@ import {
 } from "../master-data/us-master-data-support";
 import { readShippingReadiness } from "./us-shipping-readiness";
 import { finalizeShipping, finalizeShippingInTransaction } from "./us-shipping-finalization";
-import { readShippingRecord, readShippingRevisions } from "./us-shipping-history";
+import {
+  freshShippingHistoryReaders,
+  readShippingRecordCore,
+  readShippingRevisionsCore,
+  type ShippingHistoryReaders,
+} from "./us-shipping-history";
 import { executeShippingLifecycle } from "./us-shipping-lifecycle";
 import { readCurrentShippingBalanceProjection } from "./us-shipping-balance";
 
@@ -35,6 +42,45 @@ const notFound = () => new NotFoundException({ code: "shipping_not_found" });
 const referenceNotFound = () => new NotFoundException({ code: "shipping_reference_not_found" });
 const ids = (values: readonly (string | null)[]) =>
   [...new Set(values.filter((value): value is string => value !== null))].sort();
+
+export type UsShippingNativeReaders = Readonly<{
+  authorize: typeof authorizeUsMasterData;
+  history: ShippingHistoryReaders;
+}>;
+
+export const freshUsShippingNativeReaders = (): UsShippingNativeReaders => ({
+  authorize: authorizeUsMasterData,
+  history: freshShippingHistoryReaders(),
+});
+
+export async function readUsShippingRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  eventIdInput: unknown,
+  readers: UsShippingNativeReaders,
+): Promise<ShippingHistoricalRecord> {
+  await readers.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+  const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
+  return readShippingRecordCore(tx, tenantId, eventId, readers.history);
+}
+
+export async function readUsShippingRevisionsCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  eventIdInput: unknown,
+  queryInput: unknown,
+  readers: UsShippingNativeReaders,
+): Promise<ShippingRevisionList> {
+  await readers.authorize(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+  const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
+  const query: ShippingRevisionListQuery = parseMasterDataInput(
+    shippingRevisionListQuerySchema,
+    queryInput,
+  );
+  return readShippingRevisionsCore(tx, tenantId, eventId, query, readers.history);
+}
 
 function retryable(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -212,12 +258,40 @@ export async function readShippingDraft(
   eventId: string,
   lock: "share" | "update" = "share",
 ): Promise<ShippingDraftRecord> {
+  return readShippingDraftCore(tx, tenantId, eventId, lock, freshShippingDraftReaders);
+}
+
+export type ShippingDraftReaders = Readonly<{
+  identity(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    eventId: string,
+  ): Promise<{ rootEventId: string } | undefined>;
+}>;
+
+export const freshShippingDraftReaders: ShippingDraftReaders = {
+  async identity(tx, tenantId, eventId) {
+    const events = schema.traceabilityEvents;
+    const [identity] = await tx
+      .select({ rootEventId: events.rootEventId })
+      .from(events)
+      .where(
+        and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")),
+      );
+    return identity;
+  },
+};
+
+export async function readShippingDraftCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  eventId: string,
+  lock: "share" | "update",
+  readers: ShippingDraftReaders,
+): Promise<ShippingDraftRecord> {
   const events = schema.traceabilityEvents,
     roots = schema.shippingEventRoots;
-  const [identity] = await tx
-    .select({ rootEventId: events.rootEventId })
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId), eq(events.type, "shipping")));
+  const identity = await readers.identity(tx, tenantId, eventId);
   if (!identity) throw notFound();
   const [root] = await tx
     .select()
@@ -489,9 +563,13 @@ export class UsShippingStore {
     actorUserId: string,
     eventIdInput: unknown,
   ): Promise<ShippingHistoricalRecord> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
-    return readShippingRecord(tx, tenantId, eventId);
+    return readUsShippingRecordCore(
+      tx,
+      tenantId,
+      actorUserId,
+      eventIdInput,
+      freshUsShippingNativeReaders(),
+    );
   }
 
   getLotShippingBalance(
@@ -609,11 +687,15 @@ export class UsShippingStore {
   }
 
   listRevisions(tenantId: string, actorUserId: string, eventIdInput: unknown, queryInput: unknown) {
-    return shippingTransaction(this.db, async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
-      const query = parseMasterDataInput(shippingRevisionListQuerySchema, queryInput);
-      return readShippingRevisions(tx, tenantId, eventId, query);
-    });
+    return shippingTransaction(this.db, (tx) =>
+      readUsShippingRevisionsCore(
+        tx,
+        tenantId,
+        actorUserId,
+        eventIdInput,
+        queryInput,
+        freshUsShippingNativeReaders(),
+      ),
+    );
   }
 }

@@ -10,10 +10,23 @@ export const preparedServicesFiles = [
   "test/us-case-demo-owned-application.e2e.test.ts",
   "test/us-dataset-journal-reader.e2e.test.ts",
   "test/us-dataset-shipping-prerequisites.e2e.test.ts",
+  "test/us-dataset-unit-composition.e2e.test.ts",
+  "test/us-owner-provenance-procedure.e2e.test.ts",
+  "test/us-owner-provenance-procedure-locks.e2e.test.ts",
+  "test/us-owner-provenance-adapter.e2e.test.ts",
+  "test/us-terminal-native-readers.e2e.test.ts",
+  "test/us-terminal-verification-routing.e2e.test.ts",
+  "test/us-terminal-closed-reader.e2e.test.ts",
+  "test/us-dataset-unit-composition-semantics.e2e.test.ts",
+  "test/us-dataset-unit-coordinator.e2e.test.ts",
+  "test/us-dataset-composition-measurements.e2e.test.ts",
+  "test/us-dataset-corrected-terminal-reader.e2e.test.ts",
 ];
 export const preparedServicesFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 export const preparedServicesCommand = `corepack pnpm --filter @markiro/api exec vitest run ${preparedServicesFiles.join(" ")} --maxWorkers=1`;
+export const ownerProvenanceDbCommand =
+  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1";
 export const preparedServicesJob = {
   "runs-on": "ubuntu-latest",
   needs: "isolation",
@@ -64,6 +77,11 @@ export const preparedServicesJob = {
       env: { US_TEST_DATABASE_URL: preparedServicesFixture },
       run: preparedServicesCommand,
     },
+    {
+      name: "Verify US owner provenance migration on a disposable database",
+      env: { US_TEST_DATABASE_URL: preparedServicesFixture },
+      run: ownerProvenanceDbCommand,
+    },
   ],
 };
 
@@ -108,7 +126,11 @@ export const preparedServicesJobBlock = `
       - name: Verify prepared Plan, dataset intent, Plan seed and Request creation transactions
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts --maxWorkers=1
+      - name: Verify US owner provenance migration on a disposable database
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1
 `;
 
 export function hasExactPreparedServicesOwner(workflow) {

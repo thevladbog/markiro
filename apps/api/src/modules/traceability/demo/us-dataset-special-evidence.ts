@@ -11,13 +11,15 @@ import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
 import { makeUsDatasetReferenceIdentity } from "./us-dataset-receiving-contract.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
-import { verifyUsDatasetReferences } from "./us-dataset-reference-verify.js";
+import { verifyUsDatasetReferencesCore } from "./us-dataset-reference-verify.js";
 import {
   datasetSpecialError,
   type UsDatasetSpecialLifecycleResult,
   type UsDatasetSpecialReceivingResult,
 } from "./us-dataset-special-contract.js";
 import type { UsDatasetSpecialStores } from "./us-dataset-special-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetReceivingDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export function specialEqual(
   a: unknown,
@@ -277,6 +279,23 @@ export async function verifySpecialBindings(
   revisions: readonly (typeof schema.traceabilityEvents.$inferSelect)[],
   stores: UsDatasetSpecialStores,
 ): Promise<void> {
+  return verifySpecialBindingsCore(
+    tx,
+    context,
+    original,
+    lifecycle,
+    revisions,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+export async function verifySpecialBindingsCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  original: UsDatasetSpecialReceivingResult,
+  lifecycle: UsDatasetSpecialLifecycleResult | null,
+  revisions: readonly (typeof schema.traceabilityEvents.$inferSelect)[],
+  stores: UsDatasetReceivingDependencies,
+): Promise<void> {
   const equal = (a: unknown, b: unknown) => specialEqual(a, b, original);
   const { tenantId, actorUserId } = context;
   const dependency = original.input.references;
@@ -290,7 +309,7 @@ export async function verifySpecialBindings(
   if (!reference?.receipt)
     throw datasetSpecialError("us_dataset_special_mismatch", "references", "receiving");
   equal(makeUsDatasetReferenceIdentity(dependency.datasetId, reference), dependency);
-  await verifyUsDatasetReferences(tx, context, reference.intent, reference.receipt, stores);
+  await verifyUsDatasetReferencesCore(tx, context, reference.intent, reference.receipt, stores);
   const bindings = parseUsDatasetReferenceResult(reference.receipt.result).bindings;
   const bound = (entries: readonly { key: string; id: string }[], key: string) =>
     entries.find((e) => e.key === key)?.id;

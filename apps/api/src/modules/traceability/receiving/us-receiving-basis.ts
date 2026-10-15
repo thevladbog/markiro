@@ -6,6 +6,20 @@ import { lotResponse } from "../lots/us-lot-support";
 import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
 import { unavailable } from "./us-receiving-persistence";
 import { assertReceivingRootsReadable } from "./us-receiving-chain";
+import type { UsDatasetTerminalPointRows } from "../demo/us-dataset-terminal-read-contract";
+
+export type ReceivingBasisReaders = Pick<UsDatasetTerminalPointRows, "lot">;
+
+async function freshBasisLot(tx: UsMasterDataTransaction, tenantId: string, lotId: string) {
+  const lots = schema.traceabilityLots;
+  const [lot] = await tx
+    .select()
+    .from(lots)
+    .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)));
+  return lot;
+}
+
+export const freshReceivingBasisReaders: ReceivingBasisReaders = { lot: freshBasisLot };
 
 /** Caller supplies one authorized repeatable-read transaction for token, count and page. */
 export async function readReceivingBasis(
@@ -14,13 +28,19 @@ export async function readReceivingBasis(
   lotId: string,
   query: ReceivingBasisQuery,
 ) {
-  const lots = schema.traceabilityLots,
-    events = schema.traceabilityEvents,
+  return readReceivingBasisCore(tx, tenantId, lotId, query, freshReceivingBasisReaders);
+}
+
+export async function readReceivingBasisCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  lotId: string,
+  query: ReceivingBasisQuery,
+  readers: ReceivingBasisReaders,
+) {
+  const events = schema.traceabilityEvents,
     items = schema.receivingEventItems;
-  const [lot] = await tx
-    .select()
-    .from(lots)
-    .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)));
+  const lot = await readers.lot(tx, tenantId, lotId);
   if (!lot) throw new NotFoundException({ code: "lot_not_found" });
   lotResponse(lot); // Corrupt business identity is unavailable, not a valid zero-support lot.
   // This counts Receiving support only, not Transformation origin or downstream effects.

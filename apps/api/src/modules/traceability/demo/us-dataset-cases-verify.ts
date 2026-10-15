@@ -13,9 +13,11 @@ import {
   parseUsDatasetCasesResult,
   usDatasetCasesRecordIds,
 } from "./us-dataset-cases-contract.js";
-import { prepareUsDatasetCases } from "./us-dataset-cases-prepare.js";
+import { prepareUsDatasetCasesCore } from "./us-dataset-cases-prepare.js";
 import { verifyUsDatasetCasesContent } from "./us-dataset-cases-verify-content.js";
 import type { UsDatasetVerifiedOrigin } from "./us-dataset-shipping-projection.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 export async function verifyUsDatasetCases(
   ...args: Parameters<typeof verifyUsDatasetCasesOrigin>
@@ -30,6 +32,24 @@ export async function verifyUsDatasetCasesOrigin(
   rawReceipt: UsDatasetReceipt,
   mode: "fresh" | "replay",
   stores: UsDatasetTransformationStores,
+): Promise<UsDatasetVerifiedOrigin> {
+  return verifyUsDatasetCasesOriginCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    mode,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function verifyUsDatasetCasesOriginCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  mode: "fresh" | "replay",
+  stores: UsDatasetTransformationDependencies,
 ): Promise<UsDatasetVerifiedOrigin> {
   // Obtain only the installed identifier, then use the existing target guard before
   // touching any caller evidence (including getters). No separate pool read.
@@ -54,7 +74,7 @@ export async function verifyUsDatasetCasesOrigin(
   };
   try {
     const result = parseUsDatasetCasesResult(receipt.result);
-    const prepared = await prepareUsDatasetCases(
+    const prepared = await prepareUsDatasetCasesCore(
       tx,
       context,
       result.input.references.datasetId,

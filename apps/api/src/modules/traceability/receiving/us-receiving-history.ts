@@ -10,22 +10,67 @@ import type { UsMasterDataTransaction } from "../master-data/us-master-data-supp
 import { readReceivingSavedInput, unavailable } from "./us-receiving-persistence";
 import type { ReceivingRootRow } from "./us-receiving-roots";
 import { assertReceivingRootsReadable } from "./us-receiving-chain";
+import type { RawEvent, RawReceivingRoot } from "../demo/us-dataset-terminal-read-contract";
 
 const events = schema.traceabilityEvents,
   roots = schema.receivingEventRoots;
 type Header = typeof events.$inferSelect;
+type ReceivingAnchor = { rootId: string; number: string; type: RawEvent["type"] };
 
-async function readRoot(tx: UsMasterDataTransaction, tenantId: string, id: string) {
+export type ReceivingHistoryReaders = Readonly<{
+  anchor(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    id: string,
+  ): Promise<ReceivingAnchor | undefined>;
+  root(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    id: string,
+  ): Promise<RawReceivingRoot | undefined>;
+  header(tx: UsMasterDataTransaction, tenantId: string, id: string): Promise<RawEvent | undefined>;
+}>;
+
+async function freshAnchor(tx: UsMasterDataTransaction, tenantId: string, id: string) {
   const [anchor] = await tx
     .select({ rootId: events.rootEventId, number: events.eventNumber, type: events.type })
     .from(events)
     .where(and(eq(events.tenantId, tenantId), eq(events.id, id)));
-  if (!anchor || anchor.type !== "receiving")
-    throw new NotFoundException({ code: "receiving_draft_not_found" });
+  return anchor;
+}
+
+async function freshRoot(tx: UsMasterDataTransaction, tenantId: string, id: string) {
   const [root] = await tx
     .select()
     .from(roots)
-    .where(and(eq(roots.tenantId, tenantId), eq(roots.id, anchor.rootId)));
+    .where(and(eq(roots.tenantId, tenantId), eq(roots.id, id)));
+  return root;
+}
+
+async function freshHeader(tx: UsMasterDataTransaction, tenantId: string, id: string) {
+  const [header] = await tx
+    .select()
+    .from(events)
+    .where(and(eq(events.tenantId, tenantId), eq(events.id, id)));
+  return header;
+}
+
+export const freshReceivingHistoryReaders: ReceivingHistoryReaders = {
+  anchor: freshAnchor,
+  root: freshRoot,
+  header: freshHeader,
+};
+
+async function readRootCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  id: string,
+  readers: ReceivingHistoryReaders,
+) {
+  const anchor = await readers.anchor(tx, tenantId, id);
+  if (!anchor || anchor.type !== "receiving")
+    throw new NotFoundException({ code: "receiving_draft_not_found" });
+  const root = await readers.root(tx, tenantId, anchor.rootId);
   if (!root || root.eventNumber !== anchor.number) throw unavailable();
   await assertReceivingRootsReadable(tx, tenantId, sql`r.id=${root.id}`);
   return root;
@@ -70,11 +115,17 @@ export async function readReceivingLiveRecord(
   tenantId: string,
   id: string,
 ) {
-  const root = await readRoot(tx, tenantId, id);
-  const [header] = await tx
-    .select()
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.id, id)));
+  return readReceivingLiveRecordCore(tx, tenantId, id, freshReceivingHistoryReaders);
+}
+
+export async function readReceivingLiveRecordCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  id: string,
+  readers: ReceivingHistoryReaders,
+) {
+  const root = await readRootCore(tx, tenantId, id, readers);
+  const header = await readers.header(tx, tenantId, id);
   if (!header) throw unavailable();
   const parsed = receivingLiveRecordSchema.safeParse({
     ...receivingRecordIdentity(header, root),
@@ -98,7 +149,17 @@ export async function readReceivingRevisions(
   id: string,
   query: ReceivingRevisionListQuery,
 ) {
-  const root = await readRoot(tx, tenantId, id);
+  return readReceivingRevisionsCore(tx, tenantId, id, query, freshReceivingHistoryReaders);
+}
+
+export async function readReceivingRevisionsCore(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  id: string,
+  query: ReceivingRevisionListQuery,
+  readers: ReceivingHistoryReaders,
+) {
+  const root = await readRootCore(tx, tenantId, id, readers);
   const { finalizationSnapshot, ...columns } = getTableColumns(events);
   void finalizationSnapshot; // History pages do not load every frozen payload.
   const items = schema.receivingEventItems,

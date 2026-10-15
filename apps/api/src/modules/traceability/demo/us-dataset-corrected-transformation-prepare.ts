@@ -12,9 +12,11 @@ import type { UsDatasetJournalStore } from "./us-dataset-journal.js";
 import { makeUsDatasetReferenceIdentity } from "./us-dataset-receiving-contract.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
 import { parseUsDatasetSpecialResult } from "./us-dataset-special-contract.js";
-import { verifyUsDatasetSpecial } from "./us-dataset-special-verify.js";
+import { verifyUsDatasetSpecialCore } from "./us-dataset-special-verify.js";
 import { lockUsDatasetTransformationRows } from "./us-dataset-transformation-locks.js";
 import type { UsDatasetTransformationStores } from "./us-dataset-transformation-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 
 /** Read-only authorization has already run; no implicit prerequisite installation. */
 export async function readUsDatasetCorrectedTransformationInput(
@@ -46,6 +48,21 @@ export async function prepareUsDatasetCorrectedTransformation(
   context: UsDatasetContext,
   intent: UsDatasetIntent,
   stores: UsDatasetTransformationStores,
+  known: UsDatasetCorrectedTransformationResult | null,
+) {
+  return prepareUsDatasetCorrectedTransformationCore(
+    tx,
+    context,
+    intent,
+    freshUsDatasetTerminalDependencies(stores),
+    known,
+  );
+}
+export async function prepareUsDatasetCorrectedTransformationCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  intent: UsDatasetIntent,
+  stores: UsDatasetTransformationDependencies,
   known: UsDatasetCorrectedTransformationResult | null,
 ) {
   const input = parseUsDatasetCorrectedTransformationInput(intent.input);
@@ -101,7 +118,7 @@ export async function prepareUsDatasetCorrectedTransformation(
     input.receivingOrigin.inputLots,
   );
   try {
-    await verifyUsDatasetSpecial(tx, context, amendment.intent, amendment.receipt, stores);
+    await verifyUsDatasetSpecialCore(tx, context, amendment.intent, amendment.receipt, stores);
   } catch (error) {
     if (
       error instanceof Error &&

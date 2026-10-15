@@ -23,7 +23,9 @@ import {
   type UsDatasetReceivingResult,
 } from "./us-dataset-receiving-contract.js";
 import { parseUsDatasetReferenceResult } from "./us-dataset-reference-contract.js";
-import { verifyUsDatasetReferences } from "./us-dataset-reference-verify.js";
+import { verifyUsDatasetReferencesCore } from "./us-dataset-reference-verify.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetReceivingDependencies } from "./us-dataset-terminal-read-contract.js";
 export type UsDatasetReceivingStores = Readonly<{
   journal: UsDatasetJournalStore;
   master: UsMasterDataStore;
@@ -48,6 +50,22 @@ export async function verifyUsDatasetReceivingResult(
   rawReceipt: UsDatasetReceipt,
   stores: UsDatasetReceivingStores,
 ): Promise<UsDatasetReceivingResult> {
+  return verifyUsDatasetReceivingResultCore(
+    tx,
+    context,
+    rawIntent,
+    rawReceipt,
+    freshUsDatasetTerminalDependencies(stores),
+  );
+}
+
+export async function verifyUsDatasetReceivingResultCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  rawIntent: UsDatasetIntent,
+  rawReceipt: UsDatasetReceipt,
+  stores: UsDatasetReceivingDependencies,
+): Promise<UsDatasetReceivingResult> {
   const intent = parseUsDatasetIntent(rawIntent);
   const receipt = parseUsDemoReceipt(rawReceipt);
   const result = parseUsDatasetReceivingResult(receipt.result);
@@ -65,14 +83,8 @@ export async function verifyUsDatasetReceivingResult(
   equal(receipt.resultDigest, canonicalExportDigest(result));
   const { tenantId, actorUserId } = context;
   const rootId = result.created.eventId;
-  const roots = schema.receivingEventRoots,
-    events = schema.traceabilityEvents;
   // Never discover and lock foreign roots through support rows: root -> revisions -> lots.
-  const [root] = await tx
-    .select()
-    .from(roots)
-    .where(and(eq(roots.tenantId, tenantId), eq(roots.id, rootId)))
-    .for("update");
+  const root = await stores.locks.receivingRoot(tx, tenantId, rootId);
   if (!root) throw mismatch();
   equal(
     {
@@ -90,24 +102,8 @@ export async function verifyUsDatasetReceivingResult(
       number: result.finalized.record.eventNumber,
     },
   );
-  const revisions = await tx
-    .select()
-    .from(events)
-    .where(and(eq(events.tenantId, tenantId), eq(events.rootEventId, rootId)))
-    .orderBy(asc(events.id))
-    .for("update");
-  if (revisions.length !== 1) throw mismatch();
-  const event = revisions[0];
-  if (
-    !event ||
-    event.id !== rootId ||
-    event.type !== "receiving" ||
-    event.status !== "finalized" ||
-    event.revision !== 1 ||
-    event.previousRevisionId !== null ||
-    event.supersededByEventId !== null
-  )
-    throw mismatch();
+  const event = await stores.locks.receivingRevision(tx, tenantId, rootId);
+  if (!event) throw mismatch();
   if (result.created.record.content.kind !== "draft") throw mismatch();
   const draft = result.created.record.content.draft;
   equal(
@@ -157,7 +153,7 @@ export async function verifyUsDatasetReceivingResult(
       ...draft,
       items: draft.items.map((line, index) => ({ ...line, lotId: result.lots[index]?.id })),
     });
-    await verifyUsDatasetReferences(
+    await verifyUsDatasetReferencesCore(
       tx,
       context,
       referenceStage.intent,
@@ -170,21 +166,11 @@ export async function verifyUsDatasetReceivingResult(
       if (!found) throw mismatch();
       return found.id;
     };
-    const documents = schema.referenceDocuments;
-    const lockedDocuments = await tx
-      .select({ id: documents.id })
-      .from(documents)
-      .where(
-        and(
-          eq(documents.tenantId, tenantId),
-          inArray(
-            documents.id,
-            result.documents.map(({ record }) => record.id),
-          ),
-        ),
-      )
-      .orderBy(asc(documents.id))
-      .for("share");
+    const lockedDocuments = await stores.locks.receivingDocuments(
+      tx,
+      tenantId,
+      result.documents.map(({ record }) => record.id),
+    );
     equal(lockedDocuments.length, 2);
     for (const saved of result.documents) {
       const definition = result.input.chain.documents.find(({ key }) => key === saved.key);

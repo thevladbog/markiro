@@ -10,6 +10,7 @@ import {
 } from "./support/cases-regression-owner.mjs";
 import {
   hasExactPreparedServicesOwner,
+  ownerProvenanceDbCommand,
   preparedServicesCommand,
   preparedServicesFiles,
   preparedServicesFixture,
@@ -39,11 +40,25 @@ const expectedFiles = [
   "test/us-case-demo-owned-application.e2e.test.ts",
   "test/us-dataset-journal-reader.e2e.test.ts",
   "test/us-dataset-shipping-prerequisites.e2e.test.ts",
+  "test/us-dataset-unit-composition.e2e.test.ts",
+  "test/us-owner-provenance-procedure.e2e.test.ts",
+  "test/us-owner-provenance-procedure-locks.e2e.test.ts",
+  "test/us-owner-provenance-adapter.e2e.test.ts",
+  "test/us-terminal-native-readers.e2e.test.ts",
+  "test/us-terminal-verification-routing.e2e.test.ts",
+  "test/us-terminal-closed-reader.e2e.test.ts",
+  "test/us-dataset-unit-composition-semantics.e2e.test.ts",
+  "test/us-dataset-unit-coordinator.e2e.test.ts",
+  "test/us-dataset-composition-measurements.e2e.test.ts",
+  "test/us-dataset-corrected-terminal-reader.e2e.test.ts",
 ];
+const expectedDbFile = "test/us-owner-provenance-migration.test.ts";
 const expectedFixture =
   "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
 const expectedCommand =
-  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1";
+  "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts --maxWorkers=1";
+const expectedDbCommand =
+  "corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1";
 const expectedJob = load(`jobs:
   dataset_prepared_services:
     runs-on: ubuntu-latest
@@ -83,7 +98,11 @@ const expectedJob = load(`jobs:
       - name: Verify prepared Plan, dataset intent, Plan seed and Request creation transactions
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts test/us-dataset-unit-composition.e2e.test.ts test/us-owner-provenance-procedure.e2e.test.ts test/us-owner-provenance-procedure-locks.e2e.test.ts test/us-owner-provenance-adapter.e2e.test.ts test/us-terminal-native-readers.e2e.test.ts test/us-terminal-verification-routing.e2e.test.ts test/us-terminal-closed-reader.e2e.test.ts test/us-dataset-unit-composition-semantics.e2e.test.ts test/us-dataset-unit-coordinator.e2e.test.ts test/us-dataset-composition-measurements.e2e.test.ts test/us-dataset-corrected-terminal-reader.e2e.test.ts --maxWorkers=1
+      - name: Verify US owner provenance migration on a disposable database
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/db exec vitest run test/us-owner-provenance-migration.test.ts --maxWorkers=1
 `).jobs.dataset_prepared_services;
 
 const source = readFileSync(".github/workflows/us-development.yml", "utf8");
@@ -119,12 +138,12 @@ function assertOwnership(all, sources = rawSources()) {
     "globally unique native job owner",
   );
   const steps = allJobs.flatMap(([, entry]) => entry.steps ?? []);
-  const ownerName = expectedJob.steps.at(-1).name;
-  assert.equal(
-    steps.filter((step) => step.name === ownerName).length,
-    1,
-    "globally unique named native selection",
-  );
+  for (const ownerName of expectedJob.steps.slice(-2).map((step) => step.name))
+    assert.equal(
+      steps.filter((step) => step.name === ownerName).length,
+      1,
+      "globally unique named native selection",
+    );
   for (const file of expectedFiles) {
     const filename = file.slice("test/".length).replaceAll(".", "\\.");
     const selector = new RegExp(`(?<![\\w.-])${filename}(?![\\w/.-])`, "g");
@@ -134,6 +153,12 @@ function assertOwnership(all, sources = rawSources()) {
       `${file} has exactly one explicit native selection`,
     );
   }
+  const dbSelector = /(?<![\w.-])us-owner-provenance-migration\.test\.ts(?![\w/.-])/g;
+  assert.equal(
+    steps.flatMap((step) => [...(step.run ?? "").matchAll(dbSelector)]).length,
+    1,
+    `${expectedDbFile} has exactly one explicit native selection`,
+  );
   assert.deepEqual(job, expectedJob, "complete unconditional failure-propagating native job");
   assert.deepEqual(
     Object.keys(w.jobs),
@@ -151,16 +176,15 @@ function assertOwnership(all, sources = rawSources()) {
 test("prepared services have an explicit native owner", () => {
   assert.deepEqual(preparedServicesFiles, expectedFiles);
   assert.equal(preparedServicesCommand, expectedCommand);
+  assert.equal(ownerProvenanceDbCommand, expectedDbCommand);
   assert.equal(preparedServicesFixture, expectedFixture);
   assert.deepEqual(preparedServicesJob, expectedJob);
   const job = workflow.jobs.dataset_prepared_services;
   assert.ok(job, "prepared services dedicated native job is present");
   assert.equal(job.needs, "isolation");
-  const owner = job.steps.at(-1);
-  assert.equal(
-    owner.run,
-    "corepack pnpm --filter @markiro/api exec vitest run test/us-plan-draft-transaction.e2e.test.ts test/us-dataset-prepared-intent.e2e.test.ts test/us-dataset-plan-seed.e2e.test.ts test/us-request-create-transaction.e2e.test.ts test/us-case-demo-owned-application.e2e.test.ts test/us-dataset-journal-reader.e2e.test.ts test/us-dataset-shipping-prerequisites.e2e.test.ts --maxWorkers=1",
-  );
+  const owner = job.steps[9];
+  assert.equal(owner.run, expectedCommand);
+  assert.equal(job.steps[10].run, expectedDbCommand);
   assertOwnership(readWorkflows());
 });
 
@@ -201,6 +225,8 @@ test("successful contracts build precedes every Node tool and API build precedes
   );
   assert.equal(steps[9].run, expectedCommand);
   assert.deepEqual(steps[9].env, { US_TEST_DATABASE_URL: expectedFixture });
+  assert.equal(steps[10].run, expectedDbCommand);
+  assert.deepEqual(steps[10].env, { US_TEST_DATABASE_URL: expectedFixture });
   assert.deepEqual(job.services, workflow.jobs.isolation.services);
   assertOwnership(readWorkflows());
 });
@@ -232,6 +258,11 @@ test("native gates skip aggregate collection without the dedicated isolated fixt
     const path = `apps/api/${file}`;
     assertNativeFixtureGate(readFileSync(path, "utf8"), file, expectedFixture);
   }
+  assertNativeFixtureGate(
+    readFileSync(`packages/db/${expectedDbFile}`, "utf8"),
+    expectedDbFile,
+    expectedFixture,
+  );
   assert.equal(
     JSON.parse(readFileSync("apps/api/package.json", "utf8")).scripts.test,
     "vitest run",
@@ -451,12 +482,12 @@ test("complete ownership rejects missing, wrong, duplicate, foreign and bypassed
       [
         `step ${index} omitted`,
         ({ j }) => j.steps.splice(index, 1),
-        index === 9 ? "globally unique named native selection" : exact,
+        index >= 9 ? "globally unique named native selection" : exact,
       ],
       [
         `step ${index} duplicate`,
         ({ j }) => j.steps.push(structuredClone(step)),
-        index === 9 ? "globally unique named native selection" : exact,
+        index >= 9 ? "globally unique named native selection" : exact,
       ],
     );
     if (index < 9)
@@ -555,6 +586,27 @@ test("complete ownership rejects missing, wrong, duplicate, foreign and bypassed
         ]);
     }
   }
+  for (const [label, mutate] of [
+    [
+      "missing DB selector",
+      ({ j }) => {
+        j.steps[10].run = expectedDbCommand.replace(expectedDbFile, "");
+      },
+    ],
+    [
+      "duplicate DB selector",
+      ({ j }) => {
+        j.steps[10].run += ` ${expectedDbFile}`;
+      },
+    ],
+    [
+      "foreign DB selector",
+      ({ all }) => {
+        all.other = { jobs: { other: { steps: [{ run: expectedDbCommand }] } } };
+      },
+    ],
+  ])
+    mutations.push([label, mutate, `${expectedDbFile} has exactly one explicit native selection`]);
   for (const run of [
     `echo '${preparedServicesCommand}'`,
     `# ${preparedServicesCommand}`,
@@ -582,7 +634,7 @@ test("complete ownership rejects missing, wrong, duplicate, foreign and bypassed
     const all = readWorkflows();
     const w = all["us-development.yml"];
     const j = w.jobs[preparedServicesJobId];
-    const o = j.steps.at(-1);
+    const o = j.steps[9];
     mutate({ all, w, j, o });
     assert.throws(
       () => assertOwnership(all),
@@ -754,7 +806,25 @@ test("malformed prepared additions survive Trace and parallel historical normali
 test("every native fixture gate denies environment substitution, mutable and shadowed aliases", (t) => {
   let count = 0;
   for (const file of expectedFiles) {
-    const text = readFileSync(`apps/api/${file}`, "utf8");
+    let text = readFileSync(`apps/api/${file}`, "utf8");
+    if (file === "test/us-terminal-native-readers.e2e.test.ts") {
+      // This existing suite uses the equally strict direct environment predicate.
+      // Verify its actual bytes, then exercise the complete alias mutation matrix
+      // against the equivalent local binding without changing that suite's source.
+      assertNativeFixtureGate(text, file, expectedFixture);
+      const direct = "describe.skipIf(!process.env.US_TEST_DATABASE_URL)";
+      assert.ok(text.includes(direct), `${file} direct mutation anchor exists`);
+      assert.throws(() =>
+        assertNativeFixtureGate(
+          text.replace(direct, "describe.skipIf(!process.env.DATABASE_URL)"),
+          file,
+          expectedFixture,
+        ),
+      );
+      text =
+        "const base = process.env.US_TEST_DATABASE_URL;\n" +
+        text.replace(direct, "describe.skipIf(!base)");
+    }
     const alias = file.includes("request-create") ? "url" : "base";
     const binding = `const ${alias} = process.env.US_TEST_DATABASE_URL;`;
     assert.ok(text.includes(binding), `${file} fixture mutation anchor exists`);

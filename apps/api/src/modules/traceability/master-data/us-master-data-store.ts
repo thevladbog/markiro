@@ -17,8 +17,7 @@ import {
   type UsLocation,
   type UsParty,
 } from "@markiro/platform-contracts";
-import { and, arrayContains, asc, eq, ilike, inArray, or } from "drizzle-orm";
-import { orderedMasterDataRows, parseMasterDataIds } from "./us-master-data-batch";
+import { and, arrayContains, asc, eq, ilike, or } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import {
   authorizeUsMasterData,
@@ -33,6 +32,13 @@ import {
   type UsMasterDataTransaction,
   type UsPartyList,
 } from "./us-master-data-support";
+import {
+  freshUsMasterDataReaders,
+  readUsLocationCore,
+  readUsLocationsCore,
+  readUsPartiesCore,
+  readUsPartyCore,
+} from "./us-master-data-read";
 
 /** US-only tenant store. Actor and tenant identifiers are supplied only by the
  * verified server session boundary. */
@@ -78,20 +84,7 @@ export class UsMasterDataStore {
     actorUserId: string,
     id: unknown,
   ): Promise<UsParty> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const partyId = parseMasterDataInput(platformUuidSchema, id);
-    const [row] = await tx
-      .select()
-      .from(schema.traceabilityParties)
-      .where(
-        and(
-          eq(schema.traceabilityParties.tenantId, tenantId),
-          eq(schema.traceabilityParties.id, partyId),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new NotFoundException({ code: "party_not_found" });
-    return partyResponse(row);
+    return readUsPartyCore(tx, tenantId, actorUserId, id, freshUsMasterDataReaders);
   }
 
   async getPartiesInTransaction(
@@ -100,19 +93,7 @@ export class UsMasterDataStore {
     actorUserId: string,
     inputIds: unknown,
   ): Promise<UsParty[]> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const ids = parseMasterDataIds(inputIds);
-    if (ids.length === 0) return [];
-    const rows = await tx
-      .select()
-      .from(schema.traceabilityParties)
-      .where(
-        and(
-          eq(schema.traceabilityParties.tenantId, tenantId),
-          inArray(schema.traceabilityParties.id, ids),
-        ),
-      );
-    return orderedMasterDataRows(ids, rows, (row) => row.id, "party_not_found").map(partyResponse);
+    return readUsPartiesCore(tx, tenantId, actorUserId, inputIds, freshUsMasterDataReaders);
   }
 
   async createParty(
@@ -300,20 +281,7 @@ export class UsMasterDataStore {
     actorUserId: string,
     id: unknown,
   ): Promise<UsLocation> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const locationId = parseMasterDataInput(platformUuidSchema, id);
-    const [row] = await tx
-      .select()
-      .from(schema.traceabilityLocations)
-      .where(
-        and(
-          eq(schema.traceabilityLocations.tenantId, tenantId),
-          eq(schema.traceabilityLocations.id, locationId),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new NotFoundException({ code: "location_not_found" });
-    return locationResponse(row);
+    return readUsLocationCore(tx, tenantId, actorUserId, id, freshUsMasterDataReaders);
   }
 
   async getLocationsInTransaction(
@@ -322,21 +290,7 @@ export class UsMasterDataStore {
     actorUserId: string,
     inputIds: unknown,
   ): Promise<UsLocation[]> {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    const ids = parseMasterDataIds(inputIds);
-    if (ids.length === 0) return [];
-    const rows = await tx
-      .select()
-      .from(schema.traceabilityLocations)
-      .where(
-        and(
-          eq(schema.traceabilityLocations.tenantId, tenantId),
-          inArray(schema.traceabilityLocations.id, ids),
-        ),
-      );
-    return orderedMasterDataRows(ids, rows, (row) => row.id, "location_not_found").map(
-      locationResponse,
-    );
+    return readUsLocationsCore(tx, tenantId, actorUserId, inputIds, freshUsMasterDataReaders);
   }
 
   async createLocation(

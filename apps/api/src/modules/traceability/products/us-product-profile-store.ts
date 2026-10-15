@@ -2,7 +2,6 @@ import { isDeepStrictEqual } from "node:util";
 import {
   BadRequestException,
   ConflictException,
-  NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
@@ -12,8 +11,7 @@ import {
   putProductTraceabilityProfileSchema,
   type ProductTraceabilityProfile,
 } from "@markiro/platform-contracts";
-import { and, asc, eq, inArray } from "drizzle-orm";
-import { orderedMasterDataRows, parseMasterDataIds } from "../master-data/us-master-data-batch";
+import { and, eq } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   parseMasterDataInput,
@@ -23,9 +21,14 @@ import {
   canonicalPackageSize,
   coverageFields,
   editableProfile,
-  profileDefaults,
   storedProfileResponse,
 } from "./us-product-profile-support";
+import {
+  freshUsProductProfileReaders,
+  readCurrentUsProductProfile,
+  readUsProductProfileCore,
+  readUsProductProfilesCore,
+} from "./us-product-profile-read";
 
 export class UsProductProfileStore {
   constructor(private readonly db: Db) {}
@@ -47,9 +50,13 @@ export class UsProductProfileStore {
     actorUserId: string,
     inputId: unknown,
   ): Promise<ProductTraceabilityProfile> {
-    const productId = parseMasterDataInput(platformUuidSchema, inputId);
-    const profileCode = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    return this.currentProfile(tx, tenantId, productId, profileCode, "share");
+    return readUsProductProfileCore(
+      tx,
+      tenantId,
+      actorUserId,
+      inputId,
+      freshUsProductProfileReaders,
+    );
   }
 
   async getProfilesInTransaction(
@@ -58,36 +65,13 @@ export class UsProductProfileStore {
     actorUserId: string,
     inputIds: unknown,
   ): Promise<ProductTraceabilityProfile[]> {
-    const ids = parseMasterDataIds(inputIds);
-    const profileCode = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-    if (ids.length === 0) return [];
-    // Product locks serialize first profile inserts too, in a deterministic order.
-    const products = await tx
-      .select({ id: schema.products.id, name: schema.products.name })
-      .from(schema.products)
-      .where(
-        and(
-          eq(schema.products.tenantId, tenantId),
-          inArray(schema.products.id, [...new Set(ids)].sort()),
-        ),
-      )
-      .orderBy(asc(schema.products.id))
-      .for("share");
-    const ordered = orderedMasterDataRows(ids, products, (row) => row.id, "product_not_found");
-    const rows = await tx
-      .select()
-      .from(schema.productTraceabilityProfiles)
-      .where(
-        and(
-          eq(schema.productTraceabilityProfiles.tenantId, tenantId),
-          inArray(schema.productTraceabilityProfiles.productId, ids),
-        ),
-      );
-    const byProduct = new Map(rows.map((row) => [row.productId, row]));
-    return ordered.map((product) => {
-      const row = byProduct.get(product.id);
-      return row ? storedProfileResponse(row, profileCode) : profileDefaults(product);
-    });
+    return readUsProductProfilesCore(
+      tx,
+      tenantId,
+      actorUserId,
+      inputIds,
+      freshUsProductProfileReaders,
+    );
   }
 
   async putProfile(
@@ -212,23 +196,13 @@ export class UsProductProfileStore {
     profileCode: string,
     lock: "share" | "update",
   ): Promise<ProductTraceabilityProfile> {
-    const [product] = await tx
-      .select({ id: schema.products.id, name: schema.products.name })
-      .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)))
-      .limit(1)
-      .for(lock);
-    if (!product) throw new NotFoundException({ code: "product_not_found" });
-    const [row] = await tx
-      .select()
-      .from(schema.productTraceabilityProfiles)
-      .where(
-        and(
-          eq(schema.productTraceabilityProfiles.tenantId, tenantId),
-          eq(schema.productTraceabilityProfiles.productId, productId),
-        ),
-      )
-      .limit(1);
-    return row ? storedProfileResponse(row, profileCode) : profileDefaults(product);
+    return readCurrentUsProductProfile(
+      tx,
+      tenantId,
+      productId,
+      profileCode,
+      lock,
+      freshUsProductProfileReaders,
+    );
   }
 }

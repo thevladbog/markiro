@@ -343,7 +343,7 @@ describe.skipIf(!base)("standalone dataset journal reader", () => {
         journal.readStages(context, header.id, requests),
       );
       expect(measured.value).toEqual([captured]);
-      expect(measured.count).toBe(12);
+      expect(measured.count).toBe(8);
       console.info("Standalone reader actual forwarding", {
         count: measured.count,
         durationMs: measured.durationMs,
@@ -385,7 +385,7 @@ describe.skipIf(!base)("standalone dataset journal reader", () => {
       expect(
         statements.filter((statement) => /from\s+"traceability_demo_datasets"/i.test(statement)),
       ).toHaveLength(1);
-      expect(statements).toHaveLength(12);
+      expect(statements).toHaveLength(8);
       expect(await f.snapshot()).toEqual(before);
     }),
   );

@@ -17,6 +17,8 @@ import {
 import type { UsDemoTransaction } from "./us-demo-atomic-stage-contract.js";
 import type { UsDatasetContext } from "./us-dataset-contract.js";
 import type { UsDatasetJournalStore } from "./us-dataset-journal.js";
+import { freshUsDatasetTerminalDependencies } from "./us-dataset-terminal-read-fresh.js";
+import type { UsDatasetTransformationDependencies } from "./us-dataset-terminal-read-contract.js";
 import { assertBoundedSyntheticJson } from "./us-demo-journal-contract.js";
 import {
   makeUsDatasetReferenceIdentity,
@@ -49,8 +51,24 @@ export async function verifyUsDatasetShippingOriginStatus(
   expected: UsDatasetTransformationResult,
   current: TraceabilityLot,
 ): Promise<void> {
+  return verifyUsDatasetShippingOriginStatusCore(
+    tx,
+    context,
+    freshUsDatasetTerminalDependencies({ journal }),
+    expected,
+    current,
+  );
+}
+
+export async function verifyUsDatasetShippingOriginStatusCore(
+  tx: UsDemoTransaction,
+  context: UsDatasetContext,
+  stores: Pick<UsDatasetTransformationDependencies, "journal" | "points">,
+  expected: UsDatasetTransformationResult,
+  current: TraceabilityLot,
+): Promise<void> {
   // Current actual target and owner are checked before any caller evidence field.
-  const header = await journal.readHeaderInTransaction(tx, context);
+  const header = await stores.journal.readHeaderInTransaction(tx, context);
   if (!header) throw new Error("us_dataset_conflict");
   const result = parseUsDatasetTransformationResult(expected);
   const unitKey = result.input.chain.unitKey;
@@ -71,17 +89,13 @@ export async function verifyUsDatasetShippingOriginStatus(
   equal(lot.updatedBy, context.actorUserId);
   equal(original.createdBy, context.actorUserId);
   equal(result.input.references.datasetId, header.id);
-  const [references, receiving, transformation, shipping] = await journal.readStagesInTransaction(
-    tx,
-    context,
-    header.id,
-    [
+  const [references, receiving, transformation, shipping] =
+    await stores.journal.readStagesInTransaction(tx, context, header.id, [
       { unitKey: "references", stage: "references" },
       { unitKey: unitKey, stage: "receiving" },
       { unitKey: unitKey, stage: "transformation" },
       { unitKey: unitKey, stage: "shipping" },
-    ],
-  );
+    ]);
   if (!references?.receipt || !receiving?.receipt || !transformation?.receipt || !shipping)
     throw fail();
   equal(transformation.receipt.result, result);
@@ -194,11 +208,7 @@ export async function verifyUsDatasetShippingOriginStatus(
       const definition = input.chain.documents.find((entry) => entry.input.number === number);
       const documentId = created.draft.documentIds[position];
       if (!definition || !documentId) throw fail();
-      const table = schema.referenceDocuments;
-      const [document] = await tx
-        .select()
-        .from(table)
-        .where(and(eq(table.tenantId, tenantId), eq(table.id, documentId)));
+      const document = await stores.points.document(tx, tenantId, documentId);
       if (!document) throw fail();
       equal(
         {
