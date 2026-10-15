@@ -75,7 +75,12 @@ export function alertFailure(error: unknown): AlertFailure {
 }
 
 /** The features whose refusal the office says by name (license spec §4.7, ЛО23). */
-const NAMED_FEATURES: ReadonlySet<string> = new Set(["labelEditor", "pallets", "handheld"]);
+const NAMED_FEATURES: ReadonlySet<string> = new Set([
+  "labelEditor",
+  "pallets",
+  "handheld",
+  "customLogo",
+]);
 
 /**
  * A write the site's license refuses (plan ЛЦ-3): `conflict` on `seat_limit`

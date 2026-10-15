@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { MonoBitmap } from "@markiro/domain";
@@ -8,6 +8,7 @@ import { Alert, Button, Card, FileDropZone } from "@markiro/ui";
 import type { OrgLogoState } from "../../host/protocol.js";
 import { decodeLogoFile, LOGO_FILE_TYPES, logoFromWire, logoToWire } from "../../labels/logo.js";
 import { useCan } from "../access.js";
+import { useLogoUploadLocked } from "../branding.js";
 import { alertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -33,6 +34,8 @@ const LOGO_ACCEPT = LOGO_FILE_TYPES.join(",");
 export function OrgLogoCard() {
   const { t } = useTranslation();
   const canEdit = useCan("editReference");
+  const locked = useLogoUploadLocked();
+  const lockNoteId = useId();
   const queryClient = useQueryClient();
   const state = useOfficeQuery(officeKeys.orgLogo, (api, token) => api.getOrgLogo(token));
   const put = useOfficeMutation((api, token, bitmap: MonoBitmap) =>
@@ -123,18 +126,26 @@ export function OrgLogoCard() {
       )}
       {canEdit ? (
         <>
-          <FileDropZone
-            compact
-            label={t(logo === null ? "office.org.logo.upload" : "office.org.logo.replace")}
-            accept={LOGO_ACCEPT}
-            busy={put.isPending}
-            onFile={(file) => void choose(file)}
-            onRejected={() => {
-              pick.current += 1;
-              setStaged(null);
-              setMessage({ tone: "error", text: t("office.org.logo.errors.unsupported_type") });
-            }}
-          />
+          {locked && (
+            <p id={lockNoteId} className="office-note" tabIndex={0}>
+              {t("office.org.logo.licenseLocked")}
+            </p>
+          )}
+          <div role="group" aria-describedby={locked ? lockNoteId : undefined}>
+            <FileDropZone
+              compact
+              disabled={locked}
+              label={t(logo === null ? "office.org.logo.upload" : "office.org.logo.replace")}
+              accept={LOGO_ACCEPT}
+              busy={put.isPending}
+              onFile={(file) => void choose(file)}
+              onRejected={() => {
+                pick.current += 1;
+                setStaged(null);
+                setMessage({ tone: "error", text: t("office.org.logo.errors.unsupported_type") });
+              }}
+            />
+          </div>
           <div className="standalone-form__actions">
             {logo !== null && (
               <Button

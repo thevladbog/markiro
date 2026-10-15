@@ -17,5 +17,12 @@ export function logoWriteKey(error: unknown): string {
   if (error instanceof HostError && error.code === "validation_failed") {
     return "office.org.logo.errors.rejected";
   }
+  if (
+    error instanceof HostError &&
+    error.code === "conflict" &&
+    error.details["constraint"] === "feature_disabled"
+  ) {
+    return "office.about.license.refusals.feature.customLogo";
+  }
   return errorMessageKey(error);
 }

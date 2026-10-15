@@ -44,6 +44,20 @@ export function useCustomBranding(): { settled: boolean; allowed: boolean } {
 }
 
 /**
+ * Whether the logo upload is locked by the license: only a license that was
+ * READ and lacks `customLogo` locks it (a courtesy: the host still refuses the
+ * write with `feature_disabled`). While the license is loading, or when it
+ * cannot be read, nothing is locked: an unknown state never blocks (the soft
+ * enforcement), and the lock does not flash while loading.
+ */
+export function useLogoUploadLocked(): boolean {
+  const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token), {
+    staleTime: LICENSE_STALE_MS,
+  });
+  return license.data !== undefined && !customBrandingAllowed(license.data);
+}
+
+/**
  * The organization's print logo as a PNG data URL for a printed form, read
  * afresh at the press: `null` when the license does not allow custom
  * branding, when the organization has no logo, and when either read fails —

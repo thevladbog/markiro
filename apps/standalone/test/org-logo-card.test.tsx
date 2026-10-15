@@ -13,6 +13,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { ACTIVE_LICENSE, licenseOf } from "./support/license.js";
 
 import type * as LogoModule from "../src/labels/logo.js";
 
@@ -534,5 +535,80 @@ describe("removing the logo", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Убрать" }));
     await screen.findByText("Логотип убран: новые смены напечатают логотип Маркиро.");
     expect(screen.queryByRole("img", { name: "Новый логотип для печати" })).toBeNull();
+  });
+});
+
+describe("the logo upload and the license (customLogo)", () => {
+  const NO_LOGO_LICENSE = licenseOf({
+    features: { ...ACTIVE_LICENSE.features, customLogo: false },
+  });
+  const LOCK_TEXT =
+    "Загрузка логотипа требует отдельной лицензии. Загруженный ранее логотип остаётся и печатается как раньше.";
+
+  it("disables the upload without customLogo and explains it in a focusable text the zone is described by", async () => {
+    const fake = session(null);
+    fake.api.getLicense.mockResolvedValue(NO_LOGO_LICENSE);
+    await openProfile(fake);
+    const note = await screen.findByText(LOCK_TEXT);
+    expect(note.getAttribute("tabindex")).toBe("0");
+    const zone = screen.getByRole("button", { name: "Загрузить логотип" });
+    expect(zone.getAttribute("aria-disabled")).toBe("true");
+    const group = zone.closest("[aria-describedby]");
+    expect(group?.getAttribute("aria-describedby")).toBe(note.id);
+    expect(picker().disabled).toBe(true);
+  });
+
+  it("keeps an uploaded logo showing and removable without customLogo", async () => {
+    const fake = session(STORED);
+    fake.api.getLicense.mockResolvedValue(NO_LOGO_LICENSE);
+    await openProfile(fake);
+    await screen.findByText(LOCK_TEXT);
+    expect(screen.getByRole("img", { name: "Логотип для печати" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Убрать логотип" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Заменить логотип" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+  });
+
+  it("leaves the upload enabled with customLogo", async () => {
+    await openProfile(session(null));
+    expect(screen.queryByText(LOCK_TEXT)).toBeNull();
+    expect(picker().disabled).toBe(false);
+  });
+
+  it("does not lock while the license is loading, and does not lock when it cannot be read", async () => {
+    const pending = session(null);
+    pending.api.getLicense.mockReturnValue(new Promise(() => {}));
+    await openProfile(pending);
+    expect(screen.queryByText(LOCK_TEXT)).toBeNull();
+    expect(picker().disabled).toBe(false);
+  });
+
+  it("does not lock when the license cannot be read", async () => {
+    const broken = session(null);
+    broken.api.getLicense.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    await openProfile(broken);
+    await waitFor(() => expect(broken.api.getLicense).toHaveBeenCalled());
+    expect(screen.queryByText(LOCK_TEXT)).toBeNull();
+    expect(picker().disabled).toBe(false);
+  });
+
+  it("words a host feature_disabled refusal of the logo as the missing license", async () => {
+    const fake = session(null);
+    fake.api.putOrgLogo.mockRejectedValueOnce(
+      api("conflict", { constraint: "feature_disabled", feature: "customLogo" }),
+    );
+    vi.mocked(decodeLogoFile).mockResolvedValueOnce(ONE_DOT);
+    await openProfile(fake);
+    pick(png());
+    await screen.findByRole("img", { name: "Новый логотип для печати" });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить логотип" }));
+    expect(
+      await screen.findByText(
+        /Эта возможность не входит в лицензию площадки: свой логотип. Загрузка логотипа требует отдельной лицензии/,
+      ),
+    ).toBeTruthy();
   });
 });
