@@ -33,6 +33,7 @@ export const SAAS_ENTITLEMENT_KEYS = [
   "inventory",
   "commerceMl",
   "handheld",
+  "customLogo",
 ] as const;
 export type SaasEntitlementKey = (typeof SAAS_ENTITLEMENT_KEYS)[number];
 
@@ -201,6 +202,7 @@ export const planEntitlements = pgTable(
     inventoryEnabled: boolean("inventory_enabled"),
     commerceMlEnabled: boolean("commerce_ml_enabled"),
     handheldEnabled: boolean("handheld_enabled"),
+    customLogoEnabled: boolean("custom_logo_enabled"),
     demoDurationDays: integer("demo_duration_days"),
   },
   (table) => [
@@ -258,7 +260,7 @@ export const addonEntitlements = pgTable(
     check(
       "addon_entitlements_key_shape_check",
       sql`(${table.entitlementKey}::text in ('lines', 'stations', 'kiosks', 'cabinetUsers') and ${table.quotaIncrement} is not null)
-        or (${table.entitlementKey}::text in ('labelEditor', 'publicApi', 'pallets', 'chzIntegration', 'inventory', 'commerceMl', 'handheld') and ${table.quotaIncrement} is null and ${table.featureEnabled} = true)`,
+        or (${table.entitlementKey}::text in ('labelEditor', 'publicApi', 'pallets', 'chzIntegration', 'inventory', 'commerceMl', 'handheld', 'customLogo') and ${table.quotaIncrement} is null and ${table.featureEnabled} = true)`,
     ),
   ],
 );

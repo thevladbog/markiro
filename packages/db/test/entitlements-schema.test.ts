@@ -25,6 +25,7 @@ describe("P1 entitlement persistence", () => {
       schema.planEntitlements.inventoryEnabled,
       schema.planEntitlements.commerceMlEnabled,
       schema.planEntitlements.handheldEnabled,
+      schema.planEntitlements.customLogoEnabled,
       schema.catalogItemVersions.lifecyclePolicyId,
     ]) {
       expect(column.notNull).toBe(false);
@@ -43,6 +44,7 @@ describe("P1 entitlement persistence", () => {
       "inventory",
       "commerceMl",
       "handheld",
+      "customLogo",
     ]);
   });
   it("pins source and preview subscriptions and results to their tenant", () => {

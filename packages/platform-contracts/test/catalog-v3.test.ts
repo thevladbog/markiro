@@ -18,6 +18,7 @@ const plan = {
   inventoryEnabled: true,
   commerceMlEnabled: false,
   handheldEnabled: true,
+  customLogoEnabled: false,
 };
 const legacyPlan = {
   ...p0,
@@ -25,6 +26,7 @@ const legacyPlan = {
   inventoryEnabled: null,
   commerceMlEnabled: null,
   handheldEnabled: null,
+  customLogoEnabled: null,
 };
 const fields = {
   nameRu: "Тариф",
@@ -70,6 +72,7 @@ const effects = [
   { key: "inventory", featureEnabled: true },
   { key: "commerceMl", featureEnabled: true },
   { key: "handheld", featureEnabled: true },
+  { key: "customLogo", featureEnabled: true },
 ];
 
 describe("strict negotiated commercial V3", () => {
