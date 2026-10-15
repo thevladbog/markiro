@@ -746,4 +746,40 @@
     <string name="pallet_refused_no_template">No pallet label template — set one in the cabinet</string>
     <string name="pallet_refused_no_issuer">The organisation has no GLN — the pallet cannot be numbered</string>
     <string name="pallet_refused_unavailable">Could not close the pallet — try again</string>
+
+    <!-- Pairing with an on-site host (Автоном), plan ТСД-А С4 -->
+    <string name="host_pairing_source_title">Where to pair the device</string>
+    <string name="host_pairing_source_cloud">Markiro cloud</string>
+    <string name="host_pairing_source_host">On-site server (Standalone)</string>
+    <string name="host_pairing_title">Pair with the on-site server</string>
+    <string name="host_pairing_repair_title">Pair again</string>
+    <string name="host_pairing_hint">Enter the address of the computer running Markiro Standalone and the code from the office. Or press the trigger and scan the pairing barcode.</string>
+    <string name="host_pairing_address">Server address (for example, 192.168.1.10)</string>
+    <string name="host_pairing_code">Pairing code</string>
+    <string name="host_pairing_continue">Continue</string>
+    <string name="host_pairing_verify_title">Compare the fingerprint</string>
+    <string name="host_pairing_verify_hint">Compare it with the fingerprint on the office screen. The code is sent only if they match.</string>
+    <string name="host_pairing_verify_changed">The server\'s certificate has changed. Do not confirm unless the office replaced the computer or restored data from a backup.</string>
+    <string name="host_pairing_match">Matches</string>
+    <string name="host_pairing_no_match">Does not match</string>
+    <string name="host_pairing_binding">Loading reference data…</string>
+    <string name="host_pairing_success">Device paired</string>
+    <string name="host_pairing_error_title">Pairing failed</string>
+    <string name="host_pairing_retry_sync">Retry loading</string>
+    <string name="host_pairing_error_address_invalid">An address is four numbers from 0 to 255, for example 192.168.1.10.</string>
+    <string name="host_pairing_error_code_invalid">The code has 10 characters: digits and Latin letters without U. Check it on the office screen.</string>
+    <string name="host_pairing_error_unreachable">The server does not answer. Check Wi-Fi and the address. The code was not used.</string>
+    <string name="host_pairing_error_timeout">The server takes too long to answer. Check the network and try again. The code was not used.</string>
+    <string name="host_pairing_error_not_a_host">This address is not answered by a Markiro Standalone server.</string>
+    <string name="host_pairing_error_host_too_old">The on-site server is older than this app. Update Markiro Standalone on the computer.</string>
+    <string name="host_pairing_error_app_too_old">The server is newer than this app. Update the app on the device.</string>
+    <string name="host_pairing_error_no_address_matches">No address in the barcode answers with that certificate. The code was not sent.</string>
+    <string name="host_pairing_error_pairing_invalid">The code was not accepted. Issue a new code in the office.</string>
+    <string name="host_pairing_error_pairing_expired">The code has expired. Issue a new code in the office.</string>
+    <string name="host_pairing_error_rate_limited">Too many attempts. Wait and issue a new code.</string>
+    <string name="host_pairing_error_seat_limit">The license has no free seats for handhelds.</string>
+    <string name="host_pairing_error_feature_disabled">Handheld support is not enabled in the office.</string>
+    <string name="host_pairing_error_certificate_mismatch">The server presented a different certificate than at the check. The code was not sent.</string>
+    <string name="host_pairing_error_other">Could not pair the device. Try again.</string>
+    <string name="host_pairing_error_sync_failed">The device is paired, but reference data did not load. Retry loading. No new code is needed.</string>
 </resources>

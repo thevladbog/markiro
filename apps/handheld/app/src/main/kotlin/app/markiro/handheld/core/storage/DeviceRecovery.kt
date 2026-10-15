@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -28,8 +30,19 @@ import java.util.UUID
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-data class DeviceOwner(val serverOrigin: String, val tenantId: String, val deviceId: String, val kind: String)
+data class DeviceOwner(
+    val serverOrigin: String, val tenantId: String, val deviceId: String, val kind: String,
+    /** The pinned certificate fingerprint of a host owner (plan ТСД-А, С4); `null` for the cloud, and then absent from the stored JSON. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val pinSha256: String? = null,
+)
+/** The same device and server, whatever certificate it was paired with: a re-pairing may be allowed to change the pin. */
+fun DeviceOwner.sameDevice(other: DeviceOwner) = copy(pinSha256 = null) == other.copy(pinSha256 = null)
+
+/** What a pairing with a host adds to a publication: the pin, the host and the addresses of the payload (active one first). */
+@Serializable
+data class HostPairing(val pinSha256: String, val hostId: String, val addresses: List<String>)
 enum class RecoveryPhase { UNINITIALIZED, UNPAIRED, ACTIVE, SEALING, SEALED, RESTORING, OWNER_UNRESOLVED }
 data class RecoveryState(val phase: RecoveryPhase = RecoveryPhase.UNINITIALIZED, val owner: DeviceOwner? = null, val generation: Long = 0)
 data class GenerationToken(val owner: DeviceOwner, val generation: Long)
@@ -45,7 +58,7 @@ data class DeviceRecoveryEntity(
     val pinSha256: String? = null,
 ) {
     fun owner(): DeviceOwner? = if (serverOrigin != null && tenantId != null && deviceId != null && kind != null) {
-        DeviceOwner(serverOrigin, tenantId, deviceId, kind)
+        DeviceOwner(serverOrigin, tenantId, deviceId, kind, pinSha256)
     } else null
     fun state() = RecoveryState(RecoveryPhase.valueOf(phase), owner(), generation)
 }
@@ -60,8 +73,12 @@ interface DeviceRecoveryDao {
 private data class SealedOperatorRoster(val owner: DeviceOwner, val operators: List<app.markiro.handheld.core.network.OperatorDto>)
 private const val SEALED_OPERATOR_ROSTER = "sealed_operator_roster_v1"
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-private data class Publication(val id: String, val owner: DeviceOwner, val generation: Long, val response: PairResponse)
+private data class Publication(
+    val id: String, val owner: DeviceOwner, val generation: Long, val response: PairResponse,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val host: HostPairing? = null,
+)
 
 /** One coordinator per database. Nothing can admit work until initialize has resolved its owner. */
 class DeviceRecovery(private val db: HandheldDatabase, private val credential: CredentialStore) {
@@ -78,7 +95,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         var row = db.deviceRecoveryDao().get()
         val config = db.deviceConfigDao().get()
         if (row == null) {
-            val owner = config?.let { ownerOf(it.serverUrl, it.tenantId, it.deviceId, it.kind) }
+            val owner = config?.let { ownerOf(it.serverUrl, it.tenantId, it.deviceId, it.kind, it.pinSha256) }
             val phase = when {
                 owner != null && !legacyOwnerConsistent(owner) -> RecoveryPhase.OWNER_UNRESOLVED
                 owner != null -> if (credential.read() != null) RecoveryPhase.ACTIVE else RecoveryPhase.SEALED
@@ -118,7 +135,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
                 row.generation == 0L && config == null && !hasRetainedData() && db.operatorDao().all().isEmpty() && credential.read() == null
         }
         val owner = row.owner() ?: return false
-        if (row.generation < 1 || ownerOf(owner.serverOrigin, owner.tenantId, owner.deviceId, owner.kind) != owner) return false
+        if (row.generation < 1 || ownerOf(owner.serverOrigin, owner.tenantId, owner.deviceId, owner.kind, owner.pinSha256) != owner) return false
         if (config == null) {
             // A fresh publication can lose its staged candidate before creating config.
             // Sealing and repeated authorized retries may advance its generation. Only
@@ -127,7 +144,10 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             return row.phase in setOf(RecoveryPhase.RESTORING.name, RecoveryPhase.SEALING.name, RecoveryPhase.SEALED.name) &&
                 !hasRetainedData(allowTargetFence = true) && db.operatorDao().all().isEmpty()
         }
-        return ownerOf(config.serverUrl, config.tenantId, config.deviceId, config.kind) == owner && legacyOwnerConsistent(owner)
+        val configOwner = ownerOf(config.serverUrl, config.tenantId, config.deviceId, config.kind, config.pinSha256)
+        // While a re-pairing with a changed certificate is being published, the config still holds the old pin until the commit.
+        val sameOwner = configOwner == owner || row.phase == RecoveryPhase.RESTORING.name && configOwner?.sameDevice(owner) == true
+        return sameOwner && legacyOwnerConsistent(owner)
     }
 
     fun current() = mutable.value
@@ -269,21 +289,25 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         mutable.value = sealed.state()
     }
 
-    suspend fun restore(response: PairResponse, serverUrl: String) = transitions.withLock {
+    suspend fun restore(
+        response: PairResponse, serverUrl: String, host: HostPairing? = null, allowPinChange: Boolean = false,
+    ) = transitions.withLock {
         val row = checkNotNull(db.deviceRecoveryDao().get())
         if (!ownerConsistent(row)) {
             seal(row.copy(phase = RecoveryPhase.OWNER_UNRESOLVED.name))
             throw RecoveryMismatch()
         }
         if (response.recovery != null && (row.owner() == null || db.deviceConfigDao().get() == null)) throw RecoveryMismatch()
-        val owner = ownerOf(serverUrl, response.device.tenantId, response.device.id, response.device.kind) ?: throw RecoveryMismatch()
-        if (row.phase == RecoveryPhase.OWNER_UNRESOLVED.name || row.owner()?.let { it != owner } == true) throw RecoveryMismatch()
+        val owner = ownerOf(serverUrl, response.device.tenantId, response.device.id, response.device.kind, host?.pinSha256) ?: throw RecoveryMismatch()
+        if (row.phase == RecoveryPhase.OWNER_UNRESOLVED.name || row.owner()?.let { existing ->
+                if (allowPinChange && host != null) !existing.sameDevice(owner) else existing != owner
+            } == true) throw RecoveryMismatch()
         if (row.phase == RecoveryPhase.ACTIVE.name && row.owner() == owner && credential.read() == response.credential.apiKey) {
             credential.clearStaged()
             return@withLock
         }
         if (row.phase == RecoveryPhase.RESTORING.name) {
-            if (credential.staged() == null) credential.stage(json.encodeToString(Publication.serializer(), Publication(checkNotNull(row.pendingId), owner, row.generation, response)))
+            if (credential.staged() == null) credential.stage(json.encodeToString(Publication.serializer(), Publication(checkNotNull(row.pendingId), owner, row.generation, response, host)))
             completePublication(row)
             return@withLock
         }
@@ -291,10 +315,10 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         require(response.credential.apiKey.isNotBlank())
         val id = UUID.randomUUID().toString()
         val intent = row.copy(serverOrigin = owner.serverOrigin, tenantId = owner.tenantId, deviceId = owner.deviceId,
-            kind = owner.kind, phase = RecoveryPhase.RESTORING.name, generation = row.generation + 1, pendingId = id)
+            kind = owner.kind, pinSha256 = owner.pinSha256, phase = RecoveryPhase.RESTORING.name, generation = row.generation + 1, pendingId = id)
         db.deviceRecoveryDao().put(intent)
         mutable.value = intent.state()
-        credential.stage(json.encodeToString(Publication.serializer(), Publication(id, owner, intent.generation, response)))
+        credential.stage(json.encodeToString(Publication.serializer(), Publication(id, owner, intent.generation, response, host)))
         completePublication(intent)
     }
 
@@ -314,6 +338,7 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         val publication = credential.staged()?.let { runCatching { json.decodeFromString(Publication.serializer(), it) }.getOrNull() }
         if (publication == null) { seal(row); return }
         check(publication.id == row.pendingId && publication.owner == row.owner() && publication.generation == row.generation)
+        val host = publication.host
         val recovery = publication.response.recovery
         recovery?.validate()
         val sealedRoster = if (recovery != null) {
@@ -333,15 +358,26 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         db.withTransaction {
             val old = db.deviceConfigDao().get()
             // Retain task references and original snapshots; pairing only refreshes display metadata.
+            val addresses = host?.addresses?.joinToString(",")
             val config = old?.copy(deviceName = device.name, organizationName = device.organizationName,
-                lineId = device.line?.id, lineName = device.line?.name, rosterFetchedAt = if (recovery != null) old.rosterFetchedAt else System.currentTimeMillis()) ?: DeviceConfigEntity(
+                lineId = device.line?.id, lineName = device.line?.name, rosterFetchedAt = if (recovery != null) old.rosterFetchedAt else System.currentTimeMillis(),
+                backend = if (host != null) "host" else old.backend,
+                pinSha256 = host?.pinSha256 ?: old.pinSha256, hostId = host?.hostId ?: old.hostId,
+                hostAddresses = addresses ?: old.hostAddresses,
+                // The sealing erased the operators and badges; the full feed brings them back.
+                hostRev = if (host != null) null else old.hostRev) ?: DeviceConfigEntity(
                 deviceId = device.id, deviceName = device.name, tenantId = device.tenantId,
                 organizationName = device.organizationName, lineId = device.line?.id, lineName = device.line?.name,
                 kind = device.kind, serverUrl = publication.owner.serverOrigin, pairedAt = System.currentTimeMillis(),
+                backend = if (host != null) "host" else "cloud",
+                pinSha256 = host?.pinSha256, hostId = host?.hostId, hostAddresses = addresses,
             )
-            db.operatorDao().replaceAll((sealedRoster?.operators ?: publication.response.operators).map {
-                OperatorEntity(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active)
-            })
+            // A host's operators come from its feed (С5), not from the pairing.
+            if (host == null) {
+                db.operatorDao().replaceAll((sealedRoster?.operators ?: publication.response.operators).map {
+                    OperatorEntity(it.operatorId, it.name, it.login, it.role, it.pinHash, it.badgeHash, it.active)
+                })
+            }
             db.deviceConfigDao().upsert(config)
             if (recovery == null) db.metaDao().remove(SEALED_OPERATOR_ROSTER)
             // BOTH kinds of label, exactly as startup demotes both
@@ -426,10 +462,10 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
     }
     companion object {
         val generationContext = ThreadLocal<GenerationToken?>()
-        fun ownerOf(server: String, tenant: String, device: String, kind: String): DeviceOwner? {
+        fun ownerOf(server: String, tenant: String, device: String, kind: String, pin: String? = null): DeviceOwner? {
             val url = server.trim().toHttpUrlOrNull() ?: return null
             if (tenant.isBlank() || device.isBlank() || kind != "handheld" || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
-            return DeviceOwner(url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().trimEnd('/'), tenant, device, kind)
+            return DeviceOwner(url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().trimEnd('/'), tenant, device, kind, pin)
         }
     }
 }

@@ -776,4 +776,40 @@
     <string name="pallet_refused_no_template">Нет шаблона этикетки паллеты — задайте его в кабинете</string>
     <string name="pallet_refused_no_issuer">В организации не задан GLN — паллета не получит номер</string>
     <string name="pallet_refused_unavailable">Не удалось закрыть паллету — попробуйте ещё раз</string>
+
+    <!-- Pairing with an on-site host (Автоном), plan ТСД-А С4 -->
+    <string name="host_pairing_source_title">Куда привязать ТСД</string>
+    <string name="host_pairing_source_cloud">Облако Markiro</string>
+    <string name="host_pairing_source_host">Сервер на площадке (Автоном)</string>
+    <string name="host_pairing_title">Привязать к серверу на площадке</string>
+    <string name="host_pairing_repair_title">Привязать заново</string>
+    <string name="host_pairing_hint">Введите адрес компьютера с Markiro Автоном и код из офиса. Или нажмите триггер и наведите на штрих-код привязки.</string>
+    <string name="host_pairing_address">Адрес сервера (например, 192.168.1.10)</string>
+    <string name="host_pairing_code">Код привязки</string>
+    <string name="host_pairing_continue">Продолжить</string>
+    <string name="host_pairing_verify_title">Сверьте отпечаток</string>
+    <string name="host_pairing_verify_hint">Сравните с отпечатком на экране офиса. Код отправится, только если они совпадают.</string>
+    <string name="host_pairing_verify_changed">Сертификат сервера изменился. Если офис не менял компьютер или не восстанавливал данные из копии, не подтверждайте.</string>
+    <string name="host_pairing_match">Совпадает</string>
+    <string name="host_pairing_no_match">Не совпадает</string>
+    <string name="host_pairing_binding">Загружаем справочники…</string>
+    <string name="host_pairing_success">ТСД привязан</string>
+    <string name="host_pairing_error_title">Не удалось привязать</string>
+    <string name="host_pairing_retry_sync">Повторить загрузку</string>
+    <string name="host_pairing_error_address_invalid">Адрес записывается четырьмя числами от 0 до 255, например 192.168.1.10.</string>
+    <string name="host_pairing_error_code_invalid">Код состоит из 10 знаков: цифр и латинских букв без U. Проверьте его на экране офиса.</string>
+    <string name="host_pairing_error_unreachable">Сервер не отвечает. Проверьте Wi-Fi и адрес. Код не использован.</string>
+    <string name="host_pairing_error_timeout">Сервер долго не отвечает. Проверьте сеть и повторите. Код не использован.</string>
+    <string name="host_pairing_error_not_a_host">По этому адресу отвечает не сервер Markiro Автоном.</string>
+    <string name="host_pairing_error_host_too_old">Сервер на площадке старее этого приложения. Обновите Markiro Автоном на компьютере.</string>
+    <string name="host_pairing_error_app_too_old">Сервер новее этого приложения. Обновите приложение на ТСД.</string>
+    <string name="host_pairing_error_no_address_matches">Ни один адрес из штрих-кода не отвечает сервером с этим сертификатом. Код не отправлен.</string>
+    <string name="host_pairing_error_pairing_invalid">Код не подошёл. Выпустите новый код в офисе.</string>
+    <string name="host_pairing_error_pairing_expired">Срок кода истёк. Выпустите новый код в офисе.</string>
+    <string name="host_pairing_error_rate_limited">Слишком много попыток. Подождите и выпустите новый код.</string>
+    <string name="host_pairing_error_seat_limit">В лицензии нет свободных мест для ТСД.</string>
+    <string name="host_pairing_error_feature_disabled">Работа с ТСД не включена в офисе.</string>
+    <string name="host_pairing_error_certificate_mismatch">Сервер показал другой сертификат, чем при проверке. Код не отправлен.</string>
+    <string name="host_pairing_error_other">Не удалось привязать устройство. Повторите.</string>
+    <string name="host_pairing_error_sync_failed">ТСД привязан, но справочники не загрузились. Повторите загрузку. Новый код не нужен.</string>
 </resources>

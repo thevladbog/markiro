@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -39,7 +40,13 @@ import app.markiro.handheld.feature.inventory.InventoryListViewModel
 import app.markiro.handheld.feature.inventory.InventoryWorkCallbacks
 import app.markiro.handheld.feature.inventory.InventoryWorkScreen
 import app.markiro.handheld.feature.inventory.InventoryWorkViewModel
+import app.markiro.handheld.feature.pairing.HostPairingCallbacks
+import app.markiro.handheld.feature.pairing.HostPairingScreen
+import app.markiro.handheld.feature.pairing.HostPairingViewModel
 import app.markiro.handheld.feature.pairing.PairingCallbacks
+import app.markiro.handheld.feature.pairing.PairingSource
+import app.markiro.handheld.feature.pairing.PairingSourceScreen
+import app.markiro.handheld.feature.pairing.PairingSourceViewModel
 import app.markiro.handheld.feature.pairing.PairingScreen
 import app.markiro.handheld.feature.pairing.PairingViewModel
 import app.markiro.handheld.core.label.PrinterLanguage
@@ -195,19 +202,48 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
             modifier = Modifier.fillMaxSize().background(MarkiroTheme.colors.surfacePage).safeDrawingPadding(),
         ) {
             composable(Routes.PAIRING) {
-                val vm: PairingViewModel = hiltViewModel()
-                val state by vm.state.collectAsStateWithLifecycle()
-                PairingScreen(
-                    state,
-                    PairingCallbacks(
-                        onDigit = vm::onDigit,
-                        onBackspace = vm::onBackspace,
-                        onConfirm = vm::onConfirm,
-                        onServerUrl = vm::onServerUrl,
-                        onRetry = vm::retry,
-                        onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
-                    ),
-                )
+                val sourceVm: PairingSourceViewModel = hiltViewModel()
+                val resolved by sourceVm.source.collectAsStateWithLifecycle()
+                var chosen by rememberSaveable { mutableStateOf<PairingSource?>(null) }
+                when (chosen ?: resolved) {
+                    PairingSource.LOADING -> Unit
+                    PairingSource.CHOOSE -> PairingSourceScreen(
+                        onCloud = { chosen = PairingSource.CLOUD },
+                        onHost = { chosen = PairingSource.HOST },
+                    )
+                    PairingSource.CLOUD -> {
+                        val vm: PairingViewModel = hiltViewModel()
+                        val state by vm.state.collectAsStateWithLifecycle()
+                        PairingScreen(
+                            state,
+                            PairingCallbacks(
+                                onDigit = vm::onDigit,
+                                onBackspace = vm::onBackspace,
+                                onConfirm = vm::onConfirm,
+                                onServerUrl = vm::onServerUrl,
+                                onRetry = vm::retry,
+                                onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
+                            ),
+                        )
+                    }
+                    PairingSource.HOST -> {
+                        val vm: HostPairingViewModel = hiltViewModel()
+                        val state by vm.state.collectAsStateWithLifecycle()
+                        HostPairingScreen(
+                            state,
+                            HostPairingCallbacks(
+                                onAddress = vm::onAddress,
+                                onCode = vm::onCode,
+                                onContinue = vm::onContinue,
+                                onMatch = vm::onFingerprintConfirmed,
+                                onNoMatch = vm::onFingerprintRejected,
+                                onRetry = vm::onRetry,
+                                onRetrySync = vm::onRetrySync,
+                                onDone = { nav.navigate(Routes.SIGN_IN) { popUpTo(0) } },
+                            ),
+                        )
+                    }
+                }
             }
             composable(Routes.SIGN_IN) {
                 val vm: SignInViewModel = hiltViewModel()
