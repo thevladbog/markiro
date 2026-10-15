@@ -119,17 +119,43 @@ describe("standalone support payload (plan ДИАГ К1)", () => {
     expect(parse([...year, zeroMonth("2026-01")])).toBe(false);
   });
 
-  it("bounds every counter: integer, not negative, not above 2^53 - 1", () => {
+  it("bounds every counter: integer, not negative, not above the plausible ceiling (1e9)", () => {
     const withScans = (accepted: number) => ({
       ...v1(),
       months: [{ ...zeroMonth("2026-10"), scans: { accepted, duplicates: 0, rejected: 0 } }],
     });
-    for (const bad of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN]) {
+    for (const bad of [-1, 1.5, 1_000_000_001, Number.MAX_SAFE_INTEGER, Number.NaN]) {
       expect(standaloneSupportPayloadSchema.safeParse(withScans(bad)).success).toBe(false);
     }
-    expect(
-      standaloneSupportPayloadSchema.safeParse(withScans(Number.MAX_SAFE_INTEGER)).success,
-    ).toBe(true);
+    expect(standaloneSupportPayloadSchema.safeParse(withScans(1_000_000_000)).success).toBe(true);
+  });
+
+  it("bounds the device counts to the storage range (Postgres integer) and a plausible fleet", () => {
+    const devices = (station: number) => ({
+      ...v1(),
+      devices: { station, office: 0, handheld: 0 },
+    });
+    for (const bad of [2_147_483_648, 1_000_001]) {
+      expect(standaloneSupportPayloadSchema.safeParse(devices(bad)).success).toBe(false);
+    }
+    expect(standaloneSupportPayloadSchema.safeParse(devices(1_000_000)).success).toBe(true);
+  });
+
+  it("keeps the months inside a window around generatedAt (no 0000-01 .. 9999-12 expansion)", () => {
+    const parse = (months: string[], generatedAt = "2026-10-14T09:00:00.000Z") =>
+      standaloneSupportPayloadSchema.safeParse({
+        ...v1(),
+        generatedAt,
+        months: months.map(zeroMonth),
+      }).success;
+    expect(parse(["0000-01", "9999-12"])).toBe(false);
+    expect(parse(["0000-01"])).toBe(false);
+    expect(parse(["9999-12"])).toBe(false);
+    expect(parse(["2023-10"])).toBe(true); // 36 months back
+    expect(parse(["2023-09"])).toBe(false);
+    expect(parse(["2026-11"])).toBe(true); // one month ahead of a skewed clock
+    expect(parse(["2026-12"])).toBe(false);
+    expect(parse(["2025-12", "2026-01"], "2026-01-15T00:00:00.000Z")).toBe(true);
   });
 
   it("bounds versions and system strings: length and no control characters", () => {

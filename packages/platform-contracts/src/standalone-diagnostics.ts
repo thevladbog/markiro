@@ -4,6 +4,7 @@ import {
   standaloneMonthKeySchema,
   standaloneSupportLicenseSchema,
   standaloneUsageMonthSchema,
+  standaloneUsageTotalsSchema,
 } from "./standalone-support.js";
 
 /** Plan ДИАГ: the operator pastes a support text, the API opens its token and keeps history and statistics. */
@@ -160,7 +161,7 @@ export const standaloneDiagnosticsStatisticsSchema = z
           .object({
             month: standaloneMonthKeySchema,
             hostCount: z.number().int().positive(),
-            stats: standaloneUsageMonthSchema,
+            stats: standaloneUsageTotalsSchema,
           })
           .strict(),
       )

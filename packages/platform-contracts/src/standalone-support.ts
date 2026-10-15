@@ -25,7 +25,20 @@ export const STANDALONE_SUPPORT_FEATURE_KEYS = [
   "customLogo",
 ] as const;
 
-const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/**
+ * One month's counter from one host. 1e9 is far above any real site (a line scans millions a
+ * month) and keeps the sum over a tenant's hosts inside the safe-integer range the statistics
+ * response promises; a larger value is a broken or hand-made token, not a fact to keep.
+ */
+export const STANDALONE_SUPPORT_MAX_COUNTER = 1_000_000_000;
+/** A device count: far above a site's fleet, and inside the Postgres `integer` the history stores. */
+export const STANDALONE_SUPPORT_MAX_DEVICES = 1_000_000;
+/** How far back, and (for a skewed clock) ahead, of `generatedAt` a reported month may lie. */
+export const STANDALONE_SUPPORT_MONTHS_BACK = 36;
+export const STANDALONE_SUPPORT_MONTHS_AHEAD = 1;
+
+const boundedCount = z.number().int().min(0).max(STANDALONE_SUPPORT_MAX_COUNTER);
+const count = boundedCount;
 const noControl = (value: string) => !/\p{Cc}/u.test(value);
 const text = (max: number) => z.string().min(1).max(max).refine(noControl);
 const instant = z.iso.datetime();
@@ -35,40 +48,48 @@ const uuidLower = z
 
 export const standaloneMonthKeySchema = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
 
-export const standaloneUsageMonthSchema = z
-  .object({
-    month: standaloneMonthKeySchema,
-    shifts: z
-      .object({
-        aggregation: count,
-        validation: count,
-        validationPrint: count,
-        fromOffice: count,
-        fromStation: count,
-        withPallets: count,
-      })
-      .strict(),
-    scans: z.object({ accepted: count, duplicates: count, rejected: count }).strict(),
-    boxes: z.object({ closed: count, disassembled: count, codes: count }).strict(),
-    pallets: z.object({ closed: count, disassembled: count }).strict(),
-    exceptions: z
-      .object({
-        boxUndo: count,
-        boxClear: count,
-        boxReprint: count,
-        boxDisassemble: count,
-        palletReprint: count,
-        palletDisassemble: count,
-      })
-      .strict(),
-    conflicts: z.object({ late: count, displaced: count, reviewed: count }).strict(),
-    reprints: z.object({ warehouse: count, unitLabel: count }).strict(),
-    disaggregationApplied: count,
-    syncRejected: count,
-  })
-  .strict();
+/** The month's shape with `n` as the counter type: bounded for one host, wide for a sum over hosts. */
+const usageMonthShape = (n: z.ZodNumber) =>
+  z
+    .object({
+      month: standaloneMonthKeySchema,
+      shifts: z
+        .object({
+          aggregation: n,
+          validation: n,
+          validationPrint: n,
+          fromOffice: n,
+          fromStation: n,
+          withPallets: n,
+        })
+        .strict(),
+      scans: z.object({ accepted: n, duplicates: n, rejected: n }).strict(),
+      boxes: z.object({ closed: n, disassembled: n, codes: n }).strict(),
+      pallets: z.object({ closed: n, disassembled: n }).strict(),
+      exceptions: z
+        .object({
+          boxUndo: n,
+          boxClear: n,
+          boxReprint: n,
+          boxDisassemble: n,
+          palletReprint: n,
+          palletDisassemble: n,
+        })
+        .strict(),
+      conflicts: z.object({ late: n, displaced: n, reviewed: n }).strict(),
+      reprints: z.object({ warehouse: n, unitLabel: n }).strict(),
+      disaggregationApplied: n,
+      syncRejected: n,
+    })
+    .strict();
+export const standaloneUsageMonthSchema = usageMonthShape(boundedCount);
+/** The sum of one month over a tenant's hosts: still integers, but no longer one host's ceiling. */
+export const standaloneUsageTotalsSchema = usageMonthShape(
+  z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+);
 export type StandaloneUsageMonth = z.infer<typeof standaloneUsageMonthSchema>;
 
+const devicesCount = z.number().int().min(0).max(STANDALONE_SUPPORT_MAX_DEVICES);
 const quotaUse = z.object({ limit: count.nullable(), used: count, over: z.boolean() }).strict();
 
 export const standaloneSupportLicenseSchema = z
@@ -119,10 +140,32 @@ const common = {
   appVersion: text(64).nullable(),
   hostVersion: text(64).nullable(),
   months,
-  devices: z.object({ station: count, office: count, handheld: count }).strict(),
+  devices: z
+    .object({ station: devicesCount, office: devicesCount, handheld: devicesCount })
+    .strict(),
 };
 
-export const standaloneSupportPayloadV1Schema = z.object({ v: z.literal(1), ...common }).strict();
+const monthIndex = (year: number, month: number) => year * 12 + month - 1;
+/** Every reported month lies in [generatedAt - 36 months, generatedAt + 1 month]; others expand into nothing real. */
+function monthsNearGeneratedAt(payload: {
+  generatedAt: string;
+  months: readonly { month: string }[];
+}) {
+  const generated = new Date(payload.generatedAt);
+  if (Number.isNaN(generated.getTime())) return false;
+  const at = monthIndex(generated.getUTCFullYear(), generated.getUTCMonth() + 1);
+  return payload.months.every((item) => {
+    const index = monthIndex(Number(item.month.slice(0, 4)), Number(item.month.slice(5, 7)));
+    return (
+      index >= at - STANDALONE_SUPPORT_MONTHS_BACK && index <= at + STANDALONE_SUPPORT_MONTHS_AHEAD
+    );
+  });
+}
+
+export const standaloneSupportPayloadV1Schema = z
+  .object({ v: z.literal(1), ...common })
+  .strict()
+  .refine(monthsNearGeneratedAt);
 export const standaloneSupportPayloadV2Schema = z
   .object({
     v: z.literal(2),
@@ -134,7 +177,8 @@ export const standaloneSupportPayloadV2Schema = z
     webview: text(120).nullable(),
     license: standaloneSupportLicenseSchema.nullable(),
   })
-  .strict();
+  .strict()
+  .refine(monthsNearGeneratedAt);
 export const standaloneSupportPayloadSchema = z.discriminatedUnion("v", [
   standaloneSupportPayloadV1Schema,
   standaloneSupportPayloadV2Schema,
