@@ -253,7 +253,7 @@ class ShiftRepository(
             db.deviceConfigDao().get()?.let { db.deviceConfigDao().upsert(it.copy(activeShiftId = shiftId)) }
         }
         if (cloud != null) GrantTransport(db, cloud).refreshConfiguredTask(TaskKind.SHIFT,shiftId)
-        if (bundle.shift.validationPrint.mode == "duplicate_dm") ValidationHistoryMirror(db, checkNotNull(cloud), json).refresh(shiftId, bundle.product.id)
+        if (cloud != null && bundle.shift.validationPrint.mode == "duplicate_dm") ValidationHistoryMirror(db, cloud, json).refresh(shiftId, bundle.product.id)
         return EnterResult.Ok
     }
 

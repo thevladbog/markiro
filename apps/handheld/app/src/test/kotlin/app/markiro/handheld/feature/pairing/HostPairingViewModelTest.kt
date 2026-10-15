@@ -216,4 +216,32 @@ class HostPairingViewModelTest {
         assertEquals(1, gateway.claims.size)
         assertEquals(2, bootstrap.runs)
     }
+
+    @Test
+    fun aScanWithAnotherCertificateThanTheOwnersPinAsksForConfirmationBeforeSpendingTheCode() = runTest {
+        val owner = DeviceOwner("https://192.168.1.10:45710", "h1", "d1", "handheld", pin)
+        val gateway = FakeGateway(mapOf("192.168.1.10" to Result.success(Observed(otherPin, hello()))))
+        val store = FakeStore()
+        val vm = viewModel(gateway, store, owner = owner)
+        vm.onScan("markiro-host:1?h=192.168.1.10&p=45710&f=$otherPin&c=7K3MQ9XV2D")
+        advanceUntilIdle()
+        assertTrue((vm.state.value as HostPairingUi.Verify).changed)
+        assertTrue("the code is not spent before the person confirms", gateway.claims.isEmpty())
+        vm.onFingerprintConfirmed()
+        advanceUntilIdle()
+        assertEquals(listOf(Triple("192.168.1.10", "7K3MQ9XV2D", "d1")), gateway.claims)
+        assertEquals(true, store.saved.single()[4])
+        assertEquals(otherPin, store.saved.single()[2])
+    }
+
+    @Test
+    fun aScanWithTheOwnersOwnCertificateClaimsDirectly() = runTest {
+        val owner = DeviceOwner("https://192.168.1.10:45710", "h1", "d1", "handheld", pin)
+        val gateway = FakeGateway(mapOf("192.168.1.10" to Result.success(Observed(pin, hello()))))
+        val vm = viewModel(gateway, owner = owner)
+        vm.onScan("markiro-host:1?h=192.168.1.10&p=45710&f=$pin&c=7K3MQ9XV2D")
+        advanceUntilIdle()
+        assertEquals(listOf(Triple("192.168.1.10", "7K3MQ9XV2D", "d1")), gateway.claims)
+        assertTrue(vm.state.value is HostPairingUi.Success)
+    }
 }

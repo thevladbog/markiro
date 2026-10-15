@@ -112,7 +112,12 @@ class HostPairingViewModel(
             compatibilityError(observed)?.let { return@launch _state.update { _ -> HostPairingUi.Failed(it) } }
             // The payload carries the fingerprint of the office's own screen: no second comparison by eye.
             val ordered = listOf(match.first) + payload.addresses.filter { it != match.first }
-            claim(Pending(match.first, payload.port, ordered, payload.code, observed, changed = false))
+            // A device that has an owner and meets another certificate than its pin: the person confirms before the one-time code is spent.
+            val changed = owner?.pinSha256 != null && owner.pinSha256 != observed.fingerprint
+            val next = Pending(match.first, payload.port, ordered, payload.code, observed, changed)
+            if (!changed) return@launch claim(next)
+            pending = next
+            _state.value = HostPairingUi.Verify(next.address, CertPin.display(next.observed.fingerprint), changed = true)
         }
     }
 
