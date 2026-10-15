@@ -65,6 +65,7 @@ export const noPublishedStandaloneBuild: StandaloneLatestBuildSource = {
 };
 
 const READ_CAPABILITIES = ["tenants.read"] as const;
+const PURGE_BATCH = 500;
 const REASON_CODE = {
   text_too_large: ["standalone_diagnostics_text_too_large", 413],
   no_token: ["standalone_diagnostics_no_token", 400],
@@ -548,12 +549,29 @@ export class StandaloneDiagnosticsService {
     );
   }
 
-  /** Deletes reports older than 24 months (decision В6); their months go with them. Returns the count. */
+  /**
+   * Deletes reports older than 24 months (decision В6); their months go with them. Works in
+   * batches so a backlog never holds one long lock. Returns the count.
+   */
   async purgeExpired(): Promise<number> {
-    const deleted = await this.db
-      .delete(schema.standaloneSupportDiagnostics)
-      .where(lt(schema.standaloneSupportDiagnostics.receivedAt, retentionCutoff(this.now())))
-      .returning({ id: schema.standaloneSupportDiagnostics.id });
-    return deleted.length;
+    const t = schema.standaloneSupportDiagnostics;
+    const cutoff = retentionCutoff(this.now());
+    let total = 0;
+    for (;;) {
+      const batch = await this.db
+        .select({ id: t.id })
+        .from(t)
+        .where(lt(t.receivedAt, cutoff))
+        .limit(PURGE_BATCH);
+      if (batch.length === 0) return total;
+      await this.db.delete(t).where(
+        inArray(
+          t.id,
+          batch.map((row) => row.id),
+        ),
+      );
+      total += batch.length;
+      if (batch.length < PURGE_BATCH) return total;
+    }
   }
 }
