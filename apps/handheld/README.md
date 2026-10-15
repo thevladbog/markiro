@@ -8,6 +8,15 @@ slices: `docs/superpowers/specs/2026-09-10-handheld-foundation-design.md` (pairi
 `docs/superpowers/specs/2026-09-10-handheld-aggregation-boxes-design.md` (box aggregation) and
 `docs/superpowers/specs/2026-09-11-handheld-duplicate-dm-design.md` (duplicate Data Matrix).
 
+## Two backends: cloud and host
+
+One APK serves two modes, chosen at pairing: the cloud (as before) or the host of
+"Markiro Avtonom" on the site LAN (`device_config.backend` is `cloud` or `host`; a device is
+never both). Host mode pairs by IP and one-time code or by the office's DataMatrix, talks
+HTTPS only with the host's pinned self-signed certificate fingerprint, and has no
+inventory, write-offs, replacement or in-app updates. Hardware acceptance steps:
+`docs/runbooks/standalone-handheld-checklist.md`. Scoped notes: "Host mode" in `AGENTS.md`.
+
 ## Build and test
 
     ./gradlew testDebugUnitTest lintDebug assembleDebug
