@@ -109,6 +109,7 @@ describe("verifyStandaloneLicense", () => {
   const ORIGIN = "https://license.test.invalid";
   const encoder = new TextEncoder();
   const license = cases.license.base;
+  const baseFeatures = isRecord(license.features) ? license.features : {};
   const manifest = cases.manifest.base;
 
   async function setUp() {
@@ -144,13 +145,13 @@ describe("verifyStandaloneLicense", () => {
     expect(await verifyStandaloneLicense(compact, keyset)).toEqual({
       ok: true,
       kid: "k1",
-      license: { ...license, features: { ...license.features, customLogo: false } },
+      license: { ...license, features: { ...baseFeatures, customLogo: false } },
     });
   });
 
   it("reads custom branding (customLogo) from a file that carries it", async () => {
     const { privateKey, keyset } = await setUp();
-    const branded = { ...license, features: { ...license.features, customLogo: true } };
+    const branded = { ...license, features: { ...baseFeatures, customLogo: true } };
     const compact = await signCompactJws(
       privateKey,
       { typ: STANDALONE_LICENSE_TYP, kid: "k1" },
