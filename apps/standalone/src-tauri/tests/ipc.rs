@@ -78,6 +78,15 @@ impl Host {
     }
 }
 
+/// The update state of the plain mock app starts nothing.
+struct NeverLaunches;
+
+impl Launcher for NeverLaunches {
+    fn launch(&self, _: &std::path::Path, _: &str, _: usize) -> Result<(), LaunchError> {
+        panic!("these tests start nothing")
+    }
+}
+
 /// The app's own command list on the mock runtime, with the shell's states
 /// managed. The `App` is returned too: it must outlive the webview.
 fn mock_app_with(
@@ -89,6 +98,18 @@ fn mock_app_with(
         .manage(local)
         .manage(ConnectionState::default())
         .manage(SystemAwakeState::default())
+        .manage(markiro_standalone_lib::update::fetch::DownloadsDir(
+            std::env::temp_dir().join("markiro-ipc-updates"),
+        ))
+        .manage(UpdateState::load(UpdateConfig {
+            installed: "0.1.0".to_owned(),
+            data_dir: std::env::temp_dir().join("markiro-ipc-update-state"),
+            documents: None,
+            drives: std::sync::Arc::new(FixedDrives(Vec::new())),
+            launcher: std::sync::Arc::new(NeverLaunches),
+            keyset: markiro_proto::trust::update_keyset(),
+            exit: std::sync::Arc::new(|_: i32| panic!("these tests never exit")),
+        }))
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -159,6 +180,73 @@ fn an_unpaired_device_reports_null_and_refuses_host_requests() {
             &webview,
             "host_request",
             request("POST", "/v1/local-pair", Value::Null, None)
+        ),
+        Err(json!("invalid_request"))
+    );
+    // Plan ОБН-3: the installer never crosses IPC, and an unpaired device
+    // downloads nothing.
+    assert_eq!(
+        invoke(
+            &webview,
+            "host_request",
+            request("GET", "/v1/device/update/installer", Value::Null, None)
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(&webview, "update_fetch", json!({})),
+        Err(json!("not_paired"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "update_check_manifest",
+            json!({ "manifest": "not.a.jws" })
+        ),
+        Err(json!("manifest_malformed"))
+    );
+    let manifest = markiro_proto::update::distribution::testing::sign_update_manifest(&json!({
+        "v": 1, "product": "markiro-standalone", "version": "0.3.0", "channel": "beta",
+        "releasedAt": "2026-11-02T10:00:00Z",
+        "sourceSha": "0123456789abcdef0123456789abcdef01234567",
+        "installer": {
+            "name": "markiro-standalone-0.3.0-windows-x86_64-setup.exe",
+            "sha256": "7863191bce3b1317a5e56211c00c8a962523cc52264414ba528e791d12c1f1ae",
+            "sizeBytes": 22
+        },
+        "protocol": 4, "minProtocol": 3, "minUpgradeFrom": "0.2.0", "notes": ["Тест"]
+    }));
+    assert_eq!(
+        invoke(
+            &webview,
+            "update_check_manifest",
+            json!({ "manifest": manifest })
+        ),
+        Ok(json!({
+            "version": "0.3.0", "channel": "beta", "releasedAt": "2026-11-02T10:00:00Z",
+            "notes": ["Тест"], "minUpgradeFrom": "0.2.0", "protocol": 4, "minProtocol": 3,
+            "sizeBytes": 22
+        }))
+    );
+    // Only a manifest `update_scan` found goes to the host (plan ОБН-2's list).
+    assert_eq!(
+        invoke(
+            &webview,
+            "update_stage",
+            json!({ "manifestPath": "/elsewhere/markiro-standalone-0.3.0.update.jws", "officeToken": "t" })
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "host_request",
+            request(
+                "POST",
+                "/v1/office/update-package/manifest",
+                json!({ "manifest": "x" }),
+                Some("t")
+            )
         ),
         Err(json!("invalid_request"))
     );
@@ -1306,6 +1394,9 @@ fn the_app_manages_every_state_its_commands_read() {
     assert!(app.try_state::<SystemAwakeState>().is_some());
     assert!(app.try_state::<OfficeFilesState>().is_some());
     assert!(app.try_state::<UpdateState>().is_some());
+    assert!(app
+        .try_state::<markiro_standalone_lib::update::fetch::DownloadsDir>()
+        .is_some());
     // An unpaired app has no link yet; the receiver is the device's own.
     assert!(link.borrow().is_none());
     // Commands that read the managed states answer, instead of Tauri's refusal.

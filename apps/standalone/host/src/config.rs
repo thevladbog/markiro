@@ -74,12 +74,20 @@ impl HostPaths {
         self.data_dir.join("backups")
     }
 
+    /// The update packages the host keeps and serves (plan ОБН-3): never in
+    /// a copy of the database, never touched by `markiro-host restore`. Its
+    /// rights come from the data folder (the installer's ACL).
+    pub fn updates_dir(&self) -> PathBuf {
+        self.data_dir.join("updates")
+    }
+
     pub fn ensure(&self) -> Result<(), ConfigError> {
         for dir in [
             self.data_dir.clone(),
             self.tls_dir(),
             self.logs_dir(),
             self.backups_dir(),
+            self.updates_dir(),
         ] {
             fs::create_dir_all(&dir).map_err(|source| ConfigError::Io {
                 path: dir.clone(),

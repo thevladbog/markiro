@@ -17,6 +17,9 @@ import { errorMessageKey } from "../../host/errors.js";
 import { useOfficeSession } from "../office-session.js";
 import { PageLoading } from "../page-state.js";
 import { useThisDeviceId } from "../this-device.js";
+import { DeviceVersionsBlock } from "./DeviceVersionsBlock.js";
+import { HostUpdateBlock } from "./HostUpdateBlock.js";
+import { StageToHostButton } from "./StageToHostButton.js";
 import { useAboutData } from "./about-data.js";
 import { useUpdateShell } from "./update-context.js";
 import {
@@ -69,6 +72,8 @@ export function refusalText(t: TFunction, report: VerifiedReport): string | null
         protocol: refusal.protocol,
         host: refusal.hostProtocol,
       });
+    case "host_differs":
+      return t("office.about.update.refusal.host_differs", { host: refusal.hostVersion });
   }
 }
 
@@ -92,17 +97,21 @@ export function UpdateSection() {
     },
   ];
   return (
-    <Card title={t("office.about.update.title")} titleAs="h2">
-      <DefinitionGrid items={items} />
-      {outcome.data ? (
-        <OutcomeAlert outcome={outcome.data} onHidden={() => void outcome.refetch()} />
-      ) : null}
-      {user.role === "admin" ? (
-        <UpdateFromFile />
-      ) : (
-        <p className="office-note">{t("office.about.update.adminOnly")}</p>
-      )}
-    </Card>
+    <>
+      <Card title={t("office.about.update.title")} titleAs="h2">
+        <DefinitionGrid items={items} />
+        {outcome.data ? (
+          <OutcomeAlert outcome={outcome.data} onHidden={() => void outcome.refetch()} />
+        ) : null}
+        {user.role === "admin" ? (
+          <UpdateFromFile />
+        ) : (
+          <p className="office-note">{t("office.about.update.adminOnly")}</p>
+        )}
+      </Card>
+      <HostUpdateBlock />
+      <DeviceVersionsBlock />
+    </>
   );
 }
 
@@ -449,6 +458,7 @@ function ReportCard({
         </>
       ) : null}
       {refusal === null ? null : <Alert tone="error">{refusal}</Alert>}
+      <StageToHostButton manifestPath={report.path} />
       {refusal === null && !roleKnown ? (
         <Alert tone="warn">{t("office.about.update.roleUnknown")}</Alert>
       ) : null}

@@ -23,6 +23,9 @@ const MAX_PATH_LENGTH: usize = 512;
 /// How long a stream may stay silent before the link counts as lost: three
 /// missed 15 s heartbeats.
 pub const STREAM_SILENCE_LIMIT: Duration = Duration::from_secs(45);
+/// How long a transfer of the installer may go without a byte before it
+/// counts as lost (spec §10.11.4).
+pub const TRANSFER_SILENCE_LIMIT: Duration = Duration::from_secs(60);
 
 /// Any HTTP answer, error statuses included: the webview reads the error
 /// body's code itself.
@@ -255,6 +258,146 @@ impl HostStream {
         match self.response.chunk().await {
             Ok(chunk) => Ok(chunk.map(|bytes| bytes.to_vec())),
             Err(_) => Err(RequestError::Unreachable),
+        }
+    }
+}
+
+/// Long transfers with the paired host — the installer down
+/// (`update_fetch`) and up (`update_stage`, plan ОБН-3) — with the same
+/// pinned certificate, headers and path rules as [`PinnedClient`], no limit
+/// on the whole exchange, and [`TRANSFER_SILENCE_LIMIT`] of silence.
+#[derive(Debug, Clone)]
+pub struct TransferClient {
+    client: reqwest::Client,
+    address: String,
+}
+
+/// An answer to a download: its status and headers at once, its body piece
+/// by piece.
+#[derive(Debug)]
+pub struct Download {
+    response: reqwest::Response,
+}
+
+impl TransferClient {
+    pub fn new(address: &str, fingerprint: &str) -> Result<Self, RequestError> {
+        let client = pinned_builder(fingerprint)?
+            .read_timeout(TRANSFER_SILENCE_LIMIT)
+            .build()
+            .map_err(|_| RequestError::Unreachable)?;
+        Ok(Self {
+            client,
+            address: address.trim_end_matches('/').to_owned(),
+        })
+    }
+
+    /// `GET path` with the device key. `resume` asks for the bytes from an
+    /// offset, only if the file is still the one of that ETag (`Range`,
+    /// `If-Range`); the host answers the whole file otherwise.
+    pub async fn download(
+        &self,
+        path: &str,
+        key: &Secret,
+        resume: Option<(u64, &str)>,
+    ) -> Result<Download, RequestError> {
+        validate_path(path)?;
+        let mut request = self
+            .client
+            .get(format!("{}{path}", self.address))
+            .header(PROTOCOL_HEADER, PROTOCOL_VERSION.to_string())
+            .bearer_auth(key.expose());
+        if let Some((from, etag)) = resume {
+            request = request
+                .header(reqwest::header::RANGE, format!("bytes={from}-"))
+                .header(reqwest::header::IF_RANGE, etag);
+        }
+        match request.send().await {
+            Ok(response) => Ok(Download { response }),
+            Err(error) if is_fingerprint_mismatch(&error) => Err(RequestError::CertificateMismatch),
+            Err(_) => Err(RequestError::Unreachable),
+        }
+    }
+}
+
+impl TransferClient {
+    /// `PUT path` of exactly `length` bytes of `file`, streamed, with the
+    /// device key and the office session (`update_stage`, plan ОБН-3).
+    pub async fn upload(
+        &self,
+        path: &str,
+        credentials: Credentials<'_>,
+        file: tokio::fs::File,
+        length: u64,
+    ) -> Result<HostResponse, RequestError> {
+        validate_path(path)?;
+        let mut request = self
+            .client
+            .put(format!("{}{path}", self.address))
+            .header(PROTOCOL_HEADER, PROTOCOL_VERSION.to_string())
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, length)
+            .body(reqwest::Body::from(file));
+        if let Some(key) = credentials.device_key {
+            request = request.bearer_auth(key.expose());
+        }
+        if let Some(token) = credentials.office_token {
+            request = request.header(OFFICE_SESSION_HEADER, token);
+        }
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) if error.is_builder() => return Err(RequestError::InvalidRequest),
+            Err(error) if is_fingerprint_mismatch(&error) => {
+                return Err(RequestError::CertificateMismatch)
+            }
+            Err(_) => return Err(RequestError::Unreachable),
+        };
+        let status = response.status().as_u16();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| RequestError::Unreachable)?;
+        Ok(HostResponse {
+            status,
+            body: serde_json::from_slice(&bytes).ok(),
+        })
+    }
+}
+
+impl Download {
+    pub fn status(&self) -> u16 {
+        self.response.status().as_u16()
+    }
+
+    /// Where a `206` begins (`Content-Range: bytes N-M/S`).
+    pub fn range_start(&self) -> Option<u64> {
+        self.response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)?
+            .to_str()
+            .ok()?
+            .strip_prefix("bytes ")?
+            .split_once('-')?
+            .0
+            .parse()
+            .ok()
+    }
+
+    /// The next bytes, `None` at the end. Silence past
+    /// [`TRANSFER_SILENCE_LIMIT`] or a dropped connection is an error.
+    pub async fn chunk(&mut self) -> Result<Option<Vec<u8>>, RequestError> {
+        match self.response.chunk().await {
+            Ok(chunk) => Ok(chunk.map(|bytes| bytes.to_vec())),
+            Err(_) => Err(RequestError::Unreachable),
+        }
+    }
+
+    /// An answer that is not the file: the host's error, read whole.
+    pub async fn into_error(self) -> HostResponse {
+        let status = self.status();
+        let bytes = self.response.bytes().await.unwrap_or_default();
+        HostResponse {
+            status,
+            body: serde_json::from_slice(&bytes).ok(),
         }
     }
 }

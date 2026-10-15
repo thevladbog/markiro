@@ -31,6 +31,7 @@ pub mod service;
 pub mod shifts;
 pub mod templates;
 pub mod tls;
+pub mod updates;
 pub mod upgrade;
 pub mod validate;
 
@@ -41,6 +42,10 @@ use sqlx::SqlitePool;
 use tls::TlsIdentity;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// The version this host runs: what `hello` reports and what the update
+/// packages are compared with (plan ОБН-3).
+pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// How long `stop` waits for open connections before aborting them.
 const SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
@@ -87,6 +92,8 @@ pub struct RunningHost {
     backups: tokio::task::JoinHandle<()>,
     /// The license's minute look (plan ЛЦ-2); it ends with `stopping`.
     license: tokio::task::JoinHandle<()>,
+    /// The hourly pass over the update packages (plan ОБН-3).
+    updates: tokio::task::JoinHandle<()>,
     pool: SqlitePool,
     _lock: std::fs::File,
 }
@@ -121,6 +128,14 @@ impl RunningHost {
             tracing::warn!("the license look did not stop in time; aborting it");
             license.abort();
         }
+        let mut updates = self.updates;
+        if tokio::time::timeout(SHUTDOWN_DEADLINE, &mut updates)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the update package pass did not stop in time; aborting it");
+            updates.abort();
+        }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
         Ok(())
@@ -153,16 +168,28 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
+    // The update packages (plan ОБН-3): opened after the migrations and
+    // before the first request, so a device never gets an unchecked package.
+    let packages = std::sync::Arc::new(updates::UpdateStore::new(
+        paths.updates_dir(),
+        markiro_proto::trust::update_keyset(),
+        HOST_VERSION,
+    ));
+    let opening = packages.clone();
+    let opened = tokio::task::spawn_blocking(move || opening.open_blocking()).await??;
+    updates::worker::record_start(&pool, &clock::format_timestamp(clock.now()), &opened).await?;
     let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
         .with_endpoint(identity.fingerprint.clone(), addr.port())
         .with_backups(backups.clone())
+        .with_updates(packages.clone())
         // The trial's mark: the registry on Windows, none elsewhere.
         .with_license(std::sync::Arc::new(license::LicenseService::new(
             markiro_proto::trust::license_keyset(),
             license::trial_mark::system(),
         )));
     let stopping = state.stopping.clone();
-    let backup_worker = backup::worker::spawn(backups, clock, stopping.subscribe());
+    let backup_worker = backup::worker::spawn(backups, clock.clone(), stopping.subscribe());
+    let update_worker = updates::worker::spawn(packages, pool.clone(), clock, stopping.subscribe());
     // The license (plan ЛЦ-2): the trial of a site from before it, the state
     // and the INN at the start, then a look every minute.
     state.license.startup(&state).await;
@@ -186,6 +213,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         task,
         backups: backup_worker,
         license: license_ticker,
+        updates: update_worker,
         pool,
         _lock: lock,
     })

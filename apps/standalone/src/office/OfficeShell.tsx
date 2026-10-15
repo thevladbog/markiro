@@ -16,6 +16,7 @@ import {
 import { HostStatusDot } from "../app/HostStatusDot.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { DirtyGuardProvider, useDirtyRegistry } from "./dirty-guard.js";
+import { UpdateBanner } from "./banners/UpdateBanner.js";
 import { LicenseBanner } from "./LicenseBanner.js";
 import { isSettingsItem, OFFICE_NAV, type OfficeNavItem } from "./nav.js";
 import { useOfficeLink } from "./office-link.js";
@@ -120,6 +121,7 @@ export function OfficeShell() {
             </div>
           </header>
           <LicenseBanner />
+          <UpdateBanner />
           <main ref={mainRef} tabIndex={-1} className="office-shell__content">
             {passwordChangedAt === location.key && (
               <Alert tone="ok">{t("office.password.done")}</Alert>

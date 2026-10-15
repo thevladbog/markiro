@@ -12,10 +12,12 @@
 //!   (`ShellExecuteExW`, verb `runas`; a fake in tests);
 //! - [`pending`] keeps `update-pending.json`, the outcome the next start reads.
 
+pub mod fetch;
 pub mod launch;
 pub mod package;
 pub mod pending;
 pub mod rules;
+pub mod stage;
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -209,14 +211,30 @@ impl UpdateState {
         self.installed.parse().map_err(|_| UpdateError::Unsupported)
     }
 
-    fn found_path(&self, path: &str) -> Result<PathBuf, UpdateError> {
-        self.found
+    /// A path the last search found, or the manifest of a package this app
+    /// downloaded from the host (plan ОБН-3, `fetch::downloaded_manifest`);
+    /// anything else is `invalid_request`. `update_stage` asks it too.
+    pub(crate) fn found_path(&self, path: &str) -> Result<PathBuf, UpdateError> {
+        let found = self
+            .found
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .find(|found| found.to_string_lossy() == path)
-            .cloned()
-            .ok_or(UpdateError::InvalidRequest)
+            .cloned();
+        if let Some(found) = found {
+            return Ok(found);
+        }
+        let downloaded = PathBuf::from(path);
+        if fetch::downloaded_manifest(&self.downloads(), &downloaded) {
+            return Ok(downloaded);
+        }
+        Err(UpdateError::InvalidRequest)
+    }
+
+    /// Where `update_fetch` keeps the package from the host (plan ОБН-3).
+    fn downloads(&self) -> PathBuf {
+        self.data_dir.join(fetch::DOWNLOADS)
     }
 
     /// The packages in the updates folder and on removable drives; their
@@ -244,11 +262,16 @@ impl UpdateState {
         path: &str,
     ) -> Result<(Checked, Decision, HostCheck), UpdateError> {
         let source = self.found_path(path)?;
+        // A package from the host must be of the host's very version (plan
+        // ОБН-3, spec §10.11.4); a file keeps the protocol rule of §10.7.
+        let from_host = fetch::downloaded_manifest(&self.downloads(), &source);
         let installed = self.installed_version()?;
         let host = host_check(device).await;
         let keyset = Arc::clone(&self.keyset);
         let checked = blocking(move || package::verify(&source, &keyset)).await??;
-        let decision = rules::decide(checked.manifest.offered(), &installed, &host);
+        let mut offered = checked.manifest.offered();
+        offered.from_host = from_host;
+        let decision = rules::decide(offered, &installed, &host);
         Ok((checked, decision, host))
     }
 

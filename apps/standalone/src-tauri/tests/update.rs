@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use markiro_host::config::HostPaths;
-use markiro_host::{start, RunningHost, StartOptions};
+use markiro_host::{start, RunningHost, StartOptions, HOST_VERSION};
+use markiro_proto::update::distribution::testing::sign_update_manifest;
+use markiro_proto::update::AppVersion;
 use markiro_proto::DeviceKind;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
@@ -241,6 +243,74 @@ fn a_station_does_not_get_ahead_of_its_hosts_protocol() {
     let seen = report.host.unwrap();
     assert_eq!(seen.protocol, markiro_proto::PROTOCOL_VERSION);
     assert!(seen.version.is_some());
+    host.stop();
+}
+
+/// A package as `update_fetch` leaves it: `<data>/updates/<version>/`.
+fn downloaded_package(data: &Path, version: &str) -> String {
+    let folder = data.join("updates").join(version);
+    std::fs::create_dir_all(&folder).unwrap();
+    let bytes = test_installer(version);
+    let size = bytes.len() as u64;
+    let sha256 = markiro_proto::update::hash_exact(&bytes[..], size).unwrap();
+    let name = format!("markiro-standalone-{version}-windows-x86_64-setup.exe");
+    let manifest = sign_update_manifest(&json!({
+        "v": 1, "product": "markiro-standalone", "version": version, "channel": "stable",
+        "releasedAt": "2026-11-02T10:00:00Z",
+        "sourceSha": "0123456789abcdef0123456789abcdef01234567",
+        "installer": { "name": name, "sha256": sha256, "sizeBytes": size },
+        "protocol": markiro_proto::PROTOCOL_VERSION,
+        "minProtocol": markiro_proto::MIN_PROTOCOL_VERSION,
+        "minUpgradeFrom": "0.0.1", "notes": ["Тест"]
+    }));
+    let path = folder.join(format!("markiro-standalone-{version}.update.jws"));
+    std::fs::write(&path, format!("{manifest}\n")).unwrap();
+    std::fs::write(folder.join(name), bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn a_package_from_the_host_installs_only_while_the_host_runs_its_version() {
+    let host = Host::start();
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = station_paired_at(device_dir.path(), &host.address());
+    let lockdown = LockdownState::default();
+    let site = site("0.0.1", vec![]);
+    let data = site._dirs[0].path();
+
+    // Of the host's very version: no refusal, no scan needed.
+    let same = downloaded_package(data, HOST_VERSION);
+    let report = block_on(site.state.verify(&device, &same)).unwrap();
+    assert_eq!(report.refusal, None);
+
+    // Of another version: the host was rolled back or its package changed.
+    let host_version: AppVersion = HOST_VERSION.parse().unwrap();
+    let other = AppVersion {
+        minor: host_version.minor + 1,
+        patch: 0,
+        ..host_version
+    }
+    .to_string();
+    let path = downloaded_package(data, &other);
+    let report = block_on(site.state.verify(&device, &path)).unwrap();
+    assert_eq!(
+        serde_json::to_value(&report.refusal).unwrap(),
+        json!({ "code": "host_differs", "hostVersion": HOST_VERSION })
+    );
+    assert_eq!(
+        block_on(site.state.install(&device, &lockdown, &path, &[], 0)).err(),
+        Some(UpdateError::UpdateRefused)
+    );
+
+    // Anything else in the folder is no package of this shell.
+    let folder = data.join("updates").join("x");
+    std::fs::create_dir_all(&folder).unwrap();
+    let stray = folder.join("markiro-standalone-x.update.jws");
+    std::fs::write(&stray, "x").unwrap();
+    assert_eq!(
+        block_on(site.state.verify(&device, &stray.to_string_lossy())).err(),
+        Some(UpdateError::InvalidRequest)
+    );
     host.stop();
 }
 

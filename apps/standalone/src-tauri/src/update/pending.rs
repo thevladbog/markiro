@@ -89,6 +89,8 @@ pub fn take_outcome(dir: &Path, installed: &str) -> Option<UpdateOutcome> {
         None
     } else if pending.to == installed {
         let _ = remove(dir);
+        // The package downloaded from the host did its work (plan ОБН-3).
+        let _ = fs::remove_dir_all(dir.join(crate::update::fetch::DOWNLOADS));
         Some(UpdateOutcome::Updated {
             from: pending.from,
             to: pending.to,
@@ -137,6 +139,26 @@ mod tests {
         );
         assert!(!dir.path().join(FILE_NAME).exists());
         assert_eq!(take_outcome(dir.path(), "0.2.0"), None);
+    }
+
+    #[test]
+    fn a_finished_update_takes_the_downloaded_package_and_an_unfinished_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let downloads = dir.path().join(crate::update::fetch::DOWNLOADS);
+        let package = downloads.join("0.2.0");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("installer"), b"MZ").unwrap();
+        mark(dir.path());
+        assert!(matches!(
+            take_outcome(dir.path(), "0.1.0"),
+            Some(UpdateOutcome::NotFinished { .. })
+        ));
+        assert!(package.exists(), "«Повторить» installs the same file");
+        assert!(matches!(
+            take_outcome(dir.path(), "0.2.0"),
+            Some(UpdateOutcome::Updated { .. })
+        ));
+        assert!(!downloads.exists());
     }
 
     #[test]

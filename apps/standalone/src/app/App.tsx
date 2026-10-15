@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 
 import { FloorApp } from "../floor/FloorApp.js";
 import { FloorStatusBar, type FloorBarTools } from "../floor/FloorStatusBar.js";
+import { FloorUpdatePanel } from "../floor/FloorUpdatePanel.js";
 import { createGatedScanSource } from "../floor/gated-scan-source.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import {
@@ -52,6 +53,12 @@ import {
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { countUnsentRecords } from "../local/outbox.js";
+import type { UpdatesApi } from "../update/updates-api.js";
+import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
+import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
+import { useKeptOffer } from "../update/kept-offer.js";
+import { useHostUpdateOffer } from "../update/use-host-offer.js";
+import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
 import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
@@ -171,9 +178,21 @@ export interface AppProps {
    * screen's own field, so the keyboard is not a source here.
    */
   pairingScanSource?: ScanSource;
+  /** The shell's update commands (plan ОБН-3); tests give their own. */
+  updates?: UpdatesApi;
 }
 
-export function App({
+/** The app, with the shell's update commands in reach of every screen below it. */
+export function App(props: AppProps) {
+  const updates = props.updates ?? TAURI_UPDATES;
+  return (
+    <UpdatesProvider value={updates}>
+      <AppScreens {...props} updates={updates} />
+    </UpdatesProvider>
+  );
+}
+
+function AppScreens({
   probe,
   device,
   host,
@@ -188,6 +207,7 @@ export function App({
   lockdown,
   kioskPolicy,
   pairingScanSource,
+  updates = TAURI_UPDATES,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -295,6 +315,21 @@ export function App({
   const owedHere = owed !== null && owed === view.kind;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
+  // The update the host offers this PC (plan ОБН-3): the office's banner, the
+  // station's line off the work screen and the version screen read it.
+  const updateOffer = useHostUpdateOffer({
+    link: state.link,
+    paired: pairedStatus !== null,
+    host: hostApi,
+    updates,
+  });
+  // «Обновить с хоста» where no office opens (the version screen, a station
+  // the host refuses): the dialog, and the shell's own install after it.
+  const updateShell = useUpdateShell();
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const offerToInstall = updateOffer.kind === "available" ? updateOffer : null;
+  // The dialog outlives a re-read of the offer while it is open.
+  const dialogOffer = useKeptOffer(updateOffer, updateOpen);
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
@@ -837,6 +872,8 @@ export function App({
         hostRevision={state.hostRevision}
         deviceId={pairedStatus?.deviceId ?? null}
         windowMode={windowMode}
+        updateOffer={updateOffer}
+        updates={updates}
       />
     );
   }
@@ -862,6 +899,9 @@ export function App({
           address={address}
           onRetry={retryProbe}
           onNetwork={unpaired ? () => dispatch({ type: "network_pairing_requested" }) : null}
+          onUpdate={
+            offerToInstall === null || pairedStatus === null ? null : () => setUpdateOpen(true)
+          }
         />
       )}
       {view.kind === "bootstrap" && <BootstrapWizard onSubmit={bootstrap} />}
@@ -949,6 +989,7 @@ export function App({
             refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
             otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
             license={stationLicense}
+            updateOffer={updateOffer}
             watchScanners={hardwareApi.watchScanners}
             tools={floorTools}
             {...(view.kind === "floor_operator" ? { onSwitchOperator: switchOperator } : {})}
@@ -965,21 +1006,26 @@ export function App({
               onBack={() => setScannerSetup(false)}
             />
           ) : view.kind === "floor" ? (
-            <OperatorSignIn
-              // A number or PIN typed under another pairing or line is not kept.
-              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
-              local={localDb}
-              pairing={pairedStatus}
-              lineId={pairedStatus.lineId}
-              sync={state.sync}
-              notice={state.floorNotice}
-              source={floorGate.source}
-              onSignedIn={operatorSignedIn}
-              onSync={signInSync.request}
-              onOffice={openOffice}
-              watchScanners={hardwareApi.watchScanners}
-              onScannerSettings={() => setScannerSetup(true)}
-            />
+            <>
+              {offerToInstall?.required === true && (
+                <FloorUpdatePanel offer={offerToInstall} onUpdate={() => setUpdateOpen(true)} />
+              )}
+              <OperatorSignIn
+                // A number or PIN typed under another pairing or line is not kept.
+                key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
+                local={localDb}
+                pairing={pairedStatus}
+                lineId={pairedStatus.lineId}
+                sync={state.sync}
+                notice={state.floorNotice}
+                source={floorGate.source}
+                onSignedIn={operatorSignedIn}
+                onSync={signInSync.request}
+                onOffice={openOffice}
+                watchScanners={hardwareApi.watchScanners}
+                onScannerSettings={() => setScannerSetup(true)}
+              />
+            </>
           ) : (
             <UnpairContext.Provider value={unpairApi}>
               <FloorApp
@@ -1023,6 +1069,18 @@ export function App({
           hostAddress={remoteAddress}
           onChangeAddress={changeAddress}
           link={state.link}
+        />
+      )}
+      {dialogOffer !== null && (
+        <UpdateFromHostDialog
+          open={updateOpen}
+          offer={dialogOffer}
+          // Opened from the station's sign-in or the version screen: touch targets.
+          size="floor"
+          onClose={() => setUpdateOpen(false)}
+          // No office here: no `app.update.start` report (its route is the
+          // office's); Windows' administrator prompt is the permission.
+          start={(report) => updateShell.install(report.path, report.confirmations)}
         />
       )}
     </main>

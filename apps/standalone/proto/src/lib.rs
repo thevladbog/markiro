@@ -72,6 +72,12 @@ pub mod codes {
     /// A stored file no longer matches the SHA-256 it was stored with: the
     /// host serves nothing of it.
     pub const EXPORT_FILE_CORRUPTED: &str = "export_file_corrupted";
+    /// The host checks its update package again after its files changed
+    /// (plan ОБН-3): `503` with `Retry-After`, ask again in a moment.
+    pub const PACKAGE_VERIFYING: &str = "package_verifying";
+    /// Three devices download the update from the host already (plan
+    /// ОБН-3): `503` with `Retry-After: 30`.
+    pub const UPDATE_BUSY: &str = "update_busy";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -96,6 +102,8 @@ pub mod codes {
         EXPORT_STORE_FULL,
         EXPORT_FILE_TOO_LARGE,
         EXPORT_FILE_CORRUPTED,
+        PACKAGE_VERIFYING,
+        UPDATE_BUSY,
     ];
 }
 

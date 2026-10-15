@@ -62,6 +62,19 @@ pub struct AppState {
     /// The copies of the database (plan РК); `None` answers the office's
     /// backup routes `not_found`. `crate::start` always sets it.
     pub backups: Option<Arc<crate::backup::Backups>>,
+    /// The update packages (plan ОБН-3); `None` answers the office's upload
+    /// routes `not_found` and a device's offer `missing`. `crate::start`
+    /// always sets it.
+    pub updates: Option<Arc<crate::updates::UpdateStore>>,
+    /// One download per device, three on the host, 30 update requests a
+    /// minute per device (plan ОБН-3).
+    pub update_limits: Arc<crate::updates::limits::DownloadLimits>,
+    /// How long a download waits for the client to take its next piece
+    /// (60 s; tests shorten it).
+    pub download_stall: Duration,
+    /// How long an upload of an installer may take nothing from the client
+    /// (60 s; tests shorten it).
+    pub upload_idle: Duration,
     /// The site's license (plan ЛЦ-2): its files, its state, the time it
     /// trusts and its gates.
     pub license: Arc<crate::license::LicenseService>,
@@ -97,6 +110,10 @@ impl AppState {
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             backups: None,
+            updates: None,
+            update_limits: Arc::new(crate::updates::limits::DownloadLimits::new(clock.clone())),
+            download_stall: crate::updates::stream::STALL_LIMIT,
+            upload_idle: crate::updates::stream::UPLOAD_IDLE_LIMIT,
             license: Arc::new(crate::license::LicenseService::new(
                 markiro_proto::trust::license_keyset(),
                 Arc::new(crate::license::trial_mark::NoMark),
@@ -142,6 +159,24 @@ impl AppState {
         self
     }
 
+    /// The update packages the distribution routes serve (plan ОБН-3).
+    pub fn with_updates(mut self, updates: Arc<crate::updates::UpdateStore>) -> Self {
+        self.updates = Some(updates);
+        self
+    }
+
+    /// Another stall limit of a download; tests use a short one.
+    pub fn with_download_stall(mut self, stall: Duration) -> Self {
+        self.download_stall = stall;
+        self
+    }
+
+    /// Another idle limit of an installer upload; tests use a short one.
+    pub fn with_upload_idle(mut self, idle: Duration) -> Self {
+        self.upload_idle = idle;
+        self
+    }
+
     /// Replace the license service (`crate::start` gives it the registry's
     /// mark; tests a mark of their own).
     pub fn with_license(mut self, license: Arc<crate::license::LicenseService>) -> Self {
@@ -153,6 +188,19 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/v1/hello", get(hello))
+        // Outside the protocol guard like `hello` (plan ОБН-3, spec §10.11.3):
+        // a device the host refuses as `app_too_old` can still learn of its
+        // update, yet the handler takes `AuthDevice`: no key, no answer. Its
+        // shape is frozen like `hello`'s. Inline, not a router of its own:
+        // `tests/license_routes.rs` allows one merge and two routers.
+        .route(
+            "/v1/device/update",
+            get(crate::routes::device_update::offer),
+        )
+        .route(
+            "/v1/device/update/installer",
+            get(crate::routes::device_update::installer),
+        )
         .merge(protected_routes().route_layer(middleware::from_fn(protocol_guard)))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
@@ -580,6 +628,24 @@ fn protected_routes() -> Router<AppState> {
             )),
         )
         .route(
+            "/v1/office/update-package/manifest",
+            post(crate::routes::update_package::post_manifest).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::routes::update_package::MANIFEST_BODY_LIMIT,
+                ),
+            ),
+        )
+        // The installer is read as a `Body`, which no `DefaultBodyLimit`
+        // limits: the handler holds the manifest's size itself (plan ОБН-3).
+        .route(
+            "/v1/office/update-package/{upload_id}/installer",
+            put(crate::routes::update_package::put_installer),
+        )
+        .route(
+            "/v1/office/update-status",
+            get(crate::routes::update_status::update_status),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),
@@ -659,7 +725,7 @@ async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hell
         protocol: markiro_proto::PROTOCOL_VERSION,
         min_protocol: markiro_proto::MIN_PROTOCOL_VERSION,
         host_id: state.host_id.clone(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: crate::HOST_VERSION.to_owned(),
         time: state.timestamp(),
         initialized,
         restore_epoch,

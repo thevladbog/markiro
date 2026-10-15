@@ -11,6 +11,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Update distribution through the host (plan ОБН-3): `update/distribution.rs`.
+pub mod distribution;
+
 /// The product an update manifest names.
 pub const PRODUCT: &str = "markiro-standalone";
 

@@ -259,6 +259,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateBackupSettings"),
     ),
     resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
+    // The host is never newer in a test about something else: no offer is read.
+    getDeviceUpdate: vi.fn<HostApi["getDeviceUpdate"]>(() => unexpected("getDeviceUpdate")),
+    getUpdateStatus: vi.fn<HostApi["getUpdateStatus"]>(() => unexpected("getUpdateStatus")),
     // The banner and «Обзор» read the license on every office test: a valid one warns of nothing,
     // and it has every feature on, custom branding included (`office/branding.ts`).
     getLicense: vi.fn<HostApi["getLicense"]>(async () => ACTIVE_LICENSE),

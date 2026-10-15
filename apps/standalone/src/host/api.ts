@@ -13,6 +13,12 @@ import {
   type KnownBlocksResponse,
 } from "./backups.js";
 import type { HostClient } from "./client.js";
+import {
+  deviceUpdateOfferSchema,
+  officeUpdateStatusSchema,
+  type DeviceUpdateOffer,
+  type OfficeUpdateStatus,
+} from "./distribution.js";
 import { usageStatsSchema, type UsageStats } from "./usage-stats.js";
 import {
   codeSearchPath,
@@ -607,6 +613,10 @@ export interface HostApi {
   updateBackupSettings: (token: string, update: BackupSettingsUpdate) => Promise<BackupState>;
   /** End the hold of the stations' facts a restore set; without a hold it changes nothing. */
   resumeFacts: (token: string) => Promise<BackupState>;
+  /** `GET /v1/device/update` (plan ОБН-3): the host's version and package; any protocol, the device key. */
+  getDeviceUpdate: () => Promise<DeviceUpdateOffer>;
+  /** `GET /v1/office/update-status` (plan ОБН-3): every office role. */
+  getUpdateStatus: (token: string) => Promise<OfficeUpdateStatus>;
   /** The site's license (plan ЛЦ-2); every office role reads it. */
   getLicense: (token: string) => Promise<OfficeLicense>;
   /** «было → станет» of a file, checked as a load checks it; administrators, nothing written. */
@@ -1266,6 +1276,13 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("POST", "/v1/office/backups/resume", {
         officeToken: token,
         schema: backupStateSchema,
+      }),
+    getDeviceUpdate: () =>
+      client.request("GET", "/v1/device/update", { schema: deviceUpdateOfferSchema }),
+    getUpdateStatus: (token) =>
+      client.request("GET", "/v1/office/update-status", {
+        officeToken: token,
+        schema: officeUpdateStatusSchema,
       }),
     getLicense: (token) =>
       client.request("GET", "/v1/office/license", {

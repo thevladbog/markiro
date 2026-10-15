@@ -9,10 +9,12 @@ import type { HardwareApi } from "../hardware/hardware.js";
 import type { DeviceLicense, HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
+import type { HostUpdateOffer } from "../update/host-offer.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
 import { emergencyEndsAt, floorLicenseLine } from "./license.js";
 import { LinkDot } from "./LinkDot.js";
+import { FloorUpdateLine } from "./FloorUpdateLine.js";
 import { FloorWindowControl, type FloorWindowMode } from "./FloorWindowControl.js";
 import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
 import type { ScanSource } from "./scan-source.js";
@@ -94,6 +96,8 @@ export interface FloorStatusBarProps {
    * plan ЛЦ-3); `null` (the default) — nothing to say.
    */
   license?: DeviceLicense | null;
+  /** The update the host offers this station (plan ОБН-3); none by default. */
+  updateOffer?: HostUpdateOffer;
   /**
    * The clock the waits are measured on, and the end of the license's
    * emergency extension; this computer's by default.
@@ -158,6 +162,8 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
  * block of serials arrives without one.
  */
 export const REFRESH_MS = 10_000;
+
+const NO_UPDATE: HostUpdateOffer = { kind: "none" };
 
 /** The longest delay `setTimeout` keeps (a signed 32-bit number of milliseconds). */
 const MAX_TIMER_MS = 2_147_483_647;
@@ -228,7 +234,9 @@ function stockAlert(t: TFunction, what: "box" | "pallet", stock: SerialStock) {
  * records an older pairing left unsent. Plan ЛЦ-3: the site's license, quietly
  * (`floorLicenseLine`): nothing while new shifts open, the grace with its last
  * day, that no new shift opens, or the emergency extension with its end; the
- * line never stops the work on screen. While
+ * line never stops the work on screen. Plan ОБН-3 adds, off a shift's work
+ * only, that a new version waits for an administrator, or that the host
+ * refuses this station already. While
  * the host's refusal waits nothing is sent, so the failure of an earlier send
  * is not news. A failed read of the copies leaves the names out, and of the
  * outbox or the serials their figures; the floor works on.
@@ -248,6 +256,7 @@ export function FloorStatusBar({
   outboxVersion,
   factsFailure,
   license = null,
+  updateOffer = NO_UPDATE,
   now = systemClock,
   watchScanners,
   onSwitchOperator,
@@ -604,6 +613,11 @@ export function FloorStatusBar({
             {t(otherHostHeld ? "floor.status.otherHostHeld" : "floor.status.refusalHeld")}
           </Alert>
         )}
+        <FloorUpdateLine
+          offer={updateOffer}
+          appTooOld={link?.lastError === "app_too_old"}
+          inShift={shiftId !== null}
+        />
         {licenseLine !== null && (
           <Alert tone={licenseLine.tone} role="presentation">
             {t(licenseLine.key, licenseLine.values ?? {})}

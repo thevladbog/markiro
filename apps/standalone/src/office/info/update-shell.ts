@@ -71,6 +71,7 @@ export const refusalSchema = z.discriminatedUnion("code", [
     hostProtocol: z.number().int(),
     protocol: z.number().int(),
   }),
+  z.object({ code: z.literal("host_differs"), hostVersion: z.string() }),
 ]);
 export type Refusal = z.infer<typeof refusalSchema>;
 

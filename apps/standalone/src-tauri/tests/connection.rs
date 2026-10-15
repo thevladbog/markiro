@@ -148,6 +148,9 @@ async fn an_unpaired_device_stays_offline_without_trying() {
             last_error: None,
             seq: 1,
             restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
         })
     );
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -174,6 +177,9 @@ async fn a_paired_device_comes_online_and_hears_every_revision() {
             last_error: None,
             seq: 1,
             restore_epoch: None,
+            host_version: None,
+            host_protocol: None,
+            host_min_protocol: None,
         }
     );
     let online = next_status(&mut heard).await;
@@ -181,6 +187,9 @@ async fn a_paired_device_comes_online_and_hears_every_revision() {
     assert_eq!(online.seq, 2);
     assert_eq!(online.last_error, None);
     assert!(online.last_contact_at.is_some());
+    assert!(online.host_version.is_some(), "{online:?}");
+    assert!(online.host_protocol.is_some(), "{online:?}");
+    assert!(online.host_min_protocol.is_some(), "{online:?}");
     assert_eq!(
         next_revision(&mut heard).await,
         0,
@@ -310,6 +319,12 @@ async fn a_link_swapped_for_another_host_does_not_inherit_the_epoch() {
     let connecting = status_in(&mut heard, LinkState::Connecting).await;
     assert_eq!(connecting.restore_epoch, None, "{connecting:?}");
     assert_eq!(state.snapshot().restore_epoch, None);
+    // The same goes for the versions the old host's `hello` named: a new
+    // pairing starts without a version of the host.
+    assert!(online.host_version.is_some(), "{online:?}");
+    assert_eq!(connecting.host_version, None, "{connecting:?}");
+    assert_eq!(connecting.host_protocol, None, "{connecting:?}");
+    assert_eq!(connecting.host_min_protocol, None, "{connecting:?}");
     task.abort();
     host.stop().await.unwrap();
 }

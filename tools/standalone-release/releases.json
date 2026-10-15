@@ -1,0 +1,4 @@
+{
+  "schemaVersion": 1,
+  "releases": [{ "version": "0.1.0", "protocol": 5, "minProtocol": 1 }]
+}

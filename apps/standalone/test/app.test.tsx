@@ -49,6 +49,8 @@ import type {
 } from "../src/host/protocol.js";
 import { UNSENT_COUNT_SQL } from "../src/floor/outbox-status.js";
 import type { LocalExecutor } from "../src/local/executor.js";
+import type { DeviceUpdateOffer } from "../src/host/distribution.js";
+import { UpdateError, type UpdatesApi } from "../src/update/updates-api.js";
 import { ENTITY_SET } from "../src/local/reference-sync.js";
 import {
   DEVICE_ID,
@@ -267,6 +269,7 @@ interface Services {
   hardware?: HardwareApi;
   windowsPrinting?: WindowsPrinting;
   lockdown?: LockdownLifecycle;
+  updates?: UpdatesApi;
 }
 
 /** The app with fakes; the link stays online and the local database is a fresh one. */
@@ -323,6 +326,36 @@ function openLinkDetails(): HTMLElement {
 async function openStationLinkDetails(): Promise<void> {
   fireEvent.click(await screen.findByRole("button", { name: /^Связь с хостом/ }));
 }
+
+/** The host at 0.3.0 gives a package; this PC runs 0.2.1 (plan ОБН-3). */
+const UPDATE_OFFER: DeviceUpdateOffer = {
+  hostVersion: "0.3.0",
+  package: { state: "ok", manifest: "a.b.c", version: "0.3.0", sizeBytes: 200, sha256: "ab" },
+};
+const UPDATE_MANIFEST = {
+  version: "0.3.0",
+  channel: "stable",
+  releasedAt: "2026-11-02T10:00:00Z",
+  notes: [],
+  minUpgradeFrom: "0.2.0",
+  protocol: 4,
+  minProtocol: 3,
+  sizeBytes: 200,
+};
+
+function fakeUpdatesApi(refuse = false): UpdatesApi {
+  return {
+    appVersion: vi.fn(async () => "0.2.1"),
+    checkManifest: vi.fn(async () => {
+      if (refuse) throw new UpdateError("refused", "x");
+      return UPDATE_MANIFEST;
+    }),
+    fetch: vi.fn(async () => ({ version: "0.3.0", manifestPath: "m", sizeBytes: 200 })),
+    stage: vi.fn(async () => ({ version: "0.3.0", sizeBytes: 200 })),
+  };
+}
+
+const UPDATE_LINE = "Есть новая версия программы; установит администратор.";
 
 describe("App", () => {
   it("creates the site on a fresh host and opens the office", async () => {
@@ -1012,6 +1045,38 @@ describe("App", () => {
     expect(
       screen.getByText("Это приложение старее службы «Markiro Хост». Обновите приложение."),
     ).toBeTruthy();
+  });
+
+  it("says on the sign-in screen that the host has a newer version, with no button for a merely-behind station", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDeviceUpdate.mockResolvedValue(UPDATE_OFFER);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      updates: fakeUpdatesApi(),
+    });
+    await screen.findByText("Вход оператора");
+    expect(screen.queryByText(UPDATE_LINE)).toBeNull();
+    await link.status({ ...ONLINE, hostVersion: "0.3.0", seq: 2 });
+    expect(await screen.findByText(UPDATE_LINE)).toBeTruthy();
+    // A merely-behind station is told, never given a button.
+    expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
+  });
+
+  it("leaves an unpaired PC without «Обновить с хоста» on the version screen", async () => {
+    const host = fakeHost();
+    renderApp({
+      probe: probeAnswering(new HostProbeError("app_too_old", "old")),
+      device: fakeDevice(null),
+      host,
+      updates: fakeUpdatesApi(),
+    });
+    await screen.findByText("Версии не совпадают");
+    expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
+    expect(host.getDeviceUpdate).not.toHaveBeenCalled();
   });
 
   it("retries a failed pairing by re-probing the host, not just the pairing", async () => {
@@ -2895,7 +2960,7 @@ describe("the operator on the floor", () => {
   /** Anna signed in, in the line's shift, on a station whose host lists it. */
   async function inTheShift(
     probe: HostProbe = probeAnswering(true),
-    extra: Pick<Services, "windowsPrinting"> = {},
+    extra: Pick<Services, "windowsPrinting" | "updates"> = {},
   ) {
     const link = fakeConnection();
     const device = fakeDevice(DEVICE_STATUS);
@@ -2917,6 +2982,17 @@ describe("the operator on the floor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     isOnTheList();
+  });
+
+  it("keeps the update line off the work screen and shows it again after the operator leaves the shift", async () => {
+    const { link, host } = await inTheShift(probeAnswering(true), { updates: fakeUpdatesApi() });
+    host.getDeviceUpdate.mockResolvedValue(UPDATE_OFFER);
+    await link.status({ ...ONLINE, hostVersion: "0.3.0", seq: 2 });
+    await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalled());
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText(UPDATE_LINE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText(UPDATE_LINE)).toBeTruthy();
   });
 
   it("gives the floor a print runtime over the shell's driver printing it was given (plan ДРВ)", async () => {
@@ -4297,6 +4373,72 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(device.installRole).toHaveBeenCalled();
     expect(kiosk.commands).toEqual([]);
+  });
+
+  /** The host refuses this office PC for its age, and says its own version. */
+  const REFUSING = {
+    ...ONLINE,
+    state: "offline",
+    lastError: "app_too_old",
+    hostVersion: "0.3.0",
+    seq: 2,
+  } as const;
+
+  it("offers «Обновить с хоста» on the version screen when the host gives a checked package", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDeviceUpdate.mockResolvedValue(UPDATE_OFFER);
+    renderApp({
+      probe: probeAnswering(true),
+      device: officePc(),
+      host,
+      connection: link.connection,
+      updates: fakeUpdatesApi(),
+    });
+    await screen.findByText("Вход в офис");
+    await link.status(REFUSING);
+    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Обновить с хоста" })).toBeTruthy();
+  });
+
+  it("offers no button when the shell refuses the host's manifest", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDeviceUpdate.mockResolvedValue(UPDATE_OFFER);
+    const updates = fakeUpdatesApi(true);
+    renderApp({
+      probe: probeAnswering(true),
+      device: officePc(),
+      host,
+      connection: link.connection,
+      updates,
+    });
+    await screen.findByText("Вход в офис");
+    await link.status(REFUSING);
+    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    await waitFor(() => expect(updates.checkManifest).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
+  });
+
+  it("offers no button when the host has no package", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getDeviceUpdate.mockResolvedValue({
+      hostVersion: "0.3.0",
+      package: { state: "missing" },
+    } as DeviceUpdateOffer);
+    renderApp({
+      probe: probeAnswering(true),
+      device: officePc(),
+      host,
+      connection: link.connection,
+      updates: fakeUpdatesApi(),
+    });
+    await screen.findByText("Вход в офис");
+    await link.status(REFUSING);
+    expect(await screen.findByText("Версии не совпадают")).toBeTruthy();
+    await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Обновить с хоста" })).toBeNull();
   });
 
   it("still locks a station when the shell reports no role", async () => {
