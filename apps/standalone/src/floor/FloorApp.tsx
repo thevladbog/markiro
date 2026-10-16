@@ -533,6 +533,7 @@ export function FloorApp({
         onHostError={hostError}
         onBack={() => setView({ kind: "list" })}
         license={license}
+        {...(palletSheets === undefined ? {} : { palletSheets })}
       />
     );
   }

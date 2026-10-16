@@ -2508,15 +2508,15 @@ describe("the box template step of a new shift always offers the templates that 
     next();
     const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
     expect(within(group).getAllByRole("button")).toHaveLength(16);
-    expect(within(group).getByRole("button", { name: "Стоковый 06" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(
+      within(group).getByRole("button", { name: "Стоковый 06" }).getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(screen.getByText("Шаблон этикетки короба: Стоковый 06")).toBeTruthy();
     // The operator can pick another one, and the shift is made with it.
     fireEvent.click(within(group).getByRole("button", { name: "Стоковый 02" }));
-    expect(within(group).getByRole("button", { name: "Стоковый 02" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(
+      within(group).getByRole("button", { name: "Стоковый 02" }).getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("shows a plain line, no list, when exactly one template fits", async () => {
@@ -2536,7 +2536,9 @@ describe("the box template step of a new shift always offers the templates that 
     await chooseMilk();
     next();
     expect(
-      screen.getByText("Нет шаблонов этикетки короба для этого товара — создайте их в офисе: «Шаблоны»."),
+      screen.getByText(
+        "Нет шаблонов этикетки короба для этого товара — создайте их в офисе: «Шаблоны».",
+      ),
     ).toBeTruthy();
     expect(createButton()).toHaveProperty("disabled", true);
   });
