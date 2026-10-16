@@ -1531,6 +1531,51 @@ describe("геометрия тега", () => {
   });
 });
 
+describe("Table (fill)", () => {
+  const columns = [
+    { key: "name", title: "Название" },
+    { key: "actions", title: "Действия", stickyEnd: true },
+  ];
+
+  it("keeps its old look without `fill`: no pinned heading, the padding and border from the tokens' fallbacks", () => {
+    render(<Table columns={columns} rows={[{ name: "A", actions: "x" }]} />);
+    const heading = screen.getByRole("columnheader", { name: "Название" });
+    expect(heading.style.position).toBe("");
+    expect(heading.style.padding).toContain("var(--table-th-py, 10px)");
+    expect(screen.getByRole("cell", { name: "A" }).style.padding).toContain(
+      "var(--table-td-py, 11px)",
+    );
+  });
+
+  it("pins the heading to the top of an internally scrolling body and fills its parent", () => {
+    const { container } = render(
+      <Table fill columns={columns} rows={[{ name: "A", actions: "x" }]} />,
+    );
+    const root = container.querySelector(".mk-table") as HTMLElement;
+    expect(root.style.display).toBe("flex");
+    expect(root.style.flexDirection).toBe("column");
+    expect(root.style.minHeight).toBe("0px");
+    const scroll = container.querySelector(".mk-table__scroll") as HTMLElement;
+    expect(scroll.style.overflow).toBe("auto");
+    expect(scroll.style.minHeight).toBe("0px");
+    const heading = screen.getByRole("columnheader", { name: "Название" });
+    expect(heading.style.position).toBe("sticky");
+    expect(heading.style.top).toBe("0px");
+    // The pinned action column's heading sits above the scrolling headings.
+    const actions = screen.getByRole("columnheader", { name: "Действия" });
+    expect(actions.style.position).toBe("sticky");
+    expect(actions.style.top).toBe("0px");
+    expect(Number(actions.style.zIndex)).toBeGreaterThan(Number(heading.style.zIndex));
+  });
+
+  it("marks the heading, the rows and the cells with classes the office styles", () => {
+    const { container } = render(<Table columns={columns} rows={[{ name: "A", actions: "x" }]} />);
+    expect(container.querySelector("th.mk-table__th")).not.toBeNull();
+    expect(container.querySelector("tbody tr.mk-table__row")).not.toBeNull();
+    expect(container.querySelector("td.mk-table__td")).not.toBeNull();
+  });
+});
+
 describe("Table", () => {
   it("sorts by the keyboard from a sortable header, which says its order, and leaves a control inside a clickable row alone", () => {
     const onSort = vi.fn();
