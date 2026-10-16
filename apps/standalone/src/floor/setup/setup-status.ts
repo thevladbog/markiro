@@ -7,12 +7,7 @@ import {
 
 /** What differs between the stored settings and the draft: the words of «Не сохранено: …». */
 export type UnsavedPart =
-  | "printers"
-  | `assignment_${PrintPurpose}`
-  | "verify"
-  | "scanners"
-  | "sound"
-  | "volume";
+  "printers" | `assignment_${PrintPurpose}` | "verify" | "scanners" | "sound" | "volume";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -21,7 +16,10 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
  * the printers, who prints what, the label check, the scanners, the sound switch, the volume.
  * Empty when the draft is what is stored.
  */
-export function unsavedParts(stored: WorkstationSettings, draft: WorkstationSettings): UnsavedPart[] {
+export function unsavedParts(
+  stored: WorkstationSettings,
+  draft: WorkstationSettings,
+): UnsavedPart[] {
   const parts: UnsavedPart[] = [];
   if (!same(stored.printers, draft.printers)) parts.push("printers");
   for (const purpose of PRINT_PURPOSES) {

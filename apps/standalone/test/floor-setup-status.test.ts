@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { unsavedParts, volumeDivisions } from "../src/floor/setup/setup-status.js";
+import {
+  unsavedParts,
+  volumeDivisions,
+  type UnsavedPart,
+} from "../src/floor/setup/setup-status.js";
 import {
   DEFAULT_WORKSTATION_SETTINGS,
   type PrinterProfile,
@@ -22,14 +26,10 @@ describe("the words of «Не сохранено»", () => {
     expect(unsavedParts(base, structuredClone(base))).toEqual([]);
   });
 
-  it.each([
+  it.each<[string, WorkstationSettings, UnsavedPart[]]>([
     ["printers", { ...base, printers: [] }, ["printers"]],
     ["a changed printer", { ...base, printers: [{ ...PRINTER, dpi: 300 as const }] }, ["printers"]],
-    [
-      "the box",
-      { ...base, assignments: { ...base.assignments, box: "p1" } },
-      ["assignment_box"],
-    ],
+    ["the box", { ...base, assignments: { ...base.assignments, box: "p1" } }, ["assignment_box"]],
     [
       "the pallet and the duplicate",
       { ...base, assignments: { ...base.assignments, pallet: "p1", duplicate: "p1" } },
@@ -39,7 +39,7 @@ describe("the words of «Не сохранено»", () => {
     ["scanners", { ...base, scanners: [{ port: "COM9", baud: 9600 }] }, ["scanners"]],
     ["the sound switch", { ...base, sound: { ...base.sound, muted: true } }, ["sound"]],
     ["the volume", { ...base, sound: { ...base.sound, volume: 50 } }, ["volume"]],
-  ] as const)("names %s", (_name, draft, expected) => {
+  ])("names %s", (_name, draft, expected) => {
     expect(unsavedParts(base, draft)).toEqual(expected);
   });
 

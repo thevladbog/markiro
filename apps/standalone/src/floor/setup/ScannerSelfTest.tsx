@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { Button, FullScreenDialog, Select } from "@markiro/ui";
+import { Button, FullScreenDialog, Select, StatusChip } from "@markiro/ui";
 
 import { downloadFile } from "../../office/templates/download.js";
 import type { ScanChannel } from "../scan-source.js";
@@ -368,9 +368,16 @@ export function ScannerSelfTest({
         </div>
         <div className="self-test__result-side">
           {current === null ? (
-            <p className="setup-card__waiting" data-testid="self-test-waiting">
-              {t("floor.setup.selfTest.waiting")}
-            </p>
+            <div className="self-test__waiting">
+              <StatusChip
+                size="floor"
+                phase="running"
+                label={t("floor.setup.selfTest.waitingChip")}
+              />
+              <p className="setup-card__waiting" data-testid="self-test-waiting">
+                {t("floor.setup.selfTest.waiting")}
+              </p>
+            </div>
           ) : (
             <VerdictView verdict={current.verdict} />
           )}

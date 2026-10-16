@@ -129,6 +129,9 @@ describe("a paste", () => {
   });
 
   it("still goes through the live check", () => {
-    expect(checkAddress(normalizePaste(" 192.168.1.256 "))).toEqual({ state: "octet", octet: "256" });
+    expect(checkAddress(normalizePaste(" 192.168.1.256 "))).toEqual({
+      state: "octet",
+      octet: "256",
+    });
   });
 });

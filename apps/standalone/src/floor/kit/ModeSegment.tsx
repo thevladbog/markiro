@@ -78,7 +78,10 @@ export function ModeSegment<T extends string>({
   };
   return (
     <div className="floor-mode">
-      <p id={labelId} className={hideLabel ? "floor-mode__label floor-mode__label--hidden" : "floor-mode__label"}>
+      <p
+        id={labelId}
+        className={hideLabel ? "floor-mode__label floor-mode__label--hidden" : "floor-mode__label"}
+      >
         {label}
       </p>
       <div

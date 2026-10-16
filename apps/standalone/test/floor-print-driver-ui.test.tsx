@@ -26,7 +26,7 @@ import {
   type PrinterProfile,
 } from "../src/floor/setup/workstation-settings.js";
 import { fakeHardware } from "./support/hardware.js";
-import { choicesOf, setField, usbListed } from "./support/floor-fields.js";
+import { choicesOf, setField, shownInList, usbListed } from "./support/floor-fields.js";
 import { openLocalDb } from "./support/local-db.js";
 import { km } from "./support/floor-work.js";
 import { FIRST_SSCC, fakeRender, printStation, setUpPrinting, ZEBRA } from "./support/printing.js";
@@ -478,8 +478,7 @@ describe("the workstation setup's driver controls", () => {
     // The shell's answer arrives after the form opened: wait for it.
     expect(await screen.findByLabelText("Способ печати")).toBeTruthy();
     const options = choicesOf("Способ печати");
-    expect(options).toContain("На языке принтера (ZPL / TSPL)");
-    expect(options).toContain("Через драйвер Windows");
+    expect(options).toEqual(["ZPL / TSPL", "Драйвер"]);
     setField("Способ печати", "windows_driver");
     expect(screen.queryByLabelText("Язык принтера")).toBeNull();
     // The way of printing is a Windows queue's: a COM port keeps its language, and no driver hint.
@@ -501,8 +500,8 @@ describe("the workstation setup's driver controls", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Изменить принтер «Godex через драйвер»" }),
     );
-    const mode = await screen.findByLabelText("Способ печати");
-    expect(mode.textContent).toBe("Через драйвер Windows");
+    await screen.findByLabelText("Способ печати");
+    expect(shownInList("Способ печати")).toBe("Драйвер");
     expect(screen.queryByLabelText("Язык принтера")).toBeNull();
     setField("Способ печати", "raw");
     expect(screen.getByLabelText("Язык принтера")).toBeTruthy();

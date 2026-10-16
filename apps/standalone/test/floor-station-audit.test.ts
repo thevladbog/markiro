@@ -211,11 +211,14 @@ describe("the workstation setup's tabs", () => {
     const list = rule(setup, ".setup-tabs__list.mk-data-tabs");
     expect(list["display"]).toBe("flex");
     expect(list["width"]).toBe("fit-content");
-    expect(rule(setup, ".setup-tabs")["grid-template-rows"]).toBe("auto minmax(0, 1fr)");
     const active = rule(setup, ".setup-tabs__list .mk-data-tabs__tab--active");
     expect(active["background"]).toBe("var(--fg)");
     expect(active["color"]).toBe("var(--bg)");
-    expect(active["font-weight"]).toBe("700");
+    // The kit's selected segment: fill, check and weight 600 (not 700).
+    expect(active["font-weight"]).toBe("600");
+    const check = rule(setup, ".setup-tabs__list .mk-data-tabs__tab--active::before");
+    expect(check["content"]).toBe('""');
+    expect(check["background"]).toBe("currentColor");
   });
 
   it("does not add a second, blue outline to the chosen scanner-check kind", () => {
@@ -236,5 +239,62 @@ describe("the work screen", () => {
     expect(rule(work, ".work-scan-hero__code", "@media (max-height: 900px)")["font-size"]).toBe(
       "22px",
     );
+  });
+});
+
+describe("the redesigned workstation setup (design kit 2026-10)", () => {
+  const setup = rulesOf("src/floor/setup/workstation-setup.css");
+  const controls = rulesOf("src/floor/kit/floor-controls.css");
+  const keypadKey = ":where(.floor-frame, .station-screen) .floor-ipkeypad__key";
+
+  it("ends in an 84 px footer, and the footer's primary and back buttons are as tall", () => {
+    expect(rule(setup, "section.workstation-setup")["grid-template-rows"]).toBe(
+      "auto minmax(0, 1fr) auto 84px",
+    );
+    expect(rule(setup, ".workstation-setup__footer")["height"]).toBe("84px");
+    expect(rule(setup, ".workstation-setup__footer .setup-footer__back")["height"]).toBe(
+      "84px !important",
+    );
+  });
+
+  it("gives the keypad 64 px keys with a `linectl` edge, in a 380 px panel", () => {
+    const key = rule(controls, keypadKey);
+    expect(key["height"]).toBe("64px");
+    expect(key["border"]).toBe("1px solid var(--linectl)");
+    expect(key["font"]).toContain("var(--font-mono)");
+    expect(rule(controls, ":where(.floor-frame, .station-screen) .floor-ipkeypad")["width"]).toBe(
+      "380px",
+    );
+    expect(rule(setup, ".setup-editor--keypad")["grid-template-columns"]).toBe(
+      "minmax(0, 1fr) 380px",
+    );
+  });
+
+  it("holds every interactive row element at 64 px or more", () => {
+    expect(rule(setup, ".setup-tabs__list .mk-data-tabs__tab")["min-height"]).toBe("64px");
+    expect(rule(setup, ".setup-printer-row__actions > .setup-printer-row__remove")["width"]).toBe(
+      "64px",
+    );
+    expect(rule(setup, ".setup-printer-row")["min-height"]).toBe("84px");
+    expect(rule(setup, ".setup-scanner-row")["min-height"]).toBe("84px");
+    expect(rule(setup, ".setup-station__row")["min-height"]).toBe("64px");
+    expect(rule(setup, ".setup-volume__step")["height"]).toBe("84px !important");
+  });
+
+  it("rings the keypad's field 2 px `fg` and fills the volume's divisions with `fg`", () => {
+    const active = rule(
+      setup,
+      '.setup-keyfield[data-active="true"] .mk-input:not(.mk-input--error)',
+    );
+    expect(active["border-color"]).toBe("var(--fg) !important");
+    expect(rule(setup, '.setup-volume__division[data-filled="true"]')["background"]).toBe(
+      "var(--fg)",
+    );
+    expect(rule(setup, ".setup-volume__division")["background"]).toBe("var(--panel)");
+  });
+
+  it("keeps one layer: a switch card inside a list or a card has no border of its own", () => {
+    expect(rule(setup, ".setup-printer-verification .floor-switch-card")["border"]).toBe("0");
+    expect(rule(setup, ".setup-sound > .floor-switch-card")["border-radius"]).toBe("0");
   });
 });

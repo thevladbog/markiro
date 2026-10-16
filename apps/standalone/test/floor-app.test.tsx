@@ -1109,7 +1109,7 @@ describe("the level of the verdict tones", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     });
-    await screen.findByText("Настройки сохранены.");
+    await screen.findByText("Настройки сохранены");
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(lastLevel()).toEqual(["ok", undefined, 0.4]);
@@ -1144,17 +1144,17 @@ describe("the level the setup's own sound controls give the tones", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     });
-    await screen.findByText("Настройки сохранены.");
+    await screen.findByText("Настройки сохранены");
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.6]);
     fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
     fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Звук сигналов" }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     });
-    await screen.findByText("Настройки сохранены.");
+    await screen.findByText("Настройки сохранены");
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0]);
@@ -1168,7 +1168,7 @@ describe("the level the setup's own sound controls give the tones", () => {
     await enterPlanned();
     fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
     fireEvent.click(await screen.findByRole("tab", { name: "Звук" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Звук сигналов" }));
     fireEvent.click(screen.getByRole("button", { name: "Назад без сохранения" }));
     fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
     expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.8]);

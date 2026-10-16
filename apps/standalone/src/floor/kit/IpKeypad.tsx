@@ -78,11 +78,7 @@ export function IpKeypad({
       )}
       <div className="floor-ipkeypad__keys">
         {DIGITS.map(key)}
-        {hasDotKey(target) ? (
-          key(".")
-        ) : (
-          <span className="floor-ipkeypad__gap" aria-hidden="true" />
-        )}
+        {hasDotKey(target) ? key(".") : <span className="floor-ipkeypad__gap" aria-hidden="true" />}
         {key("0")}
         <button
           type="button"
@@ -96,7 +92,9 @@ export function IpKeypad({
       <Button
         size="floor"
         variant={actionPrimary ? "primary" : "secondary"}
-        className={actionPrimary ? "floor-primary floor-ipkeypad__action" : "floor-ipkeypad__action"}
+        className={
+          actionPrimary ? "floor-primary floor-ipkeypad__action" : "floor-ipkeypad__action"
+        }
         disabled={actionDisabled}
         onMouseDown={keepFocus}
         onClick={onAction}
