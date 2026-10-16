@@ -241,7 +241,8 @@ export function Table<Row>({
                     : undefined
                 }
                 style={{
-                  borderTop: "1px solid var(--line)",
+                  // `--mk-table-row-rule` lets an app draw the rule between rows differently (none on the first).
+                  borderTop: "var(--mk-table-row-rule, 1px solid var(--line))",
                   cursor: onRowClick ? "pointer" : undefined,
                 }}
               >

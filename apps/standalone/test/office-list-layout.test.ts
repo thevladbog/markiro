@@ -13,6 +13,20 @@ import { cssRules } from "./support/css-rules.js";
  */
 const source = readFileSync(join(__dirname, "../src/office/list/list.css"), "utf8");
 const rules = cssRules(source);
+// The shared kit's stylesheet: since the 2026 kit scope the destructive ink and the field's error rule
+// are tokens defined there (under `.mk-kit-2026`), no longer `!important` overrides in this app.
+const kitRules = cssRules(
+  readFileSync(join(__dirname, "../../../packages/ui/src/components.css"), "utf8"),
+);
+
+/** The declarations of the kit's rules whose selector list contains `selector`. */
+function kitDeclarations(selector: string): string {
+  const found = kitRules.filter((rule) =>
+    rule.selector.split(",").some((each) => each.trim() === selector),
+  );
+  if (found.length === 0) throw new Error(`no rule for ${selector} in the kit's components.css`);
+  return found.map((rule) => rule.body).join("\n");
+}
 
 /** The declarations of every rule whose selector list contains `selector`, joined. */
 function declarations(selector: string): string {
@@ -117,13 +131,15 @@ describe("the segmented control", () => {
 
 describe("the destructive button and the field error", () => {
   it("takes the label colour that pairs with the solid error fill, not a literal white", () => {
-    expect(declarations(".mk-btn--destructive")).toContain(
-      "color: var(--fg-on-err-solid) !important",
+    expect(kitDeclarations(".mk-kit-2026")).toContain(
+      "--mk-btn-destructive-fg: var(--fg-on-err-solid)",
     );
   });
 
   it("draws a wrong field with a 2 px border and opens its message with the word from i18n", () => {
-    expect(declarations(".mk-input--error")).toContain("border-width: 2px");
+    expect(kitDeclarations(".mk-kit-2026 .mk-input--error")).toContain(
+      "--mk-input-border: 2px solid var(--err-solid)",
+    );
     const before = declarations('.mk-field > span[id$="-error"]::before');
     expect(before).toContain("var(--mk-error-prefix");
   });

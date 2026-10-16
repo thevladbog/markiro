@@ -48,7 +48,10 @@ export function CloudImportPage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.cloudImport.title")} />
+      <PageHeader
+        title={t("office.cloudImport.title")}
+        description={t("office.cloudImport.subtitle")}
+      />
       <CloudImportContent />
     </>
   );

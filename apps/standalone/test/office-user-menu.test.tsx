@@ -4,14 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 import { UserMenu } from "../src/office/UserMenu.js";
 
 function mount() {
+  const onProfile = vi.fn();
   const onChangePassword = vi.fn();
   const onSignOut = vi.fn();
   render(
     <div>
       <UserMenu
+        userId="u-1"
+        avatarVersion={null}
         name="Иван Петров"
         login="ivan"
         roleLabel="Администратор"
+        onProfile={onProfile}
         onChangePassword={onChangePassword}
         onSignOut={onSignOut}
       />
@@ -19,7 +23,7 @@ function mount() {
     </div>,
   );
   const trigger = screen.getByRole("button", { name: /Иван Петров/ });
-  return { trigger, onChangePassword, onSignOut };
+  return { trigger, onProfile, onChangePassword, onSignOut };
 }
 
 describe("UserMenu", () => {
@@ -45,14 +49,18 @@ describe("UserMenu", () => {
     );
   });
 
-  it("opens on a click with the identity and exactly the two entries, the first one focused", () => {
+  it("opens on a click with the identity and exactly the three entries, the first one focused", () => {
     const { trigger } = mount();
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     const menu = screen.getByRole("menu", { name: "Меню пользователя" });
     expect(trigger.getAttribute("aria-controls")).toBe(menu.id);
     const items = within(menu).getAllByRole("menuitem");
-    expect(items.map((item) => item.textContent)).toEqual(["Сменить пароль", "Выйти из офиса"]);
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Профиль",
+      "Сменить пароль",
+      "Выйти из офиса",
+    ]);
     expect(document.activeElement).toBe(items[0]);
     // The identity is text, not an entry.
     expect(within(menu).getByText("Администратор · ivan")).toBeTruthy();
@@ -61,25 +69,27 @@ describe("UserMenu", () => {
   it("moves with the arrows, wraps, and jumps with Home and End", () => {
     const { trigger } = mount();
     fireEvent.click(trigger);
-    const [first, second] = screen.getAllByRole("menuitem");
+    const [first, second, third] = screen.getAllByRole("menuitem");
     const menu = screen.getByRole("menu");
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(document.activeElement).toBe(second);
     fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(third);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(menu, { key: "ArrowUp" });
-    expect(document.activeElement).toBe(second);
+    expect(document.activeElement).toBe(third);
     fireEvent.keyDown(menu, { key: "Home" });
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(menu, { key: "End" });
-    expect(document.activeElement).toBe(second);
+    expect(document.activeElement).toBe(third);
   });
 
   it("opens from the trigger with ArrowDown on the first entry and ArrowUp on the last", () => {
     const { trigger } = mount();
     fireEvent.keyDown(trigger, { key: "ArrowUp" });
     const items = screen.getAllByRole("menuitem");
-    expect(document.activeElement).toBe(items[1]);
+    expect(document.activeElement).toBe(items[2]);
   });
 
   it("closes on Escape and returns the focus to the trigger", () => {
@@ -98,6 +108,15 @@ describe("UserMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(trigger);
     fireEvent.pointerDown(screen.getByText("вне"));
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("runs «Профиль» and closes", () => {
+    const { trigger, onProfile, onChangePassword } = mount();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Профиль" }));
+    expect(onProfile).toHaveBeenCalledTimes(1);
+    expect(onChangePassword).not.toHaveBeenCalled();
     expect(screen.queryByRole("menu")).toBeNull();
   });
 

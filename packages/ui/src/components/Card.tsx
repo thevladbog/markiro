@@ -46,15 +46,19 @@ export function Card({
             alignItems: "center",
             justifyContent: "space-between",
             gap: 12,
-            padding: "14px 20px",
-            borderBottom: "1px solid var(--line)",
+            // `--mk-card-head-pad` and `--mk-card-head-rule` let an app seat the header differently (no divider).
+            padding: "var(--mk-card-head-pad, 14px 20px)",
+            borderBottom: "var(--mk-card-head-rule, 1px solid var(--line))",
           }}
         >
           <Title style={{ margin: 0, font: "var(--text-h3)", color: "var(--fg-1)" }}>{title}</Title>
           {actions && <span style={{ display: "flex", gap: 8 }}>{actions}</span>}
         </div>
       )}
-      <div className="mk-card__body" style={{ padding: padding ?? 20, flex: 1 }}>
+      <div
+        className="mk-card__body"
+        style={{ padding: padding ?? "var(--mk-card-pad, 20px)", flex: 1 }}
+      >
         {children}
       </div>
     </div>

@@ -65,7 +65,7 @@
 }
 
 .office-list-card .mk-table__row:first-child {
-  border-top: 0 !important;
+  --mk-table-row-rule: 0;
 }
 
 .office-list-card .mk-table__row[tabindex]:hover {
@@ -75,6 +75,25 @@
 .office-list-card .mk-table__row[tabindex]:focus-visible {
   outline: var(--focus-ring-w) solid var(--focus-ring);
   outline-offset: -2px;
+}
+
+/*
+ * A table inside an ordinary card (counters, copies, sheets of a document, a card's files) has no frame
+ * of its own: the card is the one layer, the heading is cut off by a hairline and the rows are divided
+ * by hairlines, as in a list card. Without this the table's own frame sat inside the card's (two frames).
+ */
+.office-shell .mk-card {
+  --table-border: 0;
+  --table-radius: 0;
+  --table-bg: transparent;
+}
+
+.office-shell .mk-card .mk-table__th {
+  border-bottom: 1px solid var(--line);
+}
+
+.office-shell .mk-card .mk-table__row:first-child {
+  --mk-table-row-rule: 0;
 }
 
 /* ---- Filters ---- */
@@ -244,18 +263,16 @@
 
 .office-row-menu__item {
   display: flex;
-  justify-content: flex-start !important;
+  justify-content: flex-start;
   align-items: center;
-  gap: 12px !important;
+  gap: 12px;
   box-sizing: border-box;
-  width: 100% !important;
-  min-height: 40px !important;
-  padding: 0 12px !important;
-  border: 0 !important;
-  border-radius: var(--r-sm) !important;
-  background: transparent !important;
-  color: var(--fg-1) !important;
-  font: 500 14px/20px var(--font-ui) !important;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -301,36 +318,34 @@
   display: inline-flex;
   flex: 1 1 auto;
   align-items: center;
-  justify-content: center !important;
-  gap: 8px !important;
+  justify-content: center;
+  gap: 8px;
   box-sizing: border-box;
-  min-height: 40px !important;
-  padding: 0 16px !important;
-  border: 0 !important;
-  border-radius: var(--r-sm) !important;
-  background: transparent !important;
-  color: var(--fg-2) !important;
-  font: 500 14px/20px var(--font-ui) !important;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
   white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
 }
 
 .office-segmented__item:hover:not(:disabled):not(.office-segmented__item--selected) {
-  color: var(--fg-1) !important;
-  background: color-mix(in srgb, var(--fg-1) 8%, transparent) !important;
+  color: var(--fg-1);
+  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
 }
 
 /* The selected segment: a fill, a check (drawn by the component) and a heavier weight. */
 .office-segmented__item.office-segmented__item--selected,
 .office-segmented__item.office-segmented__item--selected:hover:not(:disabled) {
-  background: var(--surface-inverse) !important;
-  color: var(--fg-on-inverse) !important;
-  font-weight: 600 !important;
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 600;
 }
 
 .office-segmented__item:disabled {
-  color: var(--fg-disabled) !important;
+  color: var(--fg-disabled);
   cursor: not-allowed;
 }
 
@@ -480,20 +495,19 @@
 }
 
 .office-sort-toggle {
-  min-height: 24px !important;
-  padding: 0 8px !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 999px !important;
-  background: transparent !important;
-  color: var(--fg-2) !important;
-  font: 500 12px/16px var(--font-ui) !important;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-2);
+  font: 500 12px/16px var(--font-ui);
 }
 
 .office-sort-toggle[aria-pressed="true"] {
-  background: var(--surface-panel) !important;
-  border-color: var(--line-strong) !important;
-  color: var(--fg-1) !important;
-  font-weight: 600 !important;
+  background: var(--surface-panel);
+  border-color: var(--line-strong);
+  color: var(--fg-1);
+  font-weight: 600;
 }
 
 .office-sort-toggle:focus-visible {
@@ -553,10 +567,6 @@
  * a glyph and the word «Ошибка ·» (the word comes from i18n through `--mk-error-prefix`, set once by
  * the office), so the error is never colour alone. The message itself stays the field's own text.
  */
-.mk-input--error {
-  border-width: 2px !important;
-}
-
 .mk-field > span[id$="-error"] {
   font-weight: 500;
 }
@@ -597,13 +607,4 @@
 .office-filter-row__end--top {
   align-self: flex-start;
   margin-top: 22px;
-}
-
-/*
- * The destructive button's label is the kit's `onerr` on the solid error fill (white on light,
- * dark on dark: 7.58 / 5.64). The shared button writes a literal white, which on the dark theme's
- * coral is 2.6:1; this app takes the token that pairs with the fill.
- */
-.mk-btn--destructive {
-  color: var(--fg-on-err-solid) !important;
 }

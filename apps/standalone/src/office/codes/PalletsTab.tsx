@@ -191,7 +191,10 @@ export function PalletsTab() {
 
   return (
     <>
-      <PageHeader title={t("office.codeSearch.title")} />
+      <PageHeader
+        title={t("office.codeSearch.title")}
+        description={t("office.codeSearch.subtitle")}
+      />
       <RegistryTabs active="pallets" />
       <ListCard>
         <form

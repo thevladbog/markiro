@@ -25,6 +25,7 @@ import {
   RowActions,
   RowActionMenu,
   Select,
+  Slider,
   StatusChip,
   Table,
 } from "../src/components/index.js";
@@ -1826,5 +1827,80 @@ describe("RowActionMenu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
+describe("Slider", () => {
+  it("is a named range with the value, bounds and step, and reports a change as a number", () => {
+    const onValueChange = vi.fn();
+    render(
+      <Slider
+        aria-label="Масштаб"
+        min={1}
+        max={4}
+        step={0.25}
+        value={2}
+        onValueChange={onValueChange}
+      />,
+    );
+    const slider = screen.getByRole("slider", { name: "Масштаб" }) as HTMLInputElement;
+    expect(slider.min).toBe("1");
+    expect(slider.max).toBe("4");
+    expect(slider.step).toBe("0.25");
+    expect(slider.value).toBe("2");
+    fireEvent.change(slider, { target: { value: "3.25" } });
+    expect(onValueChange).toHaveBeenCalledWith(3.25);
+  });
+
+  it("can be disabled", () => {
+    render(
+      <Slider aria-label="x" min={0} max={1} value={0} disabled onValueChange={() => undefined} />,
+    );
+    expect((screen.getByRole("slider") as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+describe("Button, variant plain", () => {
+  it("takes no inline look, so an app's class can draw it without !important", () => {
+    render(<Button variant="plain">Пункт</Button>);
+    const button = screen.getByRole("button", { name: "Пункт" });
+    expect(button.className).toContain("mk-btn--plain");
+    for (const property of [
+      "padding",
+      "background",
+      "border",
+      "border-radius",
+      "font",
+      "min-height",
+      "gap",
+    ]) {
+      expect(button.style.getPropertyValue(property)).toBe("");
+    }
+    expect(button.style.display).toBe("inline-flex");
+  });
+
+  it("keeps the other variants' inline shape as it was", () => {
+    render(<Button>Сохранить</Button>);
+    const button = screen.getByRole("button", { name: "Сохранить" });
+    expect(button.style.padding).toBe("0px 16px");
+    expect(button.style.borderRadius).toBe("var(--r-2)");
+  });
+});
+
+describe("the 2026 office sizing is opt-in", () => {
+  it("is defined only under .mk-kit-2026, as tokens", () => {
+    const block = /\.mk-kit-2026\s*\{([^}]*)\}/.exec(componentStyles)?.[1] ?? "";
+    expect(block).toContain("--control-md: 44px");
+    expect(block).toContain("--control-sm: 36px");
+    expect(block).toContain("--r-2: 16px");
+    expect(block).toContain("--r-3: 20px");
+    expect(block).toContain("--shadow-1: none");
+  });
+
+  it("leaves the shared defaults the cloud apps use", () => {
+    expect(tokenStyles).toMatch(/--control-md:\s*40px/);
+    expect(tokenStyles).toMatch(/--control-sm:\s*32px/);
+    expect(tokenStyles).toMatch(/--r-2:\s*8px/);
+    expect(tokenStyles).toMatch(/--r-3:\s*12px/);
   });
 });

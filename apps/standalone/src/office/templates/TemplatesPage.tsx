@@ -7,25 +7,26 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
-  FilterBar,
   Input,
   PageHeader,
-  RowActionMenu,
-  RowActions,
   Select,
   StatusChip,
   VisuallyHidden,
   type TableColumn,
 } from "@markiro/ui";
 
+import { listViewState } from "../list/list-state.js";
+import { ListCard, ListFilters } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { LabelTemplate, LabelTemplateSummary } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useProductGroups, useTemplates } from "../catalog-queries.js";
 import { officeKeys } from "../office-query.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { useChangeList } from "../records.js";
+import { TemplateTabPanel, TemplateTabsBar } from "./TemplatesSection.js";
 import { TemplateCategoriesDialog } from "./TemplateCategoriesDialog.js";
 import { TemplateStateDialog } from "./TemplateStateDialog.js";
 import { TemplateThumb } from "./TemplateThumb.js";
@@ -161,34 +162,31 @@ export function TemplatesPage() {
       stickyEnd: true,
       title: t("office.templates.table.actions"),
       render: (template) => (
-        <RowActions>
-          {/* A stock template keeps its name and layout (the host refuses a change): it is copied. */}
-          {template.stock ? (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.templates.copyNamed", { name: template.name })}
-              onClick={() => void navigate(`/templates/${template.id}/copy`)}
-            >
-              {t("office.templates.copy")}
-            </Button>
-          ) : (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.templates.editNamed", { name: template.name })}
-              onClick={() => void navigate(`/templates/${template.id}`)}
-            >
-              {t("office.templates.edit")}
-            </Button>
-          )}
-          <RowActionMenu
-            label={t("office.common.rowActions", { name: template.name })}
-            items={[
+        <RowActionBar
+          actions={[
+            // A stock template keeps its name and layout (the host refuses a change): it is copied.
+            template.stock
+              ? {
+                  key: "copy",
+                  label: t("office.templates.copyNamed", { name: template.name }),
+                  icon: "copy",
+                  onSelect: () => void navigate(`/templates/${template.id}/copy`),
+                }
+              : {
+                  key: "edit",
+                  label: t("office.templates.editNamed", { name: template.name }),
+                  icon: "pencil",
+                  onSelect: () => void navigate(`/templates/${template.id}`),
+                },
+          ]}
+          menu={{
+            label: t("office.common.rowActions", { name: template.name }),
+            items: [
               {
                 key: "categories",
                 label: t("office.templates.categories"),
                 ariaLabel: t("office.templates.categoriesNamed", { name: template.name }),
+                icon: "tag",
                 onSelect: () => open({ kind: "categories", template }),
               },
               {
@@ -200,39 +198,74 @@ export function TemplatesPage() {
                     : "office.templates.enableNamed",
                   { name: template.name },
                 ),
+                icon: template.enabled ? "stop" : "reset",
                 destructive: template.enabled,
                 onSelect: () => open({ kind: "state", template }),
               },
-            ]}
-          />
-        </RowActions>
+            ],
+          }}
+        />
       ),
     });
   }
 
-  const content = () => {
-    if (templates.isPending) return <PageLoading />;
-    if (templates.isError) {
-      return (
-        <LoadError
-          error={templates.error}
-          onRetry={() => {
-            void templates.refetch();
-            // One click recovers both reads when the group names failed too.
-            if (groups.isError) void groups.refetch();
-          }}
-        />
-      );
-    }
-    const found = findTemplates(templatesByName(templates.data), search, purpose, state);
-    return (
-      <>
-        <FilterBar
+  const found = templates.isSuccess
+    ? findTemplates(templatesByName(templates.data), search, purpose, state)
+    : [];
+  const filtersOn = search !== "" || purpose !== "all" || state !== "all";
+  const resetFilters = () => {
+    setSearch("");
+    setPurpose("all");
+    setState("all");
+  };
+  const view = listViewState({
+    pending: templates.isPending,
+    failed: templates.isError,
+    total: templates.data?.length ?? 0,
+    found: found.length,
+  });
+  const emptyState =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError
+        error={templates.error}
+        onRetry={() => {
+          void templates.refetch();
+          // One click recovers both reads when the group names failed too.
+          if (groups.isError) void groups.refetch();
+        }}
+      />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="tag"
+        title={t("office.templates.empty")}
+        {...(canEdit
+          ? {
+              action: (
+                <Button
+                  icon={<OfficeIcon name="plus" size={20} />}
+                  onClick={() => void navigate("/templates/new")}
+                >
+                  {t("office.templates.create")}
+                </Button>
+              ),
+            }
+          : {})}
+      />
+    ) : view === "nothing" ? (
+      <ListNothing title={t("office.templates.nothingFound")} onReset={resetFilters} />
+    ) : null;
+  const content = (
+    <ListCard>
+      {templates.isSuccess && (
+        <ListFilters
           label={t("office.templates.filters")}
           resultSummary={t("office.templates.found", {
             shown: found.length,
             total: templates.data.length,
           })}
+          onReset={filtersOn ? resetFilters : undefined}
         >
           <Input
             label={t("office.templates.search")}
@@ -258,29 +291,25 @@ export function TemplatesPage() {
             value={state}
             onValueChange={setState}
           />
-        </FilterBar>
-        <Card>
-          <PagedTable
-            tableId="templates"
-            columns={columns}
-            rows={found}
-            getRowKey={(template) => template.id}
-            empty={t(
-              templates.data.length === 0
-                ? "office.templates.empty"
-                : "office.templates.nothingFound",
-            )}
-            scrollLabel={t("office.templates.title")}
-          />
-        </Card>
-      </>
-    );
-  };
+        </ListFilters>
+      )}
+      <PagedTable
+        tableId="templates"
+        resetKey={`${search}|${purpose}|${state}`}
+        columns={columns}
+        rows={found}
+        getRowKey={(template) => template.id}
+        empty={emptyState}
+        scrollLabel={t("office.templates.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
       <PageHeader
         title={t("office.templates.title")}
+        description={t("office.templates.subtitle")}
         actions={
           canEdit ? (
             <Button onClick={() => void navigate("/templates/new")}>
@@ -289,6 +318,7 @@ export function TemplatesPage() {
           ) : undefined
         }
       />
+      <TemplateTabsBar />
       {notice && <Alert tone="ok">{notice}</Alert>}
       {/* About the categories column: with no list on screen the templates' error stands alone. */}
       {groups.isError && templates.isSuccess && (
@@ -303,7 +333,7 @@ export function TemplatesPage() {
           {t("office.templates.groupsFailed")}
         </Alert>
       )}
-      {content()}
+      <TemplateTabPanel>{content}</TemplateTabPanel>
       {canEdit && dialog?.kind === "state" && (
         <TemplateStateDialog
           template={dialog.template}

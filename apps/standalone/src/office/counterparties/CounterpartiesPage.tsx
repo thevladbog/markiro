@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, PageHeader, type TableColumn } from "@markiro/ui";
+import { Alert, Button, PageHeader, type TableColumn } from "@markiro/ui";
+
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 
 import { PagedTable } from "../paging/PagedTable.js";
 import type { CounterpartyRecord } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, ArchiveStatus, useStoreRecord } from "../records.js";
 import { CounterpartyDialog } from "./CounterpartyDialog.js";
 
@@ -70,44 +75,72 @@ export function CounterpartiesPage() {
       stickyEnd: true,
       title: t("office.counterparties.table.actions"),
       render: (counterparty) => (
-        <Button
-          variant="secondary"
-          size="compact"
-          aria-label={t("office.counterparties.editNamed", { name: counterparty.name })}
-          onClick={() => open({ kind: "edit", counterparty })}
-        >
-          {t("office.counterparties.edit")}
-        </Button>
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.counterparties.editNamed", { name: counterparty.name }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", counterparty }),
+            },
+          ]}
+        />
       ),
     });
   }
 
-  const content = () => {
-    if (counterparties.isPending) return <PageLoading />;
-    if (counterparties.isError) {
-      return (
-        <LoadError error={counterparties.error} onRetry={() => void counterparties.refetch()} />
-      );
-    }
-    return (
-      <Card>
+  const view = listViewState({
+    pending: counterparties.isPending,
+    failed: counterparties.isError,
+    total: counterparties.data?.length ?? 0,
+    found: counterparties.data?.length ?? 0,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={counterparties.error} onRetry={() => void counterparties.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="handshake"
+        title={t("office.counterparties.empty")}
+        {...(canEdit
+          ? {
+              action: (
+                <Button
+                  icon={<OfficeIcon name="plus" size={20} />}
+                  onClick={() => open({ kind: "create" })}
+                >
+                  {t("office.counterparties.add")}
+                </Button>
+              ),
+            }
+          : {})}
+      />
+    ) : null;
+  const content = () => (
+    <>
+      <ListCard>
         <PagedTable
           tableId="counterparties"
           columns={columns}
-          rows={activeFirstByName(counterparties.data)}
+          rows={view === "error" ? [] : activeFirstByName(counterparties.data ?? [])}
           getRowKey={(counterparty) => counterparty.id}
-          empty={t("office.counterparties.empty")}
+          empty={state}
           scrollLabel={t("office.counterparties.title")}
         />
-        {!canEdit && <p className="office-note">{t("office.common.readOnly")}</p>}
-      </Card>
-    );
-  };
+      </ListCard>
+      {!canEdit && counterparties.isSuccess && (
+        <p className="office-note">{t("office.common.readOnly")}</p>
+      )}
+    </>
+  );
 
   return (
     <>
       <PageHeader
         title={t("office.counterparties.title")}
+        description={t("office.counterparties.subtitle")}
         actions={
           canEdit ? (
             <Button onClick={() => open({ kind: "create" })}>

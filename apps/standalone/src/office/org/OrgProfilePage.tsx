@@ -27,9 +27,11 @@ export function OrgProfilePage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.org.title")} />
-      <OrgProfileContent />
-      <OrgLogoCard />
+      <PageHeader title={t("office.org.title")} description={t("office.org.subtitle")} />
+      <div className="office-split">
+        <OrgProfileContent />
+        <OrgLogoCard />
+      </div>
     </>
   );
 }
@@ -51,7 +53,7 @@ function OrgProfileContent() {
   };
 
   return (
-    <Card>
+    <Card title={t("office.org.card")} titleAs="h2" className="org-card">
       {savedRev === org.data.rev && <Alert tone="ok">{t("office.common.saved")}</Alert>}
       {canEdit ? (
         // A new revision — after a save or a reload — starts the form afresh.
@@ -131,22 +133,24 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
         {...fieldError(errors.orgName?.message)}
         {...register("orgName")}
       />
-      <Input
-        label={t("org.inn")}
-        hint={t("org.innHint")}
-        inputMode="numeric"
-        mono
-        {...fieldError(errors.inn?.message)}
-        {...register("inn")}
-      />
-      <Input
-        label={t("org.gln")}
-        hint={t("org.glnHint")}
-        inputMode="numeric"
-        mono
-        {...fieldError(errors.gln?.message)}
-        {...register("gln")}
-      />
+      <div className="office-form-row">
+        <Input
+          label={t("org.inn")}
+          hint={t("org.innHint")}
+          inputMode="numeric"
+          mono
+          {...fieldError(errors.inn?.message)}
+          {...register("inn")}
+        />
+        <Input
+          label={t("org.gln")}
+          hint={t("org.glnHint")}
+          inputMode="numeric"
+          mono
+          {...fieldError(errors.gln?.message)}
+          {...register("gln")}
+        />
+      </div>
       {newPrefix && (
         <Alert tone="warn">{t("office.org.prefixChange", { prefix: newPrefix })}</Alert>
       )}

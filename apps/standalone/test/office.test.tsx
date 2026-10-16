@@ -140,12 +140,12 @@ describe("Office", () => {
     const session = fakeOfficeSession();
     renderOffice(session);
     const menu = await openUserMenu();
-    // The two entries replace the two separate buttons of the old bar.
+    // The three entries replace the separate buttons of the old bar.
     expect(
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Сменить пароль", "Выйти из офиса"]);
+    ).toEqual(["Профиль", "Сменить пароль", "Выйти из офиса"]);
     expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Сменить пароль" })).toBeNull();
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Выйти из офиса" }));

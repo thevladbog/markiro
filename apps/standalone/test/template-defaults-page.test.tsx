@@ -152,8 +152,11 @@ describe("office template defaults: the organization's", () => {
       ).toEqual(["Этикетки", "Листы А4", "По умолчанию"]);
       fireEvent.click(within(tabs).getByRole("tab", { name: "По умолчанию" }));
       await screen.findByRole("heading", { name: "Шаблоны по умолчанию" });
+      // Each part draws the bar under its own heading, so the bar is the new page's.
       expect(
-        within(tabs).getByRole("tab", { name: "По умолчанию" }).getAttribute("aria-selected"),
+        within(screen.getByRole("tablist", { name: "Разделы шаблонов" }))
+          .getByRole("tab", { name: "По умолчанию" })
+          .getAttribute("aria-selected"),
       ).toBe("true");
       view.unmount();
     }

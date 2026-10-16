@@ -4,10 +4,12 @@ import { Outlet, useLocation } from "react-router";
 
 import { Alert, ConfirmDialog } from "@markiro/ui";
 
+import { ProfileDialog } from "./avatar/ProfileDialog.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { DirtyGuardProvider, useDirtyRegistry } from "./dirty-guard.js";
 import { UpdateBanner } from "./banners/UpdateBanner.js";
 import { LicenseBanner } from "./LicenseBanner.js";
+import { useKitScope } from "./kit-scope.js";
 import { isMenuCollapsed } from "./menu-collapse.js";
 import { navGroups } from "./nav-groups.js";
 import { OfficeSidebar } from "./OfficeSidebar.js";
@@ -17,9 +19,11 @@ import { useViewportWidth } from "./use-viewport-width.js";
 
 /** Office layout: the menu, the top bar, the banners, the page. */
 export function OfficeShell() {
+  useKitScope();
   const { t } = useTranslation();
   const session = useOfficeSession();
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   // What a drawer holds unsaved: leaving the office asks first.
   const dirtyRegistry = useDirtyRegistry();
   const [leaving, setLeaving] = useState<(() => void) | null>(null);
@@ -64,6 +68,7 @@ export function OfficeShell() {
             menuId={menuId}
             onToggleMenu={() => setMenuOverride(!collapsed)}
             onToFloor={session.exitTo !== "sign_in" ? () => leave(session.logout) : null}
+            onProfile={() => setProfileOpen(true)}
             onChangePassword={() => {
               setPasswordChangedAt(null);
               setPasswordOpen(true);
@@ -94,6 +99,7 @@ export function OfficeShell() {
           }}
           onCancel={() => setLeaving(null)}
         />
+        <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
         <ChangePasswordDialog
           open={passwordOpen}
           onClose={() => setPasswordOpen(false)}

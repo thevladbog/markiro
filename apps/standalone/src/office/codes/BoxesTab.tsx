@@ -165,7 +165,10 @@ export function BoxesTab() {
 
   return (
     <>
-      <PageHeader title={t("office.codeSearch.title")} />
+      <PageHeader
+        title={t("office.codeSearch.title")}
+        description={t("office.codeSearch.subtitle")}
+      />
       <RegistryTabs active="boxes" />
       {shifts.isError && <LoadError error={shifts.error} onRetry={() => void shifts.refetch()} />}
       <ListCard>

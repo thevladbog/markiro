@@ -6,18 +6,25 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
+  ConfirmDialog,
   PageHeader,
-  RowActions,
   StatusChip,
   type TableColumn,
 } from "@markiro/ui";
 
+import { canDeleteAvatar } from "../avatar/avatar-rules.js";
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeUserRecord } from "../../host/protocol.js";
-import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
-import { LoadError, PageLoading } from "../page-state.js";
+import { alertFailure, type AlertFailure } from "../form-errors.js";
+import { WriteFailureAlert } from "../page-state.js";
+import { UserAvatar } from "../UserAvatar.js";
 import { CreateUserDialog } from "./CreateUserDialog.js";
 import { EditUserDialog } from "./EditUserDialog.js";
 import { SetPasswordDialog } from "./SetPasswordDialog.js";
@@ -25,7 +32,8 @@ import { SetPasswordDialog } from "./SetPasswordDialog.js";
 type UsersDialog =
   | { kind: "create" }
   | { kind: "edit"; user: OfficeUserRecord }
-  | { kind: "password"; user: OfficeUserRecord };
+  | { kind: "password"; user: OfficeUserRecord }
+  | { kind: "removePhoto"; user: OfficeUserRecord };
 
 /** The host's order: `ORDER BY login COLLATE NOCASE` (ASCII case folded, then bytes). */
 function byLogin(a: OfficeUserRecord, b: OfficeUserRecord): number {
@@ -48,9 +56,14 @@ export function OfficeUsersPage() {
   const users = useOfficeQuery(officeKeys.users, (api, token) => api.listUsers(token));
   const [dialog, setDialog] = useState<UsersDialog | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
+  const clearPhoto = useOfficeMutation((api, token, userId: string) =>
+    api.deleteUserAvatar(token, userId),
+  );
 
   const open = (next: UsersDialog) => {
     setNotice(null);
+    setFailure(null);
     setDialog(next);
   };
   const store = (user: OfficeUserRecord) => {
@@ -63,26 +76,47 @@ export function OfficeUsersPage() {
     }
   };
 
+  const removePhoto = async (user: OfficeUserRecord) => {
+    setDialog(null);
+    try {
+      await clearPhoto.mutateAsync(user.id);
+      void queryClient.invalidateQueries({ queryKey: officeKeys.users, exact: true });
+      setNotice(t("office.users.photoRemoved", { login: user.login }));
+      // The header shows the signed-in user's own photo.
+      if (user.id === session.user.id) void session.refreshUser().catch(() => undefined);
+    } catch (error) {
+      setFailure(alertFailure(error));
+    }
+  };
+
   const columns: TableColumn<OfficeUserRecord>[] = [
     {
-      key: "login",
-      title: t("office.users.table.login"),
-      mono: true,
-      render: (user) => user.login,
-    },
-    {
-      key: "name",
-      title: t("office.users.table.name"),
+      key: "user",
+      title: t("office.users.table.user"),
+      wrap: true,
+      minWidth: 260,
       render: (user) => (
-        <>
-          {user.name}
-          {user.id === session.user.id && (
-            <>
-              {" "}
-              <Badge tone="info">{t("office.users.you")}</Badge>
-            </>
-          )}
-        </>
+        <span className="user-cell">
+          <UserAvatar
+            name={user.name}
+            size={40}
+            userId={user.id}
+            avatarVersion={user.avatarVersion}
+            label={t("office.profile.photo.label", { name: user.name })}
+          />
+          <span className="user-cell__text">
+            <span className="user-cell__name">
+              {user.name}
+              {user.id === session.user.id && (
+                <>
+                  {" "}
+                  <Badge tone="info">{t("office.users.you")}</Badge>
+                </>
+              )}
+            </span>
+            <span className="user-cell__login">{user.login}</span>
+          </span>
+        </span>
       ),
     },
     {
@@ -105,55 +139,91 @@ export function OfficeUsersPage() {
       stickyEnd: true,
       title: t("office.users.table.actions"),
       render: (user) => (
-        <RowActions>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.users.editNamed", { login: user.login })}
-            onClick={() => open({ kind: "edit", user })}
-          >
-            {t("office.users.edit")}
-          </Button>
-          {user.id !== session.user.id && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.users.passwordNamed", { login: user.login })}
-              onClick={() => open({ kind: "password", user })}
-            >
-              {t("office.users.password")}
-            </Button>
-          )}
-        </RowActions>
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.users.editNamed", { login: user.login }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", user }),
+            },
+          ]}
+          menu={{
+            label: t("office.common.rowActions", { name: user.login }),
+            items: [
+              ...(user.id !== session.user.id
+                ? [
+                    {
+                      key: "password",
+                      label: t("office.users.password"),
+                      ariaLabel: t("office.users.passwordNamed", { login: user.login }),
+                      icon: "key" as const,
+                      onSelect: () => open({ kind: "password", user }),
+                    },
+                  ]
+                : []),
+              // An administrator takes any photo down (never replaces it: the owner alone does).
+              ...(canDeleteAvatar(session.user, user.id, user.avatarVersion != null)
+                ? [
+                    {
+                      key: "photo",
+                      label: t("office.users.photoRemove"),
+                      ariaLabel: t("office.users.photoRemoveNamed", { login: user.login }),
+                      icon: "trash" as const,
+                      destructive: true,
+                      onSelect: () => open({ kind: "removePhoto", user }),
+                    },
+                  ]
+                : []),
+            ],
+          }}
+        />
       ),
     },
   ];
 
-  const content = () => {
-    if (users.isPending) return <PageLoading />;
-    if (users.isError)
-      return <LoadError error={users.error} onRetry={() => void users.refetch()} />;
-    return (
-      <Card>
-        <PagedTable
-          tableId="users"
-          columns={columns}
-          rows={users.data}
-          getRowKey={(user) => user.id}
-          empty={t("office.users.empty")}
-          scrollLabel={t("office.users.title")}
-        />
-      </Card>
-    );
-  };
+  const view = listViewState({
+    pending: users.isPending,
+    failed: users.isError,
+    total: users.data?.length ?? 0,
+    found: users.data?.length ?? 0,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={users.error} onRetry={() => void users.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty icon="users" title={t("office.users.empty")} />
+    ) : null;
+  const content = () => (
+    <ListCard>
+      <PagedTable
+        tableId="users"
+        columns={columns}
+        rows={view === "error" ? [] : (users.data ?? [])}
+        getRowKey={(user) => user.id}
+        empty={state}
+        scrollLabel={t("office.users.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
       <PageHeader
         title={t("office.users.title")}
-        actions={<Button onClick={() => open({ kind: "create" })}>{t("office.users.add")}</Button>}
+        actions={
+          <Button
+            icon={<OfficeIcon name="plus" size={20} />}
+            onClick={() => open({ kind: "create" })}
+          >
+            {t("office.users.add")}
+          </Button>
+        }
       />
       {notice && <Alert tone="ok">{notice}</Alert>}
+      <WriteFailureAlert failure={failure} />
       {content()}
       {dialog?.kind === "create" && (
         <CreateUserDialog
@@ -181,6 +251,18 @@ export function OfficeUsersPage() {
             setDialog(null);
             void users.refetch();
           }}
+        />
+      )}
+      {dialog?.kind === "removePhoto" && (
+        <ConfirmDialog
+          open
+          title={t("office.users.photoRemoveTitle", { login: dialog.user.login })}
+          description={t("office.users.photoRemoveBody")}
+          confirmLabel={t("office.users.photoRemove")}
+          cancelLabel={t("office.common.cancel")}
+          tone="destructive"
+          onConfirm={() => void removePhoto(dialog.user)}
+          onCancel={() => setDialog(null)}
         />
       )}
       {dialog?.kind === "password" && (

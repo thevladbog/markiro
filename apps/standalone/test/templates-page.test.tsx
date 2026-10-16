@@ -514,7 +514,9 @@ describe("office label templates", () => {
     renderOffice(fake);
     fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
+    // The card with its table heading stays on screen while the rows are awaited (the list layer's
+    // loading state); no template is shown yet.
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
     arrive(TEMPLATES);
     expect(await screen.findByText("Молоко 58×40")).toBeTruthy();
     expect(screen.queryByText("Загрузка…")).toBeNull();
@@ -1074,12 +1076,12 @@ describe("office label templates: categories", () => {
         `${primary} шаблон «${name}»`,
         `Действия: ${name}`,
       ]);
-      expect(buttons[0]?.textContent).toBe(primary);
-      expect(new Set(buttons.map((button) => button.parentElement)).size).toBe(1);
+      // Icon buttons (the name is the aria-label, the tooltip repeats it), side by side in one bar.
+      expect(buttons[0]?.textContent).toBe("");
+      expect(new Set(buttons.map((button) => button.closest(".office-row-actions"))).size).toBe(1);
+      expect(buttons[0]?.closest(".office-row-actions")).not.toBeNull();
       for (const button of buttons) {
-        expect(button.parentElement?.classList.contains("mk-row-actions")).toBe(true);
-        expect(button.classList.contains("mk-btn--secondary")).toBe(true);
-        expect(button.classList.contains("mk-btn--compact")).toBe(true);
+        expect(button.classList.contains("mk-icon-button")).toBe(true);
       }
       fireEvent.click(buttons[1] as HTMLElement);
       const items = within(screen.getByRole("menu")).getAllByRole("menuitem");

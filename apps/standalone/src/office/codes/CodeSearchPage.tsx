@@ -389,7 +389,10 @@ export function CodeSearchPage() {
 
   return (
     <>
-      <PageHeader title={t("office.codeSearch.title")} />
+      <PageHeader
+        title={t("office.codeSearch.title")}
+        description={t("office.codeSearch.subtitle")}
+      />
       <RegistryTabs active="codes" />
       <p className="office-note">{t("office.codeSearch.intro")}</p>
       <ListCard>

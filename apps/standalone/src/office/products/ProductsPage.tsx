@@ -267,6 +267,7 @@ export function ProductsPage() {
     <>
       <PageHeader
         title={t("office.products.title")}
+        description={t("office.products.subtitle")}
         actions={
           canEdit ? (
             <Button onClick={() => open({ kind: "create" })}>{t("office.products.add")}</Button>

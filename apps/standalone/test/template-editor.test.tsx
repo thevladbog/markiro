@@ -293,7 +293,8 @@ describe("a new label template", () => {
     expect(screen.getByText("Шаблон «Молоко 58×40» создан.")).toBeTruthy();
     // The cached list was dropped, so no row of the old list shows while it is read.
     expect(screen.getByText("Загрузка…")).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
+    // The list card keeps its table heading while the rows are awaited; no row of the old list shows.
+    expect(screen.queryByText("Коробка 58×40")).toBeNull();
     await act(async () => {
       listed([BOX_58]);
     });

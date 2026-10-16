@@ -7,21 +7,33 @@ import { OfficeIcon } from "./OfficeIcon.js";
 import { UserAvatar } from "./UserAvatar.js";
 
 export interface UserMenuProps {
+  userId: string;
+  avatarVersion: number | null | undefined;
   name: string;
   login: string;
   /** The role as the person reads it: «Администратор». */
   roleLabel: string;
+  onProfile: () => void;
   onChangePassword: () => void;
   onSignOut: () => void;
 }
 
 /**
  * The signed-in person in the office's top bar: name and role on a trigger that opens a menu of
- * «Сменить пароль» and «Выйти из офиса» (it replaces the two separate buttons). Menu semantics:
+ * «Профиль», «Сменить пароль» and «Выйти из офиса» (it replaces the two separate buttons). Menu semantics:
  * the first entry takes the focus on opening, the arrows, Home and End move, Escape closes and
  * returns to the trigger, Tab and a press outside close.
  */
-export function UserMenu({ name, login, roleLabel, onChangePassword, onSignOut }: UserMenuProps) {
+export function UserMenu({
+  userId,
+  avatarVersion,
+  name,
+  login,
+  roleLabel,
+  onProfile,
+  onChangePassword,
+  onSignOut,
+}: UserMenuProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -81,7 +93,7 @@ export function UserMenu({ name, login, roleLabel, onChangePassword, onSignOut }
   return (
     <div ref={rootRef} className="user-menu">
       <Button
-        variant="secondary"
+        variant="plain"
         className="user-menu__trigger"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -92,7 +104,7 @@ export function UserMenu({ name, login, roleLabel, onChangePassword, onSignOut }
         }}
         onKeyDown={onTriggerKey}
       >
-        <UserAvatar name={name} size={32} />
+        <UserAvatar name={name} size={32} userId={userId} avatarVersion={avatarVersion} />
         <span className="user-menu__who">
           <span className="user-menu__name">{name}</span>
           <span className="user-menu__role">{roleLabel}</span>
@@ -109,14 +121,24 @@ export function UserMenu({ name, login, roleLabel, onChangePassword, onSignOut }
           onKeyDown={onMenuKey}
         >
           <div className="user-menu__identity">
-            <UserAvatar name={name} size={40} />
+            <UserAvatar name={name} size={40} userId={userId} avatarVersion={avatarVersion} />
             <div className="user-menu__identity-text">
               <span className="user-menu__identity-name">{name}</span>
               <span className="user-menu__identity-meta">{`${roleLabel} · ${login}`}</span>
             </div>
           </div>
           <Button
-            variant="secondary"
+            variant="plain"
+            role="menuitem"
+            tabIndex={-1}
+            className="user-menu__item"
+            onClick={() => run(onProfile)}
+          >
+            <OfficeIcon name="user" />
+            {t("office.header.profile")}
+          </Button>
+          <Button
+            variant="plain"
             role="menuitem"
             tabIndex={-1}
             className="user-menu__item"
@@ -126,7 +148,7 @@ export function UserMenu({ name, login, roleLabel, onChangePassword, onSignOut }
             {t("office.password.open")}
           </Button>
           <Button
-            variant="secondary"
+            variant="plain"
             role="menuitem"
             tabIndex={-1}
             className="user-menu__item"

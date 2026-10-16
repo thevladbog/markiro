@@ -530,28 +530,30 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
           <>
             {palletId === undefined && (
               <>
-                <RadioGroup
-                  label={t("office.exports.formats")}
-                  name="shift-export-format"
-                  disabled={busy}
-                  value={selected === undefined ? "" : formatKey(selected.format)}
-                  onValueChange={setChosen}
-                  options={checks.map((check) => ({
-                    value: formatKey(check.format),
-                    disabled: check.refusal !== null,
-                    label:
-                      check.refusal === null ? (
-                        check.format.label
-                      ) : (
-                        <span className="shift-cell">
-                          <span>{check.format.label}</span>
-                          <span className="shift-cell__quiet">
-                            {t(`office.exports.failures.${check.refusal}`)}
+                <div className="export-formats">
+                  <RadioGroup
+                    label={t("office.exports.formats")}
+                    name="shift-export-format"
+                    disabled={busy}
+                    value={selected === undefined ? "" : formatKey(selected.format)}
+                    onValueChange={setChosen}
+                    options={checks.map((check) => ({
+                      value: formatKey(check.format),
+                      disabled: check.refusal !== null,
+                      label:
+                        check.refusal === null ? (
+                          check.format.label
+                        ) : (
+                          <span className="shift-cell">
+                            <span>{check.format.label}</span>
+                            <span className="shift-cell__quiet">
+                              {t(`office.exports.failures.${check.refusal}`)}
+                            </span>
                           </span>
-                        </span>
-                      ),
-                  }))}
-                />
+                        ),
+                    }))}
+                  />
+                </div>
                 <Checkbox
                   label={t("office.exports.split")}
                   checked={split}
@@ -570,7 +572,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
                 )}
               </>
             )}
-            <p className="office-note">{t("office.exports.folderHint")}</p>
+            <Alert tone="info">{t("office.exports.folderHint")}</Alert>
             {palletId !== undefined && pallets.length === 0 && (
               <Alert tone="warn">{t("office.exports.palletUnavailable")}</Alert>
             )}

@@ -1,3 +1,4 @@
+import { deviceLink } from "./device-link.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -150,6 +151,8 @@ export function DevicesPage() {
     setDialog(next);
   };
 
+  // One reading of the clock for the whole table.
+  const now = Date.now();
   const columns: TableColumn<DeviceRecord>[] = [
     {
       key: "name",
@@ -192,14 +195,29 @@ export function DevicesPage() {
       render: (device) => DATE_TIME.format(new Date(device.pairedAt)),
     },
     {
-      // Updated at most once a minute, and by a stream only when it opens:
-      // the time the host last heard from the device, not "online".
-      key: "lastSeenAt",
-      title: t("office.devices.table.lastSeenAt"),
-      render: (device) =>
-        device.lastSeenAt === null
-          ? t("office.common.none")
-          : DATE_TIME.format(new Date(device.lastSeenAt)),
+      // The host's last hearing (written at most once a minute, by a stream only when it opens):
+      // «на связи» means heard within five minutes, not a live socket. The exact time stays under it.
+      key: "link",
+      title: t("office.devices.table.link"),
+      wrap: true,
+      render: (device) => {
+        const link = deviceLink(device, now);
+        return (
+          <span className="shift-cell">
+            <span className={link === "online" ? "office-chip office-chip--ok" : "office-chip"}>
+              <OfficeIcon name={link === "online" ? "wifi" : "wifiSlash"} size={16} />
+              <span>{t(`office.devices.link.${link}`)}</span>
+            </span>
+            {device.lastSeenAt !== null && (
+              <span className="shift-cell__quiet">
+                {t("office.devices.link.heard", {
+                  at: DATE_TIME.format(new Date(device.lastSeenAt)),
+                })}
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       key: "status",
@@ -307,6 +325,7 @@ export function DevicesPage() {
     <>
       <PageHeader
         title={t("office.devices.title")}
+        description={t("office.devices.subtitle")}
         actions={
           <Button loading={create.isPending && !dialogOpen} onClick={() => void newCode()}>
             {t("office.devices.add")}

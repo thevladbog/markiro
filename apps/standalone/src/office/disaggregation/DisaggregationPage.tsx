@@ -6,9 +6,6 @@ import { Link, useNavigate } from "react-router";
 import {
   Alert,
   Button,
-  Card,
-  DatePicker,
-  FilterBar,
   Input,
   PageHeader,
   Select,
@@ -22,9 +19,10 @@ import { useCan } from "../access.js";
 import { alertFailure, failureMessage } from "../form-errors.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { listViewState } from "../list/list-state.js";
+import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
 import { PagedTable } from "../paging/PagedTable.js";
-import { LoadError, PageLoading } from "../page-state.js";
-import { datePickerTexts } from "../shifts/shift-text.js";
 import { searchableSelect } from "../select-search.js";
 import { documentFilter, type DocumentFilterState } from "./document-list.js";
 import { byReasonOrder, DOCUMENT_STATUS_PHASE } from "./disaggregation-text.js";
@@ -183,34 +181,42 @@ export function DisaggregationPage() {
     },
   ];
 
-  const content = () => {
-    if (reversed) return null;
-    if (documents.isPending) return <PageLoading />;
-    if (documents.isError) {
-      return <LoadError error={documents.error} onRetry={() => void documents.refetch()} />;
-    }
-    return (
-      <Card>
-        <PagedTable
-          tableId="disaggregation"
-          pagerLabel={t("office.disaggregation.pager")}
-          resetKey={JSON.stringify(filter)}
-          columns={columns}
-          rows={documents.data}
-          getRowKey={(document) => document.id}
-          empty={t(
-            filtersOn ? "office.disaggregation.nothingFound" : "office.disaggregation.empty",
-          )}
-          scrollLabel={t("office.disaggregation.title")}
-        />
-      </Card>
+  const view = listViewState({
+    pending: documents.isPending && !reversed,
+    failed: documents.isError && !reversed,
+    // The server filters: an empty answer is «none» or «none with this filter».
+    total: filtersOn ? 1 : (documents.data?.length ?? 0),
+    found: documents.data?.length ?? 0,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={documents.error} onRetry={() => void documents.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty icon="split" title={t("office.disaggregation.empty")} />
+    ) : view === "nothing" ? (
+      <ListNothing title={t("office.disaggregation.nothingFound")} onReset={resetFilters} />
+    ) : null;
+  const content = () =>
+    reversed ? null : (
+      <PagedTable
+        tableId="disaggregation"
+        pagerLabel={t("office.disaggregation.pager")}
+        resetKey={JSON.stringify(filter)}
+        columns={columns}
+        rows={view === "error" ? [] : (documents.data ?? [])}
+        getRowKey={(document) => document.id}
+        empty={state}
+        scrollLabel={t("office.disaggregation.title")}
+      />
     );
-  };
 
   return (
     <>
       <PageHeader
         title={t("office.disaggregation.title")}
+        description={t("office.disaggregation.subtitle")}
         actions={
           <>
             <Link to="/disaggregation/reasons">{t("office.disaggregation.reasonsLink")}</Link>
@@ -227,74 +233,65 @@ export function DisaggregationPage() {
           {failure}
         </Alert>
       )}
-      <FilterBar
-        label={t("office.disaggregation.filters.label")}
-        resultSummary={
-          documents.isSuccess && !reversed
-            ? t("office.disaggregation.found", { count: documents.data.length })
-            : ""
-        }
-      >
-        <Select
-          label={t("office.disaggregation.filters.status")}
-          options={STATUS_FILTERS.map((value) => ({
-            value,
-            label:
-              value === "all" ? t("office.disaggregation.filters.statusAll") : statusLabel(value),
-          }))}
-          value={status}
-          onValueChange={(value) => {
-            setStatus(value);
-          }}
-        />
-        <Select
-          {...searchableSelect(t)}
-          label={t("office.disaggregation.filters.reason")}
-          options={[
-            { value: "", label: t("office.disaggregation.filters.reasonAll") },
-            ...reasonOrder.map((reason) => ({
-              value: reason.id,
-              label: reason.archived
-                ? t("office.common.archivedName", { name: reason.name })
-                : reason.name,
-            })),
-          ]}
-          value={reasonId}
-          onValueChange={(value) => {
-            setReasonId(value);
-          }}
-        />
-        <Input
-          label={t("office.disaggregation.filters.docNo")}
-          placeholder={t("office.disaggregation.filters.docNoPlaceholder")}
-          value={docNo}
-          onChange={(event) => setDocNo(event.target.value)}
-        />
-        <DatePicker
-          label={t("office.disaggregation.filters.from")}
-          {...datePickerTexts(t)}
-          {...(from === "" ? {} : { value: from })}
-          onValueChange={(value) => {
-            setFrom(value ?? "");
-          }}
-        />
-        <DatePicker
-          label={t("office.disaggregation.filters.to")}
-          {...datePickerTexts(t)}
-          {...(to === "" ? {} : { value: to })}
-          {...(reversed ? { error: t("office.disaggregation.filters.reversed") } : {})}
-          onValueChange={(value) => {
-            setTo(value ?? "");
-          }}
-        />
-        {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}
-        {filtersOn && (
-          <Button variant="secondary" onClick={resetFilters}>
-            {t("office.disaggregation.filters.reset")}
-          </Button>
-        )}
-      </FilterBar>
-      {content()}
+      <ListCard>
+        <ListFilters
+          label={t("office.disaggregation.filters.label")}
+          resultSummary={
+            documents.isSuccess && !reversed
+              ? t("office.disaggregation.found", { count: documents.data.length })
+              : ""
+          }
+          onReset={filtersOn ? resetFilters : undefined}
+          resetLabel={t("office.disaggregation.filters.reset")}
+        >
+          <Select
+            label={t("office.disaggregation.filters.status")}
+            options={STATUS_FILTERS.map((value) => ({
+              value,
+              label:
+                value === "all" ? t("office.disaggregation.filters.statusAll") : statusLabel(value),
+            }))}
+            value={status}
+            onValueChange={(value) => {
+              setStatus(value);
+            }}
+          />
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.disaggregation.filters.reason")}
+            options={[
+              { value: "", label: t("office.disaggregation.filters.reasonAll") },
+              ...reasonOrder.map((reason) => ({
+                value: reason.id,
+                label: reason.archived
+                  ? t("office.common.archivedName", { name: reason.name })
+                  : reason.name,
+              })),
+            ]}
+            value={reasonId}
+            onValueChange={(value) => {
+              setReasonId(value);
+            }}
+          />
+          <Input
+            label={t("office.disaggregation.filters.docNo")}
+            placeholder={t("office.disaggregation.filters.docNoPlaceholder")}
+            value={docNo}
+            onChange={(event) => setDocNo(event.target.value)}
+          />
+          <DateRange
+            label={t("office.disaggregation.filters.period")}
+            fromLabel={t("office.disaggregation.filters.from")}
+            toLabel={t("office.disaggregation.filters.to")}
+            from={from}
+            to={to}
+            onFrom={setFrom}
+            onTo={setTo}
+            error={reversed ? t("office.disaggregation.filters.reversed") : undefined}
+          />
+        </ListFilters>
+        {content()}
+      </ListCard>
     </>
   );
 }

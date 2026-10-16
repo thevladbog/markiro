@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
 
 import type { MonoBitmap } from "@markiro/domain";
 import { Alert, Button, Card, FileDropZone } from "@markiro/ui";
@@ -12,6 +13,7 @@ import { useLogoUploadLocked } from "../branding.js";
 import { alertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { BitmapCanvas } from "./BitmapCanvas.js";
 import { hasInk } from "./logo-canvas.js";
@@ -37,6 +39,7 @@ export function OrgLogoCard() {
   const locked = useLogoUploadLocked();
   const lockNoteId = useId();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const state = useOfficeQuery(officeKeys.orgLogo, (api, token) => api.getOrgLogo(token));
   const put = useOfficeMutation((api, token, bitmap: MonoBitmap) =>
     api.putOrgLogo(token, logoToWire(bitmap)),
@@ -91,21 +94,35 @@ export function OrgLogoCard() {
   if (state.isPending) return <PageLoading />;
   if (state.isError) return <LoadError error={state.error} onRetry={() => void state.refetch()} />;
   return (
-    <Card>
-      <h2>{t("office.org.logo.title")}</h2>
-      <p>{t("office.org.logo.intro")}</p>
+    <Card className="org-card org-logo-card">
+      <div className="org-logo-card__head">
+        <h2 className="org-logo-card__title">
+          <OfficeIcon name={locked && canEdit ? "lock" : "image"} size={20} />
+          {t("office.org.logo.title")}
+        </h2>
+        {locked && canEdit && (
+          <span className="office-chip">
+            <OfficeIcon name="lock" size={16} />
+            {t("office.org.logo.needsLicense")}
+          </span>
+        )}
+      </div>
+      <p className="org-logo-card__intro">{t("office.org.logo.intro")}</p>
       {message !== null && <Alert tone={message.tone}>{message.text}</Alert>}
-      {logo === null ? (
-        <p>{t("office.org.logo.none")}</p>
-      ) : current === null ? (
-        <Alert tone="warn">{t("office.org.logo.unreadableStored")}</Alert>
-      ) : (
-        <BitmapCanvas
-          bitmap={current}
-          className="org-logo-preview"
-          label={t("office.org.logo.preview")}
-        />
-      )}
+      {/* The paper the logo prints on: literal white in both themes, the printer's black on it. */}
+      <div className="org-logo-paper">
+        {logo === null ? (
+          <p className="org-logo-paper__none">{t("office.org.logo.none")}</p>
+        ) : current === null ? (
+          <Alert tone="warn">{t("office.org.logo.unreadableStored")}</Alert>
+        ) : (
+          <BitmapCanvas
+            bitmap={current}
+            className="org-logo-preview"
+            label={t("office.org.logo.preview")}
+          />
+        )}
+      </div>
       {staged !== null && (
         <section aria-label={t("office.org.logo.stagedTitle")}>
           <p>{t("office.org.logo.stagedIntro")}</p>
@@ -127,9 +144,18 @@ export function OrgLogoCard() {
       {canEdit ? (
         <>
           {locked && (
-            <p id={lockNoteId} className="office-note" tabIndex={0}>
-              {t("office.org.logo.licenseLocked")}
-            </p>
+            <>
+              <Alert tone="info" role="note" id={lockNoteId} tabIndex={0}>
+                {t("office.org.logo.licenseLocked")}
+              </Alert>
+              <Button
+                variant="secondary"
+                icon={<OfficeIcon name="arrowRight" size={20} />}
+                onClick={() => void navigate("/about#license")}
+              >
+                {t("office.org.logo.openAbout")}
+              </Button>
+            </>
           )}
           <div role="group" aria-describedby={locked ? lockNoteId : undefined}>
             <FileDropZone

@@ -43,7 +43,7 @@ export function BackupsPage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.backups.title")} />
+      <PageHeader title={t("office.backups.title")} description={t("office.backups.subtitle")} />
       <BackupsContent />
     </>
   );
@@ -130,74 +130,76 @@ function BackupsContent() {
             }}
           />
         )}
-        <Card title={t("office.backups.local")} titleAs="h2">
-          <div className="standalone-form">
-            <div className="backup-alerts" aria-live="polite">
-              {done && (
-                <Alert tone="ok" role="presentation">
-                  {t("office.backups.done")}
-                </Alert>
-              )}
-              {startFailure === "running" && (
-                <Alert tone="info" role="presentation">
-                  {t("office.backups.alreadyRunning")}
-                </Alert>
-              )}
-              {startFailure !== null && startFailure !== "running" && (
-                <Alert tone="error" role="presentation">
-                  {t(failureMessage(startFailure))}
-                </Alert>
-              )}
-            </div>
-            <Destination destination={shown.local} time={time} />
-            {canManage ? (
-              <div className="standalone-form__actions">
-                <Button
-                  size="md"
-                  loading={running || start.isPending}
-                  onClick={() => void copyNow()}
-                >
-                  {running ? t("office.backups.running") : t("office.backups.copyNow")}
-                </Button>
+        <div className="office-split office-split--even">
+          <Card title={t("office.backups.local")} titleAs="h2">
+            <div className="standalone-form">
+              <div className="backup-alerts" aria-live="polite">
+                {done && (
+                  <Alert tone="ok" role="presentation">
+                    {t("office.backups.done")}
+                  </Alert>
+                )}
+                {startFailure === "running" && (
+                  <Alert tone="info" role="presentation">
+                    {t("office.backups.alreadyRunning")}
+                  </Alert>
+                )}
+                {startFailure !== null && startFailure !== "running" && (
+                  <Alert tone="error" role="presentation">
+                    {t(failureMessage(startFailure))}
+                  </Alert>
+                )}
               </div>
-            ) : (
-              <p className="office-note">{t("office.backups.adminOnlyCopy")}</p>
-            )}
-          </div>
-        </Card>
-        <Card title={t("office.backups.second")} titleAs="h2">
-          <div className="standalone-form">
-            <div className="backup-alerts" aria-live="polite">
-              {savedRev === shown.settingsRev && (
-                <Alert tone="ok" role="presentation">
-                  {t("office.common.saved")}
-                </Alert>
+              <Destination destination={shown.local} time={time} />
+              {canManage ? (
+                <div className="standalone-form__actions">
+                  <Button
+                    size="md"
+                    loading={running || start.isPending}
+                    onClick={() => void copyNow()}
+                  >
+                    {running ? t("office.backups.running") : t("office.backups.copyNow")}
+                  </Button>
+                </div>
+              ) : (
+                <p className="office-note">{t("office.backups.adminOnlyCopy")}</p>
               )}
             </div>
-            {shown.second === null ? (
-              <>
-                <p>{t("office.backups.secondNotSet")}</p>
-                <p className="office-note">{t("office.backups.secondNotSetHint")}</p>
-              </>
-            ) : (
-              <Destination destination={shown.second} time={time} />
-            )}
-            {canManage ? (
-              <SecondDirForm
-                key={shown.settingsRev}
-                state={shown}
-                onSaved={(next) => {
-                  queryClient.setQueryData(officeKeys.backups, next);
-                  setSavedRev(next.settingsRev);
-                }}
-                onSubmitStart={() => setSavedRev(null)}
-                onReload={() => void backups.refetch()}
-              />
-            ) : (
-              <p className="office-note">{t("office.common.readOnly")}</p>
-            )}
-          </div>
-        </Card>
+          </Card>
+          <Card title={t("office.backups.second")} titleAs="h2">
+            <div className="standalone-form">
+              <div className="backup-alerts" aria-live="polite">
+                {savedRev === shown.settingsRev && (
+                  <Alert tone="ok" role="presentation">
+                    {t("office.common.saved")}
+                  </Alert>
+                )}
+              </div>
+              {shown.second === null ? (
+                <>
+                  <p>{t("office.backups.secondNotSet")}</p>
+                  <p className="office-note">{t("office.backups.secondNotSetHint")}</p>
+                </>
+              ) : (
+                <Destination destination={shown.second} time={time} />
+              )}
+              {canManage ? (
+                <SecondDirForm
+                  key={shown.settingsRev}
+                  state={shown}
+                  onSaved={(next) => {
+                    queryClient.setQueryData(officeKeys.backups, next);
+                    setSavedRev(next.settingsRev);
+                  }}
+                  onSubmitStart={() => setSavedRev(null)}
+                  onReload={() => void backups.refetch()}
+                />
+              ) : (
+                <p className="office-note">{t("office.common.readOnly")}</p>
+              )}
+            </div>
+          </Card>
+        </div>
         <Card title={t("office.backups.copies")} titleAs="h2">
           <CopiesTable copies={shown.local.copies} time={time} />
         </Card>

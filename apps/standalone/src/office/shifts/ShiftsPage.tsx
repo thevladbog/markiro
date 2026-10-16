@@ -683,6 +683,7 @@ export function ShiftsPage() {
     <>
       <PageHeader
         title={t("office.shifts.title")}
+        description={t("office.shifts.subtitle")}
         actions={
           canPlan ? (
             <Button onClick={() => open({ kind: "create" })}>{t("office.shifts.add")}</Button>

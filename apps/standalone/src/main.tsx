@@ -1,6 +1,7 @@
 import "@markiro/ui/styles.css";
 import "./app/shell.css";
 import "./office/list/list.css";
+import "./office/avatar/profile.css";
 import "./i18n/index.js";
 
 import { StrictMode } from "react";

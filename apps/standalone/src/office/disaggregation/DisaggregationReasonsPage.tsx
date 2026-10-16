@@ -5,8 +5,12 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { z } from "zod";
 
-import { Alert, Button, Card, Checkbox, Input, PageHeader, type TableColumn } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, PageHeader, type TableColumn } from "@markiro/ui";
 
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { DisaggregationReason } from "../../host/disaggregation.js";
 import { characters, isPlainText } from "../../lib/rules.js";
@@ -14,7 +18,7 @@ import { useCan } from "../access.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
+import { WriteFailureAlert } from "../page-state.js";
 import { ArchiveStatus, useStoreRecord } from "../records.js";
 import { byReasonOrder } from "./disaggregation-text.js";
 
@@ -212,37 +216,49 @@ export function DisaggregationReasonsPage() {
     columns.push({
       key: "actions",
       title: t("office.disaggregation.reasons.table.actions"),
+      stickyEnd: true,
       render: (reason) => (
-        <Button
-          variant="secondary"
-          size="compact"
-          aria-label={t("office.disaggregation.reasons.editNamed", { name: reason.name })}
-          onClick={() => open({ kind: "edit", reason })}
-        >
-          {t("office.disaggregation.reasons.edit")}
-        </Button>
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.disaggregation.reasons.editNamed", { name: reason.name }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", reason }),
+            },
+          ]}
+        />
       ),
     });
   }
 
-  const content = () => {
-    if (reasons.isPending) return <PageLoading />;
-    if (reasons.isError) {
-      return <LoadError error={reasons.error} onRetry={() => void reasons.refetch()} />;
-    }
-    return (
-      <Card>
-        <PagedTable
-          tableId="disaggregation-reasons"
-          columns={columns}
-          rows={[...reasons.data].sort(byReasonOrder)}
-          getRowKey={(reason) => reason.id}
-          empty={t("office.disaggregation.reasons.empty")}
-          scrollLabel={t("office.disaggregation.reasons.title")}
-        />
-      </Card>
-    );
-  };
+  const view = listViewState({
+    pending: reasons.isPending,
+    failed: reasons.isError,
+    total: reasons.data?.length ?? 0,
+    found: reasons.data?.length ?? 0,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={reasons.error} onRetry={() => void reasons.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty icon="list" title={t("office.disaggregation.reasons.empty")} />
+    ) : null;
+  const content = () => (
+    <ListCard>
+      <PagedTable
+        tableId="disaggregation-reasons"
+        columns={columns}
+        // A failed read shows its error, not the rows an earlier read left in the cache.
+        rows={view === "error" ? [] : [...(reasons.data ?? [])].sort(byReasonOrder)}
+        getRowKey={(reason) => reason.id}
+        empty={state}
+        scrollLabel={t("office.disaggregation.reasons.title")}
+      />
+    </ListCard>
+  );
 
   // The next place after the last reason, archived ones included.
   const nextOrder = Math.min(
@@ -258,6 +274,7 @@ export function DisaggregationReasonsPage() {
       </Link>
       <PageHeader
         title={t("office.disaggregation.reasons.title")}
+        description={t("office.disaggregation.reasons.subtitle")}
         actions={
           canWrite ? (
             <Button onClick={() => open({ kind: "create" })}>

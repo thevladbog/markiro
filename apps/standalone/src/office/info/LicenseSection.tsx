@@ -12,6 +12,8 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
+import { Tooltip } from "../list/Tooltip.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeLicense } from "../../host/protocol.js";
 import { useCan } from "../access.js";
@@ -183,14 +185,40 @@ function LicenseFeatures({ license }: { license: OfficeLicense }) {
     <section className="license-part" aria-labelledby={titleId}>
       <h3 id={titleId}>{t("office.about.license.featuresTitle")}</h3>
       <ul className="license-features">
-        {featureRows(license).map((row) => (
-          <li key={row.key}>
-            <span>{t(`office.about.license.features.${row.key}`)}</span>
-            <Badge tone={row.on ? "ok" : "neutral"}>
-              {t(row.on ? "office.about.license.features.on" : "office.about.license.features.off")}
-            </Badge>
-          </li>
-        ))}
+        {featureRows(license).map((row) => {
+          const locked = row.key === "customLogo" && !row.on;
+          const state = t(
+            row.on ? "office.about.license.features.on" : "office.about.license.features.off",
+          );
+          return (
+            <li key={row.key} className={locked ? "license-features__locked" : undefined}>
+              <span className="license-features__name">
+                {locked && <OfficeIcon name="lock" size={16} />}
+                {t(`office.about.license.features.${row.key}`)}
+              </span>
+              {locked ? (
+                // The reason is on the page below the row (never the tooltip alone); the tooltip repeats it
+                // on hover and keyboard focus.
+                <Tooltip label={t("office.about.license.features.customLogoWhy")}>
+                  <span
+                    tabIndex={0}
+                    className="license-features__state"
+                    aria-describedby={`${titleId}-why`}
+                  >
+                    <Badge tone="neutral">{state}</Badge>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Badge tone={row.on ? "ok" : "neutral"}>{state}</Badge>
+              )}
+              {locked && (
+                <p id={`${titleId}-why`} className="license-features__why">
+                  {t("office.about.license.features.customLogoWhy")}
+                </p>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

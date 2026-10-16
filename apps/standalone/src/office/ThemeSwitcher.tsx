@@ -65,7 +65,7 @@ export function ThemeSwitcher() {
         return (
           <Button
             key={each}
-            variant="ghost"
+            variant="plain"
             role="radio"
             aria-checked={on}
             aria-label={nameOf(each)}

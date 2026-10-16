@@ -466,19 +466,13 @@
 }
 
 /*
- * The top bar's controls are `Button`s, whose inline style sets the padding, the radius and the
- * colours; the design's shapes (48 px, radius 16, a pill chip) override them, hence `!important`.
+ * The top bar's controls are the design's 48 px with radius 16: the shared `Button` draws its height
+ * and radius from `--control-md` and `--r-2`, so the bar redefines the two for its own subtree (no
+ * `!important` against the button's inline style). The icon buttons take the same 48.
  */
-.office-header__actions > .mk-btn,
-.office-header__actions > .user-menu > .mk-btn {
-  min-height: 48px !important;
-  border-radius: 16px !important;
-}
-
-.office-header__actions > .mk-icon-button {
-  width: 48px !important;
-  height: 48px !important;
-  min-width: 48px !important;
+.office-header__actions {
+  --control-md: 48px;
+  --r-2: 16px;
 }
 
 /* A chip: an icon and a word on a tinted pill. The state is the icon and the word, never the tint alone. */
@@ -517,10 +511,11 @@
 }
 
 /* The link chip is a button (it opens the details): 40 px to hit, the pill drawn inside it. */
-.host-dot > .mk-btn {
-  padding: 0 !important;
-  border-color: transparent !important;
-  background: transparent !important;
+.host-dot__button {
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 12px;
+  color: var(--fg-1);
 }
 
 .theme-switcher {
@@ -532,31 +527,39 @@
 }
 
 .theme-switcher > .theme-switcher__option {
+  justify-content: center;
   width: 40px;
   min-width: 40px;
-  padding: 0 !important;
-  border-radius: 12px !important;
-  color: var(--fg-2) !important;
+  height: 40px;
+  border-radius: 12px;
+  color: var(--fg-2);
 }
 
 .theme-switcher > .theme-switcher__option:hover:not(.theme-switcher__option--on) {
-  background: var(--surface-card) !important;
-  color: var(--fg-1) !important;
+  background: var(--surface-card);
+  color: var(--fg-1);
 }
 
 .theme-switcher > .theme-switcher__option--on,
 .theme-switcher > .theme-switcher__option--on:hover {
-  background: var(--surface-inverse) !important;
-  color: var(--fg-on-inverse) !important;
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
 }
 
 .user-menu {
   position: relative;
 }
 
+/* The secondary look, drawn here (the trigger is a plain button): rule, card fill, the bar's 48 px and radius. */
 .user-menu__trigger {
-  gap: 10px !important;
-  padding: 0 12px 0 8px !important;
+  gap: 10px;
+  min-height: var(--control-md);
+  padding: 0 12px 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 600 14px/1 var(--font-ui);
 }
 
 /* An initials avatar: a circle on the category tone its person's name fixes (the kit's four). */
@@ -570,10 +573,42 @@
   font: 600 12px/1 var(--font-mono);
 }
 
+.user-avatar--20 {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.user-avatar--24 {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
 .user-avatar--40 {
   width: 40px;
   height: 40px;
   font-size: 14px;
+}
+
+.user-avatar--48 {
+  width: 48px;
+  height: 48px;
+  font-size: 16px;
+}
+
+.user-avatar--96 {
+  width: 96px;
+  height: 96px;
+  font-size: 32px;
+}
+
+/* A photo fills the same circle; the hairline keeps a pale picture from dissolving into the page. */
+.user-avatar--photo {
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  background: var(--surface-panel);
 }
 
 .user-avatar--violet {
@@ -652,19 +687,18 @@
 }
 
 .user-menu__panel > .user-menu__item {
-  justify-content: flex-start !important;
-  gap: 12px !important;
+  gap: 12px;
   min-height: 44px;
   margin-top: 4px;
-  padding: 0 12px !important;
-  border-color: transparent !important;
-  border-radius: 12px !important;
-  background: transparent !important;
-  font-weight: 500 !important;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+  text-align: left;
 }
 
 .user-menu__panel > .user-menu__item:hover {
-  background: var(--surface-panel) !important;
+  background: var(--surface-panel);
 }
 
 /*
@@ -693,7 +727,7 @@
   flex-wrap: wrap;
 }
 
-.office-shell__content .mk-page-header > div {
+.office-shell__content .mk-page-header > div:not(.mk-page-header__titles) {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -904,18 +938,44 @@
 }
 
 /* A page's table of contents: plain links to its sections' anchors in a row. */
+/* The anchors of «Информация» as the kit's segments (a link each, not a tab list: the page reads as a whole). */
 .office-toc {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
+  gap: 4px;
   margin: 0;
-  padding: 0;
+  padding: 4px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
   list-style: none;
 }
 
 .office-toc a {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  text-decoration: none;
+}
+
+.office-toc a:hover {
+  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
   color: var(--fg-1);
-  text-decoration: underline;
+}
+
+.office-toc a[aria-current="location"] {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 600;
+}
+
+.office-toc a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 /* The license section (plan ЛЦ-3): its parts one under another, each feature as its name and a word. */
@@ -941,9 +1001,33 @@
 
 .license-features li {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.license-features__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.license-features__state {
+  border-radius: var(--r-sm);
+}
+
+.license-features__state:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Why a feature is off, on the page under its row (the tooltip repeats it). */
+.license-features__why {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
 }
 
 /*
@@ -971,9 +1055,9 @@
  */
 .office-banner .mk-alert {
   align-items: center;
-  /* The shared alert sets these inline. */
-  padding: 14px 20px !important;
-  border-radius: var(--r-ctl) !important;
+  /* The shared alert draws its padding and radius from these (no `!important`). */
+  --mk-alert-pad: 14px 20px;
+  --r-2: var(--r-ctl);
 }
 
 .office-banner .mk-alert__icon {
@@ -1140,7 +1224,89 @@
   max-height: 96px;
   image-rendering: pixelated;
   background: var(--paper);
-  border: 1px solid var(--line-strong);
+}
+
+/* Two columns on a wide window: the data at the left, the logo at the right; one column below 1100 px. */
+.office-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.office-split--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .office-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.office-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/*
+ * The office's cards are the kit's one layer: radius 24, a hairline, no shadow (the shadow is off in the
+ * kit scope), the title seated at the top with no divider under it. The card draws these from tokens.
+ */
+.office-shell {
+  --r-3: var(--r-card);
+  --mk-card-pad: 24px;
+  --mk-card-head-pad: 20px 24px 0;
+  --mk-card-head-rule: 0;
+}
+
+.org-logo-card .mk-card__body {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.org-logo-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.org-logo-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.org-logo-card__intro {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* Paper is paper in both themes: literal white, the logo printed black on it. */
+.org-logo-paper {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: #ffffff;
+  color: #17161a;
+}
+
+.org-logo-paper__none {
+  margin: 0;
+  color: #17161a;
+  font: var(--text-body-sm);
+  text-align: center;
 }
 
 /* An A4 sheet's preview: the page shrunk to the dialog's width. */
@@ -1321,22 +1487,35 @@
   font: var(--text-body-sm);
 }
 
+/* The matrix at the left, its code at the right (the kit's pairing dialog); one column in a narrow window. */
 .pairing-code {
-  display: grid;
-  justify-items: center;
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
 }
 
-/* The card's paper, A4 and A5 side by side (the group's own column is inline, hence !important). */
-.pairing-card-paper [role="radiogroup"] {
-  flex-direction: row !important;
-  gap: 24px !important;
+.pairing-code__side {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pairing-code__label {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* The card's paper, A4 and A5 side by side (the group draws its direction and gap from these). */
+.pairing-card-paper {
+  --mk-radio-dir: row;
+  --mk-radio-gap: 24px;
 }
 
 /* The SVG has only a viewBox: the box gives it a size, and a light quiet zone in both themes. */
 .pairing-code__matrix {
-  width: 200px;
-  height: 200px;
+  width: 148px;
+  height: 148px;
   padding: 12px;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -1352,7 +1531,9 @@
 .pairing-code__digits {
   font: var(--text-h1);
   font-family: var(--font-mono);
-  letter-spacing: 0.12em;
+  font-size: 40px;
+  line-height: 44px;
+  letter-spacing: 0.08em;
 }
 
 /* The import dialog: the code and its check beside the fields a layout can print. */
@@ -1819,11 +2000,6 @@
   }
 }
 
-.overview-card {
-  border-radius: var(--r-card) !important;
-  box-shadow: none !important;
-}
-
 .overview-planned {
   display: grid;
   gap: var(--sp-3);
@@ -1989,17 +2165,11 @@
 
 /* A refused sign-in marks both fields (a 2 px rule), and the alert above them says why. */
 .office-login__form[data-failed] .mk-input {
-  border: 2px solid var(--err-solid) !important;
-}
-
-.office-login .office-login__submit {
-  min-height: 44px;
-  border-radius: 16px !important;
+  --mk-input-border: 2px solid var(--err-solid);
 }
 
 .office-login .office-login__ghost {
   align-self: center;
-  color: var(--fg-1) !important;
 }
 
 .office-login__recent {
@@ -2027,15 +2197,19 @@
 .office-login .office-login__recent-pick {
   width: 100%;
   min-height: 52px;
-  justify-content: flex-start;
-  gap: 12px !important;
-  padding: 0 8px !important;
-  border-radius: 14px !important;
-  font-weight: 500 !important;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: 14px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.office-login .office-login__recent-pick:hover {
+  background: var(--surface-panel);
 }
 
 .office-login .office-login__recent-pick--selected {
-  background: var(--surface-panel) !important;
+  background: var(--surface-panel);
 }
 
 .office-login__avatar {
@@ -2074,7 +2248,11 @@
 
 .office-login .office-login__clear {
   justify-self: start;
-  color: var(--fg-2) !important;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 13px/16px var(--font-ui);
 }
 
 .office-login__footer {
@@ -2090,10 +2268,6 @@
   align-items: center;
   justify-content: center;
   gap: 4px 12px;
-}
-
-.office-login__address .mk-btn {
-  color: var(--fg-1) !important;
 }
 
 .theme-switcher .theme-switcher__option:focus-visible {
@@ -2159,4 +2333,18 @@
 
 .shift-cell--end > .shift-cell__quiet {
   font: var(--text-body-sm);
+}
+
+/* The export formats as rows divided by hairlines (the kit's export dialog), one choice among them. */
+.export-formats {
+  --mk-radio-gap: 0;
+}
+
+.export-formats [role="radiogroup"] > div {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.export-formats [role="radiogroup"] > div:last-child {
+  border-bottom: 0;
 }

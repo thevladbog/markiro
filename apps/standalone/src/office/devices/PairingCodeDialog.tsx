@@ -223,10 +223,15 @@ export function PairingCodeDialog({
                     label={t("office.devices.pairing.matrixLabel")}
                   />
                 </Suspense>
-                <span className="pairing-code__digits" aria-hidden="true">
-                  {`${code.code.slice(0, 5)} ${code.code.slice(5)}`}
-                </span>
-                <VisuallyHidden>{code.code}</VisuallyHidden>
+                <div className="pairing-code__side">
+                  <span className="pairing-code__label" aria-hidden="true">
+                    {t("office.devices.pairing.codeLabel")}
+                  </span>
+                  <span className="pairing-code__digits" aria-hidden="true">
+                    {`${code.code.slice(0, 5)} ${code.code.slice(5)}`}
+                  </span>
+                  <VisuallyHidden>{code.code}</VisuallyHidden>
+                </div>
               </div>
               {payload !== null && payload.addresses.length === 0 && (
                 <Alert tone="warn">{t("office.devices.pairing.noAddresses")}</Alert>

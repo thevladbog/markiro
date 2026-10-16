@@ -42,7 +42,10 @@ describe("the office layout rules", () => {
     expect(rule(".office-header")).toContain("flex-wrap: wrap");
     expect(rule(".office-header__actions")).toContain("flex-wrap: wrap");
     expect(rule(".office-shell__content .mk-page-header")).toContain("flex-wrap: wrap");
-    expect(rule(".office-shell__content .mk-page-header > div")).toContain("flex-wrap: wrap");
+    // The actions' box; the title box of a header with a description (`__titles`) is not one of them.
+    expect(
+      rule(".office-shell__content .mk-page-header > div:not(.mk-page-header__titles)"),
+    ).toContain("flex-wrap: wrap");
   });
 
   it("keeps the menu in view and lets it scroll by itself in a low window", () => {

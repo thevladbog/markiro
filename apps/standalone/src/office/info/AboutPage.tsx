@@ -32,12 +32,17 @@ export function AboutPage() {
   }, [location.hash, location.key]);
   return (
     <>
-      <PageHeader title={t("office.about.title")} />
+      <PageHeader title={t("office.about.title")} description={t("office.about.subtitle")} />
       <nav aria-label={t("office.about.toc")}>
         <ul className="office-toc">
           {sections.map((section) => (
             <li key={section.id}>
-              <a href={`#${section.id}`}>{t(section.titleKey)}</a>
+              <a
+                href={`#${section.id}`}
+                {...(location.hash === `#${section.id}` ? { "aria-current": "location" } : {})}
+              >
+                {t(section.titleKey)}
+              </a>
             </li>
           ))}
         </ul>

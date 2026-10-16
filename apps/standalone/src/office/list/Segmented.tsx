@@ -73,7 +73,7 @@ export function Segmented<Id extends string>({
         return (
           <Button
             key={option.id}
-            variant="ghost"
+            variant="plain"
             ref={(node) => {
               if (node) refs.current.set(option.id, node);
               else refs.current.delete(option.id);

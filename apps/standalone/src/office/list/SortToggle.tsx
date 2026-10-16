@@ -19,8 +19,7 @@ export interface SortToggleProps {
 export function SortToggle({ label, ariaLabel, active, dir, onToggle }: SortToggleProps) {
   return (
     <Button
-      variant="ghost"
-      size="compact"
+      variant="plain"
       className="office-sort-toggle"
       aria-label={ariaLabel}
       aria-pressed={active}

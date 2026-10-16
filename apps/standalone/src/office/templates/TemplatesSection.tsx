@@ -1,8 +1,16 @@
-import { useEffect, useId, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router";
 
-import { DataTabs } from "@markiro/ui";
+import { Segmented } from "../list/Segmented.js";
 
 /** The section's parts: the label templates, the A4 sheets and the defaults of both. */
 export const TEMPLATE_TABS = [
@@ -21,14 +29,46 @@ function tabOf(pathname: string): TemplateTab {
   return "/templates";
 }
 
+interface SectionValue {
+  bar: ReactNode;
+  panelId: string;
+  panelLabel: string;
+}
+
+const SectionContext = createContext<SectionValue | null>(null);
+
 /**
- * «Шаблоны» as one section (beta feedback): the label templates, the A4
- * pallet sheets and the templates chosen by default, labels and sheets
- * alike, as tabs over one menu item: the office's one tab bar (`DataTabs`,
- * a tablist of tabs with the open part in a tabpanel). A part is a page of
- * its own, so choosing a tab goes to its address, and the focus the menu
- * gives a new page is given back to the tab, so the arrow keys go on. The old
- * addresses of the sheets and the defaults lead here.
+ * The section's parts as a segmented control with tab semantics. A part draws it itself, right under
+ * its own heading (the kit puts the heading first, then the parts), so it renders nothing where
+ * there is no section around it.
+ */
+export function TemplateTabsBar() {
+  return <>{useContext(SectionContext)?.bar ?? null}</>;
+}
+
+/** The open part's content: the tabpanel the bar's tabs control. Plain content outside a section. */
+export function TemplateTabPanel({ children }: { children: ReactNode }) {
+  const section = useContext(SectionContext);
+  if (section === null) return <>{children}</>;
+  return (
+    <div
+      id={section.panelId}
+      role="tabpanel"
+      aria-label={section.panelLabel}
+      className="office-stack"
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * «Шаблоны» as one section (beta feedback): the label templates, the A4 pallet sheets and the
+ * templates chosen by default, labels and sheets alike, as the parts of one menu item. A part is a
+ * page of its own, so choosing a tab goes to its address, and the focus the menu gives a new page is
+ * given back to the tab, so the arrow keys go on. The old addresses of the sheets and the defaults
+ * lead here. The section holds the bar and the panel's id; each part renders them under its heading
+ * (`TemplateTabsBar`, `TemplateTabPanel`).
  */
 export function TemplatesSection() {
   const { t } = useTranslation();
@@ -48,27 +88,35 @@ export function TemplatesSection() {
     return () => clearTimeout(timer);
   }, [pathname]);
   const activeLabel = TEMPLATE_TABS.find((tab) => tab.to === active)?.labelKey ?? "";
+  const value = useMemo<SectionValue>(
+    () => ({
+      panelId,
+      panelLabel: t(activeLabel),
+      bar: (
+        <div ref={wrapper}>
+          <Segmented
+            mode="tabs"
+            label={t("office.templatesSection.label")}
+            value={active}
+            options={TEMPLATE_TABS.map((tab) => ({
+              id: tab.to,
+              label: t(tab.labelKey),
+              panelId,
+            }))}
+            onChange={(to) => {
+              if (to === active) return;
+              refocus.current = true;
+              void navigate(to);
+            }}
+          />
+        </div>
+      ),
+    }),
+    [active, activeLabel, navigate, panelId, t],
+  );
   return (
-    <>
-      <div ref={wrapper}>
-        <DataTabs
-          label={t("office.templatesSection.label")}
-          items={TEMPLATE_TABS.map((tab) => ({
-            id: tab.to,
-            label: t(tab.labelKey),
-            panelId,
-          }))}
-          activeId={active}
-          onChange={(to) => {
-            if (to === active) return;
-            refocus.current = true;
-            void navigate(to);
-          }}
-        />
-      </div>
-      <div id={panelId} role="tabpanel" aria-label={t(activeLabel)} className="office-stack">
-        <Outlet />
-      </div>
-    </>
+    <SectionContext.Provider value={value}>
+      <Outlet />
+    </SectionContext.Provider>
   );
 }

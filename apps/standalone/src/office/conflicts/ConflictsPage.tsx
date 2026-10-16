@@ -6,8 +6,6 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   Alert,
   Button,
-  Card,
-  FilterBar,
   PageHeader,
   Select,
   StatusChip,
@@ -31,8 +29,12 @@ import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.j
 import { PaginationBar } from "../paging/PaginationBar.js";
 import { usePageSize } from "../paging/page-size.js";
 import { useHostWindowRows } from "../paging/use-host-window.js";
-import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
+import { WriteFailureAlert } from "../page-state.js";
+import { ListCard, ListFilters } from "../list/ListCard.js";
+import { ListError, ListSkeleton } from "../list/ListStates.js";
+import { StateFilter } from "../list/StateFilter.js";
 import { searchableSelect } from "../select-search.js";
+import { UserAvatar } from "../UserAvatar.js";
 import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
 import {
   conflictKindKey,
@@ -242,11 +244,14 @@ export function ConflictsPage() {
         row.reviewedAt !== null ? (
           <span className="shift-cell">
             <StatusChip phase="done" label={t("office.conflicts.reviewed")} />
-            <span className="shift-cell__quiet">
-              {t("office.conflicts.reviewedBy", {
-                name: row.reviewedByName ?? t("office.common.none"),
-                at: at(row.reviewedAt),
-              })}
+            <span className="shift-cell__quiet conflict-reviewer">
+              {row.reviewedByName !== null && <UserAvatar name={row.reviewedByName} size={20} />}
+              <span>
+                {t("office.conflicts.reviewedBy", {
+                  name: row.reviewedByName ?? t("office.common.none"),
+                  at: at(row.reviewedAt),
+                })}
+              </span>
             </span>
           </span>
         ) : (
@@ -270,55 +275,53 @@ export function ConflictsPage() {
   ];
 
   const filtered = shiftId !== "" || reviewed !== "unreviewed";
-  const content = () => {
+  const body = () => {
     // The instants are the organization's: the rows wait for its zone.
-    if (conflicts.isPending || org.isPending) return <PageLoading />;
+    if (conflicts.isPending || org.isPending) return <ListSkeleton />;
     if (conflicts.isError) {
-      return <LoadError error={conflicts.error} onRetry={() => void conflicts.refetch()} />;
+      return <ListError error={conflicts.error} onRetry={() => void conflicts.refetch()} />;
     }
     const rows = window.rows;
     if (rows === undefined) {
       return window.second.isError ? (
-        <LoadError error={window.second.error} onRetry={() => void window.second.refetch()} />
+        <ListError error={window.second.error} onRetry={() => void window.second.refetch()} />
       ) : (
-        <PageLoading />
+        <ListSkeleton />
       );
     }
     const shown = Math.min(page, window.pageCount);
     return (
-      <Card>
-        <div className="office-paged">
-          <Table
-            columns={columns}
-            rows={rows}
-            getRowKey={(row) => row.id}
-            empty={t(filtered ? "office.conflicts.emptyFiltered" : "office.conflicts.empty")}
-            scrollLabel={t("office.conflicts.table.label")}
-          />
-          <PaginationBar
-            label={t("office.conflicts.pager")}
-            name={t("office.conflicts.table.label")}
-            page={shown}
-            pageSize={pageSize}
-            shownRows={rows.length}
-            total={window.reachable}
-            pageCount={window.pageCount}
-            hasNext={shown < window.pageCount}
-            onPage={(next) => setFilter({ page: next })}
-            onPageSize={(size) => {
-              setPageSize(size);
-              setFilter({ page: 1 });
-            }}
-          />
-        </div>
-      </Card>
+      <div className="office-paged">
+        <Table
+          fill
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          empty={t(filtered ? "office.conflicts.emptyFiltered" : "office.conflicts.empty")}
+          scrollLabel={t("office.conflicts.table.label")}
+        />
+        <PaginationBar
+          label={t("office.conflicts.pager")}
+          name={t("office.conflicts.table.label")}
+          page={shown}
+          pageSize={pageSize}
+          shownRows={rows.length}
+          total={window.reachable}
+          pageCount={window.pageCount}
+          hasNext={shown < window.pageCount}
+          onPage={(next) => setFilter({ page: next })}
+          onPageSize={(size) => {
+            setPageSize(size);
+            setFilter({ page: 1 });
+          }}
+        />
+      </div>
     );
   };
 
   return (
     <div className="office-stack">
-      <PageHeader title={t("office.conflicts.title")} />
-      <p className="office-note">{t("office.conflicts.intro")}</p>
+      <PageHeader title={t("office.conflicts.title")} description={t("office.conflicts.intro")} />
       {notice !== null && (
         <Alert tone="ok" id={noticeId} tabIndex={-1}>
           {notice}
@@ -342,43 +345,45 @@ export function ConflictsPage() {
           )}
         </Alert>
       )}
-      <FilterBar
-        label={t("office.conflicts.filters.label")}
-        resultSummary={
-          conflicts.isSuccess
-            ? t("office.conflicts.found", { total: COUNT.format(conflicts.data.total) })
-            : ""
-        }
-        {...(filtered
-          ? {
-              resetLabel: t("office.conflicts.filters.reset"),
-              onReset: () => {
-                setNotice(null);
-                setFailure(null);
-                setParams(new URLSearchParams());
-              },
-            }
-          : {})}
-      >
-        <Select
-          {...searchableSelect(t)}
-          label={t("office.conflicts.filters.shift")}
-          hint={t("office.conflicts.filters.shiftHint")}
-          options={shiftOptions}
-          value={shiftId}
-          onValueChange={(value) => setFilter({ shift: value })}
-        />
-        <Select
-          label={t("office.conflicts.filters.reviewed")}
-          options={REVIEWED_FILTERS.map((value) => ({
-            value,
-            label: t(`office.conflicts.filters.reviewedOptions.${value}`),
-          }))}
-          value={reviewed}
-          onValueChange={(value) => setFilter({ state: readReviewed(value) })}
-        />
-      </FilterBar>
-      {content()}
+      <ListCard>
+        <ListFilters
+          label={t("office.conflicts.filters.label")}
+          resultSummary={
+            conflicts.isSuccess
+              ? t("office.conflicts.found", { total: COUNT.format(conflicts.data.total) })
+              : ""
+          }
+          resetLabel={t("office.conflicts.filters.reset")}
+          onReset={
+            filtered
+              ? () => {
+                  setNotice(null);
+                  setFailure(null);
+                  setParams(new URLSearchParams());
+                }
+              : undefined
+          }
+        >
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.conflicts.filters.shift")}
+            hint={t("office.conflicts.filters.shiftHint")}
+            options={shiftOptions}
+            value={shiftId}
+            onValueChange={(value) => setFilter({ shift: value })}
+          />
+          <StateFilter
+            label={t("office.conflicts.filters.reviewed")}
+            options={REVIEWED_FILTERS.map((value) => ({
+              value,
+              label: t(`office.conflicts.filters.reviewedOptions.${value}`),
+            }))}
+            value={reviewed}
+            onChange={(value) => setFilter({ state: readReviewed(value) })}
+          />
+        </ListFilters>
+        {body()}
+      </ListCard>
     </div>
   );
 }

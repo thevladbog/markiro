@@ -156,6 +156,7 @@ export function LinesPage() {
     <>
       <PageHeader
         title={t("office.lines.title")}
+        description={t("office.lines.subtitle")}
         actions={
           canEdit ? (
             <Button onClick={() => open({ kind: "create" })}>{t("office.lines.add")}</Button>
