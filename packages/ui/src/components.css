@@ -1156,3 +1156,38 @@
   outline-offset: 2px;
   border-radius: var(--r-2);
 }
+
+/* Button, variant "plain": a reset only (no fill, rule, padding or ink of its own); the app's class draws it. */
+.mk-btn--plain {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+/*
+ * The 2026-10 office sizing, opt-in (kit §Changes: office controls 44, radii 16/20): inside an element with
+ * this class the controls are 44 px (36 compact) and the field, button and alert radius is 16, the dialog
+ * and card radius 20, and a card carries no shadow (one hairline layer). The components draw all of that
+ * from tokens, so redefining the tokens here changes only this subtree; the cloud apps (admin, saas-admin,
+ * kiosk, station) never carry the class and keep 40/32 and 8/12. The standalone office puts it on its root.
+ */
+.mk-kit-2026 {
+  --control-md: 44px;
+  --control-sm: 36px;
+  --r-2: 16px;
+  --r-3: 20px;
+  --shadow-1: none;
+  --shadow-2: none;
+  /* The label of a solid error button is the kit's `onerr`, not a literal white (2.6:1 on the dark coral). */
+  --mk-btn-destructive-fg: var(--fg-on-err-solid);
+}
+
+/* A field with a wrong value: a 2 px rule in the error colour (the message carries the word «Ошибка ·»). */
+.mk-kit-2026 .mk-input--error {
+  --mk-input-border: 2px solid var(--err-solid);
+}

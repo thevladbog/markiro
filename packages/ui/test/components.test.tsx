@@ -1859,3 +1859,48 @@ describe("Slider", () => {
     expect((screen.getByRole("slider") as HTMLInputElement).disabled).toBe(true);
   });
 });
+
+describe("Button, variant plain", () => {
+  it("takes no inline look, so an app's class can draw it without !important", () => {
+    render(<Button variant="plain">Пункт</Button>);
+    const button = screen.getByRole("button", { name: "Пункт" });
+    expect(button.className).toContain("mk-btn--plain");
+    for (const property of [
+      "padding",
+      "background",
+      "border",
+      "border-radius",
+      "font",
+      "min-height",
+      "gap",
+    ]) {
+      expect(button.style.getPropertyValue(property)).toBe("");
+    }
+    expect(button.style.display).toBe("inline-flex");
+  });
+
+  it("keeps the other variants' inline shape as it was", () => {
+    render(<Button>Сохранить</Button>);
+    const button = screen.getByRole("button", { name: "Сохранить" });
+    expect(button.style.padding).toBe("0px 16px");
+    expect(button.style.borderRadius).toBe("var(--r-2)");
+  });
+});
+
+describe("the 2026 office sizing is opt-in", () => {
+  it("is defined only under .mk-kit-2026, as tokens", () => {
+    const block = /\.mk-kit-2026\s*\{([^}]*)\}/.exec(componentStyles)?.[1] ?? "";
+    expect(block).toContain("--control-md: 44px");
+    expect(block).toContain("--control-sm: 36px");
+    expect(block).toContain("--r-2: 16px");
+    expect(block).toContain("--r-3: 20px");
+    expect(block).toContain("--shadow-1: none");
+  });
+
+  it("leaves the shared defaults the cloud apps use", () => {
+    expect(tokenStyles).toMatch(/--control-md:\s*40px/);
+    expect(tokenStyles).toMatch(/--control-sm:\s*32px/);
+    expect(tokenStyles).toMatch(/--r-2:\s*8px/);
+    expect(tokenStyles).toMatch(/--r-3:\s*12px/);
+  });
+});

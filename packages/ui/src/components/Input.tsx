@@ -104,9 +104,10 @@ export function Input({
           padding: size === "floor" ? "0 16px" : "0 12px",
           borderRadius: "var(--r-2)",
           background: "var(--surface-card)",
-          border: `1px solid ${
+          // `--mk-input-border` is the app's way to draw a field's rule differently (a 2 px error rule).
+          border: `var(--mk-input-border, 1px solid ${
             error ? "var(--err-solid)" : focus ? "var(--focus-ring)" : "var(--line-strong)"
-          }`,
+          })`,
           boxShadow: focus
             ? "0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent)"
             : "none",

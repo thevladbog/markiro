@@ -4,11 +4,21 @@ import { cn } from "../cn.js";
 
 /** Порт `design-system/components/forms/Button.jsx` с офисными и цеховым размерами. */
 export type ButtonVariant =
-  "primary" | "secondary" | "ghost" | "destructive" | "warning-outline" | "destructive-outline";
+  | "primary"
+  | "secondary"
+  | "ghost"
+  | "destructive"
+  | "warning-outline"
+  | "destructive-outline"
+  | "plain";
 export type ButtonSize = "md" | "compact" | "floor";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** primary — главное действие экрана (одно); secondary — обычное; ghost — без заливки и рамки; destructive — необратимое */
+  /**
+   * primary — главное действие экрана (одно); secondary — обычное; ghost — без заливки и рамки; destructive — необратимое;
+   * plain — только поведение кнопки: без заливки, рамки, отступов и шрифта, всё остальное рисует класс приложения
+   * (пункт меню, сегмент, значок темы) без `!important`
+   */
   variant?: ButtonVariant;
   /** md — 40px (по умолчанию); compact — 32px; floor — 64px, для работы в перчатках */
   size?: ButtonSize;
@@ -27,7 +37,7 @@ const HEIGHT: Record<ButtonSize, string> = {
   floor: "var(--control-floor)",
 };
 
-const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
+const VARIANT_STYLE: Record<Exclude<ButtonVariant, "plain">, CSSProperties> = {
   primary: {
     background: "var(--surface-inverse)",
     color: "var(--fg-on-inverse)",
@@ -41,7 +51,8 @@ const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
   destructive: {
     // handoff hardcodes white text on the solid error color — no on-solid token exists
     background: "var(--err-solid)",
-    color: "#FFFFFF",
+    // `--mk-btn-destructive-fg` lets an app pair the label with the fill by token (the kit's `onerr`).
+    color: "var(--mk-btn-destructive-fg, #FFFFFF)",
     border: "1px solid var(--err-solid)",
   },
   // Kit «ghost»: no fill and no rule until it is hovered or focused; for a menu entry or a quiet link-like action.
@@ -60,6 +71,17 @@ const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
     color: "var(--err-fg)",
     border: "1px solid var(--err-border)",
   },
+};
+
+/**
+ * `plain` carries no look of its own: the inline style would beat any class, so a button the app draws
+ * itself (a menu entry, a segment) takes none and the app's class sets its shape (`.mk-btn--plain` in
+ * `components.css` is the reset the class starts from).
+ */
+const PLAIN_STYLE: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  transition: "filter 120ms, transform 60ms",
 };
 
 export function Button({
@@ -90,28 +112,37 @@ export function Button({
         fullWidth && "mk-btn--full",
         className,
       )}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: size === "floor" ? 12 : 8,
-        minHeight: HEIGHT[size],
-        height: size === "floor" ? HEIGHT[size] : undefined,
-        minWidth: size === "floor" ? "var(--control-floor)" : undefined,
-        padding: size === "floor" ? "0 24px" : "0 16px",
-        borderRadius: "var(--r-2)",
-        font: size === "floor" ? "var(--floor-body-strong)" : "600 14px/1 var(--font-ui)",
-        fontSize: size === "floor" ? 18 : size === "compact" ? 13 : 14,
-        width: fullWidth ? "100%" : undefined,
-        cursor: isDisabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.45 : 1,
-        transition: "filter 120ms, transform 60ms",
-        ...VARIANT_STYLE[variant],
-        ...(size === "floor" && variant === "destructive"
-          ? { color: "var(--fg-on-err-solid)" }
-          : {}),
-        ...style,
-      }}
+      style={
+        variant === "plain"
+          ? {
+              ...PLAIN_STYLE,
+              cursor: isDisabled ? "not-allowed" : "pointer",
+              opacity: disabled ? 0.45 : 1,
+              ...style,
+            }
+          : {
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: size === "floor" ? 12 : 8,
+              minHeight: HEIGHT[size],
+              height: size === "floor" ? HEIGHT[size] : undefined,
+              minWidth: size === "floor" ? "var(--control-floor)" : undefined,
+              padding: size === "floor" ? "0 24px" : "0 16px",
+              borderRadius: "var(--r-2)",
+              font: size === "floor" ? "var(--floor-body-strong)" : "600 14px/1 var(--font-ui)",
+              fontSize: size === "floor" ? 18 : size === "compact" ? 13 : 14,
+              width: fullWidth ? "100%" : undefined,
+              cursor: isDisabled ? "not-allowed" : "pointer",
+              opacity: disabled ? 0.45 : 1,
+              transition: "filter 120ms, transform 60ms",
+              ...VARIANT_STYLE[variant],
+              ...(size === "floor" && variant === "destructive"
+                ? { color: "var(--fg-on-err-solid)" }
+                : {}),
+              ...style,
+            }
+      }
       {...rest}
     >
       {loading && (

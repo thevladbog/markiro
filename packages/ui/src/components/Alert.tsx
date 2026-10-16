@@ -50,7 +50,8 @@ export function Alert({
   const containerStyle: CSSProperties = {
     display: "flex",
     gap: 12,
-    padding: "12px 16px",
+    // `--mk-alert-pad` is the app's way to seat an alert differently (a banner) without `!important`.
+    padding: "var(--mk-alert-pad, 12px 16px)",
     borderRadius: "var(--r-2)",
     background: config.bg,
     border: `1px solid ${config.border}`,
