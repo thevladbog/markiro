@@ -58,21 +58,26 @@ describe("the office sign-in (beta 3.2)", () => {
     expect(document.querySelectorAll(".office-login__card")).toHaveLength(2);
   });
 
-  it("switches the theme from the pill: light, system, dark; the choice persists and applies", () => {
+  it("switches the theme from the selector: system, light, dark; the choice persists and applies", () => {
     renderLogin();
-    const group = screen.getByRole("group", { name: "Тема оформления" });
-    const dark = within(group).getByRole("button", { name: "Тёмная" });
-    expect(dark.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(within(group).getByRole("button", { name: "Светлая" }));
+    const trigger = screen.getByRole("button", { name: "Тема оформления: Тёмная" });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "Тема оформления" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitemradio")
+        .map((item) => item.getAttribute("aria-checked")),
+    ).toEqual(["false", "false", "true"]);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /Светлая/ }));
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(localStorage.getItem("markiro.theme")).toBe("light");
-    expect(
-      within(group).getByRole("button", { name: "Светлая" }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    fireEvent.click(within(group).getByRole("button", { name: "Система" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Тема оформления: Светлая" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Системная/ }));
     expect(localStorage.getItem("markiro.theme")).toBe("system");
     expect(["light", "dark"]).toContain(document.documentElement.dataset.theme);
-    fireEvent.click(dark);
+    fireEvent.click(screen.getByRole("button", { name: "Тема оформления: Системная" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Тёмная/ }));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
@@ -80,9 +85,8 @@ describe("the office sign-in (beta 3.2)", () => {
     localStorage.setItem("markiro.theme", "light");
     renderLogin();
     expect(screen.getByRole("heading", { level: 2, name: "Вход в офис" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Светлая" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "Тема оформления: Светлая" })).toBeTruthy();
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("keeps the version in the footer: «Markiro Автоном 2.1.0 · Офис»", async () => {

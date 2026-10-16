@@ -2,16 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation } from "react-router";
 
-import {
-  Alert,
-  Button,
-  ConfirmDialog,
-  cn,
-  IconButton,
-  Sidebar,
-  useTheme,
-  type SidebarItem,
-} from "@markiro/ui";
+import { Alert, Button, ConfirmDialog, cn, Sidebar, type SidebarItem } from "@markiro/ui";
 
 import { HostStatusDot } from "../app/HostStatusDot.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
@@ -21,6 +12,7 @@ import { LicenseBanner } from "./LicenseBanner.js";
 import { isSettingsItem, OFFICE_NAV, type OfficeNavItem } from "./nav.js";
 import { useOfficeLink } from "./office-link.js";
 import { useOfficeSession } from "./office-session.js";
+import { ThemeSwitcher } from "./ThemeSwitcher.js";
 import { WindowModeButton } from "./WindowModeButton.js";
 
 /** Office layout after `apps/admin/src/layout/AppShell.tsx`: sidebar, header, page. */
@@ -28,8 +20,6 @@ export function OfficeShell() {
   const { t } = useTranslation();
   const session = useOfficeSession();
   const link = useOfficeLink();
-  const { theme, setTheme } = useTheme();
-  const dark = theme === "dark";
   const [passwordOpen, setPasswordOpen] = useState(false);
   // What a drawer holds unsaved: leaving the office asks first.
   const dirtyRegistry = useDirtyRegistry();
@@ -91,12 +81,7 @@ export function OfficeShell() {
             </div>
             <div className="office-header__actions">
               <HostStatusDot status={link.status} sync={link.sync} />
-              <IconButton
-                variant="secondary"
-                icon={<span aria-hidden="true">{dark ? "☀" : "☾"}</span>}
-                aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
-                onClick={() => setTheme(dark ? "light" : "dark")}
-              />
+              <ThemeSwitcher />
               <WindowModeButton onLeft={() => mainRef.current?.focus()} />
               <Button
                 variant="secondary"
