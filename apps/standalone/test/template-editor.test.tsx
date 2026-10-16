@@ -252,7 +252,7 @@ describe("a new label template", () => {
       expect(
         screen.getByRole("radio", { name: "Все категории" }).getAttribute("aria-checked"),
       ).toBe("true");
-      expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+      expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
       expect(
         screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
       ).toBeTruthy();
@@ -271,7 +271,7 @@ describe("a new label template", () => {
     type("Название", "  Молоко 58×40 ");
     await importCode(ZPL);
     expect(screen.getByText("Элементов в макете: 2")).toBeTruthy();
-    expect(screen.getByText("Размер: 58,06 × 40,04 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58,06 × 40,04 мм")).toBeTruthy();
     chooseCategories("Упакованная вода", "Молочная продукция");
     // The list is read again once the editor is back: that read is held open.
     let listed: (list: LabelTemplateSummary[]) => void = () => undefined;
@@ -323,7 +323,7 @@ describe("a new label template", () => {
     await openNew(fake);
     await importCode(ZPL);
     chooseValue("Назначение", "pallet");
-    expect(screen.getByText("Размер: 58,06 × 40,04 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58,06 × 40,04 мм")).toBeTruthy();
     expect(screen.getByText("Элементов в макете: 2")).toBeTruthy();
   });
 
@@ -584,7 +584,7 @@ describe("a new label template", () => {
     expect(
       screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL, TSPL или JSON."),
     ).toBeTruthy();
-    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
   });
 
   it("keeps the old alert and refusal only until the next save", async () => {
@@ -785,7 +785,7 @@ describe("the label's size", () => {
     expect(within(dialog).getByLabelText("Высота, мм")).toHaveProperty("value", "150");
     await applySize();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Размер: 100 × 150 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 100 × 150 мм")).toBeTruthy();
     expect(await savedSpec(fake)).toStrictEqual({
       widthMm: 100,
       heightMm: 150,
@@ -816,7 +816,7 @@ describe("the label's size", () => {
     type("Ширина, мм", "90");
     expect(within(sizeDialog()).getAllByText("Размер — от 10 до 300 мм")).toHaveLength(1);
     fireEvent.click(within(sizeDialog()).getByRole("button", { name: "Отмена" }));
-    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
   });
 
   it("moves the elements inside a smaller label, and keeps the layout when one is larger than the label", async () => {
@@ -836,7 +836,7 @@ describe("the label's size", () => {
     chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "58x40");
     expect(within(sizeDialog()).queryByRole("alert")).toBeNull();
     await applySize();
-    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
     expect(await savedSpec(fake)).toStrictEqual(resizedSpec(importedSpec(WIDE_ZPL), 58, 40, "box"));
   });
 
@@ -849,7 +849,7 @@ describe("the label's size", () => {
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "58,06");
     type("Высота, мм", "50");
     await applySize();
-    expect(screen.getByText("Размер: 58,06 × 50 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58,06 × 50 мм")).toBeTruthy();
     expect(await savedSpec(fake)).toStrictEqual({
       ...importedSpec(),
       heightMm: 50,
@@ -880,7 +880,7 @@ describe("the label's size", () => {
     chooseValueOn(preset(), "58x40");
     expect(valueOn(preset())).toBe("58x40");
     await applySize();
-    expect(screen.getByText("Размер: 58 × 40 мм · 300 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
     expect(await savedSpec(fake)).toStrictEqual({ ...imported, widthMm: 58, heightMm: 40 });
   });
 
@@ -967,7 +967,7 @@ describe("the label's size", () => {
       expect(within(sizeDialog()).queryByRole("alert"), text).toBeNull();
     }
     fireEvent.click(within(sizeDialog()).getByRole("button", { name: "Отмена" }));
-    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
     const taken: [string, string][] = [
       ["10", "10"],
       ["300", "300"],
@@ -981,7 +981,7 @@ describe("the label's size", () => {
       fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
       type("Ширина, мм", text);
       await applySize();
-      expect(screen.getByText(`Размер: ${shown} × 40 мм · 203 dpi`), text).toBeTruthy();
+      expect(screen.getByText(`Размер: ${shown} × 40 мм`), text).toBeTruthy();
     }
   });
 
@@ -1260,7 +1260,7 @@ describe("changing a label template", () => {
           "aria-checked",
         ),
       ).toBe("true");
-      expect(screen.getByText("Размер: 58,06 × 40,04 мм · 203 dpi")).toBeTruthy();
+      expect(screen.getByText("Размер: 58,06 × 40,04 мм")).toBeTruthy();
       expect(screen.getByText("Элементов в макете: 2")).toBeTruthy();
       expect(saveButton()).toHaveProperty("disabled", true);
       type("Название", "Молоко 60×40");
@@ -1772,7 +1772,7 @@ describe("copying and deleting a label template", () => {
     await settle();
     expect(fake.api.getTemplate).toHaveBeenCalledTimes(2);
     chooseValue("Назначение", "pallet");
-    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58 × 40 мм")).toBeTruthy();
     await save();
     expect(fake.api.createTemplate.mock.calls[0]?.[1]).toMatchObject({
       purpose: "pallet",
@@ -1857,7 +1857,7 @@ describe("copying and deleting a label template", () => {
     expect(screen.getByRole("radio", { name: "Все категории" }).getAttribute("aria-checked")).toBe(
       "true",
     );
-    expect(screen.getByText(/^Размер: .* · 300 dpi$/)).toBeTruthy();
+    expect(screen.getByText(/^Размер: .* мм$/)).toBeTruthy();
     let release: (rows: LabelTemplateSummary[]) => void = () => {};
     fake.api.listTemplates.mockReturnValueOnce(
       new Promise<LabelTemplateSummary[]>((resolve) => {
