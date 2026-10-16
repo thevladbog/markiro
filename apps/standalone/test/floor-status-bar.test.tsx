@@ -632,23 +632,26 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(shown("Конфликтов")).toBe("2\u00a0222");
   });
 
-  it("shows the serials left for the boxes of the shift the operator works in, and none outside it", async () => {
+  it("keeps the box and pallet serial counters out of the header, in a shift and outside it (the counts live in the sync panel)", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1500, to: 3499 });
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
-    // Nothing written yet: nothing to send, refused or in conflict.
-    expect([shown("Не отправлено"), shown("Отклонено хостом"), shown("Конфликтов")]).toEqual([
-      "0",
-      null,
-      null,
-    ]);
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("1\u00a0999"));
-    view.rerender(bar({ local: executor, shiftId: null, outboxVersion: 1 }));
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      extension: 1,
+    });
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    render(bar({ local: executor, shiftId: ENTERED.id }));
+    // The header has read the outbox: its other chips are on screen, the counters are not.
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
     expect(shown("Номеров SSCC")).toBeNull();
+    expect(shown("Номеров SSCC паллет")).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC/)).toBeNull();
+    // Plenty left: no warning chip either.
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
   });
 
   it("leaves the counts out when this computer cannot read the outbox", async () => {
@@ -686,10 +689,15 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(shown("Не отправлено")).toBeNull());
   });
 
-  it("leaves the serials out when this computer cannot read them, and for a shift it has no snapshot of", async () => {
+  it("leaves the low-stock chip out when this computer cannot read the serials, and for a shift it has no snapshot of", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
-    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1501,
+    });
     let failing = false;
     const local: LocalExecutor = {
       query: (sql, params, row) =>
@@ -699,24 +707,24 @@ describe("the outbox and the serials on the floor's status bar", () => {
       transaction: (statements) => executor.transaction(statements),
     };
     const view = render(bar({ local, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     failing = true;
     view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
     failing = false;
     view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 2 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     // A shift this pairing has no copy of names no serials.
     view.rerender(
       bar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a", outboxVersion: 2 }),
     );
-    await waitFor(() => expect(shown("Номеров SSCC")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
 
-  it("warns, in the polite region that was there before, at a quarter and a tenth of the block, at the last serial, and says so at zero (plan ОЧ)", async () => {
+  it("shows one short chip, in the polite region that was there before, when the serials fall to a quarter of the block or less, and not above it (plan ОЧ)", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
-    // A block of 2 000 with 501 left: nothing to say yet.
+    // A block of 2 000 with 501 left: more than a quarter, nothing to say yet.
     seedBlock(db, {
       blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
       from: 1,
@@ -724,47 +732,40 @@ describe("the outbox and the serials on the floor's status bar", () => {
       next: 1500,
     });
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("501"));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
     const before = politeRegions();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
 
-    const step = async (next: number, version: number) => {
+    const step = (next: number, version: number) => {
       db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
       view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
     };
-    await step(1501, 1);
-    const quarter = await screen.findByText(
-      "Номеров SSCC для коробов осталось 500 — четверть блока или меньше. Новые номера выдаёт хост: станция должна быть с ним на связи.",
+    step(1501, 1);
+    const chip = await screen.findByText("Заканчиваются номера SSCC");
+    expect(heardOnce(before, chip)).toBe(true);
+    // The header holds that one short chip and no long warning row of its own.
+    expect(screen.queryAllByText("Заканчиваются номера SSCC")).toHaveLength(1);
+    const detail = (): string =>
+      screen.getByText("Заканчиваются номера SSCC").closest(".floor-stock-chip")?.textContent ?? "";
+    expect(detail()).toContain("осталось 500 — четверть блока или меньше");
+    expect(screen.getByText("Заканчиваются номера SSCC").closest(".mk-alert")).toBeNull();
+    step(1801, 2);
+    await waitFor(() =>
+      expect(detail()).toContain("осталось 200 — десятая часть блока или меньше"),
     );
-    expect(heardOnce(before, quarter)).toBe(true);
-    await step(1801, 2);
-    expect(
-      await screen.findByText(
-        "Номеров SSCC для коробов осталось 200 — десятая часть блока или меньше. Без связи с хостом короба скоро не закрыть.",
-      ),
-    ).toBeTruthy();
-    // One warning at a time: the quarter's words are gone.
-    expect(screen.queryByText(/четверть блока или меньше/)).toBeNull();
-    await step(2000, 3);
-    const last = await screen.findByText(
-      "Остался последний номер SSCC для коробов: следующий короб без связи с хостом не закрыть.",
-    );
-    expect(heardOnce(before, last)).toBe(true);
-    expect(screen.queryByText(/десятая часть блока или меньше/)).toBeNull();
-    await step(2001, 4);
-    const gone = await screen.findByText(
-      "Номера SSCC для коробов закончились: короб не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
-    );
-    expect(heardOnce(before, gone)).toBe(true);
-    expect(screen.queryByText(/Остался последний номер/)).toBeNull();
-    expect(shown("Номеров SSCC")).toBe("0");
+    expect(detail()).not.toContain("четверть блока");
+    step(2000, 3);
+    await waitFor(() => expect(detail()).toContain("Остался последний номер SSCC для коробов"));
+    step(2001, 4);
+    await waitFor(() => expect(detail()).toContain("Номера SSCC для коробов закончились"));
+    expect(screen.queryAllByText("Заканчиваются номера SSCC")).toHaveLength(1);
 
-    // A block arrives: the warnings go.
+    // A block arrives: the chip goes.
     seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 5 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
-    expect(screen.queryByText(/Номера SSCC для коробов закончились/)).toBeNull();
-    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
 
   it("says «или меньше» at a quarter and a tenth, for boxes and pallets: both thresholds count exactly 25 % and 10 % (final review m-5)", () => {
@@ -780,7 +781,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     }
   });
 
-  it("calls the warnings by their weight: a warning at a quarter and a tenth, an error at the last serial and at none", async () => {
+  it("calls the chip by its weight: a warning at a quarter and a tenth, an error at the last serial and at none", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, {
@@ -790,29 +791,31 @@ describe("the outbox and the serials on the floor's status bar", () => {
       next: 1501,
     });
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    const toneOf = (text: RegExp): string =>
-      (screen.getByText(text).closest(".mk-alert")?.className ?? "").replace(
-        /^.*(mk-alert--\w+).*$/,
-        "$1",
-      );
+    const toneOf = (): string | null =>
+      screen
+        .getByText("Заканчиваются номера SSCC")
+        .closest(".floor-stock-chip")
+        ?.getAttribute("data-tone") ?? null;
     const step = (next: number, version: number) => {
       db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
       view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
     };
-    await screen.findByText(/четверть блока или меньше/);
-    expect(toneOf(/четверть блока или меньше/)).toBe("mk-alert--warn");
+    await screen.findByText("Заканчиваются номера SSCC");
+    expect(toneOf()).toBe("warn");
     step(1801, 1);
-    await screen.findByText(/десятая часть блока или меньше/);
-    expect(toneOf(/десятая часть блока или меньше/)).toBe("mk-alert--warn");
+    await waitFor(() => expect(screen.getByText(/десятая часть блока или меньше/)).toBeTruthy());
+    expect(toneOf()).toBe("warn");
     step(2000, 2);
-    await screen.findByText(/Остался последний номер/);
-    expect(toneOf(/Остался последний номер/)).toBe("mk-alert--error");
+    await waitFor(() => expect(screen.getByText(/Остался последний номер/)).toBeTruthy());
+    expect(toneOf()).toBe("error");
     step(2001, 3);
-    await screen.findByText(/Номера SSCC для коробов закончились/);
-    expect(toneOf(/Номера SSCC для коробов закончились/)).toBe("mk-alert--error");
+    await waitFor(() =>
+      expect(screen.getByText(/Номера SSCC для коробов закончились/)).toBeTruthy(),
+    );
+    expect(toneOf()).toBe("error");
   });
 
-  it("shows and warns of the pallets' serials only in a shift with pallets (plan ОЧ)", async () => {
+  it("warns of the pallets' serials only in a shift with pallets, through the same one chip (plan ОЧ)", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
@@ -824,40 +827,40 @@ describe("the outbox and the serials on the floor's status bar", () => {
       extension: 1,
     });
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
-    expect(shown("Номеров SSCC паллет")).toBeNull();
-    expect(screen.queryByText(/Номеров SSCC для паллет/)).toBeNull();
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
+    await flushEffects();
+    // Pallets are off: their low stock says nothing.
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("20"));
-    expect(
-      screen.getByText(
-        "Номеров SSCC для паллет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную паллету скоро не закрыть.",
-      ),
-    ).toBeTruthy();
+    const chip = await screen.findByText("Заканчиваются номера SSCC");
+    const detail = (): string => chip.closest(".floor-stock-chip")?.textContent ?? "";
+    expect(detail()).toContain(
+      "Номеров SSCC для паллет осталось 20 — десятая часть блока или меньше. Без связи с хостом полную паллету скоро не закрыть.",
+    );
     // The boxes' stock is plentiful: nothing is said of it.
-    expect(screen.queryByText(/Номеров SSCC для коробов/)).toBeNull();
+    expect(detail()).not.toContain("для коробов");
+    expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("warn");
     // The pallets' last serial and none have their own words.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 200 WHERE extension = 1").run();
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
-    expect(
-      await screen.findByText(
+    await waitFor(() =>
+      expect(detail()).toContain(
         "Остался последний номер SSCC для паллет: следующую полную паллету без связи с хостом не закрыть.",
       ),
-    ).toBeTruthy();
+    );
+    expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("error");
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 201 WHERE extension = 1").run();
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
-    expect(
-      await screen.findByText(
+    await waitFor(() =>
+      expect(detail()).toContain(
         "Номера SSCC для паллет закончились: полную паллету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
       ),
-    ).toBeTruthy();
-    expect(shown("Номеров SSCC паллет")).toBe("0");
+    );
     // Pallets are off again: nothing of them.
     db.prepare("UPDATE floor_shifts SET pallets_enabled = 0 WHERE id = ?").run(ENTERED.id);
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
-    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBeNull());
-    expect(screen.queryByText(/Номера SSCC для паллет закончились/)).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
 
   it("says the blocks the host gave and the station did not take, and the records an older pairing left (plan ОЧ)", async () => {
@@ -991,6 +994,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       await new Promise((resolve) => setImmediate(resolve));
     });
     expect(screen.queryByText(/Номера SSCC/)).toBeNull();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     expect(shown("Номеров SSCC")).toBeNull();
   });
 
@@ -1329,7 +1333,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
     const quiet = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
     quiet.unmount();
@@ -1344,7 +1348,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     // And the same for a station running out of serials.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1951").run();
     const low = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("50"));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
     // A block arrives with no record written: the bar finds out on its own.
@@ -1352,12 +1356,11 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9_000);
     });
-    expect(shown("Номеров SSCC")).toBe("50");
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0050"));
-    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
     low.unmount();
@@ -1372,14 +1375,14 @@ describe("the outbox and the serials on the floor's status bar", () => {
     // 501 left, over a quarter of the block: no warning, no timer.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1500").run();
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("501"));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
     // 500 left: the warning stands, and so does the timer.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("500"));
-    expect(await screen.findByText(/Номеров SSCC для коробов осталось 500 —/)).toBeTruthy();
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     // (Not inside `waitFor`: its own polling is a timer too.)
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
@@ -1399,7 +1402,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       extension: 1,
     });
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("20"));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
     // A block of pallets' serials arrives with no record written: the next tick finds out.
@@ -1412,7 +1415,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_500);
     });
-    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("220"));
+    await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
     view.unmount();
@@ -1485,14 +1488,15 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const held = holdingFirstRead(executor, isSerialsRead);
     const view = render(bar({ local: held.executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(held.started()).toBe(true));
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 501").run();
+    // The older read saw 2 000 left; the newest, after the floor wrote, sees 500: the chip.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
     view.rerender(bar({ local: held.executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("1\u00a0500"));
+    expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await act(async () => {
       held.release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
-    expect(shown("Номеров SSCC")).toBe("1\u00a0500");
+    expect(screen.queryByText("Заканчиваются номера SSCC")).toBeTruthy();
   });
 
   it("keeps the wait of the newest read when an older one lands late", async () => {

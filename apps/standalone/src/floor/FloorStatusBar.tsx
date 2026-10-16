@@ -30,12 +30,12 @@ import {
   waitUnits,
   type DeliveryStuck,
   type OutboxStatus,
-  type SerialStock,
   type ShiftStock,
 } from "./outbox-status.js";
 import { readShiftCopy } from "./shifts/shift-copies.js";
 import { formatQuantity } from "./shifts/shift-text.js";
 import type { FloorOperator } from "./sign-in.js";
+import { stockChipDetail, stockChipTone } from "./stock-text.js";
 
 /**
  * What the rail offers besides «Сменить оператора» (beta 3): the sync panel,
@@ -132,9 +132,18 @@ type PillTone = "ok" | "warn" | "neutral";
  * One identity value, after the cloud's `IdentityValue`: the label stays for
  * assistive tech but is not painted, the value is.
  */
-function IdentityValue({ label, value }: { label: string; value: string }) {
+function IdentityValue({
+  label,
+  value,
+  keep = false,
+}: {
+  label: string;
+  value: string;
+  /** Does not shrink with an ellipsis before the others (the shift's number). */
+  keep?: boolean;
+}) {
   return (
-    <div className="station-status-item">
+    <div className={keep ? "station-status-item station-status-item--keep" : "station-status-item"}>
       <dt className="station-visually-hidden">{label}</dt>
       <dd title={value}>{value}</dd>
     </div>
@@ -147,7 +156,11 @@ function IdentityValue({ label, value }: { label: string; value: string }) {
  */
 function StatusPill({ label, value, tone }: { label: string; value: string; tone: PillTone }) {
   return (
-    <div className="station-status-item station-status-pill" data-tone={tone}>
+    <div
+      className="station-status-item station-status-pill"
+      data-tone={tone}
+      title={`${label}: ${value}`}
+    >
       <span aria-hidden="true" className="station-status-pill__dot" />
       <dt>{label}</dt>
       <dd>{value}</dd>
@@ -189,19 +202,6 @@ function stuckText(t: TFunction, stuck: DeliveryStuck): string {
         attempts,
         last: waitText(t, stuck.sinceLastAttemptMs),
       });
-}
-
-/** The warning of a stock of serials below `ok`, in the tone its level calls for. */
-function stockAlert(t: TFunction, what: "box" | "pallet", stock: SerialStock) {
-  if (stock.level === "ok") return null;
-  return (
-    <Alert
-      tone={stock.level === "last" || stock.level === "none" ? "error" : "warn"}
-      role="presentation"
-    >
-      {t(`floor.status.stock.${what}.${stock.level}`, { n: formatQuantity(stock.left) })}
-    </Alert>
-  );
 }
 
 /**
@@ -338,10 +338,8 @@ export function FloorStatusBar({
   }, [local, hostId, deviceId, shiftId, outboxVersion, tick]);
   // Only the shift on screen's serials: none after it is left.
   const shiftStock = stock !== null && stock.shiftId === shiftId ? stock.stock : null;
-  const serialsRunningOut =
-    shiftStock !== null &&
-    (shiftStock.boxes.level !== "ok" ||
-      (shiftStock.pallets !== null && shiftStock.pallets.level !== "ok"));
+  const stockTone = stockChipTone(shiftStock);
+  const serialsRunningOut = stockTone !== null;
 
   // The blocks the host gave and the station did not take (plan ОЧ), read with
   // the outbox; the records an older pairing left unsent, read once per pairing
@@ -474,7 +472,7 @@ export function FloorStatusBar({
         <div className="station-status-identity__row station-status-identity__row--secondary">
           <IdentityValue label={t("floor.status.operator")} value={operatorValue} />
           {shiftNumber !== null && (
-            <IdentityValue label={t("floor.status.shift")} value={shiftNumber} />
+            <IdentityValue label={t("floor.status.shift")} value={shiftNumber} keep />
           )}
           {place.organization !== null && (
             <IdentityValue label={t("floor.status.organization")} value={place.organization} />
@@ -491,21 +489,26 @@ export function FloorStatusBar({
           status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
           sync={sync}
         />
+        {/*
+          The one header trace of the SSCC serials running out (the counts live
+          in the sync panel). A polite region that is there before the chip
+          comes, so the warning is heard; `display: contents` keeps it out of
+          the row's layout. The detail is read, not painted: the chip stays short.
+        */}
+        <div className="floor-stock-chip-region" aria-live="polite">
+          {stockTone !== null && shiftStock !== null && (
+            <div
+              className="station-status-item station-status-pill floor-stock-chip"
+              data-tone={stockTone}
+              title={stockChipDetail(t, shiftStock)}
+            >
+              <span aria-hidden="true" className="station-status-pill__dot" />
+              <span className="floor-stock-chip__text">{t("floor.status.stockLow")}</span>
+              <span className="station-visually-hidden">{stockChipDetail(t, shiftStock)}</span>
+            </div>
+          )}
+        </div>
         <dl className="station-status-pills__list">
-          {shiftStock !== null && (
-            <StatusPill
-              label={t("floor.status.serials")}
-              value={formatQuantity(shiftStock.boxes.left)}
-              tone={shiftStock.boxes.level === "ok" ? "ok" : "warn"}
-            />
-          )}
-          {shiftStock !== null && shiftStock.pallets !== null && (
-            <StatusPill
-              label={t("floor.status.palletSerials")}
-              value={formatQuantity(shiftStock.pallets.left)}
-              tone={shiftStock.pallets.level === "ok" ? "ok" : "warn"}
-            />
-          )}
           {outbox !== null && (
             <StatusPill
               label={t("floor.status.unsent")}
@@ -596,6 +599,7 @@ export function FloorStatusBar({
           refusalHeld={refusalHeld}
           outboxVersion={outboxVersion}
           lastSyncedAt={tools.lastSyncedAt}
+          stock={shiftStock}
           onRetry={tools.retry}
           now={now}
         />
@@ -658,10 +662,6 @@ export function FloorStatusBar({
             {stuckText(t, stuck)}
           </Alert>
         )}
-        {shiftStock !== null && stockAlert(t, "box", shiftStock.boxes)}
-        {shiftStock !== null &&
-          shiftStock.pallets !== null &&
-          stockAlert(t, "pallet", shiftStock.pallets)}
         {drops > 0 && (
           <Alert tone="error" role="presentation">
             {t("floor.status.blockDrops", { n: formatQuantity(drops) })}

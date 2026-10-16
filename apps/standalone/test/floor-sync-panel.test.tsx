@@ -122,6 +122,36 @@ describe("the «Синхронизация» panel", () => {
     expect(screen.getByText("Не отправлено записей: 0", { selector: "p, span" })).toBeTruthy();
   });
 
+  it("says how many SSCC serials are left for the boxes and, with pallets, the pallets, and warns below the threshold only", async () => {
+    const { executor } = await station();
+    const view = panel(executor, {
+      stock: { boxes: { left: 1998, level: "ok" }, pallets: { left: 197, level: "ok" } },
+    });
+    const section = (await screen.findByText("Запас номеров SSCC")).closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section as HTMLElement).getByText("Для коробов осталось: 1 998")).toBeTruthy();
+    expect(within(section as HTMLElement).getByText("Для паллет осталось: 197")).toBeTruthy();
+    // Plenty left: the counts, no warning words.
+    expect(
+      screen.queryByText(/четверть блока|десятая часть|последний номер|закончились/),
+    ).toBeNull();
+    view.unmount();
+
+    // Low: the same row carries the words (the header's chip says it short).
+    panel(executor, { stock: { boxes: { left: 200, level: "tenth" }, pallets: null } });
+    const low = (await screen.findByText("Запас номеров SSCC")).closest("section") as HTMLElement;
+    expect(within(low).getByText("Для коробов осталось: 200")).toBeTruthy();
+    expect(within(low).queryByText(/Для паллет осталось/)).toBeNull();
+    expect(within(low).getByText(/десятая часть блока или меньше/)).toBeTruthy();
+  });
+
+  it("has no serials row outside a shift", async () => {
+    const { executor } = await station();
+    panel(executor);
+    await screen.findByText(/Всё в порядке/);
+    expect(screen.queryByText("Запас номеров SSCC")).toBeNull();
+  });
+
   it("says that the references have not been updated since the app started", async () => {
     const { executor } = await station();
     panel(executor, { lastSyncedAt: null });

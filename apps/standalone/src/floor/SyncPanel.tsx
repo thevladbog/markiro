@@ -18,7 +18,9 @@ import {
   waitWords,
   type SyncDetails,
 } from "./sync-details.js";
+import type { ShiftStock } from "./outbox-status.js";
 import { formatQuantity } from "./shifts/shift-text.js";
+import { stockText } from "./stock-text.js";
 import "./sync-panel.css";
 
 export interface SyncPanelProps {
@@ -40,6 +42,12 @@ export interface SyncPanelProps {
    * (`requestSync`, `requestFacts`). It starts no protocol of its own.
    */
   onRetry: () => void;
+  /**
+   * The SSCC serials left for the shift on screen (`readShiftStock`); `null`
+   * outside a shift or where they cannot be read. The bar owns the read, so
+   * the panel and the bar's low-stock chip say the same.
+   */
+  stock?: ShiftStock | null;
   /** This computer's clock; tests pin it. */
   now?: () => Date;
 }
@@ -76,6 +84,7 @@ export function SyncPanel({
   outboxVersion,
   lastSyncedAt,
   onRetry,
+  stock = null,
   now = systemClock,
 }: SyncPanelProps) {
   const { t } = useTranslation();
@@ -313,6 +322,24 @@ export function SyncPanel({
             </>
           )}
         </section>
+
+        {stock !== null && (
+          <section className="sync-panel__section" aria-labelledby="sync-panel-stock">
+            <h3 id="sync-panel-stock">{t("floor.sync.stockTitle")}</h3>
+            <p>{t("floor.sync.stockBoxes", { n: formatQuantity(stock.boxes.left) })}</p>
+            {stockText(t, "box", stock.boxes) !== null && (
+              <p className="sync-panel__reason">{stockText(t, "box", stock.boxes)}</p>
+            )}
+            {stock.pallets !== null && (
+              <>
+                <p>{t("floor.sync.stockPallets", { n: formatQuantity(stock.pallets.left) })}</p>
+                {stockText(t, "pallet", stock.pallets) !== null && (
+                  <p className="sync-panel__reason">{stockText(t, "pallet", stock.pallets)}</p>
+                )}
+              </>
+            )}
+          </section>
+        )}
 
         <section className="sync-panel__section" aria-labelledby="sync-panel-copy">
           <h3 id="sync-panel-copy">{t("floor.sync.copyTitle")}</h3>
