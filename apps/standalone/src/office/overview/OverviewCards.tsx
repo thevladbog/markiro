@@ -94,14 +94,22 @@ export function ShiftsCards() {
 
   if (shifts.isPending || org.isPending) {
     return (
-      <Card title={t("office.overview.shifts.activeTitle")} titleAs="h2">
+      <Card
+        title={t("office.overview.shifts.activeTitle")}
+        titleAs="h2"
+        className="overview-card overview-card--shifts"
+      >
         <PageLoading />
       </Card>
     );
   }
   if (shifts.isError) {
     return (
-      <Card title={t("office.overview.shifts.activeTitle")} titleAs="h2">
+      <Card
+        title={t("office.overview.shifts.activeTitle")}
+        titleAs="h2"
+        className="overview-card overview-card--shifts"
+      >
         <LoadError error={shifts.error} onRetry={() => void shifts.refetch()} />
       </Card>
     );
@@ -115,24 +123,30 @@ export function ShiftsCards() {
     line: lines.data?.find((line) => line.id === shift.lineId)?.name ?? null,
   });
   return (
-    <>
-      <Card title={t("office.overview.shifts.activeTitle")} titleAs="h2">
-        {buckets.active.length === 0 ? (
-          <p className="office-note">{t("office.overview.shifts.noActive")}</p>
-        ) : (
-          <ul className="overview-list">
-            {buckets.active.map((shift) => (
-              <ShiftRow key={shift.id} shift={shift} names={names(shift)} />
-            ))}
-          </ul>
-        )}
-        {buckets.closedToday > 0 && (
-          <p className="office-note">
-            {t("office.overview.shifts.closedToday", { count: buckets.closedToday })}
-          </p>
-        )}
-      </Card>
-      <Card title={t("office.overview.shifts.plannedTitle")} titleAs="h2">
+    <Card
+      title={t("office.overview.shifts.activeTitle")}
+      titleAs="h2"
+      className="overview-card overview-card--shifts"
+    >
+      {buckets.active.length === 0 ? (
+        <p className="office-note">{t("office.overview.shifts.noActive")}</p>
+      ) : (
+        <ul className="overview-list">
+          {buckets.active.map((shift) => (
+            <ShiftRow key={shift.id} shift={shift} names={names(shift)} />
+          ))}
+        </ul>
+      )}
+      {buckets.closedToday > 0 && (
+        <p className="office-note">
+          {t("office.overview.shifts.closedToday", { count: buckets.closedToday })}
+        </p>
+      )}
+      {/* The day's plan is a part of the same card, set apart by a hairline (design 2026-10). */}
+      <section className="overview-planned" aria-labelledby="overview-planned-title">
+        <h3 id="overview-planned-title" className="overview-planned__title">
+          {t("office.overview.shifts.plannedTitle")}
+        </h3>
         {buckets.plannedToday.length === 0 ? (
           <p className="office-note">{t("office.overview.shifts.noPlanned")}</p>
         ) : (
@@ -142,8 +156,8 @@ export function ShiftsCards() {
             ))}
           </ul>
         )}
-      </Card>
-    </>
+      </section>
+    </Card>
   );
 }
 
@@ -156,7 +170,11 @@ export function DevicesCard() {
   const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token));
   const time = useBackupTime();
   return (
-    <Card title={t("office.overview.devices.title")} titleAs="h2">
+    <Card
+      title={t("office.overview.devices.title")}
+      titleAs="h2"
+      className="overview-card overview-card--devices"
+    >
       {devices.isPending ? (
         <PageLoading />
       ) : devices.isError ? (
@@ -214,7 +232,7 @@ export function ConflictsCard() {
     api.listConflicts(token, { reviewed: false }),
   );
   return (
-    <Card title={t("office.overview.conflicts.title")} titleAs="h2">
+    <Card title={t("office.overview.conflicts.title")} titleAs="h2" className="overview-card">
       {conflicts.isPending ? (
         <PageLoading />
       ) : conflicts.isError ? (
@@ -240,7 +258,7 @@ export function BackupsCard() {
   const backups = useOfficeQuery(officeKeys.backups, (api, token) => api.getBackups(token));
   const time = useBackupTime();
   return (
-    <Card title={t("office.overview.backups.title")} titleAs="h2">
+    <Card title={t("office.overview.backups.title")} titleAs="h2" className="overview-card">
       {backups.isPending || !time.ready ? (
         <PageLoading />
       ) : backups.isError ? (
@@ -281,7 +299,7 @@ export function LicenseCard() {
   const { t } = useTranslation();
   const license = useOfficeQuery(officeKeys.license, (api, token) => api.getLicense(token));
   return (
-    <Card title={t("office.about.license.title")} titleAs="h2">
+    <Card title={t("office.about.license.title")} titleAs="h2" className="overview-card">
       {license.isPending ? (
         <PageLoading />
       ) : license.isError ? (
@@ -342,17 +360,14 @@ export function WarningsCard() {
     }
   }
   if (lines.length === 0) return null;
+  // One layer: the warning is the alert itself (title and the lines), not a card around alerts.
   return (
-    <Card title={t("office.overview.warnings.title")} titleAs="h2">
+    <Alert tone="warn" role="presentation" title={t("office.overview.warnings.title")}>
       <ul className="overview-list">
         {lines.map((line) => (
-          <li key={line}>
-            <Alert tone="warn" role="presentation">
-              {line}
-            </Alert>
-          </li>
+          <li key={line}>{line}</li>
         ))}
       </ul>
-    </Card>
+    </Alert>
   );
 }

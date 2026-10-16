@@ -95,18 +95,26 @@ describe("HostStatusDot", () => {
   });
 });
 
-describe("the office header and menu (beta 3.2)", () => {
-  it("shows the host link as a dot beside the user's controls, not as a chip across the header", async () => {
+describe("the office top bar and menu (design 2026-10)", () => {
+  it("shows the host link as a chip with an icon and a word, beside the user's controls", async () => {
     renderOffice(fakeOfficeSession(), { link: ONLINE });
     const header = (await screen.findByRole("banner")) as HTMLElement;
-    expect(
-      within(header).getByRole("button", { name: "Связь с хостом: На связи с хостом" }),
-    ).toBeTruthy();
+    const chip = within(header).getByRole("button", { name: "Связь с хостом: На связи с хостом" });
+    expect(within(chip).getByText("Хост на связи")).toBeTruthy();
+    expect(chip.querySelector("svg")).not.toBeNull();
     expect(header.querySelector(".host-status")).toBeNull();
     expect(header.querySelector(".office-header__actions .host-dot")).not.toBeNull();
   });
 
-  it("keeps the operations on top and moves Организация, Доступ and Сервис to the foot of the menu", async () => {
+  it("names the page in the crumbs: the menu group, then the page", async () => {
+    renderOffice(fakeOfficeSession());
+    const header = (await screen.findByRole("banner")) as HTMLElement;
+    const crumbs = within(header).getByRole("navigation", { name: "Вы здесь" });
+    expect(crumbs.textContent).toBe("ОфисОбзор");
+    expect(within(crumbs).getByText("Обзор").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("keeps the operations on top and the settings after a rule, with «Доступ» merged into «Организация»", async () => {
     renderOffice(fakeOfficeSession());
     const nav = await screen.findByRole("navigation", { name: "Разделы офиса" });
     const labels = within(nav)
@@ -122,24 +130,63 @@ describe("the office header and menu (beta 3.2)", () => {
       "Информация",
     ];
     for (const label of [...operations, ...settings]) expect(labels).toContain(label);
+    expect(labels).toHaveLength(17);
     const lastOperation = Math.max(...operations.map((label) => labels.indexOf(label)));
     const firstSetting = Math.min(...settings.map((label) => labels.indexOf(label)));
     expect(lastOperation).toBeLessThan(firstSetting);
-    // The settings block is its own, quieter group.
-    const block = nav.querySelector(".office-menu-settings") as HTMLElement;
-    expect(block).not.toBeNull();
-    expect(within(block).getByText("Организация")).toBeTruthy();
-    expect(within(block).getByText("Доступ")).toBeTruthy();
-    expect(within(block).getByText("Сервис")).toBeTruthy();
-    expect(within(block).queryByRole("link", { name: "Смены" })).toBeNull();
+    // One rule sets the settings block apart; the group names stand above their entries.
+    expect(nav.querySelectorAll('[role="separator"]')).toHaveLength(1);
+    expect(within(nav).getByText("Организация")).toBeTruthy();
+    expect(within(nav).getByText("Сервис")).toBeTruthy();
+    expect(within(nav).queryByText("Доступ")).toBeNull();
+    // «Пользователи» is the last entry of «Организация».
+    expect(labels.indexOf("Пользователи")).toBe(labels.indexOf("Контрагенты") + 1);
+    // Every entry has an icon.
+    for (const link of within(nav).getAllByRole("link")) {
+      expect(link.querySelector("svg")).not.toBeNull();
+    }
   });
 
-  it("shows a technologist only the settings entries their role may open", async () => {
+  it("shows a technologist only the entries their role may open", async () => {
     renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
     const nav = await screen.findByRole("navigation", { name: "Разделы офиса" });
-    const block = nav.querySelector(".office-menu-settings") as HTMLElement;
-    expect(within(block).queryByText("Доступ")).toBeNull();
-    expect(within(block).getByRole("link", { name: "Резервные копии" })).toBeTruthy();
+    expect(within(nav).queryByRole("link", { name: "Пользователи" })).toBeNull();
+    expect(within(nav).queryByRole("link", { name: "Устройства" })).toBeNull();
+    expect(within(nav).getByRole("link", { name: "Резервные копии" })).toBeTruthy();
+  });
+
+  it("collapses to icons below 1366 px, keeping every name, and opens with the toggle", async () => {
+    const original = window.innerWidth;
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+      renderOffice(fakeOfficeSession());
+      const nav = await screen.findByRole("navigation", { name: "Разделы офиса" });
+      expect(nav.className).toContain("office-menu--collapsed");
+      // The name stays for a screen reader and as a tooltip.
+      const link = within(nav).getByRole("link", { name: "Смены" });
+      expect(link.getAttribute("title")).toBe("Смены");
+      const toggle = screen.getByRole("button", { name: "Меню разделов" });
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(toggle.getAttribute("aria-controls")).toBe(nav.id);
+      fireEvent.click(toggle);
+      expect(nav.className).not.toContain("office-menu--collapsed");
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(within(nav).getByRole("link", { name: "Смены" }).getAttribute("title")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: original });
+    }
+  });
+
+  it("stays open from 1366 px", async () => {
+    const original = window.innerWidth;
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+      renderOffice(fakeOfficeSession());
+      const nav = await screen.findByRole("navigation", { name: "Разделы офиса" });
+      expect(nav.className).not.toContain("office-menu--collapsed");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: original });
+    }
   });
 
   it("keeps every route and sorts items into settings by their section", () => {

@@ -160,7 +160,8 @@ describe("office devices", () => {
 
   it("lists the devices, naming lines from the host's list", async () => {
     await openDevices(adminSession());
-    expect(screen.getByText("Производство")).toBeTruthy();
+    // The menu's group name and the crumb both say «Производство».
+    expect(screen.getAllByText("Производство")).toHaveLength(2);
     const station = rowOf("Рабочее место хоста");
     expect(within(station).getByText("Станция")).toBeTruthy();
     expect(within(station).getByText("Линия 1")).toBeTruthy();

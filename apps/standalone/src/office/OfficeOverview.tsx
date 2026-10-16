@@ -63,14 +63,14 @@ export function OfficeOverview() {
         <OverviewBackups />
         {admin && <HostAddressNotice />}
       </div>
+      <WarningsCard />
       <div className="overview-grid">
         <ShiftsCards />
-        <ConflictsCard />
         {admin && <DevicesCard />}
+        <ConflictsCard />
         <BackupsCard />
         <LicenseCard />
       </div>
-      <WarningsCard />
     </>
   );
 }

@@ -34,10 +34,15 @@ describe("the office layout rules", () => {
   });
 
   it("keeps the menu in view and lets it scroll by itself in a low window", () => {
-    const sidebar = rule(".office-shell > .mk-sidebar");
+    const sidebar = rule(".office-menu");
     expect(sidebar).toContain("position: sticky");
     expect(sidebar).toContain("max-height: 100vh");
-    expect(sidebar).toContain("overflow-y: auto");
+    expect(sidebar).toContain("overflow: hidden auto");
+  });
+
+  it("sizes the menu from the kit's tokens: 272 open, 76 collapsed", () => {
+    expect(rule(".office-menu")).toContain("width: var(--sidebar-w)");
+    expect(rule(".office-menu--collapsed")).toContain("width: var(--sidebar-w-collapsed)");
   });
 
   it("lays a card's parts one gap apart, so a note, a table and a pager never touch", () => {
@@ -82,12 +87,38 @@ describe("the office layout rules", () => {
     expect(rule(".office-pagination")).toContain("flex-wrap: wrap");
   });
 
-  it("draws every menu entry in one style: the settings block has a rule above it and nothing more", () => {
-    // The first and the second half of the menu are the same size, weight and colour (beta feedback).
-    expect(css).not.toMatch(/\.office-menu-settings\s+\.mk-sidebar__link/);
-    expect(css).not.toMatch(/\.office-menu-settings\s+\.mk-sidebar__section/);
-    expect(rule(".office-menu-settings")).toContain("border-top: 1px solid var(--line)");
-    expect(rule(".office-shell > .mk-sidebar .mk-sidebar__link")).toContain("padding-block: 6px");
+  it("draws every menu entry in one style at one height token, the settings block set apart by a rule alone", () => {
+    // The first and the second half of the menu are one style (beta feedback); the entry's height is
+    // the single token `--menu-item-h`, so the kit's 44 is a one-line change.
+    expect(rule(".office-menu__link")).toContain("height: var(--menu-item-h)");
+    expect(css.match(/var\(--menu-item-h\)/g)?.length).toBe(1);
+    expect(css).not.toMatch(/\.office-menu__link[^{]*\{[^}]*\bheight: \d/);
+    expect(rule(".office-menu__rule")).toContain("border-top: 1px solid var(--line)");
+    expect(css).not.toMatch(/\.office-menu-settings/);
+    // The active entry is the `fg` fill with inverse text, not a second look.
+    const active = rule(".office-menu__link--active,\n.office-menu__link--active:hover");
+    expect(active).toContain("background: var(--surface-inverse)");
+    expect(active).toContain("color: var(--fg-on-inverse)");
+  });
+
+  it("collapses the menu to icons: the name stays for a screen reader, out of sight", () => {
+    const label = rule(".office-menu--collapsed .office-menu__label");
+    expect(label).toContain("position: absolute");
+    expect(label).toContain("clip: rect(0 0 0 0)");
+    expect(rule(".office-menu--collapsed .office-menu__wordmark")).toContain("display: none");
+  });
+
+  it("gives the menu entry a visible focus ring", () => {
+    expect(rule(".office-menu__link:focus-visible")).toContain(
+      "outline: var(--focus-ring-w) solid var(--focus-ring)",
+    );
+  });
+
+  it("keeps the top bar's only shadow on its overlay (one layer)", () => {
+    expect(rule(".user-menu__panel")).toContain("box-shadow: var(--shadow-overlay)");
+    expect(
+      css.slice(css.indexOf(".office-header {"), css.indexOf(".user-menu__panel {")),
+    ).not.toContain("box-shadow");
   });
 
   it("starts a table row's buttons at their heading and keeps them on one line", () => {

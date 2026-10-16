@@ -114,6 +114,14 @@ describe("Admin page layout", () => {
 });
 
 describe("Button", () => {
+  it("draws the ghost variant without a fill or a visible rule", () => {
+    render(<Button variant="ghost">Quiet</Button>);
+    const ghost = screen.getByRole("button", { name: "Quiet" });
+    expect(ghost.className).toContain("mk-btn--ghost");
+    expect(ghost.style.background).toBe("transparent");
+    expect(ghost.style.border).toContain("transparent");
+  });
+
   it("keeps the office control minimum height while allowing wrapped labels to grow", () => {
     const { rerender } = render(
       <Button variant="primary" size="md">
