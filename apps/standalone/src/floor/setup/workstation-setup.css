@@ -614,7 +614,7 @@ p.workstation-setup__result {
 }
 
 .self-test__kind[data-checked="true"] {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: -3px;
 }
 

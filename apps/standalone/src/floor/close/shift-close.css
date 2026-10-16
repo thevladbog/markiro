@@ -132,14 +132,14 @@
   padding: var(--sp-2) var(--sp-3) !important;
   justify-content: flex-start !important;
   gap: var(--sp-3) !important;
-  border-color: var(--line-strong) !important;
   font: var(--floor-body) !important;
   text-align: left;
 }
 
 .shift-close .floor-choice.mk-btn[data-checked="true"] {
-  border-color: var(--accent) !important;
-  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent) 12%) !important;
+  /* Selected (kit): the `fg` border, the check in the mark and the weight, never colour alone. */
+  border: 2px solid var(--fg) !important;
+  background: var(--panel) !important;
   font: var(--floor-body-strong) !important;
 }
 
@@ -149,15 +149,15 @@
   width: 24px;
   height: 24px;
   place-items: center;
-  border: 2px solid var(--line-strong);
+  border: 2px solid var(--linectl);
   border-radius: 50%;
-  color: var(--surface-card);
+  color: var(--bg);
   font: 700 14px/1 var(--font-ui);
 }
 
 [data-checked="true"] > .floor-choice__mark {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--fg);
+  background: var(--fg);
 }
 
 .floor-choice__label {

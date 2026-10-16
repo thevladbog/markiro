@@ -378,3 +378,82 @@ Deviations and notes for the next steps:
   (580). The `tools/production-browser` station specs target the cloud station and do not load the
   standalone floor; they were not run. Not verified: Windows/WebView2 (`:has()`, `color-mix`,
   `content: "✓" / ""`), the Tauri CSP with `theme-init.js`, a real kiosk-mode session, hardware.
+
+## 13. Накатка кита · шаг C (станция: рабочий экран и остальные экраны цеха)
+
+Done on branch `claude/kit-work` (from `claude/integration`; nothing pushed). Design: the
+approved work screen «Проверка с дублем» (`HVdQ6`), the data and alert boards of the kit.
+
+What the work screen is now (`apps/standalone/src/floor/work/`, `unit-labels/`):
+
+- Product strip (`ShiftBand`): the brand-gradient card, the product photo as one rounded
+  104 px frame (contain-fit, never cropped; monogram without a photo), the name, chips (shift
+  number, GTIN, mode: «Проверка с дубликатом» / «Проверка» / «Агрегация», the counterparty
+  last, the one that shrinks), and the single counter «ПРИНЯТО В СМЕНЕ» (`.work-shift-band__count`,
+  the only element of the screen that carries the accepted count; plan and its percent under
+  it) with the small «Дубли» and «Ошибки» of a validation shift beside it.
+- «Последний скан» (`LastScan`): one large status word with a glyph on the verdict's tone —
+  ПРИНЯТ (ok), ДУБЛЬ (warn palette, the copy glyph), ОШИБКА (err), ПАУЗА/ЗАКРЫТА (warn),
+  ОЖИДАНИЕ (neutral) — the code's tail in mono and the scan's time; the line of words only where
+  the word leaves something to say (why it is a duplicate, which GTIN); never the count.
+- «Дубликат Data Matrix» (`UnitLabelPanel`): three vertical steps (Код принят → Этикетка
+  напечатана → Проверка этикетки), each `ready` (ok), `pending` (panel, dashed glyph),
+  `current` (fg outline, filled dot) or `error` (err, with its recovery button), and one line of
+  the label's state with its code's end. With the check off the third step reads «Проверка
+  этикетки выключена».
+- «История сканирований» (`ScanHistory`): the one list (the second one, «Последние сканы» of the
+  validation panel, is gone with `ValidationPanel`): last 8 scans as time · result chip (glyph +
+  word) · code, «Вся история», a note at the foot when there are more. The list is the only
+  scroll region of the screen, reachable by keyboard. The work screen reads it once
+  (`useScanHistory`) and the hero takes the code's tail from the same read.
+- A box shift keeps its open box cells, the pallet strip and the close actions; its hero
+  (word and code in one row), its two figures (closed boxes, last SSCC) and the same history
+  stand in the right column.
+- Footer: three actions at the kit's 84 px (`floor-primary`), «История этикеток» / «Исключения»
+  secondary, «Выйти из смены» warning, «Закрыть смену» danger (outline variants of `Button`).
+
+Why the page scrolled: `.floor-frame` is `min-height: 100dvh`, so any content taller than the
+window grew the page. The work screen now sets `height: 100dvh` and `overflow: hidden` on the
+frame (`:has(> .work-screen)`), a fixed grid (content row + the 84 px footer row, the
+instruments' one row `minmax(0, 1fr)`), and the history list scrolls inside itself. Checked in
+Chromium at 1280×1024 and 1280×800, dark and light: document scroll 0, no element past the
+window, no interactive element under 64 px.
+
+Derived from existing state (no change to the state machines):
+
+- The three steps come from the unit-label job alone (`duplicateSteps`, pure, tested): no job →
+  all pending; the job exists → «Код принят» ready; attempt `sent` or the check done/skipped →
+  «Напечатана» ready; `prepared`/`sending`, or a decision being saved (`busy`) → current;
+  `failed_before_send`/`delivery_unknown` with no check settling it → error; the check: verified
+  or skipped → ready, a sent label under a required check → current, otherwise pending (`checkOff`
+  from the snapshot's policy).
+- The error step's recovery is `unit.retry` («Повторить»: the label read again, a lost send
+  becomes unknown, nothing is sent). The reprint with a reason stays in the label's window, which
+  opens over the work for every unresolved label.
+- The hero's word and tone come from the `Last` outcome (`lastWord`, `lastTone`; duplicate has its
+  own tone now); the code's tail from the newest history row with the same `scannedAt`.
+- The band's «Дубли»/«Ошибки» are the existing validation counts; a box shift has none and
+  shows no such tiles.
+
+Behaviour that is presentation only but changed visibly: a scan the unit label refused (no crypto
+tail, no render) was listed in the validation panel's outcomes; it is not journalled, so it is not
+in the history, and the hero says it; «Принято: в коробе 2 из 12.» became «В коробе 2 из 12.»
+(the word «Принято» appears once on the screen, as the band's label).
+
+Other floor screens:
+
+- The reason lists of the shift close and of the label reprint (`floor-choice`,
+  `unit-label-reasons`) used `--accent` and `!important` borders against floor-kit: the selected
+  row is now the kit's (2 px `fg` border, `fg` mark with a check, weight 600), the unselected
+  border is floor-kit's. The workstation setup's focus outline `--accent` -> `--focus`.
+- The hub card's photo is a `panel` frame with a hairline (the gradient is the work band's).
+- `useProductAccent`/`data-accent` are no longer used by the work screen. The code stays in
+  `shifts/ProductPhoto.tsx` and `photo-accent.ts` because the hub card and the new-shift screen
+  (`ProductPanel`) still call it and `ProductPhoto` belongs to the parallel new-shift step; remove
+  it together with that step.
+
+Verified: tsc, ESLint (src, test), Prettier, the touched Vitest files, the full `vitest run`;
+Chromium screenshots (jsdom-rendered real screens + the built CSS) in `/tmp/claude/shots/kit-c/`.
+Not verified: Windows/WebView2 (`:has()`, `color-mix`, `100dvh`), a real status bar height (the
+harness uses an 80 px stand-in for the one-row bar), the real kiosk window with the OS taskbar,
+hardware, and the queue, warehouse and workstation-setup screens in a browser (token review only).

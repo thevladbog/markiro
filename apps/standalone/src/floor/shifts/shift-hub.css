@@ -275,9 +275,10 @@
   min-height: 0;
   padding: var(--sp-3);
   overflow: hidden;
-  border-radius: var(--r-2);
-  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
-  border: 1px solid var(--brandline);
+  /* The photo as one rounded frame on a `panel` face (kit): the gradient is the work band's. */
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  border: 1px solid var(--line2);
   place-items: center;
 }
 
