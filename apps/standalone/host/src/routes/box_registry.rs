@@ -2,6 +2,13 @@
 //! ТСД-Х, spec 6.5). A delta by the boxes' change time: `since` (the previous walk's `until`),
 //! pages of `(changed_at, sscc)` after `cursor`, every page of one walk under the `until` the first
 //! page named. No code of a unit leaves the host (unlike a station's warehouse lookup).
+//!
+//! The window closes at the newest `changed_at` the walk's snapshot holds, never at the host's
+//! clock. A writer stamps its change inside its own write transaction with at least the newest
+//! stamp committed so far (`registry_touch`), and writers are serial, so a change that commits
+//! after a walk read its snapshot is stamped at or above that walk's `until`, and the next walk
+//! (`since` is inclusive, a device repeats the second below it) delivers it. A margin below "now"
+//! could not promise that: nothing bounds how long a writer holds its transaction.
 
 use axum::extract::State;
 use axum::Json;
@@ -9,19 +16,15 @@ use markiro_proto::{BoxRegistryItem, BoxRegistryKind, BoxRegistryPage};
 use serde::Deserialize;
 
 use crate::auth::AskingDevice;
-use crate::clock::{format_timestamp, parse_timestamp};
+use crate::clock::parse_timestamp;
 use crate::error::{ApiError, ApiQuery};
 use crate::server::AppState;
 
 const DEFAULT_LIMIT: u32 = 250;
 const MAX_LIMIT: u32 = 500;
 
-/// How far below "now" a walk's window closes. A writer stamps a box's `changed_at` with the time
-/// it received the batch and commits a moment later; a walk that read its snapshot in between
-/// would close its window above the stamp, and the next walk (which starts at that `until`) would
-/// never see the change. The window closes this much earlier, so such a change is delivered again
-/// by the next walk. A delta is idempotent for the handheld, so a repeat is harmless.
-const WINDOW_MARGIN: time::Duration = time::Duration::seconds(5);
+/// The window's first moment when a device has none: before every change.
+const EPOCH: &str = "1970-01-01T00:00:00Z";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,7 +84,7 @@ pub async fn box_registry(
                 "required after the first page",
             ))
         }
-        (None, None) => (format_timestamp(state.now() - WINDOW_MARGIN), None),
+        (None, None) => (String::new(), None),
         (Some(cursor), Some(until)) => {
             timestamp("until", until)?;
             let (changed_at, sscc) = cursor
@@ -97,6 +100,18 @@ pub async fn box_registry(
     let (after_at, after_sscc) = after.unwrap_or_default();
     // One snapshot: the window and its rows come from the same read.
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let until = if until.is_empty() {
+        // The first page of a walk: the newest change in this snapshot, and never below `since`.
+        let newest: Option<String> =
+            sqlx::query_scalar("SELECT MAX(changed_at) FROM boxes WHERE sscc IS NOT NULL")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        let floor = query.since.clone().unwrap_or_else(|| EPOCH.to_owned());
+        newest.map_or(floor.clone(), |newest| newest.max(floor))
+    } else {
+        until
+    };
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT b.sscc AS sscc, b.changed_at AS changed_at, b.id AS id, sh.product_id AS product_id, \
          b.item_count_reported AS item_count_reported, b.closed_at AS closed_at, \

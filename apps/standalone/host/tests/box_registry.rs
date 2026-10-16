@@ -5,6 +5,7 @@
 mod support;
 
 use axum::http::StatusCode;
+use markiro_host::db::begin_write;
 use serde_json::{json, Value};
 use support::app::{
     admin, box_id, code_hash, empty, fact, instant, json as json_request, pair_handheld, record_id,
@@ -49,6 +50,16 @@ async fn walk(admin: &Admin, key: &str, since: Option<&str>, limit: u32) -> (Str
         cursor = page["nextCursor"].as_str().map(str::to_owned);
     }
     (until, items)
+}
+
+/// The items a walk delivered for changes AFTER the window it started from: `since` is inclusive,
+/// so the boxes stamped at the previous window's close come again (a delta is idempotent for the
+/// handheld, and the window closes at the newest change, not below the clock).
+fn fresh(items: Vec<Value>, since: &str) -> Vec<Value> {
+    items
+        .into_iter()
+        .filter(|item| item["updatedAt"].as_str().unwrap() > since)
+        .collect()
 }
 
 #[tokio::test]
@@ -125,6 +136,7 @@ async fn a_change_moves_a_box_into_the_next_window_with_its_pallet() {
     admin.app.clock.advance(Duration::seconds(10));
     // Only the box that was put on the pallet is in the next window, standing on an open pallet.
     let (next, items) = walk(&admin, &key, Some(&until), 100).await;
+    let items = fresh(items, &until);
     let on_pallet: Vec<&Value> = items
         .iter()
         .filter(|item| item["sscc"] == json!(box_sscc(1500)))
@@ -153,6 +165,7 @@ async fn a_change_moves_a_box_into_the_next_window_with_its_pallet() {
     .await;
     admin.app.clock.advance(Duration::seconds(10));
     let (_, items) = walk(&admin, &key, Some(&next), 100).await;
+    let items = fresh(items, &next);
     assert_eq!(items[0]["palletSscc"], json!(pallet_sscc(40)));
 }
 
@@ -186,6 +199,7 @@ async fn a_taken_apart_box_is_a_removal_and_the_restore_epoch_rides_every_page()
     assert_eq!(sent["receipts"][0]["outcome"], json!("accepted"), "{sent}");
     admin.app.clock.advance(Duration::seconds(10));
     let (_, items) = walk(&admin, &key, Some(&until), 100).await;
+    let items = fresh(items, &until);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["kind"], json!("remove"));
     assert_eq!(items[0]["sscc"], json!(box_sscc(1500)));
@@ -279,6 +293,7 @@ async fn a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time() {
     admin.app.clock.advance(Duration::seconds(10));
     // The next walk lists the changes by when they happened, not by SSCC: 1502 first, then 1500.
     let (_, next) = walk(&admin, &key, Some(&until), 100).await;
+    let next = fresh(next, &until);
     let order: Vec<&str> = next
         .iter()
         .map(|item| item["sscc"].as_str().unwrap())
@@ -292,32 +307,55 @@ async fn a_walk_keeps_its_window_while_boxes_change_and_lists_by_change_time() {
     );
 }
 
+/// Finding 2 of the review: a writer that holds its change uncommitted while a walk reads must not
+/// lose it. The window closes at the newest change the walk SAW, and a writer's stamp is never
+/// below the newest committed one, so whatever commits later is in the next window, however stale
+/// the clock the writer read.
 #[tokio::test]
-async fn a_change_stamped_just_before_the_window_closed_is_delivered_by_the_next_walk() {
+async fn a_change_committed_after_a_walk_read_its_snapshot_is_delivered_by_the_next_walk() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     closed_boxes(&admin, &setup, 2).await;
     let key = pair_handheld(&admin).await;
     admin.app.clock.advance(Duration::seconds(60));
-    // A writer stamped its change two seconds before this walk and commits after the walk read
-    // its snapshot: the window must close below the stamp, or the change is never delivered.
-    let stamped = markiro_host::clock::format_timestamp(
-        markiro_host::clock::parse_timestamp(&admin.app.state.timestamp()).unwrap()
-            - Duration::seconds(2),
-    );
+    // The writer takes the write lock and stamps its change with a clock far behind the host's.
+    let mut writer = begin_write(&admin.app.state.pool).await.unwrap();
+    markiro_host::facts::registry_touch::box_by_sscc(
+        &mut writer,
+        &box_sscc(1501),
+        "2020-01-01T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    // The walk reads while the change is uncommitted: it cannot see it, and names its window.
     let (until, first) = walk(&admin, &key, None, 100).await;
     assert_eq!(first.len(), 2);
-    sqlx::query("UPDATE boxes SET changed_at = ? WHERE sscc = ?")
-        .bind(&stamped)
-        .bind(box_sscc(1501))
-        .execute(&admin.app.state.pool)
-        .await
-        .unwrap();
+    writer.commit().await.unwrap();
     admin.app.clock.advance(Duration::seconds(60));
     let (_, next) = walk(&admin, &key, Some(&until), 100).await;
     let sscc: Vec<&str> = next
         .iter()
         .map(|item| item["sscc"].as_str().unwrap())
         .collect();
-    assert_eq!(sscc, vec![box_sscc(1501)], "{next:?}");
+    assert!(sscc.contains(&box_sscc(1501).as_str()), "{next:?}");
+}
+
+#[tokio::test]
+async fn the_window_closes_at_the_newest_change_and_an_empty_registry_keeps_the_cursor() {
+    let admin = admin().await;
+    let key = pair_handheld(&admin).await;
+    // Nothing closed yet: a walk is empty, its window is a valid time, and asking again from it works.
+    let (until, items) = walk(&admin, &key, None, 100).await;
+    assert!(items.is_empty());
+    let (again, items) = walk(&admin, &key, Some(&until), 100).await;
+    assert!(items.is_empty());
+    assert_eq!(again, until);
+    // A walk with nothing new answers the same window, and the clock moving does not move it.
+    let setup = shift_setup(&admin).await;
+    closed_boxes(&admin, &setup, 1).await;
+    let (first, items) = walk(&admin, &key, Some(&until), 100).await;
+    assert_eq!(items.len(), 1);
+    admin.app.clock.advance(Duration::seconds(600));
+    let (second, _) = walk(&admin, &key, Some(&first), 100).await;
+    assert_eq!(second, first);
 }

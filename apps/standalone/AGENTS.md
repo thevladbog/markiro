@@ -1718,6 +1718,9 @@ assigns the line), gets blocks of both extensions, sends facts and closes the sh
 (`boxes.changed_at`, window `since..until`, no codes) and the organization's print data through
 `GET /v1/device/org/print`. The hold after a restore covers `pallet-events` too. `tests/box_registry_touch.rs`
 knows every writer into `boxes`; a new writer must touch `changed_at`.
+A touch stamps at least the newest stamp committed so far (`registry_touch::stamp`, under the write lock), and
+a walk's `until` is the newest `changed_at` its snapshot holds (not the clock), so a change that commits after
+a walk read its snapshot lands in the next window; `since` is inclusive and the boxes at `until` repeat.
 
 ## Signed documents and trust keys
 
