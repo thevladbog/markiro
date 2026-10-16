@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  NOTES_DRAFT_FILE,
   prepareStandaloneRelease,
   readProtocolRange,
   readStandaloneVersion,
@@ -171,6 +172,27 @@ test("rejects changed bytes and an extra file", async () => {
     verifyPreparedStandaloneRelease({ directory: outputDir, version: VERSION }),
     /unexpected asset set/,
   );
+});
+
+test("the notes draft CI leaves beside the installer is tolerated, left out of SHA256SUMS and never read", async () => {
+  const { bundleDir, outputDir } = await bundle("x-setup.exe");
+  await prepareStandaloneRelease({
+    version: VERSION,
+    ...SOURCE,
+    bundleDir,
+    outputDir,
+    authenticode: "Valid",
+  });
+  // Any content: the owner edits it, so its bytes are not a contract.
+  await writeFile(join(outputDir, NOTES_DRAFT_FILE), "anything\n\u0000 at all");
+  const verified = await verifyPreparedStandaloneRelease({
+    directory: outputDir,
+    version: VERSION,
+  });
+  assert.equal(verified.name, INSTALLER);
+  const sums = await readFile(join(outputDir, "SHA256SUMS"), "utf8");
+  assert.doesNotMatch(sums, /notes/u);
+  assert.equal(NOTES_DRAFT_FILE, "notes.draft.txt");
 });
 
 const sha = (text) => createHash("sha256").update(text).digest("hex");

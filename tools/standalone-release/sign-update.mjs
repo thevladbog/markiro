@@ -2,7 +2,7 @@
 // spec §5.1, §10.2, §10.3, §10.9):
 //
 //   node tools/standalone-release/sign-update.mjs --release-dir <prepared dir> \
-//     --notes <notes.txt> --min-upgrade-from <X.Y.Z> --channel <stable|beta> \
+//     [--notes <notes.txt>] --min-upgrade-from <X.Y.Z> --channel <stable|beta> \
 //     --key <encrypted PKCS#8 PEM outside the repository> --kid <kid> \
 //     --output-dir <dir outside the repository> [--released-at <YYYY-MM-DDTHH:MM:SSZ>]
 //
@@ -16,6 +16,13 @@
 // JWS ES256 (`typ` markiro-standalone-update+jws): the folder the owner hands
 // to the customer.
 //
+// `--notes` is optional. Without it the tool reads `notes.draft.txt` from the
+// release directory (the draft CI generates from the Git history,
+// draft-notes.mjs), checks it like any notes file, prints it to stderr and
+// signs it only after `y` is typed on the terminal: notes end up in the
+// signed manifest and the customer reads them. An explicit `--notes` file is
+// read as it always was, with no confirmation (the owner wrote it).
+//
 // Authenticode changes the installer's bytes, so with a code-signing
 // certificate the order is: the build signed (sign-overlay.mjs), prepare.mjs
 // on that installer, then this tool. An installer signed after prepare.mjs no
@@ -25,11 +32,13 @@
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
   EVIDENCE_FILE,
+  NOTES_DRAFT_FILE,
   UPDATE_PRODUCT,
   standaloneInstallerName,
   verifyPreparedStandaloneRelease,
@@ -81,7 +90,7 @@ const KID = /^[A-Za-z0-9._-]{1,64}$/u;
  * separator, no bidirectional override or isolate (a note is shown to the
  * customer, and an override could disguise it). No regex: no-control-regex.
  */
-const hasControl = (text) =>
+export const hasControl = (text) =>
   [...text].some((char) => {
     const code = char.codePointAt(0) ?? 0;
     return (
@@ -138,6 +147,44 @@ export function parseNotes(text) {
     if (hasControl(line)) throw new Error("the notes hold a control character");
   }
   return lines;
+}
+
+/**
+ * The notes to sign: the `notesPath` file as given, or, without one, the
+ * draft beside the installer, shown and signed only after `y` on a terminal.
+ */
+export async function resolveNotes({
+  releaseDir,
+  notesPath,
+  input = process.stdin,
+  output = process.stderr,
+}) {
+  if (notesPath !== undefined) return parseNotes(await readFile(notesPath, "utf8"));
+  let draft;
+  try {
+    draft = await readFile(join(releaseDir, NOTES_DRAFT_FILE), "utf8");
+  } catch (error) {
+    throw new Error(
+      `--notes is required: ${releaseDir} holds no ${NOTES_DRAFT_FILE} to sign instead`,
+      { cause: error },
+    );
+  }
+  const notes = parseNotes(draft);
+  if (!input.isTTY) throw new Error("the draft notes are confirmed on a terminal only");
+  output.write(
+    `Заметки к выпуску из ${NOTES_DRAFT_FILE} (они попадут в подписанный манифест):\n${notes.join("\n")}\n`,
+  );
+  const reader = createInterface({ input, output, terminal: false });
+  let answer;
+  try {
+    answer = await reader.question("Подписать эти заметки? Введите y для подтверждения: ");
+  } finally {
+    reader.close();
+  }
+  if (answer.trim().toLowerCase() !== "y") {
+    throw new Error("the draft notes were not confirmed (type y to sign them)");
+  }
+  return notes;
 }
 
 function exactKeys(value, keys) {
@@ -505,22 +552,17 @@ async function main() {
     },
     strict: true,
   });
-  for (const option of [
-    "release-dir",
-    "notes",
-    "min-upgrade-from",
-    "channel",
-    "key",
-    "kid",
-    "output-dir",
-  ]) {
+  for (const option of ["release-dir", "min-upgrade-from", "channel", "key", "kid", "output-dir"]) {
     if (values[option] === undefined) throw new Error(`--${option} is required`);
   }
   const keyPath = await assertOutsideRepository(values.key, "the release key");
   await assertOutsideRepository(values["output-dir"], "the signed update");
   const options = {
     releaseDir: values["release-dir"],
-    notes: parseNotes(await readFile(values.notes, "utf8")),
+    notes: await resolveNotes({
+      releaseDir: values["release-dir"],
+      notesPath: values.notes,
+    }),
     minUpgradeFrom: values["min-upgrade-from"],
     channel: values.channel,
     releasedAt: values["released-at"] ?? new Date().toISOString().replace(/\.[0-9]{3}Z$/u, "Z"),

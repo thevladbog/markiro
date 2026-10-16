@@ -25,6 +25,13 @@ export const STANDALONE_TAURI_CONFIG = "apps/standalone/src-tauri/tauri.conf.jso
 export const STANDALONE_PROTO_LIB = "apps/standalone/proto/src/lib.rs";
 export const EVIDENCE_FILE = "release-evidence.json";
 export const CHECKSUM_FILE = "SHA256SUMS";
+/**
+ * The draft of the release notes (`draft-notes.mjs`) CI may leave beside the
+ * installer. Deliberately NOT in SHA256SUMS or the evidence: it is a text the
+ * owner edits, and a hash would make every edit a mismatch. The verification
+ * tolerates it and never reads it; `sign-update.mjs` checks it when used.
+ */
+export const NOTES_DRAFT_FILE = "notes.draft.txt";
 /** The product an update manifest names (`markiro_proto::update::PRODUCT`). */
 export const UPDATE_PRODUCT = "markiro-standalone";
 /** The installer's roles (`src-tauri/windows/installer-hooks.nsh`). */
@@ -197,7 +204,7 @@ export async function verifyPreparedStandaloneRelease({ directory, version }) {
   const name = standaloneInstallerName(version);
   const draftName = updateDraftName(version);
   const expected = [CHECKSUM_FILE, EVIDENCE_FILE, name, draftName].sort();
-  const entries = (await readdir(directory)).sort();
+  const entries = (await readdir(directory)).filter((entry) => entry !== NOTES_DRAFT_FILE).sort();
   if (entries.join("\n") !== expected.join("\n")) {
     throw new Error("prepared standalone release has an unexpected asset set");
   }

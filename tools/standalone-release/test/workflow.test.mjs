@@ -145,6 +145,21 @@ test("the release evidence names the pull request's head, given through env and 
   assert.doesNotMatch(prepare.run, /GITHUB_SHA/u);
 });
 
+test("a notes draft from the full history lands in the artifact folder, after prepare.mjs and before the upload", () => {
+  // The draft reads `git log` since the previous release: a shallow clone has none.
+  const checkout = job.steps.find((step) => (step.uses ?? "").startsWith("actions/checkout@"));
+  assert.equal(checkout.with["fetch-depth"], 0);
+  const draft = stepRunning("draft-notes.mjs");
+  assert.equal(draft.shell, "pwsh");
+  assert.match(draft.run, /--output-dir "\$env:RUNNER_TEMP\/standalone-installer"/u);
+  const at = (needle) => runs.findIndex((run) => run.includes(needle));
+  assert.ok(at("prepare.mjs") < at("draft-notes.mjs"));
+  assert.ok(at("draft-notes.mjs") < at("actions/upload-artifact@"));
+  // prepare.mjs refuses a non-empty directory, so the draft cannot come first;
+  // it needs no secret, no environment and no network.
+  assert.equal(draft.env, undefined);
+});
+
 test("the export tool's tests run once the domain they compare with is built", () => {
   const build = runs.findIndex(
     (run) => run === "pnpm turbo build --filter '@markiro/standalone...'",

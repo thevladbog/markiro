@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import {
   mkdir,
   mkdtemp,
@@ -17,7 +18,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { findJwk } from "../generate-update-fixtures.mjs";
-import { prepareStandaloneRelease } from "../prepare.mjs";
+import { NOTES_DRAFT_FILE, prepareStandaloneRelease } from "../prepare.mjs";
 import {
   MAX_NOTE_CHARS,
   assertOutsideRepository,
@@ -28,6 +29,7 @@ import {
   parseNotes,
   readPassphrase,
   readReleaseKeyset,
+  resolveNotes,
   signCompact,
   signUpdate,
   updateFolderName,
@@ -440,6 +442,71 @@ test("the command line reads the passphrase from a terminal only, and keeps the 
   const unknown = spawnSync(process.execPath, [SIGN, "--passphrase", "x"], { encoding: "utf8" });
   assert.notEqual(unknown.status, 0);
   assert.match(unknown.stderr, /passphrase/u);
+});
+
+/** A terminal stand-in: the answer is typed once something is asked. */
+function terminal(answer, { tty = true } = {}) {
+  const input = new PassThrough();
+  input.isTTY = tty;
+  const output = new PassThrough();
+  let shown = "";
+  output.on("data", (chunk) => (shown += chunk));
+  input.write(answer);
+  return { input, output, shown: () => shown };
+}
+
+test("without --notes the draft beside the installer is signed only after a typed y", async () => {
+  const { releaseDir } = await release();
+  await writeFile(join(releaseDir, NOTES_DRAFT_FILE), "Первая\n\n Вторая \n");
+  for (const answer of ["y\n", "Y\r\n", " y \n"]) {
+    const term = terminal(answer);
+    const notes = await resolveNotes({ releaseDir, ...term });
+    assert.deepEqual(notes, ["Первая", "Вторая"]);
+    // The owner sees exactly which text goes into the signed manifest.
+    assert.match(term.shown(), /notes\.draft\.txt/u);
+    assert.match(term.shown(), /Первая\nВторая/u);
+  }
+  for (const answer of ["n\n", "\n", "yes\n", "да\n"]) {
+    await assert.rejects(resolveNotes({ releaseDir, ...terminal(answer) }), /not confirmed/u);
+  }
+  await assert.rejects(
+    resolveNotes({ releaseDir, ...terminal("y\n", { tty: false }) }),
+    /terminal/u,
+  );
+});
+
+test("without --notes a missing or invalid draft is refused", async () => {
+  const { releaseDir } = await release();
+  await assert.rejects(resolveNotes({ releaseDir, ...terminal("y\n") }), /--notes|notes\.draft/u);
+  for (const bad of ["", "\n \n", "a\u0000b\n", `${"я".repeat(201)}\n`]) {
+    await writeFile(join(releaseDir, NOTES_DRAFT_FILE), bad);
+    await assert.rejects(resolveNotes({ releaseDir, ...terminal("y\n") }), /notes/u);
+  }
+});
+
+test("an explicit --notes file is read as before, and the draft is neither read nor confirmed", async () => {
+  const { root, releaseDir } = await release();
+  await writeFile(join(releaseDir, NOTES_DRAFT_FILE), "draft text\n");
+  const own = join(root, "own.txt");
+  await writeFile(own, "Моя строка\n");
+  const term = terminal("", { tty: false });
+  assert.deepEqual(await resolveNotes({ releaseDir, notesPath: own, ...term }), ["Моя строка"]);
+  assert.equal(term.shown(), "");
+  await writeFile(own, "\n");
+  await assert.rejects(resolveNotes({ releaseDir, notesPath: own, ...term }), /notes/u);
+});
+
+test("the command line signs nothing from a draft without a terminal, and still needs the other options", async () => {
+  const inputs = await cliInputs();
+  await writeFile(join(inputs.releaseDir, NOTES_DRAFT_FILE), "Черновик\n");
+  const out = join(inputs.root, "signed");
+  const args = cliArgs({ ...inputs, out });
+  const withoutNotes = [...args.slice(0, 3), ...args.slice(5)];
+  const piped = spawnSync(process.execPath, withoutNotes, { encoding: "utf8", input: "y\n" });
+  assert.notEqual(piped.status, 0);
+  assert.match(piped.stderr, /terminal/u);
+  assert.doesNotMatch(piped.stderr, /--notes is required/u);
+  await assert.rejects(stat(out), { code: "ENOENT" });
 });
 
 test("importing the module runs nothing, and CI never signs", async () => {
