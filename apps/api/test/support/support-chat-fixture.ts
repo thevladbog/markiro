@@ -13,6 +13,7 @@ import { mountAuth, setupAuth } from "../../src/auth/auth.setup";
 import { loadEnv } from "../../src/env";
 import { mountPlatformAuth, setupPlatformAuth } from "../../src/platform-auth/platform-auth.setup";
 import { CHATWOOT_CONFIG } from "../../src/modules/support-chat/chatwoot.client";
+import { closeFixturePool, dropFixtureDatabase, tolerateAdminShutdown } from "./fixture-pool";
 import { listenOnLoopback } from "./listen-loopback";
 import { signUpAndActivate } from "./auth";
 
@@ -62,15 +63,17 @@ export async function createSupportChatFixture(
   const scratchUrl = new URL(maintenanceUrl);
   scratchUrl.pathname = `/${databaseName}`;
   const maintenance = createDb(maintenanceUrl);
+  tolerateAdminShutdown(maintenance.pool);
   await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
   const migrator = createDb(scratchUrl.toString());
+  tolerateAdminShutdown(migrator.pool);
   let app: INestApplication | undefined;
   let upstream: Server | undefined;
   try {
     await migrate(migrator.db, {
       migrationsFolder: join(__dirname, "../../../../packages/db/migrations"),
     });
-    await migrator.pool.end();
+    await closeFixturePool(migrator.pool);
     const requests: Array<{ method: string; path: string; body: unknown }> = [];
     const contacts = new Map<
       string,
@@ -218,6 +221,7 @@ export async function createSupportChatFixture(
           }),
     });
     const auth = setupAuth(env);
+    tolerateAdminShutdown(auth.pool);
     const platformAuth = setupPlatformAuth(env, auth.db);
     const module = await Test.createTestingModule({
       imports: [
@@ -344,16 +348,16 @@ export async function createSupportChatFixture(
         await new Promise<void>((resolve, reject) =>
           upstream?.close((error) => (error ? reject(error) : resolve())),
         );
-        await maintenance.pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
-        await maintenance.pool.end();
+        await dropFixtureDatabase(maintenance.pool, databaseName);
+        await closeFixturePool(maintenance.pool);
       },
     };
   } catch (error) {
     await app?.close();
     if (upstream) await new Promise<void>((resolve) => upstream!.close(() => resolve()));
     await migrator.pool.end().catch(() => undefined);
-    await maintenance.pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
-    await maintenance.pool.end();
+    await dropFixtureDatabase(maintenance.pool, databaseName);
+    await closeFixturePool(maintenance.pool);
     throw error;
   }
 }
