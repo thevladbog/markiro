@@ -2669,6 +2669,27 @@ Windows) changed is verified again before it is served (`503
 package_verifying`). The packages are no data of the site: no copy holds
 them and `markiro-host restore` leaves `updates\` alone.
 
+Review of ОБН-3 (Codex) tightened the store. The promotion hashes `staged`
+outside the swap lock and re-checks the folder's identity under it, so an
+upload's end never waits for a hash; opening an upload is one step under its
+own gate, so a replaced upload is always removed by its id; the package of
+the running version is accepted (and promoted at once) only while `current`
+is missing, invalid or of another version — the repair of a lost package —
+and `package_not_newer` otherwise. The `update.package.stage` row is committed
+before the folders move (a failed move writes a second, `failed` row with
+`reason: "not_staged"`), and the start writes `update.package.promote` with
+`reason: "unrecorded"` for a current package no `ok` promotion row names: a
+package never exists without its row, a row may exist without its package.
+A download opens the installer and compares the handle (size, times, inode off
+Windows) with what was hashed; a write in place that keeps all of them is
+caught only by the device's own hash check. The installer limit is 256 MiB.
+A paired PC reads the host's `hello` for the final version check through the
+pinned connection (`host_probe::pinned_host_versions`); an answer from another
+certificate is «host silent» (a confirmation), never a version. Error answers
+and upload answers are read to at most 64 KiB, a download's read error is
+bounded by the stall limit like a chunk, and the office offer is read again
+(bounded: ~2 minutes) while the host says `verifying`.
+
 `GET /v1/device/update` and `GET /v1/device/update/installer` are outside
 `protocol_guard` (`server::update_routes`), so a device the host refuses as
 `app_too_old` still gets its update, yet both take `AuthDevice`; their
