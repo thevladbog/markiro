@@ -3,13 +3,15 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { LabelTemplateSpec, PalletSheetSpecV2 } from "@markiro/domain";
 
 import type {
   DeviceLicense,
   DeviceShift,
   DeviceShiftCreate,
   EnteredShift,
+  PalletSheet,
+  PalletSheets,
   ShiftEnter,
   ShiftMode,
 } from "../../host/protocol.js";
@@ -21,7 +23,13 @@ import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { opensBlocked } from "../license.js";
 import type { ScanSource } from "../scan-source.js";
-import { readWarehouseTemplates } from "../warehouse/warehouse-templates.js";
+import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import { sheetSpecOf } from "../warehouse/warehouse-sheet.js";
+import {
+  palletPaperOf,
+  readWarehouseTemplates,
+  type PalletPaper,
+} from "../warehouse/warehouse-templates.js";
 import { FloorFooter, FloorScreen } from "./FloorScreen.js";
 import {
   createdCopy,
@@ -42,6 +50,7 @@ import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
 import { productMonogram } from "./product-accent.js";
 import { ProductPanel } from "./ProductPhoto.js";
+import { SheetPreview } from "./SheetPreview.js";
 import { TemplatePreview } from "./TemplatePreview.js";
 
 /** At most this many products answer a search by name. */
@@ -69,7 +78,16 @@ export interface NewShiftProps {
   now?: () => Date;
   /** The site's license as the station last heard it (plan ЛЦ-3); `null` — nothing known. */
   license?: DeviceLicense | null;
+  /**
+   * `HostApi.getDevicePalletSheets`: the A4 sheets a pallet of the shift may print, asked when
+   * the printer assigned to pallets prints sheets; none — no sheet is offered.
+   */
+  palletSheets?: (productId?: string) => Promise<PalletSheets>;
 }
+
+/** The host's A4 sheets as the pallet step has them. */
+type SheetsState =
+  { kind: "loading" } | { kind: "failed" } | { kind: "ready"; sheets: PalletSheets };
 
 type Choices =
   | { kind: "loading" }
@@ -81,8 +99,6 @@ interface Form {
   product: ShiftProduct;
   requestId: string;
   templateId: string | null;
-  /** The rule chose the template, or only one fits: nothing to choose. */
-  templateFixed: boolean;
   productionDate: string;
   /** «Дата смены»: the working day, today in the organization's zone until the operator moves it. */
   plannedDate: string;
@@ -91,8 +107,8 @@ interface Form {
   /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
   pallets: boolean;
   palletTemplateId: string | null;
-  /** The rule chose the pallet template, or only one fits. */
-  palletTemplateFixed: boolean;
+  /** On a printer of A4 sheets: the sheet the operator chose; `null` — the product's default one. */
+  palletSheetId: string | null;
   /** «Режим работы» (plan РЕЖ): «Агрегация» unless the operator chose «Проверка». */
   mode: ShiftMode;
   /** «Печатать дубликат Data Matrix»: only a validation shift prints. */
@@ -157,17 +173,29 @@ type Step = { kind: "product" } | { kind: "form"; form: Form; view: FormView };
 function palletsOf(
   form: Form,
   from: NewShiftChoices,
+  paper: PalletPaper | null = null,
 ):
   | { kind: "none" }
   | { kind: "unavailable" }
   | { kind: "pallets"; pallets: NonNullable<DeviceShiftInput["pallets"]> } {
   if (!form.pallets || form.mode === "validation") return { kind: "none" };
   const boxCapacity = palletCapacityOffered(form.product, from.palletTemplates);
-  const template = fittingPalletTemplates(form.product, from.palletTemplates).find(
-    (each) => each.id === form.palletTemplateId,
-  );
+  const fitting = fittingPalletTemplates(form.product, from.palletTemplates);
+  // On a printer of A4 sheets the pallet prints its sheet, not a label template: the host
+  // still takes a template for the shift, so the preselected one (else the first) stands.
+  const wanted = paper === "a4" ? (form.palletTemplateId ?? fitting[0]?.id) : form.palletTemplateId;
+  const template = fitting.find((each) => each.id === wanted);
   if (boxCapacity === null || template === undefined) return { kind: "unavailable" };
-  return { kind: "pallets", pallets: { boxCapacity, templateId: template.id } };
+  return {
+    kind: "pallets",
+    pallets: {
+      boxCapacity,
+      templateId: template.id,
+      ...(paper === "a4" && form.palletSheetId !== null
+        ? { sheetTemplateId: form.palletSheetId }
+        : {}),
+    },
+  };
 }
 
 function letters(text: string): number {
@@ -200,6 +228,7 @@ export function NewShift({
   newRequestId = () => crypto.randomUUID(),
   now = () => new Date(),
   license = null,
+  palletSheets,
 }: NewShiftProps) {
   const { t } = useTranslation();
   const blocked = opensBlocked(license);
@@ -249,6 +278,7 @@ export function NewShift({
       const fitting = fittingTemplates(product, ready.templates);
       const suggested = suggestBoxTemplate(product, ready.templates, ready.defaults);
       const [only] = fitting;
+      // The rule's choice is only the preselection: the operator sees every template that fits.
       const fixed = suggested ?? (fitting.length === 1 && only !== undefined ? only.id : null);
       const palletFitting = fittingPalletTemplates(product, ready.palletTemplates);
       const [onlyPallet] = palletFitting;
@@ -266,14 +296,13 @@ export function NewShift({
           product,
           requestId: current.current.newRequestId(),
           templateId: fixed,
-          templateFixed: fixed !== null,
           productionDate: civilToday(ready.timeZone, current.current.now()),
           plannedDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
           pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
           palletTemplateId: palletFixed,
-          palletTemplateFixed: palletFixed !== null,
+          palletSheetId: null,
           mode: "aggregation",
           printDuplicate: false,
           duplicateTemplateId: onlyDuplicate?.id ?? null,
@@ -340,6 +369,50 @@ export function NewShift({
     };
   }, [formOpen, local]);
 
+  // What the printer assigned to pallets prints, the same settings the print path reads: a
+  // printer of A4 sheets makes the pallet step a choice of sheets, not of label templates.
+  const [paper, setPaper] = useState<PalletPaper | null>(null);
+  useEffect(() => {
+    if (!formOpen) return undefined;
+    let cancelled = false;
+    readWorkstationSettings(local).then(
+      (settings) => {
+        if (!cancelled) setPaper(palletPaperOf(settings));
+      },
+      () => {
+        if (!cancelled) setPaper("thermal");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [formOpen, local]);
+
+  // The host's A4 sheets for the product of the form, asked once the pallets go to a printer of sheets.
+  const [sheets, setSheets] = useState<SheetsState>({ kind: "loading" });
+  const [sheetsAttempt, setSheetsAttempt] = useState(0);
+  const formProductId = step.kind === "form" ? step.form.product.id : null;
+  useEffect(() => {
+    if (paper !== "a4" || formProductId === null) return undefined;
+    if (palletSheets === undefined) {
+      setSheets({ kind: "failed" });
+      return undefined;
+    }
+    let cancelled = false;
+    setSheets({ kind: "loading" });
+    palletSheets(formProductId).then(
+      (listed) => {
+        if (!cancelled) setSheets({ kind: "ready", sheets: listed });
+      },
+      () => {
+        if (!cancelled) setSheets({ kind: "failed" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [paper, formProductId, palletSheets, sheetsAttempt]);
+
   /** One request at a time: `work` runs alone, with the busy line and no old problem on the screen. */
   const run = async (kind: "creating" | "entering", work: () => Promise<void>) => {
     running.current = true;
@@ -397,11 +470,11 @@ export function NewShift({
       // The template the rule fixed is refused: the choice is the operator's
       // now, among the templates that fit.
       if (created.reason === "template") {
-        update({ templateId: null, templateFixed: false });
+        update({ templateId: null });
         go("box_template");
       }
       if (created.reason === "pallet_template") {
-        update({ palletTemplateId: null, palletTemplateFixed: false });
+        update({ palletTemplateId: null });
         go("pallet_template");
       }
       if (created.reason === "duplicate_template") {
@@ -461,7 +534,7 @@ export function NewShift({
     if (ready === null || running.current) return;
     const templateId = boxTemplateOf(form, ready);
     if (templateId === null) return;
-    const pallets = palletsOf(form, ready);
+    const pallets = palletsOf(form, ready, paper);
     if (pallets.kind === "unavailable") return;
     const prints = form.mode === "validation" && form.printDuplicate;
     if (prints && form.duplicateTemplateId === null) return;
@@ -803,11 +876,115 @@ export function NewShift({
    * offered (decision 7): the choice is the operator's only where the rule
    * leaves several.
    */
+  /**
+   * The pallet step on a printer of A4 sheets: the pallet prints the host's sheet (the print
+   * path's `renderShiftSheet`), not a label template, so the choice is a sheet — «по умолчанию
+   * товара» first, then every enabled one — with the chosen sheet drawn beside it.
+   */
+  const sheetView = (form: Form) => {
+    const frozen = busy !== null || form.created !== null;
+    const listed: PalletSheets | null = sheets.kind === "ready" ? sheets.sheets : null;
+    const enabled: PalletSheet[] = (listed?.sheets ?? []).filter((sheet) => sheet.enabled);
+    const effectiveId = form.palletSheetId ?? listed?.defaultId ?? null;
+    const chosen = enabled.find((sheet) => sheet.id === effectiveId) ?? null;
+    const spec: PalletSheetSpecV2 | null = chosen === null ? null : sheetSpecOf(chosen);
+    const pick = (palletSheetId: string | null) => () => update({ palletSheetId });
+    return (
+      <>
+        <h3 className="new-shift__template-title">{t("floor.newShift.palletSheet")}</h3>
+        {sheets.kind === "loading" ? (
+          <p className="new-shift__hint">{t("floor.newShift.sheetLoading")}</p>
+        ) : sheets.kind === "failed" ? (
+          <Alert
+            tone="warn"
+            action={
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => setSheetsAttempt((attempt) => attempt + 1)}
+              >
+                {t("floor.newShift.retry")}
+              </Button>
+            }
+          >
+            {t("floor.newShift.sheetFailed")}
+          </Alert>
+        ) : enabled.length === 0 ? (
+          <Alert tone="error">{t("floor.newShift.sheetNone")}</Alert>
+        ) : (
+          <div className="new-shift__template-grid">
+            <div className="new-shift__template-choices">
+              <p className={chosen === null ? "new-shift__label" : "new-shift__value"}>
+                {chosen === null
+                  ? t("floor.newShift.sheetChoose")
+                  : t(
+                      form.palletSheetId === null
+                        ? "floor.newShift.sheetChosenAuto"
+                        : "floor.newShift.sheetChosen",
+                      { name: chosen.name },
+                    )}
+              </p>
+              <div
+                className="new-shift__template-list"
+                role="group"
+                aria-label={t("floor.newShift.palletSheet")}
+              >
+                <Button
+                  size="floor"
+                  fullWidth
+                  variant={form.palletSheetId === null ? "primary" : "secondary"}
+                  aria-pressed={form.palletSheetId === null}
+                  disabled={frozen}
+                  onClick={pick(null)}
+                >
+                  {t("floor.newShift.sheetAuto")}
+                </Button>
+                {enabled.map((sheet) => (
+                  <Button
+                    key={sheet.id}
+                    size="floor"
+                    fullWidth
+                    variant={sheet.id === form.palletSheetId ? "primary" : "secondary"}
+                    aria-pressed={sheet.id === form.palletSheetId}
+                    disabled={frozen}
+                    onClick={pick(sheet.id)}
+                  >
+                    <span className="new-shift__ellipsis" title={sheet.name}>
+                      {sheet.name}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="new-shift__preview">
+              {chosen !== null && spec !== null ? (
+                <SheetPreview
+                  local={local}
+                  pairing={{ hostId, deviceId }}
+                  spec={spec}
+                  label={t("floor.newShift.sheetPreview", { name: chosen.name })}
+                />
+              ) : (
+                <p className="new-shift__hint">
+                  {t(chosen === null ? "floor.newShift.previewPick" : "floor.newShift.previewNone")}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const templateView = (
     form: Form,
     from: NewShiftChoices,
     purpose: "box" | "pallet" | "duplicate",
   ) => {
+    if (purpose === "pallet") {
+      if (paper === null) return <p className="new-shift__hint">{t("floor.newShift.loading")}</p>;
+      if (paper === "a4") return sheetView(form);
+    }
     const box = purpose === "box";
     const duplicate = purpose === "duplicate";
     const fitting = box
@@ -820,7 +997,8 @@ export function NewShift({
       : duplicate
         ? form.duplicateTemplateId
         : form.palletTemplateId;
-    const fixed = box ? form.templateFixed : duplicate ? false : form.palletTemplateFixed;
+    // Only one template fits: a plain line. Two or more: the choice, with the rule's preselected.
+    const fixed = fitting.length === 1;
     const chosen = fitting.find((template) => template.id === chosenId) ?? null;
     const frozen = busy !== null || form.created !== null;
     const spec = chosen === null ? null : (specs?.get(chosen.id) ?? null);
@@ -1001,7 +1179,7 @@ export function NewShift({
             disabled={
               busy !== null ||
               (view === "box_template" && form.templateId === null) ||
-              (view === "pallet_template" && form.palletTemplateId === null)
+              (view === "pallet_template" && paper !== "a4" && form.palletTemplateId === null)
             }
             onClick={() => (view === "details" ? next(form, following) : go(following))}
           >
@@ -1015,7 +1193,7 @@ export function NewShift({
             disabled={
               !online ||
               boxTemplateOf(form, from) === null ||
-              palletsOf(form, from).kind === "unavailable" ||
+              palletsOf(form, from, paper).kind === "unavailable" ||
               (prints && form.duplicateTemplateId === null)
             }
             onClick={() => {

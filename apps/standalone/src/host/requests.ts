@@ -654,7 +654,12 @@ export interface DeviceShiftInput {
   boxCapacity?: number;
   plannedQty: number | null;
   /** «С паллетами» (plan ПЛ-Ц): boxes per pallet and the pallet template; absent — none. */
-  pallets?: { boxCapacity: number; templateId: string };
+  pallets?: {
+    boxCapacity: number;
+    templateId: string;
+    /** A printer of A4 sheets: the sheet the operator chose; left out, the host takes the product's. */
+    sheetTemplateId?: string;
+  };
   /** The shift's mode (beta 3.2); left out, aggregation, which an older host also takes. */
   mode?: ShiftMode;
   /** The print policy of a validation shift; left out, none. */
@@ -689,6 +694,9 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
           palletsEnabled: true,
           palletBoxCapacity: shift.pallets.boxCapacity,
           palletTemplateId: shift.pallets.templateId,
+          ...(shift.pallets.sheetTemplateId === undefined
+            ? {}
+            : { palletSheetTemplateId: shift.pallets.sheetTemplateId }),
         }),
   };
 }
