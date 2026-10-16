@@ -122,22 +122,20 @@ export function StandaloneLicenseIssue({
         </Alert>
       ) : null}
       {preview.isError ? (
-        <Alert
-          tone="error"
-          role="alert"
-          {...(needsAssignments(preview.error) ? { action: changeRightsLink } : {})}
-        >
-          {t(standaloneErrorKey(preview.error))}
-        </Alert>
+        <>
+          <Alert tone="error" role="alert">
+            {t(standaloneErrorKey(preview.error))}
+          </Alert>
+          {needsAssignments(preview.error) ? changeRightsLink : null}
+        </>
       ) : null}
       {confirm.isError ? (
-        <Alert
-          tone="error"
-          role="alert"
-          {...(needsAssignments(confirm.error) ? { action: changeRightsLink } : {})}
-        >
-          {t(standaloneErrorKey(confirm.error))}
-        </Alert>
+        <>
+          <Alert tone="error" role="alert">
+            {t(standaloneErrorKey(confirm.error))}
+          </Alert>
+          {needsAssignments(confirm.error) ? changeRightsLink : null}
+        </>
       ) : null}
       {preview.data ? (
         <>

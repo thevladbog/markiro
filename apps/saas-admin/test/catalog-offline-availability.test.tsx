@@ -95,7 +95,7 @@ describe("offline availability in the catalog editor", () => {
       ]),
     );
     expect(
-      (await screen.findByText(/Снято\. У клиентов без кабинета назначения остаются в силе: 3/))
+      (await screen.findByText(/Снято\. Назначения остаются в силе у клиентов без кабинета: 3/))
         .textContent,
     ).toBeTruthy();
   });

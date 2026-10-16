@@ -499,14 +499,17 @@ describe("offline license from the assignments of a tenant without a cabinet (sp
       ),
     ).toBeDefined();
     await user.click(within(dialog).getByRole("button", { name: "Предпросмотр" }));
-    const refusal = await within(dialog).findByText(
-      "Нет действующего назначения тарифа. Измените права клиента.",
-    );
     expect(
-      within(refusal.closest("[role=alert]") as HTMLElement)
-        .getByRole("link", { name: "Изменить права клиента" })
-        .getAttribute("href"),
-    ).toBe(`/tenants/${STANDALONE_TENANT_ID}#tenant-subscription`);
+      await within(dialog).findByText(
+        "Нет действующего назначения тарифа. Измените права клиента.",
+      ),
+    ).toBeDefined();
+    const links = within(dialog).getAllByRole("link", { name: "Изменить права клиента" });
+    expect(links).toHaveLength(2);
+    for (const link of links)
+      expect(link.getAttribute("href")).toBe(
+        `/tenants/${STANDALONE_TENANT_ID}#tenant-subscription`,
+      );
   });
 
   it("tells an old cached build that the manual terms are gone", async () => {

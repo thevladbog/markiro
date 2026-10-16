@@ -68,9 +68,12 @@ export function StandaloneAssignmentsSummary({ tenantId }: { tenantId: string })
         </Alert>
       ) : null}
       {detail && rows.length === 0 ? (
-        <Alert tone="warn" role="alert" action={changeLink}>
-          {t("tenants.detail.standalone.assignments.empty")}
-        </Alert>
+        <>
+          <Alert tone="warn" role="alert">
+            {t("tenants.detail.standalone.assignments.empty")}
+          </Alert>
+          {changeLink}
+        </>
       ) : null}
       {rows.length > 0 ? (
         <>

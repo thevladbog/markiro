@@ -1699,6 +1699,13 @@ textarea {
   flex-shrink: 0;
 }
 
+.version-panel__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .version-panel__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
@@ -2557,6 +2564,34 @@ textarea {
 
 .standalone-site-actions {
   min-width: 230px;
+}
+
+.standalone-assignments {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.standalone-assignments h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.standalone-assignments ul {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.standalone-assignments a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  justify-self: start;
 }
 
 .standalone-license-dialog__actions {

@@ -2083,7 +2083,7 @@
         "assignments": {
           "title": "Rights from the tenant's assignments",
           "plan": "Plan: {{name}} · version {{version}} · {{term}}",
-          "addon": "Add-on: {{name}} · version {{version}} × {{quantity}} · {{term}}",
+          "addon": "Add-on: {{name}} · version {{version}} · quantity {{quantity}} · {{term}}",
           "until": "until {{date}}",
           "open": "no end date",
           "change": "Change the tenant's rights",

@@ -664,11 +664,13 @@ export function CatalogVersionPanel({
           <h2>{regionLabel}</h2>
         </div>
         <div className="version-panel__header-actions">
-          <StatusChip
-            phase={CATALOG_STATUS_TO_PHASE[item.status]}
-            label={t(`catalog.status.${item.status}`)}
-          />
-          {item.offlineAvailable ? <Badge tone="teal">{t("catalog.offline.badge")}</Badge> : null}
+          <span className="version-panel__tags">
+            <StatusChip
+              phase={CATALOG_STATUS_TO_PHASE[item.status]}
+              label={t(`catalog.status.${item.status}`)}
+            />
+            {item.offlineAvailable ? <Badge tone="teal">{t("catalog.offline.badge")}</Badge> : null}
+          </span>
           {canWrite && item.status === "published" ? (
             <Button variant="secondary" onClick={() => setRetireOpen(true)}>
               {t("catalog.retire")}
