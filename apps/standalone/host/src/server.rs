@@ -48,6 +48,9 @@ pub struct AppState {
     /// License previews and loads, per address (plan ЛЦ-2, spec §8.3: like
     /// the sign-in); its refusals write no row.
     pub license_limiter: Arc<crate::rate_limit::RateLimiter>,
+    /// Uploads of an office user's photo, per address (plan АВА): ten a
+    /// minute, refused ones counted, and a refusal writes no row.
+    pub avatar_limiter: Arc<crate::rate_limit::RateLimiter>,
     pub endpoint: Endpoint,
     /// Raised by `commit_with_revision` after each commit that moved the
     /// revision; it starts at 0, so read `db::current_revision` for the
@@ -98,6 +101,11 @@ impl AppState {
                 clock.clone(),
             )),
             license_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
+                10,
+                time::Duration::minutes(1),
+                clock.clone(),
+            )),
+            avatar_limiter: Arc::new(crate::rate_limit::RateLimiter::new(
                 10,
                 time::Duration::minutes(1),
                 clock.clone(),
@@ -692,6 +700,20 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/users/{id}",
             put(crate::routes::office_users::update_user),
+        )
+        .route(
+            "/v1/office/users/{id}/avatar",
+            get(crate::routes::user_avatars::get_avatar)
+                .put(crate::routes::user_avatars::put_avatar)
+                .delete(crate::routes::user_avatars::delete_avatar)
+                // The base64 of a 2 MiB picture is past the router's 2 MiB JSON limit.
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::avatar::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/v1/office/users/{id}/avatar/image",
+            get(crate::routes::user_avatars::get_image),
         )
         .route(
             "/v1/office/users/{id}/password",

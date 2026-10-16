@@ -4,6 +4,7 @@
 pub mod address_check;
 pub mod audit;
 pub mod auth;
+pub mod avatar;
 pub mod backup;
 pub mod clock;
 pub mod cloud_import;

@@ -40,6 +40,11 @@ pub mod actions {
     /// An administrator set someone's password, or a user changed their own
     /// (then `actor_id == target_id`).
     pub const OFFICE_USER_PASSWORD: &str = "office_user.password";
+    /// An office user's photo set or replaced (their own, plan АВА), and
+    /// cleared (their own, or an administrator's of someone else's: the actor
+    /// and the target tell which); the details name the size, never the picture.
+    pub const OFFICE_USER_AVATAR_SET: &str = "office_user.avatar.set";
+    pub const OFFICE_USER_AVATAR_CLEAR: &str = "office_user.avatar.clear";
     pub const ORG_UPDATE: &str = "org.update";
     pub const SSCC_COUNTER_UPDATE: &str = "sscc.counter.update";
     pub const SSCC_BLOCK_SIZES_UPDATE: &str = "sscc.block_sizes.update";

@@ -463,7 +463,17 @@ pub fn reviews_conflicts(role: OfficeRole) -> bool {
     }
 }
 
-type SessionRow = (String, String, String, String, String, String, String, i64);
+type SessionRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    Option<i64>,
+);
 
 impl FromRequestParts<AppState> for OfficeContext {
     type Rejection = ApiError;
@@ -482,7 +492,8 @@ impl FromRequestParts<AppState> for OfficeContext {
                 ApiError::unauthorized(credentials::SESSION, "an office session is required")
             })?;
         let row: Option<SessionRow> = sqlx::query_as(
-            "SELECT s.id, s.last_seen_at, s.expires_at, u.id, u.login, u.name, u.role, u.active \
+            "SELECT s.id, s.last_seen_at, s.expires_at, u.id, u.login, u.name, u.role, u.active, \
+             (SELECT a.version FROM user_avatars a WHERE a.user_id = u.id) \
              FROM office_sessions s JOIN office_users u ON u.id = s.user_id \
              WHERE s.token_hash = ? AND s.device_id = ?",
         )
@@ -491,10 +502,19 @@ impl FromRequestParts<AppState> for OfficeContext {
         .fetch_optional(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-        let (session_id, last_seen_at, expires_at, user_id, login, name, role, active) = row
-            .ok_or_else(|| {
-                ApiError::unauthorized(credentials::SESSION, "unknown or ended office session")
-            })?;
+        let (
+            session_id,
+            last_seen_at,
+            expires_at,
+            user_id,
+            login,
+            name,
+            role,
+            active,
+            avatar_version,
+        ) = row.ok_or_else(|| {
+            ApiError::unauthorized(credentials::SESSION, "unknown or ended office session")
+        })?;
         let now = state.now();
         let last_seen = parse_timestamp(&last_seen_at).map_err(ApiError::internal)?;
         let expires = parse_timestamp(&expires_at).map_err(ApiError::internal)?;
@@ -529,6 +549,7 @@ impl FromRequestParts<AppState> for OfficeContext {
                 login,
                 name,
                 role,
+                avatar_version,
             },
         })
     }

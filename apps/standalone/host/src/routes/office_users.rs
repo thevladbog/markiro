@@ -18,10 +18,23 @@ use crate::secrets::hash_password_blocking;
 use crate::server::AppState;
 use crate::validate;
 
-type UserRow = (String, String, String, String, i64, String, i64);
+type UserRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    i64,
+    Option<i64>,
+);
+
+/// The columns of a [`UserRow`] from `office_users u`.
+const USER_COLUMNS: &str = "u.id, u.login, u.name, u.role, u.active, u.created_at, u.rev, \
+     (SELECT a.version FROM user_avatars a WHERE a.user_id = u.id)";
 
 fn record(
-    (id, login, name, role, active, created_at, rev): UserRow,
+    (id, login, name, role, active, created_at, rev, avatar_version): UserRow,
 ) -> Result<OfficeUserRecord, ApiError> {
     Ok(OfficeUserRecord {
         id,
@@ -31,6 +44,7 @@ fn record(
         active: active == 1,
         created_at,
         rev,
+        avatar_version,
     })
 }
 
@@ -38,9 +52,9 @@ async fn read_user(
     conn: &mut SqliteConnection,
     id: &str,
 ) -> Result<Option<OfficeUserRecord>, ApiError> {
-    let row: Option<UserRow> = sqlx::query_as(
-        "SELECT id, login, name, role, active, created_at, rev FROM office_users WHERE id = ?",
-    )
+    let row: Option<UserRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLUMNS} FROM office_users u WHERE u.id = ?"
+    ))
     .bind(id)
     .fetch_optional(conn)
     .await
@@ -100,9 +114,9 @@ pub async fn list_users(
     context: OfficeContext,
 ) -> Result<Json<Vec<OfficeUserRecord>>, ApiError> {
     context.require_admin()?;
-    let rows: Vec<UserRow> = sqlx::query_as(
-        "SELECT id, login, name, role, active, created_at, rev FROM office_users ORDER BY login COLLATE NOCASE",
-    )
+    let rows: Vec<UserRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLUMNS} FROM office_users u ORDER BY u.login COLLATE NOCASE"
+    ))
     .fetch_all(&state.pool)
     .await
     .map_err(ApiError::internal)?;

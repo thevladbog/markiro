@@ -1042,6 +1042,7 @@ async fn require_admin_in_rechecks_role_and_session_inside_the_transaction() {
             login: "admin".to_owned(),
             name: "Ирина Смирнова".to_owned(),
             role: OfficeRole::Admin,
+            avatar_version: None,
         },
     };
 

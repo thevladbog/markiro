@@ -70,7 +70,8 @@ async fn login_opens_a_session_bound_to_the_device() {
     assert_eq!(token.len(), 43);
     assert_eq!(
         body["user"],
-        json!({ "id": user_id, "login": "irina", "name": "Пользователь irina", "role": "admin" })
+        json!({ "id": user_id, "login": "irina", "name": "Пользователь irina", "role": "admin",
+                "avatarVersion": null })
     );
     let expected_expiry =
         markiro_host::clock::format_timestamp(app.state.now() + time::Duration::hours(12));

@@ -1,0 +1,6 @@
+{
+  "maxBytes": 2097152,
+  "minSide": 128,
+  "maxSide": 4096,
+  "mediaTypes": ["image/jpeg", "image/png", "image/webp"]
+}

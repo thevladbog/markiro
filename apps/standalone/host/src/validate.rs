@@ -479,7 +479,7 @@ pub fn product_photo(
 }
 
 /// The sides a PNG's first chunk (IHDR) declares.
-fn png_sides(bytes: &[u8]) -> Option<(u32, u32)> {
+pub(crate) fn png_sides(bytes: &[u8]) -> Option<(u32, u32)> {
     if bytes.len() < 24 || &bytes[12..16] != b"IHDR" || bytes[8..12] != [0, 0, 0, 13] {
         return None;
     }
@@ -490,7 +490,7 @@ fn png_sides(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// The sides a WebP's first chunk declares: lossy `VP8 `, lossless `VP8L`
 /// or extended `VP8X`.
-fn webp_sides(bytes: &[u8]) -> Option<(u32, u32)> {
+pub(crate) fn webp_sides(bytes: &[u8]) -> Option<(u32, u32)> {
     let chunk = bytes.get(12..16)?;
     match chunk {
         b"VP8 " => {

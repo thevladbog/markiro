@@ -113,6 +113,11 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/office/logout"),
     ("GET", "/v1/office/me"),
     ("PUT", "/v1/office/me/password"),
+    // An office user's photo (plan АВА): a profile, never closed by the license.
+    ("GET", "/v1/office/users/{id}/avatar"),
+    ("PUT", "/v1/office/users/{id}/avatar"),
+    ("DELETE", "/v1/office/users/{id}/avatar"),
+    ("GET", "/v1/office/users/{id}/avatar/image"),
     ("POST", "/v1/bootstrap"),
     ("GET", "/v1/office/host-network"),
     ("PUT", "/v1/office/host-network"),

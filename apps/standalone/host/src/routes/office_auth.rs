@@ -110,6 +110,12 @@ pub async fn login(
     match (row, refusal) {
         (Some((id, login, name, role, _, _)), None) => {
             let role: OfficeRole = role.parse().map_err(ApiError::internal)?;
+            let avatar_version: Option<i64> =
+                sqlx::query_scalar("SELECT version FROM user_avatars WHERE user_id = ?")
+                    .bind(&id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(ApiError::internal)?;
             let (token, expires) = open_session(&mut tx, &id, &device.id, now)
                 .await
                 .map_err(ApiError::internal)?;
@@ -135,6 +141,7 @@ pub async fn login(
                     login,
                     name,
                     role,
+                    avatar_version,
                 },
                 expires_at: format_timestamp(expires),
             }))

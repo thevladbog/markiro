@@ -25,8 +25,8 @@ use markiro_proto::{
 use markiro_proto::{
     receipt_codes, shift_supports, BoxRegistryItem, BoxRegistryKind, BoxRegistryPage,
     OfficeWarehousePallets, OrgPrint, PalletBoxAddedData, PalletBoxRemovedData, PalletEventBatch,
-    PalletEventKind, WarehousePalletClosedData, WarehousePalletLabelData,
-    WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
+    PalletEventKind, UserAvatarPut, UserAvatarState, WarehousePalletClosedData,
+    WarehousePalletLabelData, WarehousePalletOpenedData, MIN_PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -158,6 +158,38 @@ fn office_auth_fixtures_round_trip() {
     assert_eq!(user.role, OfficeRole::Admin);
     let session: OfficeSession = round_trip("office-session.json");
     assert_eq!(session.user, user);
+    assert_eq!(user.avatar_version, None);
+}
+
+#[test]
+fn a_user_of_a_host_before_the_photos_reads_without_a_version() {
+    let user: OfficeUser = serde_json::from_value(fixture("office-user-legacy.json")).unwrap();
+    assert_eq!(user.avatar_version, None);
+}
+
+#[test]
+fn the_avatar_fixtures_round_trip_and_the_limits_match_the_constants() {
+    use markiro_proto::avatar;
+    let state: UserAvatarState = round_trip("user-avatar-state.json");
+    let photo = state.avatar.unwrap();
+    assert_eq!((photo.width, photo.height), (128, 128));
+    assert_eq!(photo.version, 1_790_000_000_000);
+    let empty: UserAvatarState = round_trip("user-avatar-state-empty.json");
+    assert_eq!(empty.avatar, None);
+    let put: UserAvatarPut = round_trip("avatar-put.json");
+    assert!(!put.data_base64.is_empty());
+    let limits = fixture("avatar-limits.json");
+    assert_eq!(limits["maxBytes"], serde_json::json!(avatar::MAX_BYTES));
+    assert_eq!(limits["minSide"], serde_json::json!(avatar::MIN_SIDE));
+    assert_eq!(limits["maxSide"], serde_json::json!(avatar::MAX_SIDE));
+    assert_eq!(limits["mediaTypes"], serde_json::json!(avatar::MEDIA_TYPES));
+}
+
+#[test]
+fn an_avatar_put_refuses_an_unknown_field() {
+    let mut put = fixture("avatar-put.json");
+    put["mediaType"] = serde_json::json!("image/png");
+    assert!(serde_json::from_value::<UserAvatarPut>(put).is_err());
 }
 
 #[test]
@@ -235,6 +267,7 @@ fn sscc_and_user_admin_fixtures_round_trip() {
     let _: BlockSizesUpdate = round_trip("block-sizes-update.json");
     let record: OfficeUserRecord = round_trip("office-user-record.json");
     assert!(record.active);
+    assert_eq!(record.avatar_version, Some(1_790_000_000_000));
     let _: OfficeUserCreate = round_trip("office-user-create.json");
     let _: OfficeUserUpdate = round_trip("office-user-update.json");
     let _: PasswordSet = round_trip("password-set.json");
