@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -75,6 +78,30 @@ const EXTENDED = licenseOf({
 });
 
 describe("the license's band above the office's pages", () => {
+  it("lays the notice out as the shared alert does: the icon on the first line, the sentence with its link inline in the text, the button in the action slot", async () => {
+    renderPage(sessionWith(TRIAL));
+    await pageShown();
+    const alert = await waitFor(() => {
+      const found = band().querySelector(".mk-alert");
+      if (!(found instanceof HTMLElement)) throw new Error("no notice yet");
+      return found;
+    });
+    // The pieces the stylesheet aligns, in the order it expects them.
+    const [icon, body, action] = Array.from(alert.children);
+    expect(icon?.className).toContain("mk-alert__icon");
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    expect(body?.className).toContain("mk-alert__body");
+    expect(action?.className).toContain("mk-alert__action");
+    // The link is part of the sentence, not of the action; the action is the one button.
+    const text = body?.querySelector(".mk-alert__text");
+    expect(text?.querySelector("a")?.textContent).toBe("Открыть раздел «Лицензия»");
+    expect(action?.querySelectorAll("a")).toHaveLength(0);
+    expect(within(action as HTMLElement).getAllByRole("button")).toHaveLength(1);
+    // The link stays whole when the sentence wraps (a rule of the office's stylesheet).
+    const css = readFileSync(join(__dirname, "../src/app/shell.css"), "utf8");
+    expect(css).toMatch(/\.office-banner \.mk-alert__text a\s*\{[^}]*white-space: nowrap/);
+  });
+
   it("shows the trial's days left, neutral, with a hidden word for its tone and a link", async () => {
     const session = sessionWith(TRIAL);
     renderPage(session);

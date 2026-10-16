@@ -270,8 +270,10 @@
 }
 
 /*
- * The settings groups (Организация, Доступ, Сервис) at the foot of the menu: set apart by a
- * rule and quieter than the operations above them.
+ * The settings groups (Организация, Доступ, Сервис) at the foot of the menu are set apart from the
+ * operations above them by a rule alone. Every entry of the menu, in either block, is one style
+ * (size, weight, height, colour, active mark: `.mk-sidebar__link` of `@markiro/ui`); only a
+ * group's name differs. The entries here carry the same inner box as the ones `Sidebar` draws.
  */
 .office-menu-settings {
   margin-top: 8px;
@@ -288,19 +290,35 @@
   gap: 2px;
 }
 
-.office-menu-settings .mk-sidebar__section {
-  padding-top: 8px;
+/*
+ * One row height for every entry (a control-sm, 32 px) and one gap above a group's name, so the
+ * whole menu, 17 entries and 6 names, stands in the minimum window's height without a scrollbar
+ * of its own at 800 px.
+ */
+.office-shell > .mk-sidebar .mk-sidebar__link {
+  padding-block: 6px;
 }
 
-.office-menu-settings .mk-sidebar__link {
-  padding: 6px 10px;
-  color: var(--fg-3);
-  font: var(--text-body-sm);
+.office-shell > .mk-sidebar .mk-sidebar__section {
+  padding-top: 10px;
 }
 
-.office-menu-settings .mk-sidebar__link:hover,
-.office-menu-settings .mk-sidebar__link--active {
-  color: var(--fg-1);
+.office-shell > .mk-sidebar .mk-sidebar__section:first-child {
+  padding-top: 4px;
+}
+
+.office-menu-settings .mk-sidebar__content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.office-menu-settings .mk-sidebar__content > span {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .office-shell__main {
@@ -395,7 +413,7 @@
  * sit the same distance apart, so a note above a table, the table, its pager
  * and the note under it never touch, and every card reads alike.
  */
-.office-shell__content .mk-card__body {
+:is(.office-shell__content, .mk-side-panel) .mk-card__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
@@ -412,42 +430,134 @@
 }
 
 /* A paragraph of a card has no browser margin on top of the card's gap. */
-.office-shell__content .mk-card__body > p {
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > p {
   margin: 0;
   font: var(--text-body);
 }
 
 /* A table in a card: the card's own gap is the space around it. */
-.office-shell__content .mk-card__body > .mk-table {
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > .mk-table,
+:is(.office-shell__content, .mk-side-panel) .mk-card__body > .office-paged {
   min-width: 0;
 }
 
 /*
- * A filter bar: one row of controls of one height on one line, their tops
- * together (a hint under one field hangs below the row and moves nothing). A
- * select or a date has the width of its content otherwise.
+ * A filter bar, on the page and in a drawer: its controls in one grid of equal tracks, their tops
+ * on one line (a hint or an error under a field hangs below it and moves nothing in its row); a
+ * button beside the fields starts level with their inputs, and a text field takes two tracks. The
+ * same grid everywhere, so the controls of one form never wrap into rows of different widths.
  */
-.office-shell__content .mk-filter-bar__controls {
-  align-items: flex-start;
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  align-items: start;
+  gap: var(--sp-4) var(--sp-3);
 }
 
-.office-shell__content .mk-filter-bar__controls > .mk-field {
-  min-width: 168px;
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field {
+  min-width: 0;
 }
 
 /*
- * A button beside the fields starts level with their inputs, not with the
- * bottom of the tallest field (a hint under one would pull it down): 22px is
- * a label (16px) and the gap under it (6px).
+ * 22px is a label (16px) and the gap under it (6px): the button's top is the input's top, not the
+ * bottom of the tallest field (a hint under one would pull it down).
  */
-.office-shell__content .mk-filter-bar__controls > .mk-btn {
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-btn {
+  justify-self: start;
   margin-top: 22px;
 }
 
-/* The search field, the one text input of a bar, gets the room its placeholder needs. */
-.office-shell__content .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
-  flex: 1 1 200px;
-  max-width: 420px;
+/*
+ * The search field, a text input of a bar, gets the room its placeholder needs: two tracks. In a
+ * drawer (a narrower column of four tracks) the text inputs of a filter form are one track each,
+ * so they and the form's buttons share a row.
+ */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  grid-column: span 2;
+}
+
+.mk-side-panel .mk-filter-bar__controls > .mk-field:has(> .mk-input) {
+  grid-column: span 1;
+}
+
+/*
+ * A table is a scroll region of its own, never wider than its card. Its edges say so: a shade
+ * where more lies beyond (it goes with the scroll), a thin scrollbar, and the ring the keyboard
+ * gives the region it focuses (arrow keys scroll it).
+ */
+.office-shell .mk-table__scroll,
+.mk-side-panel .mk-table__scroll {
+  --scroll-cover: var(--surface-card);
+  --scroll-shade: color-mix(in srgb, var(--fg-3) 40%, transparent);
+  background:
+    linear-gradient(to right, var(--scroll-cover) 30%, transparent) left center / 40px 100%
+      no-repeat local,
+    linear-gradient(to left, var(--scroll-cover) 30%, transparent) right center / 40px 100%
+      no-repeat local,
+    linear-gradient(to right, var(--scroll-shade), transparent) left center / 14px 100% no-repeat
+      scroll,
+    linear-gradient(to left, var(--scroll-shade), transparent) right center / 14px 100% no-repeat
+      scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.office-shell .mk-table__scroll:focus-visible,
+.mk-side-panel .mk-table__scroll:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* A table and its pagination: one block, the pagination a step under the table. */
+.office-paged {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/*
+ * The foot of a table: what is shown at the left, then the page size and the pages at the right;
+ * all of one height (a control is 40 px), wrapping by whole groups in a narrow drawer.
+ */
+.office-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.office-pagination__range {
+  margin: 0 auto 0 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.office-pagination__size {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-pagination__size .mk-field {
+  width: 88px;
+}
+
+.office-pagination__pages {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.office-pagination__page {
+  min-width: 112px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* A page's table of contents: plain links to its sections' anchors in a row. */
@@ -505,6 +615,11 @@
 
 .floor-update {
   margin-top: var(--sp-3);
+}
+
+/* The link in a banner's sentence stays whole: it moves to the next line rather than breaking in two. */
+.office-banner .mk-alert__text a {
+  white-space: nowrap;
 }
 
 .office-banner:empty {
@@ -627,14 +742,6 @@
 .shift-card__section > h2 {
   margin: 0;
   font: var(--text-h3);
-}
-
-/* Apart from the table by its container's gap, not by a margin of its own. */
-.office-pager {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
 }
 
 /* A template's name, and the «Типовой» tag of a stock template beside it. */
