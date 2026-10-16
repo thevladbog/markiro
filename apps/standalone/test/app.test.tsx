@@ -3370,7 +3370,7 @@ describe("the operator on the floor", () => {
     const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
     for (const serial of ["A1", "A2", "A3"]) {
       scan(km(serial));
-      await screen.findByText(`Принято: в коробе ${serial.slice(1)} из 12.`);
+      await screen.findByText(`В коробе ${serial.slice(1)} из 12.`);
     }
     await waitFor(() => expect(unsent()).toBe("3"));
     host.sendFacts.mockImplementation(async (records) =>
@@ -3453,7 +3453,7 @@ describe("the operator on the floor", () => {
       await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
       for (let n = 1; n <= 12; n += 1) {
         scan(km(`B${String(n).padStart(2, "0")}`));
-        await screen.findByText(`Принято: в коробе ${n} из 12.`);
+        await screen.findByText(`В коробе ${n} из 12.`);
       }
       // The twelfth fills the box; with no serial and no host the box stays open, and the screen says why.
       expect(await screen.findByText("Нет номеров SSCC: короб не закрыт")).toBeTruthy();
@@ -3569,7 +3569,7 @@ describe("the operator on the floor", () => {
       await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
       for (const serial of ["A1", "A2"]) {
         scan(km(serial));
-        await screen.findByText(`Принято: в коробе ${serial.slice(1)} из 12.`);
+        await screen.findByText(`В коробе ${serial.slice(1)} из 12.`);
       }
       fireEvent.click(await afterPause("Закрыть короб"));
       fireEvent.click(await afterPause("Закрыть короб"));

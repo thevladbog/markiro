@@ -9,7 +9,7 @@ import { readScanHistory, type ScanHistoryRow } from "./scan-history.js";
 import "./scan-history.css";
 
 /** Rows in the work screen's own list: the last scans, with «Вся история» for the rest. */
-export const COMPACT_ROWS = 4;
+export const COMPACT_ROWS = 8;
 /** Rows on a page of the full history: 64 px rows that fit the touch panel. */
 export const PAGE_ROWS = 7;
 
@@ -96,17 +96,18 @@ function HistoryHead() {
   );
 }
 
-type Read =
+export type ScanHistoryRead =
   | { kind: "loading" }
   | { kind: "failed" }
   | { kind: "ready"; rows: ScanHistoryRow[]; total: number };
+type Read = ScanHistoryRead;
 
 /**
  * One slice of the shift's scans, read again when `refreshKey` changes (the
  * work screen changes it after every scan). A failed read leaves the old rows
  * out and says so; it never touches the work itself.
  */
-function useScanHistory(
+export function useScanHistory(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,
@@ -135,40 +136,60 @@ function useScanHistory(
   return read;
 }
 
+/** One row of the work screen's list: the time, the result as a chip with its glyph, the code. */
+function CompactRow({ row }: { row: ScanHistoryRow }) {
+  const { t } = useTranslation();
+  const result = useResult()(row);
+  const operator = row.operatorName ?? t("floor.scanHistory.noOperator");
+  const position =
+    row.boxPosition === null
+      ? t("floor.scanHistory.noBox")
+      : t("floor.scanHistory.position_n", { n: row.boxPosition });
+  const code = row.maskedCode ?? t("floor.scanHistory.noCode");
+  return (
+    <li
+      className="scan-history__row"
+      data-verdict={row.verdict}
+      aria-label={t("floor.scanHistory.row", {
+        time: timeOf(row.scannedAt),
+        operator,
+        position,
+        result: result.reason === null ? result.label : `${result.label}: ${result.reason}`,
+        code,
+      })}
+    >
+      <span className="scan-history__time">{timeOf(row.scannedAt)}</span>
+      <span className="scan-history__result">
+        <StatusChip phase={PHASE[row.verdict]} size="floor" label={result.label} />
+      </span>
+      <span className="scan-history__code" title={code}>
+        {code}
+      </span>
+    </li>
+  );
+}
+
 export interface ScanHistoryProps {
-  local: LocalExecutor;
-  pairing: Pairing;
-  shiftId: string;
-  /** Changes after each scan, so the list reads again. */
-  refreshKey: unknown;
-  /**
-   * The screen has read its own state: the history is secondary and reads after it, so a
-   * failed first read stops the line as it did, whatever the history asks.
-   */
-  enabled?: boolean;
+  /** The screen's one read of the newest scans (`useScanHistory`), also the last scan's source. */
+  read: ScanHistoryRead;
   /** Opens the full history. */
   onOpenAll: () => void;
 }
 
 /**
- * «История сканирования» on the work screen (beta 3.2, in the place of the
- * duplicated plan row): the last scans of this shift with the time, the
- * operator, the place in the box and the result, and a button for all of them.
+ * «История сканирований» on the work screen: the shift's one list of its last
+ * `COMPACT_ROWS` scans (time, result, code), and a button for all of them. The list
+ * scrolls inside its own region; nothing else on the screen does.
  */
-export function ScanHistory({
-  local,
-  pairing,
-  shiftId,
-  refreshKey,
-  enabled = true,
-  onOpenAll,
-}: ScanHistoryProps) {
+export function ScanHistory({ read, onOpenAll }: ScanHistoryProps) {
   const { t } = useTranslation();
-  const read = useScanHistory(local, pairing, shiftId, COMPACT_ROWS, 0, refreshKey, enabled);
   return (
-    <section className="scan-history" aria-labelledby="scan-history-title">
+    <section
+      className="work-instrument scan-history scan-history--compact"
+      aria-labelledby="scan-history-title"
+    >
       <div className="scan-history__title">
-        <h3 id="scan-history-title">{t("floor.scanHistory.title")}</h3>
+        <h2 id="scan-history-title">{t("floor.scanHistory.title")}</h2>
         <Button size="floor" variant="secondary" onClick={onOpenAll}>
           {t("floor.scanHistory.all")}
         </Button>
@@ -178,11 +199,16 @@ export function ScanHistory({
         <p className="scan-history__empty">{t("floor.scanHistory.empty")}</p>
       )}
       {read.kind === "ready" && read.rows.length > 0 && (
-        <ul className="scan-history__list" aria-label={t("floor.scanHistory.title")}>
+        <ul className="scan-history__list" aria-label={t("floor.scanHistory.title")} tabIndex={0}>
           {read.rows.map((row) => (
-            <HistoryRow key={row.id} row={row} />
+            <CompactRow key={row.id} row={row} />
           ))}
         </ul>
+      )}
+      {read.kind === "ready" && read.total > read.rows.length && (
+        <p className="scan-history__note">
+          {t("floor.scanHistory.shown", { count: read.rows.length })}
+        </p>
       )}
     </section>
   );

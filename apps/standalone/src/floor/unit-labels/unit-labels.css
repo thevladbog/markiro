@@ -5,43 +5,78 @@
  * .print-verification*, .product-label-history*). Tokens from @markiro/ui only.
  */
 
-/* The validation panel keeps the flexible row; the label panel takes its content height. */
+/* The duplicate's steps take their content height under the last scan's hero. */
 .work-screen__primary:has(> .work-unit-label) {
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .work-unit-label {
   display: grid;
-  padding: var(--sp-3);
+  padding: 0;
   gap: var(--sp-2);
 }
 
-.work-unit-label h2 {
+/* Three vertical steps: ready (ok), waiting (grey), in hand (highlighted), stopped (err). */
+.work-unit-label__steps {
+  display: grid;
   margin: 0;
-  font: var(--floor-lg);
+  padding: 0;
+  gap: var(--sp-2);
+  list-style: none;
 }
 
-/* The state in words, the code's end beside it in the counter's face. */
-.work-unit-label__readout {
+.work-unit-label__step {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
-  align-items: baseline;
+  min-height: 52px;
+  padding: var(--sp-1) var(--sp-4);
+  gap: var(--sp-3);
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--muted);
   font: var(--floor-body-strong);
 }
 
-.work-unit-label__readout code,
-.unit-label-history__row code,
-.unit-label-window__code {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+.work-unit-label__glyph {
+  flex: none;
 }
 
-.work-unit-label__hint {
+.work-unit-label__step-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.work-unit-label__step .mk-btn {
+  flex: none;
+}
+
+.work-unit-label__step[data-state="ready"] {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.work-unit-label__step[data-state="current"] {
+  border-color: var(--fg);
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.work-unit-label__step[data-state="error"] {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* One line of the label's state in words, with its code's end. */
+.work-unit-label__status {
   margin: 0;
-  color: var(--fg-2);
+  overflow: hidden;
+  color: var(--muted);
   font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The window: its words in the middle, large enough to read from the line. */

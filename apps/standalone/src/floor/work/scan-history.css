@@ -113,35 +113,61 @@
   white-space: nowrap;
 }
 
-/* The compact list lives in a narrow column: two lines to a scan, nothing left out. */
-.work-facts .scan-history__row {
-  padding-block: var(--sp-1);
-  row-gap: 2px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "time operator position"
-    "result result code";
+/*
+ * The work screen's list: one card, a head with «Вся история», rows of time, result chip and code,
+ * and a note at its foot. The list is the one region that scrolls, and on the keyboard too.
+ */
+.scan-history--compact {
+  display: grid;
+  min-height: 0;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+}
+
+.scan-history--compact .scan-history__title h2 {
+  font: var(--floor-body-strong);
+}
+
+.scan-history--compact .scan-history__list {
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+}
+
+.scan-history--compact .scan-history__list:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The empty and failed states take the list's row, so the note stays at the foot. */
+.scan-history--compact > .scan-history__empty,
+.scan-history--compact > .mk-alert {
+  grid-row: 2;
+}
+
+.scan-history--compact .scan-history__row {
   min-height: 56px;
+  padding-inline: var(--sp-3);
+  gap: var(--sp-3);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--panel);
 }
 
-.work-facts .scan-history__time {
-  grid-area: time;
+.scan-history--compact .scan-history__time {
+  color: var(--muted);
 }
 
-.work-facts .scan-history__operator {
-  grid-area: operator;
+.scan-history--compact .scan-history__code {
+  text-align: right;
 }
 
-.work-facts .scan-history__position {
-  grid-area: position;
-}
-
-.work-facts .scan-history__result {
-  grid-area: result;
-}
-
-.work-facts .scan-history__code {
-  grid-area: code;
-  color: var(--fg-2);
-  font-size: 14px;
+.scan-history__note {
+  margin: 0;
+  color: var(--muted);
+  font: 400 14px/20px var(--font-ui);
+  text-align: center;
 }
