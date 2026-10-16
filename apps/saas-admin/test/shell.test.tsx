@@ -46,6 +46,47 @@ describe("SaaS-admin operational shell", () => {
     expect(screen.queryByText("SAAS CONSOLE · 01")).toBeNull();
   });
 
+  it("orders the rail by group, numbers it from position and omits support chats", async () => {
+    installOperationsApi();
+    renderSaasApp({ initialEntry: "/" });
+    await screen.findByRole("heading", { level: 1, name: "Операционный обзор" });
+
+    const rail = screen.getByRole("navigation", { name: "Разделы платформы" });
+    const groups = Array.from(rail.querySelectorAll("li")).filter((node) =>
+      node.querySelector("a[href]"),
+    );
+    const labels = groups.map((node) => node.querySelector("a")?.textContent ?? "");
+    const indexes = Array.from(rail.querySelectorAll(".app-rail__index")).map(
+      (node) => node.textContent,
+    );
+
+    expect(indexes).toEqual(indexes.map((_, position) => String(position + 1).padStart(2, "0")));
+    expect(new Set(indexes).size).toBe(indexes.length);
+    const names = [
+      "Обзор",
+      "Тенанты",
+      "Заявки",
+      "Каталог",
+      "Услуги",
+      "Договоры",
+      "Предложения",
+      "Счета",
+      "Акты",
+      "Платежи",
+      "Мониторинг",
+      "Национальный каталог",
+      "Отчёты",
+      "Аудит",
+      "Команда",
+      "Наша организация",
+    ];
+    const positions = names.map((name) => labels.findIndex((label) => label.includes(name)));
+    expect(positions.every((value) => value >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(screen.queryByRole("link", { name: /Чаты поддержки/ })).toBeNull();
+    expect(rail.querySelector('a[href="/support"]')).toBeNull();
+  });
+
   it("shows only capability-backed rail entries", async () => {
     installOperationsApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/" });

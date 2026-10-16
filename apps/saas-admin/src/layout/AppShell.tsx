@@ -8,6 +8,7 @@ import type { PlatformCapability } from "@markiro/platform-contracts";
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
 import { MarkiroLogo } from "../components/MarkiroLogo.js";
+import { SUPPORT_CHAT_ENABLED } from "../features.js";
 import i18n from "../i18n/index.js";
 import { NavigationGuardProvider, useNavigationGuard } from "./NavigationGuard.js";
 
@@ -31,77 +32,89 @@ function AppShellContent() {
     principal.capabilities.includes(capability);
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
-  const item = (id: string, label: string, to: string, index: string) => ({
+  const item = (id: string, label: string, to: string) => ({
     id,
     label,
     to,
     active: isActive(to),
-    icon: <RailIndex>{index}</RailIndex>,
   });
+  const when = (capability: PlatformCapability, ...items: ReturnType<typeof item>[]) =>
+    hasCapability(capability) ? items : [];
 
-  const groups: OperationalRailGroup[] = [
+  const draftGroups = [
     {
       id: "operations",
       label: t("shell.groups.operations"),
       items: [
-        item("overview", t("shell.overview"), "/", "01"),
-        item("tenants", t("shell.tenants"), "/tenants", "02"),
+        item("overview", t("shell.overview"), "/"),
+        item("tenants", t("shell.tenants"), "/tenants"),
+        ...when(
+          "billing.read",
+          item("billing-requests", t("shell.billingRequests"), "/billing-requests"),
+        ),
+        ...(SUPPORT_CHAT_ENABLED
+          ? when("billing.read", item("support", t("shell.supportEpisodes"), "/support"))
+          : []),
       ],
     },
     {
       id: "commerce",
       label: t("shell.groups.commerce"),
       items: [
-        ...(hasCapability("catalog.read")
-          ? [item("catalog", t("shell.catalog"), "/catalog", "03")]
-          : []),
-        ...(hasCapability("services.read")
-          ? [item("service-periods", t("shell.servicePeriods"), "/service-periods", "04")]
-          : []),
-        ...(hasCapability("agreements.read")
-          ? [item("agreements", t("shell.agreements"), "/agreements", "05")]
-          : []),
-        ...(hasCapability("billing.read")
-          ? [
-              item("offers", t("shell.offers"), "/offers", "06"),
-              item("invoices", t("shell.invoices"), "/invoices", "07"),
-              item("acts", t("shell.acts"), "/billing-acts", "08"),
-              item("payments", t("shell.payments"), "/payments", "09"),
-              item("billing-requests", t("shell.billingRequests"), "/billing-requests", "10"),
-              item("support", t("shell.supportEpisodes"), "/support", "10A"),
-            ]
-          : []),
+        ...when("catalog.read", item("catalog", t("shell.catalog"), "/catalog")),
+        ...when(
+          "services.read",
+          item("service-periods", t("shell.servicePeriods"), "/service-periods"),
+        ),
+        ...when("agreements.read", item("agreements", t("shell.agreements"), "/agreements")),
+        ...when(
+          "billing.read",
+          item("offers", t("shell.offers"), "/offers"),
+          item("invoices", t("shell.invoices"), "/invoices"),
+          item("acts", t("shell.acts"), "/billing-acts"),
+          item("payments", t("shell.payments"), "/payments"),
+        ),
       ],
     },
     {
       id: "platform",
       label: t("shell.groups.platform"),
       items: [
-        ...(hasCapability("diagnostics.read")
-          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "11")]
-          : []),
-        ...(hasCapability("catalog.read")
-          ? [item("national-catalog", t("shell.nationalCatalog"), "/national-catalog", "10A")]
-          : []),
-        ...(hasCapability("platformTeam.write")
-          ? [item("team", t("shell.team"), "/team", "12")]
-          : []),
-        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "13")] : []),
-        ...(hasCapability("reports.read")
-          ? [item("reports", t("shell.reports"), "/reports", "14")]
-          : []),
+        ...when("diagnostics.read", item("monitoring", t("shell.monitoring"), "/monitoring")),
+        ...when(
+          "catalog.read",
+          item("national-catalog", t("shell.nationalCatalog"), "/national-catalog"),
+        ),
+        ...when("reports.read", item("reports", t("shell.reports"), "/reports")),
+        ...when("audit.read", item("audit", t("shell.audit"), "/audit")),
+        ...when("platformTeam.write", item("team", t("shell.team"), "/team")),
       ],
     },
-    ...(hasCapability("billing.read")
-      ? [
-          {
-            id: "settings",
-            label: t("shell.groups.settings"),
-            items: [item("organization", t("shell.organization"), "/settings/organization", "15")],
-          },
-        ]
-      : []),
+    {
+      id: "settings",
+      label: t("shell.groups.settings"),
+      items: [
+        ...when(
+          "billing.read",
+          item("organization", t("shell.organization"), "/settings/organization"),
+        ),
+      ],
+    },
   ].filter((group) => group.items.length > 0);
+
+  // The index follows the visible position, so it is never typed by hand and
+  // cannot repeat or skip when a capability hides an entry.
+  let position = 0;
+  const groups: OperationalRailGroup[] = draftGroups.map((group) => ({
+    ...group,
+    items: group.items.map((entry) => {
+      position += 1;
+      return {
+        ...entry,
+        icon: <RailIndex>{String(position).padStart(2, "0")}</RailIndex>,
+      };
+    }),
+  }));
 
   useEffect(() => {
     if (!railOpen) return;
