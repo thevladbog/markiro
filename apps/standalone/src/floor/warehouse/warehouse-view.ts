@@ -142,7 +142,13 @@ export interface JobFact {
   value: string;
 }
 
-/** What the label says of its subject (the job's frozen fields); a line the label lacks is left out. */
+/** The facts the detail has room for: the most that stand beside the code without a scroll. */
+const FACTS_SHOWN = 4;
+
+/**
+ * What the label says of its subject (the job's frozen fields); a line the label lacks is left
+ * out, and no more than `FACTS_SHOWN` stand (the counterparty is the first to give way).
+ */
 export function jobFacts(job: Pick<WarehouseJob, "kind" | "fields">): JobFact[] {
   const { fields } = job;
   const facts: JobFact[] = [];
@@ -154,7 +160,7 @@ export function jobFacts(job: Pick<WarehouseJob, "kind" | "fields">): JobFact[] 
   add("productionDate", fields.date);
   add("shift", fields["shift.no"]);
   add("counterparty", fields["counterparty.name"]);
-  return facts;
+  return facts.slice(0, FACTS_SHOWN);
 }
 
 /** The codes a failed job carries when the printer, not the label, is what is missing. */

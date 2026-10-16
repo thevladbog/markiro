@@ -34,6 +34,7 @@ import {
   type JobKindView,
   type JournalFilter,
 } from "./warehouse-view.js";
+import "./warehouse.css";
 
 /**
  * The reprint's three views and its two questions, as stateless components over the pieces of

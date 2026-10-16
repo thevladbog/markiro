@@ -527,7 +527,7 @@ export function ReprintDialog({
     if (event.key !== "Tab") return;
     const focusable = Array.from(
       own.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]):not([tabindex="-1"]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
       ) ?? [],
     );
     const first = focusable[0];

@@ -172,6 +172,11 @@ describe("what a job tells of its printing", () => {
     ]);
   });
 
+  it("shows four facts at most, the counterparty giving way on a pallet", () => {
+    const keys = jobFacts(palletJob()).map((fact) => fact.key);
+    expect(keys).toEqual(["boxes", "quantity", "productionDate", "shift"]);
+  });
+
   it("starts a pallet's with its boxes, and a unit's with its date, leaving out what the label lacks", () => {
     expect(jobFacts(palletJob())[0]).toEqual({ key: "boxes", value: "18" });
     expect(jobFacts(palletJob())[1]).toEqual({ key: "quantity", value: "216" });
