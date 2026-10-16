@@ -1,6 +1,7 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { TSC, ZEBRA } from "./support/printing.js";
 import { BOX_SSCC } from "./support/warehouse.js";
 import {
   OPERATOR_ID,
@@ -12,8 +13,8 @@ import {
 describe("the warehouse reprint screen (plan СКЛ)", () => {
   it("starts a session with a reason and the organization's templates, and prints a box found on the host", async () => {
     const at = await renderWarehouse();
-    expect(await screen.findByText("Коды единиц: Дубль 58×40")).toBeTruthy();
-    expect(screen.getByText("Короба: Коробка 58×40")).toBeTruthy();
+    expect(await screen.findByText(`«Дубль 58×40» · ${TSC.name}`)).toBeTruthy();
+    expect(screen.getByText(`«Коробка 58×40» · ${ZEBRA.name}`)).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Начать перепечатку" }).hasAttribute("disabled"),
     ).toBe(true);
@@ -22,7 +23,8 @@ describe("the warehouse reprint screen (plan СКЛ)", () => {
     await at.scanner.listening();
     await at.scan(BOX_SSCC);
     expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
-    expect(screen.getByText("Этикеток передано на принтер: 1")).toBeTruthy();
+    await at.press("Следующий код");
+    expect(screen.getByText("Передано на принтер: 1")).toBeTruthy();
     expect(at.lookup).toHaveBeenCalledWith({ sscc: BOX_SSCC });
     expect(at.shell.sends).toHaveLength(1);
     expect(at.props.onRecorded).toHaveBeenCalled();
@@ -64,6 +66,7 @@ describe("the warehouse reprint screen (plan СКЛ)", () => {
     await at.scan(BOX_SSCC);
     await at.press("К сменам");
     expect(at.props.onLeave).toHaveBeenCalledTimes(1);
+    await at.press("Следующий код");
     await at.press("Завершить сеанс");
     expect(screen.getByRole("heading", { name: "Завершить сеанс перепечатки?" })).toBeTruthy();
     await at.press("Завершить");
@@ -76,9 +79,8 @@ describe("the warehouse reprint screen (plan СКЛ)", () => {
   it("chooses templates from a searchable list, kept for each kind of label", async () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
+    await at.press("Изменить: Короба");
     expect(screen.getByRole("heading", { name: "Шаблоны этикеток" })).toBeTruthy();
-    await at.press("Короба");
     const search = screen.getByLabelText("Поиск шаблона");
     fireEvent.focus(search);
     fireEvent.change(search, { target: { value: "нет такого" } });
@@ -89,7 +91,7 @@ describe("the warehouse reprint screen (plan СКЛ)", () => {
       "true",
     );
     await at.press("Применить шаблоны");
-    expect(await screen.findByText("Короба: Коробка 58×40")).toBeTruthy();
+    expect(await screen.findByText(`«Коробка 58×40» · ${ZEBRA.name}`)).toBeTruthy();
     expect(at.scanner.textEntry.at(-1)).toBe(false);
   });
 

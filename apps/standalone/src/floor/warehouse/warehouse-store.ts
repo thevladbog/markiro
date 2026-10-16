@@ -128,6 +128,9 @@ export const JOB_BY_IDENTITY_SQL =
   `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND session_id = ? AND identity = ? ` +
   "AND state <> 'cancelled' ORDER BY rowid DESC LIMIT 1";
 
+/** The session's journal: every job of it, the newest first (presentation only, no state is moved). */
+export const SESSION_JOBS_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND session_id = ? ORDER BY rowid DESC`;
+
 export const JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND id = ?`;
 
 export const SENT_COUNT_SQL =
@@ -417,6 +420,32 @@ export function readJob(
   id: string,
 ): Promise<WarehouseJob | null> {
   return oneJob(local, JOB_SQL, [pairing.hostId, pairing.deviceId, id]);
+}
+
+/**
+ * The jobs of the session, the newest first: the station's journal of this session, which does not
+ * outlive it. A job this build cannot read is left out (the journal is shown, never the guard of
+ * a state: the open job is read by `readOpenJob`, which still refuses it).
+ */
+export async function listSessionJobs(
+  local: LocalExecutor,
+  pairing: Pairing,
+  sessionId: string,
+): Promise<WarehouseJob[]> {
+  const found = await local.query(
+    SESSION_JOBS_SQL,
+    [pairing.hostId, pairing.deviceId, sessionId],
+    jobRow,
+  );
+  const jobs: WarehouseJob[] = [];
+  for (const row of found) {
+    try {
+      jobs.push(toJob(row));
+    } catch (error) {
+      if (!(error instanceof UnreadableWarehouseJobError)) throw error;
+    }
+  }
+  return jobs;
 }
 
 /** How many labels of the session went to a printer (sent or checked). */

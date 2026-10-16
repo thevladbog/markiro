@@ -108,11 +108,25 @@ describe("the work screen's colour", () => {
     );
   });
 
-  it("paints the duplicate's steps on ok, panel, a fg-outlined highlight and err", () => {
-    expect(rule(UNIT, '.work-unit-label__step[data-state="ready"]')).toMatch(/var\(--ok-bg\)/);
-    expect(rule(UNIT, '.work-unit-label__step[data-state="current"]')).toMatch(/var\(--fg\)/);
-    expect(rule(UNIT, '.work-unit-label__step[data-state="error"]')).toMatch(/var\(--err-bg\)/);
-    expect(rule(UNIT, ".work-unit-label__step")).toMatch(/var\(--panel\)/);
+  it("draws the duplicate's steps as hairline-separated rows: ok, info, err on the glyph and the tag", () => {
+    expect(rule(UNIT, ".work-unit-label__step")).toMatch(
+      /border-bottom:\s*1px solid var\(--line\)/,
+    );
+    expect(rule(UNIT, ".work-unit-label__step")).toMatch(/min-height:\s*64px/);
+    expect(
+      rule(UNIT, '.work-unit-label__step[data-state="ready"] .work-unit-label__glyph'),
+    ).toMatch(/var\(--ok-fg\)/);
+    expect(rule(UNIT, '.work-unit-label__step[data-state="ready"] .work-unit-label__tag')).toMatch(
+      /var\(--ok-bg\)/,
+    );
+    expect(
+      rule(UNIT, '.work-unit-label__step[data-state="current"] .work-unit-label__glyph'),
+    ).toMatch(/var\(--info-fg\)/);
+    expect(
+      rule(UNIT, '.work-unit-label__step[data-state="error"] .work-unit-label__glyph'),
+    ).toMatch(/var\(--err-fg\)/);
+    // The row is no card: a container in a container is the kit's one forbidden layer.
+    expect(rule(UNIT, ".work-unit-label__step")).not.toMatch(/background/);
   });
 
   it("keeps no per-product accent on the floor's work screen", () => {

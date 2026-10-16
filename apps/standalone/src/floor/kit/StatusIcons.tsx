@@ -22,7 +22,26 @@ export type GlyphName =
   | "chevron-left"
   | "chevron-right"
   | "user-switch"
-  | "refresh";
+  | "refresh"
+  | "box"
+  | "layers"
+  | "qr"
+  | "file"
+  | "inbox"
+  | "search-x"
+  | "keyboard"
+  | "check-circle"
+  | "question-circle"
+  | "x-circle"
+  | "warning"
+  | "circle-notch"
+  | "info"
+  | "stop"
+  | "x"
+  | "arrow-left"
+  | "scan-frame"
+  | "search"
+  | "minus-circle";
 
 const PATHS: Record<GlyphName, ReactNode> = {
   "wifi-high": (
@@ -117,6 +136,113 @@ const PATHS: Record<GlyphName, ReactNode> = {
       <path d="M5.8 3.5v3.3h3.3" />
       <path d="M20.5 11.5a8.5 8.5 0 0 1-2.6 6" />
       <path d="M18.2 20.5v-3.3h-3.3" />
+    </>
+  ),
+  box: (
+    <>
+      <path d="M12 3.5 20 8v8l-8 4.5L4 16V8z" />
+      <path d="M4 8l8 4.5L20 8" />
+      <path d="M12 12.5v8" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="M12 4 21 9l-9 5-9-5z" />
+      <path d="M3 13.5l9 5 9-5" />
+    </>
+  ),
+  qr: (
+    <>
+      <path d="M4.5 4.5h6v6h-6z" />
+      <path d="M13.5 4.5h6v6h-6z" />
+      <path d="M4.5 13.5h6v6h-6z" />
+      <path d="M13.5 13.5h2.5v2.5h-2.5zM18 18h1.5v1.5H18z" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M6 3.5h8.5L19 8v12.5H6z" />
+      <path d="M14.5 3.5V8H19" />
+      <path d="M9 13h7M9 16.5h7" />
+    </>
+  ),
+  inbox: (
+    <>
+      <path d="M3.5 13.5 6 5h12l2.5 8.5v6h-17z" />
+      <path d="M3.5 13.5h5l1.2 2.5h4.6l1.2-2.5h5" />
+    </>
+  ),
+  "search-x": (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m20 20-4.9-4.9" />
+      <path d="m8.2 8.2 4.6 4.6m0-4.6-4.6 4.6" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <path d="M3 6.5h18v11H3z" />
+      <path d="M6.5 10h.1M10 10h.1M13.5 10h.1M17 10h.1M6.5 13.5h11" />
+    </>
+  ),
+  "check-circle": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m8 12.3 2.8 2.8 5.2-5.6" />
+    </>
+  ),
+  "question-circle": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.6 9.6a2.5 2.5 0 1 1 3.6 2.2c-.8.4-1.2 1-1.2 1.8" />
+      <path d="M12 16.6v.1" />
+    </>
+  ),
+  "x-circle": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m9 9 6 6m0-6-6 6" />
+    </>
+  ),
+  warning: (
+    <>
+      <path d="M12 4 21 19.5H3z" />
+      <path d="M12 10v4.5" />
+      <path d="M12 17v.1" />
+    </>
+  ),
+  "circle-notch": <path d="M20.5 12A8.5 8.5 0 1 1 12 3.5" />,
+  info: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11v5.5" />
+      <path d="M12 7.7v.1" />
+    </>
+  ),
+  stop: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.5 9.5h5v5h-5z" />
+    </>
+  ),
+  x: <path d="m6 6 12 12M18 6 6 18" />,
+  "arrow-left": <path d="M19.5 12h-15M10.5 6l-6 6 6 6" />,
+  "minus-circle": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 12h7" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m20 20-4.9-4.9" />
+    </>
+  ),
+  "scan-frame": (
+    <>
+      <path d="M4 8V4.5h3.5M16.5 4.5H20V8M20 16v3.5h-3.5M7.5 19.5H4V16" />
+      <path d="M8.5 8.5h7v7h-7z" />
     </>
   ),
   refresh: (

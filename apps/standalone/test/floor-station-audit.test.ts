@@ -405,3 +405,91 @@ describe("the redesigned workstation setup (design kit 2026-10)", () => {
     expect(rule(setup, ".setup-sound > .floor-switch-card")["border-radius"]).toBe("0");
   });
 });
+
+describe("the warehouse reprint (design: station reprint, 2026-10)", () => {
+  const reprint = rulesOf("src/floor/warehouse/reprint.css");
+  const reprintText = textOf("src/floor/warehouse/reprint.css");
+  const frame = rulesOf("src/floor/warehouse/warehouse.css");
+
+  it("holds the screen to the window: a fixed grid of heading, body and the answers, never the page", () => {
+    const screen = rule(frame, "section.warehouse-reprint");
+    expect(screen["height"]).toBe("100%");
+    expect(screen["overflow"]).toBe("hidden");
+    expect(screen["grid-template-rows"]).toBe("auto minmax(0, 1fr) auto");
+    expect(rule(reprint, "section.warehouse-reprint")["position"]).toBe("relative");
+  });
+
+  it("makes the answers the kit's 84 px, 72 px on a short window", () => {
+    for (const selector of [
+      ".rp-footer .rp-footer__action.mk-btn",
+      ".rp-dialog__actions .mk-btn",
+    ]) {
+      const answers = rule(reprint, selector);
+      expect(answers["height"], selector).toBe("var(--control-floor-primary) !important");
+      expect(answers["border-radius"], selector).toBe("var(--floor-r-primary) !important");
+      expect(rule(reprint, selector, "@media (max-height: 700px)")["height"], selector).toBe(
+        "72px !important",
+      );
+    }
+    expect(
+      rule(reprint, ".rp-footer .floor-primary.mk-btn", "@media (max-height: 700px)")["height"],
+    ).toBe("72px !important");
+  });
+
+  it("draws the reasons as 84 px rows from the left, the chosen one a `fg` fill", () => {
+    const row = rule(reprint, ".rp-reason.mk-btn");
+    expect(row["justify-content"]).toBe("flex-start !important");
+    expect(row["height"]).toBe("var(--control-floor-primary) !important");
+    const chosen = rule(reprint, '.rp-reason[aria-checked="true"]');
+    expect(chosen["background"]).toBe("var(--fg) !important");
+    expect(chosen["color"]).toBe("var(--bg) !important");
+    expect(rule(reprint, ".rp-reason.mk-btn", "@media (max-height: 700px)")["height"]).toBe(
+      "64px !important",
+    );
+  });
+
+  it("makes the journal's row a transparent 84 px ghost button between hairlines (one layer)", () => {
+    const row = rule(reprint, ".rp-journal__row.mk-btn");
+    expect(row["min-height"]).toBe("84px !important");
+    expect(row["background"]).toBe("transparent !important");
+    expect(rule(reprint, ".rp-journal__list li")["border-bottom"]).toBe("1px solid var(--line)");
+    // The list is the one scroll region of the session's view.
+    expect(rule(reprint, ".rp-journal__list")["overflow-y"]).toBe("auto");
+  });
+
+  it("says a state in a 40 px tag with a glyph and a word, tone by tone on the kit's pairs", () => {
+    expect(rule(reprint, ".rp-tag")["height"]).toBe("40px");
+    for (const [tone, bg, fg] of [
+      ["ok", "ok-bg", "ok-fg"],
+      ["warn", "warn-bg", "warn-fg"],
+      ["error", "err-bg", "err-fg"],
+      ["info", "info-bg", "info-fg"],
+    ] as const) {
+      const painted = rule(reprint, `.rp-tag[data-tone="${tone}"]`);
+      expect(painted["background"], tone).toBe(`var(--${bg})`);
+      expect(painted["color"], tone).toBe(`var(--${fg})`);
+    }
+  });
+
+  it("lifts the dialog alone with the overlay's shadow, and moves nothing but the press", () => {
+    expect(rule(reprint, ".rp-dialog")["box-shadow"]).toBe("var(--shadow-overlay)");
+    expect(reprintText.match(/box-shadow/g)).toHaveLength(1);
+    expect(reprintText).not.toContain("@keyframes");
+    expect(reprintText).not.toContain("animation");
+  });
+
+  it("shares the print rows' columns so the values stand on one line", () => {
+    expect(rule(reprint, ".rp-print__row")["grid-template-columns"]).toBe("subgrid");
+    expect(rule(reprint, ".rp-print__rows")["grid-template-columns"]).toContain("auto");
+  });
+});
+
+describe("the duplicate's steps on the work screen", () => {
+  const unit = rulesOf("src/floor/unit-labels/unit-labels.css");
+
+  it("are 64 px rows between hairlines with a 40 px tag, no card of their own", () => {
+    expect(rule(unit, ".work-unit-label__step")["min-height"]).toBe("64px");
+    expect(rule(unit, ".work-unit-label__step")["border-bottom"]).toBe("1px solid var(--line)");
+    expect(rule(unit, ".work-unit-label__tag")["height"]).toBe("40px");
+  });
+});

@@ -12,7 +12,7 @@ import { labelSampleData } from "../src/office/templates/label-samples.js";
 import { PAIRING } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 import { quietLabelRendering } from "./support/office.js";
-import { setUpPrinting } from "./support/printing.js";
+import { setUpPrinting, ZEBRA } from "./support/printing.js";
 import {
   BOX_SOURCE,
   BOX_SSCC,
@@ -35,7 +35,11 @@ const NOT_SENT_ANSWER = async () => ({ sent: false as const, code: "not_sent" as
 function allFloorSized() {
   const buttons = screen.getAllByRole("button");
   expect(buttons.length).toBeGreaterThan(0);
-  for (const button of buttons) expect(button.className).toContain("mk-btn--floor");
+  // The kit's own controls (the keypad's keys, the journal's segments) are floor-sized by their sheet.
+  const kit = ["mk-btn--floor", "floor-keypad__key", "floor-segmented__option"];
+  for (const button of buttons) {
+    expect(kit.some((name) => button.className.includes(name)), button.outerHTML).toBe(true);
+  }
 }
 
 describe("the guard against a second tap", () => {
@@ -66,7 +70,7 @@ describe("the guard against a second tap", () => {
     await screen.findByText(/Этикетка не отправлена/);
     // The retry's tap is a deliberate one; its result puts «Напечатать ещё раз» where it was.
     await at.press("Повторить отправку");
-    await screen.findByText("Задание: передано на принтер");
+    await screen.findByText(/Этикетка передана на принтер/);
     await at.pressAtOnce("Напечатать ещё раз");
     expect(screen.queryByRole("heading", { name: "Причина новой попытки" })).toBeNull();
     await at.press("Напечатать ещё раз");
@@ -78,16 +82,25 @@ describe("the guard against a second tap", () => {
     await screen.findByRole("button", { name: "Начать перепечатку" });
     // The setup has just appeared: a reason, the templates and the leave wait.
     await at.pressAtOnce("Повреждена");
-    expect(screen.queryByText("Причина: Повреждена")).toBeNull();
-    await at.pressAtOnce("Шаблоны");
+    expect(screen.getByRole("radio", { name: "Повреждена" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    await at.pressAtOnce("Изменить: Коды единиц");
     expect(screen.queryByLabelText("Поиск шаблона")).toBeNull();
     await at.pressAtOnce("К сменам");
     expect(at.props.onLeave).not.toHaveBeenCalled();
     await at.press("Повреждена");
-    expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Повреждена" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     // The session starts, and the working view holds its own.
     await at.press("Начать перепечатку");
-    for (const name of ["Ввести код вручную", "Изменить причину", "Завершить сеанс", "К сменам"]) {
+    for (const name of [
+      "Ввести код вручную",
+      "Причина: Повреждена",
+      "Завершить сеанс",
+      "К сменам",
+    ]) {
       await at.pressAtOnce(name);
     }
     expect(screen.queryByLabelText(/Номер короба или паллеты/)).toBeNull();
@@ -118,7 +131,7 @@ describe("the guard against a second tap", () => {
   it("holds the picker's buttons after another kind of label is chosen", async () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
+    await at.press("Изменить: Коды единиц");
     await at.press("Паллеты");
     await at.pressAtOnce("Применить шаблоны");
     expect(screen.getByLabelText("Поиск шаблона")).toBeTruthy();
@@ -134,9 +147,9 @@ describe("the guard against a second tap", () => {
     await screen.findByText(/Неизвестно, вышла ли этикетка/);
     await at.press("Проверить сканом");
     await at.pressAtOnce("Отменить проверку");
-    expect(screen.getByText(/Отсканируйте новую этикетку\./)).toBeTruthy();
+    expect(screen.getByText("Отсканируйте новую этикетку")).toBeTruthy();
     await at.press("Отменить проверку");
-    expect(screen.queryByText(/Отсканируйте новую этикетку\./)).toBeNull();
+    expect(screen.queryByText("Отсканируйте новую этикетку")).toBeNull();
   });
 
   it("puts the focus on the view, never on a button, when the view changes", async () => {
@@ -173,8 +186,9 @@ describe("work in hand", () => {
       release({ status: "found", source: BOX_SOURCE });
       await at.gate.drain();
     });
+    // The label is found and sent: its detail's answer is no longer held by work.
     expect(
-      screen.getByRole("button", { name: "Завершить сеанс" }).getAttribute("aria-disabled"),
+      (await screen.findByRole("button", { name: "Следующий код" })).getAttribute("aria-disabled"),
     ).toBe(null);
   });
 
@@ -251,7 +265,7 @@ describe("work in hand", () => {
     await at.scan(BOX_SSCC);
     expect(vi.mocked(at.props.touch).mock.calls.length).toBeGreaterThan(before);
     const afterScan = vi.mocked(at.props.touch).mock.calls.length;
-    await at.press("Изменить причину");
+    await at.press("Следующий код");
     expect(vi.mocked(at.props.touch).mock.calls.length).toBeGreaterThan(afterScan);
   });
 
@@ -277,7 +291,7 @@ describe("work in hand", () => {
       assignments: { box: null, pallet: null, duplicate: null },
     });
     await at.scan(BOX_SSCC);
-    await screen.findByText("Задание: не отправлено");
+    await screen.findByText("Принтер не назначен");
     await setUpPrinting(at.local, { assignments: { box: "zebra", pallet: null, duplicate: null } });
     at.shell.holdSends();
     at.clock.now += PRESS_PAUSE_MS;
@@ -336,7 +350,9 @@ describe("work in hand", () => {
       isLeaving: () => false,
     });
     await at.settled();
-    expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Повреждена" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
     expect(at.props.onRecorded).not.toHaveBeenCalled();
   });
 
@@ -367,7 +383,7 @@ describe("work in hand", () => {
     });
     vi.mocked(at.props.onRecorded).mockClear();
     await at.scan(BOX_SSCC);
-    expect(await screen.findByText("Задание: исход неизвестен")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     // The failed settle wrote no record, the recovery wrote one: the delivery is told once.
     expect(at.props.onRecorded).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
@@ -433,6 +449,7 @@ describe("the keyboard and the scanner", () => {
     await keys.type(BOX_SSCC);
     await waitFor(() => expect(at.lookup).toHaveBeenCalledTimes(1));
     await at.settled();
+    await at.press("Следующий код");
     await at.press("Ввести код вручную");
     expect(keys.calls.at(-1)).toBe(true);
     await keys.type(PALLET_SSCC);
@@ -546,7 +563,7 @@ describe("the templates of the picker", () => {
     const labels: LabelRendering = { ...quietLabelRendering(), context: () => canvas };
     const at = await renderWarehouse({ seeded: station, labels });
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
+    await at.press("Изменить: Коды единиц");
     // The picker opens on the units; the preview of the boxes is what comes after.
     canvas.ops.length = 0;
     await at.press("Короба");
@@ -568,7 +585,7 @@ describe("the templates of the picker", () => {
     const { station } = await stationWithTwoBoxTemplates();
     const at = await renderWarehouse({ seeded: station });
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
+    await at.press("Изменить: Коды единиц");
     await at.press("Короба");
     await at.press(/Коробка узкая/);
     // Another kind is looked at and chosen; the boxes' choice stays.
@@ -579,8 +596,8 @@ describe("the templates of the picker", () => {
       "true",
     );
     await at.press("Применить шаблоны");
-    expect(screen.getByText("Короба: Коробка узкая")).toBeTruthy();
-    expect(screen.getByText("Паллеты: Палета 100×150")).toBeTruthy();
+    expect(screen.getByText(`«Коробка узкая» · ${ZEBRA.name}`)).toBeTruthy();
+    expect(screen.getByText(`«Палета 100×150» · ${ZEBRA.name}`)).toBeTruthy();
     await at.press("Повреждена");
     await at.press("Начать перепечатку");
     await at.scanner.listening();
@@ -597,7 +614,7 @@ describe("the templates of the picker", () => {
   it("starts the search again for another kind of label", async () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
+    await at.press("Изменить: Коды единиц");
     await at.press("Короба");
     fireEvent.change(screen.getByLabelText("Поиск шаблона"), { target: { value: "нет такого" } });
     expect(screen.getByText("По этому запросу шаблонов нет.")).toBeTruthy();
@@ -638,8 +655,18 @@ describe("the templates of the picker", () => {
     const at = await startedWarehouse({ seeded: station });
     await at.press("Шаблоны");
     await at.press("Короба");
+    await at.press(/Коробка узкая/);
     await at.press("Отмена");
-    expect(screen.getByText("Короба: Коробка 58×40")).toBeTruthy();
+    // The choice was cancelled: the session's box template is still the one it started with.
+    await at.press("Шаблоны");
+    await at.press("Короба");
+    expect(screen.getByRole("button", { name: /Коробка 58×40/ }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Коробка узкая/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    await at.press("Отмена");
     expect(rows(station.db, "SELECT box_template_id FROM wh_sessions")).toEqual([
       { box_template_id: BOX_TEMPLATE },
     ]);
@@ -659,9 +686,8 @@ describe("the templates of the picker", () => {
         source: { ...BOX_SOURCE, kind: "pallet", identity: PALLET_SSCC, sscc: PALLET_SSCC },
       }),
     });
-    expect(await screen.findByText("Паллеты: не выбран")).toBeTruthy();
-    await at.press("Шаблоны");
-    await at.press("Паллеты");
+    expect(await screen.findByText(/шаблон не выбран/)).toBeTruthy();
+    await at.press("Изменить: Паллеты");
     expect(
       screen.getByText("Нет включённых шаблонов этого назначения. Добавьте шаблон в офисе."),
     ).toBeTruthy();
@@ -683,10 +709,9 @@ describe("what a waiting label and an empty field keep", () => {
       assignments: { box: null, pallet: null, duplicate: null },
     });
     await at.scan(BOX_SSCC);
-    await screen.findByText("Задание: не отправлено");
-    const templates = screen.getByRole("button", { name: "Шаблоны" });
-    expect(templates.getAttribute("aria-disabled")).toBe("true");
-    await at.press("Шаблоны");
+    await screen.findByText("Принтер не назначен");
+    // The label's detail has the label's own answers: the templates are not offered beside them.
+    expect(screen.queryByRole("button", { name: "Шаблоны" })).toBeNull();
     expect(screen.queryByLabelText("Поиск шаблона")).toBeNull();
   });
 
@@ -709,7 +734,7 @@ describe("what the operator can reach", () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
     allFloorSized();
-    await at.press("Шаблоны");
+    await at.press("Изменить: Коды единиц");
     allFloorSized();
     await at.press("Отмена");
     await at.press("Повреждена");
@@ -718,7 +743,7 @@ describe("what the operator can reach", () => {
     await at.press("Ввести код вручную");
     allFloorSized();
     await at.press("Отмена");
-    await at.press("Изменить причину");
+    await at.press("Причина: Повреждена");
     allFloorSized();
     await at.press("Отмена");
     await at.press("Завершить сеанс");
@@ -729,23 +754,22 @@ describe("what the operator can reach", () => {
     const at = await startedWarehouse();
     expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
     await at.scan(BOX_SSCC);
-    expect(await screen.findByLabelText(`Короб ${BOX_SSCC}`)).toBeTruthy();
-    expect(screen.getByText("Задание: передано на принтер")).toBeTruthy();
-    for (const name of ["Повреждена"]) {
-      expect(screen.queryByRole("button", { name })).toBeNull();
-    }
+    expect(await screen.findByLabelText("Короб")).toBeTruthy();
+    expect(screen.getByText(/Этикетка передана на принтер/)).toBeTruthy();
+    // The reason is told in words beside the label, and is no longer a choice in the detail.
+    expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Повреждена" })).toBeNull();
   });
 
   it("marks the chosen reason as pressed, not by colour alone", async () => {
     const at = await renderWarehouse();
     await screen.findByRole("button", { name: "Начать перепечатку" });
     await at.press("Утеряна");
-    expect(screen.getByRole("button", { name: "Утеряна" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Повреждена" }).getAttribute("aria-pressed")).toBe(
+    // Chosen is a fill and a tick in the row (a radio of its group), not colour alone.
+    expect(screen.getByRole("radio", { name: "Утеряна" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Повреждена" }).getAttribute("aria-checked")).toBe(
       "false",
     );
-    expect(screen.getByText("Причина: Утеряна")).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Причина перепечатки" })).toBeTruthy();
   });
 });

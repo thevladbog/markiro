@@ -102,6 +102,8 @@ export interface TemplatePickerProps {
   /** «Повторить» of a list of sheets the host did not give. */
   onReloadSheets?: () => void;
   chosen: WarehouseTemplates;
+  /** The tab it opens on (the row of the summary that was changed); the units' by default. */
+  initialKind?: WarehouseSubjectKind;
   source: ScanSource;
   onApply: (templates: WarehouseTemplates) => void;
   onCancel: () => void;
@@ -123,13 +125,14 @@ export function TemplatePicker({
   sheets = { kind: "loading" },
   onReloadSheets,
   chosen,
+  initialKind = "unit",
   source,
   onApply,
   onCancel,
   clock = realClock,
 }: TemplatePickerProps) {
   const { t } = useTranslation();
-  const [kind, setKind] = useState<WarehouseSubjectKind>("unit");
+  const [kind, setKind] = useState<WarehouseSubjectKind>(initialKind);
   const [draft, setDraft] = useState<WarehouseTemplates>(chosen);
   const [query, setQuery] = useState("");
   const { viewRef, settled } = useViewGuard<HTMLDivElement>(`picker:${kind}`, clock);

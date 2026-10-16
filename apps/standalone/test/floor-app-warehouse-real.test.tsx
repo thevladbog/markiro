@@ -94,7 +94,7 @@ describe("a label of the warehouse reprint whose outcome is unknown, and the ope
     fireEvent.click(await screen.findByRole("button", { name: REPRINT }));
     await screen.findByRole("heading", { name: REPRINT });
     await pause();
-    fireEvent.click(screen.getByRole("button", { name: "Повреждена" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Повреждена" }));
     await pause();
     fireEvent.click(screen.getByRole("button", { name: "Начать перепечатку" }));
     await scanner.listening();
@@ -114,7 +114,7 @@ describe("a label of the warehouse reprint whose outcome is unknown, and the ope
     // And in again: the same session, the label's outcome still said, nothing sent by itself.
     fireEvent.click(again);
     expect(await screen.findByText(/Продолжен незавершённый сеанс перепечатки\./)).toBeTruthy();
-    expect(screen.getByText("Задание: исход неизвестен")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
     await waitFor(() => expect(shell.sends).toHaveLength(1));
     // The shell heard of the records (the delivery goes after the facts) and of no shift.

@@ -7,6 +7,7 @@ import {
   countUnsentRecords,
   finishSession,
   insertJobStatement,
+  listSessionJobs,
   moveJobStatement,
   purgeWarehouseSessions,
   readJob,
@@ -293,5 +294,46 @@ describe("the warehouse reprint's own tables (migration 0012)", () => {
         await executor.query(`SELECT count(*) AS n FROM ${table}`, [], z.object({ n: z.number() })),
       ).toEqual([{ n: 0 }]);
     }
+  });
+});
+
+describe("the journal of a reprint session", () => {
+  async function started() {
+    const opened = openLocalDb();
+    await startSession(opened.executor, PAIRING, {
+      id: SESSION,
+      reason: "damaged",
+      templates: TEMPLATES,
+      operatorId: OPERATOR_ID,
+      at: AT,
+    });
+    return opened;
+  }
+
+  it("lists the session's jobs, the newest first, and no other session's", async () => {
+    const { db, executor } = await started();
+    await executor.transaction([insertJobStatement(PAIRING, job("job-1"))]);
+    db.prepare("UPDATE wh_jobs SET state = 'sent' WHERE id = 'job-1'").run();
+    await executor.transaction([
+      insertJobStatement(PAIRING, job("job-2", { identity: "second", kind: "unit" })),
+    ]);
+    const listed = await listSessionJobs(executor, PAIRING, SESSION);
+    expect(listed.map((one) => [one.id, one.state, one.kind])).toEqual([
+      ["job-2", "prepared", "unit"],
+      ["job-1", "sent", "box"],
+    ]);
+    expect(await listSessionJobs(executor, PAIRING, "another-session")).toEqual([]);
+  });
+
+  it("leaves out a job this build cannot read instead of failing the whole journal", async () => {
+    const { db, executor } = await started();
+    await executor.transaction([insertJobStatement(PAIRING, job("job-1"))]);
+    db.prepare("UPDATE wh_jobs SET state = 'sent' WHERE id = 'job-1'").run();
+    await executor.transaction([insertJobStatement(PAIRING, job("job-2", { identity: "second" }))]);
+    db.prepare("UPDATE wh_jobs SET fields = ? WHERE id = 'job-2'").run(
+      JSON.stringify({ nope: "x" }),
+    );
+    const listed = await listSessionJobs(executor, PAIRING, SESSION);
+    expect(listed.map((one) => one.id)).toEqual(["job-1"]);
   });
 });

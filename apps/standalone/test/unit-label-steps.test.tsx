@@ -103,10 +103,14 @@ describe("the duplicate's steps on the screen", () => {
   it("lists the three steps in order, each with its state, and one line of words", () => {
     renderPanel(null);
     const items = within(screen.getByRole("list")).getAllByRole("listitem");
-    expect(items.map((item) => item.textContent)).toEqual([
-      "Код принят",
-      "Этикетка напечатана",
-      "Проверка этикетки",
+    expect(
+      items.map((item) => item.querySelector(".work-unit-label__step-name")?.textContent),
+    ).toEqual(["Код принят", "Этикетка напечатана", "Проверка этикетки"]);
+    // Each step says its state in words on its tag too, not by a glyph and a colour alone.
+    expect(items.map((item) => item.querySelector(".work-unit-label__tag")?.textContent)).toEqual([
+      "Ждёт",
+      "Ждёт",
+      "Ждёт",
     ]);
     expect(stepStates()).toEqual(["pending", "pending", "pending"]);
     expect(screen.getByRole("status").textContent).toBe("Ожидание сканирования");
@@ -156,5 +160,43 @@ describe("the duplicate's steps on the screen", () => {
     renderPanel(job("failed_before_send", "pending"));
     expect(stepStates()).toEqual(["ready", "error", "pending"]);
     expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+describe("the duplicate's steps say each state in words on a tag", () => {
+  function tags(): (string | null)[] {
+    return within(screen.getByRole("list"))
+      .getAllByRole("listitem")
+      .map((item) => item.querySelector(".work-unit-label__tag")?.textContent ?? null);
+  }
+
+  it.each([
+    ["prepared", job("prepared", "pending"), false, ["Готово", "Печатаем", "Ждёт"]],
+    [
+      "sent, check waits",
+      job("sent", "pending"),
+      false,
+      ["Готово", "Готово", "Сканируйте этикетку"],
+    ],
+    ["verified", job("sent", "verified"), false, ["Готово", "Готово", "Готово"]],
+    ["skipped", job("sent", "skipped"), false, ["Готово", "Готово", "Пропущена"]],
+    [
+      "sent under no check",
+      job("sent", "not_required", "none"),
+      false,
+      ["Готово", "Готово", "Не нужна"],
+    ],
+    // A stopped step offers «Повторить» instead of a tag.
+    ["stopped", job("failed_before_send", "pending"), false, ["Готово", null, "Ждёт"]],
+  ] as const)("%s", (_name, shown, busy, expected) => {
+    renderPanel(shown, busy, () => undefined);
+    expect(tags()).toEqual(expected);
+  });
+
+  it("keeps a stopped step's recovery a floor button and no other step's", () => {
+    renderPanel(job("delivery_unknown", "pending"), false, () => undefined);
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.className).toContain("mk-btn--floor");
   });
 });
