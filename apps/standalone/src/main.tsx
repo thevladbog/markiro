@@ -14,11 +14,10 @@ if (!container) {
   throw new Error("#root element not found");
 }
 
-// The floor is dark (design brief 02/04); office screens will share this
-// provider and switch the theme from their header.
+// «Системная» (follow the OS) is the default; the office header and sign-in switch it.
 createRoot(container).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="dark">
+    <ThemeProvider defaultTheme="system">
       <App />
     </ThemeProvider>
   </StrictMode>,

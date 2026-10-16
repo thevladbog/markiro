@@ -1570,29 +1570,14 @@
   font-weight: 500;
 }
 
-.theme-switcher {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+.theme-switcher .theme-switcher__option:hover {
   background: var(--surface-card);
-}
-
-.theme-switcher .theme-switcher__option {
-  width: 32px;
-  min-width: 32px;
-  padding: 0;
-  border-radius: 999px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--fg-2);
-}
-
-.theme-switcher .theme-switcher__option--on {
-  background: var(--surface-panel);
   color: var(--fg-1);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.theme-switcher .theme-switcher__option:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 /* From 1100px the recent users stand to the right of the form; below, under it. */

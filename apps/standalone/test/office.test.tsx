@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useState, type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -156,13 +156,14 @@ describe("Office", () => {
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
   });
 
-  it("switches the theme", async () => {
+  it("has the theme selector in the header", async () => {
     renderOffice(fakeOfficeSession());
-    const toggle = await screen.findByRole("button", { name: "Включить светлую тему" });
-    expect(toggle.querySelector('[aria-hidden="true"]')?.textContent).toBe("☀");
-    fireEvent.click(toggle);
+    const header = (await screen.findByRole("banner")) as HTMLElement;
+    const trigger = within(header).getByRole("button", { name: "Тема оформления: Тёмная" });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Светлая/ }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(screen.getByRole("button", { name: "Включить тёмную тему" })).toBeTruthy();
+    expect(within(header).getByRole("button", { name: "Тема оформления: Светлая" })).toBeTruthy();
   });
 
   it("offers the organization profile to both roles", async () => {
