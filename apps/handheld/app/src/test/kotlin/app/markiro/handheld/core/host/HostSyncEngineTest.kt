@@ -257,6 +257,67 @@ class HostSyncEngineTest {
     }
 
     @Test
+    fun anErrorWithAMalformedDetailIsAFailedPassNotACrashOfTheLoop() = runTest {
+        queue("a")
+        val post = Post(HostResult.Ok(409, """{"error":{"code":"conflict","message":"m","details":{"constraint":{"x":1},"credential":["device"]}}}""", null))
+        assertFalse(engine(post).drainAll())
+        assertEquals(1, db.hostOutboxDao().queuedCount())
+    }
+
+    @Test
+    fun anExceptionOfThePassNeverEscapesTheEngine() = runTest {
+        queue("a")
+        val boom = object : HostTransport {
+            override suspend fun get(path: String): HostResult = error("no GET")
+            override suspend fun post(path: String, body: String): HostResult = throw IllegalStateException("a defect")
+        }
+        assertFalse(HostSyncEngine(db, { HostApi(boom) }, HostAckMapper(db), HostCalls { }).drainAll())
+        assertEquals(1, db.hostOutboxDao().queuedCount())
+    }
+
+    private fun refusal(status: Int) = HostResult.Ok(status, """{"error":{"code":"validation_failed","message":"m","details":{}}}""", null)
+
+    @Test
+    fun aBatchTheHostRefusesAsAWholeIsRetriedThenSentOneByOneAndThePoisonedRecordIsQuarantined() = runTest {
+        queue("a", "bad", "c")
+        // the host refuses every request that carries the record "bad" and accepts the others
+        val seen = mutableListOf<List<String>>()
+        val picky = object : HostTransport {
+            override suspend fun get(path: String): HostResult = error("no GET")
+            override suspend fun post(path: String, body: String): HostResult {
+                val sent = ids(body)
+                seen += sent
+                return if ("bad" in sent) refusal(400) else receipts(*sent.map(::accepted).toTypedArray())
+            }
+        }
+        val engine = HostSyncEngine(db, { HostApi(picky) }, HostAckMapper(db), HostCalls { })
+        // two passes only retry: the queue is untouched and nothing is quarantined yet
+        assertFalse(engine.drainAll())
+        assertFalse(engine.drainAll())
+        assertEquals(3, db.hostOutboxDao().queuedCount())
+        assertEquals(0, db.hostOutboxDao().quarantinedCount())
+        // the third turns to single records: "a" goes, "bad" is refused alone three times, then quarantined with the status, "c" goes
+        var passes = 0
+        while (!engine.drainAll() && passes++ < 10) Unit
+        assertEquals(listOf("bad"), db.hostOutboxDao().quarantined().map { it.recordId })
+        assertEquals("refused_400", db.hostOutboxDao().quarantined().single().reason)
+        assertEquals(0, db.hostOutboxDao().queuedCount())
+        assertTrue("each record that was accepted was sent as a fact once more at most", seen.count { it == listOf("a") } >= 1 && seen.any { it == listOf("c") })
+    }
+
+    @Test
+    fun aRefusedBatchThatTheHostLaterAcceptsIsNotQuarantined() = runTest {
+        queue("a", "b")
+        val post = Post(refusal(403))
+        val engine = engine(post)
+        assertFalse(engine.drainAll())
+        assertFalse(engine.drainAll())
+        post.answer = receipts(accepted("a"), accepted("b"))
+        assertTrue(engine.drainAll())
+        assertEquals(0, db.hostOutboxDao().queuedCount() + db.hostOutboxDao().quarantinedCount())
+    }
+
+    @Test
     fun aDeviceOfTheCloudNeverSendsAnythingToTheHost() = runTest {
         db.deviceConfigDao().upsert(HostFactsFixtures.config(db, backend = "cloud"))
         db.outboxDao().insert(HostFactsFixtures.scanRow(KM_A, boxId = "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"))

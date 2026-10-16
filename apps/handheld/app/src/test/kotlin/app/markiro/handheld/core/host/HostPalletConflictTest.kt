@@ -79,6 +79,41 @@ class HostPalletConflictTest {
     }
 
     @Test
+    fun aReceiptOfAnOldAddNeverSettlesTheBoxPutOnAgainAfterIt() = runTest {
+        HostPalletFixtures.pallet(db)
+        HostPalletFixtures.box(db, BOX_1, "2026-10-08T07:00:05.000Z")
+        registryRow(BOX_1, claimedBy = PALLET)
+        val events = frozen()
+        val add = events.single { it.kind == "pallet_box_added" }
+        // the box is taken off and put on the same pallet again while the first add is in flight
+        db.palletMembershipDao().delete(PALLET, BOX_1)
+        HostPalletFixtures.box(db, BOX_1, "2026-10-08T07:05:00.000Z")
+        HostAckMapper(db, now = { "2026-10-15T10:01:00.000Z" }).apply(listOf(add), listOf(FactReceiptDto(add.recordId, "accepted")))
+        val row = db.palletMembershipDao().byPallet(PALLET).single()
+        assertEquals("the replacement is not acknowledged", MembershipStatus.PENDING, row.status)
+        // a refusal of the old add leaves the replacement and its claim on the box alone
+        HostAckMapper(db).apply(
+            listOf(add),
+            listOf(FactReceiptDto(add.recordId, "rejected", "box_on_pallet", details = Json.parseToJsonElement("""{"palletSscc":"146006820000000409"}""").jsonObject)),
+        )
+        assertEquals(MembershipStatus.PENDING, db.palletMembershipDao().byPallet(PALLET).single().status)
+        assertEquals(PALLET, db.boxRegistryDao().bySscc(BOX_1)!!.localPalletId)
+    }
+
+    @Test
+    fun aMalformedDetailOfAReceiptIsIgnoredNotACrash() = runTest {
+        HostPalletFixtures.pallet(db)
+        HostPalletFixtures.box(db, BOX_1, "2026-10-08T07:00:05.000Z")
+        val events = frozen()
+        val add = events.single { it.kind == "pallet_box_added" }
+        HostAckMapper(db).apply(
+            listOf(add),
+            listOf(FactReceiptDto(add.recordId, "rejected", "box_on_pallet", details = Json.parseToJsonElement("""{"palletSscc":["x"],"palletId":{"a":1}}""").jsonObject)),
+        )
+        assertEquals(MembershipStatus.REJECTED, db.palletMembershipDao().byPallet(PALLET).single().status)
+    }
+
+    @Test
     fun aConflictReceiptOfAnAddIsTheSameRefusal() = runTest {
         HostPalletFixtures.pallet(db)
         HostPalletFixtures.box(db, BOX_1, "2026-10-08T07:00:05.000Z")

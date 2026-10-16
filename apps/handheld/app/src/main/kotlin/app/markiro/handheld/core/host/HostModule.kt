@@ -122,12 +122,12 @@ object HostModule {
         operators: OperatorDao,
         orgPrint: HostOrgPrint,
         registry: HostBoxRegistry,
-    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls { revocation.reject() }, reference, operators, orgPrint, registry)
+    ): HostBackend = HostBackend({ api }, config, db, supplier, HostCalls(revocation::current) { revocation.reject(it) }, reference, operators, orgPrint, registry)
 
     @Provides
     @Singleton
     fun hostSyncEngine(db: HandheldDatabase, config: DeviceConfigDao, api: HostApi, revocation: HostRevocation, heartbeat: HostHeartbeat): HostSyncEngine =
-        HostSyncEngine(db, { api }, HostAckMapper(db), HostCalls { revocation.reject() }, config, beat = heartbeat::beat)
+        HostSyncEngine(db, { api }, HostAckMapper(db), HostCalls(revocation::current) { revocation.reject(it) }, config, beat = heartbeat::beat)
 
     /** What the consumers of the sync engine hold: the cloud's engine or the host's, by the backend of this device at each call. */
     @Provides

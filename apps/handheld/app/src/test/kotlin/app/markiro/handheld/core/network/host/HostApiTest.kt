@@ -79,4 +79,18 @@ class HostApiTest {
         assertEquals(listOf("accepted", "rejected"), receipts.map { it.outcome })
         assertEquals("box_on_pallet", receipts[1].code)
     }
+
+    @Test
+    fun aDetailThatIsNotAStringIsABadResponseNotACrash() = runTest {
+        val cases = listOf(
+            error(409, "conflict", """{"constraint":{"a":1}}"""),
+            error(409, "conflict", """{"constraint":["seat_limit"]}"""),
+            error(401, "unauthorized", """{"credential":{"x":1}}"""),
+        )
+        for (answer in cases) {
+            val (_, host) = api(answer)
+            val failure = (host.postFacts("{}").exceptionOrNull() as HostApiError).failure
+            assertTrue(failure.toString(), failure == HostFailure.BadResponse)
+        }
+    }
 }

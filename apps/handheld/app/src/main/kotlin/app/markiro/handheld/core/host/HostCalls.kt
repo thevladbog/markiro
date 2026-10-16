@@ -2,6 +2,7 @@ package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.network.host.HostFailure
+import app.markiro.handheld.core.storage.GenerationToken
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import retrofit2.HttpException
@@ -13,14 +14,21 @@ import java.io.IOException
  * on the device is then entered offline), `HttpException` with the cloud's own code for a refusal they show. A rejected key revokes this device
  * once (`revocation`), as the cloud's `RevocationInterceptor` does.
  */
-class HostCalls(private val revocation: suspend () -> Unit) {
-    suspend fun <T> run(block: suspend () -> Result<T>): T = block().getOrElse { throw translate(it) }
+class HostCalls(
+    /** The credential generation the call starts under, as the cloud tags its request: a late refusal never revokes a credential issued since. */
+    private val generation: () -> GenerationToken? = { null },
+    private val revocation: suspend (GenerationToken?) -> Unit,
+) {
+    suspend fun <T> run(block: suspend () -> Result<T>): T {
+        val started = generation()
+        return block().getOrElse { throw translate(it, started) }
+    }
 
-    private suspend fun translate(error: Throwable): Throwable {
+    private suspend fun translate(error: Throwable, started: GenerationToken?): Throwable {
         val failure = (error as? HostApiError)?.failure ?: return IOException("host call failed", error)
         return when (failure) {
             HostFailure.KeyRejected -> {
-                revocation()
+                revocation(started)
                 IOException("the host rejected this device's key")
             }
             is HostFailure.Constraint -> http(

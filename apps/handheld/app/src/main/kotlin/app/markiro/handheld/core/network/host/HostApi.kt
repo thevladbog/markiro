@@ -7,20 +7,22 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import java.io.IOException
+
+/** A detail that is a string, or `null` for anything else (an object, an array, a number, a missing key): a defect of the host must not throw. */
+fun JsonObject?.text(key: String): String? = (this?.get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 /** The calls of the host's protocol (spec 5, 8.1). Every call answers a `Result`; a failure is a [HostApiError]. */
 class HostApi(private val transport: HostTransport, private val json: Json = Json { ignoreUnknownKeys = true }) {
     private fun failureOf(result: HostResult.Ok): HostFailure {
         val error = runCatching { json.decodeFromString(ErrorEnvelopeDto.serializer(), result.body).error }.getOrNull()
             ?: return if (result.code >= 500) HostFailure.ServerError(result.code) else HostFailure.BadResponse
-        val constraint = error.details?.get("constraint")?.jsonPrimitive?.contentOrNull
+        val constraint = error.details.text("constraint")
         return when {
             error.code == "restore_pending" -> HostFailure.RestorePending(result.retryAfterSeconds)
-            error.code == "unauthorized" && error.details?.get("credential")?.jsonPrimitive?.contentOrNull == "device" -> HostFailure.KeyRejected
+            error.code == "unauthorized" && error.details.text("credential") == "device" -> HostFailure.KeyRejected
             error.code == "forbidden" -> HostFailure.Forbidden
             error.code == "pairing_code_invalid" -> HostFailure.PairingInvalid
             error.code == "pairing_code_expired" -> HostFailure.PairingExpired

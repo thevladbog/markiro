@@ -1,6 +1,7 @@
 package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.network.host.FactReceiptDto
+import app.markiro.handheld.core.network.host.text
 import app.markiro.handheld.core.storage.ConflictEntity
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.HostOutboxEntity
@@ -8,9 +9,7 @@ import app.markiro.handheld.core.storage.MetaEntity
 import app.markiro.handheld.core.util.Iso
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * What the host's receipt of each record does to this device, one record at a time and each in its own commit (a crash between two
@@ -59,7 +58,8 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
             "pallet" -> db.palletDao().markAcked(listOf(row.sourceKey), now())
             "shift_close" -> db.shiftCloseDao().markAccepted(row.sourceKey, now())
             HostPalletEvents.OPEN -> db.metaDao().put(MetaEntity(HostPalletEvents.openedKey(row.sourceKey), now()))
-            HostPalletEvents.ADDED -> body(row)?.let { db.palletMembershipDao().markAccepted(it.palletId, it.sscc, now()) }
+            // The receipt belongs to the add that was frozen (its `addedAt`): a box taken off and put on again is another row.
+            HostPalletEvents.ADDED -> body(row)?.let { db.palletMembershipDao().markAcceptedAt(it.palletId, it.sscc, it.addedAt, now()) }
             HostPalletEvents.REMOVED -> row.sourceKey.toLongOrNull()?.let { db.palletMembershipRemovalDao().delete(it) }
             HostPalletEvents.CLOSED -> {
                 db.palletDao().markAcked(listOf(row.sourceKey), now())
@@ -90,31 +90,32 @@ class HostAckMapper(private val db: HandheldDatabase, private val now: () -> Str
         val sent = body(row)
         db.hostOutboxDao().delete(row.recordId)
         if (sent == null) return
-        val winnerSscc = receipt.details?.get("palletSscc")?.jsonPrimitive?.contentOrNull
-        db.palletMembershipDao().markRejected(sent.palletId, sent.sscc, code, winnerSscc, now())
+        val winnerSscc = receipt.details.text("palletSscc")
+        // Only the row that was sent is refused; a replacement added since (another `addedAt`) holds the claim on the box.
+        if (db.palletMembershipDao().markRejectedAt(sent.palletId, sent.sscc, sent.addedAt, code, winnerSscc, now()) == 0) return
         db.boxRegistryDao().release(sent.sscc)
         if (code == "box_on_pallet") {
-            db.boxRegistryDao().markOnPallet(sent.sscc, receipt.details?.get("palletId")?.jsonPrimitive?.contentOrNull, winnerSscc)
+            db.boxRegistryDao().markOnPallet(sent.sscc, receipt.details.text("palletId"), winnerSscc)
         }
     }
 
-    private class Sent(val palletId: String, val sscc: String)
+    private class Sent(val palletId: String, val sscc: String, val addedAt: String?)
 
     private fun body(row: HostOutboxEntity): Sent? {
         val data = runCatching { Json.parseToJsonElement(row.body).jsonObject["data"].asObject() }.getOrNull() ?: return null
-        val palletId = data["palletId"]?.jsonPrimitive?.contentOrNull ?: return null
-        val sscc = data["boxSscc"]?.jsonPrimitive?.contentOrNull ?: return null
-        return Sent(palletId, sscc)
+        val palletId = data.text("palletId") ?: return null
+        val sscc = data.text("boxSscc") ?: return null
+        return Sent(palletId, sscc, data.text("addedAt"))
     }
 
     /** A scan the host already holds under another scan: the winner's terminal and time, as the cloud's conflict list keeps them. */
     private suspend fun recordConflict(row: HostOutboxEntity, receipt: FactReceiptDto) {
         if (row.sourceKind != "scan") return
         val body = runCatching { Json.parseToJsonElement(row.body).jsonObject }.getOrNull() ?: return
-        val hash = body["data"].asObject()?.get("code").asObject()?.get("codeHash")?.jsonPrimitive?.contentOrNull ?: return
+        val hash = body["data"].asObject()?.get("code").asObject().text("codeHash") ?: return
         val winner = receipt.details?.get("winner").asObject() ?: return
-        val scannedAt = winner["scannedAt"]?.jsonPrimitive?.contentOrNull ?: return
-        db.conflictDao().insertIgnore(listOf(ConflictEntity(hash, winner["deviceId"]?.jsonPrimitive?.contentOrNull, scannedAt, now())))
+        val scannedAt = winner.text("scannedAt") ?: return
+        db.conflictDao().insertIgnore(listOf(ConflictEntity(hash, winner.text("deviceId"), scannedAt, now())))
     }
 
     private companion object {
