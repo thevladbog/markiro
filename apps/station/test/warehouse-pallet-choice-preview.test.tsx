@@ -48,6 +48,9 @@ it("bounds A4 screen pixels and reuses the same owner-scoped layout when reopene
     let view = render(<PalletChoicePreview choice={choice} logoOwner={owner} />);
     await waitFor(() => expect(screen.getByRole("img")).toBeTruthy());
     const canvas = screen.getByRole("img") as HTMLCanvasElement;
+    // The canvas is committed before its passive sizing/drawing effect runs (an
+    // unsized canvas is the 300x150 default), so wait for the effect's draw.
+    await waitFor(() => expect(context.putImageData).toHaveBeenCalledTimes(1));
     expect(Math.max(canvas.width, canvas.height)).toBe(800);
     expect(canvas.width / canvas.height).toBeCloseTo(2480 / 3508, 2);
     const coldMs = performance.now() - cold;
@@ -55,6 +58,7 @@ it("bounds A4 screen pixels and reuses the same owner-scoped layout when reopene
     const warm = performance.now();
     view = render(<PalletChoicePreview choice={{ ...choice }} logoOwner={owner} />);
     await waitFor(() => expect(screen.getByRole("img")).toBeTruthy());
+    await waitFor(() => expect(context.putImageData).toHaveBeenCalledTimes(2));
     expect(renderPalletSheet).toHaveBeenCalledTimes(1);
     console.info(
       JSON.stringify({
