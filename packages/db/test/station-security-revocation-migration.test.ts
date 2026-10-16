@@ -7,6 +7,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 import { stationDevices } from "../src/schema/platform.js";
+import { closeFixturePool } from "./support/close-pool.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 it("models the separate security revocation revision", () => {
@@ -53,8 +54,8 @@ describe.skipIf(!process.env.DATABASE_URL)("security revocation forward migratio
     });
   }, 120_000);
   afterAll(async () => {
-    await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    await closeFixturePool(pool);
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
