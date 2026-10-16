@@ -32,14 +32,23 @@ function link(overrides: Partial<HostStatus> = {}): HostStatus {
   };
 }
 
-function setup(host: { getDeviceUpdate: () => Promise<DeviceUpdateOffer> }) {
+function setup(
+  host: { getDeviceUpdate: () => Promise<DeviceUpdateOffer> },
+  retryDelaysMs?: readonly number[],
+) {
   const updates = {
     appVersion: vi.fn(async () => "0.2.1"),
     checkManifest: vi.fn(async () => MANIFEST),
   };
   const view = renderHook(
     ({ status }: { status: HostStatus }) =>
-      useHostUpdateOffer({ link: status, paired: true, host, updates }),
+      useHostUpdateOffer({
+        link: status,
+        paired: true,
+        host,
+        updates,
+        ...(retryDelaysMs === undefined ? {} : { retryDelaysMs }),
+      }),
     { initialProps: { status: link() } },
   );
   return { ...view, updates };
@@ -86,5 +95,31 @@ describe("the offer across the link's flaps", () => {
     } as DeviceUpdateOffer);
     rerender({ status: link({ hostVersion: "0.4.0", seq: 2 }) });
     await waitFor(() => expect(result.current.kind).toBe("unavailable"));
+  });
+});
+
+describe("a host that is still checking its package", () => {
+  const VERIFYING = { hostVersion: "0.3.0", package: { state: "verifying" } } as DeviceUpdateOffer;
+
+  it("is asked again until its package is ready, without a change of the link", async () => {
+    const host = {
+      getDeviceUpdate: vi
+        .fn<() => Promise<DeviceUpdateOffer>>()
+        .mockResolvedValueOnce(VERIFYING)
+        .mockResolvedValueOnce(VERIFYING)
+        .mockResolvedValue(OFFER),
+    };
+    const { result } = setup(host, [5, 5]);
+    await waitFor(() => expect(result.current.kind).toBe("available"));
+    expect(host.getDeviceUpdate).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up after the bounded number of tries", async () => {
+    const host = { getDeviceUpdate: vi.fn(async () => VERIFYING) };
+    const { result } = setup(host, [5, 5]);
+    await waitFor(() => expect(host.getDeviceUpdate).toHaveBeenCalledTimes(3));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(host.getDeviceUpdate).toHaveBeenCalledTimes(3);
+    expect(result.current).toMatchObject({ kind: "unavailable", reason: "verifying" });
   });
 });
