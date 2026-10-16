@@ -4,6 +4,7 @@ import {
   commercialReviewIdentityV3Schema,
 } from "@markiro/platform-contracts";
 import { CatalogP1Fields } from "./CatalogP1Fields.js";
+import { CatalogOfflineAvailability } from "./CatalogOfflineAvailability.js";
 import { CatalogPayablePreview } from "./CatalogPayablePreview.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -15,6 +16,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
   Alert,
+  Badge,
   Button,
   Checkbox,
   ConfirmDialog,
@@ -25,6 +27,7 @@ import {
 } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
+import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   getCatalogEditorContext,
   getCatalogVersion,
@@ -453,6 +456,7 @@ export function CatalogVersionPanel({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const principal = usePlatformPrincipal();
   const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
   const context = useQuery({
@@ -664,6 +668,7 @@ export function CatalogVersionPanel({
             phase={CATALOG_STATUS_TO_PHASE[item.status]}
             label={t(`catalog.status.${item.status}`)}
           />
+          {item.offlineAvailable ? <Badge tone="teal">{t("catalog.offline.badge")}</Badge> : null}
           {canWrite && item.status === "published" ? (
             <Button variant="secondary" onClick={() => setRetireOpen(true)}>
               {t("catalog.retire")}
@@ -689,6 +694,10 @@ export function CatalogVersionPanel({
           </Button>
         </div>
       </header>
+      <CatalogOfflineAvailability
+        item={item}
+        canEdit={canWrite && principal.role === "platform_admin"}
+      />
       <div className="version-panel__grid">
         <div className="version-panel__content">
           {canEdit ? (

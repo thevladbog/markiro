@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   Alert,
+  Badge,
   Button,
   DataTabs,
   Pager,
@@ -70,15 +71,18 @@ export function CatalogPage() {
       key: "nameRu",
       title: t("catalog.columns.name"),
       render: (item) => (
-        <button
-          type="button"
-          className="table-link"
-          aria-label={t("catalog.openVersion", { name: item.nameRu, version: item.version })}
-          onClick={() => setSelectedId(item.id)}
-        >
-          <span>{item.nameRu}</span>
-          <small>{item.catalogItemCode}</small>
-        </button>
+        <div className="table-name-cell">
+          <button
+            type="button"
+            className="table-link"
+            aria-label={t("catalog.openVersion", { name: item.nameRu, version: item.version })}
+            onClick={() => setSelectedId(item.id)}
+          >
+            <span>{item.nameRu}</span>
+            <small>{item.catalogItemCode}</small>
+          </button>
+          {item.offlineAvailable ? <Badge tone="teal">{t("catalog.offline.badge")}</Badge> : null}
+        </div>
       ),
     },
     { key: "version", title: t("catalog.columns.version"), mono: true },

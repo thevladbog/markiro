@@ -1243,6 +1243,20 @@ textarea {
   font: var(--text-meta);
 }
 
+.table-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.catalog-offline-availability {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
 .invoice-detail-page {
   min-width: 0;
   display: grid;

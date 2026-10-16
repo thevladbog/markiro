@@ -322,6 +322,7 @@ export function installCatalogApi({
     { id: "91111111-1111-4111-8111-111111111111", policyKey: "test-fixture-policy", version: 1 },
   ],
   offlinePolicies = [],
+  offlineAvailability = { status: 200, holders: 0 },
   taxPolicy = {
     kind: "vat",
     regime: "other",
@@ -342,6 +343,7 @@ export function installCatalogApi({
   stalePublishPeriod?: "month" | "year";
   lifecyclePolicies?: { id: string; policyKey: string; version: number }[];
   offlinePolicies?: OfflineGrantPolicyDto[];
+  offlineAvailability?: { status: 200; holders: number } | { status: number; code: string };
   taxPolicy?: SellerTaxPolicy | null;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
@@ -351,6 +353,7 @@ export function installCatalogApi({
   let createSequence = 0;
   let reviewRevision = "2026-09-10T10:00:00.000Z";
   const offlinePolicyCalls: Array<{ path: string; body: unknown }> = [];
+  const offlineAvailabilityCalls: Array<{ code: string; body: unknown }> = [];
 
   vi.stubGlobal(
     "fetch",
@@ -479,6 +482,35 @@ export function installCatalogApi({
         catalog = [...catalog, created];
         return jsonResponse(201, created);
       }
+      const offlineMatch = url.match(
+        /\/api\/platform\/catalog\/items\/([^/]+)\/offline-availability$/,
+      );
+      if (offlineMatch && init.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as {
+          offlineAvailable: boolean;
+          reason: string;
+        };
+        offlineAvailabilityCalls.push({ code: offlineMatch[1]!, body: structuredClone(body) });
+        if (offlineAvailability.status !== 200) {
+          return jsonResponse(offlineAvailability.status, {
+            code: "code" in offlineAvailability ? offlineAvailability.code : "unexpected",
+          });
+        }
+        const target = catalog.find((item) => item.catalogItemCode === offlineMatch[1]);
+        catalog = catalog.map((item) =>
+          item.catalogItemCode === offlineMatch[1]
+            ? { ...item, offlineAvailable: body.offlineAvailable }
+            : item,
+        );
+        return jsonResponse(200, {
+          catalogItemId: target?.catalogItemId ?? "",
+          catalogItemCode: offlineMatch[1],
+          kind: target?.kind === "addon" ? "addon" : "plan",
+          offlineAvailable: body.offlineAvailable,
+          changed: target?.offlineAvailable !== body.offlineAvailable,
+          offlineTenantHolders: "holders" in offlineAvailability ? offlineAvailability.holders : 0,
+        });
+      }
       const archiveMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/archive$/);
       if (archiveMatch && init.method === "POST") {
         const status = archiveStatuses.shift() ?? 200;
@@ -546,6 +578,7 @@ export function installCatalogApi({
     patchCalls: () => structuredClone(patchCalls),
     createCalls: () => structuredClone(createCalls),
     offlinePolicyCalls: () => structuredClone(offlinePolicyCalls),
+    offlineAvailabilityCalls: () => structuredClone(offlineAvailabilityCalls),
   };
 }
 

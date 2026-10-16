@@ -1781,7 +1781,28 @@
     },
     "policyRequired": "Configure the seller tax policy before publishing.",
     "reviewError": "Review subject, document names and tax terms.",
-    "reviewStale": "Terms changed. Review the refreshed terms and confirm again."
+    "reviewStale": "Terms changed. Review the refreshed terms and confirm again.",
+    "offline": {
+      "badge": "Offline",
+      "label": "Available to offline customers",
+      "hint": "The item can be assigned to tenants without a cabinet. Cloud tenants get it as usual. Applies to every version of the item.",
+      "reason": "Reason",
+      "confirmEnableTitle": "Make this item available to offline customers?",
+      "confirmWithdrawTitle": "Withdraw availability for offline customers?",
+      "enableDescription": "The item can be assigned to tenants without a cabinet and added to their offers and invoices. The reason is written to the audit log.",
+      "withdrawDescription": "New assignments, offers and invoices for this item will no longer be possible for tenants without a cabinet. Assignments already made stay in force. The reason is written to the audit log.",
+      "confirm": "Confirm",
+      "enabled": "The item is available to offline customers.",
+      "withdrawn": "Withdrawn. Assignments stay in force for tenants without a cabinet: {{count}}.",
+      "unchanged": "The value is already set, nothing changed.",
+      "errors": {
+        "generic": "Could not change the availability of the item.",
+        "catalog_offline_availability_forbidden": "Only a platform administrator can change availability.",
+        "catalog_item_offline_kind_invalid": "A service needs no flag: services are always available to tenants without a cabinet.",
+        "catalog_item_archived": "The item is archived.",
+        "catalog_item_not_found": "The item was not found."
+      }
+    }
   },
   "tenants": {
     "title": "Tenants",
