@@ -94,7 +94,8 @@ export function HostStatusDot({ status, sync }: HostStatusDotProps) {
   return (
     <div className="host-dot" ref={root}>
       <Button
-        variant="ghost"
+        variant="plain"
+        className="host-dot__button"
         aria-label={label}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}

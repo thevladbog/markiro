@@ -336,6 +336,16 @@ describe("PageHeader", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Каталог" })).toBeDefined();
     expect(screen.getByRole("button", { name: "+ Продукт" })).toBeDefined();
   });
+
+  it("puts a description under the title only when given, and keeps the bare heading otherwise", () => {
+    const { container, rerender } = render(<PageHeader title="Каталог" />);
+    expect(container.querySelector(".mk-page-header__description")).toBeNull();
+    expect(container.querySelector(".mk-page-header__titles")).toBeNull();
+    rerender(<PageHeader title="Каталог" description="Товары и их шаблоны" />);
+    const description = container.querySelector(".mk-page-header__description");
+    expect(description?.textContent).toBe("Товары и их шаблоны");
+    expect(container.querySelector(".mk-page-header__titles h1")?.textContent).toBe("Каталог");
+  });
 });
 
 describe("EmptyState", () => {

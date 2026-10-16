@@ -1,3 +1,4 @@
+import { TemplateTabPanel, TemplateTabsBar } from "./TemplatesSection.js";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -73,8 +74,14 @@ export function TemplateDefaultsPage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.templateDefaults.title")} />
-      <TemplateDefaultsContent />
+      <PageHeader
+        title={t("office.templateDefaults.title")}
+        description={t("office.templateDefaults.subtitle")}
+      />
+      <TemplateTabsBar />
+      <TemplateTabPanel>
+        <TemplateDefaultsContent />
+      </TemplateTabPanel>
     </>
   );
 }

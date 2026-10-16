@@ -307,6 +307,7 @@ export function DevicesPage() {
     <>
       <PageHeader
         title={t("office.devices.title")}
+        description={t("office.devices.subtitle")}
         actions={
           <Button loading={create.isPending && !dialogOpen} onClick={() => void newCode()}>
             {t("office.devices.add")}

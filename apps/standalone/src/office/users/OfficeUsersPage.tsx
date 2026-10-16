@@ -91,37 +91,32 @@ export function OfficeUsersPage() {
 
   const columns: TableColumn<OfficeUserRecord>[] = [
     {
-      key: "photo",
-      title: t("office.users.table.photo"),
+      key: "user",
+      title: t("office.users.table.user"),
+      wrap: true,
+      minWidth: 260,
       render: (user) => (
-        <UserAvatar
-          name={user.name}
-          size={40}
-          userId={user.id}
-          avatarVersion={user.avatarVersion}
-          label={t("office.profile.photo.label", { name: user.name })}
-        />
-      ),
-    },
-    {
-      key: "login",
-      title: t("office.users.table.login"),
-      mono: true,
-      render: (user) => user.login,
-    },
-    {
-      key: "name",
-      title: t("office.users.table.name"),
-      render: (user) => (
-        <>
-          {user.name}
-          {user.id === session.user.id && (
-            <>
-              {" "}
-              <Badge tone="info">{t("office.users.you")}</Badge>
-            </>
-          )}
-        </>
+        <span className="user-cell">
+          <UserAvatar
+            name={user.name}
+            size={40}
+            userId={user.id}
+            avatarVersion={user.avatarVersion}
+            label={t("office.profile.photo.label", { name: user.name })}
+          />
+          <span className="user-cell__text">
+            <span className="user-cell__name">
+              {user.name}
+              {user.id === session.user.id && (
+                <>
+                  {" "}
+                  <Badge tone="info">{t("office.users.you")}</Badge>
+                </>
+              )}
+            </span>
+            <span className="user-cell__login">{user.login}</span>
+          </span>
+        </span>
       ),
     },
     {
@@ -206,7 +201,7 @@ export function OfficeUsersPage() {
       <PagedTable
         tableId="users"
         columns={columns}
-        rows={users.data ?? []}
+        rows={view === "error" ? [] : (users.data ?? [])}
         getRowKey={(user) => user.id}
         empty={state}
         scrollLabel={t("office.users.title")}

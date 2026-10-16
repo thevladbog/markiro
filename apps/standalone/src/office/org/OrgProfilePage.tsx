@@ -27,7 +27,7 @@ export function OrgProfilePage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.org.title")} />
+      <PageHeader title={t("office.org.title")} description={t("office.org.subtitle")} />
       <OrgProfileContent />
       <OrgLogoCard />
     </>

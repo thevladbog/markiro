@@ -93,7 +93,7 @@ export function UserMenu({
   return (
     <div ref={rootRef} className="user-menu">
       <Button
-        variant="secondary"
+        variant="plain"
         className="user-menu__trigger"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -128,7 +128,7 @@ export function UserMenu({
             </div>
           </div>
           <Button
-            variant="secondary"
+            variant="plain"
             role="menuitem"
             tabIndex={-1}
             className="user-menu__item"
@@ -138,7 +138,7 @@ export function UserMenu({
             {t("office.header.profile")}
           </Button>
           <Button
-            variant="secondary"
+            variant="plain"
             role="menuitem"
             tabIndex={-1}
             className="user-menu__item"
@@ -148,7 +148,7 @@ export function UserMenu({
             {t("office.password.open")}
           </Button>
           <Button
-            variant="secondary"
+            variant="plain"
             role="menuitem"
             tabIndex={-1}
             className="user-menu__item"

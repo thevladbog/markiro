@@ -15,6 +15,7 @@ import { isTransferable } from "../lib/rules.js";
 import type { StatusDotTone } from "../lib/StatusDot.js";
 import { useAbout } from "./info/about-context.js";
 import { OfficeBrandMark } from "./OfficeBrand.js";
+import { useKitScope } from "./kit-scope.js";
 import { OfficeIcon } from "./OfficeIcon.js";
 import { PasswordInput } from "./PasswordInput.js";
 import { userInitials } from "./user-avatar.js";
@@ -73,6 +74,7 @@ export function OfficeLogin({
   onChangeAddress,
   link = null,
 }: OfficeLoginProps) {
+  useKitScope();
   const { t } = useTranslation();
   const about = useAbout();
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -223,7 +225,7 @@ export function OfficeLogin({
                   {recent.map((login) => (
                     <li key={login}>
                       <Button
-                        variant="ghost"
+                        variant="plain"
                         className={
                           login === typed
                             ? "office-login__recent-pick office-login__recent-pick--selected"
@@ -247,8 +249,7 @@ export function OfficeLogin({
                   ))}
                 </ul>
                 <Button
-                  variant="ghost"
-                  size="compact"
+                  variant="plain"
                   className="office-login__clear"
                   onClick={() => {
                     clearLogins();

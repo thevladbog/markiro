@@ -7,7 +7,12 @@ import { HostError } from "../src/host/client.js";
 import { disaggregationDetailSchema } from "../src/host/disaggregation.js";
 import { officeConflictPageSchema, type OfficeConflictPage } from "../src/host/review.js";
 import { renderOffice, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
-import { chooseText, optionTexts, selectTrigger, shownIn, waitForList } from "./support/select.js";
+import { chooseText, optionTexts, shownIn, waitForList } from "./support/select.js";
+
+/** The review filter is a segmented control (three values, owner decision 2026-10): a press picks one. */
+function chooseState(name: string): void {
+  fireEvent.click(screen.getByRole("radio", { name }));
+}
 import { ACTIVE, expectFocusedNotice, shiftsSession } from "./support/shifts.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -232,9 +237,9 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
         "Смена, чей скан проиграл. Конфликты, где эта смена выиграла код, сюда не попадают.",
       ),
     ).toBeTruthy();
-    chooseText("Состояние", "Все");
+    chooseState("Все");
     await waitFor(() => expect(lastQuery(value)).toEqual({ page: 1 }));
-    chooseText("Состояние", "Не разобранные");
+    chooseState("Не разобранные");
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 1 }));
     await waitForList(() => expect(optionTexts("Смена")).toContain(ACTIVE.number));
     chooseText("Смена", ACTIVE.number);
@@ -242,7 +247,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
       expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: false, page: 1 }),
     );
     // A filter on page 2 goes back to the first page.
-    chooseText("Состояние", "Разобранные");
+    chooseState("Разобранные");
     await waitFor(() =>
       expect(lastQuery(value)).toEqual({ shiftId: ACTIVE.id, reviewed: true, page: 1 }),
     );
@@ -250,7 +255,9 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 1 }));
     expect(screen.queryByRole("button", { name: "Сбросить" })).toBeNull();
     expect(shownIn("Смена")).toBe("Все смены");
-    expect(shownIn("Состояние")).toBe("Не разобранные");
+    expect(screen.getByRole("radio", { name: "Не разобранные" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 
   it("names a shift a link brought that the list does not hold", async () => {
@@ -360,7 +367,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     const value = session(EMPTY);
     await openConflicts(value);
     expect(screen.getByText("Конфликтов нет")).toBeTruthy();
-    chooseText("Состояние", "Разобранные");
+    chooseState("Разобранные");
     expect(await screen.findByText("Нет конфликтов с таким отбором")).toBeTruthy();
   });
 
@@ -383,7 +390,7 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
       name: "Отметить разобранным конфликт кода S000008",
     });
     // Everything between the filters and the button can take the focus in order.
-    const state = selectTrigger("Состояние");
+    const state = screen.getByRole("radio", { name: "Не разобранные" });
     expect(state.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.getAttribute("tabindex")).not.toBe("-1");
     expect(button.hasAttribute("disabled")).toBe(false);

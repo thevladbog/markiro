@@ -39,6 +39,8 @@ export interface RowActionBarProps {
     /** The menu button's accessible name, naming the record: «Действия: Квас». */
     label: string;
     items: readonly RowMenuItem[];
+    /** The whole menu is off (a write is on its way): its button cannot be pressed. */
+    disabled?: boolean;
   };
 }
 
@@ -66,7 +68,12 @@ export function RowActionBar({ actions = [], menu }: RowActionBarProps) {
         </Tooltip>
       ))}
       {menu !== undefined && items.length > 0 && (
-        <RowMenu label={menu.label} moreLabel={t("office.common.more")} items={items} />
+        <RowMenu
+          label={menu.label}
+          moreLabel={t("office.common.more")}
+          items={items}
+          disabled={menu.disabled ?? false}
+        />
       )}
     </div>
   );
@@ -81,10 +88,12 @@ function RowMenu({
   label,
   moreLabel,
   items,
+  disabled,
 }: {
   label: string;
   moreLabel: string;
   items: readonly RowMenuItem[];
+  disabled: boolean;
 }) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
@@ -183,6 +192,7 @@ function RowMenu({
           <IconButton
             variant="ghost"
             aria-label={label}
+            disabled={disabled}
             aria-haspopup="menu"
             aria-expanded={open}
             aria-controls={open ? menuId : undefined}
@@ -217,7 +227,7 @@ function RowMenu({
                     <div role="separator" className="office-row-menu__rule" />
                   )}
                 <Button
-                  variant="ghost"
+                  variant="plain"
                   role="menuitem"
                   aria-label={item.ariaLabel}
                   disabled={item.disabled ?? false}

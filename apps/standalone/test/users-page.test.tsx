@@ -174,7 +174,7 @@ describe("office users", () => {
     // `localeCompare`, would put `A_bc` first instead.
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row").slice(1);
-    const logins = rows.map((row) => within(row).getAllByRole("cell")[1]?.textContent);
+    const logins = rows.map((row) => row.querySelector(".user-cell__login")?.textContent);
     expect(logins).toEqual(["a-bc", "A_bc", "abc"]);
   });
 

@@ -9,6 +9,7 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { DirtyGuardProvider, useDirtyRegistry } from "./dirty-guard.js";
 import { UpdateBanner } from "./banners/UpdateBanner.js";
 import { LicenseBanner } from "./LicenseBanner.js";
+import { useKitScope } from "./kit-scope.js";
 import { isMenuCollapsed } from "./menu-collapse.js";
 import { navGroups } from "./nav-groups.js";
 import { OfficeSidebar } from "./OfficeSidebar.js";
@@ -18,6 +19,7 @@ import { useViewportWidth } from "./use-viewport-width.js";
 
 /** Office layout: the menu, the top bar, the banners, the page. */
 export function OfficeShell() {
+  useKitScope();
   const { t } = useTranslation();
   const session = useOfficeSession();
   const [passwordOpen, setPasswordOpen] = useState(false);

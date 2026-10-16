@@ -32,7 +32,7 @@ export function AboutPage() {
   }, [location.hash, location.key]);
   return (
     <>
-      <PageHeader title={t("office.about.title")} />
+      <PageHeader title={t("office.about.title")} description={t("office.about.subtitle")} />
       <nav aria-label={t("office.about.toc")}>
         <ul className="office-toc">
           {sections.map((section) => (

@@ -1174,9 +1174,12 @@
  * this class the controls are 44 px (36 compact) and the field, button and alert radius is 16, the dialog
  * and card radius 20, and a card carries no shadow (one hairline layer). The components draw all of that
  * from tokens, so redefining the tokens here changes only this subtree; the cloud apps (admin, saas-admin,
- * kiosk, station) never carry the class and keep 40/32 and 8/12. The standalone office puts it on its root.
+ * kiosk, station) never carry the class and keep 40/32 and 8/12. Overlays (dialogs, panels, select lists)
+ * are portalled to the document body, outside any subtree, so the standalone office puts the class on
+ * `<html>` while it is open (`:root.mk-kit-2026` outranks the token defaults on `:root`).
  */
-.mk-kit-2026 {
+.mk-kit-2026,
+:root.mk-kit-2026 {
   --control-md: 44px;
   --control-sm: 36px;
   --r-2: 16px;

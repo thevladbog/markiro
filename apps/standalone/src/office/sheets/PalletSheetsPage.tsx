@@ -10,13 +10,10 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
   FileDropZone,
   Input,
   Modal,
   PageHeader,
-  RowActionMenu,
-  RowActions,
   StatusChip,
   type TableColumn,
 } from "@markiro/ui";
@@ -26,8 +23,12 @@ import { useCan } from "../access.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { byNameThenId, withRecord } from "../records.js";
 import { downloadFile } from "../templates/download.js";
+import { TemplateTabPanel, TemplateTabsBar } from "../templates/TemplatesSection.js";
 import { SheetPreview } from "./SheetPreview.js";
 import {
   duplicateSheetNames,
@@ -286,81 +287,74 @@ export function PalletSheetsPage() {
       title: t("office.palletSheets.table.actions"),
       render: (sheet) => {
         const spec = readSheetSpec(sheet.spec);
+        const editItems: RowMenuItem[] = [
+          {
+            key: "state",
+            label: t(sheet.enabled ? "office.palletSheets.disable" : "office.palletSheets.enable"),
+            ariaLabel: t(
+              sheet.enabled
+                ? "office.palletSheets.disableNamed"
+                : "office.palletSheets.enableNamed",
+              { name: sheet.name },
+            ),
+            icon: sheet.enabled ? "stop" : "reset",
+            onSelect: () =>
+              void run(
+                async () => keepSheet(await update.mutateAsync({ sheet, enabled: !sheet.enabled })),
+                t(
+                  sheet.enabled
+                    ? "office.palletSheets.disabledNotice"
+                    : "office.palletSheets.enabledNotice",
+                  { name: sheet.name },
+                ),
+              ),
+          },
+          {
+            key: "rename",
+            label: t("office.palletSheets.rename"),
+            ariaLabel: t("office.palletSheets.renameNamed", { name: sheet.name }),
+            icon: "pencil",
+            onSelect: () => open({ kind: "rename", sheet }),
+          },
+          {
+            key: "delete",
+            label: t("office.palletSheets.delete"),
+            ariaLabel: t("office.palletSheets.deleteNamed", { name: sheet.name }),
+            icon: "trash",
+            destructive: true,
+            onSelect: () => open({ kind: "delete", sheet }),
+          },
+        ];
         return (
-          <RowActions>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.palletSheets.previewNamed", { name: sheet.name })}
-              disabled={spec === null}
-              onClick={() => {
-                if (spec !== null) open({ kind: "preview", sheet, spec });
-              }}
-            >
-              {t("office.palletSheets.preview")}
-            </Button>
-            {canEdit ? (
-              <RowActionMenu
-                label={t("office.common.rowActions", { name: sheet.name })}
-                disabled={busy}
-                items={[
-                  {
-                    key: "export",
-                    label: t("office.palletSheets.export"),
-                    ariaLabel: t("office.palletSheets.exportNamed", { name: sheet.name }),
-                    disabled: spec === null,
-                    onSelect: () => download(sheet),
+          <RowActionBar
+            actions={[
+              {
+                key: "preview",
+                label: t("office.palletSheets.previewNamed", { name: sheet.name }),
+                icon: "eye",
+                disabled: spec === null,
+                onSelect: () => {
+                  if (spec !== null) open({ kind: "preview", sheet, spec });
+                },
+              },
+              {
+                key: "export",
+                label: t("office.palletSheets.exportNamed", { name: sheet.name }),
+                icon: "download",
+                disabled: spec === null || busy,
+                onSelect: () => download(sheet),
+              },
+            ]}
+            {...(canEdit
+              ? {
+                  menu: {
+                    label: t("office.common.rowActions", { name: sheet.name }),
+                    items: editItems,
+                    disabled: busy,
                   },
-                  {
-                    key: "state",
-                    label: t(
-                      sheet.enabled ? "office.palletSheets.disable" : "office.palletSheets.enable",
-                    ),
-                    ariaLabel: t(
-                      sheet.enabled
-                        ? "office.palletSheets.disableNamed"
-                        : "office.palletSheets.enableNamed",
-                      { name: sheet.name },
-                    ),
-                    onSelect: () =>
-                      void run(
-                        async () =>
-                          keepSheet(await update.mutateAsync({ sheet, enabled: !sheet.enabled })),
-                        t(
-                          sheet.enabled
-                            ? "office.palletSheets.disabledNotice"
-                            : "office.palletSheets.enabledNotice",
-                          { name: sheet.name },
-                        ),
-                      ),
-                  },
-                  {
-                    key: "rename",
-                    label: t("office.palletSheets.rename"),
-                    ariaLabel: t("office.palletSheets.renameNamed", { name: sheet.name }),
-                    onSelect: () => open({ kind: "rename", sheet }),
-                  },
-                  {
-                    key: "delete",
-                    label: t("office.palletSheets.delete"),
-                    ariaLabel: t("office.palletSheets.deleteNamed", { name: sheet.name }),
-                    destructive: true,
-                    onSelect: () => open({ kind: "delete", sheet }),
-                  },
-                ]}
-              />
-            ) : (
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.palletSheets.exportNamed", { name: sheet.name })}
-                disabled={spec === null}
-                onClick={() => download(sheet)}
-              >
-                {t("office.palletSheets.export")}
-              </Button>
-            )}
-          </RowActions>
+                }
+              : {})}
+          />
         );
       },
     },
@@ -371,6 +365,7 @@ export function PalletSheetsPage() {
     <>
       <PageHeader
         title={t("office.palletSheets.title")}
+        description={t("office.palletSheets.subtitle")}
         {...(canEdit
           ? {
               actions: (
@@ -399,6 +394,7 @@ export function PalletSheetsPage() {
             }
           : {})}
       />
+      <TemplateTabsBar />
       <div ref={noticeRef} tabIndex={-1}>
         {notice !== null && <Alert tone="ok">{notice}</Alert>}
         {dialog === null && <FailureAlert failure={failure} />}
@@ -408,17 +404,19 @@ export function PalletSheetsPage() {
           {t("office.palletSheets.duplicates", { names: duplicates.join(", ") })}
         </Alert>
       )}
-      <Card>
-        <p>{t("office.palletSheets.intro")}</p>
-        <PagedTable
-          tableId="pallet-sheets"
-          columns={columns}
-          rows={rows}
-          getRowKey={(sheet) => sheet.id}
-          empty={t("office.palletSheets.empty")}
-          scrollLabel={t("office.palletSheets.title")}
-        />
-      </Card>
+      <TemplateTabPanel>
+        <ListCard>
+          <PagedTable
+            tableId="pallet-sheets"
+            columns={columns}
+            rows={rows}
+            getRowKey={(sheet) => sheet.id}
+            empty={t("office.palletSheets.empty")}
+            scrollLabel={t("office.palletSheets.title")}
+          />
+        </ListCard>
+        <Alert tone="info">{t("office.palletSheets.intro")}</Alert>
+      </TemplateTabPanel>
       {dialog?.kind === "preview" && (
         <Modal
           open

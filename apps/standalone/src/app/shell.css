@@ -466,19 +466,13 @@
 }
 
 /*
- * The top bar's controls are `Button`s, whose inline style sets the padding, the radius and the
- * colours; the design's shapes (48 px, radius 16, a pill chip) override them, hence `!important`.
+ * The top bar's controls are the design's 48 px with radius 16: the shared `Button` draws its height
+ * and radius from `--control-md` and `--r-2`, so the bar redefines the two for its own subtree (no
+ * `!important` against the button's inline style). The icon buttons take the same 48.
  */
-.office-header__actions > .mk-btn,
-.office-header__actions > .user-menu > .mk-btn {
-  min-height: 48px !important;
-  border-radius: 16px !important;
-}
-
-.office-header__actions > .mk-icon-button {
-  width: 48px !important;
-  height: 48px !important;
-  min-width: 48px !important;
+.office-header__actions {
+  --control-md: 48px;
+  --r-2: 16px;
 }
 
 /* A chip: an icon and a word on a tinted pill. The state is the icon and the word, never the tint alone. */
@@ -517,10 +511,11 @@
 }
 
 /* The link chip is a button (it opens the details): 40 px to hit, the pill drawn inside it. */
-.host-dot > .mk-btn {
-  padding: 0 !important;
-  border-color: transparent !important;
-  background: transparent !important;
+.host-dot__button {
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 12px;
+  color: var(--fg-1);
 }
 
 .theme-switcher {
@@ -532,31 +527,39 @@
 }
 
 .theme-switcher > .theme-switcher__option {
+  justify-content: center;
   width: 40px;
   min-width: 40px;
-  padding: 0 !important;
-  border-radius: 12px !important;
-  color: var(--fg-2) !important;
+  height: 40px;
+  border-radius: 12px;
+  color: var(--fg-2);
 }
 
 .theme-switcher > .theme-switcher__option:hover:not(.theme-switcher__option--on) {
-  background: var(--surface-card) !important;
-  color: var(--fg-1) !important;
+  background: var(--surface-card);
+  color: var(--fg-1);
 }
 
 .theme-switcher > .theme-switcher__option--on,
 .theme-switcher > .theme-switcher__option--on:hover {
-  background: var(--surface-inverse) !important;
-  color: var(--fg-on-inverse) !important;
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
 }
 
 .user-menu {
   position: relative;
 }
 
+/* The secondary look, drawn here (the trigger is a plain button): rule, card fill, the bar's 48 px and radius. */
 .user-menu__trigger {
-  gap: 10px !important;
-  padding: 0 12px 0 8px !important;
+  gap: 10px;
+  min-height: var(--control-md);
+  padding: 0 12px 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 600 14px/1 var(--font-ui);
 }
 
 /* An initials avatar: a circle on the category tone its person's name fixes (the kit's four). */
@@ -684,19 +687,18 @@
 }
 
 .user-menu__panel > .user-menu__item {
-  justify-content: flex-start !important;
-  gap: 12px !important;
+  gap: 12px;
   min-height: 44px;
   margin-top: 4px;
-  padding: 0 12px !important;
-  border-color: transparent !important;
-  border-radius: 12px !important;
-  background: transparent !important;
-  font-weight: 500 !important;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+  text-align: left;
 }
 
 .user-menu__panel > .user-menu__item:hover {
-  background: var(--surface-panel) !important;
+  background: var(--surface-panel);
 }
 
 /*
@@ -725,7 +727,7 @@
   flex-wrap: wrap;
 }
 
-.office-shell__content .mk-page-header > div {
+.office-shell__content .mk-page-header > div:not(.mk-page-header__titles) {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -1003,9 +1005,9 @@
  */
 .office-banner .mk-alert {
   align-items: center;
-  /* The shared alert sets these inline. */
-  padding: 14px 20px !important;
-  border-radius: var(--r-ctl) !important;
+  /* The shared alert draws its padding and radius from these (no `!important`). */
+  --mk-alert-pad: 14px 20px;
+  --r-2: var(--r-ctl);
 }
 
 .office-banner .mk-alert__icon {
@@ -1851,9 +1853,9 @@
   }
 }
 
+/* A card of the overview: radius 24 (the card draws it from `--r-3`); the shadow is off in the kit scope. */
 .overview-card {
-  border-radius: var(--r-card) !important;
-  box-shadow: none !important;
+  --r-3: var(--r-card);
 }
 
 .overview-planned {
@@ -2021,17 +2023,11 @@
 
 /* A refused sign-in marks both fields (a 2 px rule), and the alert above them says why. */
 .office-login__form[data-failed] .mk-input {
-  border: 2px solid var(--err-solid) !important;
-}
-
-.office-login .office-login__submit {
-  min-height: 44px;
-  border-radius: 16px !important;
+  --mk-input-border: 2px solid var(--err-solid);
 }
 
 .office-login .office-login__ghost {
   align-self: center;
-  color: var(--fg-1) !important;
 }
 
 .office-login__recent {
@@ -2059,15 +2055,19 @@
 .office-login .office-login__recent-pick {
   width: 100%;
   min-height: 52px;
-  justify-content: flex-start;
-  gap: 12px !important;
-  padding: 0 8px !important;
-  border-radius: 14px !important;
-  font-weight: 500 !important;
+  gap: 12px;
+  padding: 0 8px;
+  border-radius: 14px;
+  color: var(--fg-1);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.office-login .office-login__recent-pick:hover {
+  background: var(--surface-panel);
 }
 
 .office-login .office-login__recent-pick--selected {
-  background: var(--surface-panel) !important;
+  background: var(--surface-panel);
 }
 
 .office-login__avatar {
@@ -2106,7 +2106,11 @@
 
 .office-login .office-login__clear {
   justify-self: start;
-  color: var(--fg-2) !important;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 13px/16px var(--font-ui);
 }
 
 .office-login__footer {
@@ -2122,10 +2126,6 @@
   align-items: center;
   justify-content: center;
   gap: 4px 12px;
-}
-
-.office-login__address .mk-btn {
-  color: var(--fg-1) !important;
 }
 
 .theme-switcher .theme-switcher__option:focus-visible {

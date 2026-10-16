@@ -268,6 +268,7 @@ export function OperatorsPage() {
     <>
       <PageHeader
         title={t("office.operators.title")}
+        description={t("office.operators.subtitle")}
         actions={
           <Button onClick={() => open({ kind: "create" })}>{t("office.operators.add")}</Button>
         }

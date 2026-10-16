@@ -45,7 +45,7 @@ export function SsccPage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.sscc.title")} />
+      <PageHeader title={t("office.sscc.title")} description={t("office.sscc.subtitle")} />
       <SsccContent />
     </>
   );

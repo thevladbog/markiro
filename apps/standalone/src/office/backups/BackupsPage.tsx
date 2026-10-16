@@ -43,7 +43,7 @@ export function BackupsPage() {
   const { t } = useTranslation();
   return (
     <>
-      <PageHeader title={t("office.backups.title")} />
+      <PageHeader title={t("office.backups.title")} description={t("office.backups.subtitle")} />
       <BackupsContent />
     </>
   );

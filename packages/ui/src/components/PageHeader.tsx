@@ -12,9 +12,21 @@ import { cn } from "../cn.js";
 export interface PageHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
   title: ReactNode;
   actions?: ReactNode;
+  /** A line under the title that says what the page is for (kit 2026; absent: the heading stands alone). */
+  description?: ReactNode;
 }
 
-export function PageHeader({ title, actions, className, style, ...rest }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  actions,
+  description,
+  className,
+  style,
+  ...rest
+}: PageHeaderProps) {
+  const heading = (
+    <h1 style={{ margin: 0, font: "var(--text-h1)", color: "var(--fg-1)" }}>{title}</h1>
+  );
   return (
     <div
       className={cn("mk-page-header", className)}
@@ -27,7 +39,19 @@ export function PageHeader({ title, actions, className, style, ...rest }: PageHe
       }}
       {...rest}
     >
-      <h1 style={{ margin: 0, font: "var(--text-h1)", color: "var(--fg-1)" }}>{title}</h1>
+      {description === undefined ? (
+        heading
+      ) : (
+        <div className="mk-page-header__titles" style={{ display: "grid", gap: 4, minWidth: 0 }}>
+          {heading}
+          <p
+            className="mk-page-header__description"
+            style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-2)" }}
+          >
+            {description}
+          </p>
+        </div>
+      )}
       {actions && <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{actions}</div>}
     </div>
   );
