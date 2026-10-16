@@ -568,7 +568,7 @@ apps/standalone` перед выкладкой; правок хоста не о�
    транзакции (savepoint), `ConflictException` стража ловится как ожидаемая ошибка применения
    (`isExpectedApplicationError`), строка получает событие `failed` с кодом
    `catalog_kind_not_allowed_for_offline_tenant`, счёт — `partial_failure`, аудит
-   `billing.invoice.line_applied` с исходом `failed`; повторное применение (`POST /platform/billing/invoices/:id/apply`
+   `billing.invoice.line_applied` с исходом `failed`; повторное применение (`POST /platform/invoices/:id/apply`
    по этой строке) идёт с `attempt + 1` после возврата флага. Платёж при этом уже записан. Предложение: оплата
    и применение лицензии — одна транзакция `PlatformOffersService.pay`, отказ откатывает её целиком (ни платежа, ни
    смены статуса предложения), предложение остаётся принятым и оплачиваемым; после возврата флага
