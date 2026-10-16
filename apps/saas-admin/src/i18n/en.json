@@ -2482,7 +2482,8 @@
       "documentKind": "Kind",
       "filename": "File",
       "size": "Size",
-      "actions": "Actions"
+      "actions": "Actions",
+      "createdAt": "Added"
     },
     "statuses": {
       "draft": "Draft",
@@ -2523,7 +2524,12 @@
       "header": "Agreement header",
       "transitions": "Status",
       "tenant": "Tenant",
-      "documents": "Documents"
+      "documents": "Documents",
+      "requisites": "Requisites",
+      "status": "Status",
+      "contract": "Agreement",
+      "address": "Address and contacts",
+      "bank": "Bank"
     },
     "fields": {
       "kind": "Entity kind",
@@ -2557,7 +2563,8 @@
       "anyStatus": "Any",
       "search": "Search",
       "searchPlaceholder": "Number, INN or name",
-      "withoutTenant": "Without tenant"
+      "withoutTenant": "Without tenant",
+      "label": "Filters"
     },
     "list": {
       "noTenant": "No tenant linked",
@@ -2576,7 +2583,35 @@
       "badAttachmentType": "Only PDF, DOCX, PNG and JPEG are accepted.",
       "noDocuments": "No documents yet.",
       "staleDraft": "The agreement changed after this document was generated: the file no longer matches the record. Generate the printable form again before sending it.",
-      "staleBadge": "Out of date"
+      "staleBadge": "Out of date",
+      "openTenant": "Open tenant",
+      "linkSubmit": "Link",
+      "candidateLabel": "Tenant with a matching INN",
+      "candidatePlaceholder": "Choose a tenant",
+      "candidateSearch": "Search by name",
+      "candidateEmpty": "Nothing found",
+      "candidateLoading": "Loading",
+      "tenantLoading": "Loading name…",
+      "unlinkConfirmTitle": "Unlink the tenant?",
+      "unlinkConfirmBody": "Agreement {{number}} will no longer be linked to tenant {{name}}. The agreement itself does not change.",
+      "cancel": "Cancel",
+      "terminateTitle": "Terminate the agreement?",
+      "terminateBody": "The agreement stays in the registry, but it cannot be brought back into work. Give the reason for termination.",
+      "terminateConfirm": "Terminate",
+      "terminatedAt": "Terminated {{date}}",
+      "statusCurrent": "Current status",
+      "deleteConfirmTitle": "Delete the attachment?",
+      "deleteConfirmBody": "File {{name}} will be removed from the agreement.",
+      "uploadFile": "Upload a file",
+      "uploadHint": "PDF, DOCX, PNG or JPEG, up to {{mb}} MB",
+      "tooLarge": "The file is larger than {{mb}} MB.",
+      "noDocumentsHint": "Render the agreement draft or upload the signed file.",
+      "save": "Save changes",
+      "reset": "Reset",
+      "saved": "Changes saved",
+      "editHint": "Edits apply to the next rendered draft; files already created are marked out of date.",
+      "notSet": "not set",
+      "sizeKb": "{{count}} KB"
     }
   },
   "entitlements": {

@@ -48,7 +48,7 @@ const KINDS = [
 const nullable = (value: string): string | null => (value.trim() === "" ? null : value.trim());
 
 /** Throws nothing: the contract schema is the validator, this only shapes. */
-export function toRequisitesInput(draft: RequisitesDraft): unknown {
+export function toRequisitesInput(draft: RequisitesDraft): AgreementRequisitesInput {
   const base = {
     name: draft.name.trim(),
     address: nullable(draft.address),
@@ -105,175 +105,205 @@ export function AgreementRequisitesForm({
 
   return (
     <div className="agreement-requisites">
-      <Select
-        id="agreement-kind"
-        label={t("agreements.fields.kind")}
-        value={value.kind}
-        disabled={disabled}
-        options={KINDS.map((kind) => ({ value: kind, label: t(`agreements.kinds.${kind}`) }))}
-        onValueChange={(next) => set("kind", next)}
-      />
-
-      {!disabled && (
-        <OrganizationSuggestField
-          value={value.inn}
-          onValueChange={(next) => set("inn", next)}
-          onSelect={(suggestion) =>
-            onChange({
-              ...value,
-              // A suggestion fills; every field below stays editable, so a
-              // later manual correction simply wins.
-              kind: suggestion.kind,
-              name: suggestion.displayName,
-              inn: suggestion.inn,
-              kpp: suggestion.kpp ?? "",
-              ogrn: suggestion.ogrn ?? "",
-              ogrnip: suggestion.ogrnip ?? "",
-              address: suggestion.legalAddress?.value ?? value.address,
-            })
-          }
-        />
-      )}
-
-      <Field label={t("agreements.fields.name")} htmlFor="agreement-name">
-        <Input
-          id="agreement-name"
-          value={value.name}
-          disabled={disabled}
-          onChange={(event) => set("name", event.target.value)}
-        />
-      </Field>
-
-      <Field label={t("agreements.fields.inn")} htmlFor="agreement-inn">
-        <Input
-          id="agreement-inn"
-          value={value.inn}
-          inputMode="numeric"
-          disabled={disabled}
-          onChange={(event) => set("inn", event.target.value)}
-        />
-      </Field>
-
-      {value.kind === "legal_entity" && (
-        <>
-          <Field label={t("agreements.fields.kpp")} htmlFor="agreement-kpp">
-            <Input
-              id="agreement-kpp"
-              value={value.kpp}
-              inputMode="numeric"
-              disabled={disabled}
-              onChange={(event) => set("kpp", event.target.value)}
-            />
-          </Field>
-          <Field label={t("agreements.fields.ogrn")} htmlFor="agreement-ogrn">
-            <Input
-              id="agreement-ogrn"
-              value={value.ogrn}
-              inputMode="numeric"
-              disabled={disabled}
-              onChange={(event) => set("ogrn", event.target.value)}
-            />
-          </Field>
-        </>
-      )}
-
-      {value.kind === "sole_proprietor" && (
-        <Field label={t("agreements.fields.ogrnip")} htmlFor="agreement-ogrnip">
-          <Input
-            id="agreement-ogrnip"
-            value={value.ogrnip}
-            inputMode="numeric"
+      <div
+        role="group"
+        aria-label={t("agreements.sections.counterparty")}
+        className="agreement-group"
+      >
+        <h3 className="agreement-group__title">{t("agreements.sections.counterparty")}</h3>
+        <div className="agreement-group__grid">
+          <Select
+            id="agreement-kind"
+            label={t("agreements.fields.kind")}
+            value={value.kind}
             disabled={disabled}
-            onChange={(event) => set("ogrnip", event.target.value)}
+            options={KINDS.map((kind) => ({ value: kind, label: t(`agreements.kinds.${kind}`) }))}
+            onValueChange={(next) => set("kind", next)}
           />
-        </Field>
-      )}
 
-      {disabled ? (
-        <Field label={t("agreements.fields.address")} htmlFor="agreement-address">
-          <Input id="agreement-address" value={value.address} disabled />
-        </Field>
-      ) : (
-        <AddressSuggestField
-          label={t("agreements.fields.address")}
-          value={value.address}
-          onValueChange={(next) => set("address", next)}
-          onSelect={(suggestion) => set("address", suggestion.value)}
-        />
-      )}
+          {!disabled && (
+            <div className="agreement-group__wide">
+              <OrganizationSuggestField
+                value={value.inn}
+                onValueChange={(next) => set("inn", next)}
+                onSelect={(suggestion) =>
+                  onChange({
+                    ...value,
+                    // A suggestion fills; every field below stays editable, so a
+                    // later manual correction simply wins.
+                    kind: suggestion.kind,
+                    name: suggestion.displayName,
+                    inn: suggestion.inn,
+                    kpp: suggestion.kpp ?? "",
+                    ogrn: suggestion.ogrn ?? "",
+                    ogrnip: suggestion.ogrnip ?? "",
+                    address: suggestion.legalAddress?.value ?? value.address,
+                  })
+                }
+              />
+            </div>
+          )}
 
-      <Field label={t("agreements.fields.email")} htmlFor="agreement-email">
-        <Input
-          id="agreement-email"
-          type="email"
-          value={value.email}
-          disabled={disabled}
-          onChange={(event) => set("email", event.target.value)}
-        />
-      </Field>
+          <div className="agreement-group__wide">
+            <Field label={t("agreements.fields.name")} htmlFor="agreement-name">
+              <Input
+                id="agreement-name"
+                value={value.name}
+                disabled={disabled}
+                onChange={(event) => set("name", event.target.value)}
+              />
+            </Field>
+          </div>
 
-      <Field label={t("agreements.fields.phone")} htmlFor="agreement-phone">
-        <Input
-          id="agreement-phone"
-          value={value.phone}
-          disabled={disabled}
-          onChange={(event) => set("phone", event.target.value)}
-        />
-      </Field>
+          <Field label={t("agreements.fields.inn")} htmlFor="agreement-inn">
+            <Input
+              id="agreement-inn"
+              value={value.inn}
+              inputMode="numeric"
+              disabled={disabled}
+              onChange={(event) => set("inn", event.target.value)}
+            />
+          </Field>
 
-      {!disabled && (
-        <BankSuggestField
-          value={value.bic}
-          onValueChange={(next) => set("bic", next)}
-          onSelect={(suggestion) =>
-            onChange({
-              ...value,
-              bic: suggestion.bic,
-              bankName: suggestion.bankName,
-              correspondentAccount: suggestion.correspondentAccount ?? value.correspondentAccount,
-            })
-          }
-        />
-      )}
+          {value.kind === "legal_entity" && (
+            <>
+              <Field label={t("agreements.fields.kpp")} htmlFor="agreement-kpp">
+                <Input
+                  id="agreement-kpp"
+                  value={value.kpp}
+                  inputMode="numeric"
+                  disabled={disabled}
+                  onChange={(event) => set("kpp", event.target.value)}
+                />
+              </Field>
+              <Field label={t("agreements.fields.ogrn")} htmlFor="agreement-ogrn">
+                <Input
+                  id="agreement-ogrn"
+                  value={value.ogrn}
+                  inputMode="numeric"
+                  disabled={disabled}
+                  onChange={(event) => set("ogrn", event.target.value)}
+                />
+              </Field>
+            </>
+          )}
 
-      <Field label={t("agreements.fields.bankName")} htmlFor="agreement-bank">
-        <Input
-          id="agreement-bank"
-          value={value.bankName}
-          disabled={disabled}
-          onChange={(event) => set("bankName", event.target.value)}
-        />
-      </Field>
+          {value.kind === "sole_proprietor" && (
+            <Field label={t("agreements.fields.ogrnip")} htmlFor="agreement-ogrnip">
+              <Input
+                id="agreement-ogrnip"
+                value={value.ogrnip}
+                inputMode="numeric"
+                disabled={disabled}
+                onChange={(event) => set("ogrnip", event.target.value)}
+              />
+            </Field>
+          )}
+        </div>
+      </div>
 
-      <Field label={t("agreements.fields.bic")} htmlFor="agreement-bic">
-        <Input
-          id="agreement-bic"
-          value={value.bic}
-          inputMode="numeric"
-          disabled={disabled}
-          onChange={(event) => set("bic", event.target.value)}
-        />
-      </Field>
+      <div role="group" aria-label={t("agreements.sections.address")} className="agreement-group">
+        <h3 className="agreement-group__title">{t("agreements.sections.address")}</h3>
+        <div className="agreement-group__grid">
+          <div className="agreement-group__wide">
+            {disabled ? (
+              <Field label={t("agreements.fields.address")} htmlFor="agreement-address">
+                <Input id="agreement-address" value={value.address} disabled />
+              </Field>
+            ) : (
+              <AddressSuggestField
+                label={t("agreements.fields.address")}
+                value={value.address}
+                onValueChange={(next) => set("address", next)}
+                onSelect={(suggestion) => set("address", suggestion.value)}
+              />
+            )}
+          </div>
 
-      <Field label={t("agreements.fields.settlementAccount")} htmlFor="agreement-rs">
-        <Input
-          id="agreement-rs"
-          value={value.settlementAccount}
-          inputMode="numeric"
-          disabled={disabled}
-          onChange={(event) => set("settlementAccount", event.target.value)}
-        />
-      </Field>
+          <Field label={t("agreements.fields.email")} htmlFor="agreement-email">
+            <Input
+              id="agreement-email"
+              type="email"
+              value={value.email}
+              disabled={disabled}
+              onChange={(event) => set("email", event.target.value)}
+            />
+          </Field>
 
-      <Field label={t("agreements.fields.correspondentAccount")} htmlFor="agreement-ks">
-        <Input
-          id="agreement-ks"
-          value={value.correspondentAccount}
-          inputMode="numeric"
-          disabled={disabled}
-          onChange={(event) => set("correspondentAccount", event.target.value)}
-        />
-      </Field>
+          <Field label={t("agreements.fields.phone")} htmlFor="agreement-phone">
+            <Input
+              id="agreement-phone"
+              value={value.phone}
+              disabled={disabled}
+              onChange={(event) => set("phone", event.target.value)}
+            />
+          </Field>
+        </div>
+      </div>
+
+      <div role="group" aria-label={t("agreements.sections.bank")} className="agreement-group">
+        <h3 className="agreement-group__title">{t("agreements.sections.bank")}</h3>
+        <div className="agreement-group__grid">
+          {!disabled && (
+            <div className="agreement-group__wide">
+              <BankSuggestField
+                value={value.bic}
+                onValueChange={(next) => set("bic", next)}
+                onSelect={(suggestion) =>
+                  onChange({
+                    ...value,
+                    bic: suggestion.bic,
+                    bankName: suggestion.bankName,
+                    correspondentAccount:
+                      suggestion.correspondentAccount ?? value.correspondentAccount,
+                  })
+                }
+              />
+            </div>
+          )}
+
+          <div className="agreement-group__wide">
+            <Field label={t("agreements.fields.bankName")} htmlFor="agreement-bank">
+              <Input
+                id="agreement-bank"
+                value={value.bankName}
+                disabled={disabled}
+                onChange={(event) => set("bankName", event.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Field label={t("agreements.fields.bic")} htmlFor="agreement-bic">
+            <Input
+              id="agreement-bic"
+              value={value.bic}
+              inputMode="numeric"
+              disabled={disabled}
+              onChange={(event) => set("bic", event.target.value)}
+            />
+          </Field>
+
+          <Field label={t("agreements.fields.settlementAccount")} htmlFor="agreement-rs">
+            <Input
+              id="agreement-rs"
+              value={value.settlementAccount}
+              inputMode="numeric"
+              disabled={disabled}
+              onChange={(event) => set("settlementAccount", event.target.value)}
+            />
+          </Field>
+
+          <Field label={t("agreements.fields.correspondentAccount")} htmlFor="agreement-ks">
+            <Input
+              id="agreement-ks"
+              value={value.correspondentAccount}
+              inputMode="numeric"
+              disabled={disabled}
+              onChange={(event) => set("correspondentAccount", event.target.value)}
+            />
+          </Field>
+        </div>
+      </div>
     </div>
   );
 }

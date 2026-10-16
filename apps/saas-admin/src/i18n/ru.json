@@ -2484,7 +2484,8 @@
       "documentKind": "Тип",
       "filename": "Файл",
       "size": "Размер",
-      "actions": "Действия"
+      "actions": "Действия",
+      "createdAt": "Добавлен"
     },
     "statuses": {
       "draft": "Черновик",
@@ -2525,7 +2526,12 @@
       "header": "Шапка договора",
       "transitions": "Статус",
       "tenant": "Тенант",
-      "documents": "Документы"
+      "documents": "Документы",
+      "requisites": "Реквизиты",
+      "status": "Статус",
+      "contract": "Договор",
+      "address": "Адрес и контакты",
+      "bank": "Банк"
     },
     "fields": {
       "kind": "Вид лица",
@@ -2559,7 +2565,8 @@
       "anyStatus": "Любой",
       "search": "Поиск",
       "searchPlaceholder": "Номер, ИНН или наименование",
-      "withoutTenant": "Без тенанта"
+      "withoutTenant": "Без тенанта",
+      "label": "Фильтры"
     },
     "list": {
       "noTenant": "Тенант не привязан",
@@ -2578,7 +2585,35 @@
       "badAttachmentType": "Допустимы только PDF, DOCX, PNG и JPEG.",
       "noDocuments": "Документов пока нет.",
       "staleDraft": "Договор изменён после того, как документ был сформирован: файл больше не соответствует записи. Сформируйте печатную форму заново перед отправкой.",
-      "staleBadge": "Устарел"
+      "staleBadge": "Устарел",
+      "openTenant": "Открыть тенанта",
+      "linkSubmit": "Привязать",
+      "candidateLabel": "Тенант с совпадающим ИНН",
+      "candidatePlaceholder": "Выберите тенанта",
+      "candidateSearch": "Поиск по названию",
+      "candidateEmpty": "Ничего не найдено",
+      "candidateLoading": "Загружаем",
+      "tenantLoading": "Загружаем название…",
+      "unlinkConfirmTitle": "Отвязать тенанта?",
+      "unlinkConfirmBody": "Договор {{number}} перестанет быть связан с тенантом {{name}}. Сам договор не меняется.",
+      "cancel": "Отмена",
+      "terminateTitle": "Прекратить договор?",
+      "terminateBody": "Договор останется в реестре, но вернуть его в работу будет нельзя. Укажите основание прекращения.",
+      "terminateConfirm": "Прекратить",
+      "terminatedAt": "Прекращён {{date}}",
+      "statusCurrent": "Текущий статус",
+      "deleteConfirmTitle": "Удалить вложение?",
+      "deleteConfirmBody": "Файл {{name}} будет удалён из договора.",
+      "uploadFile": "Загрузить файл",
+      "uploadHint": "PDF, DOCX, PNG или JPEG, до {{mb}} МБ",
+      "tooLarge": "Файл больше {{mb}} МБ.",
+      "noDocumentsHint": "Сформируйте проект договора или загрузите подписанный файл.",
+      "save": "Сохранить изменения",
+      "reset": "Сбросить",
+      "saved": "Изменения сохранены",
+      "editHint": "Правки попадут в следующий сформированный проект; уже созданные файлы будут помечены как устаревшие.",
+      "notSet": "не указано",
+      "sizeKb": "{{count}} КБ"
     }
   },
   "entitlements": {

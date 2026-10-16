@@ -76,6 +76,7 @@ export function DeviceReplacementPanel({
         <Alert tone="error">
           {t("deviceReplacement.loadError")}{" "}
           <Button
+            size="compact"
             variant="secondary"
             disabled={list.isFetching}
             onClick={() => void list.refetch()}

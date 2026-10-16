@@ -13,6 +13,7 @@ import {
 import { Spinner } from "@markiro/ui";
 
 import { PlatformAuthBoundary } from "./auth/PlatformAuthBoundary.js";
+import { SUPPORT_CHAT_ENABLED } from "./features.js";
 import { AppShell } from "./layout/AppShell.js";
 const ActivatePlatformUser = lazy(() =>
   import("./pages/auth/ActivatePlatformUser.js").then((module) => ({
@@ -208,8 +209,12 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/billing-requests" element={<BillingRequestsPage />} />
         <Route path="/billing-requests/:requestId" element={<BillingRequestsPage />} />
-        <Route path="/support" element={<SupportEpisodesPage />} />
-        <Route path="/support/:episodeId" element={<SupportEpisodePage />} />
+        {SUPPORT_CHAT_ENABLED ? (
+          <>
+            <Route path="/support" element={<SupportEpisodesPage />} />
+            <Route path="/support/:episodeId" element={<SupportEpisodePage />} />
+          </>
+        ) : null}
         <Route path="/billing-acts" element={<BillingActsPage />} />
         <Route path="/billing-acts/new" element={<CreateBillingActPage />} />
         <Route path="/billing-acts/:actId" element={<BillingActDetailPage />} />

@@ -114,7 +114,9 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
       {query.isError ? (
         <Alert tone="error">
           {t("support.loadError")}{" "}
-          <Button onClick={() => void query.refetch()}>{t("support.retry")}</Button>
+          <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
+            {t("support.retry")}
+          </Button>
         </Alert>
       ) : null}
       {query.data && !query.isError ? (
@@ -139,7 +141,9 @@ function Episode({ userId, episodeId }: { userId: string; episodeId: string }) {
             {olderError ? (
               <Alert tone="error">
                 {t("support.olderError")}{" "}
-                <Button onClick={() => void loadOlder()}>{t("support.retryOlder")}</Button>
+                <Button size="compact" variant="secondary" onClick={() => void loadOlder()}>
+                  {t("support.retryOlder")}
+                </Button>
               </Alert>
             ) : null}
           </Card>

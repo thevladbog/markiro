@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it as baseIt, vi } from "vitest";
+import { SUPPORT_CHAT_ENABLED } from "../src/features.js";
 import {
   renderSaasApp,
   jsonResponse,
@@ -25,6 +26,10 @@ const episode = {
   request: null,
   sync: { state: "healthy", lastSyncedAt: null, errorCode: null },
 };
+
+// The feature is off (src/features.ts): the routes are not registered, so these
+// app-level tests only run while it is switched back on.
+const it = baseIt.skipIf(!SUPPORT_CHAT_ENABLED);
 
 afterEach(() => {
   cleanup();
