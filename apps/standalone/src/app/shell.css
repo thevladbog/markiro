@@ -249,9 +249,15 @@
   font-family: var(--font-mono);
 }
 
+/*
+ * The shell is as tall as the window and never taller: the menu and the top bar stay in view and
+ * the page scrolls inside `.office-shell__content`, which is what lets a list's table pin its
+ * heading and its pagination bar inside a card of the room that is left (`list.css`).
+ */
 .office-shell {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--surface-page);
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -401,6 +407,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 /*
@@ -661,16 +668,24 @@
 }
 
 /*
- * The page's one column is as wide as the window leaves it, never as wide as its
- * widest child: an implicit `auto` column would grow to a table's full width and
- * push the page sideways. A table scrolls inside its own card instead.
+ * The page is one column as wide as the window leaves it, never as wide as its widest child
+ * (`min-width: 0` on every child: a table scrolls inside its own card instead of pushing the page
+ * sideways). The column scrolls by itself; its parts keep their height (`flex: none`) except a
+ * list's card, which shrinks to the room that is left (`list.css`).
  */
 .office-shell__content {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   gap: 16px;
   padding: 24px 32px;
+  overflow: auto;
+}
+
+.office-shell__content > * {
+  flex: none;
+  min-width: 0;
 }
 
 /* A page header's title and buttons wrap; the buttons stay together at the right. */
@@ -2100,4 +2115,20 @@
 /* The greeting is the page's subtitle: it hugs the title above it. */
 .office-shell__content .mk-page-header + .overview-who {
   margin-top: -12px;
+}
+
+/* A product row: the photo frame, then the name and under it the print name. */
+.product-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.product-cell > .product-thumb {
+  flex: none;
+}
+
+.product-name__full {
+  font-weight: 600;
 }

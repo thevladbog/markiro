@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Input, Select } from "@markiro/ui";
+import { IconButton, Input, Select } from "@markiro/ui";
+
+import { OfficeIcon } from "../OfficeIcon.js";
 
 import { isPageSize, PAGE_SIZES, SMALLEST_PAGE_SIZE, type PageSize } from "./page-size.js";
 
@@ -64,24 +66,29 @@ function PageJump({
     if (target !== page) onPage(target);
   };
   return (
-    <Input
-      className="office-pagination__jump"
-      aria-label={t("office.common.pagination.jump", { pages: COUNT.format(pages) })}
-      title={t("office.common.pagination.jumpHint")}
-      inputMode="numeric"
-      mono
-      value={draft}
-      disabled={busy}
-      onChange={(event) => setDraft(event.target.value)}
-      onFocus={(event) => event.target.select()}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-        }
-      }}
-    />
+    <div className="office-pagination__jump-group">
+      <span className="office-pagination__jump-label" aria-hidden="true">
+        {t("office.common.pagination.jumpShort")}
+      </span>
+      <Input
+        className="office-pagination__jump"
+        aria-label={t("office.common.pagination.jump", { pages: COUNT.format(pages) })}
+        title={t("office.common.pagination.jumpHint")}
+        inputMode="numeric"
+        mono
+        value={draft}
+        disabled={busy}
+        onChange={(event) => setDraft(event.target.value)}
+        onFocus={(event) => event.target.select()}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+        }}
+      />
+    </div>
   );
 }
 
@@ -151,44 +158,48 @@ export function PaginationBar({
       </div>
       <nav aria-label={label} className="office-pagination__pages">
         {many && (
-          <Button
+          <IconButton
             variant="secondary"
             aria-label={t("office.common.pagination.first")}
             title={t("office.common.pagination.first")}
+            icon={<OfficeIcon name="caretsLeft" size={20} />}
             disabled={busy || page <= 1}
             onClick={() => onPage(1)}
-          >
-            <span aria-hidden="true">«</span>
-          </Button>
+          />
         )}
-        <Button variant="secondary" disabled={busy || page <= 1} onClick={() => onPage(page - 1)}>
-          {t("office.common.pagination.previous")}
-        </Button>
+        <IconButton
+          variant="secondary"
+          aria-label={t("office.common.pagination.previous")}
+          title={t("office.common.pagination.previous")}
+          icon={<OfficeIcon name="caretLeft" size={20} />}
+          disabled={busy || page <= 1}
+          onClick={() => onPage(page - 1)}
+        />
         <span className="office-pagination__page" aria-live="polite">
           {known
             ? t("office.common.pagination.page", { page, pages: COUNT.format(pageCount) })
             : t("office.common.pagination.pageOpen", { page })}
         </span>
-        {known && pageCount > 1 && (
-          <PageJump page={page} pages={pageCount} busy={busy} onPage={onPage} />
-        )}
-        <Button
+        <IconButton
           variant="secondary"
+          aria-label={t("office.common.pagination.next")}
+          title={t("office.common.pagination.next")}
+          icon={<OfficeIcon name="caretRight" size={20} />}
           disabled={busy || page >= last}
           onClick={() => onPage(page + 1)}
-        >
-          {t("office.common.pagination.next")}
-        </Button>
+        />
         {many && known && (
-          <Button
+          <IconButton
             variant="secondary"
             aria-label={t("office.common.pagination.last")}
             title={t("office.common.pagination.last")}
+            icon={<OfficeIcon name="caretsRight" size={20} />}
             disabled={busy || page >= pageCount}
             onClick={() => onPage(pageCount)}
-          >
-            <span aria-hidden="true">»</span>
-          </Button>
+          />
+        )}
+        {known && pageCount > 1 && (
+          <PageJump page={page} pages={pageCount} busy={busy} onPage={onPage} />
         )}
       </nav>
     </div>

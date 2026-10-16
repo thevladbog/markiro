@@ -47,6 +47,7 @@ export function CursorTable<Row>({
   return (
     <div className="office-paged">
       <Table
+        fill
         {...table}
         rows={paging.rows}
         scrollLabel={name ?? t("office.common.pagination.table")}
