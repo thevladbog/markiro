@@ -406,6 +406,7 @@ async fn opening_a_stream_for_a_device_revoked_meanwhile_is_refused() {
         AuthDevice {
             id,
             kind: DeviceKind::Station,
+            key_hash: None,
         },
     )
     .await

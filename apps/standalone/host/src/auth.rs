@@ -26,6 +26,11 @@ use crate::server::AppState;
 pub struct AuthDevice {
     pub id: String,
     pub kind: DeviceKind,
+    /// The hash of the key this request authenticated with. The write transaction checks it
+    /// again ([`AuthDevice::require_live_in`]): a recovery that rotated the key after the
+    /// extractor read it must stop the request the old key was still carrying. `None` only for a
+    /// handler a test calls without a request.
+    pub key_hash: Option<String>,
 }
 
 impl FromRequestParts<AppState> for AuthDevice {
@@ -74,11 +79,12 @@ async fn authenticate(
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|key| !key.is_empty())
         .ok_or_else(|| ApiError::unauthorized(credentials::DEVICE, "a device key is required"))?;
+    let presented = key_hash(key);
     let row: Option<DeviceAuthRow> = sqlx::query_as(
         "SELECT id, kind, last_seen_at, app_version, protocol, version_seen_at FROM devices \
          WHERE key_hash = ? AND revoked_at IS NULL",
     )
-    .bind(key_hash(key))
+    .bind(&presented)
     .fetch_optional(&state.pool)
     .await
     .map_err(ApiError::internal)?;
@@ -143,7 +149,11 @@ async fn authenticate(
             .map_err(ApiError::internal)?;
         }
     }
-    Ok(AuthDevice { id, kind })
+    Ok(AuthDevice {
+        id,
+        kind,
+        key_hash: Some(presented),
+    })
 }
 
 /// `id, kind, last_seen_at, app_version, protocol, version_seen_at` of a
@@ -188,12 +198,17 @@ impl AuthDevice {
         &self,
         conn: &mut SqliteConnection,
     ) -> Result<DeviceKind, ApiError> {
-        let kind: Option<String> =
-            sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
-                .bind(&self.id)
-                .fetch_optional(conn)
-                .await
-                .map_err(ApiError::internal)?;
+        // The key the request came with must still be the device's key: a recovery rotates it
+        // without revoking the row.
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT kind FROM devices WHERE id = ?1 AND revoked_at IS NULL \
+             AND (?2 IS NULL OR key_hash = ?2)",
+        )
+        .bind(&self.id)
+        .bind(self.key_hash.as_deref())
+        .fetch_optional(conn)
+        .await
+        .map_err(ApiError::internal)?;
         kind.ok_or_else(|| {
             ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
         })?

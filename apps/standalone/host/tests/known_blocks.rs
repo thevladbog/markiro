@@ -501,6 +501,7 @@ async fn a_station_revoked_while_it_waited_registers_nothing() {
         AuthDevice {
             id: station,
             kind: DeviceKind::Station,
+            key_hash: None,
         },
         ApiJson(request),
     )

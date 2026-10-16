@@ -1529,6 +1529,7 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
         AuthDevice {
             id: station,
             kind: DeviceKind::Station,
+            key_hash: None,
         },
         ApiPath(id.clone()),
         None,
@@ -1621,6 +1622,7 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
         AuthDevice {
             id: stations[0].clone(),
             kind: DeviceKind::Station,
+            key_hash: None,
         },
         ApiPath(id.clone()),
         None,
@@ -1631,6 +1633,7 @@ async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_s
         AuthDevice {
             id: stations[1].clone(),
             kind: DeviceKind::Station,
+            key_hash: None,
         },
         ApiJson(create),
     );

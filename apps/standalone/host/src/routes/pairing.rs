@@ -121,6 +121,7 @@ async fn insert_device(
 #[derive(sqlx::FromRow)]
 struct StoredCode {
     id: String,
+    created_by: String,
     expires_at: String,
     used_at: Option<String>,
     failed_attempts: i64,
@@ -148,7 +149,7 @@ pub async fn claim(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     let found: Option<StoredCode> = match pairing_code::normalize(request.code.expose()) {
         Some(code) => sqlx::query_as(
-            "SELECT id, expires_at, used_at, failed_attempts, device_id FROM pairing_codes WHERE code_hash = ?",
+            "SELECT id, created_by, expires_at, used_at, failed_attempts, device_id FROM pairing_codes WHERE code_hash = ?",
         )
         .bind(key_hash(&code))
         .fetch_optional(&mut *tx)
@@ -247,6 +248,17 @@ pub async fn claim(
             .execute(&mut *tx)
             .await
             .map_err(ApiError::internal)?;
+        // No other code for this device outlives its recovery: a superseded or leaked one must
+        // not rotate the key again under the device that just recovered.
+        sqlx::query(
+            "UPDATE pairing_codes SET used_at = ? WHERE device_id = ? AND used_at IS NULL AND id != ?",
+        )
+        .bind(&at)
+        .bind(&device_id)
+        .bind(&code.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
         let key = random_key();
         sqlx::query(
             "UPDATE devices SET key_hash = ?, app_version = ?, protocol = ?, capabilities = ?, \
@@ -272,7 +284,9 @@ pub async fn claim(
             &mut tx,
             &at,
             Entry {
-                actor: Actor::Device(&device_id),
+                // The office's act (design 6.6): the administrator who made the code. The device
+                // only carried it out; `pairingCodeId` joins the code's own creation row.
+                actor: Actor::OfficeUser(&code.created_by),
                 action: actions::DEVICE_REKEY,
                 target_type: Some("device"),
                 target_id: Some(&device_id),
@@ -455,6 +469,20 @@ async fn issue_code(
                 "only a station or a handheld pairs again with a code",
             ));
         }
+    }
+    // A new code for a device replaces every code that still lives for it: two codes for one
+    // device would be two ways to take its key.
+    if let Some(device) = device {
+        sqlx::query(
+            "UPDATE pairing_codes SET expires_at = ? WHERE device_id = ? AND used_at IS NULL \
+             AND expires_at > ?",
+        )
+        .bind(&at)
+        .bind(device)
+        .bind(&at)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
     }
     // Expiring the replaced code now makes a claim refuse it as expired and
     // takes it out of the live codes a wrong guess counts against.

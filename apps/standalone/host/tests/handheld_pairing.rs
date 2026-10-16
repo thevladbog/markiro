@@ -5,6 +5,8 @@
 mod support;
 
 use axum::http::StatusCode;
+use markiro_host::auth::AuthDevice;
+use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_trail, empty, json as json_request, login, pair_device, pair_handheld, request,
@@ -115,7 +117,8 @@ async fn a_code_for_a_device_gives_it_a_new_key_and_ends_the_old_one() {
         (StatusCode::BAD_REQUEST, json!("pairing_code_invalid"))
     );
 
-    // The trail: the re-keying is the device's own row; the code's creation names the device.
+    // The trail (design 6.6): the re-keying is the office's act, the administrator who made the
+    // code, on the device as its target; the code's creation names the device.
     let rekey = audit_trail(&admin.app, "device.rekey").await;
     assert_eq!(rekey.len(), 1);
     assert_eq!(
@@ -127,8 +130,8 @@ async fn a_code_for_a_device_gives_it_a_new_key_and_ends_the_old_one() {
             &rekey[0].5[..]
         ),
         (
-            "device",
-            Some(id.as_str()),
+            "office_user",
+            Some(admin.id.as_str()),
             Some("device"),
             Some(id.as_str()),
             "ok"
@@ -324,4 +327,69 @@ async fn a_recovery_id_that_is_not_a_uuid_is_a_validation_error_and_changes_noth
         .send(empty(with_device(request("GET", "/v1/device"), &key)))
         .await;
     assert_eq!(status, StatusCode::OK, "the old key still works");
+}
+
+#[tokio::test]
+async fn a_new_code_for_a_device_ends_the_old_one_and_a_recovery_ends_every_other() {
+    let admin = admin().await;
+    let old = pair_handheld(&admin).await;
+    let id = device_id(&admin, &old).await;
+    let (_, first) = code_for(&admin, &id).await;
+    let (_, second) = code_for(&admin, &id).await;
+    // The first code was replaced by the second one: it is not a second way in.
+    let (status, refused) = claim(&admin, &first["code"], "handheld", Some(&id)).await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("pairing_code_expired"))
+    );
+    // A code that still lives for the device (made some other way) dies with the recovery.
+    sqlx::query(
+        "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at, device_id) \
+         SELECT '99999999-9999-4999-8999-999999999999', 'x' || substr(code_hash, 2), created_by, \
+         created_at, '2999-01-01T00:00:00Z', device_id FROM pairing_codes WHERE device_id = ? LIMIT 1",
+    )
+    .bind(&id)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (status, paired) = claim(&admin, &second["code"], "handheld", Some(&id)).await;
+    assert_eq!(status, StatusCode::OK, "{paired}");
+    let live: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pairing_codes WHERE device_id = ? AND used_at IS NULL AND expires_at > ?",
+    )
+    .bind(&id)
+    .bind(admin.app.state.timestamp())
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(live, 0, "no code for the device outlives its recovery");
+}
+
+#[tokio::test]
+async fn a_request_authenticated_with_the_old_key_stops_when_the_key_was_rotated() {
+    let admin = admin().await;
+    let old = pair_handheld(&admin).await;
+    let id = device_id(&admin, &old).await;
+    let (_, code) = code_for(&admin, &id).await;
+    let (status, paired) = claim(&admin, &code["code"], "handheld", Some(&id)).await;
+    assert_eq!(status, StatusCode::OK, "{paired}");
+    let mut conn = admin.app.state.pool.acquire().await.unwrap();
+    let stale = AuthDevice {
+        id: id.clone(),
+        kind: DeviceKind::Handheld,
+        key_hash: Some(markiro_host::secrets::key_hash(&old)),
+    };
+    // The extractor read the old key before the rotation committed; the write must not follow.
+    let error = stale.require_live_in(&mut conn).await.unwrap_err();
+    assert_eq!(error.status(), StatusCode::UNAUTHORIZED);
+    let current = AuthDevice {
+        key_hash: Some(markiro_host::secrets::key_hash(
+            paired["deviceKey"].as_str().unwrap(),
+        )),
+        ..stale
+    };
+    assert_eq!(
+        current.require_live_in(&mut conn).await.unwrap(),
+        DeviceKind::Handheld
+    );
 }

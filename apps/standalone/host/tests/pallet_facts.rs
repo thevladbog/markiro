@@ -644,6 +644,7 @@ async fn receive_as(admin: &Admin, id: &str, records: &[Value]) -> (StatusCode, 
         AuthDevice {
             id: id.to_owned(),
             kind: DeviceKind::Station,
+            key_hash: None,
         },
         ApiJson(batch),
     )

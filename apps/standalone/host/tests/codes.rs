@@ -191,6 +191,7 @@ async fn a_check_never_waits_for_a_batch_being_written() {
             AskingDevice(AuthDevice {
                 id: station.clone(),
                 kind: DeviceKind::Station,
+                key_hash: None,
             }),
             ApiPath(code_hash(1)),
         ),

@@ -87,7 +87,10 @@ decimal key).
 A code the office makes for one device (`POST /v1/office/devices/{id}/pairing-code`, stored in
 `pairing_codes.device_id`) re-pairs that device with its own `deviceId`: the claim names `recoverDeviceId`, the
 host gives the device a new key, ends the old key and the device's office sessions, takes no seat and writes
-`device.rekey`. A code for one device used without that id, or an ordinary code with one, is
+`device.rekey` (the actor is the administrator who made the code, as design 6.6 says; `details.pairingCodeId`
+joins the code's creation row). A new code for a device expires every code still alive for it, and a recovery
+spends the rest. A request the old key already authenticated stops at `AuthDevice::require_live_in`, which
+checks the key's hash again inside the write transaction. A code for one device used without that id, or an ordinary code with one, is
 `pairing_code_invalid` and stays whole.
 
 ## Audit

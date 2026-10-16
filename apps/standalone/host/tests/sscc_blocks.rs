@@ -351,6 +351,7 @@ async fn issue_as(admin: &Admin, id: &str, kind: DeviceKind, body: Value) -> (St
         AuthDevice {
             id: id.to_owned(),
             kind,
+            key_hash: None,
         },
         ApiJson(request),
     )
