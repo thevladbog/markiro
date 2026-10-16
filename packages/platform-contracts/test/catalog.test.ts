@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  catalogOfflineAvailabilityBodySchema,
+  catalogOfflineAvailabilityResponseSchema,
   catalogVersionCreateSchema,
   catalogVersionPatchSchema,
+  catalogVersionSchema,
   platformCatalogContracts,
 } from "../src/index.js";
 
@@ -48,6 +51,7 @@ const responseBase = {
   vatRateBps: 2000,
   vatIncluded: true,
   publishedByPlatformUserId: null,
+  offlineAvailable: false,
 } as const;
 
 describe("platform catalog contracts", () => {
@@ -343,5 +347,67 @@ describe("platform catalog contracts", () => {
     expect(
       platformCatalogContracts.setDefaultDemo.body.safeParse({ catalogVersionId: null }).success,
     ).toBe(false);
+  });
+});
+
+describe("offline availability contracts", () => {
+  const draftPlan = {
+    ...responseBase,
+    id: PLAN_VERSION_ID,
+    kind: "plan",
+    status: "draft",
+    publishedAt: null,
+    plan: planCreate.plan,
+  } as const;
+
+  it("requires offlineAvailable in every catalog version response", () => {
+    const { offlineAvailable: _omitted, ...withoutFlag } = draftPlan;
+    void _omitted;
+    expect(catalogVersionSchema.safeParse(withoutFlag).success).toBe(false);
+    expect(catalogVersionSchema.safeParse(draftPlan).success).toBe(true);
+    expect(catalogVersionSchema.safeParse({ ...draftPlan, offlineAvailable: true }).success).toBe(
+      true,
+    );
+  });
+
+  it("accepts a reasoned, strict flag change and refuses extras", () => {
+    expect(
+      catalogOfflineAvailabilityBodySchema.safeParse({
+        offlineAvailable: true,
+        reason: "Продаём автоном",
+      }).success,
+    ).toBe(true);
+    expect(catalogOfflineAvailabilityBodySchema.safeParse({ offlineAvailable: true }).success).toBe(
+      false,
+    );
+    expect(
+      catalogOfflineAvailabilityBodySchema.safeParse({
+        offlineAvailable: true,
+        reason: "x",
+        extra: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      catalogOfflineAvailabilityBodySchema.safeParse({ offlineAvailable: true, reason: "" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("answers with the item, the result and the holders, plan or add-on only", () => {
+    const answer = {
+      catalogItemId: "6f1b5ea0-0000-4000-8000-000000000001",
+      catalogItemCode: "plan-a",
+      kind: "plan",
+      offlineAvailable: true,
+      changed: true,
+      offlineTenantHolders: 2,
+    };
+    expect(catalogOfflineAvailabilityResponseSchema.safeParse(answer).success).toBe(true);
+    expect(
+      catalogOfflineAvailabilityResponseSchema.safeParse({ ...answer, kind: "service" }).success,
+    ).toBe(false);
+    expect(platformCatalogContracts.setOfflineAvailability.response).toBe(
+      catalogOfflineAvailabilityResponseSchema,
+    );
   });
 });

@@ -8,6 +8,7 @@ const catalogVersion = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogItemId: "21111111-1111-4111-8111-111111111111",
   catalogItemCode: "plan-basic",
+  offlineAvailable: false,
   documentNameRu: null,
   documentNameEn: null,
   subject: null,
