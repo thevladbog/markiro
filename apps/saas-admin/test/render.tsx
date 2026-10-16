@@ -926,7 +926,7 @@ export function installTenantApi({
   total?: number;
   createResponses?: Array<{ status: number; code?: string }>;
   renewResponses?: Array<{ status: number; code?: string }>;
-  grantResponses?: Array<{ status: number; code?: string }>;
+  grantResponses?: Array<{ status: number; code?: string; body?: unknown }>;
   assignmentResponses?: Array<{ status: number; code?: string }>;
   detailResponses?: Array<Record<string, unknown>>;
   catalogResponse?: unknown;
@@ -1003,14 +1003,17 @@ export function installTenantApi({
         mutationCalls.push({ method, path: url, body: JSON.parse(String(init.body)) });
         const response = grantResponses.shift() ?? { status: 201 };
         return response.status === 201
-          ? jsonResponse(201, {
-              tenantId: TENANT_ID,
-              userId: "owner-user-1",
-              memberId: "member-1",
-              deliveryId: "c1111111-1111-4111-8111-111111111111",
-              offlineAssignments: { plans: 0, addons: 0 },
-              demoCreated: true,
-            })
+          ? jsonResponse(
+              201,
+              response.body ?? {
+                tenantId: TENANT_ID,
+                userId: "owner-user-1",
+                memberId: "member-1",
+                deliveryId: "c1111111-1111-4111-8111-111111111111",
+                offlineAssignments: { plans: 0, addons: 0 },
+                demoCreated: true,
+              },
+            )
           : jsonResponse(response.status, {
               code: response.code ?? "cabinet_access_already_enabled",
             });

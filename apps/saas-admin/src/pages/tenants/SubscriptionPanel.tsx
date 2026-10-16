@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import {
   Alert,
@@ -215,12 +216,15 @@ export function SubscriptionPanel({
   capabilities,
   financialVisible,
   accountant,
+  offlineTenant = false,
 }: {
   detail: TenantDetail;
   canDirectAssign: boolean;
   capabilities: readonly PlatformCapability[];
   financialVisible: boolean;
   accountant: boolean;
+  /** A tenant without a cabinet: only offline-flagged items are assignable (spec 2026-10-16). */
+  offlineTenant?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
@@ -260,7 +264,11 @@ export function SubscriptionPanel({
     new Date(detail.currentSubscription.endsAt).getTime() <= Date.now(),
   );
   const planSuccessorExists = detail.scheduledSubscription !== null;
-  const publishedVersions = catalog.data?.items.filter((item) => item.status === "published") ?? [];
+  // The server guard stays the source of truth; hiding unflagged items is a convenience.
+  const publishedVersions =
+    catalog.data?.items.filter(
+      (item) => item.status === "published" && (!offlineTenant || item.offlineAvailable),
+    ) ?? [];
   const choices = publishedVersions.filter((item) => item.kind === kind);
   const versionOptions: ComboboxOption[] = choices.map((version) => ({
     value: version.id,
@@ -522,7 +530,9 @@ export function SubscriptionPanel({
         />
       </section>
 
-      <EntitlementsPanel tenantId={detail.tenant.id} capabilities={capabilities} />
+      {offlineTenant ? null : (
+        <EntitlementsPanel tenantId={detail.tenant.id} capabilities={capabilities} />
+      )}
       <div className="addon-grid">
         <AddonList
           title={t("tenants.detail.addons.active")}
@@ -547,107 +557,123 @@ export function SubscriptionPanel({
             onRetry={() => void catalog.refetch()}
             loadingText={t("tenants.assignment.loading")}
           >
-            <form
-              className="assignment-form"
-              noValidate
-              onSubmit={(event) => void prepareConfirmation(event)}
-            >
-              <Select<AssignmentKind>
-                label={t("tenants.assignment.kind")}
-                options={[
-                  { value: "plan", label: t("tenants.assignment.plan") },
-                  { value: "addon", label: t("tenants.assignment.addon") },
-                ]}
-                value={kind}
-                onValueChange={(value) => {
-                  form.setValue("kind", value, { shouldDirty: true });
-                  form.setValue("catalogVersionId", "", { shouldDirty: true });
-                  form.clearErrors();
-                }}
-              />
-              <Combobox
-                label={t(`tenants.assignment.${kind}Version`)}
-                options={versionOptions}
-                value={form.watch("catalogVersionId")}
-                {...(form.formState.errors.catalogVersionId?.message
-                  ? { error: form.formState.errors.catalogVersionId.message }
+            {offlineTenant ? (
+              <Alert tone="info">{t("tenants.assignment.offlineNote")}</Alert>
+            ) : null}
+            {offlineTenant && publishedVersions.length === 0 ? (
+              <Alert
+                tone="warn"
+                {...(capabilities.includes("catalog.read")
+                  ? {
+                      action: <Link to="/catalog">{t("tenants.assignment.openCatalog")}</Link>,
+                    }
                   : {})}
-                onValueChange={(value) =>
-                  form.setValue("catalogVersionId", value, {
-                    shouldDirty: true,
-                    shouldValidate: true,
-                  })
-                }
-                placeholder={t("tenants.assignment.selectVersion")}
-                searchPlaceholder={t("tenants.assignment.selectVersion")}
-                emptyText={t("tenants.assignment.selectVersion")}
-                loadingText={t("tenants.assignment.loading")}
-              />
-              <Select<ActivationPolicy>
-                label={t("tenants.assignment.policy")}
-                options={[
-                  { value: "immediate", label: t("tenants.assignment.immediate") },
-                  {
-                    value: "after_current",
-                    label: t("tenants.assignment.afterCurrent"),
-                    disabled: kind === "plan" && (currentTermEnded || planSuccessorExists),
-                  },
-                ]}
-                value={form.watch("activationPolicy")}
-                {...(form.formState.errors.activationPolicy?.message
-                  ? { error: form.formState.errors.activationPolicy.message }
-                  : {})}
-                onValueChange={(value) =>
-                  form.setValue("activationPolicy", value, { shouldDirty: true })
-                }
-              />
-              {kind === "plan" && (currentTermEnded || planSuccessorExists) ? (
-                <p className="tenant-policy-note">
-                  {t(
-                    currentTermEnded
-                      ? "tenants.assignment.validation.afterCurrentEnded"
-                      : "tenants.assignment.validation.afterCurrentScheduled",
-                  )}
-                </p>
-              ) : null}
-              {kind === "addon" ? (
-                <Input
-                  label={t("tenants.assignment.quantity")}
-                  inputMode="numeric"
-                  mono
-                  {...(form.formState.errors.quantity?.message
-                    ? { error: form.formState.errors.quantity.message }
+              >
+                {t("tenants.assignment.offlineEmpty")}
+              </Alert>
+            ) : (
+              <form
+                className="assignment-form"
+                noValidate
+                onSubmit={(event) => void prepareConfirmation(event)}
+              >
+                <Select<AssignmentKind>
+                  label={t("tenants.assignment.kind")}
+                  options={[
+                    { value: "plan", label: t("tenants.assignment.plan") },
+                    { value: "addon", label: t("tenants.assignment.addon") },
+                  ]}
+                  value={kind}
+                  onValueChange={(value) => {
+                    form.setValue("kind", value, { shouldDirty: true });
+                    form.setValue("catalogVersionId", "", { shouldDirty: true });
+                    form.clearErrors();
+                  }}
+                />
+                <Combobox
+                  label={t(`tenants.assignment.${kind}Version`)}
+                  options={versionOptions}
+                  value={form.watch("catalogVersionId")}
+                  {...(form.formState.errors.catalogVersionId?.message
+                    ? { error: form.formState.errors.catalogVersionId.message }
                     : {})}
-                  {...form.register("quantity")}
-                />
-              ) : null}
-              <Input
-                label={t("tenants.assignment.endsAt")}
-                type="datetime-local"
-                {...(form.formState.errors.endsAt?.message
-                  ? { error: form.formState.errors.endsAt.message }
-                  : {})}
-                {...form.register("endsAt")}
-              />
-              <div className="tenant-textarea-field">
-                <label htmlFor="tenant-assignment-reason">{t("tenants.assignment.reason")}</label>
-                <textarea
-                  id="tenant-assignment-reason"
-                  maxLength={1_000}
-                  aria-invalid={form.formState.errors.reason ? true : undefined}
-                  aria-describedby={
-                    form.formState.errors.reason ? "assignment-reason-error" : undefined
+                  onValueChange={(value) =>
+                    form.setValue("catalogVersionId", value, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
                   }
-                  {...form.register("reason")}
+                  placeholder={t("tenants.assignment.selectVersion")}
+                  searchPlaceholder={t("tenants.assignment.selectVersion")}
+                  emptyText={t("tenants.assignment.selectVersion")}
+                  loadingText={t("tenants.assignment.loading")}
                 />
-                {form.formState.errors.reason ? (
-                  <span id="assignment-reason-error" className="native-field__error">
-                    {form.formState.errors.reason.message}
-                  </span>
+                <Select<ActivationPolicy>
+                  label={t("tenants.assignment.policy")}
+                  options={[
+                    { value: "immediate", label: t("tenants.assignment.immediate") },
+                    {
+                      value: "after_current",
+                      label: t("tenants.assignment.afterCurrent"),
+                      disabled: kind === "plan" && (currentTermEnded || planSuccessorExists),
+                    },
+                  ]}
+                  value={form.watch("activationPolicy")}
+                  {...(form.formState.errors.activationPolicy?.message
+                    ? { error: form.formState.errors.activationPolicy.message }
+                    : {})}
+                  onValueChange={(value) =>
+                    form.setValue("activationPolicy", value, { shouldDirty: true })
+                  }
+                />
+                {kind === "plan" && (currentTermEnded || planSuccessorExists) ? (
+                  <p className="tenant-policy-note">
+                    {t(
+                      currentTermEnded
+                        ? "tenants.assignment.validation.afterCurrentEnded"
+                        : "tenants.assignment.validation.afterCurrentScheduled",
+                    )}
+                  </p>
                 ) : null}
-              </div>
-              <Button type="submit">{t("tenants.assignment.review")}</Button>
-            </form>
+                {kind === "addon" ? (
+                  <Input
+                    label={t("tenants.assignment.quantity")}
+                    inputMode="numeric"
+                    mono
+                    {...(form.formState.errors.quantity?.message
+                      ? { error: form.formState.errors.quantity.message }
+                      : {})}
+                    {...form.register("quantity")}
+                  />
+                ) : null}
+                <Input
+                  label={t("tenants.assignment.endsAt")}
+                  type="datetime-local"
+                  {...(form.formState.errors.endsAt?.message
+                    ? { error: form.formState.errors.endsAt.message }
+                    : {})}
+                  {...form.register("endsAt")}
+                />
+                <div className="tenant-textarea-field">
+                  <label htmlFor="tenant-assignment-reason">{t("tenants.assignment.reason")}</label>
+                  <textarea
+                    id="tenant-assignment-reason"
+                    maxLength={1_000}
+                    aria-invalid={form.formState.errors.reason ? true : undefined}
+                    aria-describedby={
+                      form.formState.errors.reason ? "assignment-reason-error" : undefined
+                    }
+                    {...form.register("reason")}
+                  />
+                  {form.formState.errors.reason ? (
+                    <span id="assignment-reason-error" className="native-field__error">
+                      {form.formState.errors.reason.message}
+                    </span>
+                  ) : null}
+                </div>
+                <Button type="submit">{t("tenants.assignment.review")}</Button>
+              </form>
+            )}
           </PanelState>
           <div className="tenant-operation-status" role="status" aria-live="polite">
             {mutationMessage ? (

@@ -2325,7 +2325,9 @@
         "submit": "Grant and send activation",
         "granted": "Access granted; the activation email is queued.",
         "created": "Tenant created without a cabinet.",
-        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself."
+        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself.",
+        "assignmentsWarning": "The tenant has offline assignments (plans: {{plans}}, add-ons: {{addons}}). They stay in force and no demo is created: the cabinet quotas and features will equal these assignments.",
+        "grantedNoDemo": "Cabinet access granted, the activation e-mail is queued. The offline assignments are kept (plans: {{plans}}, add-ons: {{addons}}), no demo was created: the cabinet quotas equal those assignments."
       }
     },
     "usage": {
@@ -2397,7 +2399,10 @@
         "targetSubscription": "Target subscription: {{id}}",
         "endsAt": "End date: {{value}}",
         "reason": "Reason: {{reason}}"
-      }
+      },
+      "offlineNote": "A tenant without a cabinet can be assigned only plans and add-ons flagged «Available to offline customers». The standalone offline license is issued from these assignments.",
+      "offlineEmpty": "No items are flagged offline. You can flag an item in the catalog.",
+      "openCatalog": "Open the catalog"
     },
     "events": {
       "demo.activated": "Demo activated",
@@ -2437,7 +2442,8 @@
       "tenant_cabinet_access_mismatch": "A tenant with this slug already exists with a different cabinet access mode",
       "grant_owner_conflict": "This tenant already has another cabinet member",
       "tenant_not_found": "Tenant not found",
-      "grant_failed": "Could not grant cabinet access"
+      "grant_failed": "Could not grant cabinet access",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only items flagged as available to offline customers can be assigned. Reload the page: the flag may have been withdrawn."
     },
     "cabinet": {
       "none": "No cabinet"
@@ -2479,7 +2485,7 @@
       "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
       "commercial_amount_out_of_range": "A line, tax or document amount exceeds the supported limit. Reduce the price or quantity.",
       "commercial_line_terms_invalid": "Review the commercial subject and license period.",
-      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only services can be ordered for it.",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: services and items flagged as available to offline customers can be sold to it.",
       "commercial_subject_required": "Select the commercial subject.",
       "document_name_required": "Enter the document name."
     }

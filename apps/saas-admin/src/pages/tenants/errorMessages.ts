@@ -42,6 +42,8 @@ const ASSIGNMENT_ERROR_KEYS: Readonly<Record<string, string>> = {
   addon_exceeds_subscription_term: "tenants.errors.addon_exceeds_subscription_term",
   subscription_timeline_changed: "tenants.errors.subscription_timeline_changed",
   subscription_addon_timeline_changed: "tenants.errors.subscription_addon_timeline_changed",
+  catalog_kind_not_allowed_for_offline_tenant:
+    "tenants.errors.catalog_kind_not_allowed_for_offline_tenant",
 };
 
 const FALLBACK_KEYS: Record<TenantOperation, string> = {

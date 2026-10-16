@@ -7,17 +7,24 @@ export function CatalogPositionPicker({
   catalog,
   loading,
   separate,
+  offlineTenant = false,
   onSeparateChange,
   onSelected,
 }: {
   catalog: readonly CatalogVersionDto[];
   loading: boolean;
   separate: boolean;
+  /** A tenant without a cabinet: services and offline-flagged items only (spec 2026-10-16). */
+  offlineTenant?: boolean;
   onSeparateChange: (separate: boolean) => void;
   onSelected: (version: CatalogVersionDto) => void;
 }) {
   const { t } = useTranslation();
-  const selectableCatalog = catalog.filter((version) => version.unitPrice !== undefined);
+  const selectableCatalog = catalog.filter(
+    (version) =>
+      version.unitPrice !== undefined &&
+      (!offlineTenant || version.kind === "service" || version.offlineAvailable),
+  );
   const options: ComboboxOption[] = selectableCatalog.map((version) => ({
     value: version.id,
     label: `${version.nameRu} · ${version.catalogItemCode} · v${version.version}`,

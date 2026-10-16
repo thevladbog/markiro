@@ -172,6 +172,9 @@ export function DocumentComposer({
               catalog={catalog}
               loading={loadingSources}
               separate={separate}
+              offlineTenant={
+                tenants.find((tenant) => tenant.id === draft.tenantId)?.cabinetAccess === "none"
+              }
               onSeparateChange={setSeparate}
               onSelected={addCatalogPosition}
             />
