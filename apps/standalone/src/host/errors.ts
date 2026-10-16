@@ -26,6 +26,15 @@ export const API_ERROR_CODES = [
   "export_file_corrupted",
   "package_verifying",
   "update_busy",
+  // An office user's photo (plan АВА); the statuses are `AVATAR_ERROR_CODES` of protocol.ts.
+  "avatar_too_large",
+  "avatar_unsupported_type",
+  "avatar_too_small",
+  "avatar_dimensions_too_large",
+  "avatar_not_square",
+  "avatar_corrupt",
+  "avatar_not_found",
+  "forbidden_replace_other",
 ] as const;
 
 const API_CODES: ReadonlySet<string> = new Set(API_ERROR_CODES);

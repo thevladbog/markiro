@@ -86,6 +86,13 @@ import {
   passwordSetSchema,
   productCreateSchema,
   productPhotoPutSchema,
+  userAvatarPutSchema,
+  userAvatarStateSchema,
+  AVATAR_ERROR_CODES,
+  AVATAR_MAX_BYTES,
+  AVATAR_MAX_SIDE,
+  AVATAR_MEDIA_TYPES,
+  AVATAR_MIN_SIDE,
   productPhotoStateSchema,
   shiftSnapshotProductSchema,
   productGroupSchema,
@@ -305,7 +312,10 @@ const RESPONSES = [
   ["device-record.json", deviceRecordSchema],
   ["device-record-legacy.json", deviceRecordSchema],
   ["office-user.json", officeUserSchema],
+  ["office-user-legacy.json", officeUserSchema],
   ["office-session.json", officeSessionSchema],
+  ["user-avatar-state.json", userAvatarStateSchema],
+  ["user-avatar-state-empty.json", userAvatarStateSchema],
   ["bootstrap-response.json", bootstrapResponseSchema],
   ["org-profile.json", orgProfileSchema],
   ["org-logo.json", orgLogoStateSchema],
@@ -359,6 +369,7 @@ const REQUESTS = [
   ["org-profile-update.json", orgProfileUpdateSchema],
   ["org-logo-put.json", orgLogoPutSchema],
   ["product-photo-put.json", productPhotoPutSchema],
+  ["avatar-put.json", userAvatarPutSchema],
   ["pallet-sheet-create.json", palletSheetCreateSchema],
   ["pallet-sheet-update.json", palletSheetUpdateSchema],
   ["pallet-sheet-default-update.json", palletSheetDefaultUpdateSchema],
@@ -2001,6 +2012,41 @@ describe("catalog shapes", () => {
     const put = fixture("product-photo-put.json") as Record<string, unknown>;
     expect(productPhotoPutSchema.safeParse({ ...put, mime: "image/png" }).success).toBe(false);
     expect(productPhotoPutSchema.safeParse({ ...put, width: 641 }).success).toBe(false);
+  });
+
+  it("a user of a host before the photos reads with no version (undefined, not null), and a photo put is strict (plan АВА)", () => {
+    const legacy = fixture("office-user-legacy.json");
+    expect(officeUserSchema.parse(legacy).avatarVersion).toBeUndefined();
+    expect(
+      officeUserRecordSchema.parse({
+        ...(fixture("office-user-record.json") as Record<string, unknown>),
+        avatarVersion: undefined,
+      }).avatarVersion,
+    ).toBeUndefined();
+    expect(officeUserRecordSchema.parse(fixture("office-user-record.json")).avatarVersion).toBe(
+      1_790_000_000_000,
+    );
+    for (const version of [0, -1, 1.5, "7"]) {
+      expect(
+        officeUserSchema.safeParse({ ...(legacy as object), avatarVersion: version }).success,
+        String(version),
+      ).toBe(false);
+    }
+    const put = fixture("avatar-put.json") as Record<string, unknown>;
+    expect(userAvatarPutSchema.safeParse({ ...put, mediaType: "image/png" }).success).toBe(false);
+    expect(userAvatarPutSchema.safeParse({}).success).toBe(false);
+    expect(userAvatarPutSchema.safeParse({ dataBase64: "not base64!" }).success).toBe(false);
+  });
+
+  it("the photo's limits and error statuses are the host's (proto/fixtures/avatar-limits.json)", () => {
+    expect(fixture("avatar-limits.json")).toEqual({
+      maxBytes: AVATAR_MAX_BYTES,
+      minSide: AVATAR_MIN_SIDE,
+      maxSide: AVATAR_MAX_SIDE,
+      mediaTypes: [...AVATAR_MEDIA_TYPES],
+    });
+    const listed: readonly string[] = (fixture("error-codes.json") as { codes: string[] }).codes;
+    for (const code of Object.keys(AVATAR_ERROR_CODES)) expect(listed, code).toContain(code);
   });
 
   it("whole bodies name every field: leave one out and the schema refuses", () => {

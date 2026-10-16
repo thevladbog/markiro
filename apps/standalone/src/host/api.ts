@@ -108,6 +108,7 @@ import {
   officeUserSchema,
   orgLogoStateSchema,
   productPhotoStateSchema,
+  userAvatarStateSchema,
   hostNetworkSchema,
   orgProfileSchema,
   palletSheetSchema,
@@ -172,6 +173,8 @@ import {
   type OrgLogoState,
   type ProductPhotoPut,
   type ProductPhotoState,
+  type UserAvatarPut,
+  type UserAvatarState,
   type OrgProfile,
   type OrgProfileUpdate,
   type PalletSheet,
@@ -290,6 +293,16 @@ export interface HostApi {
   getProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
   putProductPhoto: (token: string, id: string, put: ProductPhotoPut) => Promise<ProductPhotoState>;
   deleteProductPhoto: (token: string, id: string) => Promise<ProductPhotoState>;
+  /**
+   * An office user's photo (plan АВА). Every role reads any user's (`avatar: null`
+   * without one, `not_found` for an unknown user); `userId` is the user's own id
+   * for a write: another user's `putUserAvatar` is `forbidden_replace_other`, and
+   * `deleteUserAvatar` of another's is an administrator's. The picture is the
+   * square the office cropped; the host reads its type and sides from its bytes.
+   */
+  getUserAvatar: (token: string, userId: string) => Promise<UserAvatarState>;
+  putUserAvatar: (token: string, userId: string, put: UserAvatarPut) => Promise<UserAvatarState>;
+  deleteUserAvatar: (token: string, userId: string) => Promise<UserAvatarState>;
   listPalletSheets: (token: string) => Promise<PalletSheets>;
   createPalletSheet: (token: string, create: PalletSheetCreate) => Promise<PalletSheet>;
   updatePalletSheet: (token: string, id: string, update: PalletSheetUpdate) => Promise<PalletSheet>;
@@ -725,6 +738,23 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("DELETE", `/v1/office/products/${id}/photo`, {
         officeToken: token,
         schema: productPhotoStateSchema,
+      }),
+    getUserAvatar: (token, userId) =>
+      client.request("GET", `/v1/office/users/${encodeURIComponent(userId)}/avatar`, {
+        officeToken: token,
+        schema: userAvatarStateSchema,
+      }),
+    putUserAvatar: (token, userId, put) =>
+      client.request("PUT", `/v1/office/users/${encodeURIComponent(userId)}/avatar`, {
+        // Only the wire's one field: the host reads the type and the sides from the bytes.
+        body: { dataBase64: put.dataBase64 },
+        officeToken: token,
+        schema: userAvatarStateSchema,
+      }),
+    deleteUserAvatar: (token, userId) =>
+      client.request("DELETE", `/v1/office/users/${encodeURIComponent(userId)}/avatar`, {
+        officeToken: token,
+        schema: userAvatarStateSchema,
       }),
     listPalletSheets: (token) =>
       client.request("GET", "/v1/office/pallet-sheets", {

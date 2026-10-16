@@ -509,6 +509,12 @@ export const officeUserSchema = z.object({
   login: z.string(),
   name: z.string(),
   role: officeRoleSchema,
+  /**
+   * The version of the user's photo (plan АВА), `null` without one. A host
+   * before the photos sends none (`undefined`: no photo either). The picture
+   * is asked for again only when this changes.
+   */
+  avatarVersion: z.number().int().positive().nullable().optional(),
 });
 export type OfficeUser = z.infer<typeof officeUserSchema>;
 
@@ -649,6 +655,7 @@ export const officeUserRecordSchema = z.object({
   active: z.boolean(),
   createdAt: z.iso.datetime(),
   rev: z.number().int(),
+  avatarVersion: z.number().int().positive().nullable().optional(),
 });
 export type OfficeUserRecord = z.infer<typeof officeUserRecordSchema>;
 
@@ -812,6 +819,55 @@ export const productPhotoPutSchema = z
   })
   .strict();
 export type ProductPhotoPut = z.infer<typeof productPhotoPutSchema>;
+
+/**
+ * The limits of an office user's photo (plan АВА), mirroring
+ * `markiro_proto::avatar`; `proto/fixtures/avatar-limits.json` holds both
+ * sides' copy. The office checks them before an upload so a refusal costs no
+ * round trip; the host checks them again, by the picture's own bytes.
+ */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+export const AVATAR_MIN_SIDE = 128;
+export const AVATAR_MAX_SIDE = 4096;
+export const AVATAR_MEDIA_TYPES = photoMediaTypeSchema.options;
+
+/** The host's codes for a refused photo (`markiro_proto::codes`), with their HTTP status. */
+export const AVATAR_ERROR_CODES = {
+  avatar_too_large: 413,
+  avatar_unsupported_type: 415,
+  avatar_too_small: 422,
+  avatar_dimensions_too_large: 422,
+  avatar_not_square: 422,
+  avatar_corrupt: 422,
+  avatar_not_found: 404,
+  forbidden_replace_other: 403,
+} as const;
+export type AvatarErrorCode = keyof typeof AVATAR_ERROR_CODES;
+
+/**
+ * Mirrors `markiro_proto::UserAvatar`: a square JPEG, PNG or WebP the office
+ * cropped, in standard base64. The host read `mediaType`, `width` and
+ * `height` from the picture's header; `checksum` is SHA-256 of the bytes;
+ * `version` is `avatarVersion` of the user, a client's cache key.
+ */
+export const userAvatarSchema = z.object({
+  width: z.number().int().min(AVATAR_MIN_SIDE).max(AVATAR_MAX_SIDE),
+  height: z.number().int().min(AVATAR_MIN_SIDE).max(AVATAR_MAX_SIDE),
+  dataBase64: base64Schema,
+  mediaType: photoMediaTypeSchema,
+  checksum: sha256HexSchema,
+  version: z.number().int().positive(),
+  updatedAt: z.string(),
+});
+export type UserAvatar = z.infer<typeof userAvatarSchema>;
+
+/** Mirrors `markiro_proto::UserAvatarState`: `GET`/`PUT`/`DELETE /v1/office/users/{id}/avatar`. */
+export const userAvatarStateSchema = z.object({ avatar: userAvatarSchema.nullable() });
+export type UserAvatarState = z.infer<typeof userAvatarStateSchema>;
+
+/** Mirrors `markiro_proto::UserAvatarPut`: the owner's whole picture, replacing any. */
+export const userAvatarPutSchema = z.object({ dataBase64: base64Schema }).strict();
+export type UserAvatarPut = z.infer<typeof userAvatarPutSchema>;
 
 /**
  * `GET /v1/office/templates`: a label template without its layout. The size,

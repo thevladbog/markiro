@@ -41,6 +41,7 @@ import {
   operatorUpdateSchema,
   orgLogoPutSchema,
   productPhotoPutSchema,
+  userAvatarPutSchema,
   palletSheetCreateSchema,
   palletSheetDefaultUpdateSchema,
   palletSheetUpdateSchema,
@@ -101,6 +102,7 @@ const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
 const LOGO_PUT = orgLogoPutSchema.parse(fixture("org-logo-put.json"));
 const PHOTO_PUT = productPhotoPutSchema.parse(fixture("product-photo-put.json"));
+const AVATAR_PUT = userAvatarPutSchema.parse(fixture("avatar-put.json"));
 const SHEET_ID = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
 const SHEET_CREATE = palletSheetCreateSchema.parse(fixture("pallet-sheet-create.json"));
 const SHEET_UPDATE = palletSheetUpdateSchema.parse(fixture("pallet-sheet-update.json"));
@@ -222,6 +224,24 @@ const CASES: Case[] = [
     { photo: null },
     (api) => api.deleteProductPhoto(TOKEN, PRODUCT.id),
     { method: "DELETE", path: `/v1/office/products/${PRODUCT.id}/photo`, body: undefined },
+  ],
+  [
+    "getUserAvatar",
+    fixture("user-avatar-state.json"),
+    (api) => api.getUserAvatar(TOKEN, PRODUCT.id),
+    { method: "GET", path: `/v1/office/users/${PRODUCT.id}/avatar`, body: undefined },
+  ],
+  [
+    "putUserAvatar",
+    fixture("user-avatar-state.json"),
+    (api) => api.putUserAvatar(TOKEN, PRODUCT.id, AVATAR_PUT),
+    { method: "PUT", path: `/v1/office/users/${PRODUCT.id}/avatar`, body: AVATAR_PUT },
+  ],
+  [
+    "deleteUserAvatar",
+    { avatar: null },
+    (api) => api.deleteUserAvatar(TOKEN, PRODUCT.id),
+    { method: "DELETE", path: `/v1/office/users/${PRODUCT.id}/avatar`, body: undefined },
   ],
   [
     "listPalletSheets",
@@ -862,6 +882,39 @@ describe("HostApi office endpoints", () => {
     await expect(
       recording(wrong).api.putProductPhoto(TOKEN, PRODUCT.id, PHOTO_PUT),
     ).rejects.toThrow();
+  });
+
+  it("reads a user's photo as the host sent it, none as null, and refuses anything else (plan АВА)", async () => {
+    await expect(
+      recording(fixture("user-avatar-state.json")).api.getUserAvatar(TOKEN, PRODUCT.id),
+    ).resolves.toEqual(fixture("user-avatar-state.json"));
+    await expect(
+      recording(fixture("user-avatar-state-empty.json")).api.getUserAvatar(TOKEN, PRODUCT.id),
+    ).resolves.toEqual({ avatar: null });
+    await expect(recording({}).api.getUserAvatar(TOKEN, PRODUCT.id)).rejects.toThrow();
+    const state = fixture("user-avatar-state.json") as { avatar: Record<string, unknown> };
+    for (const wrong of [
+      { ...state.avatar, checksum: "ABC" },
+      { ...state.avatar, mediaType: "image/gif" },
+      { ...state.avatar, width: 64 },
+      { ...state.avatar, version: 0 },
+    ]) {
+      await expect(
+        recording({ avatar: wrong }).api.putUserAvatar(TOKEN, PRODUCT.id, AVATAR_PUT),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("sends a user's id as one path segment and nothing of the picture but its bytes", async () => {
+    const seen = recording({ avatar: null });
+    await seen.api.deleteUserAvatar(TOKEN, "../org/logo");
+    expect(seen.sent[0]?.path).toBe("/v1/office/users/..%2Forg%2Flogo/avatar");
+    const put = recording(fixture("user-avatar-state.json"));
+    await put.api.putUserAvatar(TOKEN, PRODUCT.id, {
+      ...AVATAR_PUT,
+      mediaType: "image/png",
+    } as unknown as typeof AVATAR_PUT);
+    expect(put.sent[0]?.body).toEqual({ dataBase64: AVATAR_PUT.dataBase64 });
   });
 
   it("rejects a sheet answer that is not a sheet, and a list without its default", async () => {
