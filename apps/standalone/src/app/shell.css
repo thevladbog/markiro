@@ -307,6 +307,17 @@
   padding-top: 4px;
 }
 
+/*
+ * The menu scrolls as one block when the window is lower than it (the minimum window is
+ * 960 x 600): no entry is squeezed or cut between a list that scrolls and a pinned foot. `Sidebar`
+ * gives its list `flex: 1; overflow-y: auto` inline, hence `!important`.
+ */
+.office-shell > .mk-sidebar > ul {
+  flex: none !important;
+  min-height: auto !important;
+  overflow: visible !important;
+}
+
 .office-menu-settings .mk-sidebar__content {
   display: flex;
   align-items: center;
@@ -456,6 +467,11 @@
 
 :is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field {
   min-width: 0;
+}
+
+/* A bar with nothing to say about its result takes no room; its live region stays in the page. */
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__result:empty {
+  min-height: 0;
 }
 
 /*
