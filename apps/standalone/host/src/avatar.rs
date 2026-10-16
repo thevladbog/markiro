@@ -239,6 +239,51 @@ fn webp_header(bytes: &[u8]) -> Result<(u32, u32), ApiError> {
             // Chunks are padded to an even length.
             at = at.saturating_add(8 + size + (size & 1));
         }
+        // The canvas is the extended header's word; the bitstream's own
+        // header must say the same, or a small canvas could carry a picture
+        // the size limit never saw.
+        if image_sides(bytes, riff + 8)? != sides {
+            return Err(corrupt());
+        }
     }
     Ok(sides)
+}
+
+/// The sides the first bitstream chunk (`VP8 ` or `VP8L`) of an extended
+/// WebP declares, behind whatever the header lists first (`ICCP`, `ALPH`,
+/// `EXIF`, `XMP `); `corrupt` when there is none inside the RIFF.
+fn image_sides(bytes: &[u8], end: usize) -> Result<(u32, u32), ApiError> {
+    let mut at = 30;
+    while at + 8 <= end {
+        let kind = &bytes[at..at + 4];
+        let size = usize::try_from(u32::from_le_bytes([
+            bytes[at + 4],
+            bytes[at + 5],
+            bytes[at + 6],
+            bytes[at + 7],
+        ]))
+        .map_err(|_| corrupt())?;
+        let data = bytes.get(at + 8..).ok_or_else(corrupt)?;
+        match kind {
+            b"VP8 " => {
+                let frame = data.get(..10).ok_or_else(corrupt)?;
+                if frame[3..6] != [0x9D, 0x01, 0x2A] {
+                    return Err(corrupt());
+                }
+                let width = u16::from_le_bytes([frame[6], frame[7]]) & 0x3FFF;
+                let height = u16::from_le_bytes([frame[8], frame[9]]) & 0x3FFF;
+                return Ok((u32::from(width), u32::from(height)));
+            }
+            b"VP8L" => {
+                let head = data.get(..5).ok_or_else(corrupt)?;
+                if head[0] != 0x2F {
+                    return Err(corrupt());
+                }
+                let bits = u32::from_le_bytes([head[1], head[2], head[3], head[4]]);
+                return Ok(((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1));
+            }
+            _ => at = at.saturating_add(8 + size + (size & 1)),
+        }
+    }
+    Err(corrupt())
 }

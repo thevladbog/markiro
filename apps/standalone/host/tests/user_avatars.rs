@@ -125,8 +125,30 @@ fn webp_extended(width: u32, height: u32, flags: u8, then: &[(&[u8; 4], usize)])
     for (kind, size) in then {
         body.extend(*kind);
         body.extend((*size as u32).to_le_bytes());
-        body.extend(vec![0u8; *size]);
+        body.extend(vec![0u8; *size + (*size & 1)]);
     }
+    riff(&body)
+}
+
+/// An extended WebP of a `width` × `height` canvas holding `inner`, a whole chunk.
+fn webp_canvas_with(
+    width: u32,
+    height: u32,
+    before: &[(&[u8; 4], usize)],
+    inner: &[u8],
+) -> Vec<u8> {
+    let mut data = vec![0u8, 0, 0, 0];
+    data.extend(&(width - 1).to_le_bytes()[..3]);
+    data.extend(&(height - 1).to_le_bytes()[..3]);
+    let mut body = b"VP8X".to_vec();
+    body.extend(10u32.to_le_bytes());
+    body.extend(data);
+    for (kind, size) in before {
+        body.extend(*kind);
+        body.extend((*size as u32).to_le_bytes());
+        body.extend(vec![0u8; *size + (*size & 1)]);
+    }
+    body.extend_from_slice(inner);
     riff(&body)
 }
 
@@ -653,6 +675,25 @@ async fn the_host_judges_a_picture_by_its_bytes_and_its_header_only() {
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "avatar_unsupported_type",
         ),
+        // An extended canvas must be the bitstream's own sides.
+        (
+            "canvas 128 over a 16383 bitstream",
+            webp_canvas_with(128, 128, &[], &webp_lossless(16_383, 16_383)[12..]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "avatar_corrupt",
+        ),
+        (
+            "canvas 128 over a 256 lossy bitstream",
+            webp_canvas_with(128, 128, &[(b"ICCP", 4)], &webp_lossy(256, 256)[12..]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "avatar_corrupt",
+        ),
+        (
+            "canvas without a bitstream",
+            webp_canvas_with(128, 128, &[(b"EXIF", 4)], &[]),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "avatar_corrupt",
+        ),
         // Dimensions: read from the header, so a bomb costs nothing.
         (
             "png 127",
@@ -771,6 +812,15 @@ async fn the_host_judges_a_picture_by_its_bytes_and_its_header_only() {
     assert_eq!(biggest.len(), max);
     put(&admin, &biggest).await;
     put(&admin, &png(4096)).await;
+    // An extended WebP whose canvas and bitstream agree, behind a profile and a still alpha.
+    let extended = webp_canvas_with(
+        192,
+        192,
+        &[(b"ICCP", 4), (b"ALPH", 3)],
+        &webp_lossless(192, 192)[12..],
+    );
+    let stored = put(&admin, &extended).await;
+    assert_eq!(stored["avatar"]["mediaType"], json!("image/webp"));
 }
 
 #[tokio::test]

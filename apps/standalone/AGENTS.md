@@ -7251,7 +7251,8 @@ phase). Migration `0046_user_avatars.sql`, `host/src/avatar.rs`, `host/src/route
   the id a bound parameter; a file name is never read.
 - **What the host accepts**: JPEG (baseline, extended or progressive Huffman, 8-bit, one or three
   components), PNG or WebP, decided by the first bytes, never by the client; at most 2 MiB; each
-  side 128..=4096 dots and the picture square; no animated PNG or WebP. The sides come from the
+  side 128..=4096 dots and the picture square; no animated PNG or WebP; a WebP's extended
+  canvas must equal its bitstream's own sides. The sides come from the
   header only (`inspect`), so a decompression bomb costs nothing. The host stores the cropped
   picture as the office sent it (no re-encoding, so EXIF a client leaves in is kept: the office's
   canvas crop drops it). Limits: `markiro_proto::avatar` and `proto/fixtures/avatar-limits.json`
@@ -7266,8 +7267,9 @@ phase). Migration `0046_user_avatars.sql`, `host/src/avatar.rs`, `host/src/route
 - **Version**: `avatarVersion` (integer or `null`; absent from a host before the photos, which
   reads as `null`) is on `OfficeUser` (`/me`, sign-in, wizard) and `OfficeUserRecord` (the
   administrator's list). It is the host's time of the change in milliseconds, raised above the
-  row's previous one if the clock stood or went back; a restore cannot repeat one, as a revision
-  counter would. A change takes no host revision and reaches no station.
+  row's previous one if the clock stood or went back while the row lives (a clearing takes the
+  row and its floor, so a clock set back after a clearing can repeat an older version; the raw
+  route's checksum `ETag` cannot); a restore does not repeat one the way a revision counter would. A change takes no host revision and reaches no station.
 - **Audit**: `office_user.avatar.set` (details `width`, `height`, `bytes`, `mediaType`,
   `replaced`) and `office_user.avatar.clear` (`{}`), target `office_user`/`{id}`; the actor tells
   the owner from an administrator. The same picture again, a clearing of none and every refusal

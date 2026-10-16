@@ -8,8 +8,9 @@
 -- own header (`avatar.rs`), never a word of the client. `checksum` is the
 -- SHA-256 of `data` in lower-case hex, the raw route's ETag. `version` is
 -- the host's time of the change in milliseconds, raised above the row's
--- previous version when the clock did not move forward, so a client that
--- caches by version never meets one twice; a change takes no host revision
+-- previous version when the clock did not move forward (a clock set back
+-- after a clearing can still repeat an older version: the raw route's ETag,
+-- the checksum, is the cache key that cannot); a change takes no host revision
 -- (a photo is not in the station feed).
 CREATE TABLE user_avatars (
   user_id TEXT PRIMARY KEY REFERENCES office_users (id),

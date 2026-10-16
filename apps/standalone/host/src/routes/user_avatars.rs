@@ -24,8 +24,10 @@
 //!
 //! The version (`avatarVersion` of the user and the session) is the host's
 //! time of the change in milliseconds, raised above the row's previous one
-//! when the clock stood or went back. It is also what a client keys its
-//! cache by; the raw route's `ETag` is the checksum and does not depend on it.
+//! when the clock stood or went back while the row lives. A clearing takes
+//! the row, and with it the floor: a clock set back after a clearing can
+//! repeat an older version. The raw route's `ETag`, the checksum, does not
+//! depend on the clock.
 
 use std::net::SocketAddr;
 
@@ -212,13 +214,15 @@ pub async fn put_avatar(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     context: OfficeContext,
     ApiPath(id): ApiPath<String>,
-    AvatarBody(put): AvatarBody,
+    request: Request,
 ) -> Result<Json<UserAvatarState>, ApiError> {
     if id != context.user.id {
         return Err(forbidden_replace_other());
     }
     // Each attempt counts, a refused one too: an upload is megabytes of work.
+    // Both checks come before the body is read, so a refused caller costs no buffer.
     state.avatar_limiter.check(peer.ip())?;
+    let AvatarBody(put) = AvatarBody::from_request(request, &state).await?;
     let (bytes, picture) = avatar::from_base64(&put.data_base64)?;
     let checksum = sha256_hex(&bytes);
     let at = state.now();
