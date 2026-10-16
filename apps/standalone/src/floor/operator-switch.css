@@ -5,7 +5,7 @@
  * control 64 px high (the floor's touch target), its caption on one line.
  */
 .station-status-bar:has(> .station-status-actions) {
-  grid-template-columns: minmax(200px, 1fr) auto auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, auto) auto;
 }
 
 .station-status-actions {

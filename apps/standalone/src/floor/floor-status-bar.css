@@ -30,12 +30,19 @@
 .station-status-bar {
   display: grid;
   min-width: 0;
-  min-height: 80px;
   padding: var(--sp-2) var(--sp-4);
   gap: 0 var(--sp-4);
-  /* The identity keeps room to be read whatever the pills and the rail take (beta 3). */
-  grid-template-columns: minmax(200px, 1fr) auto;
+  /*
+   * One row of a fixed height (the rail's 64 px touch targets), never taller:
+   * what does not fit shrinks or collapses, it does not wrap (the warnings
+   * have their own row under it). The identity keeps room to be read
+   * whatever the pills and the rail take (beta 3); the pills give way first.
+   */
+  grid-template-columns: minmax(160px, 1fr) minmax(0, auto);
+  grid-template-rows: 64px auto;
   align-items: center;
+  /* The window's width, for the pills' collapse below. */
+  container-type: inline-size;
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   color: var(--fg-1);
@@ -62,6 +69,20 @@
   display: flex;
   min-width: 0;
   align-items: baseline;
+}
+
+/* The shift's number stays whole; the operator and the organization give way to it with an ellipsis. */
+.station-status-item--keep {
+  flex: 0 0 auto;
+}
+
+.station-status-identity__row {
+  overflow: hidden;
+}
+
+/* The operator's name, the longest line, gives way first. */
+.station-status-identity__row--secondary > .station-status-item:first-child {
+  flex-shrink: 3;
 }
 
 .station-status-identity__row .station-status-item + .station-status-item::before {
@@ -96,7 +117,8 @@
   gap: var(--sp-2);
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  /* No wrap: the row stays one line high; chips shrink and collapse (see the container queries). */
+  flex-wrap: nowrap;
 }
 
 .station-status-pills .host-status {
@@ -110,7 +132,30 @@
   gap: var(--sp-2);
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+/* The polite region of the low-stock chip: in the tree always, in the layout not. */
+.floor-stock-chip-region {
+  display: contents;
+}
+
+.floor-stock-chip {
+  flex: 0 0 auto;
+}
+
+.floor-stock-chip__text {
+  color: var(--fg-1);
+  font: 600 14px/18px var(--font-ui);
+  white-space: nowrap;
+}
+
+.floor-stock-chip[data-tone="warn"] .floor-stock-chip__text {
+  color: var(--warn-fg);
+}
+
+.floor-stock-chip[data-tone="error"] .floor-stock-chip__text {
+  color: var(--err-fg);
 }
 
 .station-status-pill {
@@ -212,8 +257,27 @@
 
 @media (max-height: 760px) {
   .station-status-bar {
-    min-height: 64px;
     padding-block: var(--sp-1);
+  }
+}
+
+/*
+ * What does not fit collapses by priority, by the window's width, never by
+ * wrapping. First the chips that say all is well (the scanner, the unsent
+ * count, a quiet tone) lose their caption, then their value, keeping the
+ * dot; the link's dot, any chip in a warning or error tone, and the one
+ * «Заканчиваются номера SSCC» chip stay whole, and the full text of every
+ * chip is its tooltip.
+ */
+@container (max-width: 1360px) {
+  .station-status-pills__list .station-status-pill:is([data-tone="ok"], [data-tone="neutral"]) dt {
+    display: none;
+  }
+}
+
+@container (max-width: 1000px) {
+  .station-status-pills__list .station-status-pill:is([data-tone="ok"], [data-tone="neutral"]) dd {
+    display: none;
   }
 }
 
