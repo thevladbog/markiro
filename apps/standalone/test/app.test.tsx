@@ -2415,11 +2415,7 @@ describe("the operator on the floor", () => {
       feedPage(43, [{ entity: "operators", id: ANNA, rev: 43, deleted: true }]),
     );
     await link.revision(43);
-    expect(
-      await screen.findByText(
-        "Оператор больше не может входить на станции",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText("Оператор больше не может входить на станции")).toBeTruthy();
   });
 
   it("comes back from the office to the sign-in, with nobody signed in", async () => {
