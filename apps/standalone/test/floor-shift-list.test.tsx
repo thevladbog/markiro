@@ -567,6 +567,8 @@ describe("the shifts of the station's line", () => {
     ).toHaveProperty("disabled", true);
     const finished = card(MINE.number);
     expect(within(finished).getByText("Закрыта в офисе")).toBeTruthy();
+    // The board's phase vocabulary: a shift closed in the office is «done» (✓), not a warning.
+    expect(finished.querySelector(".shift-card__status")?.className).toContain("mk-chip--done");
     expect(
       within(finished).getByText(
         "Смену закрыли в офисе. Закончите на станции короб и этикетку и закройте смену.",
