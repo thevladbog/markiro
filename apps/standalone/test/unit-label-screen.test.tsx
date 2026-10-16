@@ -683,7 +683,7 @@ describe("the window's status line", () => {
       work.scanner.emit(km("PS1", { tail: "Zf8K" }));
     });
     await waitFor(() => expect(shell.heldSends()).toBe(1));
-    expect(panelState()).toBe(`${SAVING}…PS1`);
+    expect(panelState()).toBe(`${SAVING} …PS1`);
     await act(async () => {
       shell.releaseSend({ sent: true });
       await work.gate.drain();
