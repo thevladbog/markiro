@@ -168,7 +168,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
   background: var(--surface-card);
-  box-shadow: 0 18px 48px rgb(12 20 32 / 22%);
+  box-shadow: var(--shadow-overlay);
 }
 
 .label-panel__scanner {

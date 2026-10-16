@@ -1,7 +1,7 @@
 /**
  * The cloud station's sign-in brand (`apps/station/src/ui/StationBrand.tsx`
- * with `assets/markiro-logo-on-dark.svg`), drawn inline: the floor is dark,
- * the logo is bundled (no runtime asset), and the sign-in screen holds no
+ * with `assets/markiro-logo-on-dark.svg`), drawn inline: the mark and the word
+ * follow the theme (`fg` / `bg` tokens), the logo is bundled (no runtime asset), and the sign-in screen holds no
  * `<img>`. Below 1100 px the word mark goes and the mark alone stays
  * (`operator-sign-in.css`).
  */
@@ -15,8 +15,8 @@ export function StationBrand({ label }: { label: string }) {
         aria-label={label}
         focusable="false"
       >
-        <rect x="4" y="4" width="56" height="56" fill="#FAFAF8" />
-        <g fill="#17161A">
+        <rect x="4" y="4" width="56" height="56" style={{ fill: "var(--fg)" }} />
+        <g style={{ fill: "var(--bg)" }}>
           <rect x="14" y="14" width="8" height="8" />
           <rect x="14" y="26" width="8" height="8" />
           <rect x="14" y="38" width="8" height="8" />
@@ -24,7 +24,7 @@ export function StationBrand({ label }: { label: string }) {
           <rect x="38" y="14" width="8" height="8" />
           <rect x="38" y="26" width="8" height="8" />
           <rect x="38" y="38" width="8" height="8" />
-          <rect x="26" y="42" width="8" height="8" fill="#3DDC7A" />
+          <rect x="26" y="42" width="8" height="8" style={{ fill: "var(--accent)" }} />
         </g>
         <text
           className="station-brand__word"
@@ -34,7 +34,7 @@ export function StationBrand({ label }: { label: string }) {
           fontWeight="600"
           fontSize="34"
           letterSpacing="-0.5"
-          fill="#FAFAF8"
+          style={{ fill: "var(--fg)" }}
           aria-hidden="true"
         >
           маркиро

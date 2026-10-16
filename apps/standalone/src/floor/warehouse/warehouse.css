@@ -402,7 +402,7 @@ section.warehouse-reprint--question {
   max-width: 100%;
   height: auto;
   border: 2px solid var(--fg-3);
-  background: #ffffff;
+  background: var(--floor-paper);
 }
 
 .warehouse-label-preview figcaption {

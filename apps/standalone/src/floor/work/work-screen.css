@@ -81,9 +81,9 @@
 }
 
 /*
- * The band's hue comes from the product's photo (its dominant colour, `--product-hue` and
- * `--product-sat` set by `useProductAccent`) and from the GTIN without one; lightness is
- * clamped so that white text keeps its contrast on every product.
+ * The product card is the kit's one gradient (`brand1` -> `brand3`, border `brandline`), the same for
+ * every product and themed light/dark; text on it uses `fg`/`muted` (13.1:1). The per-product hue
+ * of the cloud station (`--product-hue`, `useProductAccent`) no longer paints it.
  */
 .work-shift-band {
   display: grid;
@@ -94,16 +94,8 @@
   grid-template-columns: auto minmax(0, 1fr) minmax(240px, 320px);
   align-items: center;
   border-radius: var(--r-3);
-  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
-}
-
-.work-shift-band[data-accent="true"] {
-  background: linear-gradient(
-    305deg,
-    hsl(var(--product-hue) var(--product-sat, 46%) 21%),
-    hsl(var(--product-hue) calc(var(--product-sat, 46%) - 4%) 11%) 55%,
-    hsl(var(--product-hue) calc(var(--product-sat, 46%) - 8%) 6%)
-  );
+  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
+  border: 1px solid var(--brandline);
 }
 
 /* The product's photo, whole, in the band's first column (beta 3.2). */
@@ -118,7 +110,6 @@
   max-width: clamp(80px, 9vw, 150px);
   max-height: 112px;
   border-radius: 10px;
-  box-shadow: 0 8px 22px rgb(0 0 0 / 45%);
   object-fit: contain;
 }
 
@@ -128,10 +119,10 @@
   width: clamp(60px, 6.5vw, 120px);
   aspect-ratio: 3 / 4;
   place-items: center;
-  border: 2px solid rgb(255 255 255 / 18%);
+  border: 2px solid var(--line2);
   border-radius: 10px;
-  background: rgb(255 255 255 / 8%);
-  color: rgb(255 255 255 / 70%);
+  background: var(--panel);
+  color: var(--muted);
   font: 700 clamp(28px, 2.6vw, 48px) / 1 var(--font-ui);
 }
 
@@ -145,7 +136,7 @@
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
-  color: #fff;
+  color: var(--fg);
   font: 700 clamp(19px, 1.8vw, 34px) / 1.2 var(--font-ui);
   letter-spacing: -0.01em;
   -webkit-box-orient: vertical;
@@ -164,8 +155,8 @@
   max-width: 100%;
   padding: 5px 12px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 10%);
-  color: rgb(255 255 255 / 85%);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
   font: 600 14px/1.2 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -184,7 +175,7 @@
   gap: 6px var(--sp-2);
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
-  border-left: 1px solid rgb(255 255 255 / 15%);
+  border-left: 1px solid var(--brandline);
   font-variant-numeric: tabular-nums;
 }
 
@@ -198,7 +189,7 @@
 .work-shift-band__meta {
   margin: 0;
   overflow: hidden;
-  color: rgb(255 255 255 / 72%);
+  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -213,13 +204,13 @@
 
 .work-shift-band__count {
   margin: 0;
-  color: #fff;
+  color: var(--fg);
   font: 600 clamp(34px, 3vw, 56px) / 1 var(--font-mono);
 }
 
 .work-shift-band__planned {
   overflow: hidden;
-  color: rgb(255 255 255 / 72%);
+  color: var(--muted);
   font: 500 clamp(20px, 1.6vw, 30px) / 1.1 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -229,7 +220,7 @@
   height: 6px;
   overflow: hidden;
   border-radius: 3px;
-  background: rgb(255 255 255 / 15%);
+  background: color-mix(in srgb, var(--fg) 15%, transparent);
 }
 
 .work-shift-band__bar > span {
@@ -324,7 +315,7 @@
 }
 
 .work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="filled"] {
-  color: #fff;
+  color: var(--fg-on-ok-solid);
 }
 
 .work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="next"] {
@@ -732,7 +723,7 @@
 /* An overlay card: its title, its words and its row of floor actions. */
 .work-overlay {
   padding: var(--sp-4) !important;
-  box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-overlay);
 }
 
 .work-overlay__title {
