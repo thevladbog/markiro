@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Select } from "@markiro/ui";
+import { Button, Input, Select } from "@markiro/ui";
 
 import { isPageSize, PAGE_SIZES, SMALLEST_PAGE_SIZE, type PageSize } from "./page-size.js";
 
@@ -31,6 +32,58 @@ export interface PaginationBarProps {
 
 /** From this many pages on, «в начало» and «в конец» are offered beside «Назад» and «Вперёд». */
 const MANY_PAGES = 5;
+
+/**
+ * «Перейти на страницу»: a small number field beside the pager. Enter or leaving the field jumps;
+ * a number outside 1..`pages` is held to the nearest page, and anything that is not a number puts
+ * the current page back. It exists only where the page count is known, so a jump never guesses at
+ * a list the host still has to read to its end.
+ */
+function PageJump({
+  page,
+  pages,
+  busy,
+  onPage,
+}: {
+  page: number;
+  pages: number;
+  busy: boolean;
+  onPage: (page: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState(String(page));
+  useEffect(() => setDraft(String(page)), [page]);
+  const commit = () => {
+    const typed = draft.trim();
+    if (!/^\d+$/.test(typed)) {
+      setDraft(String(page));
+      return;
+    }
+    const target = Math.min(Math.max(Number(typed), 1), pages);
+    setDraft(String(target));
+    if (target !== page) onPage(target);
+  };
+  return (
+    <Input
+      className="office-pagination__jump"
+      aria-label={t("office.common.pagination.jump", { pages: COUNT.format(pages) })}
+      title={t("office.common.pagination.jumpHint")}
+      inputMode="numeric"
+      mono
+      value={draft}
+      disabled={busy}
+      onChange={(event) => setDraft(event.target.value)}
+      onFocus={(event) => event.target.select()}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        }
+      }}
+    />
+  );
+}
 
 /**
  * The foot of every office table: «Показано N–M из K», the page size, and
@@ -116,6 +169,9 @@ export function PaginationBar({
             ? t("office.common.pagination.page", { page, pages: COUNT.format(pageCount) })
             : t("office.common.pagination.pageOpen", { page })}
         </span>
+        {known && pageCount > 1 && (
+          <PageJump page={page} pages={pageCount} busy={busy} onPage={onPage} />
+        )}
         <Button
           variant="secondary"
           disabled={busy || page >= last}

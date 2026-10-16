@@ -2710,7 +2710,9 @@
         "first": "Первая страница",
         "last": "Последняя страница",
         "page": "Страница {{page}} из {{pages}}",
-        "pageOpen": "Страница {{page}}"
+        "pageOpen": "Страница {{page}}",
+        "jump": "Перейти на страницу (из {{pages}})",
+        "jumpHint": "Номер страницы; Enter — перейти"
       },
       "rowActions": "Действия: {{name}}",
       "selectSearch": {
