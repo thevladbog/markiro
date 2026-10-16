@@ -41,7 +41,7 @@ export function CreateAgreementPage() {
         ...(conclusionDate === "" ? {} : { conclusionDate }),
         ...(city.trim() === "" ? {} : { city: city.trim() }),
         documentForm,
-        counterparty: toRequisitesInput(counterparty) as never,
+        counterparty: toRequisitesInput(counterparty),
         signatory: {
           position: nullable(position),
           fullName: nullable(fullName),
