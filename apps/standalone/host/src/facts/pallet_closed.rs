@@ -64,17 +64,21 @@ pub async fn apply(
     {
         return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
     }
-    // One serial of a pallet block is one label: another pallet with this
-    // SSCC, or on this serial of this block under any check digit, holds it.
-    // A box's SSCC starts with 0 and comes from a box block, so no box can.
-    let taken: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM pallets WHERE sscc = ? OR (block_id = ? AND serial = ?)")
-            .bind(&closed.sscc)
-            .bind(&closed.block_id)
-            .bind(serial)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(ApiError::internal)?;
+    // One serial of a pallet block is one label, on whichever kind of pallet it is printed: another
+    // pallet of either table with this SSCC, or on this serial of this block under any check
+    // digit, holds it. A box's SSCC starts with 0 and comes from a box block, so no box can. The
+    // check runs in the batch's `BEGIN IMMEDIATE` transaction, as the warehouse close's does, so
+    // the two closes cannot both pass for one label.
+    let taken: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM pallets WHERE sscc = ?1 OR (block_id = ?2 AND serial = ?3) \
+         UNION ALL SELECT 1 FROM warehouse_pallets WHERE sscc = ?1 OR (block_id = ?2 AND serial = ?3)",
+    )
+    .bind(&closed.sscc)
+    .bind(&closed.block_id)
+    .bind(serial)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
     if taken.is_some() {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }

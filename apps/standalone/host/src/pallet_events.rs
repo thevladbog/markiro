@@ -274,8 +274,10 @@ async fn opened(
     .await
     .map_err(ApiError::internal)?;
     if let Some(open) = open {
+        // Counted as the close counts: a box the production side took apart is not on the pallet.
         let live: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM warehouse_pallet_boxes WHERE pallet_id = ? AND removed_at IS NULL",
+            "SELECT COUNT(*) FROM warehouse_pallet_boxes wb JOIN boxes b ON b.sscc = wb.box_sscc \
+             WHERE wb.pallet_id = ? AND wb.removed_at IS NULL AND b.disassembled_at IS NULL",
         )
         .bind(&open)
         .fetch_one(&mut *conn)
@@ -462,16 +464,25 @@ async fn closed(
             Err(Reject::new(receipt_codes::PALLET_ALREADY_CLOSED).into())
         };
     }
-    let gln: String = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(ApiError::internal)?;
-    let prefix = validate::issuer_prefix(&gln);
-    if !rules::names_serial(&data.sscc, 1, prefix, data.serial)
+    // The prefix is the block's own, frozen when the block was issued: the pallet was printed
+    // offline from that block, and the office may have changed the organization's GLN since. The
+    // block still has to be this device's, live, of extension 1 and to hold the serial.
+    let prefix: Option<String> = sqlx::query_scalar(
+        "SELECT issuer_prefix FROM sscc_blocks WHERE id = ? AND device_id = ? AND extension = 1",
+    )
+    .bind(&data.block_id)
+    .bind(context.device_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    let Some(prefix) = prefix else {
+        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
+    };
+    if !rules::names_serial(&data.sscc, 1, &prefix, data.serial)
         || !blocks::issued_to(
             &mut *conn,
             context.device_id,
-            prefix,
+            &prefix,
             &data.block_id,
             1,
             serial,
