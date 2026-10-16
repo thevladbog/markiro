@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
+import { Alert, Button, DatePicker, Input } from "@markiro/ui";
 
 import type { LabelTemplateSpec, PalletSheetSpecV2 } from "@markiro/domain";
 
@@ -18,9 +18,21 @@ import type {
 import type { DeviceShiftInput } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
-import { plannedQtyRule, shiftBoxCapacityRule, toCount } from "../../lib/rules.js";
+import {
+  MAX_BOX_CAPACITY,
+  MAX_PLANNED_QTY,
+  plannedQtyRule,
+  shiftBoxCapacityRule,
+  toCount,
+} from "../../lib/rules.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import { ModeSegment } from "../kit/ModeSegment.js";
+import { NumericKeypad } from "../kit/NumericKeypad.js";
+import { NumericReadout } from "../kit/NumericReadout.js";
+import { useKeyboardDigits } from "../kit/numeric-entry.js";
+import { ProductPhotoSquare } from "../kit/PhotoSquare.js";
+import { SwitchCard } from "../kit/SwitchCard.js";
 import { opensBlocked } from "../license.js";
 import type { ScanSource } from "../scan-source.js";
 import { readWorkstationSettings } from "../setup/workstation-settings.js";
@@ -49,7 +61,6 @@ import type { WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
 import { productMonogram } from "./product-accent.js";
-import { ProductPanel } from "./ProductPhoto.js";
 import { SheetPreview } from "./SheetPreview.js";
 import { TemplatePreview } from "./TemplatePreview.js";
 
@@ -289,6 +300,7 @@ export function NewShift({
       const [onlyDuplicate] = duplicateFitting.length === 1 ? duplicateFitting : [];
       setProblem(null);
       setErrors({});
+      setActiveField("plannedQty");
       setStep({
         kind: "form",
         view: "details",
@@ -342,6 +354,27 @@ export function NewShift({
     setStep((previous) =>
       previous.kind === "form" ? { ...previous, form: { ...previous.form, ...change } } : previous,
     );
+  // The field the keypad edits: the plan, or in aggregation the one the operator tapped.
+  const [activeField, setActiveField] = useState<"plannedQty" | "boxCapacity">("plannedQty");
+  const padErrorId = useId();
+  const openForm = step.kind === "form" ? step.form : null;
+  const entryField = openForm?.mode === "aggregation" ? activeField : "plannedQty";
+  const entryMax = String(entryField === "plannedQty" ? MAX_PLANNED_QTY : MAX_BOX_CAPACITY).length;
+  /** A digit typed on the keypad: the field's text changes and its error goes (the next check is «Далее»'s). */
+  const editField = (field: "plannedQty" | "boxCapacity", next: string) => {
+    update({ [field]: next });
+    setErrors((previous) => {
+      const rest = { ...previous };
+      delete rest[field];
+      return rest;
+    });
+  };
+  const keyboardDigits = useKeyboardDigits({
+    value: openForm?.[entryField] ?? "",
+    onChange: (next) => editField(entryField, next),
+    maxLength: entryMax,
+    disabled: openForm === null || busy !== null || openForm.created !== null,
+  });
   const go = (view: FormView) =>
     setStep((previous) => (previous.kind === "form" ? { ...previous, view } : previous));
 
@@ -514,6 +547,8 @@ export function NewShift({
       };
     }
     if (!plan.success || !capacity.success) {
+      // The keypad goes to the first field that is wrong (the capacity stands above the plan).
+      setActiveField(capacity.success ? "plannedQty" : "boxCapacity");
       setErrors({
         ...(plan.success ? {} : { plannedQty: t("rules.plannedQty") }),
         ...(capacity.success ? {} : { boxCapacity: t("rules.shiftBoxCapacity") }),
@@ -689,184 +724,219 @@ export function NewShift({
     );
   };
 
-  /** Step 1, the cloud's `found`: the product, the pallets, the date, the counts. */
+  /**
+   * Step 1, the cloud's `found`, as the kit draws it (step B): two zones. On the
+   * left the product card, the mode, the one switch card the mode has (the
+   * duplicate print, or the pallets) and the two dates; on the right the flat
+   * keypad panel with the readout of the plan (and, in aggregation, of the
+   * box capacity). Every control is at least 64 px and nothing scrolls.
+   */
   const detailsView = (form: Form, from: NewShiftChoices) => {
     const palletCapacity = palletCapacityOffered(form.product, from.palletTemplates);
     const zoneKnown = from.timeZone !== null && isKnownTimeZone(from.timeZone);
     // Once the host has made the shift its fields are not the form's to change.
     const frozen = busy !== null || form.created !== null;
+    const aggregation = form.mode === "aggregation";
+    const duplicateTemplate =
+      fittingDuplicateTemplates(form.product, from.duplicateTemplates).find(
+        (template) => template.id === form.duplicateTemplateId,
+      ) ?? null;
+    const shownError =
+      (entryField === "plannedQty"
+        ? (errors.plannedQty ?? errors.boxCapacity)
+        : (errors.boxCapacity ?? errors.plannedQty)) ?? null;
+    const planErrorShown = shownError !== null && shownError === errors.plannedQty;
+    const capacityErrorShown = shownError !== null && shownError === errors.boxCapacity;
     return (
-      <>
-        <Card className="new-shift__product" padding="var(--sp-3)">
-          <ProductPanel
-            local={local}
-            productId={form.product.id}
-            gtin={form.product.gtin14}
-            className="new-shift__product-photo"
-            fallback={
-              <span className="new-shift__product-monogram" aria-hidden="true">
-                {productMonogram(form.product.name)}
-              </span>
-            }
-          />
-          <div className="new-shift__product-text">
-            <h3 title={form.product.name}>{form.product.name}</h3>
-            <div className="new-shift__code">{form.product.gtin14}</div>
-          </div>
-        </Card>
-        {/* The shift's mode and the duplicate print, as the cloud's two-column
-            `new-shift__modes` rows under the product (plan РЕЖ). */}
-        <div className="new-shift__group">
-          <p className="new-shift__label">{t("floor.newShift.mode")}</p>
-          <div className="new-shift__modes" role="group" aria-label={t("floor.newShift.mode")}>
-            <Button
-              size="floor"
-              fullWidth
-              variant={form.mode === "validation" ? "primary" : "secondary"}
-              aria-pressed={form.mode === "validation"}
-              disabled={frozen}
-              onClick={() => update({ mode: "validation" })}
-            >
-              {t("floor.newShift.modeValidation")}
-            </Button>
-            <Button
-              size="floor"
-              fullWidth
-              variant={form.mode === "aggregation" ? "primary" : "secondary"}
-              aria-pressed={form.mode === "aggregation"}
-              disabled={frozen}
-              onClick={() => update({ mode: "aggregation" })}
-            >
-              {t("floor.newShift.modeAggregation")}
-            </Button>
-          </div>
-        </div>
-        {form.mode === "validation" && (
-          <div className="new-shift__group">
-            <p className="new-shift__label">{t("floor.newShift.printDuplicate")}</p>
-            <div
-              className="new-shift__modes"
-              role="group"
-              aria-label={t("floor.newShift.printDuplicate")}
-            >
-              <Button
-                size="floor"
-                fullWidth
-                variant={form.printDuplicate ? "secondary" : "primary"}
-                aria-pressed={!form.printDuplicate}
-                disabled={frozen}
-                onClick={() => update({ printDuplicate: false })}
-              >
-                {t("floor.newShift.no")}
-              </Button>
-              <Button
-                size="floor"
-                fullWidth
-                variant={form.printDuplicate ? "primary" : "secondary"}
-                aria-pressed={form.printDuplicate}
-                disabled={frozen}
-                onClick={() => update({ printDuplicate: true })}
-              >
-                {t("floor.newShift.yes")}
-              </Button>
+      <div className="new-shift__zones">
+        <div className="new-shift__left">
+          <div className="new-shift__product">
+            <ProductPhotoSquare
+              local={local}
+              productId={form.product.id}
+              fallback={
+                <span className="new-shift__product-monogram" aria-hidden="true">
+                  {productMonogram(form.product.name)}
+                </span>
+              }
+            />
+            <div className="new-shift__product-text">
+              <h3 title={form.product.name}>{form.product.name}</h3>
+              <div className="new-shift__code">{form.product.gtin14}</div>
+              <div className="new-shift__facts">
+                {form.product.boxCapacity !== null && (
+                  <span className="new-shift__fact">
+                    {t("floor.newShift.factBox", {
+                      quantity: formatQuantity(form.product.boxCapacity),
+                    })}
+                  </span>
+                )}
+                {palletCapacity !== null && (
+                  <span className="new-shift__fact">
+                    {t("floor.newShift.factPallet", { count: palletCapacity })}
+                  </span>
+                )}
+              </div>
             </div>
-            <p className="new-shift__hint">
-              {t(
-                form.printDuplicate
-                  ? "floor.newShift.printDuplicateHint"
-                  : "floor.newShift.validationBoxHint",
-              )}
-            </p>
           </div>
-        )}
-        {form.mode === "aggregation" && palletCapacity !== null && (
-          <div className="new-shift__group">
-            <div className="new-shift__modes" role="group" aria-label={t("floor.newShift.pallets")}>
-              <Button
-                size="floor"
-                fullWidth
-                variant={form.pallets ? "secondary" : "primary"}
-                aria-pressed={!form.pallets}
-                disabled={frozen}
-                onClick={() => update({ pallets: false })}
-              >
-                {t("floor.newShift.withoutPallets")}
-              </Button>
-              <Button
-                size="floor"
-                fullWidth
-                variant={form.pallets ? "primary" : "secondary"}
-                aria-pressed={form.pallets}
-                disabled={frozen}
-                onClick={() => update({ pallets: true })}
-              >
-                {t("floor.newShift.withPallets")}
-              </Button>
-            </div>
-            {form.pallets && (
-              <p className="new-shift__hint">
-                {t("floor.newShift.palletCapacity", { quantity: formatQuantity(palletCapacity) })}
-              </p>
+          <ModeSegment<ShiftMode>
+            label={t("floor.newShift.mode")}
+            options={[
+              { value: "validation", label: t("floor.newShift.modeValidation") },
+              { value: "aggregation", label: t("floor.newShift.modeAggregation") },
+            ]}
+            value={form.mode}
+            hint={t(
+              aggregation
+                ? "floor.newShift.modeAggregationHint"
+                : "floor.newShift.modeValidationHint",
             )}
-          </div>
-        )}
-        {/* The date and the two counts in one row: step 1 keeps room under the
-            product for plan РЕЖ's rows and still fits 1280×800 unscrolled. */}
-        <div className="new-shift__counts">
-          <div className="new-shift__date">
-            <DatePicker
-              label={t("floor.newShift.productionDate")}
-              {...(zoneKnown ? {} : { hint: t("floor.newShift.pcDate") })}
-              value={form.productionDate}
-              locale="ru-RU"
-              calendarLabel={t("floor.newShift.calendar")}
-              previousMonthLabel={t("floor.newShift.previousMonth")}
-              nextMonthLabel={t("floor.newShift.nextMonth")}
-              disabled={frozen}
-              // The production date is required: clearing it keeps the date shown.
-              onValueChange={(value) => {
-                if (value !== undefined) update({ productionDate: value });
-              }}
-            />
-          </div>
-          <div className="new-shift__date">
-            <DatePicker
-              label={t("floor.newShift.plannedDate")}
-              value={form.plannedDate}
-              locale="ru-RU"
-              calendarLabel={t("floor.newShift.calendar")}
-              previousMonthLabel={t("floor.newShift.previousMonth")}
-              nextMonthLabel={t("floor.newShift.nextMonth")}
-              disabled={frozen}
-              // The shift date is required too: clearing it keeps the date shown.
-              onValueChange={(value) => {
-                if (value !== undefined) update({ plannedDate: value });
-              }}
-            />
-          </div>
-          <Input
-            size="floor"
-            label={t("floor.newShift.plannedQty")}
-            hint={t("floor.newShift.optional")}
-            inputMode="numeric"
-            value={form.plannedQty}
             disabled={frozen}
-            {...(errors.plannedQty === undefined ? {} : { error: errors.plannedQty })}
-            onChange={(event) => update({ plannedQty: event.currentTarget.value })}
+            onChange={(mode) => update({ mode })}
           />
-          {form.mode === "aggregation" && (
-            <Input
-              size="floor"
-              label={t("floor.newShift.boxCapacity")}
-              inputMode="numeric"
-              value={form.boxCapacity}
+          {!aggregation && (
+            <SwitchCard
+              title={t("floor.newShift.printDuplicate")}
+              hint={t("floor.newShift.printDuplicateHint")}
+              checked={form.printDuplicate}
+              stateLabel={t(
+                form.printDuplicate ? "floor.newShift.switchOn" : "floor.newShift.switchOff",
+              )}
               disabled={frozen}
-              {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
-              onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
+              onChange={(printDuplicate) => update({ printDuplicate })}
+              {...(form.printDuplicate && duplicateTemplate !== null
+                ? {
+                    detail: (
+                      <>
+                        <span className="new-shift__detail-label">
+                          {t("floor.newShift.templateLine")}
+                        </span>{" "}
+                        {duplicateTemplate.name}
+                      </>
+                    ),
+                  }
+                : {})}
             />
           )}
+          {aggregation && palletCapacity !== null && (
+            <SwitchCard
+              title={t("floor.newShift.withPallets")}
+              hint={t("floor.newShift.withPalletsHint")}
+              checked={form.pallets}
+              stateLabel={t(form.pallets ? "floor.newShift.switchOn" : "floor.newShift.switchOff")}
+              disabled={frozen}
+              onChange={(pallets) => update({ pallets })}
+              {...(form.pallets
+                ? {
+                    detail: t("floor.newShift.palletCapacity", {
+                      quantity: formatQuantity(palletCapacity),
+                    }),
+                  }
+                : {})}
+            />
+          )}
+          <div className="new-shift__dates">
+            <div className="new-shift__date">
+              <DatePicker
+                label={t("floor.newShift.productionDate")}
+                {...(zoneKnown ? {} : { hint: t("floor.newShift.pcDate") })}
+                value={form.productionDate}
+                locale="ru-RU"
+                calendarLabel={t("floor.newShift.calendar")}
+                previousMonthLabel={t("floor.newShift.previousMonth")}
+                nextMonthLabel={t("floor.newShift.nextMonth")}
+                disabled={frozen}
+                // The production date is required: clearing it keeps the date shown.
+                onValueChange={(value) => {
+                  if (value !== undefined) update({ productionDate: value });
+                }}
+              />
+            </div>
+            <div className="new-shift__date">
+              <DatePicker
+                label={t("floor.newShift.plannedDate")}
+                value={form.plannedDate}
+                locale="ru-RU"
+                calendarLabel={t("floor.newShift.calendar")}
+                previousMonthLabel={t("floor.newShift.previousMonth")}
+                nextMonthLabel={t("floor.newShift.nextMonth")}
+                disabled={frozen}
+                // The shift date is required too: clearing it keeps the date shown.
+                onValueChange={(value) => {
+                  if (value !== undefined) update({ plannedDate: value });
+                }}
+              />
+            </div>
+          </div>
         </div>
-      </>
+        {/* The keypad edits the form's own digit strings, `plannedQty` and `boxCapacity`;
+            a physical keyboard does too, listened for here and not on the window, so a
+            scanner's keys keep going to the scan handler. */}
+        <div
+          className="new-shift__pad"
+          data-fields={aggregation ? "2" : "1"}
+          onKeyDown={keyboardDigits}
+        >
+          <div className="new-shift__readouts">
+            {aggregation && (
+              <NumericReadout
+                label={t("floor.newShift.boxCapacity")}
+                {...(form.product.boxCapacity !== null &&
+                form.boxCapacity === String(form.product.boxCapacity)
+                  ? { note: t("floor.newShift.capacityNote") }
+                  : {})}
+                value={form.boxCapacity}
+                unit={t("floor.newShift.unit")}
+                active={entryField === "boxCapacity"}
+                onSelect={() => setActiveField("boxCapacity")}
+                invalid={errors.boxCapacity !== undefined}
+                {...(capacityErrorShown ? { errorId: padErrorId } : {})}
+                disabled={frozen}
+              />
+            )}
+            <NumericReadout
+              label={t("floor.newShift.plannedQty")}
+              note={t("floor.newShift.planNote")}
+              value={form.plannedQty}
+              unit={t("floor.newShift.unit")}
+              active={aggregation ? entryField === "plannedQty" : null}
+              onSelect={() => setActiveField("plannedQty")}
+              invalid={errors.plannedQty !== undefined}
+              {...(planErrorShown ? { errorId: padErrorId } : {})}
+              disabled={frozen}
+            />
+          </div>
+          <div className="new-shift__pad-slot">
+            {shownError !== null ? (
+              <p id={padErrorId} role="alert" className="new-shift__pad-error">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" />
+                  <path
+                    d="M12 7v6m0 3.5v.5"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span>
+                  <strong>{t("floor.newShift.errorPrefix")}</strong> <span>{shownError}</span>
+                </span>
+              </p>
+            ) : entryField === "plannedQty" ? (
+              <p className="new-shift__pad-hint">{t("floor.newShift.planHint")}</p>
+            ) : null}
+          </div>
+          <NumericKeypad
+            value={form[entryField]}
+            onChange={(next) => editField(entryField, next)}
+            maxLength={entryMax}
+            disabled={frozen}
+            ariaLabel={t("floor.newShift.keypad")}
+            clearLabel={t("floor.newShift.keyClear")}
+            backspaceLabel={t("floor.newShift.keyBackspace")}
+          />
+        </div>
+      </div>
     );
   };
 
@@ -1176,6 +1246,7 @@ export function NewShift({
           <Button
             size="floor"
             fullWidth
+            className="floor-primary"
             disabled={
               busy !== null ||
               (view === "box_template" && form.templateId === null) ||
@@ -1189,6 +1260,7 @@ export function NewShift({
           <Button
             size="floor"
             fullWidth
+            className="floor-primary"
             loading={busy !== null}
             disabled={
               !online ||
