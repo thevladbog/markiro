@@ -349,6 +349,19 @@ export async function readWorkstationSettings(local: LocalExecutor): Promise<Wor
   };
 }
 
+const changeListeners = new Set<() => void>();
+
+/**
+ * Calls `listener` after every save of the workstation settings (the header's printer chip reads
+ * them again); returns what stops it.
+ */
+export function onWorkstationSettingsChanged(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => {
+    changeListeners.delete(listener);
+  };
+}
+
 /** A setting this build would not read back as it was given. */
 export class InvalidSettingsError extends Error {
   constructor(what: string) {
@@ -407,6 +420,7 @@ export async function saveWorkstationSettings(
     upsert(SETTING_KEYS.sound, settings.sound),
     upsert(SETTING_KEYS.verifyPrintedLabel, settings.verifyPrintedLabel),
   ]);
+  for (const listener of [...changeListeners]) listener();
 }
 
 /** The printer assigned to `purpose`, or `null`. */

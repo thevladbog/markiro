@@ -129,7 +129,10 @@ function Hub() {
     <ThemeProvider defaultTheme={query.get("theme") === "dark" ? "dark" : "light"}>
       <div className="standalone-screen">
         <div className="floor-frame">
+          <div />
           <section className="station-screen shift-hub">
+            {/* The screen's three rows (title, content, actions): the card takes the content row's height. */}
+            <header className="station-screen__header" />
             <div className="station-screen__content">
               <div className="shift-selection__grid">
                 <ShiftCard

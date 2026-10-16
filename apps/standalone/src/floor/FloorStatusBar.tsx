@@ -13,15 +13,31 @@ import type { HostUpdateOffer } from "../update/host-offer.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
 import { emergencyEndsAt, floorLicenseLine } from "./license.js";
+import { FloorChip } from "./FloorChip.js";
 import { LinkDot } from "./LinkDot.js";
 import { FloorUpdateLine } from "./FloorUpdateLine.js";
 import { FloorWindowControl, type FloorWindowMode } from "./FloorWindowControl.js";
+import {
+  chipForm,
+  chipKinds,
+  linkChip,
+  operatorForm,
+  printerChip,
+  queueChips,
+  scannerChip,
+  type ChipKind,
+  type HeaderChip,
+  type HeaderScreen,
+} from "./header-chips.js";
+import { Glyph } from "./kit/StatusIcons.js";
 import { OperatorSwitchControl } from "./OperatorSwitchControl.js";
+import { usePrinterState } from "./printer-indicator.js";
 import type { ScanSource } from "./scan-source.js";
 import { SyncPanel } from "./SyncPanel.js";
 import "./floor-status-bar.css";
 import { readStrandedRecords } from "./queue/outbox-recovery.js";
-import { useScannerIndicator, type ScannerIndicator } from "./scanner-indicator.js";
+import { useScannerIndicator } from "./scanner-indicator.js";
+import { useHeaderCollapse } from "./use-header-collapse.js";
 import {
   readBlockDrops,
   readDeliveryStuck,
@@ -116,17 +132,13 @@ export interface FloorStatusBarProps {
   onSwitchOperator?: () => void;
   /** The sync panel and the window mode in the rail; without them the rail holds «Сменить оператора» only. */
   tools?: FloorBarTools;
+  /**
+   * Which chips the screen shows (`chipKinds`): sign-in the link and the scanner, the hub and the
+   * forms the link, the printer and the scanner, the work screen all four. Without it: no operator
+   * is sign-in, an operator in a shift is work, any other is hub.
+   */
+  screen?: HeaderScreen;
 }
-
-const SCANNER_TONE: Readonly<Record<ScannerIndicator, PillTone>> = {
-  keyboard: "neutral",
-  connected: "ok",
-  partial: "warn",
-  disconnected: "warn",
-  unknown: "neutral",
-};
-
-type PillTone = "ok" | "warn" | "neutral";
 
 /**
  * One identity value, after the cloud's `IdentityValue`: the label stays for
@@ -146,24 +158,6 @@ function IdentityValue({
     <div className={keep ? "station-status-item station-status-item--keep" : "station-status-item"}>
       <dt className="station-visually-hidden">{label}</dt>
       <dd title={value}>{value}</dd>
-    </div>
-  );
-}
-
-/**
- * One telemetry pill, after the cloud's `StatusPill`: a tone dot, the label,
- * the value right after it (its next element, as the tests read it).
- */
-function StatusPill({ label, value, tone }: { label: string; value: string; tone: PillTone }) {
-  return (
-    <div
-      className="station-status-item station-status-pill"
-      data-tone={tone}
-      title={`${label}: ${value}`}
-    >
-      <span aria-hidden="true" className="station-status-pill__dot" />
-      <dt>{label}</dt>
-      <dd>{value}</dd>
     </div>
   );
 }
@@ -261,6 +255,7 @@ export function FloorStatusBar({
   watchScanners,
   onSwitchOperator,
   tools,
+  screen: screenProp,
 }: FloorStatusBarProps) {
   const { t } = useTranslation();
   const scanner = useScannerIndicator(watchScanners);
@@ -453,12 +448,84 @@ export function FloorStatusBar({
     sync.quarantined > 0 ||
     (outbox !== null && (outbox.rejected > 0 || outbox.conflicts > 0 || outbox.displaced > 0));
   const operatorValue = operator === null ? t("floor.status.nobody") : operator.name;
+
+  // The chips (kit header): which ones the screen shows, and what each says now.
+  const screen: HeaderScreen =
+    screenProp ?? (operator === null ? "sign-in" : shiftId !== null ? "work" : "hub");
+  const kinds = chipKinds(screen);
+  const printerState = usePrinterState(local, pairing, shiftId, outboxVersion, tick);
+  const count = (key: string, n: number): string => `${t(key)}: ${formatQuantity(n)}`;
+  const counted: Array<{ chip: HeaderChip; title: string }> = [];
+  if (kinds.includes("printer") && printerState !== null) {
+    const chip = printerChip(printerState);
+    counted.push({ chip, title: t(`floor.chips.printer.${chip.text}`) });
+  }
+  const scannerSign = scannerChip(scanner);
+  counted.push({
+    chip: scannerSign,
+    title: `${t("floor.status.scanner")}: ${t(`floor.status.scannerValue.${scanner}`)}`,
+  });
+  if (kinds.includes("queue") && outbox !== null) {
+    for (const chip of queueChips({
+      unsent: outbox.unsent,
+      rejected: outbox.rejected,
+      failing,
+    })) {
+      counted.push({
+        chip,
+        title: count(
+          chip.kind === "queue" ? "floor.status.unsent" : "floor.status.rejected",
+          chip.n ?? 0,
+        ),
+      });
+    }
+  }
+  // What the design has no place for and the old bar always said: a conflict, a displaced code, the
+  // records an older pairing left unsent. Rare, a warning each, with their words.
+  const problems: Array<[ChipKind, number, string]> = [];
+  if (outbox !== null) {
+    problems.push(["conflicts", outbox.conflicts, "floor.status.conflicts"]);
+    problems.push(["displaced", outbox.displaced, "floor.status.displaced"]);
+  }
+  problems.push(["stranded", stranded, "floor.status.stranded"]);
+  for (const [kind, n, label] of problems) {
+    if (n > 0) {
+      counted.push({
+        chip: { kind, tone: "warn", icon: "stock", text: "count", n },
+        title: count(label, n),
+      });
+    }
+  }
+  const chipText = (chip: HeaderChip): string =>
+    t(`floor.chips.${chip.kind}.${chip.text}`, {
+      n: chip.n === undefined ? "" : formatQuantity(chip.n),
+    });
+  const linkSign = linkChip(
+    refusalHeld && link !== null ? { ...link, state: "offline" } : link,
+    sync,
+  );
+  const content = [
+    operatorValue,
+    deviceName ?? "",
+    place.line ?? "",
+    place.organization ?? "",
+    shiftNumber ?? "",
+    stockTone ?? "",
+    [linkSign, ...counted.map((entry) => entry.chip)]
+      .map((chip) => `${chip.kind}:${chip.tone}:${chip.text}:${chip.n ?? ""}`)
+      .join(","),
+  ].join("|");
+  const { ref: barRef, level } = useHeaderCollapse(screen, content);
   return (
-    <section className="station-status-bar floor-status" aria-label={t("floor.status.label")}>
+    <section
+      ref={barRef}
+      className="station-status-bar floor-status"
+      aria-label={t("floor.status.label")}
+    >
       {/*
-        The cloud station's identity deck (`apps/station/src/ui/StatusBar.tsx`):
-        where on the strong first row (the device, the line), who and for whom
-        on the quieter second (the operator, the shift, the organization).
+        The identity deck, after the cloud station's (`apps/station/src/ui/StatusBar.tsx`): where
+        on the quiet first row (the device, the line), who on the strong second (the operator, the
+        shift, the organization).
       */}
       <dl className="station-status-identity">
         <div className="station-status-identity__row station-status-identity__row--primary">
@@ -479,114 +546,92 @@ export function FloorStatusBar({
           )}
         </div>
       </dl>
-      <div className="station-status-pills">
-        {/*
-          While the refusal waits the link is torn down, but a refusal that came
-          from a call leaves the last status `online`: say it stopped (a stopped
-          link also hides the sync failure it can no longer retry).
-        */}
-        <LinkDot
-          status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
-          sync={sync}
-        />
-        {/*
-          The one header trace of the SSCC serials running out (the counts live
-          in the sync panel). A polite region that is there before the chip
-          comes, so the warning is heard; `display: contents` keeps it out of
-          the row's layout. The detail is read, not painted: the chip stays short.
-        */}
-        <div className="floor-stock-chip-region" aria-live="polite">
-          {stockTone !== null && shiftStock !== null && (
-            <div
-              className="station-status-item station-status-pill floor-stock-chip"
-              data-tone={stockTone}
-              title={stockChipDetail(t, shiftStock)}
-            >
-              <span aria-hidden="true" className="station-status-pill__dot" />
-              <span className="floor-stock-chip__text">{t("floor.status.stockLow")}</span>
-              <span className="station-visually-hidden">{stockChipDetail(t, shiftStock)}</span>
-            </div>
-          )}
-        </div>
-        <dl className="station-status-pills__list">
-          {outbox !== null && (
-            <StatusPill
-              label={t("floor.status.unsent")}
-              value={formatQuantity(outbox.unsent)}
-              tone={failing ? "warn" : "ok"}
-            />
-          )}
-          {outbox !== null && outbox.rejected > 0 && (
-            <StatusPill
-              label={t("floor.status.rejected")}
-              value={formatQuantity(outbox.rejected)}
-              tone="warn"
-            />
-          )}
-          {outbox !== null && outbox.conflicts > 0 && (
-            <StatusPill
-              label={t("floor.status.conflicts")}
-              value={formatQuantity(outbox.conflicts)}
-              tone="warn"
-            />
-          )}
-          {outbox !== null && outbox.displaced > 0 && (
-            <StatusPill
-              label={t("floor.status.displaced")}
-              value={formatQuantity(outbox.displaced)}
-              tone="warn"
-            />
-          )}
-          {stranded > 0 && (
-            <StatusPill
-              label={t("floor.status.stranded")}
-              value={formatQuantity(stranded)}
-              tone="warn"
-            />
-          )}
-          <StatusPill
-            label={t("floor.status.scanner")}
-            value={t(`floor.status.scannerValue.${scanner}`)}
-            tone={SCANNER_TONE[scanner]}
+      <div className="floor-bar__rail">
+        <div className="station-status-pills" role="group" aria-label={t("floor.chips.label")}>
+          {/*
+            While the refusal waits the link is torn down, but a refusal that came from a call
+            leaves the last status `online`: say it stopped (a stopped link also hides the sync
+            failure it can no longer retry).
+          */}
+          <LinkDot
+            status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
+            sync={sync}
+            level={level}
           />
-        </dl>
-      </div>
-      {(tools !== undefined || (operator !== null && onSwitchOperator !== undefined)) && (
-        <div className="station-status-actions" role="group" aria-label={t("floor.status.actions")}>
-          {tools !== undefined && (
-            <Button
-              type="button"
-              size="floor"
-              variant="secondary"
-              className="station-rail-button station-rail-button--icon floor-sync-button"
-              aria-label={t(syncProblem ? "floor.sync.openProblems" : "floor.sync.open")}
-              title={t("floor.sync.open")}
-              data-problem={syncProblem ? "true" : "false"}
-              onClick={() => setSyncOpen(true)}
-              icon={
-                <span aria-hidden="true" className="floor-sync-button__glyph">
-                  ↻
-                </span>
-              }
-            >
-              {syncProblem && <span className="floor-sync-button__dot" aria-hidden="true" />}
-            </Button>
-          )}
-          {tools?.windowMode != null && (
-            <FloorWindowControl
-              windowMode={tools.windowMode}
-              local={local}
-              pairing={pairing}
-              source={tools.source}
-              onMute={tools.onMute}
-              operatorId={operator === null ? null : operator.id}
+          {counted.map(({ chip, title }) => (
+            <FloorChip
+              key={chip.kind}
+              kind={chip.kind}
+              tone={chip.tone}
+              icon={chip.icon}
+              text={chipText(chip)}
+              form={chipForm(level, chip.tone)}
+              title={title}
             />
-          )}
-          {operator !== null && onSwitchOperator !== undefined && (
-            <OperatorSwitchControl activeShift={shiftId !== null} onSwitch={onSwitchOperator} />
-          )}
+          ))}
+          {/*
+            The one header trace of the SSCC serials running out (the counts live in the sync
+            panel). A polite region that is there before the chip comes, so the warning is heard;
+            `display: contents` keeps it out of the row's layout. The detail is read, not painted:
+            the chip stays short.
+          */}
+          <div className="floor-stock-chip-region" aria-live="polite">
+            {stockTone !== null && shiftStock !== null && (
+              <div
+                className="floor-chip floor-stock-chip"
+                data-chip="stock"
+                data-tone={stockTone}
+                data-form="full"
+                title={stockChipDetail(t, shiftStock)}
+              >
+                <Glyph name="stock" size={22} />
+                <span className="floor-chip__text">{t("floor.status.stockLow")}</span>
+                <span className="station-visually-hidden">{stockChipDetail(t, shiftStock)}</span>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+        {(tools !== undefined || (operator !== null && onSwitchOperator !== undefined)) && (
+          <div
+            className="station-status-actions"
+            role="group"
+            aria-label={t("floor.status.actions")}
+          >
+            {tools !== undefined && (
+              <Button
+                type="button"
+                size="floor"
+                variant="secondary"
+                className="station-rail-button station-rail-button--icon floor-sync-button"
+                aria-label={t(syncProblem ? "floor.sync.openProblems" : "floor.sync.open")}
+                title={t("floor.sync.open")}
+                data-problem={syncProblem ? "true" : "false"}
+                onClick={() => setSyncOpen(true)}
+                icon={<Glyph name="refresh" size={28} />}
+              >
+                {syncProblem && <span className="floor-sync-button__dot" aria-hidden="true" />}
+              </Button>
+            )}
+            {tools?.windowMode != null && (
+              <FloorWindowControl
+                windowMode={tools.windowMode}
+                local={local}
+                pairing={pairing}
+                source={tools.source}
+                onMute={tools.onMute}
+                operatorId={operator === null ? null : operator.id}
+              />
+            )}
+            {operator !== null && onSwitchOperator !== undefined && (
+              <OperatorSwitchControl
+                activeShift={shiftId !== null}
+                onSwitch={onSwitchOperator}
+                form={operatorForm(level)}
+              />
+            )}
+          </div>
+        )}
+      </div>
       {tools !== undefined && (
         <SyncPanel
           open={syncOpen}

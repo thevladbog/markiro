@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -18,6 +18,7 @@ import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { seedBlock, unsentScans } from "./support/floor-work.js";
 import { deviceLicense } from "./support/license.js";
 import { openLocalDb } from "./support/local-db.js";
+import { closeBoxWithLabel, printStation } from "./support/printing.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -79,6 +80,11 @@ function bar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
       />
     </ThemeProvider>
   );
+}
+
+/** The bar of the work screen: the queue's chips are drawn there only. */
+function workBar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
+  return bar({ screen: "work", ...props });
 }
 
 describe("where the floor's status bar says the station works", () => {
@@ -221,9 +227,10 @@ describe("the floor's status bar", () => {
       seq: 1,
     };
     render(bar({ local: await synced([ORG]), link: offline }));
-    // A small dot with the state in its name (beta 3.2), red without the host; the reason is one tap away.
+    // A chip with a glyph and «Связи нет» (kit header), amber without the host: the work goes on
+    // offline, so it is a warning and not an error; the reason is one tap away.
     const dot = await screen.findByRole("button", { name: "Связь с хостом: Нет связи с хостом" });
-    expect(dot.querySelector('[data-tone="error"]')).not.toBeNull();
+    expect(dot.querySelector('[data-tone="warn"]')?.textContent).toBe("Связи нет");
     expect(screen.queryByText("Хост не отвечает.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Связь с хостом: Нет связи с хостом" }));
     const details = screen.getByRole("dialog", { name: "Связь с хостом" });
@@ -536,15 +543,26 @@ describe("the floor's status bar", () => {
   });
 });
 
+/** The header's count chips, by the words the tests used for the pills they replaced. */
+const COUNT_CHIPS: Record<string, string> = {
+  "Не отправлено": "queue",
+  "Отклонено хостом": "rejected",
+  Конфликтов: "conflicts",
+  "Вытеснено кодов": "displaced",
+  "Не отправлено прежним подключением": "stranded",
+};
+
 describe("the outbox and the serials on the floor's status bar", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  /** The value the bar shows under `label`, or `null` when it shows no such item. */
+  /** The count the bar's chip for `label` shows (the number after its words), or `null` when it shows no such chip. */
   function shown(label: string): string | null {
-    const term = screen.queryByText(label);
-    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+    const kind = COUNT_CHIPS[label];
+    if (kind === undefined) return screen.queryByText(label)?.textContent ?? null;
+    const chip = document.querySelector(`[data-chip="${kind}"]`);
+    return chip === null ? null : (/(\d[\d\u00a0]*)$/.exec(chip.textContent ?? "")?.[1] ?? null);
   }
 
   /** The polite live regions of the bar, before anything is warned of. */
@@ -605,12 +623,12 @@ describe("the outbox and the serials on the floor's status bar", () => {
     );
     answer.run("accepted", null, ids[0] ?? "");
     answer.run("rejected", "invalid_record", ids[1] ?? "");
-    const view = render(bar({ local: executor }));
+    const view = render(workBar({ local: executor }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("3"));
     expect(shown("Отклонено хостом")).toBe("1");
     expect(shown("Конфликтов")).toBeNull();
     answer.run("conflict", null, ids[2] ?? "");
-    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
     expect(shown("Конфликтов")).toBe("1");
   });
@@ -626,7 +644,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     fill.run(1234, "u", HOST_ID, DEVICE_ID, null, null);
     fill.run(1111, "r", HOST_ID, DEVICE_ID, "rejected", "rejected");
     fill.run(2222, "c", HOST_ID, DEVICE_ID, "conflict", "conflict");
-    render(bar({ local: executor }));
+    render(workBar({ local: executor }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("1\u00a0234"));
     expect(shown("Отклонено хостом")).toBe("1\u00a0111");
     expect(shown("Конфликтов")).toBe("2\u00a0222");
@@ -643,7 +661,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       extension: 1,
     });
     db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
-    render(bar({ local: executor, shiftId: ENTERED.id }));
+    render(workBar({ local: executor, shiftId: ENTERED.id }));
     // The header has read the outbox: its other chips are on screen, the counters are not.
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
@@ -663,7 +681,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    render(bar({ local: failing }));
+    render(workBar({ local: failing }));
     expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
     await act(async () => {
       await new Promise((resolve) => setImmediate(resolve));
@@ -682,10 +700,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    const view = render(bar({ local }));
+    const view = render(workBar({ local }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
     failing = true;
-    view.rerender(bar({ local, outboxVersion: 1 }));
+    view.rerender(workBar({ local, outboxVersion: 1 }));
     await waitFor(() => expect(shown("Не отправлено")).toBeNull());
   });
 
@@ -706,17 +724,17 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    const view = render(bar({ local, shiftId: ENTERED.id }));
+    const view = render(workBar({ local, shiftId: ENTERED.id }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     failing = true;
-    view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 1 }));
+    view.rerender(workBar({ local, shiftId: ENTERED.id, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
     failing = false;
-    view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 2 }));
+    view.rerender(workBar({ local, shiftId: ENTERED.id, outboxVersion: 2 }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     // A shift this pairing has no copy of names no serials.
     view.rerender(
-      bar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a", outboxVersion: 2 }),
+      workBar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a", outboxVersion: 2 }),
     );
     await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
@@ -731,7 +749,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       to: 2000,
       next: 1500,
     });
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     const before = politeRegions();
@@ -740,7 +758,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
     const step = (next: number, version: number) => {
       db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
-      view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+      view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
     };
     step(1501, 1);
     const chip = await screen.findByText("Заканчиваются номера SSCC");
@@ -764,7 +782,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
     // A block arrives: the chip goes.
     seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 5 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 5 }));
     await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
 
@@ -790,7 +808,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       to: 2000,
       next: 1501,
     });
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
     const toneOf = (): string | null =>
       screen
         .getByText("Заканчиваются номера SSCC")
@@ -798,7 +816,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
         ?.getAttribute("data-tone") ?? null;
     const step = (next: number, version: number) => {
       db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
-      view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+      view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
     };
     await screen.findByText("Заканчиваются номера SSCC");
     expect(toneOf()).toBe("warn");
@@ -826,13 +844,13 @@ describe("the outbox and the serials on the floor's status bar", () => {
       next: 181,
       extension: 1,
     });
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     // Pallets are off: their low stock says nothing.
     expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
     const chip = await screen.findByText("Заканчиваются номера SSCC");
     const detail = (): string => chip.closest(".floor-stock-chip")?.textContent ?? "";
     expect(detail()).toContain(
@@ -843,7 +861,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("warn");
     // The pallets' last serial and none have their own words.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 200 WHERE extension = 1").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
     await waitFor(() =>
       expect(detail()).toContain(
         "Остался последний номер SSCC для паллет: следующую полную паллету без связи с хостом не закрыть.",
@@ -851,7 +869,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     );
     expect(chip.closest(".floor-stock-chip")?.getAttribute("data-tone")).toBe("error");
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 201 WHERE extension = 1").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
     await waitFor(() =>
       expect(detail()).toContain(
         "Номера SSCC для паллет закончились: полную паллету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
@@ -859,7 +877,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     );
     // Pallets are off again: nothing of them.
     db.prepare("UPDATE floor_shifts SET pallets_enabled = 0 WHERE id = ?").run(ENTERED.id);
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
     await waitFor(() => expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull());
   });
 
@@ -871,7 +889,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
         "'460068200', 0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
     ).run(PAIRING.hostId, PAIRING.deviceId);
     await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
-    const view = render(bar({ local: executor }));
+    const view = render(workBar({ local: executor }));
     const before = politeRegions();
     const drops = await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 1/);
     // Heard once in the region that was there before, and called an error in words, not by colour alone.
@@ -887,7 +905,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
         "'460068200', 0, 11, 20, 'mismatch', '2026-10-11T08:01:00.000Z')",
     ).run(PAIRING.hostId, PAIRING.deviceId);
     await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 90);
-    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
     expect(
       await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 2/),
     ).toBeTruthy();
@@ -898,7 +916,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { executor } = openLocalDb();
     // Records of the pairing itself are not an older pairing's.
     await unsentScans(executor, 2);
-    render(bar({ local: executor }));
+    render(workBar({ local: executor }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
     await flushEffects();
     expect(shown("Не отправлено прежним подключением")).toBeNull();
@@ -914,10 +932,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
     );
     drop.run(PAIRING.hostId, PAIRING.deviceId, "b-1");
     const heldDrops = holdingFirstRead(executor, (sql) => sql.includes("FROM floor_block_drops"));
-    const view = render(bar({ local: heldDrops.executor }));
+    const view = render(workBar({ local: heldDrops.executor }));
     await waitFor(() => expect(heldDrops.started()).toBe(true));
     drop.run(PAIRING.hostId, PAIRING.deviceId, "b-2");
-    view.rerender(bar({ local: heldDrops.executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: heldDrops.executor, outboxVersion: 1 }));
     expect(await screen.findByText(/которые она не приняла: 2/)).toBeTruthy();
     await act(async () => {
       heldDrops.release();
@@ -930,11 +948,11 @@ describe("the outbox and the serials on the floor's status bar", () => {
     // The older records are read per pairing: an answer for the pairing left must not land on the next.
     await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
     const heldOld = holdingFirstRead(executor, (sql) => sql.includes("INDEXED BY"));
-    const second = render(bar({ local: heldOld.executor }));
+    const second = render(workBar({ local: heldOld.executor }));
     await waitFor(() => expect(heldOld.started()).toBe(true));
     // Another pairing (the one that left the records) sees none of its own as an older one's.
     second.rerender(
-      bar({ local: heldOld.executor, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }),
+      workBar({ local: heldOld.executor, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }),
     );
     await flushEffects();
     expect(shown("Не отправлено прежним подключением")).toBeNull();
@@ -956,10 +974,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    const view = render(bar({ local: flaky }));
+    const view = render(workBar({ local: flaky }));
     await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
     failing = true;
-    view.rerender(bar({ local: flaky, pairing: { hostId: OTHER_HOST, deviceId: DEVICE_ID } }));
+    view.rerender(workBar({ local: flaky, pairing: { hostId: OTHER_HOST, deviceId: DEVICE_ID } }));
     await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBeNull());
   });
 
@@ -978,17 +996,17 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    const view = render(bar({ local }));
+    const view = render(workBar({ local }));
     expect(await screen.findByText(/которые она не приняла: 1/)).toBeTruthy();
     failing = true;
-    view.rerender(bar({ local, outboxVersion: 1 }));
+    view.rerender(workBar({ local, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/которые она не приняла/)).toBeNull());
     expect(shown("Не отправлено прежним подключением")).toBeNull();
   });
 
   it("says nothing of serials outside a shift, though the pairing has none", async () => {
     const { executor } = openLocalDb();
-    render(bar({ local: executor, shiftId: null }));
+    render(workBar({ local: executor, shiftId: null }));
     expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
     await act(async () => {
       await new Promise((resolve) => setImmediate(resolve));
@@ -1000,34 +1018,34 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
   it("says in the polite region when the host or this computer, not the link, fails the outbox's delivery", async () => {
     const { executor } = openLocalDb();
-    const view = render(bar({ local: executor, factsFailure: "offline" }));
+    const view = render(workBar({ local: executor, factsFailure: "offline" }));
     expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
     const before = politeRegions();
     expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
     expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
-    view.rerender(bar({ local: executor, factsFailure: "host" }));
+    view.rerender(workBar({ local: executor, factsFailure: "host" }));
     const host = screen.getByText(
       "Хост не принимает записи смены: на хосте ошибка. Станция повторяет отправку, записи хранятся на этом компьютере.",
     );
     expect(heardOnce(before, host)).toBe(true);
     expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
-    view.rerender(bar({ local: executor, factsFailure: "local" }));
+    view.rerender(workBar({ local: executor, factsFailure: "local" }));
     const local = screen.getByText(
       "Ответ хоста не удалось записать в базу этого компьютера. Станция повторяет отправку.",
     );
     expect(heardOnce(before, local)).toBe(true);
     expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
-    view.rerender(bar({ local: executor, factsFailure: null }));
+    view.rerender(workBar({ local: executor, factsFailure: null }));
     expect(screen.queryByText(/Станция повторяет отправку/)).toBeNull();
   });
 
   it("says in the polite region that a host restored from a copy holds the records", async () => {
     const { executor } = openLocalDb();
-    const view = render(bar({ local: executor, factsFailure: null }));
+    const view = render(workBar({ local: executor, factsFailure: null }));
     expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
     const before = politeRegions();
     expect(screen.queryByText(/отправка ждёт администратора/)).toBeNull();
-    view.rerender(bar({ local: executor, factsFailure: "held" }));
+    view.rerender(workBar({ local: executor, factsFailure: "held" }));
     const held = screen.getByText(
       "Хост восстановлен из копии — отправка ждёт администратора. Станция работает и хранит записи на этом компьютере.",
     );
@@ -1040,7 +1058,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
     seedBlock(db, { blockId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 5500, to: 7499 });
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
-    const view = render(bar({ local: executor }));
+    const view = render(workBar({ local: executor }));
     expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
     const before = politeRegions();
     const due = await screen.findByText(
@@ -1059,7 +1077,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       }),
       now: () => new Date(),
     });
-    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
     const refused = await screen.findByText(
       "Блоков номеров SSCC, которые хост не принял после восстановления: 2. Станция больше не печатает номера из них — сообщите администратору.",
     );
@@ -1071,7 +1089,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { executor } = openLocalDb();
     await unsentScans(executor, 2);
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
-    const view = render(bar({ local: executor, factsFailure: "host", now: clock }));
+    const view = render(workBar({ local: executor, factsFailure: "host", now: clock }));
     expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
     expect(screen.getByText(/станция возвращает ему свои блоки/)).toBeTruthy();
     await flushEffects();
@@ -1084,9 +1102,9 @@ describe("the outbox and the serials on the floor's status bar", () => {
       }),
       now: () => new Date(),
     });
-    view.rerender(bar({ local: executor, factsFailure: "host", now: clock, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, factsFailure: "host", now: clock, outboxVersion: 1 }));
     expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
-    view.rerender(bar({ local: executor, factsFailure: "held", now: clock, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, factsFailure: "held", now: clock, outboxVersion: 1 }));
     expect(screen.getByText(/отправка ждёт администратора/)).toBeTruthy();
     expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
     expect(shown("Не отправлено")).toBe("2");
@@ -1095,7 +1113,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
   it("says nothing of a restore for a station that owes nothing, with no block either", async () => {
     const { executor } = openLocalDb();
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
-    const view = render(bar({ local: executor }));
+    const view = render(workBar({ local: executor }));
     expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
     // No block: one empty request marks the station on the host (plan ХП), and the obligation is settled at once.
     const asked = vi.fn();
@@ -1110,7 +1128,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     });
     expect(result).toMatchObject({ kind: "reconciled", registered: 0, known: 0, refused: 0 });
     expect(asked.mock.calls).toEqual([[{ blocks: [] }]]);
-    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
     expect(screen.queryByText(/Блоков номеров SSCC, которые хост не принял/)).toBeNull();
     expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
@@ -1120,7 +1138,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor } = openLocalDb();
     seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
-    const view = render(bar({ local: executor, refusalHeld: true }));
+    const view = render(workBar({ local: executor, refusalHeld: true }));
     expect(await screen.findByText(/Хост отказал этой станции/)).toBeTruthy();
     await flushEffects();
     expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
@@ -1137,7 +1155,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       now: () => new Date(),
     });
     view.rerender(
-      bar({ local: executor, refusalHeld: true, factsFailure: "held", outboxVersion: 1 }),
+      workBar({ local: executor, refusalHeld: true, factsFailure: "held", outboxVersion: 1 }),
     );
     expect(
       await screen.findByText(
@@ -1151,12 +1169,14 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { executor } = openLocalDb();
     await unsentScans(executor, 2);
     const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
-    const view = render(bar({ local: executor, link: online, factsFailure: "host", now: clock }));
+    const view = render(
+      workBar({ local: executor, link: online, factsFailure: "host", now: clock }),
+    );
     expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
     expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
     expect(screen.getByText("На связи с хостом")).toBeTruthy();
     view.rerender(
-      bar({
+      workBar({
         local: executor,
         link: online,
         factsFailure: "host",
@@ -1169,7 +1189,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
     expect(screen.queryByText("На связи с хостом")).toBeNull();
     view.rerender(
-      bar({
+      workBar({
         local: executor,
         link: online,
         factsFailure: "local",
@@ -1203,7 +1223,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
   it("says how long the oldest undelivered record has waited and how often it was sent, while a send fails", async () => {
     const { db, executor, head } = await waitingRecords();
     const now = () => at(9, 53);
-    const view = render(bar({ local: executor, factsFailure: "host", now }));
+    const view = render(workBar({ local: executor, factsFailure: "host", now }));
     const waiting = await screen.findByText(
       "Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 5, последняя — 2 мин назад.",
     );
@@ -1212,7 +1232,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
     // Never sent yet: nothing to say of a last attempt.
     db.prepare("UPDATE outbox SET attempts = 0, sent_at = NULL WHERE id = ?").run(head);
-    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
     expect(
       await screen.findByText("Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 0."),
     ).toBeTruthy();
@@ -1223,7 +1243,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       at(9, 52, 59).toISOString(),
       head,
     );
-    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 2 }));
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 2 }));
     expect(
       await screen.findByText(
         "Самая старая запись ждёт отправки уже 2 ч 5 мин, попыток отправки: 1 234, последняя — меньше минуты назад.",
@@ -1232,7 +1252,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
     // A clock set back reads as no wait at all, never a negative one.
     view.rerender(
-      bar({ local: executor, factsFailure: "host", now: () => at(6, 0), outboxVersion: 3 }),
+      workBar({ local: executor, factsFailure: "host", now: () => at(6, 0), outboxVersion: 3 }),
     );
     expect(
       await screen.findByText(
@@ -1245,23 +1265,23 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor } = await waitingRecords();
     const now = () => at(9, 53);
     const stuck = /Самая старая запись ждёт отправки уже 12 мин/;
-    const view = render(bar({ local: executor, factsFailure: "offline", now }));
+    const view = render(workBar({ local: executor, factsFailure: "offline", now }));
     expect(await screen.findByText(stuck)).toBeTruthy();
-    view.rerender(bar({ local: executor, factsFailure: "local", now }));
+    view.rerender(workBar({ local: executor, factsFailure: "local", now }));
     expect(await screen.findByText(stuck)).toBeTruthy();
-    view.rerender(bar({ local: executor, factsFailure: null, now }));
+    view.rerender(workBar({ local: executor, factsFailure: null, now }));
     await waitFor(() => expect(screen.queryByText(stuck)).toBeNull());
     // The failure comes back: the line is read again, not the one shown before.
     db.prepare("UPDATE outbox SET created_at = ? WHERE acked_at IS NULL AND attempts = 5").run(
       at(9, 33).toISOString(),
     );
-    view.rerender(bar({ local: executor, factsFailure: "host", now }));
+    view.rerender(workBar({ local: executor, factsFailure: "host", now }));
     expect(await screen.findByText(/ждёт отправки уже 20 мин/)).toBeTruthy();
     // Nothing waits any more: a failure that nothing explains is not dressed up as a wait.
     db.prepare(
       "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-08T06:20:00.000Z' WHERE acked_at IS NULL",
     ).run();
-    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
     expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
   });
@@ -1273,7 +1293,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
         isHeadRecord(sql) ? Promise.reject(new Error("disk")) : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    render(bar({ local: failing, factsFailure: "host", now: () => at(9, 53) }));
+    render(workBar({ local: failing, factsFailure: "host", now: () => at(9, 53) }));
     expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
     await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
     await act(async () => {
@@ -1293,10 +1313,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
       transaction: (statements) => executor.transaction(statements),
     };
     const now = () => at(9, 53);
-    const view = render(bar({ local, factsFailure: "host", now }));
+    const view = render(workBar({ local, factsFailure: "host", now }));
     expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
     broken = true;
-    view.rerender(bar({ local, factsFailure: "host", now, outboxVersion: 1 }));
+    view.rerender(workBar({ local, factsFailure: "host", now, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
     expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
   });
@@ -1305,7 +1325,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
     const { db, executor, head } = await waitingRecords();
     const now = () => at(9, 53);
-    const view = render(bar({ local: executor, factsFailure: "host", now }));
+    const view = render(workBar({ local: executor, factsFailure: "host", now }));
     expect(await screen.findByText(/попыток отправки: 5,/)).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
@@ -1321,7 +1341,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(await screen.findByText(/попыток отправки: 6,/)).toBeTruthy();
 
     // The failure goes: nothing is read on a timer for it any more.
-    view.rerender(bar({ local: executor, factsFailure: null, now }));
+    view.rerender(workBar({ local: executor, factsFailure: null, now }));
     await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
@@ -1332,13 +1352,13 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
-    const quiet = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const quiet = render(workBar({ local: executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
     quiet.unmount();
 
-    const failing = render(bar({ local: executor, factsFailure: "local" }));
+    const failing = render(workBar({ local: executor, factsFailure: "local" }));
     expect(await screen.findByText(/Ответ хоста не удалось записать/)).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
@@ -1347,7 +1367,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
 
     // And the same for a station running out of serials.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1951").run();
-    const low = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const low = render(workBar({ local: executor, shiftId: ENTERED.id }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
@@ -1374,14 +1394,14 @@ describe("the outbox and the serials on the floor's status bar", () => {
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
     // 501 left, over a quarter of the block: no warning, no timer.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1500").run();
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("0"));
     await flushEffects();
     expect(screen.queryByText("Заканчиваются номера SSCC")).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
     // 500 left: the warning stands, and so does the timer.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    view.rerender(workBar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     // (Not inside `waitFor`: its own polling is a timer too.)
     await flushEffects();
@@ -1401,7 +1421,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       next: 181,
       extension: 1,
     });
-    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: executor, shiftId: ENTERED.id }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
@@ -1427,7 +1447,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { executor } = openLocalDb();
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
     const held = holdingFirstRead(executor, isRestoreStatus);
-    const view = render(bar({ local: held.executor }));
+    const view = render(workBar({ local: held.executor }));
     await waitFor(() => expect(held.started()).toBe(true));
     await reconcileRestore({
       local: executor,
@@ -1435,7 +1455,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       register: async () => ({ results: [] }),
       now: () => new Date(),
     });
-    view.rerender(bar({ local: held.executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: held.executor, outboxVersion: 1 }));
     await flushEffects();
     expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
     // The older read, which saw the obligation, lands now.
@@ -1457,10 +1477,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
           : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
-    const view = render(bar({ local: flaky }));
+    const view = render(workBar({ local: flaky }));
     expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
     failing = true;
-    view.rerender(bar({ local: flaky, outboxVersion: 1 }));
+    view.rerender(workBar({ local: flaky, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
   });
 
@@ -1468,10 +1488,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor } = openLocalDb();
     await unsentScans(executor, 3);
     const held = holdingFirstRead(executor, isUnsentCount);
-    const view = render(bar({ local: held.executor }));
+    const view = render(workBar({ local: held.executor }));
     await waitFor(() => expect(held.started()).toBe(true));
     await unsentScans(executor, 1, PAIRING, 50);
-    view.rerender(bar({ local: held.executor, outboxVersion: 1 }));
+    view.rerender(workBar({ local: held.executor, outboxVersion: 1 }));
     await waitFor(() => expect(shown("Не отправлено")).toBe("4"));
     await act(async () => {
       held.release();
@@ -1486,11 +1506,11 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
     const held = holdingFirstRead(executor, isSerialsRead);
-    const view = render(bar({ local: held.executor, shiftId: ENTERED.id }));
+    const view = render(workBar({ local: held.executor, shiftId: ENTERED.id }));
     await waitFor(() => expect(held.started()).toBe(true));
     // The older read saw 2 000 left; the newest, after the floor wrote, sees 500: the chip.
     db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
-    view.rerender(bar({ local: held.executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    view.rerender(workBar({ local: held.executor, shiftId: ENTERED.id, outboxVersion: 1 }));
     expect(await screen.findByText("Заканчиваются номера SSCC")).toBeTruthy();
     await act(async () => {
       held.release();
@@ -1503,10 +1523,10 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor, head } = await waitingRecords();
     const now = () => at(9, 53);
     const held = holdingFirstRead(executor, isHeadRecord);
-    const view = render(bar({ local: held.executor, factsFailure: "host", now }));
+    const view = render(workBar({ local: held.executor, factsFailure: "host", now }));
     await waitFor(() => expect(held.started()).toBe(true));
     db.prepare("UPDATE outbox SET attempts = 7 WHERE id = ?").run(head);
-    view.rerender(bar({ local: held.executor, factsFailure: "host", now, outboxVersion: 1 }));
+    view.rerender(workBar({ local: held.executor, factsFailure: "host", now, outboxVersion: 1 }));
     expect(await screen.findByText(/попыток отправки: 7,/)).toBeTruthy();
     await act(async () => {
       held.release();
@@ -1519,9 +1539,9 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { executor } = await waitingRecords();
     const now = () => at(9, 53);
     const held = holdingFirstRead(executor, isHeadRecord);
-    const view = render(bar({ local: held.executor, factsFailure: "host", now }));
+    const view = render(workBar({ local: held.executor, factsFailure: "host", now }));
     await waitFor(() => expect(held.started()).toBe(true));
-    view.rerender(bar({ local: held.executor, factsFailure: null, now }));
+    view.rerender(workBar({ local: held.executor, factsFailure: null, now }));
     await act(async () => {
       held.release();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1531,10 +1551,9 @@ describe("the outbox and the serials on the floor's status bar", () => {
 });
 
 describe("the scanner on the floor's status bar", () => {
-  /** The value the bar shows under `label`, or `null` when it shows no such item. */
-  function shown(label: string): string | null {
-    const term = screen.queryByText(label);
-    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+  /** The words of the scanner's chip. */
+  function shown(): string | null {
+    return document.querySelector('[data-chip="scanner"]')?.textContent ?? null;
   }
 
   function watching(...statuses: Array<"connected" | "disconnected">) {
@@ -1559,17 +1578,17 @@ describe("the scanner on the floor's status bar", () => {
   it("says «Клавиатурный» with only the keyboard wedge", async () => {
     render(bar({ local: await synced([ORG]) }));
     expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
-    expect(shown("Сканер")).toBe("Клавиатурный");
+    expect(shown()).toBe("Сканер готов");
   });
 
   it("follows the COM scanners the shell reports", async () => {
     const local = await synced([ORG]);
     const view = render(bar({ local, watchScanners: watching("connected") }));
-    await waitFor(() => expect(shown("Сканер")).toBe("Подключён"));
+    await waitFor(() => expect(shown()).toBe("Сканер готов"));
     view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
-    await waitFor(() => expect(shown("Сканер")).toBe("Часть сканеров недоступна"));
+    await waitFor(() => expect(shown()).toBe("Часть сканеров"));
     view.rerender(bar({ local, watchScanners: watching("disconnected") }));
-    await waitFor(() => expect(shown("Сканер")).toBe("Нет связи"));
+    await waitFor(() => expect(shown()).toBe("Сканер не на связи"));
   });
 });
 
@@ -1661,5 +1680,187 @@ describe("the license on the floor's status bar (plan ЛЦ-3)", () => {
       ),
     ).toBeTruthy();
     expect(within(alerts()).queryByText(/аварийному продлению/)).toBeNull();
+  });
+});
+
+describe("the header's chips (kit header: a glyph and a word on a tone, never a bare dot)", () => {
+  const operator = { id: "op-1", login: "0042", name: "Анна Кузнецова", role: null } as const;
+
+  /** The words of every chip of the bar, in order, with their tones. */
+  function chips(): Array<[string, string | null, string]> {
+    return [...document.querySelectorAll("[data-chip]")].map((chip) => [
+      chip.getAttribute("data-chip") ?? "",
+      chip.getAttribute("data-tone"),
+      chip.textContent ?? "",
+    ]);
+  }
+
+  it("sign-in shows the link and the scanner, each with a glyph and its words", async () => {
+    const view = render(bar({ local: await synced([ORG]), link: ONLINE_LINK }));
+    await screen.findByText("Никто не вошёл");
+    expect(chips()).toEqual([
+      ["link", "ok", "Связь есть"],
+      ["scanner", "ok", "Сканер готов"],
+    ]);
+    for (const chip of view.container.querySelectorAll("[data-chip]")) {
+      expect(chip.querySelector("svg")).not.toBeNull();
+    }
+  });
+
+  it("the hub and the forms add the printer; «Принтер не задан» until the workstation has one", async () => {
+    render(bar({ local: await synced([ORG]), link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().map(([kind]) => kind)).toContain("printer"));
+    expect(chips()).toEqual([
+      ["link", "ok", "Связь есть"],
+      ["printer", "neutral", "Принтер не задан"],
+      ["scanner", "ok", "Сканер готов"],
+    ]);
+  });
+
+  it("the printer chip is ready with a printer set up, and an error while the shift's label failed", async () => {
+    const at = await printStation();
+    await closeBoxWithLabel(at);
+    const view = render(
+      bar({ local: at.local, link: ONLINE_LINK, operator, shiftId: at.shift.copy.id }),
+    );
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "printer")).toEqual([
+        "printer",
+        "ok",
+        "Принтер готов",
+      ]),
+    );
+    at.db.prepare("UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent'").run();
+    view.rerender(
+      bar({
+        local: at.local,
+        link: ONLINE_LINK,
+        operator,
+        shiftId: at.shift.copy.id,
+        outboxVersion: 1,
+      }),
+    );
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "printer")).toEqual([
+        "printer",
+        "error",
+        "Принтер: ошибка",
+      ]),
+    );
+  });
+
+  it("the work screen adds the queue: quiet «Очередь 0», a warning with N, «Отклонено N» as an error", async () => {
+    const { db, executor } = openLocalDb();
+    const ids = await unsentScans(executor, 3);
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "queue")).toEqual(["queue", "warn", "Очередь 3"]),
+    );
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'invalid_record', acked_at = '2026-10-08T06:20:00.000Z' WHERE id = ?",
+    ).run(ids[0] ?? "");
+    cleanup();
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "rejected")).toEqual([
+        "rejected",
+        "error",
+        "Отклонено 1",
+      ]),
+    );
+    expect(chips().find(([kind]) => kind === "queue")).toEqual(["queue", "warn", "Очередь 2"]);
+  });
+
+  it("the work screen's healthy chips are glyphs with their words kept for a reader; a problem keeps its words", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    render(workBar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().find(([kind]) => kind === "queue")?.[2]).toBe("Очередь 2"));
+    const form = (kind: string) =>
+      document.querySelector(`[data-chip="${kind}"]`)?.getAttribute("data-form");
+    expect(form("link")).toBe("icon");
+    expect(form("scanner")).toBe("icon");
+    // «Очередь 2» is a warning: it keeps its words on the eye as well.
+    expect(form("queue")).toBe("full");
+    expect(document.querySelector('[data-chip="link"] .station-visually-hidden')?.textContent).toBe(
+      "Связь есть",
+    );
+    cleanup();
+    render(bar({ local: executor, link: ONLINE_LINK, operator }));
+    expect(document.querySelector('[data-chip="link"]')?.getAttribute("data-form")).toBe("full");
+  });
+
+  it("the hub has no queue chip: the queue is the footer's button", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    render(bar({ local: executor, link: ONLINE_LINK, operator }));
+    await waitFor(() => expect(chips().map(([kind]) => kind)).toContain("printer"));
+    expect(chips().map(([kind]) => kind)).not.toContain("queue");
+  });
+
+  it("a scanner that is off the link is an error with its words, a part of them a warning", async () => {
+    const local = await synced([ORG]);
+    const watching =
+      (...statuses: Array<"connected" | "disconnected">) =>
+      (
+        onSnapshot: (next: {
+          revision: number;
+          scanners: Array<{ port: string; baud: number; status: "connected" | "disconnected" }>;
+        }) => void,
+      ) => {
+        onSnapshot({
+          revision: 1,
+          scanners: statuses.map((status, i) => ({ port: `COM${i + 3}`, baud: 9600, status })),
+        });
+        return Promise.resolve(() => undefined);
+      };
+    const view = render(bar({ local, watchScanners: watching("disconnected") }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "scanner")).toEqual([
+        "scanner",
+        "error",
+        "Сканер не на связи",
+      ]),
+    );
+    view.rerender(bar({ local, watchScanners: watching("connected", "disconnected") }));
+    await waitFor(() =>
+      expect(chips().find(([kind]) => kind === "scanner")).toEqual([
+        "scanner",
+        "warn",
+        "Часть сканеров",
+      ]),
+    );
+  });
+
+  it("the link chip says «Связь слабая» while connecting and «Связи нет» offline, both amber", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local, link: { ...ONLINE_LINK, state: "connecting" } }));
+    expect(chips()[0]).toEqual(["link", "warn", "Связь слабая"]);
+    view.rerender(bar({ local, link: { ...ONLINE_LINK, state: "offline" } }));
+    expect(chips()[0]).toEqual(["link", "warn", "Связи нет"]);
+  });
+
+  it("keeps every control of the rail named and in the order of the design: sync, window mode, operator", async () => {
+    const { executor } = openLocalDb();
+    render(
+      bar({
+        local: executor,
+        operator,
+        onSwitchOperator: vi.fn(),
+        tools: {
+          retry: vi.fn(),
+          lastSyncedAt: null,
+          windowMode: null,
+          source: { subscribe: () => () => undefined } as never,
+          onMute: vi.fn(),
+        },
+      }),
+    );
+    const rail = await screen.findByRole("group", { name: "Действия станции" });
+    expect(
+      within(rail)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label") ?? button.textContent),
+    ).toEqual(["Синхронизация", "Сменить оператора"]);
   });
 });

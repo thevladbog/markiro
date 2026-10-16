@@ -84,21 +84,31 @@ export function ProductPanel({
   productId,
   className,
   fallback,
+  overlay = null,
 }: {
   local: LocalExecutor | undefined;
   productId: string;
   className: string;
   fallback: ReactNode;
+  /** Laid over the frame's face (the hub card's tags on the gradient). */
+  overlay?: ReactNode;
 }) {
   if (local === undefined) {
     return (
       <div className={className} data-photo-backing="gradient">
         {fallback}
+        {overlay}
       </div>
     );
   }
   return (
-    <PhotoPanel local={local} productId={productId} className={className} fallback={fallback} />
+    <PhotoPanel
+      local={local}
+      productId={productId}
+      className={className}
+      fallback={fallback}
+      overlay={overlay}
+    />
   );
 }
 
@@ -107,16 +117,19 @@ function PhotoPanel({
   productId,
   className,
   fallback,
+  overlay,
 }: {
   local: LocalExecutor;
   productId: string;
   className: string;
   fallback: ReactNode;
+  overlay: ReactNode;
 }) {
   const photo = useStoredProductPhoto(local, productId);
   return (
     <div className={className} data-photo-backing={usePhotoBacking(photo)}>
       <ProductPhotoImage photo={photo} fallback={fallback} />
+      {overlay}
     </div>
   );
 }

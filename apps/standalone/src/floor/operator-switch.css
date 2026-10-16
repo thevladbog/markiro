@@ -1,13 +1,9 @@
 /*
  * The status bar's rail of actions, forked from the cloud station
  * (apps/station/src/station.css: `.station-status-actions`, `.station-rail-button`,
- * `.operator-switch-control`): a third column of the one-row header, every
+ * `.operator-switch-control`): the right of the one-row header, every
  * control 64 px high (the floor's touch target), its caption on one line.
  */
-.station-status-bar:has(> .station-status-actions) {
-  grid-template-columns: minmax(160px, 1fr) minmax(0, auto) auto;
-}
-
 .station-status-actions {
   display: flex;
   min-width: 0;
@@ -18,9 +14,8 @@
 }
 
 .station-status-actions > * {
-  min-width: 0;
   min-height: 64px;
-  max-width: 100%;
+  flex: none;
 }
 
 .operator-switch-control {
@@ -114,10 +109,6 @@
 /* The sync button (beta 3): the glyph, and a dot while the panel has something to explain. */
 .floor-sync-button {
   position: relative;
-}
-
-.floor-sync-button__glyph {
-  font: 700 26px/1 var(--font-ui);
 }
 
 .floor-sync-button__dot {

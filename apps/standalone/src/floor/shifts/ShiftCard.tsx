@@ -5,9 +5,11 @@ import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 import { shiftProductTitle } from "../../lib/shift-product.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { LicenseRefusal } from "../license.js";
+import { Glyph } from "../kit/StatusIcons.js";
 import { ProductPanel } from "./ProductPhoto.js";
 import type { ShiftCopy } from "./shift-copies.js";
 import { productMonogram } from "./product-accent.js";
+import { shiftProgress } from "./hub-layout.js";
 import { formatCivilDate, formatQuantity } from "./shift-text.js";
 
 /**
@@ -53,7 +55,8 @@ const PHASE: Record<"planned" | "active" | "closing" | "office_closed", TagPhase
   planned: "planned",
   active: "active",
   closing: "running",
-  office_closed: "attention",
+  // Closed in the office, to be finished here: the done tone, as the board draws it (✓).
+  office_closed: "done",
 };
 
 export interface ShiftCardProps {
@@ -66,20 +69,32 @@ export interface ShiftCardProps {
   onAction: () => void;
   /** The station's database, for the product's photo; without it the monogram stands. */
   local?: LocalExecutor;
+  /**
+   * The codes this station holds in the shift (its local records), for «Принято N из M»;
+   * `null` (the default): no count was read, and the progress row is not drawn.
+   */
+  accepted?: number | null;
 }
 
 /**
- * One shift of the line, laid out as the cloud station's `ShiftCard`
- * (apps/station/src/ui/ShiftCard.tsx, redesign 2026-09-20, PR #615/#619):
- * the product's panel on its GTIN-derived gradient with the product's photo
- * (beta 3: the station keeps it, `ProductPhoto`) or, without one, the
- * monogram, then the number and the status, the
- * product, the date, the mode and plan as facts, the counterparty, and the
- * 72 px action pinned to the card's last row. What the standalone adds — a
- * shift that needs the host, one the office closed, a close the host
- * refused — is said in the free row above the action.
+ * One shift of the line, as the owner-approved «Смены линии» board draws it (2026-10, kit): the
+ * left half is the product's panel the full height of the card, on the kit's one brand gradient
+ * (a transparent or unknown photo) or with the photo's own background, the photo fitted whole
+ * and the tags (mode, pallets) as chips on it; on the right the status chip and the shift's
+ * number, the product's print name, who it is for, the dates and the plan as label and value,
+ * the progress where both counters exist locally, and the 84 px action pinned to the bottom.
+ * What the standalone adds — a shift that needs the host, one the office closed, a close the
+ * host refused — is said in the free row above the action.
  */
-export function ShiftCard({ copy, refusal = null, action, busy, onAction, local }: ShiftCardProps) {
+export function ShiftCard({
+  copy,
+  refusal = null,
+  action,
+  busy,
+  onAction,
+  local,
+  accepted = null,
+}: ShiftCardProps) {
   const { t } = useTranslation();
   const phase =
     copy.localState === "closing"
@@ -94,8 +109,13 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
     action.kind === "finish" ||
     ((action.kind === "open" || action.kind === "continue") && action.enabled);
   const needsLink = (action.kind === "open" || action.kind === "continue") && !action.enabled;
+  const progress = shiftProgress({
+    plannedQty: copy.plannedQty,
+    accepted,
+    entered: copy.entered,
+  });
   return (
-    <Card className="shift-card" padding="var(--sp-1)">
+    <Card className="shift-card" padding={0} data-phase={phase}>
       <div className="shift-card__body">
         <ProductPanel
           local={local}
@@ -106,48 +126,86 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
               {productMonogram(title)}
             </span>
           }
+          overlay={
+            <div className="shift-card__tags">
+              <Badge
+                className="shift-card__mode-badge"
+                size="floor"
+                tone={copy.mode === "aggregation" ? "violet" : "steel"}
+              >
+                {t(`floor.shifts.mode.${copy.mode}`)}
+              </Badge>
+              {copy.mode === "aggregation" && copy.palletsEnabled ? (
+                <Badge className="shift-card__pallets" size="floor" tone="teal">
+                  {t("floor.shifts.withPallets")}
+                </Badge>
+              ) : null}
+            </div>
+          }
         />
         <div className="shift-card__details">
           <div className="shift-card__heading">
-            <span className="shift-card__number">{copy.number}</span>
             <StatusChip
               className="shift-card__status"
               size="floor"
               phase={PHASE[phase]}
               label={t(`floor.shifts.status.${phase}`)}
             />
+            <span className="shift-card__number">{copy.number}</span>
           </div>
           <div className="shift-card__product shift-card__product--only">{title}</div>
-          <div className="shift-card__dates">
-            <span className="shift-card__date-part">
-              {t("floor.shifts.productionDate", { date: formatCivilDate(copy.productionDate) })}
-            </span>
-            {copy.plannedDate === null ? null : (
-              <span className="shift-card__date-part">
-                {t("floor.shifts.plannedDate", { date: formatCivilDate(copy.plannedDate) })}
-              </span>
-            )}
-          </div>
-          <div className="shift-card__mode">
-            <Badge className="shift-card__mode-badge" size="floor">
-              {t(`floor.shifts.mode.${copy.mode}`)}
-            </Badge>
-            {copy.mode === "aggregation" && copy.palletsEnabled ? (
-              <Badge className="shift-card__pallets" size="floor">
-                {t("floor.shifts.withPallets")}
-              </Badge>
-            ) : null}
-            <span className="shift-card__plan">
-              {copy.plannedQty === null
-                ? t("floor.shifts.noPlan")
-                : t("floor.shifts.plan", { quantity: formatQuantity(copy.plannedQty) })}
-            </span>
-          </div>
           <div className="shift-card__counterparty">
             {copy.counterpartyName === null
               ? null
               : t("floor.shifts.counterparty", { name: copy.counterpartyName })}
           </div>
+          <dl className="shift-card__facts">
+            <div className="shift-card__fact">
+              <dt>{t("floor.shifts.fact.productionDate")}</dt>
+              <dd>{formatCivilDate(copy.productionDate)}</dd>
+            </div>
+            {copy.plannedDate === null ? null : (
+              <div className="shift-card__fact">
+                <dt>{t("floor.shifts.fact.plannedDate")}</dt>
+                <dd>{formatCivilDate(copy.plannedDate)}</dd>
+              </div>
+            )}
+            <div className="shift-card__fact">
+              <dt>{t("floor.shifts.fact.plan")}</dt>
+              <dd className={copy.plannedQty === null ? "shift-card__plan--none" : undefined}>
+                {copy.plannedQty === null
+                  ? t("floor.shifts.fact.planNone")
+                  : t("floor.shifts.fact.planValue", { quantity: formatQuantity(copy.plannedQty) })}
+              </dd>
+            </div>
+          </dl>
+          {progress === null ? null : (
+            <div className="shift-card__progress">
+              <div className="shift-card__progress-line">
+                <span>{t("floor.shifts.progress.label")}</span>
+                <span className="shift-card__progress-count">
+                  {t("floor.shifts.progress.count", {
+                    accepted: formatQuantity(progress.accepted),
+                    planned: formatQuantity(progress.planned),
+                  })}
+                </span>
+              </div>
+              <div
+                className="shift-card__progress-bar"
+                role="progressbar"
+                aria-label={t("floor.shifts.progress.label")}
+                aria-valuemin={0}
+                aria-valuemax={progress.planned}
+                aria-valuenow={Math.min(progress.accepted, progress.planned)}
+                aria-valuetext={t("floor.shifts.progress.count", {
+                  accepted: formatQuantity(progress.accepted),
+                  planned: formatQuantity(progress.planned),
+                })}
+              >
+                <span style={{ width: `${(progress.ratio * 100).toFixed(1)}%` }} />
+              </div>
+            </div>
+          )}
           <div className="shift-card__notes">
             {needsLink && <p className="shift-card__hint">{t("floor.shifts.needsLink")}</p>}
             {action.kind === "blocked" && (
@@ -165,14 +223,17 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
           </div>
           {action.kind !== "blocked" && (
             <Button
-              className="shift-card__action"
+              className="shift-card__action floor-primary"
               size="floor"
               fullWidth
-              variant={
-                action.kind === "continue" || action.kind === "finish" ? "primary" : "secondary"
-              }
+              variant={action.kind === "continue" ? "primary" : "secondary"}
               disabled={busy || !enabled}
               onClick={onAction}
+              {...(action.kind === "continue"
+                ? { icon: <Glyph name="arrow-right" size={26} /> }
+                : action.kind === "finish"
+                  ? { icon: <Glyph name="check" size={26} /> }
+                  : {})}
             >
               {t(`floor.shifts.action.${action.kind}`)}
             </Button>

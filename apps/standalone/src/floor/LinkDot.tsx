@@ -7,29 +7,18 @@ import { Button } from "@markiro/ui";
 import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
+import { FloorChip } from "./FloorChip.js";
+import { chipForm, linkChip, type CollapseLevel } from "./header-chips.js";
 
 const CLOCK = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
 const DATE = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" });
-
-/** The dot's colour: green, amber or red; grey before the link's first status. */
-export type LinkTone = "ok" | "warn" | "error" | "neutral";
 
 export interface LinkDotProps {
   /** The link as the shell reports it; `null` before the first status. */
   status: HostStatus | null;
   sync: SyncState | null;
-}
-
-/** The dot's colour: green while the host answers and the copies are sound, amber while a sync fails or the link is being made, red without the host. */
-export function linkTone(
-  status: HostStatus | null,
-  sync: SyncState | null,
-): { tone: LinkTone; pulse: boolean } {
-  if (status === null) return { tone: "neutral", pulse: true };
-  if (status.state === "offline") return { tone: "error", pulse: false };
-  if (status.state === "connecting") return { tone: "warn", pulse: true };
-  const unwell = (sync?.failure ?? null) !== null || (sync?.quarantined ?? 0) > 0;
-  return { tone: unwell ? "warn" : "ok", pulse: false };
+  /** How far the header has collapsed (`header-chips`): a healthy link is its glyph alone from level 1. */
+  level?: CollapseLevel;
 }
 
 /** The link in words, as the line beside it has always said it. */
@@ -50,18 +39,18 @@ function linkLabel(t: TFunction, status: HostStatus | null): string {
 }
 
 /**
- * The link to the host as a small status dot in the station's bar (beta 3.2,
- * owner feedback: the green chip across the header was too loud). The dot's
- * name says the link in words; a tap opens the details beside it (since when,
+ * The link to the host as the first chip of the station's bar (kit header:
+ * a glyph and a word, not a bare dot; collapsed to the glyph while the row is
+ * tight). The button's name says the link in full; a tap opens the details beside it (since when,
  * why, the sync's health: `HostStatusLine`), a second tap, Escape or a tap
  * elsewhere closes them. A hidden polite line keeps announcing a change of the
  * link, as the chip's live region did.
  */
-export function LinkDot({ status, sync }: LinkDotProps) {
+export function LinkDot({ status, sync, level = 0 }: LinkDotProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const { tone, pulse } = linkTone(status, sync);
+  const chip = linkChip(status, sync);
   const label = linkLabel(t, status);
   useEffect(() => {
     if (!open) return undefined;
@@ -92,17 +81,18 @@ export function LinkDot({ status, sync }: LinkDotProps) {
         onClick={() => setOpen((current) => !current)}
       >
         {/*
-          The same chip as the telemetry pills beside it (`StatusPill`: its height, border,
-          radius and dot), holding only the dot; the button around it is the 64 px target.
+          The same chip as the others beside it (a glyph and a word on a tone); the button around
+          it is the 64 px target. Its name says the link in full, the chip its short word.
         */}
-        <span
-          className={`station-status-item station-status-pill floor-link__pill${
-            pulse ? " floor-link__pill--pulse" : ""
-          }`}
-          data-tone={tone}
-        >
-          <span aria-hidden="true" className="station-status-pill__dot" />
-        </span>
+        <FloorChip
+          kind="link"
+          tone={chip.tone}
+          icon={chip.icon}
+          text={t(`floor.chips.link.${chip.text}`)}
+          form={chipForm(level, chip.tone)}
+          title={label}
+          className="floor-link__chip"
+        />
       </Button>
       <span className="station-visually-hidden" role="status" aria-live="polite">
         {label}

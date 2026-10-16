@@ -42,11 +42,10 @@ function rule(rules: CssRule[], selector: string, within = ""): Record<string, s
 describe("the status bar", () => {
   const rules = rulesOf("src/floor/floor-status-bar.css");
 
-  it("draws the link dot's frame itself: a 64 px target with a transparent hairline, not the browser's outset", () => {
+  it("draws the link chip's target itself: at least 64 px wide with a transparent hairline, not the browser's outset", () => {
     const button = rule(rules, ".floor-link__button.mk-btn");
-    expect(button["width"]).toBe("64px");
     expect(button["min-width"]).toBe("64px");
-    // The kit's secondary border colour is `!important`; the dot beats it by specificity and says the style.
+    // The kit's secondary border colour is `!important`; the chip's target beats it by specificity.
     const frame = rule(
       rules,
       ":where(.floor-frame, .station-screen) .floor-link__button.mk-btn.mk-btn--floor",
@@ -54,27 +53,38 @@ describe("the status bar", () => {
     expect(frame["border"]).toBe("1px solid transparent !important");
   });
 
-  it("anchors the link popover at the dot's left edge, within the window's width", () => {
+  it("anchors the link popover at the chip's left edge, within the window's width", () => {
     const popover = rule(rules, ".floor-link__popover");
     expect(popover["left"]).toBe("0");
     expect(popover["right"]).toBeUndefined();
     expect(popover["max-width"]).toContain("100vw");
   });
 
-  it("gives the identity room: the scanner's words go before the operator's name does", () => {
-    const narrow = rule(
-      rules,
-      '.station-status-pills__list .station-status-pill[data-tone="neutral"] dd',
-      "@container (max-width: 1300px)",
-    );
-    expect(narrow["display"]).toBe("none");
-    // The warning chips never collapse: the neutral rule names no `warn` or `error` tone.
-    expect(
-      rules
-        .filter((r) => r.within.some((w) => w.startsWith("@container")))
-        .flatMap((r) => selectorParts(r.selector))
-        .some((part) => /data-tone="(warn|error)"/.test(part)),
-    ).toBe(false);
+  it("is one row of 64 px targets and a hairline (73 px), whose rail never shrinks", () => {
+    const bar = rule(rules, ".station-status-bar");
+    expect(bar["grid-template-rows"]).toBe("64px auto");
+    expect(bar["padding"]).toBe("4px var(--sp-4)");
+    expect(rule(rules, ".floor-bar__rail")["flex"]).toBe("none");
+    const chip = rule(rules, ".floor-chip");
+    expect(chip["height"]).toBe("40px");
+    expect(chip["flex"]).toBe("0 0 auto");
+    expect(chip["white-space"]).toBe("nowrap");
+  });
+
+  it("paints the tones with the kit's status tokens, words and glyph with them (no bare dot, no pulse)", () => {
+    for (const tone of ["ok", "warn", "error"]) {
+      const painted = rule(rules, `.floor-chip[data-tone="${tone}"]`);
+      expect(painted["background"], tone).toMatch(/^var\(--(ok|warn|err)-bg\)$/);
+      expect(painted["color"], tone).toMatch(/^var\(--(ok|warn|err)-fg\)$/);
+    }
+    const css = textOf("src/floor/floor-status-bar.css");
+    expect(css).not.toContain("station-status-pill__dot");
+    expect(css).not.toContain("@keyframes");
+    expect(css).not.toContain("animation");
+  });
+
+  it("collapses by script, not by container query: the decision is `useHeaderCollapse`'s", () => {
+    expect(rules.some((r) => r.within.some((w) => w.startsWith("@container")))).toBe(false);
   });
 });
 
@@ -117,24 +127,47 @@ describe("the calendar of the new shift", () => {
 describe("the hub's shift cards", () => {
   const hub = rulesOf("src/floor/shifts/shift-hub.css");
 
-  it("take the height of their content, with a square photo frame instead of a full-height strip", () => {
-    expect(rule(hub, ".shift-hub .shift-selection__grid")["align-items"]).toBe("start");
+  it("fill the zone: the card is the grid cell's full height, its photo the whole left half", () => {
+    const grid = rule(hub, ".shift-hub .shift-selection__grid");
+    expect(grid["height"]).toBe("100%");
+    expect(grid["grid-auto-rows"]).toBe("minmax(0, 1fr)");
+    // One shift: one wide column and the 520 px photo; two and more: two columns and 260 px.
+    expect(grid["--hub-photo"]).toBe("260px");
+    const single = rule(hub, '.shift-hub .shift-selection__grid[data-columns="1"]');
+    expect(single["grid-template-columns"]).toBe("minmax(0, 1fr)");
+    expect(single["--hub-photo"]).toBe("520px");
+    expect(rule(hub, ".shift-hub .shift-card")["height"]).toBe("100%");
     const body = rule(hub, ".shift-hub .shift-card__body");
-    expect(body["height"]).toBe("auto");
-    expect(body["grid-template-columns"]).toContain("var(--hub-photo, 120px)");
+    expect(body["height"]).toBe("100%");
+    // The photo's width is capped by a share of the card: a 1024 px window keeps room for the facts.
+    expect(body["grid-template-columns"]).toBe("min(var(--hub-photo, 260px), 43%) minmax(0, 1fr)");
     const photo = rule(hub, ".shift-hub .shift-card__photo");
-    expect(photo["width"]).toBe(photo["height"]);
+    expect(photo["border-radius"]).toBe("0");
+    expect(photo["padding"]).toBe("var(--sp-4)");
+  });
+
+  it("fit the photo whole inside the panel and sit the tags on its lower edge", () => {
+    const image = rule(hub, ".shift-hub .shift-card__photo .product-photo");
+    expect(image["object-fit"]).toBe("contain");
+    expect(rule(hub, ".shift-hub .shift-card__tags")["position"]).toBe("absolute");
+  });
+
+  it("set the actions at 84 px with bold words, and the footer's three buttons the same", () => {
+    expect(textOf("src/floor/shifts/ShiftCard.tsx")).toContain("floor-primary");
+    expect(rule(hub, ".shift-hub .station-floor-footer .mk-btn")["height"]).toBe(
+      "var(--control-floor-primary) !important",
+    );
+    expect(rule(hub, ".shift-hub .shift-card__action.mk-btn")["font-weight"]).toBe("700");
   });
 
   it("set their facts at the floor's 16 px and up, and their tags at the floor's size", () => {
     for (const selector of [
       ".shift-hub .shift-card__number",
-      ".shift-hub .shift-card__dates,\n.shift-hub .shift-card__plan",
+      ".shift-hub .shift-card__fact dd",
+      ".shift-hub .shift-card__progress-count",
     ]) {
-      const css = rulesOf("src/floor/shifts/shift-hub.css").find((r) =>
-        r.selector.replace(/\s+/g, " ").startsWith(selector.replace(/\s+/g, " ")),
-      );
-      expect(css?.body, selector).toMatch(/font: \d+ 16px\//);
+      const css = rule(hub, selector);
+      expect(css["font"], selector).toMatch(/^\d+ (2\d|3\d)px\//);
     }
     const card = textOf("src/floor/shifts/ShiftCard.tsx");
     expect(card).not.toContain('size="office"');
@@ -148,6 +181,12 @@ describe("the hub's shift cards", () => {
     );
     expect(tag["height"]).toBe("34px");
     expect(tag["font-size"]).toBe("16px");
+  });
+
+  it("keep the 64 px targets of the title row: the pager and the reprint", () => {
+    expect(rule(hub, ".shift-hub .shift-pager .mk-btn")["min-height"]).toBe("64px");
+    const header = rule(hub, ".shift-hub .shift-selection__header-action .mk-btn");
+    expect(header["min-height"]).toBe("64px");
   });
 });
 

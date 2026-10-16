@@ -77,11 +77,34 @@
   white-space: nowrap;
 }
 
+/*
+ * The hub's footer (owner-approved board): «Новая смена» the one primary, the setup and the queue
+ * secondary, all 84 px, one line, the queue's count a badge in its button.
+ */
+.shift-hub .station-floor-footer {
+  height: var(--control-floor-primary);
+  min-height: var(--control-floor-primary);
+}
+
+.shift-hub .station-floor-footer .mk-btn {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
+  font-weight: 700;
+}
+
 .shift-hub .shift-hub__primary {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   gap: var(--sp-3);
   align-items: center;
+}
+
+.shift-hub .shift-hub__primary > .mk-btn {
+  min-width: 320px;
+  flex: 0 0 auto;
 }
 
 .shift-hub .shift-hub__hint {
@@ -102,35 +125,90 @@
   gap: var(--sp-3);
 }
 
-/* ---- The hub's header: message slot and the top-right action. ---- */
-
-.shift-hub .shift-selection__message {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  max-width: 620px;
-  min-height: 64px;
-  max-height: min(144px, 18vh);
-  overflow: auto;
-  gap: var(--sp-2);
-  align-content: center;
+/* The queue's count: «✓ 0» quiet, «! N ждут» a warning, «Отклонено N» an error: words and a sign, never colour alone. */
+.shift-hub .shift-hub__queue-badge {
+  display: inline-flex;
+  height: 40px;
+  margin-inline-start: var(--sp-2);
+  padding: 0 14px;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg-2);
+  font: 600 18px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
 
-.shift-hub .shift-selection__message p {
+.shift-hub .shift-hub__queue-badge[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.shift-hub .shift-hub__queue-badge[data-tone="warn"]::before {
+  content: "!";
+  font-weight: 700;
+}
+
+.shift-hub .shift-hub__queue-badge[data-tone="error"] {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* ---- The hub's title row: the title and its quiet line, the pager and the reprint. ---- */
+
+.shift-hub .station-screen__heading {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shift-hub .station-screen__subtitle {
   margin: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-selection__header-actions {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 0;
+  gap: var(--sp-3);
+  align-items: center;
 }
 
 .shift-hub .shift-selection__header-action {
   flex-shrink: 0;
-  margin-left: auto;
 }
 
-.shift-hub .shift-selection__header-action .mk-btn {
+.shift-hub .shift-selection__header-action .mk-btn,
+.shift-hub .shift-pager .mk-btn {
   min-height: 64px;
+  font-weight: 700;
   white-space: nowrap;
 }
 
-/* ---- The hub's content: the page of cards and the pager under it. ---- */
+.shift-hub .shift-pager {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.shift-hub .shift-pager__page {
+  min-width: 64px;
+  color: var(--fg-1);
+  font: 700 22px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ---- The hub's content: the message row, then the cards the whole zone (no scroll). ---- */
 
 .shift-hub .shift-selection__content {
   display: grid;
@@ -139,8 +217,25 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  gap: var(--sp-3);
-  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* Said in a polite region that is in the tree before any of it; flat while it says nothing. */
+.shift-hub .shift-selection__message {
+  display: grid;
+  min-width: 0;
+  max-height: min(144px, 18vh);
+  overflow: auto;
+  gap: var(--sp-2);
+}
+
+.shift-hub .shift-selection__message:not(:empty) {
+  margin-bottom: var(--sp-3);
+}
+
+.shift-hub .shift-selection__message p {
+  margin: 0;
 }
 
 .shift-hub .shift-selection__slot,
@@ -150,15 +245,22 @@
   overflow: hidden;
 }
 
-/* Cards take the height their content needs (station audit): stretched to the page they were
-   500 px tall columns of empty panel round three lines of 13 px text. */
+/*
+ * The cards fill the zone: one shift is one card on the full width (photo 520 px), two are two
+ * columns (photo 260 px), more come two a page. A last page of one keeps the first column.
+ */
 .shift-hub .shift-selection__grid {
   display: grid;
   height: 100%;
-  align-content: start;
-  align-items: start;
   gap: var(--sp-4);
+  grid-auto-rows: minmax(0, 1fr);
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  --hub-photo: 260px;
+}
+
+.shift-hub .shift-selection__grid[data-columns="1"] {
+  grid-template-columns: minmax(0, 1fr);
+  --hub-photo: 520px;
 }
 
 .shift-hub .shift-selection__state {
@@ -179,35 +281,48 @@
   margin: 0;
 }
 
+/* The empty state: a quiet clipboard in the zone, the words under it; «Новая смена» stays in the footer. */
 .shift-hub .shift-selection__state--empty {
   gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
 }
 
-/* A quiet marker instead of a centred control a read could re-render. */
 .shift-hub .shift-selection__empty-mark {
-  width: 72px;
-  height: 4px;
-  margin-bottom: var(--sp-2);
-  border-radius: 999px;
-  background: var(--line-strong);
+  margin-bottom: var(--sp-3);
+  color: var(--fg-3);
 }
 
-/* ---- The shift card (redesign 2026-09-20). ---- */
+.shift-hub .shift-selection__empty-title {
+  color: var(--fg-1);
+  font: var(--floor-title);
+}
+
+.shift-hub .shift-selection__empty-hint {
+  color: var(--fg-2);
+  font: var(--floor-lg);
+}
+
+/* ---- The shift card (owner-approved «Смены линии», 2026-10). ---- */
 
 .shift-hub .shift-card {
   display: flex;
   min-width: 0;
+  height: 100%;
   min-height: 0;
   padding: 0;
   overflow: hidden;
   gap: 0;
-  /* The card's surface, border and shadow are `Card`'s own inline style, as on
-     the cloud station (its stylesheet gradient loses to that style there too). */
+  /* The card's border and shadow are `Card`'s own inline style; the kit's radius and no shadow win here. */
+  border-radius: var(--floor-r-card) !important;
+  box-shadow: none !important;
 }
 
 .shift-hub .shift-card .mk-card__body {
   min-width: 0;
   min-height: 0;
+  padding: 0 !important;
   overflow: hidden;
 }
 
@@ -215,48 +330,91 @@
   margin: 0;
 }
 
+/* The photo's half and the details, the full height of the card. */
 .shift-hub .shift-card__body {
   display: grid;
-  height: auto;
-  padding: var(--sp-4);
-  gap: var(--sp-4);
-  align-items: start;
-  grid-template-columns: var(--hub-photo, 120px) minmax(0, 1fr);
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* The photo's width at the 1280 px frame, never more than a share of the card (a 1024 px window). */
+  grid-template-columns: min(var(--hub-photo, 260px), 43%) minmax(0, 1fr);
 }
 
 /*
- * Rows: heading · product · date · mode · counterparty · notes (the free
- * row) · the 72 px action. The cloud card's free row stands empty; the
- * standalone says there what the action is waiting for.
+ * The product's panel: the card's whole left half. Its face and border colour are the backing's
+ * (`data-photo-backing`: the brand gradient behind a cut-out or the monogram, nothing behind a photo
+ * with its own background); the photo is fitted whole, never cropped, and the tags sit on it.
  */
-.shift-hub .shift-card__details {
+.shift-hub .shift-card__photo {
+  position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: 0;
+  padding: var(--sp-4);
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  place-items: center;
+}
+
+.shift-hub .shift-card__photo .product-photo {
+  /* Laid over the frame: the picture's natural size never takes part in the layout. */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-6);
+  box-sizing: border-box;
+  object-fit: contain;
+}
+
+.shift-hub .shift-card__photo-monogram {
+  color: var(--muted);
+  font: 700 96px / 1 var(--font-ui);
+}
+
+/* The tags (mode, pallets) as chips on the panel's lower edge. */
+.shift-hub .shift-card__tags {
+  position: absolute;
+  inset: auto var(--sp-3) var(--sp-3) var(--sp-3);
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-2);
-  grid-auto-rows: auto;
+}
+
+/*
+ * Rows: status and number · product · for whom · the facts · the progress · notes (the free row) ·
+ * the 84 px action at the bottom. A row that has nothing is not drawn.
+ */
+.shift-hub .shift-card__details {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow: hidden;
+  gap: var(--sp-3);
+  flex-direction: column;
+  /* The facts and the progress sit in a row or a column by the room the card has. */
+  container-type: inline-size;
 }
 
 .shift-hub .shift-card__heading {
   display: flex;
   flex-wrap: nowrap;
   min-width: 0;
+  flex: none;
   gap: var(--sp-2);
   align-items: center;
   justify-content: space-between;
 }
 
-/* The number is the shift's address: quiet monospace text beside the status. */
+/* The number is the shift's address: monospace beside the status. */
 .shift-hub .shift-card__number {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-2);
-  font: 500 16px/22px var(--font-mono);
+  font: 500 20px/26px var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -274,130 +432,131 @@
   flex-shrink: 0;
 }
 
-/* The product's photo frame, a fixed square beside the details. */
-.shift-hub .shift-card__photo {
-  position: relative;
-  display: grid;
-  /* One square frame, as the new shift's and the work band's: never a full-height strip. */
-  width: var(--hub-photo, 120px);
-  height: var(--hub-photo, 120px);
-  min-width: 0;
-  min-height: 0;
-  padding: var(--sp-2);
-  overflow: hidden;
-  /* One rounded frame; its face and border colour are the backing's (`data-photo-backing`). */
-  border-radius: var(--r-ctl);
-  border: 1px solid transparent;
-  place-items: center;
-}
-
-/*
- * The product's own photo, whole, over the colour panel (beta 3). A PNG or WebP
- * with transparency (beta 3.2) lets the panel's colour through, so the shadow
- * follows the picture's alpha (`drop-shadow`), not its rectangle.
- */
-.shift-hub .shift-card__photo .product-photo {
-  /* Laid over the frame: the picture's natural size never takes part in the layout. */
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  padding: var(--sp-2);
-  box-sizing: border-box;
-  object-fit: contain;
-}
-
-.shift-hub .shift-card__photo-monogram {
-  color: var(--muted);
-  font: 700 48px / 1 var(--font-ui);
-}
-
 .shift-hub .shift-card__product {
   display: -webkit-box;
-  align-self: start;
+  flex: none;
   overflow: hidden;
-  font: var(--floor-lg);
+  font: 700 28px/34px var(--font-ui);
   letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.shift-hub .shift-card__product--only {
-  -webkit-line-clamp: 5;
-}
-
-/* Short kiosk viewports (1366×768, 1280×800): a tighter title by height. */
-@media (max-height: 820px) {
-  .shift-hub .shift-card__product {
-    font: 600 20px/24px var(--font-ui);
-    -webkit-line-clamp: 2;
-  }
-
-  .shift-hub .shift-card__product--only {
-    -webkit-line-clamp: 4;
-  }
-}
-
-/* Dates and plan are monospace facts, not prose. */
-.shift-hub .shift-card__dates,
-.shift-hub .shift-card__plan {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-2);
-  font: 400 16px/22px var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.shift-hub .shift-card__dates {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--sp-3);
-  row-gap: var(--sp-1);
-}
-
-/*
- * 1024×600: the production date and the shift date stand one above the other
- * in the narrow column, so the card's rows are packed closer to keep the
- * 72 px action and every fact on the card.
- */
-@media (max-height: 700px) {
-  .shift-hub .shift-card__details {
-    gap: var(--sp-1);
-  }
-}
-
-.shift-hub .shift-card__date-part {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shift-hub .shift-card__mode {
-  display: flex;
-  min-width: 0;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  align-items: center;
+  -webkit-line-clamp: 2;
 }
 
 .shift-hub .shift-card__counterparty {
   display: -webkit-box;
+  flex: none;
   margin: 0;
   overflow: hidden;
   color: var(--fg-2);
   font: var(--floor-body);
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
+}
+
+.shift-hub .shift-card__counterparty:empty {
+  display: none;
+}
+
+/* Label and value: the label 18, the value monospace 24 (20 in two columns). */
+.shift-hub .shift-card__facts {
+  display: grid;
+  flex: none;
+  margin: auto 0 0;
+  gap: var(--sp-2) var(--sp-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shift-hub .shift-card__fact {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shift-hub .shift-card__fact dt {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__fact dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-1);
+  font: 500 20px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__plan--none {
+  color: var(--fg-2);
+}
+
+/* The wide card (one shift, a wide window): the facts side by side, the value larger. */
+@container (min-width: 600px) {
+  .shift-hub .shift-card__facts {
+    grid-template-columns: repeat(auto-fit, minmax(0, max-content));
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
+/* «Принято N из M» and its bar: the count mono, the bar a `fg` fill on the `panel` track. */
+.shift-hub .shift-card__progress {
+  display: grid;
+  flex: none;
+  margin-top: var(--sp-4);
+  gap: var(--sp-2);
+}
+
+.shift-hub .shift-card__progress-line {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.shift-hub .shift-card__progress-count {
+  color: var(--fg-1);
+  font: 600 22px/28px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shift-hub .shift-card__progress-bar {
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.shift-hub .shift-card__progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--fg-1);
 }
 
 .shift-hub .shift-card__notes {
   display: grid;
   min-width: 0;
   min-height: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   gap: var(--sp-1);
   align-content: end;
+}
+
+.shift-hub .shift-card__notes:empty {
+  display: none;
 }
 
 .shift-hub .shift-card__hint {
@@ -405,11 +564,148 @@
   font: var(--floor-body);
 }
 
-.shift-hub .shift-card__action {
-  --control-floor: 72px;
+/* The action: 84 px, bold words (a secondary one is not grey on white), at the card's bottom. */
+.shift-hub .shift-card__action.mk-btn {
+  flex: none;
+  margin-top: auto;
+  font-weight: 700;
+}
 
-  align-self: end;
-  margin-top: var(--sp-2);
+/* A short window (1280×800, 1366×768): tighter rows keep every fact and the 84 px action. */
+@media (max-height: 860px) {
+  .station-screen.shift-hub {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
+  .shift-hub .shift-card__details {
+    padding: var(--sp-4);
+    gap: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__product {
+    font: 700 24px/28px var(--font-ui);
+  }
+
+  .shift-hub .shift-card__counterparty {
+    -webkit-line-clamp: 1;
+  }
+
+  .shift-hub .shift-card__facts {
+    gap: 0 var(--sp-5);
+  }
+
+  .shift-hub .shift-card__fact {
+    gap: 0;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 20px;
+    line-height: 22px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__progress-line {
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  .shift-hub .shift-card__progress-count {
+    font-size: 20px;
+    line-height: 24px;
+  }
+
+  .shift-hub .shift-card__progress-bar {
+    height: 12px;
+  }
+
+  .shift-hub .shift-card__photo-monogram {
+    font-size: 72px;
+  }
+}
+
+/*
+ * A narrow card (a 1024 px window: the details are about 250 px): the number steps down to the
+ * floor's 16 px so it is read whole beside the status chip.
+ */
+@container (max-width: 340px) {
+  .shift-hub .shift-card__number {
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+/*
+ * 1024×640 (the 1280×800 panel at 125 % scaling): the card is about 350 px high. «Для:» goes
+ * (it is on the card in the office), the facts are stacked tight, the action is 64 px, the
+ * smallest touch target of the floor; everything else stays.
+ */
+@media (max-height: 700px) {
+  .station-screen.shift-hub {
+    gap: var(--sp-2);
+  }
+
+  /* 72 px buttons here (the 84 px of the board does not fit): still over the floor's 64 px. */
+  .shift-hub .station-floor-footer {
+    height: 72px;
+    min-height: 72px;
+  }
+
+  .shift-hub .station-floor-footer .mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .shift-hub .station-screen__subtitle {
+    display: none;
+  }
+
+  .shift-hub .shift-card__product {
+    -webkit-line-clamp: 1;
+  }
+
+  .shift-hub .shift-card__details {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .shift-hub .shift-card__counterparty {
+    display: none;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 16px;
+    line-height: 18px;
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 18px;
+    line-height: 20px;
+  }
+
+  .shift-hub .shift-card__action.mk-btn {
+    height: 64px !important;
+    min-height: 64px !important;
+  }
+
+  /* The banner is one line (the header chip and the title's line say the same): the cards keep the room. */
+  .shift-hub .shift-selection__message .mk-alert {
+    padding: 8px 16px !important;
+  }
+
+  .shift-hub .shift-selection__message .mk-alert__text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* ---- The new shift (NewShift). ---- */

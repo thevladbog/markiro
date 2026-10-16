@@ -249,6 +249,16 @@ function fakeDevice(
   };
 }
 
+/**
+ * The count on the floor header's chip of `kind` («Очередь 3» → `3`), or `null` without that
+ * chip: the queue's chips are drawn on the work screen only (kit header), the conflict chip on
+ * every screen.
+ */
+function chipCount(kind: string): string | null {
+  const chip = document.querySelector(`[data-chip="${kind}"]`);
+  return chip === null ? null : (/(\d[\d\u00a0]*)$/.exec(chip.textContent ?? "")?.[1] ?? null);
+}
+
 function fakeHost() {
   return fakeHostApi({
     bootstrap: vi.fn<HostApi["bootstrap"]>(async () => ({ session: SESSION })),
@@ -3096,7 +3106,7 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(host.sendFacts).toHaveBeenCalled());
     const sent = host.sendFacts.mock.calls.flatMap(([records]) => records);
     expect(sent).toContainEqual(expect.objectContaining({ kind: "scan", shiftId: PLANNED.id }));
-    await waitFor(() => expect(value("Не отправлено")).toBe("0"));
+    await waitFor(() => expect(chipCount("queue")).toBe("0"));
     // The screen asked the host for serials on entry (the station had no block).
     expect(host.requestSsccBlock).toHaveBeenCalled();
   });
@@ -3217,11 +3227,7 @@ describe("the operator on the floor", () => {
     });
     await screen.findByText(PROMPT);
     scan("MRK-000742");
-    expect(
-      await screen.findByText(
-        "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText("Открытых смен на линии нет")).toBeTruthy();
     host.getDeviceShifts.mockResolvedValue([PLANNED]);
     await link.revision(43);
     expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
@@ -3364,8 +3370,7 @@ describe("the operator on the floor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
     await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
-    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
-    const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
+    const unsent = () => chipCount("queue");
     for (const serial of ["A1", "A2", "A3"]) {
       scan(km(serial));
       await screen.findByText(`В коробе ${serial.slice(1)} из 12.`);
@@ -3419,7 +3424,7 @@ describe("the operator on the floor", () => {
           toSerial: 3499,
         };
       };
-      const unsentOf = () => screen.getByText("Не отправлено").nextElementSibling?.textContent;
+      const unsentOf = () => chipCount("queue");
 
       // ---- The first start: the host is there for the entry only.
       const first = openLocalDbFile(path);
@@ -3588,8 +3593,7 @@ describe("the operator on the floor", () => {
           "Смена закрыта на этой станции. Данные будут отправлены автоматически.",
         ),
       ).toBeTruthy();
-      const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
-      const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
+      const unsent = () => chipCount("queue");
       await waitFor(() => expect(unsent()).toBe("5"));
       fireEvent.click(await afterPause("К списку смен"));
       expect(await screen.findByRole("button", { name: "Закрывается" })).toBeTruthy();
@@ -3600,7 +3604,15 @@ describe("the operator on the floor", () => {
         })),
       );
       await link.status({ ...ONLINE, seq: 3 });
-      await waitFor(() => expect(unsent()).toBe("0"));
+      // On the hub the queue is the footer button's badge: «✓ 0» once everything was taken.
+      await waitFor(() =>
+        expect(
+          screen
+            .getByRole("button", { name: "Очередь отправки" })
+            .querySelector(".shift-hub__queue-badge")
+            ?.getAttribute("data-kind"),
+        ).toBe("none"),
+      );
       const delivered = host.sendFacts.mock.calls.at(-1)?.[0] ?? [];
       expect(delivered.map((record) => (record as { kind: string }).kind)).toEqual([
         "scan",
@@ -4288,12 +4300,6 @@ describe("the outbox in the app", () => {
     expect(host.sendFacts).toHaveBeenCalledTimes(1);
   });
 
-  /** The value the floor's status bar shows under `label`, or `null` when it shows no such item. */
-  function barValue(label: string): string | null {
-    const term = screen.queryByText(label);
-    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
-  }
-
   it("shows the floor's status bar what waits, what the host refused and what conflicts, as the host answers", async () => {
     const database = openLocalDb();
     const [first, second, third] = await unsentScans(database.executor, 3);
@@ -4318,9 +4324,11 @@ describe("the outbox in the app", () => {
       connection: link.connection,
       local: database.executor,
     });
-    await waitFor(() => expect(barValue("Отклонено хостом")).toBe("1"));
-    expect(barValue("Конфликтов")).toBe("1");
-    expect(barValue("Не отправлено")).toBe("0");
+    // The conflict is a warning chip on every screen; the queue's «Очередь N» and «Отклонено N»
+    // are the work screen's alone (kit header), the sync button and the queue screen say the rest.
+    await waitFor(() => expect(chipCount("conflicts")).toBe("1"));
+    expect(chipCount("rejected")).toBeNull();
+    expect(chipCount("queue")).toBeNull();
   });
 
   it("tells the floor's status bar when the host fails the delivery, and how long the record has waited", async () => {
@@ -4340,7 +4348,6 @@ describe("the outbox in the app", () => {
     });
     expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
     expect(await screen.findByText(/Самая старая запись ждёт отправки уже/)).toBeTruthy();
-    expect(barValue("Не отправлено")).toBe("2");
   });
 });
 
