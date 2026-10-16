@@ -35,6 +35,13 @@ const c = ru.pages.catalog.chz;
 test("own partial feed, cross-page choices, link-only and draft, independent photo retry, saved and read-only routes", async ({
   page,
 }) => {
+  // One linear journey with ten full-app reloads (each re-fetches the Vite dev
+  // module graph, ~1 s locally, ~2 s on a CI runner): it takes 17 s locally and
+  // 29-31 s on CI, i.e. it sat on the 30 s default. A run that crossed it timed
+  // out inside whichever expect was running (the final «cancelled» one), with no
+  // cancel request ever sent -- not a race in the app. Budget the journey; the
+  // 5 s expect timeout still bounds every individual step.
+  test.setTimeout(90_000);
   const unexpected: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
