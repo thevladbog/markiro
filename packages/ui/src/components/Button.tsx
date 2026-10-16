@@ -4,11 +4,11 @@ import { cn } from "../cn.js";
 
 /** Порт `design-system/components/forms/Button.jsx` с офисными и цеховым размерами. */
 export type ButtonVariant =
-  "primary" | "secondary" | "destructive" | "warning-outline" | "destructive-outline";
+  "primary" | "secondary" | "ghost" | "destructive" | "warning-outline" | "destructive-outline";
 export type ButtonSize = "md" | "compact" | "floor";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** primary — главное действие экрана (одно); secondary — обычное; destructive — необратимое */
+  /** primary — главное действие экрана (одно); secondary — обычное; ghost — без заливки и рамки; destructive — необратимое */
   variant?: ButtonVariant;
   /** md — 40px (по умолчанию); compact — 32px; floor — 64px, для работы в перчатках */
   size?: ButtonSize;
@@ -41,6 +41,12 @@ const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
     background: "var(--err-solid)",
     color: "#FFFFFF",
     border: "1px solid var(--err-solid)",
+  },
+  // Kit «ghost»: no fill and no rule until it is hovered or focused; for a menu entry or a quiet link-like action.
+  ghost: {
+    background: "transparent",
+    color: "var(--fg-1)",
+    border: "1px solid transparent",
   },
   "warning-outline": {
     background: "transparent",

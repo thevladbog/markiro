@@ -328,6 +328,11 @@
   }
 }
 
+.mk-btn--ghost:hover:not(:disabled),
+.mk-btn--ghost:active:not(:disabled) {
+  background: var(--surface-panel) !important;
+}
+
 .mk-btn--warning-outline:hover:not(:disabled),
 .mk-btn--warning-outline:active:not(:disabled) {
   background: var(--warn-bg) !important;

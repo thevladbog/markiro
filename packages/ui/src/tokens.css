@@ -310,6 +310,9 @@
   /* controls */
   --control-sm: 32px; /* компактные таблицы, офис */
   --control-md: 40px; /* минимальная цель, офис */
+  --menu-item-h: 40px; /* office menu entry: the ONE place to flip the entry to the kit's 44 */
+  --sidebar-w: 272px; /* office menu, open */
+  --sidebar-w-collapsed: 76px; /* office menu, icons only */
   --control-floor-primary: 84px; /* kit: the one primary action of a floor screen */
   --control-floor: 64px; /* минимальная цель, цех (перчатка) */
   --control-keypad: 96px; /* клавиша цифрового блока; station compact может снизить до 80px */
