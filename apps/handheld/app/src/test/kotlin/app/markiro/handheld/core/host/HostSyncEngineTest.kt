@@ -14,6 +14,7 @@ import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.HostOutboxEntity
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -334,14 +335,22 @@ class HostSyncEngineTest {
         db.outboxDao().insert(HostFactsFixtures.scanRow(KM_A, boxId = "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"))
         var calls = 0
         val client = okhttp3.Call.Factory { calls++; throw java.io.IOException("the cloud was called") }
+        // The engine launches its legacy-pin pass from its constructor: a scope of its own on the default dispatcher would still be
+        // running when @After closes the database, and the failure would surface as an uncaught exception in whichever test runs next.
+        val engineScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
         val cloud = app.markiro.handheld.core.sync.SyncEngine(
             db = db, meta = app.markiro.handheld.core.storage.MetaStore(db), config = db.deviceConfigDao(),
             transport = app.markiro.handheld.core.sync.SyncTransport(client) { "https://admin.markiro.app" },
-            json = Json, scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Job()),
+            json = Json, scope = engineScope,
         )
-        assertTrue(cloud.drainAll())
-        assertEquals(0, calls)
-        assertEquals(1, db.outboxDao().countNow())
+        try {
+            cloud.legacyPinMaterialised.join()
+            assertTrue(cloud.drainAll())
+            assertEquals(0, calls)
+            assertEquals(1, db.outboxDao().countNow())
+        } finally {
+            engineScope.cancel()
+        }
     }
 }
 

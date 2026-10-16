@@ -13,6 +13,8 @@ import app.markiro.handheld.core.pallets.SsccBlockApplier
 import app.markiro.handheld.core.storage.HandheldDatabase
 import app.markiro.handheld.core.storage.MetaStore
 import app.markiro.handheld.core.storage.initializeRecoveryForTest
+
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -91,25 +93,39 @@ class HostHeartbeatTest {
     @Test
     fun theSyncLoopBeatsOnEveryTurnBeforeItSendsTheQueue() = runBlocking {
         val beats = java.util.concurrent.atomic.AtomicInteger()
+        // The loop never ends on its own: the test stops it before @After closes the database under it.
+        val loopJob = kotlinx.coroutines.SupervisorJob()
+        val loopScope = kotlinx.coroutines.CoroutineScope(loopJob + kotlinx.coroutines.Dispatchers.IO)
         val engine = HostSyncEngine(
             db, { HostApi(routes("/v1/device/facts" to listOf(ok("""{"receipts":[]}""")))) }, HostAckMapper(db), HostCalls { }, db.deviceConfigDao(),
-            heartbeatMs = 10, beat = { beats.incrementAndGet() },
+            heartbeatMs = 10, scope = loopScope, beat = { beats.incrementAndGet() },
         )
-        engine.start()
-        kotlinx.coroutines.withTimeout(5_000) { while (beats.get() < 3) kotlinx.coroutines.delay(10) }
-        assertEquals(true, beats.get() >= 3)
+        try {
+            engine.start()
+            kotlinx.coroutines.withTimeout(5_000) { while (beats.get() < 3) kotlinx.coroutines.delay(10) }
+            assertEquals(true, beats.get() >= 3)
+        } finally {
+            loopJob.cancelAndJoin()
+        }
     }
 
     @Test
     fun aBeatThatFailsInItsOwnWayDoesNotStopTheLoop() = runBlocking {
         val beats = java.util.concurrent.atomic.AtomicInteger()
+        // The loop never ends on its own: the test stops it before @After closes the database under it.
+        val loopJob = kotlinx.coroutines.SupervisorJob()
+        val loopScope = kotlinx.coroutines.CoroutineScope(loopJob + kotlinx.coroutines.Dispatchers.IO)
         val engine = HostSyncEngine(
             db, { HostApi(routes("/v1/device/facts" to listOf(ok("""{"receipts":[]}""")))) }, HostAckMapper(db), HostCalls { }, db.deviceConfigDao(),
-            heartbeatMs = 10, beat = { beats.incrementAndGet(); error("boom") },
+            heartbeatMs = 10, scope = loopScope, beat = { beats.incrementAndGet(); error("boom") },
         )
-        engine.start()
-        kotlinx.coroutines.withTimeout(5_000) { while (beats.get() < 3) kotlinx.coroutines.delay(10) }
-        assertEquals(true, beats.get() >= 3)
+        try {
+            engine.start()
+            kotlinx.coroutines.withTimeout(5_000) { while (beats.get() < 3) kotlinx.coroutines.delay(10) }
+            assertEquals(true, beats.get() >= 3)
+        } finally {
+            loopJob.cancelAndJoin()
+        }
     }
 
     @Test
