@@ -9,10 +9,9 @@ Source of truth for the drawings: `docs/design-briefs/check_with_reprint.pen`, b
 Direction (taken from the three approved station redraws): calm, high-contrast
 industrial touch UI; warm near-black and warm off-white themes; the primary action is
 a large solid button filled with `fg` (inverts per theme); a selected state is a `fg`
-fill plus a check icon or a text state, never colour alone; generous radii; nested
-"double bezel" containers (outer shell `surface` + hairline `line`, inner core
-`panel`) for key content; hairlines instead of shadows; one gradient only (the
-product card). Fonts: IBM Plex Sans and IBM Plex Mono (bundled), icons Phosphor
+fill plus a check icon or a text state, never colour alone; generous radii; the
+"one layer" rule (see §3): no container inside a container for decoration;
+hairlines instead of shadows; one gradient only (the product card). Fonts: IBM Plex Sans and IBM Plex Mono (bundled), icons Phosphor
 light (weight 300). One system for three surfaces: station floor, standalone office,
 SaaS admin.
 
@@ -134,16 +133,23 @@ Only Plex Sans and Plex Mono. All numbers, counters and codes are Plex Mono
 
 - Spacing: 4 8 12 16 20 24 32 40 48 64. Floor: gaps between touch targets at least
   12, card padding 24–32. Office: 8 / 12 / 16.
-- Radii: 12 (chips, small), 16 (office 44 px controls), 20 (floor 64 px controls,
-  bezel core), 22 (floor 64 pill-ish), 24 (cards, floor 84 buttons), 28 (bezel
-  shell, large cards), 30 (large zones), 999 (chips, switch).
-- Elevation: L0 page `bg`; L1 card `surface` + hairline `line`; L2 double bezel —
-  shell `surface` r28 + `line`, 8 px gap, core `panel` r20 + `line`; L3 overlay
-  (modal, drawer, toast) is the only place for a shadow: `0 8 24 rgba(0,0,0,.28)`.
-  The product card is the only gradient (`brand1 → brand2 → brand3`, dark
-  `#4e1d27 → #281015 → #15090c`; light a soft rose tint of the same hue
-  `#F3D5DB → #F8E4E8 → #FCF1F3`, border `brandline`). Text on it uses `fg`
-  (light: 15+:1, dark: 13.1:1).
+- Radii: 12 (chips, small), 16 (office 44 px controls), 18–20 (photo, floor 64 controls),
+  22 (floor 64 pill-ish), 24 (L1 cards, floor 84 buttons), 999 (chips, switch).
+- Levels ("one layer" rule): **L0** page `bg`; **L1** card or panel — `surface` +
+  1 px `line` hairline, radius 20–24, content padding inside the card itself, no outer
+  "shell"; **L2** overlay (modal, drawer, menu, toast) — the only place for a soft shadow
+  `0 8 24 rgba(0,0,0,.28)`. A container inside a container just for decoration is
+  forbidden. Sections inside a card are separated by hairline dividers or spacing. A
+  tinted `panel` fill is allowed only for functional insets: segmented-control track,
+  selected row, keypad key faces, code chips, table header. A state fill (`okbg`,
+  `errbg`...) is the card's own fill, not a second backing.
+- Photo: ONE rounded frame (radius 18–20, neutral fill, 1 px hairline, contain-fit image).
+- Keypad: keys directly on one flat `surface` panel; readout is a plain bordered field,
+  2 px `fg` border only while it is the active field.
+- The product card is the only gradient (`brand1 → brand2 → brand3`, dark
+  `#4e1d27 → #281015 → #15090c`; light a soft rose tint
+  `#F3D5DB → #F8E4E8 → #FCF1F3`, border `brandline`), one layer: the photo sits directly
+  on the card with its own hairline; facts have no frames. Text uses `fg`.
 
 ## 4. Components
 
@@ -155,16 +161,16 @@ Reusable components in the .pen (instances via `ref`, theme-aware through variab
 | --- | --- | --- | --- | --- |
 | Button | primary (`fg`), secondary (`surface`+`line2`), danger (`err`), ghost | floor 84 (r28, 22 px label) and 64 (r22, 20 px); office 44 (r16) and 36 (r12) | default, pressed (scale 0.97, 150 ms), focus (3 px `focus` ring outside), disabled (`panel`, `dis`), loading (spinner, label "Загрузка…") | label is always text; icon optional |
 | Segmented | 2–4 options | floor 64, office 36 | selected = `fg` fill + check + weight 600 | |
-| Switch / switch card | on, off | 56×32 | on shows a check inside the knob | switch card is a bezel with title, description and state word |
+| Switch / switch card | on, off | 56×32 | on shows a check inside the knob | switch card is ONE L1 card; selected = 2 px `fg` border + the switch + the word «Включено» |
 | Text / number / date / select field | label, hint, error, read-only, disabled | office 44 (r16), floor 64 (r22) | focus, error (2 px `err` border, "Ошибка ·" prefix, icon) | border uses `linectl` |
 | Search | pill | 44 | | |
 | Checkbox / radio | | 28 box, 44 row target (office), 64 (floor) | checked = fill + check/dot, disabled, error | |
-| Keypad + readout | 3×4 | key 76–96 high | pressed | bezel shell + core, readout has a `fg` 2 px outline |
+| Keypad + readout | 3×4 | key 76–96 high | pressed | keys (`panel` faces) on one flat `surface` panel; readout is a plain bordered field, 2 px `fg` only when active |
 | Alert | info, ok, warn, err | width fill | optional action | icon on the first text line; action sits right with a 14 px gap; banner variant for licence/trial |
 | Toast | ok, err, info | 520 | | overlay shadow; errors do not auto-close |
 | Chip / phase tag | 11 phases + 4 category tones | office 22, floor 34, wall 40 | | glyph and tone derive from the phase only (see §6) |
 | Empty state, skeleton | | | | static skeleton (no shimmer under reduced motion) |
-| Confirm dialog, modal, drawer | | modal 560, drawer 520–720 | | overlay shadow; focus trap; Esc |
+| Confirm dialog, modal, drawer | | modal 560, drawer 520–720 | | L2: single surface + shadow; focus trap; Esc |
 | Sidebar | expanded 272, collapsed 76 | item 44 / 52 | active = `fg` fill, inverse text, weight 600 | ONE item style; group labels 11 px caps |
 | Tabs | | | active = bold + single 3 px `accentui` bar; focus = 3 px ring | no text underline anywhere |
 | Breadcrumbs, page header, theme selector | | | | selector: Системная (default) · Светлая · Тёмная, selected carries a check |
@@ -173,7 +179,7 @@ Reusable components in the .pen (instances via `ref`, theme-aware through variab
 | Pagination | page size 10/25/50/100, default 10 | 44 | first/prev/next/last, disabled | "Показано N–M из K" |
 | Filters row | label above, hint below, aligned | 44 | | |
 | Definition list, KPI, history row | | | | "Принято в смене" is the single large counter (Mono 600 96) |
-| Photo square | any aspect | 132 shell | | outer shell + inner core, image `contain` |
+| Photo square | any aspect | 132 | | one rounded frame (r 18–20, hairline), image `contain` |
 
 ## 5. Accessibility rules
 
@@ -206,8 +212,8 @@ violet → teal → magenta → steel in order.
 ## 7. Do / Don't
 
 Do: use `fg` fill for the one primary action per screen; show selected = fill + check;
-use bezel for photo, keypad and readouts; keep numbers in Plex Mono; use variables only.
-Don't: add shadows to cards; use `accent` for text or thin lines on light; colour a
+keep one layer per container; keep numbers in Plex Mono; use variables only.
+Don't: nest a container in a container for decoration (double backing); add shadows to cards; use `accent` for text or thin lines on light; colour a
 tag by taste (derive from phase); underline tab text; put a dpi column in template
 lists; hard-code hex in new components; use more than one large counter per screen.
 
@@ -226,7 +232,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
 ### Changes
 - `--surface-inverse`/`--fg-1` become the primary-button fill (`fg`): the current
   primary is `--ink`; value is the same, the role name changes to `fg`.
-- Radii: `--r-1..3` (4/8/12) → 12/16/20/24/28; office controls `--control-md` 40 → 44,
+- Radii: `--r-1..3` (4/8/12) → 12/16/20/24; office controls `--control-md` 40 → 44,
   `--control-sm` 32 → 36; `--mk-radius-operational: 2px` is dropped.
 - `--control-floor` 64 stays; add `--control-floor-primary` 84.
 - `--fg-3` becomes `muted2`; `--line-strong` keeps its value but is renamed `line2`
@@ -243,9 +249,9 @@ lists; hard-code hex in new components; use more than one large counter per scre
 
 ### New
 - Tokens: `muted2`(alias), `linectl`, `accentui`, `onerr`, `brand1..3`, `brandline`,
-  `r-*`, motion tokens (`press-scale`, `press-ms`, `ease`).
-- Components: double-bezel container, switch card, keypad+readout shell, theme
-  selector, photo square, banner, numbered rail, selected-row marker.
+  `r-card` 24, `r-ctl`, `r-sm`, motion tokens (`press-scale`, `press-ms`, `ease`).
+- Components: switch card (single L1), flat keypad + readout, theme selector, photo
+  square, banner, numbered rail, selected-row marker. No bezel/shell container.
 - Light-theme counterpart of the product-card gradient.
 
 ### Removed
@@ -263,7 +269,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
    `StatusChip`, `Tabs`, `Table`, `Pager`, `Modal/Drawer`, `Toast`): restyle behind the
    same props. Risk: office layout shifts from 40 → 44 px; snapshot churn in admin,
    standalone and saas-admin component tests.
-3. Station: floor tokens, 84 px primary, bezel containers, light theme (the station
+3. Station: floor tokens, 84 px primary, flat L1 containers (remove the photo and keypad shells), light theme (the station
    is dark-only today; light needs the theme switch and kiosk-mode review). Risk:
    the production-browser touch-target contract and no-scroll check at 1280×800 /
    1280×1024; update `tools/production-browser` station specs and README screenshots.
@@ -282,6 +288,23 @@ Windows station is separate from automated checks.
 ## 10. Open design decisions
 
 See the report that accompanied this document: light theme on the station, floor
-title 32, 84 px primary, radii for dense office controls, selected sidebar item = `fg`
+title 32, 84 px primary, flat single-layer containers (confirmed by the owner), radii for dense office controls, selected sidebar item = `fg`
 fill, rail numbering in the office, tinted light product-card gradient, `accentui`,
 `linectl`, reduced-motion press state, and category tone order.
+
+## 11. What we dropped and why
+
+Dropped: the nested "double bezel" (outer `surface` shell + hairline, inner `panel` core,
+8 px gap) and the `r-core` radius that existed only for it.
+Why: the owner does not like the style, and it was decorative — it doubled borders, wasted
+8–14 px per edge on the 1280×800 floor screens and made radii dependent on a padding
+(shell = core + gap). One layer is simpler to build, to theme and to test.
+What replaced it: L0/L1/L2 levels (§3). Photo = one framed square; keypad = keys on one
+flat panel with a bordered readout; product card = one gradient layer; switch card = one
+card with a 2 px `fg` border when on; toasts, dialogs and KPI use the state fill as the
+card's own fill. `panel` tint stays only for functional insets (segmented track,
+selected row, key faces, table header, code chips).
+Legibility checks: keypad keys now sit on `surface`, so they keep a `panel` face and a
+hairline (dark: `panel` #232228 on `surface` #1C1B21 is a quiet step, the hairline carries
+the key boundary); the photo on the brand card keeps its own 1 px `line` border so the
+neutral photo background does not merge with the rose/dark gradient.
