@@ -81,8 +81,6 @@ interface Form {
   product: ShiftProduct;
   requestId: string;
   templateId: string | null;
-  /** The rule chose the template, or only one fits: nothing to choose. */
-  templateFixed: boolean;
   productionDate: string;
   /** «Дата смены»: the working day, today in the organization's zone until the operator moves it. */
   plannedDate: string;
@@ -91,8 +89,6 @@ interface Form {
   /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
   pallets: boolean;
   palletTemplateId: string | null;
-  /** The rule chose the pallet template, or only one fits. */
-  palletTemplateFixed: boolean;
   /** «Режим работы» (plan РЕЖ): «Агрегация» unless the operator chose «Проверка». */
   mode: ShiftMode;
   /** «Печатать дубликат Data Matrix»: only a validation shift prints. */
@@ -249,6 +245,7 @@ export function NewShift({
       const fitting = fittingTemplates(product, ready.templates);
       const suggested = suggestBoxTemplate(product, ready.templates, ready.defaults);
       const [only] = fitting;
+      // The rule's choice is only the preselection: the operator sees every template that fits.
       const fixed = suggested ?? (fitting.length === 1 && only !== undefined ? only.id : null);
       const palletFitting = fittingPalletTemplates(product, ready.palletTemplates);
       const [onlyPallet] = palletFitting;
@@ -266,14 +263,12 @@ export function NewShift({
           product,
           requestId: current.current.newRequestId(),
           templateId: fixed,
-          templateFixed: fixed !== null,
           productionDate: civilToday(ready.timeZone, current.current.now()),
           plannedDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
           pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
           palletTemplateId: palletFixed,
-          palletTemplateFixed: palletFixed !== null,
           mode: "aggregation",
           printDuplicate: false,
           duplicateTemplateId: onlyDuplicate?.id ?? null,
@@ -397,11 +392,11 @@ export function NewShift({
       // The template the rule fixed is refused: the choice is the operator's
       // now, among the templates that fit.
       if (created.reason === "template") {
-        update({ templateId: null, templateFixed: false });
+        update({ templateId: null });
         go("box_template");
       }
       if (created.reason === "pallet_template") {
-        update({ palletTemplateId: null, palletTemplateFixed: false });
+        update({ palletTemplateId: null });
         go("pallet_template");
       }
       if (created.reason === "duplicate_template") {
@@ -820,7 +815,8 @@ export function NewShift({
       : duplicate
         ? form.duplicateTemplateId
         : form.palletTemplateId;
-    const fixed = box ? form.templateFixed : duplicate ? false : form.palletTemplateFixed;
+    // Only one template fits: a plain line. Two or more: the choice, with the rule's preselected.
+    const fixed = fitting.length === 1;
     const chosen = fitting.find((template) => template.id === chosenId) ?? null;
     const frozen = busy !== null || form.created !== null;
     const spec = chosen === null ? null : (specs?.get(chosen.id) ?? null);

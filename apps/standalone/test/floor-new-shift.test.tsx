@@ -1046,7 +1046,7 @@ describe("a new shift on the station", () => {
     next();
     expect(
       screen.getByText(
-        "Для этого товара нет подходящего шаблона этикетки короба. Шаблоны настраивают в офисе.",
+        "Нет шаблонов этикетки короба для этого товара — создайте их в офисе: «Шаблоны».",
       ),
     ).toBeTruthy();
     expect(createButton()).toHaveProperty("disabled", true);
@@ -1533,7 +1533,9 @@ describe("the template, the date and the capacity of a new shift", () => {
     await screen.findByRole("heading", { name: "Сметана 20%" });
     next();
     expect(await screen.findByText("Шаблон этикетки короба: Коробка 58×40")).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
+    // Preselected, and the other one that fits is on offer beside it.
+    const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
+    expect(within(group).getByRole("button", { name: "Короб 100×150" })).toBeTruthy();
   });
 
   it("takes the one template that fits without asking", async () => {
@@ -2159,9 +2161,9 @@ describe("a request to create a shift", () => {
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
     next();
-    // The rule fixed the template: there is nothing to choose, yet.
+    // The rule preselected the template; the others are on offer beside it.
     expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Шаблон этикетки короба" })).toBeTruthy();
     createShift();
     expect(
       await screen.findByText(
@@ -2462,5 +2464,80 @@ describe("a new shift and the site's license (plan ЛЦ-3)", () => {
         "Эта возможность не входит в лицензию площадки: паллеты. Создайте смену без паллет или сообщите администратору.",
       ),
     ).toBeTruthy();
+  });
+});
+
+/** A box template of the copies for any group, stored at 203 dpi (templates are DPI-neutral). */
+function boxTemplate(id: string, name: string, extra: Record<string, unknown> = {}): ChangeItem {
+  return item("label_templates", id, 105, {
+    name,
+    purpose: "box",
+    enabled: true,
+    chzProductGroupCodes: null,
+    stock: true,
+    spec: { widthMm: 75, heightMm: 120, dpi: 203, language: "zpl", elements: [] },
+    ...extra,
+  });
+}
+
+describe("the box template step of a new shift always offers the templates that fit", () => {
+  const SIXTEEN = Array.from({ length: 16 }, (_, index) =>
+    boxTemplate(
+      `00000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+      `Стоковый ${String(index + 1).padStart(2, "0")}`,
+    ),
+  );
+
+  it("lists all 16 enabled templates with the organization's default preselected, never a fixed line only", async () => {
+    const org = CATALOG.find((each) => each.entity === "org_profile");
+    const withDefault = CATALOG.filter(
+      (each) => each.entity !== "label_templates" && each.entity !== "org_profile",
+    );
+    renderNew(
+      await copiesOf([
+        ...withDefault,
+        item("org_profile", "1", 102, {
+          ...(org?.data as Record<string, unknown>),
+          defaultBoxTemplateId: "00000000-0000-4000-8000-000000000105",
+        }),
+        milkWith({ defaultBoxTemplateId: null }),
+        ...SIXTEEN,
+      ]),
+    );
+    await chooseMilk();
+    next();
+    const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
+    expect(within(group).getAllByRole("button")).toHaveLength(16);
+    expect(within(group).getByRole("button", { name: "Стоковый 06" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByText("Шаблон этикетки короба: Стоковый 06")).toBeTruthy();
+    // The operator can pick another one, and the shift is made with it.
+    fireEvent.click(within(group).getByRole("button", { name: "Стоковый 02" }));
+    expect(within(group).getByRole("button", { name: "Стоковый 02" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("shows a plain line, no list, when exactly one template fits", async () => {
+    const only = CATALOG.filter(
+      (each) => each.entity !== "label_templates" || each.id === MILK_TEMPLATE,
+    );
+    renderNew(await copiesOf(only));
+    await chooseMilk();
+    next();
+    expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
+  });
+
+  it("explains an empty set with the office's section named", async () => {
+    const none = CATALOG.filter((each) => each.entity !== "label_templates");
+    renderNew(await copiesOf(none));
+    await chooseMilk();
+    next();
+    expect(
+      screen.getByText("Нет шаблонов этикетки короба для этого товара — создайте их в офисе: «Шаблоны»."),
+    ).toBeTruthy();
+    expect(createButton()).toHaveProperty("disabled", true);
   });
 });
