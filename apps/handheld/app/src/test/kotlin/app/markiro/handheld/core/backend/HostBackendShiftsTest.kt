@@ -177,4 +177,24 @@ class HostBackendShiftsTest {
         assertEquals(emptyList<Long>(), top.revokedFrom)
         assertNull(top.issuerProblem)
     }
+
+    @Test
+    fun theListFirstReadsTheDeviceRecordSoALineAssignedAfterPairingIsFollowed() = runTest {
+        val routes = Routes(
+            mutableMapOf(
+                "/v1/device" to ArrayDeque(listOf(ok("""{"id":"d1","kind":"handheld","name":"ТСД","lineId":"line-9"}"""))),
+                "/v1/device/shifts" to ArrayDeque(listOf(ok(fixture("device-shifts.json")))),
+            ),
+        )
+        val api = HostApi(routes)
+        val pool = SsccPool(db)
+        val supplier = HostBlockSupplier(db, MetaStore(db), api, pool, SsccBlockApplier(pool))
+        val backend = HostBackend(
+            api = { api }, config = db.deviceConfigDao(), db = db, supplier = supplier, calls = HostCalls { },
+            reference = app.markiro.handheld.core.host.HostReferenceSync(db, db.deviceConfigDao(), MetaStore(db), api), operators = db.operatorDao(),
+        )
+        backend.shifts()
+        assertEquals("line-9", db.deviceConfigDao().get()!!.lineId)
+        assertNull("the name of a line the feed has not carried is not guessed", db.deviceConfigDao().get()!!.lineName)
+    }
 }

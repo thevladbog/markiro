@@ -78,7 +78,7 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
     suspend fun shifts(): Result<DeviceShiftsDto> = parse(transport.get("/v1/device/shifts"), DeviceShiftsDto.serializer())
 
     suspend fun enter(shiftId: String): Result<DeviceShiftDto> {
-        val body = buildJsonObject { put("supports", JsonArray(listOf(JsonPrimitive(CAPABILITY)))) }.toString()
+        val body = buildJsonObject { put("supports", JsonArray(ENTER_SUPPORTS.map(::JsonPrimitive))) }.toString()
         return parse(transport.post("/v1/device/shifts/$shiftId/enter", body), DeviceShiftDto.serializer())
     }
 
@@ -144,6 +144,10 @@ class HostApi(private val transport: HostTransport, private val json: Json = Jso
 
     companion object {
         const val CAPABILITY = "handheld-host-v1"
+
+        /** A validation shift without duplicate printing is a plain scan flow of this app; the duplicate (`validation-dm-duplicate-v1`) is not named, so the host refuses that shift with `station_update`. */
+        const val CAPABILITY_VALIDATION = "validation-v1"
+        private val ENTER_SUPPORTS = listOf(CAPABILITY, CAPABILITY_VALIDATION)
         const val KNOWN_BLOCKS_BATCH = 64
 
         /**

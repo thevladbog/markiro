@@ -111,4 +111,13 @@ class HostHeartbeatTest {
         kotlinx.coroutines.withTimeout(5_000) { while (beats.get() < 3) kotlinx.coroutines.delay(10) }
         assertEquals(true, beats.get() >= 3)
     }
+
+    @Test
+    fun aBeatThatReachedTheHostAsksForTheDeviceRecordSoALaterLineAssignmentIsTaken() = runTest {
+        val api = HostApi(routes("/v1/hello" to listOf(hello("e1")), "/v1/device" to listOf(ok("""{"id":"d1","kind":"handheld","name":"ТСД","lineId":"line-7"}"""))))
+        val pool = SsccPool(db)
+        val reference = HostReferenceSync(db, db.deviceConfigDao(), meta, api)
+        HostHeartbeat(db, monitor, { api }, db.deviceConfigDao(), HostBlockSupplier(db, meta, api, pool, SsccBlockApplier(pool)), meta) { reference.refreshDevice() }.beat()
+        assertEquals("line-7", db.deviceConfigDao().get()!!.lineId)
+    }
 }

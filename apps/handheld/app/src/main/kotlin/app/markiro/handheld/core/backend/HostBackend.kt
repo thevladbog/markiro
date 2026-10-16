@@ -59,6 +59,8 @@ class HostBackend(
     }
 
     override suspend fun shifts(): ShiftListResponse {
+        // The office may have assigned (or changed) this device's line since it was paired: the list is of the line the host knows now.
+        reference?.refreshDevice()
         val line = config.get()?.lineName
         return ShiftListResponse(calls.run { api().shifts() }.shifts.map { it.toShiftDto(line) })
     }

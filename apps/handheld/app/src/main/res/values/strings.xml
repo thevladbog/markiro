@@ -499,6 +499,7 @@
     <string name="duplicate_blocked">Сначала разберитесь с дубликатом</string>
     <string name="work_close_duplicates_outstanding">Нерешённых дубликатов: %1$d. Смена закроется, события уйдут на сервер.</string>
     <string name="work_exceptions">Исключения</string>
+    <string name="work_exceptions_host">Исключения недоступны при работе с хостом</string>
     <string name="exceptions_title">Исключения</string>
     <string name="exceptions_disassemble">Расформировать короб</string>
     <string name="exceptions_clear">Очистить короб</string>
@@ -821,6 +822,11 @@
     <string name="host_link_offline_banner">Нет связи с хостом — работа продолжается</string>
     <string name="host_link_restoring_banner">Хост восстанавливается из копии — работа продолжается</string>
     <string name="host_link_clock_skew_banner">Часы устройства расходятся с хостом — проверьте время на ТСД</string>
+    <string name="host_link_certificate">Сертификат хоста изменился</string>
+    <string name="host_link_certificate_banner">Сертификат хоста изменился — нажмите, чтобы привязать ТСД заново</string>
+    <string name="host_link_repair_title">Привязать заново?</string>
+    <string name="host_link_repair_text">Хост предъявляет другой сертификат, и ТСД ему не верит. Привязка закроется, накопленные данные останутся. Понадобится новый код привязки из офиса; отпечаток сверьте с экраном офиса.</string>
+    <string name="host_link_repair">Привязать заново</string>
     <string name="host_queue_banner">Очередь хоста: ждут %1$d, отклонено %2$d</string>
     <string name="host_queue_title">Очередь хоста</string>
     <string name="host_queue_empty">Очередь пуста</string>

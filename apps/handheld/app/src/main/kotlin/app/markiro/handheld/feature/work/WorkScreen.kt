@@ -176,8 +176,11 @@ fun WorkScreen(state: WorkUi, cb: WorkCallbacks) {
                             },
                         )
                     }
+                    // The host does not hear of undo, clear or disassembly yet; offering them would leave this device and the host holding different
+                    // boxes. The item stays visible and says why it does nothing.
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.work_exceptions)) },
+                        text = { Text(stringResource(if (state.hostMode) R.string.work_exceptions_host else R.string.work_exceptions)) },
+                        enabled = !state.hostMode,
                         onClick = {
                             menu = false
                             cb.onExceptions()

@@ -29,8 +29,14 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -61,7 +67,20 @@ fun HubScreen(
     onHostQueue: () -> Unit = {},
     onContinueShift: (String) -> Unit = { onTile(HubTile.SHIFT) },
     onDismissDialog: () -> Unit = {},
+    /** The host's certificate changed: pair this device again (seals the credential; the pairing asks for the new fingerprint). */
+    onRepairHost: () -> Unit = {},
 ) {
+    var confirmRepair by remember { mutableStateOf(false) }
+    if (confirmRepair) {
+        AlertDialog(
+            onDismissRequest = { confirmRepair = false },
+            title = { Text(stringResource(R.string.host_link_repair_title), color = MarkiroTheme.colors.fg1) },
+            text = { Text(stringResource(R.string.host_link_repair_text), color = MarkiroTheme.colors.fg2) },
+            confirmButton = { TextButton(onClick = { confirmRepair = false; onRepairHost() }) { Text(stringResource(R.string.host_link_repair)) } },
+            dismissButton = { TextButton(onClick = { confirmRepair = false }) { Text(stringResource(R.string.common_cancel)) } },
+            containerColor = MarkiroTheme.colors.surfacePanel,
+        )
+    }
     val c = MarkiroTheme.colors
     val t = MarkiroTheme.type
     // «Продолжить» goes through the list's own entry and can be refused the
@@ -85,6 +104,7 @@ fun HubScreen(
                         HostLinkStatus.Offline -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_offline), Tone.Warn)
                         HostLinkStatus.Restoring -> StatusItem(Icons.Outlined.Sync, stringResource(R.string.host_link_restoring), Tone.Warn)
                         HostLinkStatus.ClockSkew -> StatusItem(Icons.Outlined.Schedule, stringResource(R.string.host_link_clock_skew), Tone.Warn)
+                        HostLinkStatus.CertificateChanged -> StatusItem(Icons.Outlined.WifiOff, stringResource(R.string.host_link_certificate), Tone.Err)
                     }
                 } else if (state.reachable) {
                     StatusItem(Icons.Outlined.Wifi, stringResource(R.string.hub_network))
@@ -105,6 +125,10 @@ fun HubScreen(
                 HostLinkStatus.Offline -> Banner(stringResource(R.string.host_link_offline_banner), Tone.Warn, Icons.Outlined.WifiOff)
                 HostLinkStatus.Restoring -> Banner(stringResource(R.string.host_link_restoring_banner), Tone.Warn, Icons.Outlined.Sync)
                 HostLinkStatus.ClockSkew -> Banner(stringResource(R.string.host_link_clock_skew_banner), Tone.Warn, Icons.Outlined.Schedule)
+                // The one state with no way out by waiting: the banner is the way into pairing again.
+                HostLinkStatus.CertificateChanged -> Box(Modifier.fillMaxWidth().clickable(onClick = { confirmRepair = true })) {
+                    Banner(stringResource(R.string.host_link_certificate_banner), Tone.Err, Icons.Outlined.WifiOff)
+                }
             }
         } else if (!state.reachable) {
             val text = if (state.queue > 0) {

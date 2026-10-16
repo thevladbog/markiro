@@ -103,8 +103,15 @@ object HostModule {
 
     @Provides
     @Singleton
-    fun hostHeartbeat(db: HandheldDatabase, monitor: HostLinkMonitor, api: HostApi, config: DeviceConfigDao, blocks: HostBlockSupplier, meta: MetaStore): HostHeartbeat =
-        HostHeartbeat(db, monitor, { api }, config, blocks, meta)
+    fun hostHeartbeat(
+        db: HandheldDatabase,
+        monitor: HostLinkMonitor,
+        api: HostApi,
+        config: DeviceConfigDao,
+        blocks: HostBlockSupplier,
+        meta: MetaStore,
+        reference: HostReferenceSync,
+    ): HostHeartbeat = HostHeartbeat(db, monitor, { api }, config, blocks, meta) { reference.refreshDevice() }
 
     @Provides
     @Singleton

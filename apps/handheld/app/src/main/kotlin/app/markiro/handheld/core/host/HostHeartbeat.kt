@@ -20,6 +20,8 @@ class HostHeartbeat(
     private val config: DeviceConfigDao,
     private val blocks: HostBlockSupplier,
     private val meta: MetaStore,
+    /** What a beat that reached the host also does: reads the device's own record again (its line may have been assigned or changed). */
+    private val device: suspend () -> Unit = {},
 ) {
     suspend fun beat() {
         if (config.get()?.backend != "host") return
@@ -27,6 +29,8 @@ class HostHeartbeat(
             db.recovery.work {
                 monitor.heartbeat(api(), config) { blocks.registerKnown() }.onSuccess { observation ->
                     if (observation.restored) meta.remove(MetaStore.BOX_REGISTRY_UNTIL)
+                    // A failure of this read is not the link's: the shift list asks again.
+                    runCatching { device() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                 }
             }
         } catch (_: RecoveryBlocked) {

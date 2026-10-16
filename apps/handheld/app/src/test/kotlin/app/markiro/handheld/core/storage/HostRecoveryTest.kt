@@ -87,4 +87,36 @@ class HostRecoveryTest {
         assertEquals("k2", credential.read())
         assertNull("the full feed is read again after a re-pairing", db.deviceConfigDao().get()!!.hostRev)
     }
+
+    @Test
+    fun aRePairingThroughAnotherAddressOfTheSameHostAndCertificateKeepsTheOwnerAndMovesTheOrigin() = runTest {
+        val recovery = DeviceRecovery(db, credential).also { it.initialize() }
+        recovery.restore(response(), origin, HostPairing(pin, "h1", listOf("192.168.1.10")))
+        recovery.reject(recovery.token())
+        val other = "https://10.0.0.7:45710"
+        recovery.restore(response("k2"), other, HostPairing(pin, "h1", listOf("10.0.0.7")))
+        assertEquals(DeviceOwner(other, "h1", "d1", "handheld", pin), recovery.current().owner)
+        assertEquals(other, db.deviceConfigDao().get()!!.serverUrl)
+        assertEquals("k2", credential.read())
+        assertEquals(RecoveryPhase.ACTIVE, recovery.current().phase)
+    }
+
+    @Test
+    fun anotherHostOrAnotherDeviceIsNeverAcceptedAsAMovedOrigin() = runTest {
+        val recovery = DeviceRecovery(db, credential).also { it.initialize() }
+        recovery.restore(response(), origin, HostPairing(pin, "h1", listOf("192.168.1.10")))
+        recovery.reject(recovery.token())
+        val other = "https://10.0.0.7:45710"
+        assertThrows(RecoveryMismatch::class.java) {
+            kotlinx.coroutines.runBlocking {
+                recovery.restore(
+                    PairResponse(DeviceDto("d1", "ТСД 1", "handheld", "h2", "", null), CredentialDto("k2", other), emptyList()),
+                    other, HostPairing(pin, "h2", listOf("10.0.0.7")),
+                )
+            }
+        }
+        assertThrows(RecoveryMismatch::class.java) {
+            kotlinx.coroutines.runBlocking { recovery.restore(response("k2"), other, HostPairing("cd".repeat(32), "h1", listOf("10.0.0.7"))) }
+        }
+    }
 }

@@ -483,6 +483,7 @@
     <string name="duplicate_blocked">Deal with the duplicate first</string>
     <string name="work_close_duplicates_outstanding">%1$d duplicate(s) unresolved. The shift will close and the events still sync.</string>
     <string name="work_exceptions">Exceptions</string>
+    <string name="work_exceptions_host">Exceptions are not available with a host</string>
     <string name="exceptions_title">Exceptions</string>
     <string name="exceptions_disassemble">Disassemble box</string>
     <string name="exceptions_clear">Clear box</string>
@@ -791,6 +792,11 @@
     <string name="host_link_offline_banner">No link to the host — work continues</string>
     <string name="host_link_restoring_banner">The host is being restored from a backup — work continues</string>
     <string name="host_link_clock_skew_banner">The device clock differs from the host — check the time on the handheld</string>
+    <string name="host_link_certificate">Host certificate changed</string>
+    <string name="host_link_certificate_banner">The host certificate changed — tap to pair this handheld again</string>
+    <string name="host_link_repair_title">Pair again?</string>
+    <string name="host_link_repair_text">The host presents another certificate and this handheld does not trust it. The pairing will close; the data already collected stays. You will need a new pairing code from the office; compare the fingerprint with the office screen.</string>
+    <string name="host_link_repair">Pair again</string>
     <string name="host_queue_banner">Host queue: %1$d waiting, %2$d refused</string>
     <string name="host_queue_title">Host queue</string>
     <string name="host_queue_empty">The queue is empty</string>

@@ -108,4 +108,24 @@ class ShiftListViewModelTest {
         server.enqueue(MockResponse().setBody("""{"items":[]}"""))
         assertFalse(vm().state.first { !it.loading }.refreshFailed)
     }
+
+    @Test
+    fun aHostDeviceEntersAnUncachedShiftWhenTheHostAnswersEvenThoughTheCloudTrackerNeverMoved() = runTest {
+        db.deviceConfigDao().get()!!.let { db.deviceConfigDao().upsert(it.copy(backend = "host")) }
+        server.enqueue(MockResponse().setBody("""{"items":[]}"""))
+        val reachableHost = main.track(hostVm(hostReachable = true))
+        reachableHost.state.first { !it.loading && it.reachable }
+        val unreachableHost = main.track(hostVm(hostReachable = false))
+        assertFalse(unreachableHost.state.first { !it.loading }.reachable)
+    }
+
+    private fun hostVm(hostReachable: Boolean) = ShiftListViewModel(
+        ShiftRepository(api, db, NetworkModule.json(), SsccPool(db)) { 1_757_500_000_000L },
+        db.deviceConfigDao(),
+        db.recovery,
+        ReachabilityTracker { 1_757_500_000_000L },
+        app.markiro.handheld.core.scan.ScanRouterAdapter(flowOf()),
+        flowOf(Unit),
+        flowOf(hostReachable),
+    )
 }
