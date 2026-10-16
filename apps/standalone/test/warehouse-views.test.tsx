@@ -428,7 +428,11 @@ describe("the start of a session", () => {
 
   function setup(
     reason: "damaged" | null,
-    assignments = { box: "zebra", pallet: "hp-a4", duplicate: "tsc" },
+    assignments: { box: string | null; pallet: string | null; duplicate: string | null } = {
+      box: "zebra",
+      pallet: "hp-a4",
+      duplicate: "tsc",
+    },
   ) {
     const calls = {
       onPick: vi.fn(),

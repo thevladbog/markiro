@@ -2400,10 +2400,10 @@ describe("the operator on the floor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Повторная печать этикеток" }));
     await screen.findByRole("heading", { name: "Повторная печать этикеток" });
     await pause();
-    fireEvent.click(await screen.findByRole("button", { name: "Повреждена" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Повреждена" }));
     await pause();
     fireEvent.click(await screen.findByRole("button", { name: "Начать перепечатку" }));
-    await screen.findByText("Отсканируйте код единицы, короба или паллеты.");
+    await screen.findByText("Отсканируйте код");
     await pause();
     scan("046006820000015000");
     await waitFor(() => expect(host.warehouseLookup).toHaveBeenCalledTimes(1));
