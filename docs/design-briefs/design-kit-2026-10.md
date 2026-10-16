@@ -24,8 +24,8 @@ err errbg` are unchanged). Contrast column: light / dark.
 | Token | Role | Dark | Light | Contrast |
 | --- | --- | --- | --- | --- |
 | `bg` | Фон экрана/страницы | `#131216` | `#FAFAF8` | — |
-| `surface` | Карточка; внешняя оболочка bezel | `#1C1B21` | `#FFFFFF` | — |
-| `panel` | Ядро bezel, шапки таблиц, подложки | `#232228` | `#F0EFEA` | — |
+| `surface` | Карточка L1 | `#1C1B21` | `#FFFFFF` | — |
+| `panel` | Функциональные вставки: трек сегмента, выбранная строка, клавиши, шапка таблицы | `#232228` | `#F0EFEA` | — |
 | `fg` | Основной текст; заливка primary-кнопки и выбранного | `#FAFAF8` | `#17161A` | 18.01 / 16.36 on `surface` |
 | `muted` | Вторичный текст | `#B6B3AB` | `#45433E` | 9.88 / 8.16 on `surface` |
 | `muted2` * | Подписи, подсказки, плейсхолдеры | `#8E8B83` | `#6B6862` | 5.55 / 5.02 on `surface` |
@@ -59,7 +59,7 @@ err errbg` are unchanged). Contrast column: light / dark.
 | `brand2` * | Градиент 2 (dark #281015) | `#281015` | `#F8E4E8` | — |
 | `brand3` * | Градиент 3 (dark #15090C) | `#15090C` | `#FCF1F3` | — |
 | `brandline` * | NEW: рамка карточки товара | `#5A2A34` | `#E3B8C0` | — |
-Number and string variables added: `r-card` 28, `r-ctl` 20, `r-sm` 12, `r-core` 20,
+Number and string variables added: `r-card` (now 24), `r-ctl` 20, `r-sm` 12 (`r-core` 20 stays in the .pen but is unused after the one-layer revision and is not carried into code),
 `font-ui` IBM Plex Sans, `font-mono` IBM Plex Mono.
 
 ### 1.1 WCAG contrast (computed in code, WCAG 2.x relative luminance)
@@ -129,7 +129,7 @@ Only Plex Sans and Plex Mono. All numbers, counters and codes are Plex Mono
 | Caption | not used below 18 | Caption 500 12/16 |
 | Code / meta | Mono 400 18/26 | Mono 400 13/18, 12/16 |
 
-## 3. Spacing, radii, elevation, bezel
+## 3. Spacing, radii, levels (one layer)
 
 - Spacing: 4 8 12 16 20 24 32 40 48 64. Floor: gaps between touch targets at least
   12, card padding 24–32. Office: 8 / 12 / 16.
