@@ -4,11 +4,9 @@ import type {
   EntitlementSnapshotV1,
 } from "@markiro/platform-contracts";
 import {
-  exportPlanRights,
   exportStandaloneRights,
   licenseValidity,
   MAX_LICENSE_TERM_MS,
-  offlineValidity,
   rightsReduce,
 } from "../src/modules/standalone-licenses/standalone-license-rights";
 
@@ -221,55 +219,5 @@ describe("licenseValidity (spec §6.2, plan Д5)", () => {
       boundaryAt: step(4),
     });
     expect(snapshotAt).toHaveBeenCalledTimes(3);
-  });
-});
-
-describe("offline terms (owner decision 2026-10-13)", () => {
-  const plan = {
-    maxLines: 2,
-    maxStations: null,
-    maxKiosks: 0,
-    maxCabinetUsers: 5,
-    labelEditorEnabled: true,
-    publicApiEnabled: false,
-    palletsEnabled: true,
-    chzIntegrationEnabled: null,
-    inventoryEnabled: false,
-    commerceMlEnabled: true,
-    handheldEnabled: null,
-    customLogoEnabled: null,
-  };
-
-  it("takes the plan version's quotas and features, exporting an unmapped feature as false and naming it", () => {
-    expect(exportPlanRights(plan)).toEqual({
-      rights: {
-        quotas: { lines: 2, stations: null, kiosks: 0, cabinetUsers: 5 },
-        features: {
-          labelEditor: true,
-          publicApi: false,
-          pallets: true,
-          chzIntegration: false,
-          inventory: false,
-          commerceMl: true,
-          handheld: false,
-          customLogo: false,
-        },
-      },
-      unmapped: ["chzIntegration", "handheld", "customLogo"],
-    });
-  });
-
-  it("ends exactly the term after the issuance, never later than a year and never open-ended", () => {
-    expect(offlineValidity(AT, 30)).toEqual({
-      validUntil: new Date(AT.getTime() + 30 * DAY),
-      reason: "offline_term",
-      boundaryAt: null,
-    });
-    expect(offlineValidity(AT, 365).validUntil).toEqual(
-      new Date(AT.getTime() + MAX_LICENSE_TERM_MS),
-    );
-    for (const days of [0, 366, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(() => offlineValidity(AT, days)).toThrow(RangeError);
-    }
   });
 });

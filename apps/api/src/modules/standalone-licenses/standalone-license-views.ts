@@ -48,6 +48,7 @@ export function issuanceSummary(row: StandaloneIssuanceRow): StandaloneIssuanceS
     issuedAt: row.issuedAt.toISOString(),
     issuedByPlatformUserId: row.issuedByPlatformUserId,
     replaces: row.replacesId,
+    sourceAssignments: row.sourceAssignments ?? null,
     customer: { name: payload.customer.name, inn: payload.customer.inn },
     rights: { quotas: payload.quotas, features: payload.features },
   });

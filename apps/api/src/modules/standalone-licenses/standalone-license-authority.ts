@@ -68,10 +68,12 @@ export async function requireStandaloneLicenseActor(
 
 /**
  * Owner decision 2026-10-13: a tenant without a cabinet takes offline licenses
- * only; a tenant with a cabinet takes the subscription-derived file.
+ * only; a tenant with a cabinet takes the subscription-derived file. Owner
+ * decision 2026-10-16: the offline file is derived from the tenant's direct
+ * plan and add-on assignments, through the same rights snapshot.
  */
 export function issuanceSourceFor(cabinetAccess: "enabled" | "none"): StandaloneIssuanceSource {
-  return cabinetAccess === "none" ? "offline" : "subscription";
+  return cabinetAccess === "none" ? "offline_assignments" : "subscription";
 }
 
 export async function readTenantInns(tx: SubscriptionTransaction, tenantId: string) {
