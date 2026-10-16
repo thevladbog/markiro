@@ -378,3 +378,77 @@ Deviations and notes for the next steps:
   (580). The `tools/production-browser` station specs target the cloud station and do not load the
   standalone floor; they were not run. Not verified: Windows/WebView2 (`:has()`, `color-mix`,
   `content: "✓" / ""`), the Tauri CSP with `theme-init.js`, a real kiosk-mode session, hardware.
+
+## 13. Накатка кита · шаг B (станция: «Новая смена», параметры)
+
+Done on branch `claude/kit-newshift` (from `claude/integration`, nothing pushed). Only the details
+step of the new shift (`NewShift.tsx`); the template-choice step and the pallet A4 sheet step keep their
+flow and take the kit through the classes of step A. The work screen, the status bar and the other
+floor screens are not touched. `floor-kit.css` is not edited: the new controls live in
+`apps/standalone/src/floor/kit/` (components and `floor-controls.css`, scoped like the rest of the kit).
+
+What was done:
+
+- One layer (§3): the photo is ONE frame (`PhotoSquare`, radius 20, hairline, neutral fill
+  `--floor-paper`) sitting directly on the product card, which is the kit's one gradient
+  (`brand1 → brand3`, `brandline`; light = rose tint). The keypad is keys on the screen's one flat
+  `surface` panel. No shell, no inner shell.
+- The owner's photo bug: the old rule `.new-shift__product-photo .product-photo { max-height: 100% }` sat
+  in a `display: grid` box with an automatic track, so the track grew to the picture's natural height and
+  `overflow: hidden` cut the rest. Now the core is `position: relative` of a fixed size
+  (`--floor-photo`: 208 px, 104 px on a short panel), the `<img>` is `position: absolute; inset: 0;
+object-fit: contain; max-height: none`, and takes no part in the layout. Measured in Chromium with
+  300x800 and 900x300 pictures: the image box equals the square (minus the 1 px frame) in both.
+- Components (`src/floor/kit/`): `PhotoSquare` / `ProductPhotoSquare`; `ModeSegment` (a labelled
+  `radiogroup`, two `radio` options at 64 px, check on the selected one, a polite one-line hint, roving
+  tabindex, arrows); `SwitchCard` (one L1 card that is the `switch`: 2 px `fg` border when on, a check in
+  the knob and the words «Включено / Выключено»); `NumericKeypad` (3x4, keys 72 px and up, buttons only,
+  a tap does not take the focus); `NumericReadout` (a bordered field that is a button, not an input; 2 px
+  `fg` border only while active; a thin-space grouping drawn by boxes, the text stays bare digits);
+  `numeric-entry.ts` (`appendDigit`, `dropDigit`, `groupDigits`, `useKeyboardDigits`).
+- NewShift: two zones in one grid (3fr / 2fr). Left: product card (name 28/34, two lines, GTIN, facts
+  «В коробе: N шт.» and «Паллета: N коробов», no «Объём»), «Режим работы» with the owner's hints, ONE
+  switch card (the duplicate in «Проверка»; «С паллетами» in «Агрегация» when the product has pallets;
+  «Шаблон: …» when the duplicate is on and one template fits), the two dates. Right: the readout(s) and
+  the keypad; «Агрегация» shows «В коробе, шт.» and «План, шт.» as two readouts and tapping one chooses
+  the field the keypad edits. The keypad edits the form's own digit strings (`plannedQty`,
+  `boxCapacity`); `plannedQtyRule`, `shiftBoxCapacityRule` and their messages are unchanged and judge at
+  «Далее». Footer 84 px (primary `floor-primary`, twice as wide), on every step of the new shift.
+- Keys of a physical keyboard (digits, Backspace, Delete = «Очистить») are heard on the keypad's area,
+  not on the window. A wedge scanner is a keyboard too: a run of digits faster than 40 ms apart is a
+  scan, so its digits are taken back, the rest dropped, and its closing Enter does not press the focused
+  key. The NewShift screen starts no scan listener on this step (as before).
+- No scroll at 1280x1024 and 1280x800 (dark and light). 800: screen padding and gap 12 px, readouts
+  64 px each in aggregation, the product facts and the hint lines give way (hints also while a message is
+  shown).
+
+Deviations from the approved design and the kit, and why:
+
+- The switch is 96x52 (84x44 on the short panel) as drawn in the approved frames, not the kit §4 56x32:
+  the whole card is the target either way.
+- Key digits are Plex Mono 500 (kit §2: numbers are mono); the frames draw them in Plex Sans.
+- The segment is 64 px (kit §4), not the mock's 68.
+- The readout is a `button` named by its label, value and unit (not a `spinbutton`), so tapping chooses the
+  field. The mock's «Enter on the readout = Далее» is not implemented (Enter presses the button).
+- The slot under the readouts shows ONE message: the active field's error (the keypad moves to the first
+  wrong field on «Далее», the capacity first), else the hint. The other readout is marked
+  `aria-invalid` and says its own message when tapped. Two simultaneous messages do not fit a fixed
+  slot. The slot has an icon and the word «Ошибка ·» (kit §5).
+- The keypad cannot type «0» as a first digit, so «0» and letters can no longer reach the rules from the
+  screen; tests that fed «0»/«много» now feed an eight-digit plan (99 999 999) or a six-digit capacity.
+- «Далее» with the duplicate on still goes to the duplicate template step even when one template fits
+  (the line «Шаблон: …» is shown too): the check of the label is chosen there.
+- The dates are still the `DatePicker` (calendar kept); only its trigger is restyled (`linectl` border,
+  radius 22). The calendar tile of the frame is not drawn.
+- The kit's four controls are native `<button>`s: ESLint's `no-restricted-syntax` is disabled in those four
+  files with a reason, and `floor-controls.test.ts` allows raw buttons in `src/floor/kit` only (it pins
+  the exact four files).
+- The needs-link hint moved into the polite message region; the message sits under the left zone and the
+  keypad panel spans its row, so a message never shortens the keys.
+
+Verified: tsc, eslint, prettier; Vitest (new `floor-kit-controls` 25, `floor-new-shift-css` 12, 11 new
+NewShift cases, 23 existing NewShift cases updated); the full `vitest run` of `apps/standalone`; Chromium
+screenshots and measurements (below, `/tmp/claude/shots/kit-b/`). Not verified: WebView2 on Windows
+(`:has()`, `color-mix`, `content: "✓" / ""` from step A), a touch screen or a real scanner, the real
+status bar height (the harness stands in an 81 px bar), the `tools/production-browser` station specs
+(they target the cloud station).
