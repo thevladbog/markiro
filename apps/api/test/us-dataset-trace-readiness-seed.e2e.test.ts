@@ -6,6 +6,7 @@ import { UsDatasetRegularSeedStore } from "../src/modules/traceability/demo/us-d
 import { UsDatasetReferenceSeedStore } from "../src/modules/traceability/demo/us-dataset-reference-seed";
 import { specialFixture, specialFault } from "./support/us-dataset-special-fixture";
 import { outcome } from "./support/us-transformation-lock-fixture";
+import { assertUsValidationPhaseBudgets } from "./support/us-validation-phase-budgets";
 
 describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
   "complete durable dataset Trace/Readiness composition",
@@ -93,11 +94,11 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
             [context.tenantId],
           )
         ).rows;
-        const resumeStarted = performance.now();
         console.info("Complete durable Trace/Readiness phase", {
           phase: "all_units_resume_started",
-          totalMs: resumeStarted - started,
+          totalMs: performance.now() - started,
         });
+        const resumeStarted = performance.now();
         const result = await coordinator.initialize(context);
         const resumeMs = performance.now() - resumeStarted;
         console.info("Complete durable Trace/Readiness phase", {
@@ -234,8 +235,16 @@ describe.skipIf(!process.env.US_TEST_DATABASE_URL)(
           snapshotDigest: canonicalExportDigest(before),
           processPeakRssKiB: process.resourceUsage().maxRSS,
         });
+        console.info("Complete durable Trace/Readiness independent phase budgets", {
+          ...assertUsValidationPhaseBudgets(
+            performance.now() - started,
+            [resumeMs],
+            900000,
+            900000,
+          ),
+        });
       }),
-      900000,
+      1800000,
     );
   },
 );

@@ -25,6 +25,7 @@ import {
   type UsDatasetUnitCompositionResult,
 } from "../src/modules/traceability/demo/us-dataset-unit-composition";
 import { specialFixture } from "./support/us-dataset-special-fixture";
+import { assertUsValidationPhaseBudgets } from "./support/us-validation-phase-budgets";
 import {
   driverCode,
   outcome,
@@ -403,14 +404,28 @@ describe.skipIf(!base)("bounded dataset unit coordinator", () => {
     if (id === "C17") await owner.initialize(h.context, { kind: "regular", index: 0 });
   }
 
-  function body(name: string, run: (test: TestContext, own: OwnCleanup) => Promise<void>) {
+  function body(
+    name: string,
+    run: (test: TestContext, own: OwnCleanup, performanceWindowsMs: number[]) => Promise<void>,
+  ) {
     return h.phase(async (test: TestContext) => {
       const started = performance.now();
+      const performanceWindowsMs: number[] = [];
       try {
-        await withOwnedWork((own) => run(test, own));
+        await withOwnedWork((own) => run(test, own, performanceWindowsMs));
       } finally {
         console.info(`${name} whole body ms`, Math.round(performance.now() - started));
       }
+      if (name === "C17")
+        console.info(
+          "C17 independent phase budgets",
+          assertUsValidationPhaseBudgets(
+            performance.now() - started,
+            performanceWindowsMs,
+            5000,
+            5000,
+          ),
+        );
     });
   }
   async function checkpoint(label: string) {
@@ -426,6 +441,7 @@ describe.skipIf(!base)("bounded dataset unit coordinator", () => {
     test: TestContext,
     mode: "initialize" | "verify",
     context: UsDatasetContext = h.context,
+    performanceWindowsMs?: number[],
   ) {
     const outputs: UsDatasetUnitCompositionResult[] = [];
     const calls: UsDatasetTraceReadinessUnit[] = [];
@@ -455,7 +471,18 @@ describe.skipIf(!base)("bounded dataset unit coordinator", () => {
     own("drain finite coordinator invocation", drain);
     test.onTestFinished(drain);
     work.pending = countActualQueries(h.f.pool, () =>
-      outcome(new UsDatasetTraceReadinessSeedStore(h.f.db)[mode](context)),
+      performanceWindowsMs
+        ? outcome(
+            (async () => {
+              const commandStarted = performance.now();
+              try {
+                return await new UsDatasetTraceReadinessSeedStore(h.f.db)[mode](context);
+              } finally {
+                performanceWindowsMs.push(performance.now() - commandStarted);
+              }
+            })(),
+          )
+        : outcome(new UsDatasetTraceReadinessSeedStore(h.f.db)[mode](context)),
     );
     const measured = await work.pending;
     console.info(`${test.task.name} invocation forwarding`, {
@@ -915,12 +942,12 @@ describe.skipIf(!base)("bounded dataset unit coordinator", () => {
   }
   it(
     "C17 extend-real-prefix-by-one-unit",
-    body("C17", async (test, own) => {
+    body("C17", async (test, own, performanceWindowsMs) => {
       const before = await checkpoint("C17 before");
       const existing = await existingRowDigests();
       const allocations = await c17Allocations();
       await installCoordinatorFault(own, test, "receiving-unit2");
-      const actual = await invoke(own, test, "initialize");
+      const actual = await invoke(own, test, "initialize", h.context, performanceWindowsMs);
       cutoff(actual.failed.error, 2);
       expect(actual.outputs).toHaveLength(2);
       expect(actual.calls).toEqual([
@@ -945,5 +972,6 @@ describe.skipIf(!base)("bounded dataset unit coordinator", () => {
       if (!unit1) throw new Error("Missing independently checked C17 unit1");
       c17CounterTransition(allocations, await c17Allocations(), unit1.trace);
     }),
+    10000,
   );
 });

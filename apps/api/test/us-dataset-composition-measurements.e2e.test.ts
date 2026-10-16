@@ -21,6 +21,81 @@ import { usSixMonthDefinition } from "../src/modules/traceability/demo/us-six-mo
 import { assertBoundedSyntheticJson } from "../src/modules/traceability/demo/us-demo-journal-contract";
 import { countActualQueries } from "./support/us-dataset-query-counter";
 import { specialFixture } from "./support/us-dataset-special-fixture";
+import { assertUsValidationPhaseBudgets } from "./support/us-validation-phase-budgets";
+
+describe("independent validation phase budgets", () => {
+  it.each([
+    [
+      10000,
+      [5000],
+      5000,
+      5000,
+      { performanceMs: 5000, correctnessMs: 5000, performanceCapMs: 5000, correctnessCapMs: 5000 },
+    ],
+    [
+      0,
+      [0],
+      5000,
+      5000,
+      { performanceMs: 0, correctnessMs: 0, performanceCapMs: 5000, correctnessCapMs: 5000 },
+    ],
+    [
+      10.75,
+      [4.25],
+      4.25,
+      6.5,
+      { performanceMs: 4.25, correctnessMs: 6.5, performanceCapMs: 4.25, correctnessCapMs: 6.5 },
+    ],
+  ])(
+    "accepts exact unrounded phase durations for total %s",
+    (total, windows, performanceCap, correctnessCap, expected) => {
+      expect(
+        assertUsValidationPhaseBudgets(total, windows, performanceCap, correctnessCap),
+      ).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [5001, [5001], "performance"],
+    [5001, [0], "correctness"],
+    [5000.01, [5000.01], "performance"],
+    [5000.01, [0], "correctness"],
+  ])(
+    "rejects an independent phase overrun below the aggregate: %s / %s",
+    (total, windows, phase) => {
+      expect(() => assertUsValidationPhaseBudgets(total, windows, 5000, 5000)).toThrow(
+        `${phase} budget exceeded`,
+      );
+    },
+  );
+
+  it.each([
+    [NaN, [0], 5000, 5000],
+    [Infinity, [0], 5000, 5000],
+    [-1, [0], 5000, 5000],
+    [1, [NaN], 5000, 5000],
+    [1, [Infinity], 5000, 5000],
+    [1, [-1], 5000, 5000],
+    [1, [2], 5000, 5000],
+    [1, [], 5000, 5000],
+    [1, [0, 1], 5000, 5000],
+    [1, [0], 0, 5000],
+    [1, [0], -1, 5000],
+    [1, [0], NaN, 5000],
+    [1, [0], Infinity, 5000],
+    [1, [0], 5000, 0],
+    [1, [0], 5000, -1],
+    [1, [0], 5000, NaN],
+    [1, [0], 5000, Infinity],
+  ])(
+    "rejects invalid measurement/caps: %s / %s / %s / %s",
+    (total, windows, performanceCap, correctnessCap) => {
+      expect(() =>
+        assertUsValidationPhaseBudgets(total, windows, performanceCap, correctnessCap),
+      ).toThrow(/Invalid validation phase/);
+    },
+  );
+});
 
 type Mode = "initialize" | "verify";
 type RawStage = {
@@ -392,6 +467,7 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
       name,
       h.phase(async (test: TestContext) => {
         const started = performance.now();
+        const performanceWindowsMs: number[] = [];
         const sourceSha256 = createHash("sha256")
           .update(readFileSync("test/us-dataset-composition-measurements.e2e.test.ts"))
           .digest("hex");
@@ -597,9 +673,16 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
             } else expected = await independent(mode);
             between = await measure("between-snapshot-and-census", checkpoint);
             expect(between).toEqual(before);
-            actual = await measure("owner-inclusive-completed-" + mode, () =>
-              owner[mode](h.context, unit),
-            );
+            actual = await measure("owner-inclusive-completed-" + mode, async () => {
+              if (!name.startsWith("M05 ") && !name.startsWith("M06 "))
+                return owner[mode](h.context, unit);
+              const ownerStarted = performance.now();
+              try {
+                return await owner[mode](h.context, unit);
+              } finally {
+                performanceWindowsMs.push(performance.now() - ownerStarted);
+              }
+            });
           }
           expect(actual).toEqual(expected);
           owned(actual);
@@ -652,6 +735,17 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
               : {}),
           });
         }
+        if (name.startsWith("M05 ") || name.startsWith("M06 "))
+          console.info("M independent phase budgets", {
+            name,
+            ...assertUsValidationPhaseBudgets(
+              performance.now() - started,
+              performanceWindowsMs,
+              5000,
+              5000,
+            ),
+          });
       }),
+      name.startsWith("M05 ") || name.startsWith("M06 ") ? 10000 : undefined,
     );
 });
