@@ -1,15 +1,11 @@
-import type { CSSProperties, ReactNode, Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, type ButtonProps } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import { productMonogram } from "../shifts/product-accent.js";
-import {
-  ProductPhotoImage,
-  useProductAccent,
-  useStoredProductPhoto,
-} from "../shifts/ProductPhoto.js";
+import { ProductPhotoImage, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 
 /*
@@ -33,18 +29,23 @@ export interface ShiftBandProps {
   gtin: string;
   number: string;
   counterpartyName: string | null;
-  /** Codes this station holds in the shift: its actual quantity. */
+  /** Codes this station holds in the shift: its actual quantity. The one place the count is shown. */
   accepted: number;
   plannedQty: number | null;
-  /** The station's database and the product's id: its photo and the colour taken from it (beta 3.2). */
+  /** The shift's way of working, as its chip says it («Проверка с дубликатом»). */
+  modeLabel: string;
+  /** A validation shift's refused scans by kind: the small counters beside the accepted one. */
+  refused?: { duplicates: number; errors: number };
+  /** The station's database and the product's id: its photo (beta 3.2). */
   local?: LocalExecutor;
   productId?: string;
 }
 
 /**
- * What the shift makes and how much of it is made: the product on its
- * tinted gradient, the shift's number, and the quantity accepted against the
- * plan (the cloud's `ShiftBand`; the standalone counts this station alone).
+ * What the shift makes and how much of it is made, on the kit's one gradient card: the product's
+ * photo whole in a rounded frame, its name and chips (the shift's number, the GTIN, the mode),
+ * and the single counter «Принято в смене» — the only place the accepted count stands — with the
+ * small «Дубли» and «Ошибки» of a validation shift beside it.
  */
 export function ShiftBand({
   productName,
@@ -53,21 +54,19 @@ export function ShiftBand({
   counterpartyName,
   accepted,
   plannedQty,
+  modeLabel,
+  refused,
   local,
   productId,
 }: ShiftBandProps) {
   const { t } = useTranslation();
-  // The photo the station holds, and the band's colour from it; without a
-  // database (a test of the band alone) the GTIN's hue and the monogram.
+  // The photo the station holds; without a database (a test of the band alone) the monogram.
   const photo = useStoredProductPhoto(local ?? NO_LOCAL, productId ?? "");
-  const style = useProductAccent(local === undefined ? null : photo, gtin);
   const ratio = plannedQty === null || plannedQty <= 0 ? null : Math.min(1, accepted / plannedQty);
   return (
     <section
       className="work-shift-band"
       aria-label={t("floor.work.product", { name: productName, gtin })}
-      data-accent="true"
-      style={style}
     >
       <div className="work-shift-band__photo">
         <ProductPhotoImage
@@ -84,6 +83,7 @@ export function ShiftBand({
         <div className="work-shift-band__chips">
           <span className="work-shift-band__chip">{t("floor.work.title", { number })}</span>
           <span className="work-shift-band__chip work-shift-band__chip--mono">{`GTIN ${gtin}`}</span>
+          <span className="work-shift-band__chip">{modeLabel}</span>
           {counterpartyName !== null && (
             <span className="work-shift-band__chip" title={counterpartyName}>
               {t("floor.work.layout.counterparty", { name: counterpartyName })}
@@ -91,32 +91,42 @@ export function ShiftBand({
           )}
         </div>
       </div>
-      <div className="work-shift-band__total">
-        <p className="work-shift-band__label">{t("floor.work.accepted")}</p>
-        <p className="work-shift-band__count">{formatQuantity(accepted)}</p>
-        {plannedQty === null ? (
-          <span />
-        ) : (
-          <span className="work-shift-band__planned">{`/ ${formatQuantity(plannedQty)}`}</span>
-        )}
-        {plannedQty !== null && ratio !== null && (
+      <div className="work-shift-band__counters">
+        <div className="work-shift-band__total">
+          <p className="work-shift-band__label">{t("floor.work.accepted")}</p>
+          <p className="work-shift-band__count">{formatQuantity(accepted)}</p>
+          {plannedQty !== null && ratio !== null && (
+            <>
+              <p className="work-shift-band__planned">{`/ ${formatQuantity(plannedQty)}`}</p>
+              <div
+                className="work-shift-band__bar"
+                role="progressbar"
+                aria-label={t("floor.work.accepted")}
+                aria-valuemin={0}
+                aria-valuemax={plannedQty}
+                aria-valuenow={Math.min(accepted, plannedQty)}
+                aria-valuetext={`${formatQuantity(accepted)} / ${formatQuantity(plannedQty)}`}
+              >
+                <span style={{ width: `${Math.round(ratio * 1000) / 10}%` }} />
+              </div>
+              <p className="work-shift-band__meta">
+                {t("floor.work.layout.planPercent", {
+                  percent: PERCENT.format(accepted / plannedQty),
+                })}
+              </p>
+            </>
+          )}
+        </div>
+        {refused !== undefined && (
           <>
-            <div
-              className="work-shift-band__bar"
-              role="progressbar"
-              aria-label={t("floor.work.accepted")}
-              aria-valuemin={0}
-              aria-valuemax={plannedQty}
-              aria-valuenow={Math.min(accepted, plannedQty)}
-              aria-valuetext={`${formatQuantity(accepted)} / ${formatQuantity(plannedQty)}`}
-            >
-              <span style={{ width: `${Math.round(ratio * 1000) / 10}%` }} />
+            <div className="work-shift-band__small">
+              <p className="work-shift-band__label">{t("floor.validation.duplicates")}</p>
+              <p className="work-shift-band__small-count">{formatQuantity(refused.duplicates)}</p>
             </div>
-            <p className="work-shift-band__meta">
-              {t("floor.work.layout.planPercent", {
-                percent: PERCENT.format(accepted / plannedQty),
-              })}
-            </p>
+            <div className="work-shift-band__small">
+              <p className="work-shift-band__label">{t("floor.validation.errors")}</p>
+              <p className="work-shift-band__small-count">{formatQuantity(refused.errors)}</p>
+            </div>
           </>
         )}
       </div>
@@ -272,79 +282,144 @@ export function BoxFill({ items, capacity, acceptedToken, actions }: BoxFillProp
 }
 
 /** The tone of the last scan's verdict: accepted, refused, not taken, or none yet. */
-export type LastTone = "ok" | "error" | "warn" | "neutral";
+export type LastTone = "ok" | "duplicate" | "error" | "warn" | "neutral";
 
 export interface LastScanProps {
+  /** The status word of the verdict («Принят», «Дубль», «Ошибка»), shown large. */
+  word: string;
+  /** The verdict in words beyond the status word; empty when the word says it all. */
   text: string;
   tone: LastTone;
+  /** The scanned code as the history lists it (the GTIN and the serial's tail), when known. */
+  code: string | null;
+  /** The scan's time, on this computer's clock; `null` while there is no scan. */
+  time: string | null;
   /** Lit for a moment after an accepted code. */
   cued: boolean;
-  lineRef: Ref<HTMLParagraphElement>;
+  lineRef: Ref<HTMLDivElement>;
+}
+
+/** The hero's glyph: a check in a ring, a copy, a cross, a pause, or nothing yet. */
+function VerdictIcon({ tone }: { tone: LastTone }) {
+  const common = {
+    width: 56,
+    height: 56,
+    viewBox: "0 0 56 56",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 4,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+    className: "work-scan-hero__icon",
+  };
+  if (tone === "ok") {
+    return (
+      <svg {...common}>
+        <circle cx="28" cy="28" r="24" />
+        <path d="m17 29 8 8 15-17" />
+      </svg>
+    );
+  }
+  if (tone === "error") {
+    return (
+      <svg {...common}>
+        <circle cx="28" cy="28" r="24" />
+        <path d="m19 19 18 18M37 19 19 37" />
+      </svg>
+    );
+  }
+  if (tone === "duplicate") {
+    return (
+      <svg {...common}>
+        <circle cx="28" cy="28" r="24" />
+        <rect x="18" y="22" width="14" height="14" rx="3" />
+        <path d="M24 18h10a4 4 0 0 1 4 4v10" />
+      </svg>
+    );
+  }
+  if (tone === "warn") {
+    return (
+      <svg {...common}>
+        <circle cx="28" cy="28" r="24" />
+        <path d="M28 16v16M28 39v1" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <circle cx="28" cy="28" r="24" strokeDasharray="4 7" />
+    </svg>
+  );
 }
 
 /**
- * The last scan's verdict in words, on its tone (the cloud's
- * `ScanResultInstrument`). The line is the screen's place for the focus after
- * a message is answered, and is never announced per scan: the tone and the
- * flash say it.
+ * «Последний скан»: the verdict as one large status word with its glyph on the verdict's tone,
+ * the code's tail in the counter's face and the time, and a line of words only where the word
+ * leaves something to say (why a duplicate is one). It never repeats the shift's count: that
+ * stands in the band alone. The element with the verdict is the screen's place for the focus
+ * after a message is answered, and is never announced per scan: the tone and the flash say it.
  */
-export function LastScan({ text, tone, cued, lineRef }: LastScanProps) {
+export function LastScan({ word, text, tone, code, time, cued, lineRef }: LastScanProps) {
   const { t } = useTranslation();
   return (
     <section className="work-instrument work-scan-result" aria-labelledby="work-last-title">
-      <h2 id="work-last-title">{t("floor.work.layout.last")}</h2>
-      <p
+      <div className="work-scan-result__head">
+        <h2 id="work-last-title">{t("floor.work.layout.last")}</h2>
+        {time !== null && <time className="work-scan-result__time">{time}</time>}
+      </div>
+      <div
         className={cued ? "work-screen__last work-screen__last--cue" : "work-screen__last"}
         data-verdict={tone}
         ref={lineRef}
         tabIndex={-1}
       >
-        {text}
-      </p>
+        <p className="work-scan-hero__word">
+          <VerdictIcon tone={tone} />
+          <span>{word}</span>
+        </p>
+        {code !== null && <p className="work-scan-hero__code">{code}</p>}
+        {text !== "" && <p className="work-scan-hero__detail">{text}</p>}
+      </div>
     </section>
   );
 }
 
 export interface WorkFactsProps {
   facts: readonly { term: string; value: string }[];
-  /** The shift's scan history, under the figures (beta 3.2: it stands where the plan row stood). */
-  history?: ReactNode;
 }
 
-/** The shift's figures beside the box (the cloud's journal column, in its row style). */
-export function WorkFacts({ facts, history }: WorkFactsProps) {
+/** The shift's figures of an aggregation shift (closed boxes, the last SSCC), in their row style. */
+export function WorkFacts({ facts }: WorkFactsProps) {
   const { t } = useTranslation();
+  if (facts.length === 0) return null;
   return (
     <section className="work-instrument work-facts" aria-labelledby="work-facts-title">
-      {facts.length > 0 && (
-        <>
-          <h2 id="work-facts-title">{t("floor.work.layout.summary")}</h2>
-          <dl>
-            {facts.map((fact) => (
-              <div key={fact.term}>
-                <dt>{fact.term}</dt>
-                <dd>{fact.value}</dd>
-              </div>
-            ))}
-          </dl>
-        </>
-      )}
-      {history}
+      <h2 id="work-facts-title" className="work-sr">
+        {t("floor.work.layout.summary")}
+      </h2>
+      <dl>
+        {facts.map((fact) => (
+          <div key={fact.term}>
+            <dt>{fact.term}</dt>
+            <dd>{fact.value}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
 
-/** The width of a footer action, as the cloud gives it. */
-export const FOOTER_ACTION_STYLE: CSSProperties = { width: "220px", maxWidth: "100%" };
-
-/** A floor button of the footer, its width merged with any style the caller gives. */
-export function FooterAction({ style, ...props }: ButtonProps) {
+/**
+ * A floor button of the footer: the kit's 84 px action, filling its third of the row (the
+ * footer's grid gives it the width).
+ */
+export function FooterAction({ className, ...props }: ButtonProps) {
   return (
     <Button
       size="floor"
-      className="work-footer__action"
+      className={`work-footer__action floor-primary${className === undefined ? "" : ` ${className}`}`}
       {...props}
-      style={{ ...FOOTER_ACTION_STYLE, ...style }}
     />
   );
 }

@@ -106,7 +106,7 @@ import {
 } from "../unit-labels/use-unit-label-work.js";
 import { UnitLabelRefusedError } from "../unit-labels/unit-label-work.js";
 import { UnitLabelHistory } from "../unit-labels/UnitLabelHistory.js";
-import { ScanHistory, ScanHistoryScreen } from "./ScanHistory.js";
+import { COMPACT_ROWS, ScanHistory, ScanHistoryScreen, useScanHistory } from "./ScanHistory.js";
 import { UnitLabelPanel } from "../unit-labels/UnitLabelPanel.js";
 import { UnitLabelVerification } from "../unit-labels/UnitLabelVerification.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
@@ -123,7 +123,6 @@ import {
 import { processScan, type ScanContext, type ScanOutcome } from "./scan-pipeline.js";
 import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
-import { ValidationPanel, type ValidationOutcome } from "./ValidationPanel.js";
 import {
   readOpenBox,
   readValidationCounts,
@@ -413,17 +412,13 @@ export function scanTime(iso: string): string {
   return TIME.format(new Date(iso));
 }
 
-/** How many outcomes the validation panel lists (plan РЕЖ). */
-const VALIDATION_OUTCOMES = 5;
-
 /** The last scan in words. */
 function lastText(last: Last, t: TFunction, capacity: number): string {
   switch (last.kind) {
     case "accepted":
-      // A validation shift's code is in no box (plan РЕЖ): the shift's count is said instead.
-      if (last.boxId === null) {
-        return t("floor.validation.accepted", { quantity: formatQuantity(last.acceptedCount) });
-      }
+      // A validation shift's code is in no box (plan РЕЖ): the status word says it all, and
+      // the shift's count stands in the band alone (kit step C).
+      if (last.boxId === null) return "";
       return t("floor.work.last.accepted", {
         quantity: formatQuantity(last.itemCount),
         capacity: formatQuantity(capacity),
@@ -454,6 +449,26 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
   }
 }
 
+/** The last scan's status word: the large word of the hero, one per verdict. */
+function lastWord(last: Last | null, t: TFunction): string {
+  if (last === null) return t("floor.work.hero.waiting");
+  switch (last.kind) {
+    case "accepted":
+      return t("floor.work.hero.accepted");
+    case "duplicate":
+      return t("floor.work.hero.duplicate");
+    case "wrong_gtin":
+    case "invalid":
+    case "unit_refused":
+      return t("floor.work.hero.error");
+    case "paused":
+      return t("floor.work.hero.paused");
+    case "shift_closed":
+    case "office_closed":
+      return t("floor.work.hero.closed");
+  }
+}
+
 /** The button the exceptions were opened by (its `data-action`), where the focus returns. */
 type ExceptionsOpener = "exceptions" | "box-undo" | "box-clear";
 
@@ -464,6 +479,7 @@ function lastTone(last: Last | null): LastTone {
     case "accepted":
       return "ok";
     case "duplicate":
+      return "duplicate";
     case "wrong_gtin":
     case "invalid":
     case "unit_refused":
@@ -805,10 +821,8 @@ export function WorkScreen(props: WorkScreenProps) {
   // Shown only while the pallet that `refresh` reads is still full (see `palletWaitsNow`),
   // so it cannot outlive the pallet it speaks of.
   const [palletWaits, setPalletWaits] = useState<"no_serials" | "invalid" | null>(null);
-  // A validation shift's refused scans by kind, and the outcomes of this entry, newest first.
+  // A validation shift's refused scans by kind.
   const [counts, setCounts] = useState<ValidationCounts | null>(null);
-  const [outcomes, setOutcomes] = useState<readonly ValidationOutcome[]>([]);
-  const outcomeId = useRef(0);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
@@ -907,7 +921,7 @@ export function WorkScreen(props: WorkScreenProps) {
   );
   const confirmRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLElement>(null);
-  const lastRef = useRef<HTMLParagraphElement>(null);
+  const lastRef = useRef<HTMLDivElement>(null);
   // Counted when the operator answers a message: the element that held the
   // focus is gone after that render, and the focus goes to a safe place instead.
   const [refocused, setRefocused] = useState(0);
@@ -1111,6 +1125,18 @@ export function WorkScreen(props: WorkScreenProps) {
     scanInWindow: scanUnitWindow,
     sendAccepted: sendUnitAccepted,
   } = unit;
+
+  // The screen's one read of the shift's newest scans: the single history list, and the code
+  // tail the last scan's hero shows (read after the screen's own first read, as before).
+  const history = useScanHistory(
+    props.local,
+    props.pairing,
+    shift.copy.id,
+    COMPACT_ROWS,
+    0,
+    last,
+    totals !== null,
+  );
 
   /** «Пауза»: out of the shift; the label is kept for the next entry, where its window opens. */
   const pauseUnit = () => {
@@ -1384,28 +1410,14 @@ export function WorkScreen(props: WorkScreenProps) {
     setPendingClose,
   ]);
 
-  /** One outcome of a validation shift's scan into its panel's list (plan РЕЖ), newest first. */
-  const sayOutcome = useCallback((scannedAt: string, text: string, tone: LastTone) => {
-    if (live.current.shift.copy.mode !== "validation" || !alive.current) return;
-    outcomeId.current += 1;
-    const said: ValidationOutcome = {
-      id: outcomeId.current,
-      time: scanTime(scannedAt),
-      text,
-      tone,
-    };
-    setOutcomes((before) => [said, ...before].slice(0, VALIDATION_OUTCOMES));
-  }, []);
-
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
       const say = live.current.t;
       const boxCapacity = live.current.shift.copy.boxCapacity;
       const text = lastText(outcome, say, boxCapacity);
       setLast(outcome);
-      sayOutcome(outcome.scannedAt, text, lastTone(outcome));
       if (outcome.kind === "accepted") {
-        show("ok", say("floor.work.signal.ok"), text);
+        show("ok", say("floor.work.signal.ok"), text === "" ? null : text);
         if (outcome.boxId !== null && boxIsFull(outcome.itemCount, boxCapacity)) {
           await closeBox(true);
         }
@@ -1433,7 +1445,7 @@ export function WorkScreen(props: WorkScreenProps) {
       // A validation shift's panel counts the refused scans too (plan РЕЖ).
       if (live.current.shift.copy.mode === "validation") await refreshQuietly();
     },
-    [closeBox, refreshQuietly, show, sayOutcome],
+    [closeBox, refreshQuietly, show],
   );
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
@@ -1465,14 +1477,13 @@ export function WorkScreen(props: WorkScreenProps) {
         const refused: Last = { kind: "unit_refused", reason: error.code };
         const text = lastText(refused, say, 0);
         setLast(refused);
-        sayOutcome(new Date().toISOString(), text, "error");
         show("error", say("floor.work.signal.invalid"), text);
         return;
       }
       refuse(false);
       await settleUnitSafely(false);
     },
-    [refuse, show, sayOutcome, settleUnitSafely],
+    [refuse, show, settleUnitSafely],
   );
 
   /**
@@ -2295,6 +2306,13 @@ export function WorkScreen(props: WorkScreenProps) {
   // The plan is in the shift band at the top; a second row of it here repeated it (beta 3.2),
   // and the scan history stands in its place. A validation shift has no box to count (plan РЕЖ):
   // its figures are in its panel.
+  const lastOutcomeAt = last !== null && "scannedAt" in last ? last.scannedAt : null;
+  const lastTime = lastOutcomeAt === null ? null : scanTime(lastOutcomeAt);
+  const lastRow =
+    lastOutcomeAt === null || history.kind !== "ready"
+      ? undefined
+      : history.rows.find((row) => row.scannedAt === lastOutcomeAt);
+  const lastCode = lastRow?.maskedCode ?? null;
   const facts = validation
     ? []
     : [
@@ -2352,6 +2370,16 @@ export function WorkScreen(props: WorkScreenProps) {
             counterpartyName={shift.snapshot.counterpartyName}
             accepted={totals?.accepted ?? 0}
             plannedQty={plannedQty}
+            modeLabel={t(
+              validation
+                ? printsLabels
+                  ? "floor.work.mode.validationPrint"
+                  : "floor.work.mode.validation"
+                : "floor.work.mode.aggregation",
+            )}
+            {...(validation
+              ? { refused: { duplicates: counts?.duplicates ?? 0, errors: counts?.errors ?? 0 } }
+              : {})}
             // The photo is read after the screen's own first read, so a failed first read stops
             // the line as it did, whatever the band asks.
             {...(totals === null ? {} : { local: props.local })}
@@ -2362,23 +2390,28 @@ export function WorkScreen(props: WorkScreenProps) {
               {t("floor.work.officeClosed.body")}
             </Alert>
           )}
-          <div className="work-screen__instruments">
+          <div className="work-screen__instruments" data-layout={validation ? "validation" : "box"}>
             <div className="work-screen__primary">
               {validation ? (
                 <>
-                  <ValidationPanel
-                    accepted={totals?.accepted ?? 0}
-                    duplicates={counts?.duplicates ?? 0}
-                    errors={counts?.errors ?? 0}
-                    plannedQty={plannedQty}
-                    outcomes={outcomes}
+                  <LastScan
+                    word={lastWord(last, t)}
+                    text={last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
+                    tone={lastTone(last)}
+                    code={lastCode}
+                    time={lastTime}
+                    cued={cued}
+                    lineRef={lastRef}
                   />
-                  {printPolicy !== null && (
+                  {printPolicy !== null ? (
                     <UnitLabelPanel
                       job={unit.job}
                       busy={unit.sending || unit.busy}
                       verification={printPolicy.verification}
+                      onRecover={unit.retry}
                     />
+                  ) : (
+                    <p className="work-screen__hint">{t("floor.validation.hint")}</p>
                   )}
                 </>
               ) : (
@@ -2452,29 +2485,24 @@ export function WorkScreen(props: WorkScreenProps) {
             </div>
             <div className="work-screen__secondary">
               {/*
-                A refusal is announced by its flash (an alert); this line keeps every
-                verdict in words, and an accepted scan lights it for a moment (the tone
-                and the counts carry the rest: no overlay, no announcement per scan).
+                A refusal is announced by its flash (an alert); the hero keeps every verdict in
+                words, and an accepted scan lights it for a moment (the tone and the counts carry
+                the rest: no overlay, no announcement per scan). A validation shift has the hero
+                in its main column; a box shift, over the history, under the box.
               */}
-              <LastScan
-                text={last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
-                tone={lastTone(last)}
-                cued={cued}
-                lineRef={lastRef}
-              />
-              <WorkFacts
-                facts={facts}
-                history={
-                  <ScanHistory
-                    local={props.local}
-                    pairing={props.pairing}
-                    shiftId={shift.copy.id}
-                    refreshKey={last}
-                    enabled={totals !== null}
-                    onOpenAll={() => setStop({ kind: "scan_history" })}
-                  />
-                }
-              />
+              {!validation && (
+                <LastScan
+                  word={lastWord(last, t)}
+                  text={last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
+                  tone={lastTone(last)}
+                  code={lastCode}
+                  time={lastTime}
+                  cued={cued}
+                  lineRef={lastRef}
+                />
+              )}
+              <WorkFacts facts={facts} />
+              <ScanHistory read={history} onOpenAll={() => setStop({ kind: "scan_history" })} />
             </div>
           </div>
         </div>

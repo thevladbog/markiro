@@ -185,7 +185,7 @@ function shown(label: string): string | null {
 }
 
 function lastLine(): string | null {
-  return document.querySelector(".work-screen__last")?.textContent ?? null;
+  return document.querySelector(".work-screen__last .work-scan-hero__detail")?.textContent ?? "";
 }
 
 const CLOSE_FAILED = "Короб не закрыт";
@@ -261,7 +261,7 @@ describe("the work screen of a shift", () => {
     // row of it (owner's decision of beta 3.2), and the scan history stands there.
     expect(screen.queryByText("План")).toBeNull();
     expect(document.querySelector(".work-shift-band__planned")?.textContent).toBe("/ 1\u00a0200");
-    expect(lastLine()).toBe("Принято: в коробе 2 из 12.");
+    expect(lastLine()).toBe("В коробе 2 из 12.");
     expect(screenWork.props.signal).toHaveBeenCalledTimes(2);
     expect(screenWork.props.signal).toHaveBeenLastCalledWith("ok");
     expect(screenWork.props.touch).toHaveBeenCalledTimes(2);

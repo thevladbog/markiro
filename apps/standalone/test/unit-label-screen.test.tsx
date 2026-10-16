@@ -26,7 +26,13 @@ import { fakeHardware } from "./support/hardware.js";
 import { enteredShift, km, PAIRING, rows, scanContext } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 import { TSC, ZEBRA } from "./support/printing.js";
-import { lastLine, renderWork, SESSION, type WorkHarness } from "./support/work-screen.js";
+import {
+  lastLine,
+  lastWord,
+  renderWork,
+  SESSION,
+  type WorkHarness,
+} from "./support/work-screen.js";
 
 /*
  * The station's screen of a validation shift that prints the Data Matrix duplicate (plan РЕЖ,
@@ -136,6 +142,11 @@ function panelState(): string | null {
   return unitPanel().getByRole("status").textContent;
 }
 
+/** The band's one accepted count. */
+function acceptedCount(): string | null {
+  return document.querySelector(".work-shift-band__count")?.textContent ?? null;
+}
+
 function windowOf(name: string): HTMLElement {
   return screen.getByRole("dialog", { name });
 }
@@ -243,9 +254,11 @@ describe("the label panel of a shift that prints the duplicate", () => {
     expect(work.shell.sends.map((send) => send.text)).toEqual(["DUP zpl 203 1"]);
     noWindow();
     expect(panelState()).toContain("Отправлено на принтер");
-    expect(lastLine()).toBe("Принят: в смене 1 шт.");
+    expect(lastWord()).toBe("Принят");
+    expect(acceptedCount()).toBe("1");
     await work.scan(km("N2", { tail: "Zf8K" }));
-    expect(lastLine()).toBe("Принят: в смене 2 шт.");
+    expect(lastWord()).toBe("Принят");
+    expect(acceptedCount()).toBe("2");
     expect(jobs(at)).toEqual([
       expect.objectContaining({ attempt_state: "sent", verification: "not_required" }),
       expect.objectContaining({ attempt_state: "sent", verification: "not_required" }),
@@ -283,7 +296,7 @@ describe("the window of the printed label's check", () => {
       expect.objectContaining({ attempt_state: "sent", verification: "verified" }),
     ]);
     await work.scan(km("R3", { tail: "Zf8K" }));
-    expect(lastLine()).toBe("Принят: в смене 2 шт.");
+    expect(acceptedCount()).toBe("2");
     // The check took no unit: two codes, one journalled scan each.
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 2 }]);
   });
@@ -531,14 +544,9 @@ describe("the window of the printed label's check", () => {
     );
     noWindow();
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 0 }]);
-    expect(
-      within(screen.getByRole("region", { name: "Проверка" }))
-        .getAllByRole("listitem")
-        .map((item) => item.querySelector(".work-validation__word")?.textContent),
-    ).toEqual([
-      "Этикетку не удалось подготовить для принтера дубликата. Код не принят.",
-      "Не удалось прочитать полный Data Matrix",
-    ]);
+    // Nothing was journalled, so the history has no row for them; the hero says the last one.
+    expect(lastWord()).toBe("Ошибка");
+    expect(screen.queryByRole("list", { name: "История сканирований" })).toBeNull();
   });
 
   it("leaves the shift by «Пауза», the label kept for the next entry", async () => {
@@ -675,7 +683,7 @@ describe("the window's status line", () => {
       work.scanner.emit(km("PS1", { tail: "Zf8K" }));
     });
     await waitFor(() => expect(shell.heldSends()).toBe(1));
-    expect(panelState()).toBe(`${SAVING}…PS1`);
+    expect(panelState()).toBe(`${SAVING} …PS1`);
     await act(async () => {
       shell.releaseSend({ sent: true });
       await work.gate.drain();

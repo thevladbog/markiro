@@ -16,7 +16,7 @@ import {
 import { openLocalDb } from "./support/local-db.js";
 import { palletStation } from "./support/pallets.js";
 import { FIRST_SSCC, jobRows, setUpPrinting } from "./support/printing.js";
-import { lastLine, renderWork, type WorkHarness } from "./support/work-screen.js";
+import { lastLine, lastWord, renderWork, type WorkHarness } from "./support/work-screen.js";
 
 /*
  * The work screen of a validation shift (plan РЕЖ, A7, Р8–Р10): one screen, the validation
@@ -52,24 +52,33 @@ async function ready(work: WorkHarness): Promise<void> {
   await work.settled();
 }
 
-function panel() {
-  return within(screen.getByRole("region", { name: "Проверка" }));
+function band() {
+  const element = document.querySelector<HTMLElement>(".work-shift-band");
+  if (element === null) throw new Error("the shift band is not on the screen");
+  return within(element);
 }
 
-/** The figure the panel shows under `term`. */
+/** The small figure of the band under `term` («Дубли», «Ошибки»). */
 function figure(term: string): string | null {
-  return panel().getByText(term).nextElementSibling?.textContent ?? null;
+  return band().getByText(term).nextElementSibling?.textContent ?? null;
 }
 
-function acceptedLine(): string | null {
-  return document.querySelector(".work-validation__count")?.textContent ?? null;
+/** The band's one accepted count. */
+function acceptedCount(): string | null {
+  return document.querySelector(".work-shift-band__count")?.textContent ?? null;
 }
 
-/** The panel's last outcomes in words, newest first. */
+/** The history's rows as «время · результат · код», newest first. */
+function historyRows(): HTMLElement[] {
+  const list = screen.queryByRole("list", { name: "История сканирований" });
+  return list === null ? [] : within(list).getAllByRole("listitem");
+}
+
+/** The result word of each history row, newest first. */
 function recent(): string[] {
-  return panel()
-    .getAllByRole("listitem")
-    .map((item) => item.querySelector(".work-validation__word")?.textContent ?? "");
+  return historyRows().map(
+    (item) => item.querySelector(".scan-history__result")?.textContent?.replace(/^\S\s?/, "") ?? "",
+  );
 }
 
 function closedRecords(at: Station): { data: Record<string, unknown> }[] {
@@ -90,14 +99,16 @@ afterEach(() => {
 });
 
 describe("the work screen of a validation shift", () => {
-  it("shows the validation panel in place of the box, its pallet, its label and the exceptions", async () => {
+  it("shows the last scan and the one history in place of the box, its pallet, its label and the exceptions", async () => {
     const at = await station();
     const work = renderWork(at);
     await ready(work);
-    expect(acceptedLine()).toBe("Принято 0 из плана 1\u00a0200");
+    expect(acceptedCount()).toBe("0");
+    expect(document.querySelector(".work-shift-band__planned")?.textContent).toBe("/ 1\u00a0200");
     expect(figure("Дубли")).toBe("0");
     expect(figure("Ошибки")).toBe("0");
-    expect(panel().getByText("Сканов после входа в смену ещё не было.")).toBeTruthy();
+    expect(screen.getByText("В этой смене сканов ещё не было.")).toBeTruthy();
+    expect(lastWord()).toBe("Ожидание");
     expect(lastLine()).toBe("Отсканируйте код маркировки.");
     // No box, no pallet, no label, and no exceptions (Р9).
     expect(screen.queryByText("Открытый короб")).toBeNull();
@@ -125,43 +136,43 @@ describe("the work screen of a validation shift", () => {
     const work = renderWork(at, { overrides: { online: true } });
     await ready(work);
     await work.scan(km("A1"));
-    expect(lastLine()).toBe("Принят: в смене 1 шт.");
+    // The status word says it; the shift's count stands in the band alone.
+    expect(lastWord()).toBe("Принят");
+    expect(lastLine()).toBe("");
+    expect(acceptedCount()).toBe("1");
     expect(work.props.signal).toHaveBeenLastCalledWith("ok");
     await work.scan(km("A2"));
-    expect(acceptedLine()).toBe("Принято 2 из плана 1\u00a0200");
+    expect(acceptedCount()).toBe("2");
     await work.scan(km("A1"));
+    expect(lastWord()).toBe("Дубль");
     expect(lastLine()).toMatch(/^Дубль: этот код уже принят в \d\d:\d\d:\d\d\.$/);
     expect(work.props.signal).toHaveBeenLastCalledWith("duplicate");
     await work.scan(km("W1", { gtin: OTHER_GTIN }));
+    expect(lastWord()).toBe("Ошибка");
     expect(lastLine()).toBe(`Чужой товар: GTIN ${OTHER_GTIN}.`);
     await work.scan("MRK-000742");
+    expect(lastWord()).toBe("Ошибка");
     expect(lastLine()).toBe("Это не код маркировки.");
     expect(work.props.signal).toHaveBeenLastCalledWith("error");
     expect(figure("Дубли")).toBe("1");
     expect(figure("Ошибки")).toBe("2");
-    expect(acceptedLine()).toBe("Принято 2 из плана 1\u00a0200");
-    expect(recent()).toEqual([
-      "Это не код маркировки.",
-      `Чужой товар: GTIN ${OTHER_GTIN}.`,
-      expect.stringMatching(/^Дубль: этот код уже принят в /),
-      "Принят: в смене 2 шт.",
-      "Принят: в смене 1 шт.",
+    expect(acceptedCount()).toBe("2");
+    // One history, newest first, each result in words with its glyph.
+    expect(recent()).toEqual(["Не код", "Другой товар", "Дубль", "Принят", "Принят"]);
+    expect(historyRows().map((item) => item.getAttribute("data-verdict"))).toEqual([
+      "invalid",
+      "wrong_gtin",
+      "duplicate",
+      "ok",
+      "ok",
     ]);
-    // Each outcome is said in words with its tone, not by colour alone.
-    expect(
-      panel()
-        .getAllByRole("listitem")
-        .map((item) => item.getAttribute("data-verdict")),
-    ).toEqual(["error", "error", "error", "ok", "ok"]);
-    // A sixth outcome pushes the oldest out: the list keeps five.
+    // The count of accepted codes is in exactly one element of the screen.
+    expect(document.querySelectorAll(".work-shift-band__count")).toHaveLength(1);
+    expect(screen.queryByText(/Принят: в смене/)).toBeNull();
+    expect(screen.queryByText("Последние сканы")).toBeNull();
     await work.scan(km("A3"));
-    expect(recent()).toEqual([
-      "Принят: в смене 3 шт.",
-      "Это не код маркировки.",
-      `Чужой товар: GTIN ${OTHER_GTIN}.`,
-      expect.stringMatching(/^Дубль: этот код уже принят в /),
-      "Принят: в смене 2 шт.",
-    ]);
+    expect(acceptedCount()).toBe("3");
+    expect(historyRows()).toHaveLength(6);
     // The codes are the shift's, in no box; nothing else of a box or a label was written.
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes WHERE box_id IS NULL")).toEqual([
       { n: 3 },
@@ -173,6 +184,35 @@ describe("the work screen of a validation shift", () => {
     ).toEqual(["scan"]);
   });
 
+  it("says the last scan as one large word on its tone, and the count once", async () => {
+    const at = await station();
+    const work = renderWork(at, { overrides: { online: true } });
+    await ready(work);
+    const tone = () => document.querySelector(".work-screen__last")?.getAttribute("data-verdict");
+    expect(tone()).toBe("neutral");
+    await work.scan(km("V1"));
+    expect([lastWord(), tone()]).toEqual(["Принят", "ok"]);
+    // The code's tail and the scan's time ride with the word; no count is repeated with it.
+    expect(document.querySelector(".work-scan-hero__code")?.textContent).toMatch(/…V1$/);
+    expect(document.querySelector(".work-scan-result__time")).not.toBeNull();
+    expect(document.querySelector(".work-scan-hero__detail")).toBeNull();
+    await work.scan(km("V1"));
+    expect([lastWord(), tone()]).toEqual(["Дубль", "duplicate"]);
+    await work.scan(km("V2", { gtin: OTHER_GTIN }));
+    expect([lastWord(), tone()]).toEqual(["Ошибка", "error"]);
+    // «Принято» as a word of the screen is the band's label alone, and the count is one element.
+    expect(screen.getAllByText(/принято/i)).toHaveLength(1);
+    expect(document.querySelectorAll(".work-shift-band__count")).toHaveLength(1);
+    expect(screen.getAllByText("1", { selector: ".work-shift-band__count" })).toHaveLength(1);
+    // One list of scans, one button for all of them; no second «Последние сканы».
+    expect(screen.getAllByRole("list", { name: "История сканирований" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Вся история" })).toHaveLength(1);
+    // The footer's actions are the kit's 84 px row.
+    for (const name of ["Выйти из смены", "Закрыть смену"]) {
+      expect(screen.getByRole("button", { name }).className).toContain("floor-primary");
+    }
+  });
+
   it("says a host duplicate with the shift that took the code", async () => {
     const at = await station();
     const work = renderWork(at, {
@@ -180,11 +220,12 @@ describe("the work screen of a validation shift", () => {
     });
     await ready(work);
     await work.scan(km("H1"));
+    expect(lastWord()).toBe("Дубль");
     expect(lastLine()).toBe(
       `Дубль: код принят в смене OCT26-003 в ${scanTime(TAKEN.owner.scannedAt)}.`,
     );
     expect(figure("Дубли")).toBe("1");
-    expect(acceptedLine()).toBe("Принято 0 из плана 1\u00a0200");
+    expect(acceptedCount()).toBe("0");
   });
 
   it("asks the host for no SSCC serials, on entry or when the link comes back", async () => {
@@ -200,7 +241,7 @@ describe("the work screen of a validation shift", () => {
     expect(work.props.requestBlock).not.toHaveBeenCalled();
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_block_requests")).toEqual([{ n: 0 }]);
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_sscc_blocks")).toEqual([{ n: 0 }]);
-    expect(lastLine()).toBe("Принят: в смене 1 шт.");
+    expect(lastWord()).toBe("Принят");
   });
 
   it("reads the shift's counts again when the operator enters it again", async () => {
@@ -214,24 +255,22 @@ describe("the work screen of a validation shift", () => {
     const again = renderWork(at);
     await ready(again);
     // The entry's read may land outside the harness's turn: its render is waited for.
-    await waitFor(() => expect(acceptedLine()).toBe("Принято 1 из плана 1\u00a0200"));
+    await waitFor(() => expect(acceptedCount()).toBe("1"));
     expect(figure("Дубли")).toBe("1");
     expect(figure("Ошибки")).toBe("1");
-    // The outcomes are this entry's: the list starts empty again.
-    expect(panel().queryAllByRole("listitem")).toEqual([]);
-    expect(panel().getByText("Сканов после входа в смену ещё не было.")).toBeTruthy();
+    // The last scan starts empty again; the history is the shift's own, so it keeps its three.
+    expect(lastWord()).toBe("Ожидание");
+    await waitFor(() => expect(historyRows()).toHaveLength(3));
   });
 
-  it("says the accepted codes alone for a shift without a plan", async () => {
+  it("says the accepted count alone for a shift without a plan", async () => {
     const at = await station(null);
     const work = renderWork(at);
     await ready(work);
     await work.scan(km("N1"));
-    expect(acceptedLine()).toBe("Принято 1 шт.");
-    // The same counter's face as with a plan: the numbers mono, the words the interface's.
-    const count = document.querySelector(".work-validation__count");
-    expect(count?.classList.contains("work-of-count")).toBe(true);
-    expect(count?.querySelector(".work-of-count__number")?.textContent).toBe("1");
+    expect(acceptedCount()).toBe("1");
+    expect(document.querySelector(".work-shift-band__planned")).toBeNull();
+    expect(document.querySelector(".work-shift-band__bar")).toBeNull();
   });
 
   it("offers to close the shift once the plan is reached, as the cloud does", async () => {
@@ -300,17 +339,18 @@ describe("the work screen of a validation shift", () => {
       }),
     ]);
   });
-  it("lists the outcomes in a region the keyboard can scroll, named by its heading", async () => {
+  it("lists the history in a region the keyboard can scroll, named by its heading", async () => {
     const at = await station();
     const work = renderWork(at);
     await ready(work);
     await work.scan(km("F1"));
-    const list = panel().getByRole("list", { name: "Последние сканы" });
+    const list = screen.getByRole("list", { name: "История сканирований" });
     expect(list.tabIndex).toBe(0);
-    expect(list.classList.contains("work-validation__recent")).toBe(true);
+    expect(list.classList.contains("scan-history__list")).toBe(true);
+    expect(screen.getByRole("button", { name: "Вся история" })).toBeTruthy();
   });
 
-  it("says each outcome at the time its scan was journalled, not when the panel drew it", async () => {
+  it("says each scan at the time it was journalled, not when the list drew it", async () => {
     const at = await station();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-08T06:15:02.000Z"));
@@ -335,10 +375,12 @@ describe("the work screen of a validation shift", () => {
       { scanned_at: "2026-10-08T06:15:02.000Z" },
     ]);
     expect(
-      panel()
-        .getAllByRole("listitem")
-        .map((item) => item.querySelector(".work-validation__time")?.textContent),
+      historyRows().map((item) => item.querySelector(".scan-history__time")?.textContent),
     ).toEqual(journalled.map((row) => scanTime(String(row["scanned_at"]))));
+    // The hero says the last scan's time as the journal has it.
+    expect(document.querySelector(".work-scan-result__time")?.textContent).toBe(
+      scanTime("2026-10-08T07:15:02.000Z"),
+    );
   });
 
   it("recovers no label on entry: a send another shift's stop cut stays as it was", async () => {
@@ -390,7 +432,7 @@ describe("the work screen of a validation shift", () => {
       await work.scan(km("Q1"));
       expect(screen.queryByRole("region", { name: "Паллета" })).toBeNull();
       expect(screen.queryByText("Паллеты смены не настроены на этой станции")).toBeNull();
-      expect(lastLine()).toBe("Принят: в смене 1 шт.");
+      expect(lastWord()).toBe("Принят");
       expect(rows(at.db, "SELECT count(*) AS n FROM floor_pallets")).toEqual([{ n: 0 }]);
       work.view.unmount();
     }

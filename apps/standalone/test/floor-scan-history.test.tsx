@@ -3,10 +3,31 @@ import { describe, expect, it } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import { ScanHistory, ScanHistoryScreen, PAGE_ROWS } from "../src/floor/work/ScanHistory.js";
+import {
+  COMPACT_ROWS,
+  ScanHistory,
+  ScanHistoryScreen,
+  PAGE_ROWS,
+  useScanHistory,
+} from "../src/floor/work/ScanHistory.js";
+import type { LocalExecutor } from "../src/local/executor.js";
 import { maskCode, readScanHistory } from "../src/floor/work/scan-history.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
+
+/** The work screen's one read of the newest scans, and the list that shows it. */
+function Compact({
+  local,
+  refreshKey,
+  onOpenAll,
+}: {
+  local: LocalExecutor;
+  refreshKey: unknown;
+  onOpenAll: () => void;
+}) {
+  const read = useScanHistory(local, PAIRING, SHIFT, COMPACT_ROWS, 0, refreshKey, true);
+  return <ScanHistory read={read} onOpenAll={onOpenAll} />;
+}
 
 const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
 const SHIFT = "bbbbbbbb-0000-4000-8000-000000000001";
@@ -107,41 +128,56 @@ describe("the shift's scan history, from this station's own scans", () => {
     const local = history(SEEDS);
     render(
       <ThemeProvider>
-        <ScanHistory
-          local={local}
-          pairing={PAIRING}
-          shiftId={SHIFT}
-          refreshKey={0}
-          onOpenAll={() => undefined}
-        />
+        <Compact local={local} refreshKey={0} onOpenAll={() => undefined} />
       </ThemeProvider>,
     );
-    const list = await screen.findByRole("list", { name: "История сканирования" });
+    const list = await screen.findByRole("list", { name: "История сканирований" });
     const items = within(list).getAllByRole("listitem");
-    // The newest four: the compact list is not the whole history.
-    expect(items).toHaveLength(4);
+    // The shift's five scans, newest first (the other shift's is not here).
+    expect(items).toHaveLength(5);
     expect(items[0]?.textContent).toContain("Не код");
     expect(items[1]?.textContent).toContain("Другой товар");
     expect(items[2]?.textContent).toContain("Дубль");
-    expect(items[2]?.textContent).toContain("уже принят на другой станции");
-    expect(items[3]?.textContent).toContain("Принят");
-    expect(items[3]?.textContent).toContain("№ 2");
-    expect(items[3]?.textContent).toContain("Анна Кузнецова");
+    // A row is its time, its result chip and its code: the reason, operator and place are
+    // said to a screen reader, and the full history shows them as columns.
+    expect(items[2]?.getAttribute("aria-label")).toContain("уже принят на другой станции");
+    expect(items[4]?.textContent).toContain("Принят");
+    expect(items[4]?.getAttribute("aria-label")).toContain("№ 1");
+    expect(items[3]?.getAttribute("aria-label")).toContain("Анна Кузнецова");
+    expect(items[3]?.textContent).toContain("…0002");
     expect(list.textContent).not.toContain("AAAA0002");
-    expect(list.textContent).toContain("…0002");
+  });
+
+  it("is one list of at most eight rows with its «Вся история» button", async () => {
+    const seeds: Seed[] = Array.from({ length: 11 }, (_, index) => ({
+      id: `m${index}`,
+      at: `2026-10-15T06:01:${String(index).padStart(2, "0")}.000Z`,
+      verdict: "ok",
+      serial: `BBBB${String(index).padStart(4, "0")}`,
+    }));
+    const local = history(seeds);
+    render(
+      <ThemeProvider>
+        <Compact local={local} refreshKey={0} onOpenAll={() => undefined} />
+      </ThemeProvider>,
+    );
+    const list = await screen.findByRole("list", { name: "История сканирований" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(8);
+    expect(document.querySelectorAll(".scan-history--compact")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Вся история" })).toHaveLength(1);
+    expect(
+      screen.getByText("Показаны последние записи. Полный список — «Вся история»."),
+    ).toBeTruthy();
+    // The newest first, and the list is a keyboard-reachable scroll region.
+    expect(within(list).getAllByRole("listitem")[0]?.textContent).toContain("…0010");
+    expect(list.getAttribute("tabindex")).toBe("0");
   });
 
   it("reads again when the work screen says a scan was made", async () => {
     const local = history(SEEDS.slice(0, 2));
     const view = render(
       <ThemeProvider>
-        <ScanHistory
-          local={local}
-          pairing={PAIRING}
-          shiftId={SHIFT}
-          refreshKey={0}
-          onOpenAll={() => undefined}
-        />
+        <Compact local={local} refreshKey={0} onOpenAll={() => undefined} />
       </ThemeProvider>,
     );
     await screen.findAllByRole("listitem");
@@ -154,13 +190,7 @@ describe("the shift's scan history, from this station's own scans", () => {
     ]);
     view.rerender(
       <ThemeProvider>
-        <ScanHistory
-          local={local}
-          pairing={PAIRING}
-          shiftId={SHIFT}
-          refreshKey={1}
-          onOpenAll={() => undefined}
-        />
+        <Compact local={local} refreshKey={1} onOpenAll={() => undefined} />
       </ThemeProvider>,
     );
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
@@ -171,10 +201,8 @@ describe("the shift's scan history, from this station's own scans", () => {
     let opened = 0;
     render(
       <ThemeProvider>
-        <ScanHistory
+        <Compact
           local={local}
-          pairing={PAIRING}
-          shiftId={SHIFT}
           refreshKey={0}
           onOpenAll={() => {
             opened += 1;

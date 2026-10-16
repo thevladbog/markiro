@@ -12,7 +12,27 @@
   justify-self: stretch;
 }
 
+/*
+ * The frame is `min-height: 100dvh`, so a taller screen would grow the page and scroll it. The work
+ * screen is a fixed-height grid: the frame is the window's height, the window never scrolls, and
+ * whatever cannot fit scrolls inside its own region (the history list).
+ */
+.standalone-screen:has(> .floor-frame > .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.floor-frame:has(> .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .work-screen {
+  /* The 84 px action row and the gap under it. */
+  --work-footer-h: calc(var(--control-floor-primary) + var(--sp-3));
+
   position: relative;
   display: grid;
   width: 100%;
@@ -20,7 +40,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: minmax(0, 1fr) 72px;
+  grid-template-rows: minmax(0, 1fr) var(--work-footer-h);
   background: var(--surface-page);
   color: var(--fg-1);
 }
@@ -35,9 +55,11 @@
   min-height: 0;
 }
 
+/* No page scroll at 1280x800 or 1280x1024: the content fills its row and clips; a region that
+   cannot fit scrolls inside itself (the history list), never the screen. */
 .work-screen__content {
-  padding: var(--sp-3);
-  overflow: auto;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  overflow: hidden;
 }
 
 .work-screen__work {
@@ -53,7 +75,9 @@
   width: 100%;
   height: 100%;
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  /* The one row is the region's height, never its content's: a long list scrolls inside. */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .work-screen__primary,
@@ -70,14 +94,55 @@
 
 /* The last scan takes the flexible row; the shift's figures their content height. */
 .work-screen__secondary {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* A box shift: the last scan and the figures take their content height, the history the rest. */
+.work-screen__instruments[data-layout="box"] > .work-screen__secondary {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/* A validation shift: one card holds the last scan and, under it, the duplicate's steps. */
+.work-screen__instruments[data-layout="validation"] > .work-screen__primary {
+  padding: var(--sp-4);
+  gap: var(--sp-3);
   grid-template-rows: minmax(0, 1fr) auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+}
+
+.work-screen__instruments[data-layout="validation"] > .work-screen__primary > .work-instrument {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.work-screen__hint {
+  margin: 0;
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+/* Words for a screen reader only. */
+.work-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .work-instrument {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--r-3);
-  background: var(--surface-card);
+  border-radius: var(--r-card);
+  background: var(--surface);
 }
 
 /*
@@ -91,39 +156,41 @@
   overflow: hidden;
   padding: var(--sp-3) var(--sp-4);
   gap: var(--sp-4);
-  grid-template-columns: auto minmax(0, 1fr) minmax(240px, 320px);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  border-radius: var(--r-3);
+  border-radius: var(--r-card);
   background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
   border: 1px solid var(--brandline);
 }
 
-/* The product's photo, whole, in the band's first column (beta 3.2). */
+/* The product's photo as one rounded frame, fitted whole (never cropped). */
 .work-shift-band__photo {
   display: grid;
-  min-width: clamp(60px, 6.5vw, 120px);
-  max-height: 120px;
+  width: 104px;
+  height: 104px;
+  overflow: hidden;
   place-items: center;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
 }
 
 .work-shift-band__photo .product-photo {
-  max-width: clamp(80px, 9vw, 150px);
-  max-height: 112px;
-  border-radius: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
   object-fit: contain;
 }
 
 /* The photo slot's stand-in: the product has no photo on this station. */
 .work-shift-band__monogram {
   display: grid;
-  width: clamp(60px, 6.5vw, 120px);
-  aspect-ratio: 3 / 4;
+  width: 100%;
+  height: 100%;
   place-items: center;
-  border: 2px solid var(--line2);
-  border-radius: 10px;
-  background: var(--panel);
   color: var(--muted);
-  font: 700 clamp(28px, 2.6vw, 48px) / 1 var(--font-ui);
+  font: 700 44px/1 var(--font-ui);
 }
 
 .work-shift-band__copy {
@@ -137,7 +204,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--fg);
-  font: 700 clamp(19px, 1.8vw, 34px) / 1.2 var(--font-ui);
+  font: var(--floor-lg);
   letter-spacing: -0.01em;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -146,20 +213,27 @@
 .work-shift-band__chips {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
+/* One row of chips: the counterparty's, last, is the one that shrinks (its full name is the title). */
 .work-shift-band__chip {
   overflow: hidden;
+  flex: none;
   max-width: 100%;
-  padding: 5px 12px;
-  border-radius: 999px;
+  padding: 5px 14px;
+  border-radius: var(--r-round);
   background: color-mix(in srgb, var(--fg) 10%, transparent);
   color: var(--fg);
-  font: 600 14px/1.2 var(--font-ui);
+  font: 600 16px/22px var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.work-shift-band__chip[title] {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .work-shift-band__chip--mono {
@@ -167,66 +241,89 @@
   font-weight: 400;
 }
 
-/* «Принято в смене», the count and «/ план» on one baseline, the bar and the meta under them. */
-.work-shift-band__total {
-  display: grid;
+/* The counters: the one accepted count, large, and the refused ones small beside it. */
+.work-shift-band__counters {
+  display: flex;
   min-width: 0;
-  padding-left: var(--sp-4);
-  gap: 6px var(--sp-2);
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  border-left: 1px solid var(--brandline);
+  gap: var(--sp-2);
+  align-items: stretch;
   font-variant-numeric: tabular-nums;
 }
 
-.work-shift-band__label,
-.work-shift-band__bar,
-.work-shift-band__meta {
-  grid-column: 1 / -1;
+.work-shift-band__total,
+.work-shift-band__small {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  justify-items: center;
+  border-radius: var(--r-ctl);
+  text-align: center;
 }
 
-.work-shift-band__label,
-.work-shift-band__meta {
-  margin: 0;
-  overflow: hidden;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.work-shift-band__total {
+  min-width: 188px;
+  padding: var(--sp-2) var(--sp-4);
+  gap: 2px;
+  border: 1px solid var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.work-shift-band__small {
+  min-width: 84px;
+  padding: var(--sp-2);
+  gap: 2px;
+  border: 1px solid var(--line2);
+  background: transparent;
 }
 
 .work-shift-band__label {
-  font: 600 14px/18px var(--font-ui);
+  margin: 0;
+  color: var(--muted);
+  font: 700 13px/18px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.work-shift-band__meta {
-  font: 500 13px/17px var(--font-ui);
+.work-shift-band__total .work-shift-band__label {
+  color: var(--ok-fg);
 }
 
 .work-shift-band__count {
   margin: 0;
-  color: var(--fg);
-  font: 600 clamp(34px, 3vw, 56px) / 1 var(--font-mono);
+  font: 600 56px/1 var(--font-mono);
 }
 
-.work-shift-band__planned {
-  overflow: hidden;
-  color: var(--muted);
-  font: 500 clamp(20px, 1.6vw, 30px) / 1.1 var(--font-mono);
-  text-overflow: ellipsis;
+.work-shift-band__small-count {
+  margin: 0;
+  color: var(--fg);
+  font: 600 36px/1 var(--font-mono);
+}
+
+.work-shift-band__planned,
+.work-shift-band__meta {
+  margin: 0;
+  font: 500 14px/18px var(--font-mono);
   white-space: nowrap;
 }
 
+.work-shift-band__meta {
+  font-family: var(--font-ui);
+}
+
 .work-shift-band__bar {
+  width: 100%;
   height: 6px;
   overflow: hidden;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--fg) 15%, transparent);
+  background: color-mix(in srgb, var(--ok-fg) 20%, transparent);
 }
 
 .work-shift-band__bar > span {
   display: block;
   height: 100%;
-  background: var(--ok-solid);
+  background: var(--ok-fg);
 }
 
 /* The open box: its title and count in one row, the places as cells, its action under them. */
@@ -384,7 +481,7 @@
   white-space: normal;
 }
 
-/* The last scan: the verdict on its tone, large enough to read from the line. */
+/* The last scan: the verdict as one large word on its tone, readable from the line. */
 .work-scan-result {
   display: grid;
   padding: var(--sp-3);
@@ -392,28 +489,75 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.work-scan-result__head {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
 .work-scan-result h2,
-.work-facts h2 {
+.work-facts h2,
+.work-unit-label h2 {
   margin: 0;
-  font: var(--floor-lg);
+  font: var(--floor-body-strong);
+}
+
+.work-scan-result__time {
+  color: var(--muted);
+  font: 500 18px/26px var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .work-scan-result .work-screen__last {
   display: grid;
   min-width: 0;
-  min-height: 96px;
+  min-height: 0;
   margin: 0;
   padding: var(--sp-3);
   overflow: hidden;
   align-content: center;
   justify-items: center;
-  border-radius: var(--r-2);
-  background: var(--surface-panel);
-  color: var(--fg-2);
-  font: 700 clamp(22px, 1.9vw, 34px) / 1.2 var(--font-ui);
-  overflow-wrap: anywhere;
+  gap: var(--sp-1);
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  color: var(--muted);
   text-align: center;
   box-shadow: none;
+}
+
+.work-scan-hero__word {
+  display: flex;
+  margin: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  font: 700 clamp(40px, 5vw, 60px) / 1.05 var(--font-ui);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.work-scan-hero__icon {
+  flex: none;
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.work-scan-hero__code {
+  margin: 0;
+  overflow: hidden;
+  max-width: 100%;
+  font: 500 28px/34px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-scan-hero__detail {
+  margin: 0;
+  max-width: 100%;
+  font: var(--floor-body);
+  overflow-wrap: anywhere;
 }
 
 .work-scan-result .work-screen__last[data-verdict="ok"] {
@@ -421,26 +565,57 @@
   color: var(--ok-fg);
 }
 
-.work-scan-result .work-screen__last[data-verdict="error"] {
-  background: var(--err-bg);
-  color: var(--err-fg);
-}
-
+.work-scan-result .work-screen__last[data-verdict="duplicate"],
 .work-scan-result .work-screen__last[data-verdict="warn"] {
   background: var(--warn-bg);
   color: var(--warn-fg);
 }
 
+.work-scan-result .work-screen__last[data-verdict="error"] {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
 /* An accepted scan lights the verdict for a moment (no overlay at the line's cadence). */
 .work-scan-result .work-screen__last--cue {
-  outline: 4px solid var(--ok-border);
+  outline: 4px solid var(--ok-solid);
   outline-offset: -4px;
 }
 
-/* The shift's figures, in the cloud journal's quality row style. */
+/* A box shift's hero sits above the history in the narrow column: word and code on one row. */
+.work-screen__instruments[data-layout="box"] .work-scan-result {
+  grid-template-rows: auto auto;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.work-screen__instruments[data-layout="box"] .work-screen__last {
+  display: flex;
+  padding: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  gap: 0 var(--sp-4);
+  align-items: center;
+  justify-content: center;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__word {
+  font-size: 36px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__code {
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__detail {
+  flex-basis: 100%;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+/* The shift's figures of a box shift, in the cloud journal's quality row style. */
 .work-facts {
   display: grid;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   gap: var(--sp-2);
 }
 
@@ -454,17 +629,17 @@
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  min-height: 44px;
+  min-height: 40px;
   padding-inline: var(--sp-2);
   gap: var(--sp-3);
   align-items: center;
   justify-content: space-between;
-  border-left: 4px solid var(--line-strong);
-  background: var(--surface-panel);
+  border-left: 4px solid var(--linectl);
+  background: var(--panel);
 }
 
 .work-facts dt {
-  color: var(--fg-2);
+  color: var(--muted);
   font: var(--floor-body);
 }
 
@@ -478,193 +653,36 @@
   text-align: right;
 }
 
-/*
- * A validation shift's panel where the box stands (plan РЕЖ): the accepted codes against the
- * plan, the refused ones by kind in the figures' row style, and the last outcomes in words on
- * their tone, the newest on top.
- */
-.work-validation {
-  display: grid;
-  /* The head, the figures and one outcome stay readable on the smallest screen. */
-  min-height: 320px;
-  padding: var(--sp-3);
-  gap: var(--sp-2);
-  /* Only the list of outcomes scrolls: its row takes what the rest leaves, never more. */
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
-}
-
-/* The panel's head, as the box's: its name, then the count on its baseline. */
-.work-validation__head {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: var(--sp-1) var(--sp-3);
-  align-items: baseline;
-}
-
-.work-validation__head h2 {
-  flex: 0 0 auto;
-  margin: 0;
-  font: var(--floor-lg);
-}
-
-/* «Принято 12 из плана 1 200»: the numbers in the counter's face, the words in the interface's. */
-.work-validation__count {
-  font: var(--floor-body);
-  font-variant-numeric: tabular-nums;
-}
-
-.work-validation__count .work-of-count__number {
-  font: var(--floor-counter-sm);
-}
-
-.work-validation__count .work-of-count__word {
-  color: var(--fg-2);
-}
-
-.work-validation__hint,
-.work-validation__empty {
-  margin: 0;
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
-
-.work-validation__figures {
-  display: grid;
-  margin: 0;
-  gap: var(--sp-2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.work-validation__figures > div {
-  display: flex;
-  min-width: 0;
-  min-height: 56px;
-  padding-inline: var(--sp-3);
-  gap: var(--sp-3);
-  align-items: center;
-  justify-content: space-between;
-  border-radius: var(--r-2);
-  background: var(--surface-panel);
-}
-
-.work-validation__figures dt {
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
-
-.work-validation__figures dd {
-  margin: 0;
-  font: var(--floor-lg);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.work-validation h3 {
-  margin: var(--sp-1) 0 0;
-  font: var(--floor-lg);
-}
-
-.work-validation__recent {
-  display: grid;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  gap: var(--sp-1);
-  align-content: start;
-  border-radius: var(--r-2);
-  list-style: none;
-  /*
-   * Sized by its row alone: its items never make the panel (and the screen) taller, so a long
-   * list scrolls here and the rest of the panel stays in view.
-   */
-  contain: size;
-}
-
-/* A scroll region on the keyboard: its focus is seen. */
-.work-validation__recent:focus-visible {
-  outline: var(--focus-ring-w) solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.work-validation__recent > li {
-  display: flex;
-  min-width: 0;
-  min-height: 44px;
-  padding: var(--sp-1) var(--sp-3);
-  gap: var(--sp-3);
-  align-items: center;
-  border-radius: var(--r-2);
-  background: var(--surface-panel);
-  font: var(--floor-body);
-}
-
-.work-validation__recent > li[data-verdict="ok"] {
-  background: var(--ok-bg);
-  color: var(--ok-fg);
-}
-
-.work-validation__recent > li[data-verdict="error"] {
-  background: var(--err-bg);
-  color: var(--err-fg);
-}
-
-.work-validation__time {
-  flex: 0 0 auto;
-  font: var(--floor-body);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.work-validation__word {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* The fixed floor action row: never a scroll region, never the screen's content. */
+/* The fixed floor action row: 84 px actions, never a scroll region, never the content. */
 .work-screen .station-floor-footer {
-  display: flex;
-  height: 72px;
-  min-height: 72px;
-  padding: var(--sp-1) var(--sp-4);
-  gap: var(--sp-3);
-  align-items: center;
-  justify-content: space-between;
-  border-top: 1px solid var(--line);
-  background: var(--surface-panel);
-}
-
-.work-screen .station-floor-footer.work-footer {
   display: grid;
+  height: var(--work-footer-h);
+  min-height: var(--work-footer-h);
+  padding: 0 var(--sp-3) var(--sp-3);
+  box-sizing: border-box;
+  gap: var(--sp-3);
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  justify-content: normal;
+  align-items: stretch;
+  border-top: 0;
+  background: transparent;
 }
 
-.work-footer__action:nth-child(1) {
-  justify-self: start;
-}
-
-.work-footer__action:nth-child(2) {
-  justify-self: center;
-}
-
-.work-footer__action:nth-child(3) {
-  justify-self: end;
+.work-footer__action.mk-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 /*
- * A validation shift has no exceptions: its two actions keep the columns they have in an
- * aggregation shift (the operators' habit), the leave in the middle, the close on the right.
+ * A validation shift without labels has no «История этикеток»: its two actions keep the columns
+ * they have elsewhere (the operators' habit), the leave in the middle, the close on the right.
  */
 .work-footer--two .work-footer__action:nth-child(1) {
   grid-column: 2;
-  justify-self: center;
 }
 
 .work-footer--two .work-footer__action:nth-child(2) {
   grid-column: 3;
-  justify-self: end;
 }
 
 /*
@@ -677,7 +695,7 @@
   position: absolute;
   z-index: 3;
   display: grid;
-  inset: 0 0 72px;
+  inset: 0 0 var(--work-footer-h);
   padding: var(--sp-3);
   overflow: hidden;
   gap: var(--sp-3);
@@ -773,7 +791,7 @@
 .work-screen .work-screen__leaving {
   position: absolute;
   right: var(--sp-4);
-  bottom: 84px;
+  bottom: calc(var(--work-footer-h) + var(--sp-1));
   z-index: 4;
   margin: 0;
   color: var(--fg-2);
@@ -785,41 +803,22 @@
   pointer-events: none;
 }
 
-@media (max-width: 1100px), (max-height: 767px) {
+@media (max-height: 880px) {
   .work-shift-band {
     padding: var(--sp-2) var(--sp-3);
-    gap: var(--sp-3);
-    grid-template-columns: auto minmax(0, 1fr) minmax(220px, 280px);
   }
 
-  .work-shift-band__monogram {
-    width: 60px;
-  }
-
-  .work-shift-band__copy h2 {
-    font: 700 19px/23px var(--font-ui);
-  }
-
-  .work-shift-band__chip {
-    padding: 4px 10px;
-    font-size: 13px;
+  .work-shift-band__photo {
+    width: 88px;
+    height: 88px;
   }
 
   .work-shift-band__count {
-    font: 600 34px/1 var(--font-mono);
+    font-size: 48px;
   }
 
-  .work-shift-band__planned {
-    font: 500 20px/1.1 var(--font-mono);
-  }
-
-  .work-box-fill__count .work-of-count__number {
-    font: 600 40px/44px var(--font-mono);
-  }
-
-  .work-scan-result .work-screen__last {
-    min-height: 72px;
-    font: var(--floor-lg);
+  .work-shift-band__small-count {
+    font-size: 32px;
   }
 }
 

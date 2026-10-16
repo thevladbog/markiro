@@ -78,6 +78,7 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
         counterpartyName={null}
         accepted={0}
         plannedQty={null}
+        modeLabel="Проверка"
         local={executor}
         productId={id(last)}
       />,
@@ -99,7 +100,7 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
     await waitFor(() => expect(panel.container.querySelector("img.product-photo")).not.toBeNull());
   });
 
-  it("a product without a photo keeps the monogram and the GTIN's hue", async () => {
+  it("a product without a photo keeps the monogram; the band takes no per-product colour (kit)", async () => {
     const { executor } = openLocalDb();
     const view = render(
       <ShiftBand
@@ -109,6 +110,7 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
         counterpartyName={null}
         accepted={0}
         plannedQty={null}
+        modeLabel="Проверка"
         local={executor}
         productId={id(1)}
       />,
@@ -118,8 +120,9 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
     );
     expect(view.container.querySelector("img")).toBeNull();
     const band = view.container.querySelector<HTMLElement>(".work-shift-band");
-    expect(band?.style.getPropertyValue("--product-hue")).toMatch(/^\d+$/);
-    expect(band?.style.getPropertyValue("--product-sat")).toBe("");
+    // The one brand gradient paints the band for every product (kit step C): no hue variable.
+    expect(band?.style.getPropertyValue("--product-hue")).toBe("");
+    expect(band?.getAttribute("data-accent")).toBeNull();
   });
 });
 

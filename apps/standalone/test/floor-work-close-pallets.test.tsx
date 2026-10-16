@@ -486,7 +486,9 @@ describe("what the summary and the press say of the open pallet", () => {
     await work.settled();
     expect(await screen.findByText(CLOSED)).toBeTruthy();
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes")[0]?.["n"]).toBe(2);
-    expect(document.querySelector(".work-screen__last")?.textContent).toBe(REFUSED);
+    expect(document.querySelector(".work-screen__last .work-scan-hero__detail")?.textContent).toBe(
+      REFUSED,
+    );
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed", "shift_closed"]);
   });
 

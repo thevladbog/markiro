@@ -171,7 +171,15 @@ export function renderWork(
 
 /** The last scan, as the screen says it. */
 export function lastLine(): string | null {
-  return document.querySelector(".work-screen__last")?.textContent ?? null;
+  const last = document.querySelector(".work-screen__last");
+  if (last === null) return null;
+  // The words beyond the status word: empty when the word says it all.
+  return last.querySelector(".work-scan-hero__detail")?.textContent ?? "";
+}
+
+/** The hero's large status word of the last scan («Принят», «Дубль», «Ошибка»). */
+export function lastWord(): string | null {
+  return document.querySelector(".work-scan-hero__word")?.textContent ?? null;
 }
 
 /** The open box's count, as the screen shows it beside «Открытый короб» («2 из 12»). */

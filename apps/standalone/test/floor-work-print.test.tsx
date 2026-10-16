@@ -168,7 +168,7 @@ async function fillBox(screenWork: ReturnType<typeof work>, prefix = "P"): Promi
 }
 
 function lastLine(): string | null {
-  return document.querySelector(".work-screen__last")?.textContent ?? null;
+  return document.querySelector(".work-screen__last .work-scan-hero__detail")?.textContent ?? "";
 }
 
 function scans(at: Station): unknown {
