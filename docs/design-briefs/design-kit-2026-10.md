@@ -312,3 +312,69 @@ Legibility checks: keypad keys now sit on `surface`, so they keep a `panel` face
 hairline (dark: `panel` #232228 on `surface` #1C1B21 is a quiet step, the hairline carries
 the key boundary); the photo on the brand card keeps its own 1 px `line` border so the
 neutral photo background does not merge with the rose/dark gradient.
+
+## 12. Накатка кита · шаг A (станция: основа)
+
+Done on branch `claude/kit-station-foundation` (nothing pushed). Foundation only; the
+individual floor screens (new shift, work screen, hub cards, close, warehouse, setup) are
+restyled by the next steps.
+
+What was done:
+
+- `packages/ui/src/tokens.css`, additive: `--muted2 --line2 --linectl --accentui --onerr
+--brand1..3 --brandline` with the kit §1 light and dark values; kit-named aliases of the
+  existing semantic tokens (`--bg --surface --panel --fg --muted --dis --ok/okbg --warn/warnbg
+--err/errbg --info/infobg --done/donebg --focus --violet.. --steel..`), declared in both theme
+  blocks; `--r-sm 12 --r-ctl 20 --r-card 24`; `--shadow-overlay`; `--control-floor-primary 84`;
+  `--press-scale 0.97 --press-ms 150ms --ease`. No existing name changed; `--panel` is now
+  theme-aware (it was light-only, and unused). Other apps and the cloud station do not change.
+- `packages/ui/test/contrast.test.ts`: WCAG ratios computed from the values in `tokens.css`
+  for both themes (every §1.1 pair; text 4.5, UI 3, incl. `accentui`, `linectl`); the known
+  failures (`line2`, `dis`) are asserted as exclusions. `PinPad` gets a `mk-pinpad` /
+  `mk-pinpad--floor` class (no visual change outside the standalone floor).
+- `apps/standalone/src/floor/floor-kit.css` (new, imported last by `main.tsx`): floor type scale
+  (title 32, heading 24, body-strong 20, body 18; counters unchanged), radii (controls 22, primary
+  24, cards 24), press feedback (scale 0.97 / 150 ms; under reduced motion no scale and the press
+  shows as a fill), 3 px focus ring with a 2 px gap, buttons (secondary `line2`, danger solid
+  `err` + `onerr`, disabled `panel` + `dis`, selected `[aria-pressed=true]` = `fg` fill + check),
+  opt-in `floor-primary` class (84 px), `floor-segmented` and `floor-switch` primitives, flat L1
+  card, fields (`linectl` border, 2 px `err` error, `panel` disabled), round floor tags, Alert
+  (glyph on the first text line, 14 px gap to the action, floor type), flat keypad (`panel` faces +
+  hairline, 72 px and up). All rules sit under `:where(.floor-frame, .station-screen)`; the office
+  and `.standalone-screen` pre-floor screens are untouched.
+- Themes: `index.html` no longer forces `data-theme="dark"`; `public/theme-init.js` (external, so
+  the Tauri CSP `script-src 'self'` needs no exception) sets `data-theme` from `markiro.theme` or
+  the OS before first paint; `ThemeProvider` (default `system`) takes over. `StationBrand` follows
+  the theme (it was invisible on light).
+- Hard-coded colours removed from the floor: product-card gradients `#2c2b31 #1d1c21 #141317` and
+  the `hsl(var(--product-hue)…)` per-product gradients (work band, hub card photo) -> `brand1..3`
+  - `brandline` (the per-product hue no longer paints the card; `useProductAccent` and the
+    `data-accent` attribute stay for later use); `#fff` and `rgb(255 255 255 / n%)` text and tints on
+    the band -> `fg`, `muted`, `color-mix(fg …)`; filled box cell label `#fff` -> `fg-on-ok-solid`
+    (white on `ok-solid` was 2.7:1 on light); `rgb(250 250 248 / 70%)` monograms -> `muted`;
+    `hsl(… 14%)` photo tile -> `panel` + hairline; overlay shadows (`0 16px 48px …`, `0 18px 48px …`,
+    `0 12px 32px …`) -> `--shadow-overlay`; photo shadows (box-shadow, drop-shadow) dropped.
+- Kept on purpose, named as a literal-colour block in `floor-kit.css` `:root`: the physical sheet
+  and its ink (`--floor-paper #fff`, `--floor-paper-ink`, `--floor-scan-ink`, `--floor-paper-ok/warn/err`)
+  used by the label previews and the scanner self-test symbol (a scanner reads dark on white in
+  either theme). A Vitest guard fails on any other literal colour in `src/floor/**/*.css`.
+
+Deviations and notes for the next steps:
+
+- Button, Input, Alert and PinPad style themselves inline, so the floor overrides use
+  `!important` on exactly those properties until step 2 moves them to classes.
+- The 84 px primary is opt-in (`className="floor-primary"`): the screens' footers are 72 px and a
+  blanket 84 would break their no-scroll layouts. The NewShift/work-screen steps must give the
+  footer 84 px and add the class.
+- Radii: task text says 20–24; kit §4 says r28 for the 84 button. Used 22 / 24.
+- Floor tag font 16 px (was 15); the kit's 18 px minimum would need wider tags on the hub card.
+- Not wired into any screen: `floor-segmented`, `floor-switch` (the new shift's mode and pallet
+  switch still use aria-pressed buttons, which get the selected look generically), the keypad
+  panel shell (keys only; no outer panel added), and the readout's active 2 px `fg` border.
+- Screens still carry their own old layout (hub card 2-column, new shift single column in the
+  harness shots); the approved frames are for the next executors.
+- Verified: Vitest (ui 327, standalone 7382 + admin 1703, kiosk 673, station 2247, saas-admin 644,
+  signer 49), tsc in all of them, eslint in ui and standalone, `deploy/production` contract tests
+  (580). The `tools/production-browser` station specs target the cloud station and do not load the
+  standalone floor; they were not run. Not verified: Windows/WebView2 (`:has()`, `color-mix`,
+  `content: "✓" / ""`), the Tauri CSP with `theme-init.js`, a real kiosk-mode session, hardware.
