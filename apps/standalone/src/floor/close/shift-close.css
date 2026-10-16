@@ -14,7 +14,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   background: var(--surface-card);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-overlay);
 }
 
 /* The focus lands on the card by code (each change of view), not by Tab. */

@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@markiro/ui";
 
 import { App } from "./app/App.js";
+import "./floor/floor-kit.css";
 
 const container = document.getElementById("root");
 if (!container) {

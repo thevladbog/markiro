@@ -1,0 +1,269 @@
+/*
+ * Design kit 2026-10 on the standalone floor (step A: foundation).
+ * docs/design-briefs/design-kit-2026-10.md §1–§6, «Накатка кита · шаг A».
+ *
+ * Scope: only `.floor-frame` and `.station-screen`; the office and the cloud
+ * station (apps/station) never load this file. Shared @markiro/ui components
+ * (Button, Input, Alert, PinPad) style themselves inline, so the few
+ * properties they set inline are overridden here with `!important`, until
+ * those components move to classes (kit adoption step 2). The scope is wrapped
+ * in `:where()` so a screen's own, more specific rule still wins on the rest.
+ *
+ * Colour comes from @markiro/ui tokens and follows the global theme
+ * (`data-theme` on <html>: light, dark, or the OS via «Системная»).
+ */
+
+/* The only literal colours of the floor: a physical sheet and the ink on it
+   (a label preview, a scanner's test symbol). They stay the same in both
+   themes on purpose: a scanner reads dark on white, and a label is paper. */
+:root {
+  --floor-paper: #ffffff;
+  --floor-paper-ink: #17161a;
+  --floor-scan-ink: #000000;
+  --floor-paper-ok: #116335;
+  --floor-paper-warn: #8a4c07;
+  --floor-paper-err: #a1231a;
+}
+
+/* ---- Floor tokens: the kit's type scale, radii and press feedback. ---- */
+
+:where(.floor-frame, .station-screen) {
+  --floor-title: 700 32px/38px var(--font-ui);
+  --floor-lg: 600 24px/30px var(--font-ui);
+  --floor-body-strong: 600 20px/28px var(--font-ui);
+  --floor-body: 400 18px/26px var(--font-ui);
+  --floor-r-ctl: 22px; /* 64 px controls */
+  --floor-r-primary: 24px; /* 84 px primary action */
+  --floor-r-card: var(--r-card);
+}
+
+/* ---- Focus: a 3 px ring outside the control, 2 px gap, on every interactive element. ---- */
+
+:where(.floor-frame, .station-screen)
+  :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---- Buttons: secondary by default, `fg` fill for the primary, solid `err` for danger. ---- */
+
+:where(.floor-frame, .station-screen) .mk-btn--floor {
+  border-radius: var(--floor-r-ctl) !important;
+  font-size: 20px !important;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-btn--floor.mk-btn--secondary {
+  border-color: var(--line2) !important;
+}
+
+/* Danger: solid `err` with the `onerr` label (7.58 / 5.64). */
+:where(.floor-frame, .station-screen) .mk-btn--floor.mk-btn--destructive {
+  border-color: var(--err) !important;
+  background: var(--err) !important;
+  color: var(--onerr) !important;
+}
+
+/* The one primary action of a screen: 84 px, opt in with the `floor-primary` class. */
+:where(.floor-frame, .station-screen) .mk-btn--floor.floor-primary {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
+}
+
+/* Disabled: a `panel` face and the `dis` label; a loading button keeps its fill. */
+:where(.floor-frame, .station-screen) .mk-btn--floor:disabled:not(:has(.mk-spin)) {
+  border-color: var(--line) !important;
+  background: var(--panel) !important;
+  color: var(--dis) !important;
+  opacity: 1 !important;
+}
+
+/* Press: scale 0.97 in 150 ms. */
+:where(.floor-frame, .station-screen) .mk-btn--floor:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+/* ---- Selected = `fg` fill plus a check plus weight 600 (never colour alone). ---- */
+
+:where(.floor-frame, .station-screen) .mk-btn--floor[aria-pressed="true"] {
+  border-color: var(--fg) !important;
+  background: var(--fg) !important;
+  color: var(--bg) !important;
+  font-weight: 600;
+}
+
+:where(.floor-frame, .station-screen) .mk-btn--floor[aria-pressed="true"]::before {
+  content: "✓" / "";
+  margin-inline-end: 8px;
+}
+
+/* Segmented control: a `panel` track (functional inset), segments inside it. */
+:where(.floor-frame, .station-screen) .floor-segmented {
+  display: flex;
+  padding: 6px;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--floor-r-ctl) + 6px);
+  background: var(--panel);
+}
+
+:where(.floor-frame, .station-screen) .floor-segmented > .mk-btn {
+  flex: 1 1 0;
+}
+
+:where(.floor-frame, .station-screen) .floor-segmented > .mk-btn:not([aria-pressed="true"]) {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+}
+
+/* Switch (56x32): a track and a knob; on shows a check inside the knob. */
+:where(.floor-frame, .station-screen) .floor-switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 56px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--linectl);
+  border-radius: var(--r-round);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+:where(.floor-frame, .station-screen) .floor-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--muted2);
+  color: var(--fg);
+  font: 700 16px/24px var(--font-ui);
+  transition: transform var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch[aria-checked="true"] {
+  border-color: var(--fg);
+  background: var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-switch[aria-checked="true"]::after {
+  content: "✓" / "";
+  background: var(--bg);
+  color: var(--fg);
+  transform: translateX(24px);
+}
+
+/* ---- L1 card: `surface`, a 1 px hairline, radius 24, no shadow, no shell. ---- */
+
+:where(.floor-frame, .station-screen) .mk-card {
+  border-radius: var(--floor-r-card) !important;
+  box-shadow: none !important;
+}
+
+/* ---- Fields: the border carries 3:1 (`linectl`), error is a 2 px `err` border. ---- */
+
+:where(.floor-frame, .station-screen) .mk-input {
+  border-color: var(--linectl) !important;
+  border-radius: var(--floor-r-ctl) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-input:focus-within {
+  border-color: var(--fg) !important;
+  box-shadow: none !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-input--error {
+  border: 2px solid var(--err) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-input:has(:disabled) {
+  background: var(--panel) !important;
+  color: var(--dis);
+  opacity: 1 !important;
+}
+
+:where(.floor-frame, .station-screen) .operator-login__readout {
+  border-color: var(--linectl);
+  border-radius: var(--floor-r-ctl);
+}
+
+/* ---- Chips and tags: round, floor size, glyph and label together. ---- */
+
+:where(.floor-frame, .station-screen) .mk-tag--floor {
+  border-radius: var(--r-round);
+  font-size: 16px;
+}
+
+/* ---- Alert: the glyph on the first text line, the action beside it with a gap. ---- */
+
+:where(.floor-frame, .station-screen) .mk-alert {
+  gap: 14px !important;
+  padding: 16px 20px !important;
+  border-radius: var(--r-ctl) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-alert > span[aria-hidden="true"]:first-child {
+  margin-top: 0 !important;
+  width: 24px;
+  font: 600 20px/28px var(--font-ui) !important;
+  text-align: center;
+}
+
+:where(.floor-frame, .station-screen) .mk-alert > div:first-of-type > span:first-child {
+  font: var(--floor-body-strong) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-alert > div:first-of-type > div {
+  font: var(--floor-body) !important;
+}
+
+/* ---- Numeric keypad: keys with `panel` faces and a hairline, 72 px and up. ---- */
+
+:where(.floor-frame, .station-screen) .mk-pinpad--floor > .mk-btn {
+  min-width: 72px !important;
+  min-height: 72px !important;
+  border: 1px solid var(--line2) !important;
+  border-radius: var(--floor-r-ctl) !important;
+  background: var(--panel) !important;
+  color: var(--fg) !important;
+  font: 500 32px/1 var(--font-mono) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-pinpad--floor > .mk-btn:nth-child(10),
+:where(.floor-frame, .station-screen) .mk-pinpad--floor > .mk-btn:nth-child(12) {
+  font: 600 18px/1 var(--font-ui) !important;
+}
+
+:where(.floor-frame, .station-screen) .mk-pinpad--floor > .mk-btn:disabled {
+  color: var(--dis) !important;
+}
+
+/* ---- Reduced motion: no scale, no transition; the press shows as a fill. ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.floor-frame, .station-screen) .mk-btn--floor,
+  :where(.floor-frame, .station-screen) .floor-switch::after {
+    transition: none !important;
+  }
+
+  :where(.floor-frame, .station-screen) .mk-btn--floor:active:not(:disabled) {
+    transform: none;
+    background: var(--muted) !important;
+    color: var(--bg) !important;
+  }
+
+  :where(.floor-frame, .station-screen) .mk-pinpad--floor > .mk-btn:active:not(:disabled) {
+    background: var(--fg) !important;
+    color: var(--bg) !important;
+  }
+}

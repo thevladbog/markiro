@@ -46,6 +46,7 @@ export function PinPad({
     <div
       role="group"
       aria-label={ariaLabel}
+      className={size === "floor" ? "mk-pinpad mk-pinpad--floor" : "mk-pinpad"}
       style={{
         display: "grid",
         gridTemplateColumns: `repeat(3, ${keySize})`,

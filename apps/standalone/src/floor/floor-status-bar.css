@@ -348,7 +348,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   background: var(--surface-card);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  box-shadow: var(--shadow-overlay);
 }
 
 .floor-link__popover .host-status {

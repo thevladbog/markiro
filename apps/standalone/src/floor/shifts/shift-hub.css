@@ -276,17 +276,9 @@
   padding: var(--sp-3);
   overflow: hidden;
   border-radius: var(--r-2);
-  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
+  background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
+  border: 1px solid var(--brandline);
   place-items: center;
-}
-
-.shift-hub .shift-card__photo[data-accent="true"] {
-  background: linear-gradient(
-    305deg,
-    hsl(var(--product-hue) var(--product-sat, 40%) 20%),
-    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 4%) 11%) 55%,
-    hsl(var(--product-hue) calc(var(--product-sat, 40%) - 8%) 6%)
-  );
 }
 
 /*
@@ -297,12 +289,11 @@
 .shift-hub .shift-card__photo .product-photo {
   max-width: 100%;
   max-height: 100%;
-  filter: drop-shadow(0 10px 14px rgb(0 0 0 / 45%));
   object-fit: contain;
 }
 
 .shift-hub .shift-card__photo-monogram {
-  color: rgb(250 250 248 / 70%);
+  color: var(--muted);
   font: 700 clamp(40px, 5vw, 72px) / 1 var(--font-ui);
 }
 
@@ -535,7 +526,8 @@
   height: 96px;
   overflow: hidden;
   border-radius: var(--r-2);
-  background: hsl(var(--product-hue, 210) var(--product-sat, 36%) 14%);
+  background: var(--panel);
+  border: 1px solid var(--line);
   place-items: center;
 }
 
@@ -546,7 +538,7 @@
 }
 
 .new-shift .new-shift__product-monogram {
-  color: rgb(250 250 248 / 70%);
+  color: var(--muted);
   font: 700 44px / 1 var(--font-ui);
 }
 

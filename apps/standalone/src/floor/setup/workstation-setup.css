@@ -346,7 +346,7 @@ section.workstation-setup {
   height: auto;
   object-fit: contain;
   border: 1px solid var(--line-strong);
-  background: #ffffff;
+  background: var(--floor-paper);
 }
 
 /* COM scanners: the form on the left, the scanners with their connection on the right. */
@@ -623,7 +623,7 @@ p.workstation-setup__result {
   display: grid;
   justify-items: center;
   padding: 16px;
-  background: #fff;
+  background: var(--floor-paper);
   border: 2px dashed var(--fg-3);
   border-radius: var(--r-2);
 }
@@ -634,14 +634,14 @@ p.workstation-setup__result {
   padding: 2px 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #fff;
-  background: #1b1b1b;
+  color: var(--floor-paper);
+  background: var(--floor-paper-ink);
   border-radius: 4px;
 }
 
 .self-test__symbol {
   width: 100%;
-  color: #000;
+  color: var(--floor-scan-ink);
 }
 
 .self-test__symbol svg {
@@ -670,12 +670,12 @@ p.workstation-setup__result {
   justify-items: center;
   gap: var(--sp-4);
   padding: 24px;
-  background: #fff;
+  background: var(--floor-paper);
 }
 
 /* On the white card whatever the theme: fixed dark colours, as the symbol's own card. */
 .self-test__shown {
-  color: #17161a;
+  color: var(--floor-paper-ink);
 }
 
 .self-test__shown .self-test__shown-status {
@@ -684,15 +684,15 @@ p.workstation-setup__result {
 }
 
 .self-test__shown .self-test__shown-status[data-tone="ok"] {
-  color: #116335;
+  color: var(--floor-paper-ok);
 }
 
 .self-test__shown .self-test__shown-status[data-tone="warning"] {
-  color: #8a4c07;
+  color: var(--floor-paper-warn);
 }
 
 .self-test__shown .self-test__shown-status[data-tone="problem"] {
-  color: #a1231a;
+  color: var(--floor-paper-err);
 }
 
 .self-test__code {
