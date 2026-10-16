@@ -564,9 +564,7 @@ describe("the floor after an operator signed in", () => {
     const handlers = handlersOf();
     const { executor } = openLocalDb();
     render(floorOf(executor, handlers));
-    await screen.findByText(
-      "Открытых смен на линии нет",
-    );
+    await screen.findByText("Открытых смен на линии нет");
     await settle();
     expect(handlers.onSignOut).not.toHaveBeenCalled();
     expect(types(handlers)).not.toContain("operator_refreshed");
@@ -2052,11 +2050,7 @@ describe("what the floor gives the screens it holds", () => {
   it("shows no shifts, and does not fail, for a device without a line", async () => {
     const handlers = handlersOf();
     render(floorOf(await floorCopies(), handlers, { device: { ...DEVICE_STATUS, lineId: null } }));
-    expect(
-      await screen.findByText(
-        "Открытых смен на линии нет",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText("Открытых смен на линии нет")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Открыть" })).toBeNull();
   });
 

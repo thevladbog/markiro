@@ -45,15 +45,19 @@ describe("the sign-in's two fields and one keypad", () => {
   });
 
   it("«Стереть» drops the last digit of the active field; on an empty PIN it only goes back to the number", () => {
-    expect(editEntry({ active: "login", login: "0042", pin: "" }, { kind: "backspace" }).login).toBe(
-      "004",
-    );
     expect(
-      editEntry({ active: "pin", login: "0042", pin: "48" }, { kind: "backspace" }),
-    ).toEqual({ active: "pin", login: "0042", pin: "4" });
-    expect(
-      editEntry({ active: "pin", login: "0042", pin: "" }, { kind: "backspace" }),
-    ).toEqual({ active: "login", login: "0042", pin: "" });
+      editEntry({ active: "login", login: "0042", pin: "" }, { kind: "backspace" }).login,
+    ).toBe("004");
+    expect(editEntry({ active: "pin", login: "0042", pin: "48" }, { kind: "backspace" })).toEqual({
+      active: "pin",
+      login: "0042",
+      pin: "4",
+    });
+    expect(editEntry({ active: "pin", login: "0042", pin: "" }, { kind: "backspace" })).toEqual({
+      active: "login",
+      login: "0042",
+      pin: "",
+    });
     expect(editEntry(start, { kind: "backspace" })).toEqual(start);
   });
 

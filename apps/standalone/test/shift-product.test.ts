@@ -3,7 +3,9 @@ import { shiftProductTitle } from "../src/lib/shift-product";
 
 describe("shiftProductTitle", () => {
   it("shows the print name when there is one", () => {
-    expect(shiftProductTitle({ name: "Молоко питьевое 3,2 %", printName: "Молоко" })).toBe("Молоко");
+    expect(shiftProductTitle({ name: "Молоко питьевое 3,2 %", printName: "Молоко" })).toBe(
+      "Молоко",
+    );
   });
 
   it("trims the print name", () => {
