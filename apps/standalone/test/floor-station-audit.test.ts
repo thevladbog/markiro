@@ -195,7 +195,10 @@ describe("the sign-in screen", () => {
     );
     const message = rule(signIn, ".operator-login__message");
     expect(message["overflow"]).toBeUndefined();
-    expect(rule(signIn, ".operator-login__message:empty")["display"]).toBe("none");
+    // Empty, it keeps its row (the rows below must not slip up into it) and gives its gap back.
+    expect(rule(signIn, ".operator-login__message:empty")["margin-block-start"]).toBe(
+      "calc(-1 * var(--login-gap))",
+    );
     expect(
       rule(signIn, ".operator-login__message", "@media (min-height: 900px)")["min-height"],
     ).toBe("96px");

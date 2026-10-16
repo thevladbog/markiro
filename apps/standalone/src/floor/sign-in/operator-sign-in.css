@@ -18,7 +18,8 @@
   min-height: 0;
   padding: var(--sp-4) var(--sp-5);
   overflow: hidden;
-  gap: var(--sp-3);
+  --login-gap: var(--sp-3);
+  gap: var(--login-gap);
   /* header, the message slot (empty until it has words), the body, the actions */
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: var(--bg);
@@ -89,8 +90,9 @@
   align-content: start;
 }
 
+/* Empty, it keeps its grid row (the rows below must not slip up into it) but takes no room: its gap is taken back. */
 .operator-login__message:empty {
-  display: none;
+  margin-block-start: calc(-1 * var(--login-gap));
 }
 
 /* A tall window keeps the slot's room, so that the keypad does not jump when a message comes. */
@@ -100,7 +102,7 @@
   }
 
   .operator-login__message:empty {
-    display: grid;
+    margin-block-start: 0;
   }
 }
 
@@ -399,9 +401,22 @@
 
 /* A short window (1280×800 and under): the keys give a little, never below the floor's 64 px. */
 @media (max-height: 860px) {
+  .operator-login__fields .floor-entry__box {
+    height: 72px;
+  }
+
+  .operator-login__fields .floor-entry__hint {
+    min-height: 24px;
+  }
+
+  .operator-login__countdown-time {
+    font-size: 48px;
+  }
+
   .operator-login {
+    --login-gap: var(--sp-2);
+
     padding-block: var(--sp-3);
-    gap: var(--sp-2);
   }
 
   .operator-login__body--search .floor-cyrillic {
@@ -410,6 +425,18 @@
 
   .operator-name-search__row.mk-btn {
     height: 64px !important;
+  }
+}
+
+/* The smallest panel (1024×768): the actions and gaps take what the lockout screen needs, never below 64 px. */
+@media (max-height: 800px) {
+  .operator-login .operator-login__actions .mk-btn--floor {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .operator-login__message .mk-alert {
+    padding-block: 10px !important;
   }
 }
 

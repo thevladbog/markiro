@@ -2328,7 +2328,7 @@ describe("the operator on the floor", () => {
       ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
       ...(signInSyncGapMs === undefined ? {} : { signInSyncGapMs }),
     });
-    await screen.findByText("Отсканируйте бейдж для входа");
+    await screen.findByText("Отсканируйте бейдж");
     return { link, host };
   }
 
@@ -2341,7 +2341,7 @@ describe("the operator on the floor", () => {
     const bar = await screen.findByRole("region", { name: "Строка состояния цеха" });
     expect(await within(bar).findByText("Линия розлива 2")).toBeTruthy();
     expect(within(bar).getByText("Никто не вошёл")).toBeTruthy();
-    await screen.findByText("Отсканируйте бейдж для входа");
+    await screen.findByText("Отсканируйте бейдж");
     scan("MRK-000742");
     await onTheList();
     expect(
@@ -2359,7 +2359,7 @@ describe("the operator on the floor", () => {
     expect(host.getChanges).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Офис" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
-    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж")).toBeTruthy();
     expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
   });
 
@@ -2403,7 +2403,7 @@ describe("the operator on the floor", () => {
     await onTheFloor(50);
     scan("MRK-000742");
     await onTheList();
-    expect(await screen.findByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+    expect(await screen.findByText("Оператор вышел по бездействию")).toBeTruthy();
     expect(screen.queryByText(SIGNED_IN)).toBeNull();
   });
 
@@ -2417,7 +2417,7 @@ describe("the operator on the floor", () => {
     await link.revision(43);
     expect(
       await screen.findByText(
-        "Оператор больше не может входить на станции. Обратитесь к администратору.",
+        "Оператор больше не может входить на станции",
       ),
     ).toBeTruthy();
   });
@@ -2431,12 +2431,11 @@ describe("the operator on the floor", () => {
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
-    expect(await screen.findByText("Отсканируйте бейдж для входа")).toBeTruthy();
+    expect(await screen.findByText("Отсканируйте бейдж")).toBeTruthy();
   });
 
-  const PROMPT = "Отсканируйте бейдж для входа";
-  const WRONG_BADGE =
-    "Бейдж не найден. Если бейдж новый, дождитесь синхронизации или обратитесь к администратору.";
+  const PROMPT = "Отсканируйте бейдж";
+  const WRONG_BADGE = "Бейдж не найден";
 
   /** A scan that is not on the keyboard: the test hands over what the scanner read. */
   function fakeScanSource() {
@@ -2715,7 +2714,7 @@ describe("the operator on the floor", () => {
     await elapse(2_500);
     isOnTheList();
     await elapse(1_700);
-    expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+    expect(screen.getByText("Оператор вышел по бездействию")).toBeTruthy();
   });
 
   it("does not start the wait again on every event of the link", async () => {
@@ -2731,7 +2730,7 @@ describe("the operator on the floor", () => {
     // 2 200 ms after the sign-in, 1 400 after the first event: only the
     // wait the sign-in started can have run out by now.
     await elapse(600);
-    expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+    expect(screen.getByText("Оператор вышел по бездействию")).toBeTruthy();
   });
 
   it("ends only its own session: an earlier session's late sign-out leaves the next one", async () => {
@@ -2757,7 +2756,7 @@ describe("the operator on the floor", () => {
     act(() => {
       signOutHandles.at(-1)?.("idle");
     });
-    expect(await screen.findByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+    expect(await screen.findByText("Оператор вышел по бездействию")).toBeTruthy();
   });
 
   it("asks the host for a sync at most once in a while, however many stray scans come", async () => {
@@ -2863,15 +2862,18 @@ describe("the operator on the floor", () => {
       connection: link.connection,
     });
     await screen.findByText(PROMPT);
-    fireEvent.click(screen.getByRole("button", { name: "Ввести табельный номер" }));
-    expect(await screen.findByText("Введите табельный номер")).toBeTruthy();
+    for (const digit of "0042") fireEvent.click(screen.getByRole("button", { name: digit }));
+    expect(screen.getByLabelText("Набранный табельный номер").textContent).toBe("0042");
     device.refresh.mockResolvedValueOnce({
       ...DEVICE_STATUS,
       lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
     });
     await link.revision(43);
     expect(await screen.findByText(PROMPT)).toBeTruthy();
-    expect(screen.queryByText("Введите табельный номер")).toBeNull();
+    // A fresh screen: the number typed under the old line is gone.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Набранный табельный номер").textContent).toBe(""),
+    );
   });
 
   it("does not sign an operator in on the new line when the answer lands in the batch of the line change", async () => {
@@ -3033,7 +3035,7 @@ describe("the operator on the floor", () => {
       lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
     });
     await link.revision(43);
-    expect(await screen.findByText("Станция перешла на другую линию. Войдите снова.")).toBeTruthy();
+    expect(await screen.findByText("Станция перешла на другую линию")).toBeTruthy();
     expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
   });
 
@@ -4800,7 +4802,7 @@ describe("the floor's own controls in the status bar (beta 3)", () => {
       hardware: fakeHardware().hardware,
       ...options,
     });
-    await screen.findByText("Отсканируйте бейдж для входа");
+    await screen.findByText("Отсканируйте бейдж");
     return { device, host };
   }
 
