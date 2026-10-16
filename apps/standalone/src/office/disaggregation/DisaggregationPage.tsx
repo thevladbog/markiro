@@ -13,7 +13,6 @@ import {
   PageHeader,
   Select,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -23,11 +22,11 @@ import { useCan } from "../access.js";
 import { alertFailure, failureMessage } from "../form-errors.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { datePickerTexts } from "../shifts/shift-text.js";
 import { searchableSelect } from "../select-search.js";
-import { DOCUMENT_PAGE_SIZE, documentFilter, type DocumentFilterState } from "./document-list.js";
+import { documentFilter, type DocumentFilterState } from "./document-list.js";
 import { byReasonOrder, DOCUMENT_STATUS_PHASE } from "./disaggregation-text.js";
 
 const STATUS_FILTERS: readonly DocumentFilterState["status"][] = [
@@ -62,7 +61,6 @@ export function DisaggregationPage() {
   const [askedNo, setAskedNo] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [page, setPage] = useState(1);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,7 +68,6 @@ export function DisaggregationPage() {
     if (docNo === askedNo) return undefined;
     const timer = setTimeout(() => {
       setAskedNo(docNo);
-      setPage(1);
     }, SEARCH_PAUSE_MS);
     return () => clearTimeout(timer);
   }, [docNo, askedNo]);
@@ -104,7 +101,6 @@ export function DisaggregationPage() {
     setAskedNo("");
     setFrom("");
     setTo("");
-    setPage(1);
   };
   const makeDocument = async () => {
     setFailure(null);
@@ -193,28 +189,20 @@ export function DisaggregationPage() {
     if (documents.isError) {
       return <LoadError error={documents.error} onRetry={() => void documents.refetch()} />;
     }
-    const pageCount = Math.max(1, Math.ceil(documents.data.length / DOCUMENT_PAGE_SIZE));
-    // A shorter list never shows an empty page.
-    const shown = Math.min(page, pageCount);
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="disaggregation"
+          pagerLabel={t("office.disaggregation.pager")}
+          resetKey={JSON.stringify(filter)}
           columns={columns}
-          rows={documents.data.slice((shown - 1) * DOCUMENT_PAGE_SIZE, shown * DOCUMENT_PAGE_SIZE)}
+          rows={documents.data}
           getRowKey={(document) => document.id}
           empty={t(
             filtersOn ? "office.disaggregation.nothingFound" : "office.disaggregation.empty",
           )}
           scrollLabel={t("office.disaggregation.title")}
         />
-        {pageCount > 1 && (
-          <OfficePager
-            label={t("office.disaggregation.pager")}
-            page={shown}
-            pageCount={pageCount}
-            onPage={setPage}
-          />
-        )}
       </Card>
     );
   };
@@ -257,7 +245,6 @@ export function DisaggregationPage() {
           value={status}
           onValueChange={(value) => {
             setStatus(value);
-            setPage(1);
           }}
         />
         <Select
@@ -275,7 +262,6 @@ export function DisaggregationPage() {
           value={reasonId}
           onValueChange={(value) => {
             setReasonId(value);
-            setPage(1);
           }}
         />
         <Input
@@ -290,7 +276,6 @@ export function DisaggregationPage() {
           {...(from === "" ? {} : { value: from })}
           onValueChange={(value) => {
             setFrom(value ?? "");
-            setPage(1);
           }}
         />
         <DatePicker
@@ -300,7 +285,6 @@ export function DisaggregationPage() {
           {...(reversed ? { error: t("office.disaggregation.filters.reversed") } : {})}
           onValueChange={(value) => {
             setTo(value ?? "");
-            setPage(1);
           }}
         />
         {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}

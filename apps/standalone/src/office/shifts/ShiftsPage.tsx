@@ -17,7 +17,6 @@ import {
   RowActions,
   Select,
   StatusChip,
-  Table,
   type BadgeTone,
   type TableColumn,
   type TagPhase,
@@ -29,7 +28,7 @@ import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import {
@@ -38,7 +37,6 @@ import {
   openBlocker,
   periodState,
   recordLabel,
-  SHIFT_PAGE_SIZE,
   sortShifts,
   totalShifts,
   type PeriodState,
@@ -117,7 +115,6 @@ export function ShiftsPage() {
   const [status, setStatus] = useState<ShiftStatusFilter>("all");
   const [lineId, setLineId] = useState("");
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
   const period = periodState(from, to);
   const plannedPeriod = periodState(plannedFrom, plannedTo);
   // The periods last asked for change only to ready ones or back to none (set while
@@ -197,7 +194,6 @@ export function ShiftsPage() {
     setStatus("all");
     setLineId("");
     setSearch("");
-    setPage(1);
   };
   const periodMessage = (state: PeriodState) =>
     state.kind === "reversed"
@@ -224,7 +220,6 @@ export function ShiftsPage() {
       key: key as ShiftSortKey,
       dir: previous?.key === key && previous.dir === "asc" ? "desc" : "asc",
     }));
-    setPage(1);
   };
   const closeDrawer = () =>
     setParams(
@@ -463,9 +458,6 @@ export function ShiftsPage() {
         />
       );
     }
-    const pageCount = Math.max(1, Math.ceil(found.length / SHIFT_PAGE_SIZE));
-    // A shorter list never shows an empty page.
-    const shown = Math.min(page, pageCount);
     return (
       <Card>
         {/* What the filters keep, however many pages: the figures of the period. */}
@@ -477,25 +469,29 @@ export function ShiftsPage() {
             pallets: UNITS.format(totals.pallets),
           })}
         </p>
-        <Table
+        <PagedTable
+          tableId="shifts"
+          pagerLabel={t("office.shifts.pager")}
+          resetKey={JSON.stringify([
+            from,
+            to,
+            plannedFrom,
+            plannedTo,
+            status,
+            lineId,
+            search,
+            sort,
+          ])}
           columns={columns}
           sortKey={sort?.key ?? ""}
           sortDir={sort?.dir ?? "asc"}
           onSort={onSort}
           onRowClick={(shift) => setParams({ shift: shift.id })}
-          rows={found.slice((shown - 1) * SHIFT_PAGE_SIZE, shown * SHIFT_PAGE_SIZE)}
+          rows={found}
           getRowKey={(shift) => shift.id}
           empty={t(shifts.data.length === 0 ? "office.shifts.empty" : "office.shifts.nothingFound")}
           scrollLabel={t("office.shifts.title")}
         />
-        {pageCount > 1 && (
-          <OfficePager
-            label={t("office.shifts.pager")}
-            page={shown}
-            pageCount={pageCount}
-            onPage={setPage}
-          />
-        )}
       </Card>
     );
   };
@@ -550,7 +546,6 @@ export function ShiftsPage() {
           value={search}
           onChange={(event) => {
             setSearch(event.target.value);
-            setPage(1);
           }}
         />
         <Select
@@ -562,7 +557,6 @@ export function ShiftsPage() {
           value={status}
           onValueChange={(value) => {
             setStatus(value);
-            setPage(1);
           }}
         />
         <Select
@@ -580,7 +574,6 @@ export function ShiftsPage() {
           value={lineId}
           onValueChange={(value) => {
             setLineId(value);
-            setPage(1);
           }}
         />
         <DatePicker
@@ -589,7 +582,6 @@ export function ShiftsPage() {
           {...(from === "" ? {} : { value: from })}
           onValueChange={(value) => {
             setFrom(value ?? "");
-            setPage(1);
           }}
         />
         <DatePicker
@@ -599,7 +591,6 @@ export function ShiftsPage() {
           {...(periodError === undefined ? {} : { error: periodError })}
           onValueChange={(value) => {
             setTo(value ?? "");
-            setPage(1);
           }}
         />
         <DatePicker
@@ -608,7 +599,6 @@ export function ShiftsPage() {
           {...(plannedFrom === "" ? {} : { value: plannedFrom })}
           onValueChange={(value) => {
             setPlannedFrom(value ?? "");
-            setPage(1);
           }}
         />
         <DatePicker
@@ -618,7 +608,6 @@ export function ShiftsPage() {
           {...(plannedPeriodError === undefined ? {} : { error: plannedPeriodError })}
           onValueChange={(value) => {
             setPlannedTo(value ?? "");
-            setPage(1);
           }}
         />
         {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}

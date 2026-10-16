@@ -16,7 +16,6 @@ import {
   RowActions,
   SidePanel,
   StatusChip,
-  Table,
   type TableColumn,
   type TagPhase,
 } from "@markiro/ui";
@@ -37,11 +36,10 @@ import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { taskFormInputs } from "../forms/task-inputs.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { CloseShiftDialog } from "./CloseShiftDialog.js";
 import {
-  BOX_PAGE_SIZE,
   endsWithTail,
   isLateBox,
   labelState,
@@ -778,7 +776,6 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
   const [params] = useSearchParams();
   // An older link of a conflict names the loser's box here (plan КНФ); the box's card has it now.
   const [tail, setTail] = useState(() => ssccTail(params.get("box") ?? ""));
-  const [page, setPage] = useState(1);
   const boxes = useOfficeQuery(officeKeys.shiftBoxes(shift.id), (api, token) =>
     api.listShiftBoxes(token, shift.id),
   );
@@ -879,16 +876,17 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
     if (boxes.isError)
       return <LoadError error={boxes.error} onRetry={() => void boxes.refetch()} />;
     const kept = boxes.data.filter((box) => endsWithTail(box.sscc, tail));
-    const pageCount = Math.max(1, Math.ceil(kept.length / BOX_PAGE_SIZE));
-    const shown = Math.min(page, pageCount);
     return (
       <>
         <p className="office-note" aria-live="polite">
           {t("office.shiftCard.boxes.found", { shown: kept.length, total: boxes.data.length })}
         </p>
-        <Table
+        <PagedTable
+          tableId="shift-boxes"
+          pagerLabel={t("office.shiftCard.boxes.pager")}
+          resetKey={`${tail}`}
           columns={columns}
-          rows={kept.slice((shown - 1) * BOX_PAGE_SIZE, shown * BOX_PAGE_SIZE)}
+          rows={kept}
           getRowKey={(box) => box.id}
           empty={t(
             boxes.data.length === 0
@@ -897,14 +895,6 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
           )}
           scrollLabel={t("office.shiftCard.boxes.table")}
         />
-        {pageCount > 1 && (
-          <OfficePager
-            label={t("office.shiftCard.boxes.pager")}
-            page={shown}
-            pageCount={pageCount}
-            onPage={setPage}
-          />
-        )}
       </>
     );
   };
@@ -920,7 +910,6 @@ function ShiftBoxes({ shift, at, onForm }: SectionProps) {
           value={tail}
           onChange={(event) => {
             setTail(ssccTail(event.target.value));
-            setPage(1);
           }}
         />
         {content()}
@@ -1015,7 +1004,8 @@ function ShiftPallets({ shift, at, onForm }: SectionProps) {
         ) : pallets.isError ? (
           <LoadError error={pallets.error} onRetry={() => void pallets.refetch()} />
         ) : (
-          <Table
+          <PagedTable
+            tableId="shift-pallets"
             columns={columns}
             rows={pallets.data}
             getRowKey={(pallet) => pallet.id}

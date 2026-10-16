@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, PageHeader, RowActions, Table, type TableColumn } from "@markiro/ui";
+import { Alert, Button, Card, PageHeader, RowActions, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeLine } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
@@ -101,7 +102,8 @@ export function LinesPage() {
       return <LoadError error={lines.error} onRetry={() => void lines.refetch()} />;
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="lines"
           columns={columns}
           rows={activeFirstByName(lines.data)}
           getRowKey={(line) => line.id}

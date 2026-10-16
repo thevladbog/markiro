@@ -289,12 +289,12 @@ describe("the card of a shift (plan О-Ф)", () => {
     expect(screen.getByText("Дата смены: 12.10.2026")).toBeTruthy();
   });
 
-  it("shows the boxes fifty to a page", async () => {
-    const many = Array.from({ length: 51 }, (_, index) => box(index + 1));
+  it("shows the boxes ten to a page", async () => {
+    const many = Array.from({ length: 11 }, (_, index) => box(index + 1));
     await openCard(cardSession(ACTIVE, many), "OCT26-004", "Короба");
-    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(51));
+    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(11));
     fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
-    expect(rowsOf("Короба").map((row) => row[0])).toEqual(["(00)046006820000015051"]);
+    expect(rowsOf("Короба").map((row) => row[0])).toEqual(["(00)046006820000015011"]);
   });
 
   it("has neither boxes nor figures nor exports for a planned shift", async () => {
@@ -618,16 +618,16 @@ describe("the card of a shift (plan О-Ф)", () => {
   });
 
   it("goes back to the first page when the digits typed change the boxes shown", async () => {
-    const many = Array.from({ length: 140 }, (_, index) => parity(index + 1));
+    const many = Array.from({ length: 25 }, (_, index) => parity(index + 1));
     await openCard(cardSession(ACTIVE, many), "OCT26-004", "Короба");
-    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(51));
+    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(11));
     fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
-    expect(rowsOf("Короба")[0]?.[0]).toBe("(00)046006820000000511");
-    // 70 boxes end with 0: two pages, and the typing starts the first again.
+    expect(rowsOf("Короба")[0]?.[0]).toBe("(00)046006820000000111");
+    // 12 boxes end with 0: two pages, and the typing starts the first again.
     fireEvent.change(within(section("Короба")).getByLabelText("Последние цифры SSCC"), {
       target: { value: "0" },
     });
-    expect(screen.getByText("Показано 70 из 140")).toBeTruthy();
+    expect(screen.getByText("Показано 12 из 25")).toBeTruthy();
     expect(rowsOf("Короба")[0]?.[0]).toBe("(00)046006820000000020");
     expect(screen.getByText("Страница 1 из 2")).toBeTruthy();
   });
@@ -801,12 +801,12 @@ describe("the card of a shift (plan О-Ф)", () => {
   it("stays on the pages that are left when the boxes read again are fewer", async () => {
     const session = cardSession(
       ACTIVE,
-      Array.from({ length: 51 }, (_, index) => box(index + 1)),
+      Array.from({ length: 11 }, (_, index) => box(index + 1)),
     );
     const closed: OfficeShift = { ...ACTIVE, status: "closed", closeReasonText: "Сбой линии" };
     session.api.closeShift.mockResolvedValue(closed);
     await openCard(session, "OCT26-004", "Короба");
-    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(51));
+    await waitFor(() => expect(within(section("Короба")).getAllByRole("row")).toHaveLength(11));
     fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
     expect(rowsOf("Короба")).toHaveLength(1);
     session.api.getShift.mockResolvedValue(closed);

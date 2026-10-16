@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 
-import { Card, EmptyState, Table, type TableColumn } from "@markiro/ui";
+import { Card, EmptyState, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeWarehousePallet } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -70,7 +71,8 @@ export function WarehousePalletsSection({ zone }: { zone: string }) {
       return <EmptyState title={t("office.warehousePallets.empty")} />;
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="warehouse-pallets"
           columns={columns}
           rows={list.data.pallets}
           getRowKey={(pallet) => pallet.id}

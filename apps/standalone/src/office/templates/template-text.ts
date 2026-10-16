@@ -36,11 +36,6 @@ export function sizeText(
   });
 }
 
-/** «203 dpi»; none when the layout gives no resolution. */
-export function dpiText(dpi: number | null, t: TFunction): string {
-  return dpi === null ? t("office.common.none") : t("office.templates.dpi", { dpi });
-}
-
 /** A product group's name from the lookup; its code when the lookup lacks it or did not load. */
 export function groupName(
   groups: readonly ProductGroup[] | undefined,

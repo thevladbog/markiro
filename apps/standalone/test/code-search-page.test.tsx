@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { canonicalizeKm, kmHash } from "@markiro/domain";
@@ -15,6 +15,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { chooseText } from "./support/select.js";
 import { freezeToday, pickDate } from "./support/shifts.js";
 
 const testModuleUrl = import.meta.url;
@@ -375,26 +376,73 @@ describe("«Поиск кодов» in the office", () => {
     });
   });
 
-  it("pages through the host's pages and says when it counted no further", async () => {
-    const value = session();
-    value.api.searchCodes.mockResolvedValue({
-      ...PAGE,
-      pageCount: 200,
-      total: 10_000,
-      capped: true,
+  /** The host's page `page` of 50 placements out of 10 000, as the host answers a capped search. */
+  function cappedPages(value: FakeOfficeSession) {
+    const [first] = PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no placements");
+    value.api.searchCodes.mockImplementation(async (_token, query) => {
+      const page = query.page ?? 1;
+      return {
+        items: Array.from({ length: 50 }, (_, index) => ({
+          ...first,
+          scanId: `d0000000-0000-4000-8000-${String((page - 1) * 50 + index + 1).padStart(12, "0")}`,
+        })),
+        page,
+        pageCount: 200,
+        total: 10_000,
+        capped: true,
+      };
     });
+  }
+
+  it("says when it counted no further, and pages by ten out of the host's pages of fifty, asking only for the pages it needs", async () => {
+    const value = session();
+    cappedPages(value);
     await openSearch(value);
     search("04600682000013");
     const summary = await screen.findByText(/Найдено больше/);
     expect(summary.textContent).toBe(
       "Найдено больше 10\u00a0000 — показаны первые 10\u00a0000. Уточните поиск.",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
+    const pager = () => screen.getByRole("navigation", { name: "Страницы результатов" });
+    expect(await screen.findByText("Показано 1–10 из 10 000")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 1 000")).toBeTruthy();
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(11);
+    // The second page of ten is inside the host's first page of fifty.
+    const asked = value.api.searchCodes.mock.calls.length;
+    fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
+    expect(await screen.findByText("Показано 11–20 из 10 000")).toBeTruthy();
+    expect(value.api.searchCodes).toHaveBeenCalledTimes(asked);
+    // The last page of ten is the host's last page of fifty.
+    fireEvent.click(within(pager()).getByRole("button", { name: "Последняя страница" }));
+    expect(await screen.findByText("Показано 9 991–10 000 из 10 000")).toBeTruthy();
+    expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
+      gtin: "04600682000013",
+      page: 200,
+    });
+  });
+
+  it("takes the page size from the table's own choice: a page of a hundred reads two host pages, and the size stays chosen", async () => {
+    const value = session();
+    cappedPages(value);
+    await openSearch(value);
+    search("04600682000013");
+    await screen.findByText(/Найдено больше/);
+    chooseText("Строк на странице: Найденные коды", "100");
     await waitFor(() =>
-      expect(value.api.searchCodes).toHaveBeenLastCalledWith("office-session-token", {
-        gtin: "04600682000013",
-        page: 2,
-      }),
+      expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(101),
+    );
+    expect(value.api.searchCodes).toHaveBeenCalledWith("office-session-token", {
+      gtin: "04600682000013",
+      page: 2,
+    });
+    expect(screen.getByText("Показано 1–100 из 10 000")).toBeTruthy();
+    expect(screen.getByText("Страница 1 из 100")).toBeTruthy();
+    cleanup();
+    await openSearch(value);
+    search("04600682000013");
+    await waitFor(() =>
+      expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(101),
     );
   });
 

@@ -132,7 +132,7 @@ describe("«Сканирования» of a shift's drawer", () => {
     const session = scansSession();
     await openScans(session);
     await waitFor(() => expect(rows()).toHaveLength(5));
-    expect(session.api.listShiftScans).toHaveBeenCalledWith(TOKEN, ACTIVE.id, {}, null);
+    expect(session.api.listShiftScans).toHaveBeenCalledWith(TOKEN, ACTIVE.id, {}, null, 10);
     const table = rows();
     // Time, station, operator, result with its reason, code, box, pallet.
     expect(table[0]?.slice(1)).toEqual([
@@ -183,26 +183,72 @@ describe("«Сканирования» of a shift's drawer", () => {
     expect(await screen.findByText("Сканирований по этим условиям нет")).toBeTruthy();
   });
 
-  it("pages by the cursor: «Показать ещё» asks the next page below the cursor and adds its rows", async () => {
-    const session = scansSession([
-      {
-        items: SCANS.slice(0, 2),
-        nextCursor: "1791441630000~c0000000-0000-4000-8000-000000000002",
-      },
-      { items: SCANS.slice(2), nextCursor: null },
-    ]);
+  /** The host's history of `total` scans, read by cursor and limit as the host reads it. */
+  function history(session: FakeOfficeSession, total: number) {
+    const all = Array.from({ length: total }, (_, index) => scan(index + 1));
+    session.api.listShiftScans.mockImplementation(async (_token, _id, _query, cursor, limit) => {
+      const size = limit ?? 50;
+      const start = cursor === null ? 0 : Number(cursor.split("~")[0]);
+      const next = start + size;
+      return {
+        items: all.slice(start, next),
+        nextCursor:
+          next < all.length ? `${String(next)}~c0000000-0000-4000-8000-000000000000` : null,
+      };
+    });
+  }
+
+  it("pages by the cursor with the page size as the limit, reading one page ahead so «Вперёд» always leads somewhere", async () => {
+    const session = scansSession();
+    history(session, 25);
     await openScans(session);
-    await waitFor(() => expect(rows()).toHaveLength(2));
-    fireEvent.click(screen.getByRole("button", { name: "Показать ещё" }));
-    await waitFor(() => expect(rows()).toHaveLength(5));
-    expect(session.api.listShiftScans).toHaveBeenLastCalledWith(
+    await waitFor(() => expect(rows()).toHaveLength(10));
+    // The first page and the one after it are read; the limit is the page size.
+    await waitFor(() => expect(session.api.listShiftScans).toHaveBeenCalledTimes(2));
+    expect(session.api.listShiftScans).toHaveBeenNthCalledWith(1, TOKEN, ACTIVE.id, {}, null, 10);
+    expect(session.api.listShiftScans).toHaveBeenNthCalledWith(
+      2,
       TOKEN,
       ACTIVE.id,
       {},
-      "1791441630000~c0000000-0000-4000-8000-000000000002",
+      "10~c0000000-0000-4000-8000-000000000000",
+      10,
     );
-    // The last page has no button.
-    expect(screen.queryByRole("button", { name: "Показать ещё" })).toBeNull();
+    expect(screen.getByText("Показано 1–10, есть ещё")).toBeTruthy();
+    expect(screen.getByText("Страница 1")).toBeTruthy();
+    // Forward needs no read now; the page after it is read on the way.
+    fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
+    await waitFor(() => expect(session.api.listShiftScans).toHaveBeenCalledTimes(3));
+    expect(rows()).toHaveLength(10);
+    expect(await screen.findByText("Показано 11–20 из 25")).toBeTruthy();
+    // The pages already read are kept: «Назад» asks nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByText("Показано 1–10 из 25")).toBeTruthy();
+    expect(session.api.listShiftScans).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
+    fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
+    expect(await screen.findByText("Показано 21–25 из 25")).toBeTruthy();
+    expect(rows()).toHaveLength(5);
+  });
+
+  it("takes the page size from the table's own choice as the request's limit, starts the list again from the first page, and keeps the size", async () => {
+    const session = scansSession();
+    history(session, 60);
+    await openScans(session);
+    await waitFor(() => expect(rows()).toHaveLength(10));
+    chooseText("Строк на странице: Список сканирований смены", "25");
+    await waitFor(() =>
+      expect(session.api.listShiftScans).toHaveBeenLastCalledWith(
+        TOKEN,
+        ACTIVE.id,
+        {},
+        expect.anything(),
+        25,
+      ),
+    );
+    await waitFor(() => expect(rows()).toHaveLength(25));
+    expect(session.api.listShiftScans).toHaveBeenCalledWith(TOKEN, ACTIVE.id, {}, null, 25);
+    expect(localStorage.getItem("markiro.office.pageSize.shift-scans")).toBe("25");
   });
 
   it("narrows by result and by station (named from the answers) and starts again from the first page", async () => {
@@ -216,6 +262,7 @@ describe("«Сканирования» of a shift's drawer", () => {
         ACTIVE.id,
         { result: "duplicate" },
         null,
+        10,
       ),
     );
     chooseText("Станция", "Станция Б");
@@ -225,6 +272,7 @@ describe("«Сканирования» of a shift's drawer", () => {
         ACTIVE.id,
         { result: "duplicate", device: OTHER_STATION },
         null,
+        10,
       ),
     );
   });
@@ -242,6 +290,7 @@ describe("«Сканирования» of a shift's drawer", () => {
         ACTIVE.id,
         { box: "b0000000-0000-4000-8000-000000000002" },
         null,
+        10,
       ),
     );
     fireEvent.change(box, { target: { value: "99" } });
@@ -267,6 +316,7 @@ describe("«Сканирования» of a shift's drawer", () => {
         ACTIVE.id,
         { q: "k3Z4" },
         null,
+        10,
       ),
     );
     fireEvent.change(tail, { target: { value: "k3 Z%" } });

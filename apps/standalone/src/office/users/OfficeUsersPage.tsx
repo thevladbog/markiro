@@ -10,10 +10,10 @@ import {
   PageHeader,
   RowActions,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeUserRecord } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
@@ -135,7 +135,8 @@ export function OfficeUsersPage() {
       return <LoadError error={users.error} onRetry={() => void users.refetch()} />;
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="users"
           columns={columns}
           rows={users.data}
           getRowKey={(user) => user.id}

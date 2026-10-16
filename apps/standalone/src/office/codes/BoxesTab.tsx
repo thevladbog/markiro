@@ -9,7 +9,6 @@ import {
   Input,
   PageHeader,
   Select,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -17,10 +16,10 @@ import type { OfficeBox, OfficeShift } from "../../host/protocol.js";
 import { isPackId } from "../../host/pack-cards.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
-import { BOX_PAGE_SIZE, endsWithTail, packState, ssccTail } from "../shifts/shift-card.js";
+import { endsWithTail, packState, ssccTail } from "../shifts/shift-card.js";
 import { civilDateLabel, recordLabel } from "../shifts/shift-list.js";
 import { instantFormat } from "./CodeCard.js";
 import { BoxLink, PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
@@ -47,7 +46,6 @@ export function BoxesTab() {
   const asked = params.get("shift") ?? "";
   const shiftId = isPackId(asked) ? asked : "";
   const [tail, setTail] = useState("");
-  const [page, setPage] = useState(1);
   const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token));
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
@@ -143,7 +141,6 @@ export function BoxesTab() {
 
   const select = (id: string) => {
     setTail("");
-    setPage(1);
     setParams(id === "" ? new URLSearchParams() : new URLSearchParams({ shift: id }));
   };
 
@@ -155,8 +152,6 @@ export function BoxesTab() {
     if (boxes.isError)
       return <LoadError error={boxes.error} onRetry={() => void boxes.refetch()} />;
     const kept = boxes.data.filter((box) => endsWithTail(box.sscc, tail));
-    const pageCount = Math.max(1, Math.ceil(kept.length / BOX_PAGE_SIZE));
-    const shown = Math.min(page, pageCount);
     return (
       <Card>
         <Input
@@ -166,28 +161,22 @@ export function BoxesTab() {
           value={tail}
           onChange={(event) => {
             setTail(ssccTail(event.target.value));
-            setPage(1);
           }}
         />
         <p className="office-note" aria-live="polite">
           {t("office.shiftCard.boxes.found", { shown: kept.length, total: boxes.data.length })}
         </p>
-        <Table
+        <PagedTable
+          tableId="codes-boxes"
+          pagerLabel={t("office.boxList.pager")}
+          resetKey={`${shiftId}|${tail}`}
           columns={columns}
-          rows={kept.slice((shown - 1) * BOX_PAGE_SIZE, shown * BOX_PAGE_SIZE)}
+          rows={kept}
           getRowKey={(box) => box.id}
           onRowClick={(box) => void navigate(`/codes/box/${box.id}`)}
           empty={t(boxes.data.length === 0 ? "office.boxList.empty" : "office.boxList.none")}
           scrollLabel={t("office.boxList.table")}
         />
-        {pageCount > 1 && (
-          <OfficePager
-            label={t("office.boxList.pager")}
-            page={shown}
-            pageCount={pageCount}
-            onPage={setPage}
-          />
-        )}
       </Card>
     );
   };

@@ -10,7 +10,6 @@ import {
   ConfirmDialog,
   DefinitionGrid,
   PageHeader,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -20,6 +19,7 @@ import type {
   BackupState,
   RestoreHold,
 } from "../../host/backups.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { HostError } from "../../host/client.js";
 import { useCan } from "../access.js";
 import { alertFailure, failureMessage, type AlertFailure } from "../form-errors.js";
@@ -327,7 +327,8 @@ function RestoreHoldCard({ hold, canManage, format, onResumed }: RestoreHoldCard
           ]}
         />
         <p>{t("office.backups.hold.text")}</p>
-        <Table
+        <PagedTable
+          tableId="backup-copies"
           columns={columns}
           rows={hold.stations}
           getRowKey={(station) => station.id}
@@ -450,7 +451,8 @@ function CopiesTable({ copies, time }: { copies: BackupCopy[]; time: BackupTime 
   ];
   return (
     <>
-      <Table
+      <PagedTable
+        tableId="backup-restore-copies"
         columns={columns}
         rows={copies}
         getRowKey={(copy) => copy.file}

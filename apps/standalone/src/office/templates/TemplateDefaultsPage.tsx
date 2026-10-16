@@ -2,16 +2,7 @@ import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  PageHeader,
-  Select,
-  Table,
-  type TableColumn,
-} from "@markiro/ui";
+import { Alert, Badge, Button, Card, PageHeader, Select, type TableColumn } from "@markiro/ui";
 
 import type {
   CategoryPalletSheetDefault,
@@ -22,6 +13,7 @@ import type {
   TemplateDefaults,
   TemplateDefaultsUpdate,
 } from "../../host/protocol.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { templateDefaultsUpdate } from "../../host/requests.js";
 import { errorProp } from "../../lib/form-error.js";
 import { useCan } from "../access.js";
@@ -523,7 +515,8 @@ function TemplateDefaultsForm({
             : {})}
         >
           <p className="office-note">{t("office.templateDefaults.categoriesHint")}</p>
-          <Table
+          <PagedTable
+            tableId="template-defaults"
             columns={columns}
             rows={rows}
             getRowKey={(row) => row.key}

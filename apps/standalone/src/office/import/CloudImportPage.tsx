@@ -11,11 +11,11 @@ import {
   DefinitionGrid,
   FileDropZone,
   PageHeader,
-  Table,
   type DefinitionGridItem,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import { HostError } from "../../host/client.js";
 import {
   cloudImportRequest,
@@ -417,7 +417,8 @@ function CloudImportContent() {
           </Card>
           <Card title={t("office.cloudImport.ssccTitle")} titleAs="h2">
             <p className="office-note">{t("office.cloudImport.ssccHint")}</p>
-            <Table
+            <PagedTable
+              tableId="cloud-import"
               columns={counterColumns}
               rows={view.counters}
               getRowKey={(row) => `${row.issuerPrefix}:${row.extension}`}

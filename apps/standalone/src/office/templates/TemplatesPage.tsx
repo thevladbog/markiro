@@ -15,11 +15,11 @@ import {
   RowActions,
   Select,
   StatusChip,
-  Table,
   VisuallyHidden,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { LabelTemplate, LabelTemplateSummary } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useProductGroups, useTemplates } from "../catalog-queries.js";
@@ -36,7 +36,7 @@ import {
   type TemplatePurposeFilter,
   type TemplateStateFilter,
 } from "./template-list.js";
-import { describeScope, dpiText, PURPOSE_TONE, PURPOSES, sizeText } from "./template-text.js";
+import { describeScope, PURPOSE_TONE, PURPOSES, sizeText } from "./template-text.js";
 
 const PURPOSE_FILTERS: readonly TemplatePurposeFilter[] = ["all", ...PURPOSES];
 const STATE_FILTERS: readonly TemplateStateFilter[] = ["all", "enabled", "disabled"];
@@ -118,12 +118,6 @@ export function TemplatesPage() {
       title: t("office.templates.table.size"),
       mono: true,
       render: (template) => sizeText(template, t),
-    },
-    {
-      key: "dpi",
-      title: t("office.templates.table.dpi"),
-      mono: true,
-      render: (template) => dpiText(template.dpi, t),
     },
     {
       key: "scope",
@@ -266,7 +260,8 @@ export function TemplatesPage() {
           />
         </FilterBar>
         <Card>
-          <Table
+          <PagedTable
+            tableId="templates"
             columns={columns}
             rows={found}
             getRowKey={(template) => template.id}

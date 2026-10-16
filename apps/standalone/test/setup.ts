@@ -49,3 +49,13 @@ if (typeof HTMLElement !== "undefined") {
     value: () => null,
   });
 }
+
+// A table's page size is kept in the webview's storage between visits (`office/paging`); a test
+// must not inherit the size a test before it chose.
+if (typeof localStorage !== "undefined") {
+  afterEach(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("markiro.office.pageSize.")) localStorage.removeItem(key);
+    }
+  });
+}

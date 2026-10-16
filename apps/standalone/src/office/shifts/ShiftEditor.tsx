@@ -345,15 +345,14 @@ function useShiftEditor({
     product === undefined
       ? []
       : fittingTemplates(templates.data, "product_duplicate", product.chzProductGroupCode);
-  /** A duplicate template as the cloud offers one: its name, size and density. */
+  /** A duplicate template as the office offers one: its name and size (a template has no resolution). */
   const duplicateLabel = (template: LabelTemplateSummary): string =>
-    template.widthMm === null || template.heightMm === null || template.dpi === null
+    template.widthMm === null || template.heightMm === null
       ? template.name
       : t("office.shifts.duplicate.templateOption", {
           name: template.name,
           widthMm: template.widthMm,
           heightMm: template.heightMm,
-          dpi: template.dpi,
         });
   /**
    * The choices of the duplicate template. A shift that is no longer planned

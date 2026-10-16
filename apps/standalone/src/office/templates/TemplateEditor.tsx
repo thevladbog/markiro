@@ -41,7 +41,7 @@ import { labelRenderOptions, labelSampleData } from "./label-samples.js";
 import { LabelSizeDialog } from "./LabelSizeDialog.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { TemplateFailureAlert } from "./TemplateFailureAlert.js";
-import { dpiText, PURPOSES, sizeText } from "./template-text.js";
+import { PURPOSES, sizeText } from "./template-text.js";
 
 export interface TemplateEditorProps {
   /** The page's heading. */
@@ -374,12 +374,7 @@ export function TemplateEditor({
           <Card title={t("office.templateEditor.layout")} titleAs="h2">
             <div className="standalone-form">
               <div className="template-editor__size">
-                <p>
-                  {t("office.templateEditor.sizeValue", {
-                    size: sizeText(draft.spec, t),
-                    dpi: dpiText(draft.spec.dpi, t),
-                  })}
-                </p>
+                <p>{t("office.templateEditor.sizeValue", { size: sizeText(draft.spec, t) })}</p>
                 <Button variant="secondary" size="compact" onClick={() => setSizing(true)}>
                   {t("office.templateEditor.changeSize")}
                 </Button>

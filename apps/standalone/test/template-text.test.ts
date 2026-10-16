@@ -7,7 +7,6 @@ import {
   defaultConflict,
   describeDefaultConflict,
   describeScope,
-  dpiText,
   groupName,
   PURPOSE_TONE,
   PURPOSES,
@@ -43,12 +42,6 @@ describe("template texts", () => {
   it("round a millimetre to two decimals, and write a zero side as a size, not as a missing one", () => {
     expect(sizeText({ widthMm: 58.254, heightMm: 40.1 }, t)).toBe("58,25 × 40,1 мм");
     expect(sizeText({ widthMm: 0, heightMm: 40 }, t)).toBe("0 × 40 мм");
-  });
-
-  it("write a resolution in dpi, and none without one", () => {
-    expect(dpiText(203, t)).toBe("203 dpi");
-    expect(dpiText(0, t)).toBe("0 dpi");
-    expect(dpiText(null, t)).toBe("—");
   });
 
   it("name a product group from the lookup, and by its code when the lookup lacks it or did not load", () => {

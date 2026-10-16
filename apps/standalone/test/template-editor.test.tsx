@@ -193,7 +193,12 @@ async function importCode(
   const dialog = await screen.findByRole("dialog", { name: "Импорт кода этикетки" });
   chooseValueOn(within(dialog).getByRole("combobox", { name: "Формат кода" }), format);
   if (dpi !== undefined) {
-    chooseValueOn(within(dialog).getByRole("combobox", { name: "Разрешение кода" }), String(dpi));
+    chooseValueOn(
+      within(dialog).getByRole("combobox", {
+        name: "Разрешение принтера, для которого написан код",
+      }),
+      String(dpi),
+    );
   }
   fireEvent.change(within(dialog).getByLabelText(CODE_LABELS[format]), {
     target: { value: source },
@@ -301,7 +306,7 @@ describe("a new label template", () => {
     await openNew(fake);
     type("Название", "Паллета");
     chooseValue("Назначение", "pallet");
-    expect(screen.getByText("Размер: 100 × 150 мм · 203 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 100 × 150 мм")).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
     expect(fake.api.createTemplate.mock.calls[0]?.[1]).toStrictEqual({
@@ -706,7 +711,13 @@ describe("a new label template", () => {
     fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
     const dialog = await screen.findByRole("dialog", { name: "Импорт кода этикетки" });
     expect(valueOn(within(dialog).getByRole("combobox", { name: "Формат кода" }))).toBe("tspl");
-    expect(valueOn(within(dialog).getByRole("combobox", { name: "Разрешение кода" }))).toBe("300");
+    expect(
+      valueOn(
+        within(dialog).getByRole("combobox", {
+          name: "Разрешение принтера, для которого написан код",
+        }),
+      ),
+    ).toBe("300");
     fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByText("Элементов в макете: 1")).toBeTruthy();
@@ -758,7 +769,7 @@ describe("the label's size", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("opens on the layout's size and resolution, takes a preset and sends the new size", async () => {
+  it("opens on the layout's size, takes a preset and sends the new size, the layout's own resolution left as it is", async () => {
     const fake = session();
     fake.api.createTemplate.mockResolvedValue(created("Молоко"));
     await openNew(fake);
@@ -767,9 +778,8 @@ describe("the label's size", () => {
     expect(valueOn(within(dialog).getByRole("combobox", { name: "Размер" }))).toBe("58x40");
     expect(within(dialog).getByLabelText("Ширина, мм")).toHaveProperty("value", "58");
     expect(within(dialog).getByLabelText("Высота, мм")).toHaveProperty("value", "40");
-    expect(valueOn(within(dialog).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
-      "203",
-    );
+    // A template has no resolution of its own to show or change: the dialog asks for none.
+    expect(within(dialog).queryByRole("combobox", { name: /Разрешение/ })).toBeNull();
     chooseValueOn(within(dialog).getByRole("combobox", { name: "Размер" }), "100x150");
     expect(within(dialog).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
     expect(within(dialog).getByLabelText("Высота, мм")).toHaveProperty("value", "150");
@@ -785,15 +795,14 @@ describe("the label's size", () => {
     });
   });
 
-  it("takes a typed size with a comma as «Свой размер», and a resolution", async () => {
+  it("takes a typed size with a comma as «Свой размер»", async () => {
     const fake = session();
     await openNew(fake);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     type("Ширина, мм", "58,5");
     expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
-    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     await applySize();
-    expect(screen.getByText("Размер: 58,5 × 40 мм · 300 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58,5 × 40 мм")).toBeTruthy();
   });
 
   it("refuses a size outside 10–300 mm under its field and keeps the layout", async () => {
@@ -1006,13 +1015,12 @@ describe("the label's size", () => {
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
   });
 
-  it("clears the too-large message as either field is typed in, and keeps the layout and the resolution when an element does not fit", async () => {
+  it("clears the too-large message as either field is typed in, and keeps the layout when an element does not fit", async () => {
     const fake = session();
     fake.api.createTemplate.mockResolvedValue(created("Молоко"));
     await openNew(fake);
     await importCode(WIDE_ZPL);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     type("Ширина, мм", "10");
     await applySize();
     expect(within(sizeDialog()).getByRole("alert")).toBeTruthy();
@@ -1028,7 +1036,7 @@ describe("the label's size", () => {
     expect(await savedSpec(fake)).toStrictEqual(importedSpec(WIDE_ZPL));
   });
 
-  it("keeps the exact height of an axis left as it was, and a resolution changed alone leaves both axes exact", async () => {
+  it("keeps the exact height of an axis left as it was", async () => {
     const fake = session();
     fake.api.createTemplate.mockResolvedValue(created("Молоко"));
     await openNew(fake);
@@ -1038,34 +1046,27 @@ describe("the label's size", () => {
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "58,06");
     expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", "41,29");
     expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("custom");
-    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "300");
     await applySize();
-    expect(screen.getByText("Размер: 58,06 × 41,29 мм · 300 dpi")).toBeTruthy();
+    expect(screen.getByText("Размер: 58,06 × 41,29 мм")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     type("Ширина, мм", "70");
     await applySize();
-    expect(screen.getByText("Размер: 70 × 41,29 мм · 300 dpi")).toBeTruthy();
-    expect(await savedSpec(fake)).toStrictEqual({ ...imported, widthMm: 70, dpi: 300 });
+    expect(screen.getByText("Размер: 70 × 41,29 мм")).toBeTruthy();
+    expect(await savedSpec(fake)).toStrictEqual({ ...imported, widthMm: 70 });
   });
 
-  it("opens on the resolution of the layout, and on the size and resolution just applied", async () => {
+  it("opens on the size just applied, and leaves the layout's resolution as the import read it", async () => {
     const fake = session();
     await openNew(fake);
     await importCode(ZPL, "zpl", 300);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
-    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
-      "300",
-    );
     chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), "100x150");
-    chooseValueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }), "203");
     await applySize();
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Размер" }))).toBe("100x150");
     expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "100");
     expect(within(sizeDialog()).getByLabelText("Высота, мм")).toHaveProperty("value", "150");
-    expect(valueOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" }))).toBe(
-      "203",
-    );
+    expect(await savedSpec(fake)).toMatchObject({ widthMm: 100, heightMm: 150, dpi: 300 });
   });
 
   it("offers the presets and «Свой размер», fills both fields from each preset, and leaves typed fields alone on «Свой размер»", async () => {
@@ -1073,11 +1074,6 @@ describe("the label's size", () => {
     await openNew(fake);
     fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
     const preset = () => within(sizeDialog()).getByRole("combobox", { name: "Размер" });
-    expect(
-      within(sizeDialog()).getByText(
-        "Станция печатает в разрешении своего принтера; это значение — для импорта кода и предпросмотра.",
-      ),
-    ).toBeTruthy();
     expect(optionPairsOn(preset())).toStrictEqual([
       ["58x40", "58 × 40 мм"],
       ["60x40", "60 × 40 мм"],
@@ -1086,12 +1082,7 @@ describe("the label's size", () => {
       ["100x150", "100 × 150 мм"],
       ["custom", "Свой размер"],
     ]);
-    expect(
-      optionPairsOn(within(sizeDialog()).getByRole("combobox", { name: "Разрешение макета" })),
-    ).toStrictEqual([
-      ["203", "203 dpi"],
-      ["300", "300 dpi"],
-    ]);
+    expect(within(sizeDialog()).queryByRole("combobox", { name: /Разрешение/ })).toBeNull();
     for (const [key, width, height] of [
       ["75x120", "75", "120"],
       ["60x40", "60", "40"],
@@ -1675,7 +1666,7 @@ describe("changing a label template", () => {
     await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
     expect(current()).toEqual(["Шаблоны"]);
     fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
-    fireEvent.click(await screen.findByRole("link", { name: "По умолчанию" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "По умолчанию" }));
     await screen.findByRole("heading", { name: "Шаблоны по умолчанию" });
     expect(current()).toEqual(["Шаблоны"]);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));

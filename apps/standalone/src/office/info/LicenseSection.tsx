@@ -8,11 +8,11 @@ import {
   Button,
   Card,
   DefinitionGrid,
-  Table,
   type DefinitionGridItem,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeLicense } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useBackupTime, type BackupTimeNote } from "../backups/backup-time.js";
@@ -161,7 +161,8 @@ function LicenseSeats({ rows }: { rows: QuotaRow[] }) {
   return (
     <section className="license-part" aria-labelledby={titleId}>
       <h3 id={titleId}>{t("office.about.license.seats.title")}</h3>
-      <Table
+      <PagedTable
+        tableId="license-seats"
         columns={columns}
         rows={rows}
         getRowKey={(row) => row.key}

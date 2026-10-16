@@ -10,7 +10,6 @@ import {
   PageHeader,
   Select,
   StatusChip,
-  Table,
   type TableColumn,
   type TagPhase,
 } from "@markiro/ui";
@@ -19,7 +18,7 @@ import type { OfficeProduct } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
 import { ProductDrawer } from "./ProductDrawer.js";
@@ -27,7 +26,6 @@ import { ProductThumb } from "./ProductThumb.js";
 import {
   findProducts,
   groupLabel,
-  PAGE_SIZE,
   productState,
   type ProductFilter,
   type ProductState,
@@ -59,7 +57,6 @@ export function ProductsPage() {
   const store = useStoreRecord<OfficeProduct>(officeKeys.products);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ProductFilter>("all");
-  const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<ProductsDialog | null>(null);
   const [notice, setNotice] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
@@ -154,9 +151,6 @@ export function ProductsPage() {
       );
     }
     const found = findProducts(activeFirstByName(products.data), search, filter);
-    const pageCount = Math.max(1, Math.ceil(found.length / PAGE_SIZE));
-    // A shorter list (a product archived and filtered out) never shows an empty page.
-    const shown = Math.min(page, pageCount);
     return (
       <>
         <FilterBar
@@ -172,7 +166,6 @@ export function ProductsPage() {
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
-              setPage(1);
             }}
           />
           <Select
@@ -184,28 +177,22 @@ export function ProductsPage() {
             value={filter}
             onValueChange={(value) => {
               setFilter(value);
-              setPage(1);
             }}
           />
         </FilterBar>
         <Card>
-          <Table
+          <PagedTable
+            tableId="products"
+            pagerLabel={t("office.products.pager.label")}
+            resetKey={`${search}|${filter}`}
             columns={columns}
-            rows={found.slice((shown - 1) * PAGE_SIZE, shown * PAGE_SIZE)}
+            rows={found}
             getRowKey={(product) => product.id}
             empty={t(
               products.data.length === 0 ? "office.products.empty" : "office.products.nothingFound",
             )}
             scrollLabel={t("office.products.title")}
           />
-          {pageCount > 1 && (
-            <OfficePager
-              label={t("office.products.pager.label")}
-              page={shown}
-              pageCount={pageCount}
-              onPage={setPage}
-            />
-          )}
         </Card>
       </>
     );

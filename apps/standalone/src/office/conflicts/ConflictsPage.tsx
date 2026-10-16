@@ -16,14 +16,21 @@ import {
 } from "@markiro/ui";
 
 import { errorMessageKey } from "../../host/errors.js";
-import type { OfficeConflict, OfficeConflictScan } from "../../host/review.js";
+import {
+  CONFLICT_PAGE_SIZE,
+  type OfficeConflict,
+  type OfficeConflictPage,
+  type OfficeConflictScan,
+} from "../../host/review.js";
 import { useCan } from "../access.js";
 import { instantFormat, type FormatInstant } from "../codes/CodeCard.js";
 import { PackDraftWithoutLine, startPackDisassembly } from "../codes/pack-disassembly.js";
 import { alertFailure, type AlertFailure } from "../form-errors.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PaginationBar } from "../paging/PaginationBar.js";
+import { usePageSize } from "../paging/page-size.js";
+import { useHostWindowRows } from "../paging/use-host-window.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
 import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
@@ -57,15 +64,23 @@ export function ConflictsPage() {
   const shiftId = params.get("shift") ?? "";
   const reviewed = readReviewed(params.get("state"));
   const page = readPage(params.get("page"));
-  const query = conflictQuery(shiftId, reviewed, page);
+  // The host pages conflicts by number, 50 a page; the office shows pages of its own size out of them.
+  const [pageSize, setPageSize] = usePageSize("conflicts");
   const canReview = useCan("reviewConflicts");
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   const noticeId = useId();
-  const conflicts = useOfficeQuery(officeKeys.conflictList(query), (api, token) =>
-    api.listConflicts(token, query),
-  );
+  const window = useHostWindowRows<OfficeConflict, OfficeConflictPage>({
+    page,
+    pageSize,
+    hostSize: CONFLICT_PAGE_SIZE,
+    keyOf: (hostPage) => officeKeys.conflictList(conflictQuery(shiftId, reviewed, hostPage)),
+    read: (api, token, hostPage) =>
+      api.listConflicts(token, conflictQuery(shiftId, reviewed, hostPage)),
+    enabled: true,
+  });
+  const conflicts = window.first;
   const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token));
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const review = useOfficeMutation((api, token, id: string) => api.reviewConflict(token, id));
@@ -261,24 +276,41 @@ export function ConflictsPage() {
     if (conflicts.isError) {
       return <LoadError error={conflicts.error} onRetry={() => void conflicts.refetch()} />;
     }
-    const data = conflicts.data;
+    const rows = window.rows;
+    if (rows === undefined) {
+      return window.second.isError ? (
+        <LoadError error={window.second.error} onRetry={() => void window.second.refetch()} />
+      ) : (
+        <PageLoading />
+      );
+    }
+    const shown = Math.min(page, window.pageCount);
     return (
       <Card>
-        <Table
-          columns={columns}
-          rows={data.items}
-          getRowKey={(row) => row.id}
-          empty={t(filtered ? "office.conflicts.emptyFiltered" : "office.conflicts.empty")}
-          scrollLabel={t("office.conflicts.table.label")}
-        />
-        {data.pageCount > 1 && (
-          <OfficePager
-            label={t("office.conflicts.pager")}
-            page={data.page}
-            pageCount={data.pageCount}
-            onPage={(next) => setFilter({ page: next })}
+        <div className="office-paged">
+          <Table
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            empty={t(filtered ? "office.conflicts.emptyFiltered" : "office.conflicts.empty")}
+            scrollLabel={t("office.conflicts.table.label")}
           />
-        )}
+          <PaginationBar
+            label={t("office.conflicts.pager")}
+            name={t("office.conflicts.table.label")}
+            page={shown}
+            pageSize={pageSize}
+            shownRows={rows.length}
+            total={window.reachable}
+            pageCount={window.pageCount}
+            hasNext={shown < window.pageCount}
+            onPage={(next) => setFilter({ page: next })}
+            onPageSize={(size) => {
+              setPageSize(size);
+              setFilter({ page: 1 });
+            }}
+          />
+        </div>
       </Card>
     );
   };

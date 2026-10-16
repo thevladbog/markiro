@@ -14,9 +14,6 @@ import { templateFitsSlot } from "../../lib/template-eligibility.js";
 /** What the status filter keeps. */
 export type ShiftStatusFilter = "all" | ShiftStatus;
 
-/** Rows on one page of the list. */
-export const SHIFT_PAGE_SIZE = 25;
-
 /** The longest period the list asks the host for, in days with both ends. */
 export const MAX_PERIOD_DAYS = 366;
 

@@ -5,9 +5,6 @@ import type { OfficeBox, OfficePallet } from "../../host/protocol.js";
  * the host's lists (`GET /v1/office/shifts/{id}/boxes`, `…/pallets`).
  */
 
-/** Boxes on one page of the card. */
-export const BOX_PAGE_SIZE = 50;
-
 /** A box's or a pallet's state: taken apart wins over closed. */
 export type PackState = "open" | "closed" | "disassembled";
 

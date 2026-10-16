@@ -9,10 +9,10 @@ import {
   PageHeader,
   RowActions,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { pairingCodeRequest } from "../../host/requests.js";
@@ -271,7 +271,8 @@ export function DevicesPage() {
     }
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="devices"
           columns={columns}
           rows={devices.data}
           getRowKey={(device) => device.id}

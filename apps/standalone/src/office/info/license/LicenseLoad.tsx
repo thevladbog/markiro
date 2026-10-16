@@ -2,8 +2,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, FileDropZone, Table, VisuallyHidden, type TableColumn } from "@markiro/ui";
+import { Alert, Button, FileDropZone, VisuallyHidden, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../../paging/PagedTable.js";
 import type { LicensePreview, OfficeLicense } from "../../../host/protocol.js";
 import { licenseLoad } from "../../../host/requests.js";
 import { officeKeys, useOfficeMutation } from "../../office-query.js";
@@ -151,7 +152,8 @@ export function LicenseLoad({ license, zone }: LicenseLoadProps) {
       {staged !== null && (
         <section className="license-part" aria-labelledby={previewId}>
           <h4 id={previewId}>{t("office.about.license.load.previewTitle")}</h4>
-          <Table
+          <PagedTable
+            tableId="license-load"
             columns={columns}
             rows={comparisonRows(staged.preview, zone)}
             getRowKey={(row) => row.id}

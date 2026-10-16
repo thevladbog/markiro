@@ -24,7 +24,16 @@ function rows(): HTMLElement[] {
   return within(screen.getByRole("table")).getAllByRole("row").slice(1);
 }
 
-async function palletsOf(value = packSession(), path = "/codes/pallets") {
+/** The first and only page of the pallets: the host has no more to give. */
+const ONLY_PAGE: OfficePalletPage = { ...PALLET_PAGE, nextCursor: null };
+
+function session() {
+  const value = packSession();
+  value.api.listPallets.mockResolvedValue(ONLY_PAGE);
+  return value;
+}
+
+async function palletsOf(value = session(), path = "/codes/pallets") {
   await openCodes(value, path);
   await screen.findByRole("table");
   return value;
@@ -90,25 +99,53 @@ describe("«Паллеты» (plan КРТ)", () => {
     );
   });
 
-  it("loads the next hundred below the cursor, adds the rows, and the button goes on the last page", async () => {
+  it("reads the next hundred below the cursor on its own while the page shown is not yet full, and adds the rows", async () => {
     const value = packSession();
     value.api.listPallets.mockResolvedValueOnce(PALLET_PAGE).mockResolvedValueOnce(SECOND);
     await palletsOf(value);
-    fireEvent.click(screen.getByRole("button", { name: "Показать ещё" }));
     await waitFor(() => expect(rows()).toHaveLength(4));
     expect(value.api.listPallets).toHaveBeenLastCalledWith(
       "office-session-token",
       {},
       PALLET_PAGE.nextCursor,
     );
+    // No «Показать ещё»: the pages of the table are the way on.
     expect(screen.queryByRole("button", { name: "Показать ещё" })).toBeNull();
     expect(screen.getByText("Показано: 4")).toBeTruthy();
+  });
+
+  it("pages the pallets ten at a time over the rows read, reading on while the host has more", async () => {
+    const [first] = PALLET_PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no pallets");
+    const make = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...first,
+        id: `a0000000-0000-4000-8000-${String(from + index).padStart(12, "0")}`,
+        sscc: `1460068200000${String(from + index).padStart(5, "0")}`,
+      }));
+    const value = packSession();
+    value.api.listPallets
+      .mockResolvedValueOnce({ ...PALLET_PAGE, items: make(1, 12), nextCursor: "c1" })
+      .mockResolvedValueOnce({ ...PALLET_PAGE, items: make(13, 12), nextCursor: null });
+    await palletsOf(value);
+    await waitFor(() => expect(rows()).toHaveLength(10));
+    const pager = () => screen.getByRole("navigation", { name: "Страницы списка паллет" });
+    // 12 rows are read and the host has more: the table does not yet know how many there are.
+    expect(screen.getByText("Показано 1–10, есть ещё")).toBeTruthy();
+    fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
+    expect(await screen.findByText("Показано 11–20 из 24")).toBeTruthy();
+    fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
+    expect(rows()).toHaveLength(4);
+    expect(within(pager()).getByRole("button", { name: "Вперёд" })).toHaveProperty(
+      "disabled",
+      true,
+    );
   });
 
   it("keeps the stations to choose from while a narrower list is read, and shows no stale rows", async () => {
     const value = packSession();
     value.api.listPallets
-      .mockResolvedValueOnce(PALLET_PAGE)
+      .mockResolvedValueOnce(ONLY_PAGE)
       .mockReturnValueOnce(new Promise(() => undefined));
     await palletsOf(value);
     chooseText("Товар", "Молоко 3,2% 0,9 л");
@@ -134,7 +171,6 @@ describe("«Паллеты» (plan КРТ)", () => {
       )
       .mockResolvedValueOnce(SECOND);
     await palletsOf(value);
-    fireEvent.click(screen.getByRole("button", { name: "Показать ещё" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Нет связи с хостом");
     expect(rows()).toHaveLength(3);
@@ -231,7 +267,9 @@ describe("«Паллеты» (plan КРТ)", () => {
   });
 
   it("is open to a technologist", async () => {
-    await palletsOf(packSession(undefined, TECHNOLOGIST));
+    const value = packSession(undefined, TECHNOLOGIST);
+    value.api.listPallets.mockResolvedValue(ONLY_PAGE);
+    await palletsOf(value);
     expect(rows()).toHaveLength(3);
   });
 });

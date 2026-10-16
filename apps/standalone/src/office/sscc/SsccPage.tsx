@@ -10,10 +10,10 @@ import {
   DefinitionGrid,
   PageHeader,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { SsccCounter, SsccState } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
@@ -135,7 +135,8 @@ function SsccContent() {
       <Card title={t("office.sscc.countersTitle")} titleAs="h2">
         {saved === "counter" && <Alert tone="ok">{t("office.common.saved")}</Alert>}
         <p className="office-note">{t("office.sscc.countersIntro")}</p>
-        <Table
+        <PagedTable
+          tableId="sscc"
           columns={columns}
           rows={orderedCounters(state)}
           getRowKey={(counter) => `${counter.issuerPrefix}-${counter.extension}`}

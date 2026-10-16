@@ -12,9 +12,6 @@ export function productState(product: Pick<OfficeProduct, "archived" | "status">
 /** What the state filter keeps. */
 export type ProductFilter = "all" | ProductState;
 
-/** Rows on one page of the list. */
-export const PAGE_SIZE = 25;
-
 /**
  * Whether `product` matches the search: its name or print name holds the
  * text, without case, or its GTIN holds the text with its spaces taken out,
