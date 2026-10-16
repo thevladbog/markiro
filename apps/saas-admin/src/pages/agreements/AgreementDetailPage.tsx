@@ -135,12 +135,20 @@ function AgreementDetail({ id, detail }: { id: string; detail: AgreementDetailDa
     },
   });
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: { draft: RequisitesDraft; documentForm: AgreementDocumentForm }) =>
       updateAgreement(id, {
-        documentForm,
-        counterparty: toRequisitesInput(draft) as never,
+        documentForm: submitted.documentForm,
+        counterparty: toRequisitesInput(submitted.draft),
       }),
-    onSuccess: () => {
+    onSuccess: (response, submitted) => {
+      // Take the server-normalised values, but only into a field the operator has not
+      // touched since submitting: an edit made while the request was pending stays.
+      setDraft((current) =>
+        current === submitted.draft ? fromRequisites(response.agreement.counterparty) : current,
+      );
+      setDocumentForm((current) =>
+        current === submitted.documentForm ? response.agreement.documentForm : current,
+      );
       setSaved(true);
       invalidate();
     },
@@ -334,7 +342,7 @@ function AgreementDetail({ id, detail }: { id: string; detail: AgreementDetailDa
                 onSubmit={(event) => {
                   event.preventDefault();
                   setSaved(false);
-                  save.mutate();
+                  save.mutate({ draft, documentForm });
                 }}
               >
                 <div

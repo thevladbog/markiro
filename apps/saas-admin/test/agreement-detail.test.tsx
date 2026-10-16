@@ -155,6 +155,50 @@ describe("agreement detail page", () => {
     expect(await screen.findByText("Документов пока нет.")).toBeDefined();
   });
 
+  it("takes the server-normalised requisites after a save and is clean again", async () => {
+    stubApi(detail({ status: "draft", editable: true, tenantId: null, documents: [] }));
+    await openDetail();
+    const user = userEvent.setup();
+    const name = (await screen.findByLabelText("Наименование")) as HTMLInputElement;
+    await user.type(name, "   ");
+    const save = screen.getByRole("button", { name: "Сохранить изменения" }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    await user.click(save);
+    await waitFor(() => expect(name.value).toBe("ООО «Атолл»"));
+    expect(save.disabled).toBe(true);
+  });
+
+  it("keeps an edit made while a save is pending", async () => {
+    const agreement = detail({ status: "draft", editable: true, tenantId: null, documents: [] });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const path = String(input);
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (path.endsWith("/tenant-candidates")) return jsonResponse(200, { candidates: [] });
+        if (path.includes("/api/platform/agreements/")) {
+          if ((init.method ?? "GET") !== "GET") await gate;
+          return jsonResponse(200, agreement);
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    await openDetail();
+    const user = userEvent.setup();
+    const name = (await screen.findByLabelText("Наименование")) as HTMLInputElement;
+    await user.type(name, " 2");
+    await user.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await user.type(name, "3");
+    release();
+    await waitFor(() => expect(name.value.endsWith("3")).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(name.value.endsWith("3")).toBe(true);
+  });
+
   it("confirms before deleting an attachment", async () => {
     const calls: string[] = [];
     stubApi(detail(), calls);

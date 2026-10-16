@@ -48,7 +48,7 @@ const KINDS = [
 const nullable = (value: string): string | null => (value.trim() === "" ? null : value.trim());
 
 /** Throws nothing: the contract schema is the validator, this only shapes. */
-export function toRequisitesInput(draft: RequisitesDraft): unknown {
+export function toRequisitesInput(draft: RequisitesDraft): AgreementRequisitesInput {
   const base = {
     name: draft.name.trim(),
     address: nullable(draft.address),
