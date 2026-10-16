@@ -25,6 +25,7 @@ import {
   RowActions,
   RowActionMenu,
   Select,
+  Slider,
   StatusChip,
   Table,
 } from "../src/components/index.js";
@@ -1826,5 +1827,35 @@ describe("RowActionMenu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
+describe("Slider", () => {
+  it("is a named range with the value, bounds and step, and reports a change as a number", () => {
+    const onValueChange = vi.fn();
+    render(
+      <Slider
+        aria-label="Масштаб"
+        min={1}
+        max={4}
+        step={0.25}
+        value={2}
+        onValueChange={onValueChange}
+      />,
+    );
+    const slider = screen.getByRole("slider", { name: "Масштаб" }) as HTMLInputElement;
+    expect(slider.min).toBe("1");
+    expect(slider.max).toBe("4");
+    expect(slider.step).toBe("0.25");
+    expect(slider.value).toBe("2");
+    fireEvent.change(slider, { target: { value: "3.25" } });
+    expect(onValueChange).toHaveBeenCalledWith(3.25);
+  });
+
+  it("can be disabled", () => {
+    render(
+      <Slider aria-label="x" min={0} max={1} value={0} disabled onValueChange={() => undefined} />,
+    );
+    expect((screen.getByRole("slider") as HTMLInputElement).disabled).toBe(true);
   });
 });

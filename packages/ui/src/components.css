@@ -1135,3 +1135,24 @@
   background: var(--cat-steel-bg);
   color: var(--cat-steel-fg);
 }
+
+/* Slider: the native range control in the kit's colours and a 40 px touch height. */
+.mk-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  accent-color: var(--fg-1);
+  cursor: pointer;
+}
+
+.mk-slider:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.mk-slider:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-2);
+}
