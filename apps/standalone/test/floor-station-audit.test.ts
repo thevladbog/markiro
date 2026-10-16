@@ -186,21 +186,86 @@ describe("the shift close card", () => {
 
 describe("the sign-in screen", () => {
   const signIn = rulesOf("src/floor/sign-in/operator-sign-in.css");
+  const controls = rulesOf("src/floor/kit/floor-controls.css");
+  const frame = ":where(.floor-frame, .station-screen)";
 
-  it("lets the message row grow with its words, and clips none of them", () => {
+  it("holds the message slot out of the layout until it has words, and keeps its room only in a tall window", () => {
     expect(rule(signIn, ".operator-login")["grid-template-rows"]).toBe(
-      "auto minmax(64px, auto) minmax(0, 1fr) auto",
+      "auto auto minmax(0, 1fr) auto",
     );
     const message = rule(signIn, ".operator-login__message");
     expect(message["overflow"]).toBeUndefined();
-    expect(message["min-height"]).toBe("64px");
+    expect(rule(signIn, ".operator-login__message:empty")["display"]).toBe("none");
     expect(
-      rule(signIn, ".operator-login", "@media (max-height: 760px)")["grid-template-rows"],
-    ).toBe("auto minmax(56px, auto) minmax(0, 1fr) auto");
+      rule(signIn, ".operator-login__message", "@media (min-height: 900px)")["min-height"],
+    ).toBe("96px");
   });
 
   it("sets the badge help text at the floor's body size", () => {
     expect(rule(signIn, ".operator-login__badge-copy p")["font"]).toBe("var(--floor-body)");
+  });
+
+  it("is on one layer: the page's own colour, no card or backing behind the halves", () => {
+    expect(rule(signIn, ".operator-login")["background"]).toBe("var(--bg)");
+    const css = textOf("src/floor/sign-in/operator-sign-in.css");
+    expect(css).not.toContain("badge-panel");
+    expect(css).not.toContain("--surface-card");
+    expect(css).not.toContain("--surface-panel");
+  });
+
+  it("sets 72 px keypad keys and 64 px-or-more Cyrillic keys, edged in `linectl`", () => {
+    const key = rule(controls, `${frame} .floor-keypad__key`);
+    expect(key["min-height"]).toBe("72px");
+    expect(key["border"]).toBe("1px solid var(--linectl)");
+    const letter = rule(controls, `${frame} .floor-cyrillic__key`);
+    expect(letter["border"]).toBe("1px solid var(--linectl)");
+    expect(letter["min-height"]).toBe("64px");
+    expect(
+      Number.parseInt(letter["height"]?.match(/(\d+)px\)$/)?.[1] ?? "0", 10),
+    ).toBeGreaterThanOrEqual(64);
+    // The short-window step shrinks the keys, never below 64.
+    const short = rule(
+      signIn,
+      ".operator-login__body--search .floor-cyrillic",
+      "@media (max-height: 860px)",
+    );
+    expect(Number.parseInt(short["--floor-cyrillic-key"] ?? "0", 10)).toBeGreaterThanOrEqual(64);
+    expect(
+      rule(signIn, ".operator-name-search__row.mk-btn", "@media (max-height: 860px)")["height"],
+    ).toBe("64px !important");
+  });
+
+  it("gives the fields the kit's 84 px, an always-present line, and a still caret", () => {
+    expect(rule(controls, `${frame} .floor-entry__box`)["height"]).toBe("84px");
+    expect(rule(controls, `${frame} .floor-entry__hint`)["min-height"]).toBe("26px");
+    const css = textOf("src/floor/kit/floor-controls.css");
+    expect(css).not.toMatch(/animation:[^;]*floor-entry/);
+    expect(css).not.toContain("@keyframes");
+  });
+
+  it("moves only once and only by opacity and transform: no looping animation, none on an error", () => {
+    const css = textOf("src/floor/sign-in/operator-sign-in.css");
+    expect(css).not.toMatch(/infinite/);
+    expect(rule(signIn, ".operator-login")["animation"]).toBe("sign-in-fade 140ms linear both");
+    expect(rule(signIn, ".operator-login__sweep")["animation"]).toBe(
+      "sign-in-sweep 600ms var(--ease) 140ms 1 both",
+    );
+    for (const animation of ["shake", "flash", "pulse", "blink"])
+      expect(css).not.toContain(animation);
+    // Reduced motion keeps the end states: the screen and the line sit still.
+    expect(
+      rule(signIn, ".operator-login__sweep", "@media (prefers-reduced-motion: reduce)")[
+        "animation"
+      ],
+    ).toBe("none");
+    expect(
+      rule(signIn, ".operator-login", "@media (prefers-reduced-motion: reduce)")["animation"],
+    ).toBe("none");
+  });
+
+  it("keeps every action of the row at the kit's 84 px", () => {
+    const action = rule(signIn, ".operator-login__actions .mk-btn--floor");
+    expect(action["height"]).toBe("var(--control-floor-primary) !important");
   });
 });
 

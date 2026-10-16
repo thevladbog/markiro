@@ -252,7 +252,8 @@
   min-height: 72px;
   padding: 0;
   place-items: center;
-  border: 1px solid var(--line2);
+  /* `linectl`: the key's edge carries 3:1 on the screen's own colour (kit question 8). */
+  border: 1px solid var(--linectl);
   border-radius: var(--floor-r-ctl);
   background: var(--panel);
   color: var(--fg);
@@ -358,23 +359,207 @@
   font: 500 22px/1 var(--font-ui);
 }
 
+/* ---- Entry field (the sign-in's number and PIN): label, 84 px field, an always-present line. ---- */
+
+:where(.floor-frame, .station-screen) .floor-entry {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__label {
+  color: var(--muted);
+  font: var(--floor-body-strong);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__box {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 84px;
+  box-sizing: border-box;
+  padding: 0 20px;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__box:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__value {
+  min-width: 0;
+  overflow: hidden;
+  font: 600 44px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The caret is drawn, not blinking: nothing on this screen moves all day. */
+:where(.floor-frame, .station-screen)
+  .floor-entry[data-status="active"]
+  .floor-entry__value::after {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 44px;
+  margin-inline-start: 6px;
+  vertical-align: middle;
+  background: var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__placeholder {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted2);
+  font: 400 28px/1 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The dash of an empty active field sits before the caret, in the value's own face. */
+:where(.floor-frame, .station-screen)
+  .floor-entry[data-status="active"]
+  .floor-entry__value:empty
+  + .floor-entry__placeholder {
+  order: -1;
+  flex: none;
+  font: 400 44px/1 var(--font-mono);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry__icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-inline-start: auto;
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="accepted"] .floor-entry__icon {
+  color: var(--ok);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="active"] .floor-entry__box {
+  border-color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="error"] .floor-entry__box {
+  border-color: var(--err);
+  box-shadow: inset 0 0 0 1px var(--err);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="locked"] .floor-entry__box {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--dis);
+  cursor: default;
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="locked"] .floor-entry__label {
+  color: var(--dis);
+}
+
+/* A line of its own height is always kept, so the next field never jumps. */
+:where(.floor-frame, .station-screen) .floor-entry__hint {
+  min-height: 26px;
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+:where(.floor-frame, .station-screen) .floor-entry[data-status="error"] .floor-entry__hint {
+  color: var(--err);
+}
+
+/* ---- Cyrillic keyboard: three flat rows of 64 px keys edged in `linectl`. ---- */
+
+:where(.floor-frame, .station-screen) .floor-cyrillic {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__row {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--floor-cyrillic-key, 72px);
+  min-height: 64px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--panel);
+  color: var(--fg);
+  font: 600 28px/1 var(--font-ui);
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--fn {
+  color: var(--muted);
+  font: 600 20px/1 var(--font-ui);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--erase {
+  flex-grow: 1.9;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key--space {
+  flex-grow: 2.5;
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+  background: var(--line);
+}
+
+:where(.floor-frame, .station-screen) .floor-cyrillic__key:disabled {
+  color: var(--dis);
+  cursor: default;
+}
+
 /* ---- Reduced motion: no scale and no travel; the press shows as a fill. ---- */
 
 @media (prefers-reduced-motion: reduce) {
   :where(.floor-frame, .station-screen) .floor-segmented__option,
   :where(.floor-frame, .station-screen) .floor-switch-card,
   :where(.floor-frame, .station-screen) .floor-switch-card__knob,
-  :where(.floor-frame, .station-screen) .floor-keypad__key {
+  :where(.floor-frame, .station-screen) .floor-keypad__key,
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key,
+  :where(.floor-frame, .station-screen) .floor-entry__box {
     transition: none;
   }
 
   :where(.floor-frame, .station-screen) .floor-segmented__option:active:not(:disabled),
   :where(.floor-frame, .station-screen) .floor-switch-card:active:not(:disabled),
-  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled) {
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-entry__box:active:not(:disabled) {
     transform: none;
   }
 
-  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled) {
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-cyrillic__key:active:not(:disabled) {
     background: var(--fg);
     color: var(--bg);
   }

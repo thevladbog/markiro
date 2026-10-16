@@ -1,13 +1,13 @@
 /*
- * The floor's sign-in, forked from the cloud station's approved screen
- * (`apps/station/src/station.css`: `.operator-login*`, `.badge-scan-illustration*`,
- * `.operator-name-search*`, `.station-brand`). Class names, spacing, sizes and
- * hierarchy are the cloud's; the differences are the standalone's own:
- * the status bar sits above the screen (so the screen fills what is left, not
- * the whole viewport), «Офис» and the scanner chip share the header's right
- * column (where the cloud's window chrome and its fixed chip sit), and two
- * small-panel steps keep the keypad whole down to 1024×600.
- * Colours, type and spacing come from @markiro/ui tokens only.
+ * The floor's sign-in, variant A of the design kit 2026-10 (docs/design-briefs/design-kit-2026-10.md,
+ * the station's sign-in boards): both ways in on one screen, on ONE layer — no card behind
+ * anything. The badge's half stands on the left with one instruction; the number and the PIN
+ * are two labelled fields beside the one flat keypad; a hairline divides the halves. Colours,
+ * type and spacing come from @markiro/ui tokens only (floor-kit.css owns the literal paper
+ * colours; there are none here). Motion is the kit's quiet kind: a 140 ms fade when the screen
+ * opens, one thin line over the badge once (140–740 ms), the press feedback of the keys, and the
+ * accepted scan's tick; nothing loops and nothing moves on an error. Reduced motion keeps only
+ * the end states.
  */
 
 .operator-login {
@@ -16,30 +16,29 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
   overflow: hidden;
   gap: var(--sp-3);
-  /* The message row grows with its words: a two-line refusal was cut by a fixed 64 px (station audit). */
-  grid-template-rows: auto minmax(64px, auto) minmax(0, 1fr) auto;
-  background: var(--surface-page);
-  color: var(--fg-1);
+  /* header, the message slot (empty until it has words), the body, the actions */
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background: var(--bg);
+  color: var(--fg);
   font-family: var(--font-ui);
+  animation: sign-in-fade 140ms linear both;
 }
 
 .operator-login__header {
   display: grid;
   min-width: 0;
   min-height: 64px;
-  gap: var(--sp-3);
-  /* Equal side columns: the mark on the left and «Офис» on the right take the same width, so the
-     title and its subtitle stand on the screen's axis whatever the side elements hold. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr);
-  align-items: start;
+  gap: var(--sp-4);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 .operator-login__brand {
   overflow: hidden;
-  align-self: start;
+  align-self: center;
   justify-self: start;
 }
 
@@ -49,11 +48,14 @@
   height: 48px;
 }
 
+/* The title stands next to the mark, parted from it by a hairline (the login rule of the kit). */
 .operator-login__prompt {
   min-width: 0;
-  max-width: 640px;
+  min-height: 48px;
+  padding-inline-start: var(--sp-5);
   align-self: center;
-  text-align: center;
+  border-inline-start: 1px solid var(--line2);
+  text-align: start;
 }
 
 .operator-login__prompt h1,
@@ -67,51 +69,39 @@
 }
 
 .operator-login__prompt p {
-  margin-top: var(--sp-2);
-  color: var(--fg-2);
+  color: var(--muted);
   font: var(--floor-body);
 }
 
-/* «Офис» and the scanner chip: the same place on every step. */
+/* «Офис»: the same place on every step. */
 .operator-login__aside {
   display: flex;
   min-width: 0;
   gap: var(--sp-2);
   align-items: center;
   justify-content: flex-end;
-  justify-self: end;
 }
 
-/* A quiet warning under the title while the scanner is not ready (its state lives in the header's rail). */
-.operator-login__prompt .operator-login__scanner-warning {
-  margin-top: var(--sp-1);
-  color: var(--fg-2);
-  font: var(--floor-body);
-}
-
-.operator-login__prompt .operator-login__scanner-warning[data-tone="warn"] {
-  color: var(--warn-fg);
-}
-
-.operator-login__prompt .operator-login__scanner-warning[data-tone="error"] {
-  color: var(--err-fg);
-}
-
+/* The slot is there from the start (a polite region must exist before it speaks) and takes no room. */
 .operator-login__message {
   display: grid;
-  width: min(720px, 100%);
   min-width: 0;
-  min-height: 64px;
-  margin-inline: auto;
-  gap: var(--sp-2);
-  align-content: center;
+  align-content: start;
 }
 
-.operator-login__message p {
-  margin: 0;
-  color: var(--fg-2);
-  font: var(--floor-body);
-  text-align: center;
+.operator-login__message:empty {
+  display: none;
+}
+
+/* A tall window keeps the slot's room, so that the keypad does not jump when a message comes. */
+@media (min-height: 900px) {
+  .operator-login__message {
+    min-height: 96px;
+  }
+
+  .operator-login__message:empty {
+    display: grid;
+  }
 }
 
 .operator-login__body {
@@ -119,36 +109,20 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  gap: var(--sp-3);
-  grid-template-rows: 64px minmax(0, 1fr);
-  justify-items: center;
-}
-
-/*
- * On purpose unlike the cloud: the readout and the keypad stay together and
- * the pair is centred, instead of the keypad floating in the middle of the
- * free height with a dead gap under the readout (the owner's «лишние отступы»).
- */
-.operator-login__body--pad {
-  grid-template-rows: 64px auto;
-  align-content: center;
-}
-
-.operator-login__body--badge,
-.operator-login__body--state,
-.operator-login__body--search {
-  grid-template-rows: minmax(0, 1fr);
 }
 
 /* Loading, a copy that cannot be read, no copies yet, no operators. */
+.operator-login__body--state {
+  place-items: center;
+}
+
 .operator-login__state {
   display: grid;
   width: min(720px, 100%);
-  align-self: center;
   justify-items: center;
   gap: var(--sp-4);
-  color: var(--fg-2);
-  font: var(--floor-body);
+  color: var(--muted);
+  font: var(--floor-lg);
   text-align: center;
 }
 
@@ -161,50 +135,63 @@
   text-align: start;
 }
 
-.operator-login__readout {
-  display: flex;
-  width: min(360px, 100%);
-  height: 64px;
-  padding-inline: var(--sp-4);
-  overflow: hidden;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  font: var(--floor-lg);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* ---- Variant A: the badge's half, a hairline, the number and PIN with the keypad. ---- */
+
+.operator-login__body--entry {
+  gap: var(--sp-6);
+  grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr);
 }
 
-.operator-login__keypad-zone {
+.operator-login__badge {
   display: grid;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  place-items: center;
+  padding-inline-end: var(--sp-6);
+  gap: var(--sp-4);
+  align-content: center;
+  justify-items: center;
+  border-inline-end: 1px solid var(--line2);
+  text-align: center;
 }
 
-.operator-login__badge-panel {
-  display: grid;
-  width: min(560px, 64vw);
-  min-width: 240px;
-  height: min(260px, 100%);
-  min-height: 180px;
-  padding: var(--sp-4);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-3);
-  background: var(--surface-panel);
-  color: var(--fg-2);
-  gap: var(--sp-4);
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.75fr);
-  align-items: center;
+.operator-login__badge-picture {
+  position: relative;
+  width: 96px;
+  height: 120px;
+  color: var(--fg);
+}
+
+.operator-login__badge[data-state="unavailable"] .operator-login__badge-picture {
+  width: 120px;
+  color: var(--muted);
+}
+
+.operator-login__badge[data-state="accepted"] .operator-login__badge-picture {
+  width: 120px;
+  color: var(--ok);
+}
+
+.sign-in-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The one line that passes over the badge when the screen opens, then stillness. */
+.operator-login__sweep {
+  position: absolute;
+  inset-inline: -10px;
+  top: 0;
+  height: 3px;
+  border-radius: var(--r-round);
+  background: var(--accentui);
+  opacity: 0;
+  animation: sign-in-sweep 600ms var(--ease) 140ms 1 both;
 }
 
 .operator-login__badge-copy {
   display: grid;
+  max-width: 440px;
   gap: var(--sp-2);
 }
 
@@ -214,255 +201,284 @@
 }
 
 .operator-login__badge-copy h2 {
-  color: var(--fg-1);
-  font: var(--floor-body-strong);
+  color: var(--fg);
+  font: var(--floor-title);
+  overflow-wrap: anywhere;
 }
 
 .operator-login__badge-copy p {
-  color: var(--fg-2);
+  color: var(--muted);
   /* The floor's body size: the 14 px office text was the smallest on the screen. */
   font: var(--floor-body);
 }
 
-.badge-scan-illustration {
+/* The scanner's state in a word, with a glyph: never colour alone. */
+.operator-login__chip {
+  display: inline-flex;
+  min-height: 34px;
+  margin: 0;
+  padding: 0 14px;
+  gap: 7px;
+  align-items: center;
+  border-radius: var(--r-round);
+  background: var(--panel);
+  color: var(--muted);
+  font: 600 16px/1 var(--font-ui);
+}
+
+.operator-login__chip[data-tone="ok"] {
+  background: var(--okbg);
+  color: var(--ok);
+}
+
+.operator-login__chip[data-tone="warn"] {
+  background: var(--warnbg);
+  color: var(--warn);
+}
+
+.operator-login__chip[data-tone="error"] {
+  background: var(--errbg);
+  color: var(--err);
+}
+
+.operator-login__entry {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-6);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-content: start;
+  /* The keys: 72 px, 96 px where the window has the height for it. */
+  --sign-in-key: 72px;
+}
+
+@media (min-height: 900px) {
+  .operator-login__entry {
+    --sign-in-key: 96px;
+  }
+}
+
+.operator-login__entry .floor-keypad {
+  align-self: start;
+  grid-template-rows: repeat(4, var(--sign-in-key));
+}
+
+.operator-login__fields {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+/* The lockout: a countdown in the face of the numbers, and what is left as a bar (the number says it too). */
+.operator-login__countdown {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.operator-login__countdown-time,
+.operator-login__countdown-label {
+  margin: 0;
+}
+
+.operator-login__countdown-time {
+  font: 600 64px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.operator-login__countdown-label {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.operator-login__countdown-bar {
+  height: 12px;
+  overflow: hidden;
+  border-radius: var(--r-round);
+  background: var(--panel);
+}
+
+.operator-login__countdown-bar::before {
+  content: "";
   display: block;
-  width: min(100%, 280px);
-  max-height: 180px;
-  color: var(--fg-2);
-  justify-self: center;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--fg);
+  inline-size: calc(var(--lock-share, 0) * 100%);
 }
 
-.badge-scan-illustration__badge,
-.badge-scan-illustration__barcode,
-.badge-scan-illustration__scanner {
-  fill: none;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 3.5;
-}
-
-.badge-scan-illustration__barcode,
-.badge-scan-illustration__field,
-.badge-scan-illustration__slot {
-  stroke-width: 3;
-}
-
-.badge-scan-illustration__field,
-.badge-scan-illustration__slot {
-  opacity: 0.55;
-}
-
-.badge-scan-illustration__aperture {
-  fill: var(--accent-module);
-  stroke: none;
-  opacity: 0.75;
-}
-
-/* Re-scopes currentcolor so the scan cue reads as the module accent. */
-.badge-scan-illustration__beam {
-  color: var(--accent-module);
-}
-
-.badge-scan-illustration__wave {
-  fill: none;
-  stroke: currentcolor;
-  stroke-linecap: round;
-  stroke-width: 3.5;
-  transform-box: fill-box;
-  transform-origin: 100% 50%;
-  animation: badge-scan-wave 2600ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.badge-scan-illustration__wave:nth-of-type(2) {
-  animation-delay: 200ms;
-}
-
-.badge-scan-illustration__wave:nth-of-type(3) {
-  animation-delay: 400ms;
-}
-
-.badge-scan-illustration__sweep {
-  fill: currentcolor;
-  animation: badge-scan-sweep 2600ms cubic-bezier(0.32, 0.72, 0, 1) infinite;
-}
-
-/*
- * A scanner that is not ready shows no live beam: the cue stays, still and
- * dim, so the picture does not promise a scan the station will not take.
- */
-.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__beam {
-  opacity: 0.25;
-}
-
-.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__wave,
-.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__sweep {
-  animation: none;
-}
-
-.operator-login__badge-panel[data-scanner="error"] .badge-scan-illustration__aperture {
-  fill: var(--fg-3);
-}
-
-@keyframes badge-scan-wave {
-  0%,
-  100% {
-    opacity: 0.15;
-    transform: scaleX(0.88);
-  }
-
-  40% {
-    opacity: 0.8;
-    transform: scaleX(1);
-  }
-}
-
-@keyframes badge-scan-sweep {
-  0% {
-    opacity: 0;
-    transform: translateY(0);
-  }
-
-  16% {
-    opacity: 0.85;
-  }
-
-  72% {
-    opacity: 0.85;
-  }
-
-  88%,
-  100% {
-    opacity: 0;
-    transform: translateY(102px);
-  }
-}
+/* ---- The actions: one row of equal columns, the kit's 84 px. ---- */
 
 .operator-login__actions {
   display: grid;
   min-width: 0;
-  gap: var(--sp-3);
-  align-items: center;
-  justify-content: center;
-  grid-template-columns: repeat(var(--operator-login-action-columns), minmax(0, 320px));
+  gap: var(--sp-4);
+  grid-template-columns: repeat(var(--operator-login-action-columns), minmax(0, 1fr));
 }
 
-.operator-name-search__result-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.operator-login__actions:empty {
+  display: none;
+}
+
+/* ---- The name search: the field and the names side by side, the keyboard under them. ---- */
+
+.operator-login__body--search {
+  gap: var(--sp-3) var(--sp-6);
+  grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr);
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .operator-name-search {
   display: grid;
-  width: min(720px, 100%);
-  height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  gap: var(--sp-3);
-  grid-row: 1 / -1;
-  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .operator-name-search__results {
   display: grid;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  gap: var(--sp-2);
+  overflow: auto;
   align-content: start;
+  grid-column: 2;
+  grid-row: 1;
+  border-top: 1px solid var(--line2);
 }
 
 .operator-name-search__hint {
   display: grid;
   min-height: var(--control-floor);
-  color: var(--fg-3);
+  color: var(--muted2);
   font: var(--floor-body);
   place-items: center;
 }
 
-/* The cloud's compact step (`--control-keypad: 80px`), below a full-HD height. */
-@media (max-width: 1100px), (max-height: 899px) {
+/* A found name: a flat row between hairlines, the name, the number in mono, a chevron. */
+.operator-name-search__row.mk-btn {
+  display: grid !important;
+  height: var(--control-floor) !important;
+  padding: 0 var(--sp-2) !important;
+  gap: var(--sp-4) !important;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  justify-content: stretch !important;
+  border-width: 0 0 1px !important;
+  border-color: var(--line2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  text-align: start;
+}
+
+.operator-name-search__name {
+  min-width: 0;
+  overflow: hidden;
+  font: var(--floor-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operator-name-search__number {
+  color: var(--muted);
+  font: 400 22px/1 var(--font-mono);
+}
+
+.operator-name-search__chevron,
+.operator-name-search__glyph {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
+.operator-login__body--search .floor-cyrillic {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+/* A short window (1280×800 and under): the keys give a little, never below the floor's 64 px. */
+@media (max-height: 860px) {
   .operator-login {
-    --control-keypad: 80px;
+    padding-block: var(--sp-3);
+    gap: var(--sp-2);
+  }
+
+  .operator-login__body--search .floor-cyrillic {
+    --floor-cyrillic-key: 66px;
+  }
+
+  .operator-name-search__row.mk-btn {
+    height: 64px !important;
   }
 }
 
+/* The cloud's compact step: below 1100 px of width the word mark goes, the mark stays. */
 @media (max-width: 1100px) {
-  /* The mark alone: the word mark would push the title against «Офис». */
   .operator-login__brand {
     width: 48px;
   }
+}
 
-  /* The title keeps the screen's axis: the side columns stay equal, the title takes the middle. */
-  .operator-login__prompt {
-    max-width: 100%;
+/* The actions' height is the kit's: every button of the row is the 84 px action. */
+.operator-login__actions .mk-btn--floor {
+  height: var(--control-floor-primary) !important;
+  min-height: var(--control-floor-primary) !important;
+  border-radius: var(--floor-r-primary) !important;
+  font-size: 22px !important;
+}
+
+/* ---- Motion: opacity and transform only, once, under a second in all. ---- */
+
+@keyframes sign-in-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
-/*
- * A small panel (1024×600): the floor's 64 px keys, tighter rhythm, and the
- * readout beside the keypad instead of above it, so the keypad stays whole.
- */
-@media (max-height: 760px) {
-  .operator-login {
-    --control-keypad: 64px;
-
-    padding: var(--sp-2) var(--sp-4);
-    gap: var(--sp-2);
-    grid-template-rows: auto minmax(56px, auto) minmax(0, 1fr) auto;
+@keyframes sign-in-sweep {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
   }
 
-  .operator-login__prompt h1 {
-    font: var(--floor-lg);
+  15%,
+  85% {
+    opacity: 1;
   }
 
-  .operator-login__prompt p {
-    margin-top: 0;
+  100% {
+    opacity: 0;
+    transform: translateY(116px);
+  }
+}
+
+/* An accepted scan: the tick for 400 ms, then a 140 ms fade onto the floor. */
+.operator-login[data-accepted="true"] {
+  animation: sign-in-leave 140ms linear 260ms both;
+}
+
+@keyframes sign-in-leave {
+  from {
+    opacity: 1;
   }
 
-  .operator-login__message {
-    min-height: 56px;
-  }
-
-  .operator-login__body--pad {
-    grid-template-rows: auto;
-    grid-template-columns: minmax(0, 360px) auto;
-    align-items: center;
-    justify-content: center;
-    gap: var(--sp-6);
-  }
-
-  .operator-login__badge-panel {
-    height: min(220px, 100%);
-    min-height: 160px;
-  }
-
-  /*
-   * «Стереть» and «Сброс» on a 64 px key: the PinPad writes its 18 px
-   * caption inline, so the smaller caption needs `!important`.
-   */
-  .operator-login__keypad-zone [role="group"] > button:nth-child(10),
-  .operator-login__keypad-zone [role="group"] > button:nth-child(12) {
-    padding: 0 2px !important;
-    font-size: 13px !important;
+  to {
+    opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .badge-scan-illustration__wave,
-  .badge-scan-illustration__sweep {
+  .operator-login,
+  .operator-login[data-accepted="true"] {
     animation: none;
   }
 
-  .badge-scan-illustration__wave {
-    opacity: 0.55;
-  }
-
-  .badge-scan-illustration__sweep {
-    opacity: 0.85;
-    transform: translateY(51px);
+  .operator-login__sweep {
+    animation: none;
   }
 }

@@ -11,9 +11,9 @@ import {
   signInWithPin,
   type FloorOperator,
   type SignInContext,
-  type SignInRefusal,
   type SignInResult,
 } from "./sign-in.js";
+import { problemWords, type SignInMessage } from "./sign-in/messages.js";
 import "./reconfirm.css";
 
 export interface ReconfirmProps {
@@ -42,30 +42,11 @@ export interface ReconfirmProps {
 
 type Stage = "badge" | "login" | "pin";
 
-type Message =
-  | { kind: "refused"; reason: SignInRefusal; via: "pin" | "badge" }
-  | { kind: "locked"; scope: "station" | "operator"; minutes: number }
-  | { kind: "other" }
-  | { kind: "failed" };
+type Message = SignInMessage | { kind: "other" };
 
 const LOGIN = /^[0-9]{3,12}$/;
 const PIN = /^[0-9]{4,6}$/;
 const MINUTE_MS = 60_000;
-
-const REFUSAL_KEY = {
-  wrong: "floor.signIn.errors.wrongPin",
-  ambiguous: "floor.signIn.errors.ambiguousLogin",
-  not_ready: "floor.signIn.errors.notReady",
-  product_code: "floor.signIn.errors.productCode",
-  layout: "floor.signIn.errors.layout",
-  not_badge: "floor.signIn.errors.notBadge",
-} as const satisfies Record<SignInRefusal, string>;
-
-const BADGE_REFUSAL_KEY = {
-  ...REFUSAL_KEY,
-  wrong: "floor.signIn.errors.wrongBadge",
-  ambiguous: "floor.signIn.errors.ambiguousBadge",
-} as const satisfies Record<SignInRefusal, string>;
 
 /**
  * «Подтвердите, что это вы» (beta 3): a fresh proof of identity before a step
@@ -180,22 +161,15 @@ export function Reconfirm({
     setStage(next);
   };
 
-  const messageText = (shown: Message): string => {
-    switch (shown.kind) {
-      case "failed":
-        return t("floor.signIn.errors.failed");
-      case "other":
-        return t("floor.reconfirm.notYou");
-      case "locked":
-        return t(
-          shown.scope === "station"
-            ? "floor.signIn.errors.lockedStation"
-            : "floor.signIn.errors.lockedOperator",
-          { minutes: shown.minutes },
-        );
-      case "refused":
-        return t((shown.via === "badge" ? BADGE_REFUSAL_KEY : REFUSAL_KEY)[shown.reason]);
-    }
+  /** What the dialog says of the last answer: a title and what to do (the sign-in's own words). */
+  const messageAlert = (shown: Message) => {
+    if (shown.kind === "other") return <Alert tone="error">{t("floor.reconfirm.notYou")}</Alert>;
+    const words = problemWords(shown);
+    return (
+      <Alert tone={words.tone} title={t(`${words.base}.title`, words.params)}>
+        {t(`${words.base}.hint`, words.params)}
+      </Alert>
+    );
   };
 
   const footer = (() => {
@@ -246,7 +220,7 @@ export function Reconfirm({
       <div className="reconfirm" data-stage={stage}>
         <p className="reconfirm__detail">{detail}</p>
         <div className="reconfirm__message" aria-live="polite">
-          {message !== null && <Alert tone="error">{messageText(message)}</Alert>}
+          {message !== null && messageAlert(message)}
         </div>
         {stage === "badge" && (
           <div className="reconfirm__badge">
