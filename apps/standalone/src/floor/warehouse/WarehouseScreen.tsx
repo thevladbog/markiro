@@ -6,17 +6,14 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type MouseEvent,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Input, VisuallyHidden, type AlertTone } from "@markiro/ui";
+import { Alert, Button } from "@markiro/ui";
 
 import type { FloorSession } from "../../app/shell.js";
 import {
-  WAREHOUSE_REASONS,
-  WAREHOUSE_SUBJECT_KINDS,
   type PalletSheets,
   type WarehouseLookup,
   type WarehouseLookupResult,
@@ -25,24 +22,46 @@ import {
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
+import { Glyph } from "../kit/StatusIcons.js";
+import type { ScannerIndicator } from "../scanner-indicator.js";
 import type { ScanSource } from "../scan-source.js";
-import { readWorkstationSettings } from "../setup/workstation-settings.js";
+import {
+  readWorkstationSettings,
+  type WorkstationSettings,
+} from "../setup/workstation-settings.js";
 import { createWorkQueue } from "../work/work-queue.js";
 import { TemplatePicker, type SheetsState } from "./TemplatePicker.js";
 import { sheetChoiceName } from "./warehouse-sheet.js";
-import { WarehousePanel } from "./WarehousePanel.js";
+import {
+  Banner,
+  FooterButton,
+  Journal,
+  JournalEmpty,
+  JobPrint,
+  JobSubject,
+  ManualEntry,
+  ReasonList,
+  ReprintDialog,
+  ReprintFooter,
+  ReprintHeading,
+  ScanZone,
+  SummaryList,
+  Tag,
+  type SummaryLine,
+  type ZoneVariant,
+} from "./ReprintParts.js";
 import "./warehouse.css";
 import { realClock, useViewGuard } from "./view-guard.js";
 import {
   countSent,
   countUnsentRecords,
   finishSession,
+  listSessionJobs,
   readOpenSession,
   startSession,
   updateSession,
   type WarehouseJob,
   type WarehouseReason,
-  type WarehouseRepair,
   type WarehouseSession,
   type WarehouseTemplates,
 } from "./warehouse-store.js";
@@ -54,6 +73,17 @@ import {
   type PalletPaper,
   type WarehouseTemplate,
 } from "./warehouse-templates.js";
+import {
+  filterJobs,
+  isPrinterSetupFailure,
+  jobKindView,
+  printerView,
+  resultView,
+  summaryRows,
+  type JobKindView,
+  type JournalFilter,
+  type SummaryRow,
+} from "./warehouse-view.js";
 import {
   cancelWarehouseJob,
   recoverWarehouseJob,
@@ -74,6 +104,8 @@ export interface WarehouseScreenProps {
   pairing: Pairing;
   /** The link to the host is online: only then is a code looked up. */
   online: boolean;
+  /** The scanner as the header says it; a scanner away makes the typed code the main way in. */
+  scannerState?: ScannerIndicator;
   /** `WorkGate.track`: every write and send of the screen, so a leave waits for it (N9). */
   track: <T>(work: Promise<T>) => Promise<T>;
   /** Starts the operator's idle wait again. */
@@ -115,34 +147,26 @@ type Phase =
 
 type Panel =
   | { kind: "none" }
-  | { kind: "templates" }
+  | { kind: "templates"; initial: WarehouseSubjectKind }
   | { kind: "reason"; picked: WarehouseReason }
   | { kind: "again"; job: WarehouseJob; picked: WarehouseReason | null }
   | { kind: "manual" }
   | { kind: "finish" };
 
-/** What the screen says of the last thing it did; the tone is said by the words too. */
+/**
+ * What the screen says of the last thing it did that is no state of a job (a job's state is its
+ * detail's, derived from the job itself); the tone is said by the words and the glyph too.
+ * `kind` is the outcome (`not_found`, `offline`, ...), which picks the banner's title and the scan
+ * zone's face.
+ */
 interface Said {
-  tone: AlertTone;
+  tone: "ok" | "warn" | "error" | "info";
   text: string;
+  kind?: string;
 }
 
 /** A button that waits for the work in hand: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
-
-/** A reason as the cloud's radio tile (its style is inline, as the kit's button's is). */
-const TILE_STYLE: CSSProperties = {
-  justifyContent: "flex-start",
-  width: "100%",
-  minHeight: 72,
-  height: "auto",
-  padding: "0 16px",
-  textAlign: "left",
-};
-const CHOSEN_TILE_STYLE: CSSProperties = {
-  border: "1px solid var(--ok-solid)",
-  background: "var(--ok-bg)",
-};
 
 /** The job states of a job that waits for the printer or the operator; no other work goes beside it. */
 const UNRESOLVED = ["prepared", "sending", "failed", "unknown"] as const;
@@ -166,6 +190,7 @@ export function WarehouseScreen({
   local,
   pairing,
   online,
+  scannerState = "keyboard",
   track,
   touch,
   isLeaving,
@@ -182,7 +207,7 @@ export function WarehouseScreen({
   newId = defaultNewId,
   clock = realClock,
 }: WarehouseScreenProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { hostId, deviceId } = pairing;
   const context = useMemo<WarehouseContext>(
     () => ({
@@ -203,7 +228,20 @@ export function WarehouseScreen({
   // What the pallets' printer prints, and the host's A4 sheets when it prints them (beta 3.2).
   const [palletPaper, setPalletPaper] = useState<PalletPaper>("thermal");
   const [sheets, setSheets] = useState<SheetsState>({ kind: "loading" });
+  const [settings, setSettings] = useState<Pick<WorkstationSettings, "printers" | "assignments">>({
+    printers: [],
+    assignments: { box: null, pallet: null, duplicate: null },
+  });
   const [job, setJob] = useState<WarehouseJob | null>(null);
+  /** The job's detail is on screen (a scan, a row of the journal, a job found waiting). */
+  const [detail, setDetail] = useState(false);
+  /** The job whose bytes are on their way to the printer: its detail says «Передаём…». */
+  const [sending, setSending] = useState<string | null>(null);
+  /** The journal of this session and the kind it is filtered to. */
+  const [journal, setJournal] = useState<WarehouseJob[]>([]);
+  const [filter, setFilter] = useState<JournalFilter>("all");
+  /** The job on screen was an old label with «!1», made anew (the detail says so). */
+  const [repaired, setRepaired] = useState(false);
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [verifying, setVerifying] = useState(false);
   const [said, setSaid] = useState<Said | null>(null);
@@ -223,7 +261,10 @@ export function WarehouseScreen({
       const pairingNow = { hostId, deviceId };
       const sent = sessionId === null ? 0 : await countSent(local, pairingNow, sessionId);
       const waiting = await countUnsentRecords(local, pairingNow);
-      if (alive.current) setCounts({ sent, waiting });
+      const jobs = sessionId === null ? [] : await listSessionJobs(local, pairingNow, sessionId);
+      if (!alive.current) return;
+      setCounts({ sent, waiting });
+      setJournal(jobs);
     },
     [local, hostId, deviceId],
   );
@@ -239,35 +280,6 @@ export function WarehouseScreen({
             ? t("floor.warehouse.printerNotA4")
             : t(`floor.print.codes.${code}`, { defaultValue: code });
 
-  const jobSaid = (shown: WarehouseJob, repair: WarehouseRepair | null = null): Said => {
-    const note = repair === null ? "" : ` ${t("floor.warehouse.legacyRepair")}`;
-    switch (shown.state) {
-      case "sent":
-        return {
-          tone: "ok",
-          text: `${t("floor.warehouse.status.sent")}. ${t("floor.warehouse.hint.sent")}${note}`,
-        };
-      case "verified":
-        return { tone: "ok", text: t("floor.warehouse.status.verified") };
-      case "unknown":
-        return {
-          tone: "warn",
-          text: `${t("floor.warehouse.status.unknown")}. ${codeText(shown.errorCode)} ${t("floor.warehouse.hint.unknown")}`,
-        };
-      case "failed":
-        return {
-          tone: "error",
-          text: `${t("floor.warehouse.status.failed")}. ${codeText(shown.errorCode)}`,
-        };
-      case "cancelled":
-        return { tone: "info", text: t("floor.warehouse.status.cancelled") };
-      case "prepared":
-        return { tone: "info", text: t("floor.warehouse.status.prepared") };
-      case "sending":
-        return { tone: "info", text: t("floor.warehouse.status.sending") };
-    }
-  };
-
   // What the queued work reads when its turn comes, and the props the screen's effects must not
   // restart on: a parent that passes a new function on each render does not reload the session.
   const latest = useRef({ phase, panel, verifying, online, job });
@@ -277,11 +289,10 @@ export function WarehouseScreen({
     track,
     onRecorded,
     onHostError,
-    jobSaid,
   });
   useLayoutEffect(() => {
     latest.current = { phase, panel, verifying, online, job };
-    live.current = { context, operatorId: operator.id, track, onRecorded, onHostError, jobSaid };
+    live.current = { context, operatorId: operator.id, track, onRecorded, onHostError };
   });
 
   // The session as stored: none — a new one is set up; an open one is continued, its
@@ -307,6 +318,7 @@ export function WarehouseScreen({
           } satisfies Phase,
           copies,
           paper,
+          settings,
           job: null,
         };
       }
@@ -315,6 +327,7 @@ export function WarehouseScreen({
         phase: { kind: "working", session: found } satisfies Phase,
         copies,
         paper,
+        settings,
         job: open,
       };
     };
@@ -323,15 +336,13 @@ export function WarehouseScreen({
         if (cancelled || !alive.current) return;
         setTemplates(loaded.copies);
         setPalletPaper(loaded.paper);
+        setSettings({ printers: loaded.settings.printers, assignments: loaded.settings.assignments });
         setJob(loaded.job);
+        setDetail(loaded.job !== null);
         setPhase(loaded.phase);
         if (loaded.phase.kind === "working") {
-          const resumed = t("floor.warehouse.resumed");
-          const state = loaded.job === null ? null : live.current.jobSaid(loaded.job);
-          setSaid({
-            tone: state?.tone ?? "info",
-            text: state === null ? resumed : `${resumed} ${state.text}`,
-          });
+          // The waiting job, if any, is on screen as its detail says it; this line says the session was kept.
+          setSaid({ tone: "info", text: t("floor.warehouse.resumed"), kind: "resumed" });
           void recount(loaded.phase.session.id);
           live.current.onRecorded();
         }
@@ -373,28 +384,46 @@ export function WarehouseScreen({
     switch (outcome.kind) {
       case "printed":
         setJob(outcome.job);
+        setDetail(true);
+        setRepaired(outcome.repair !== null);
         setVerifying(false);
-        setSaid(jobSaid(outcome.job, outcome.repair));
+        setSaid(null);
         return;
       case "busy":
         setJob(outcome.job);
-        setSaid({ tone: "warn", text: t("floor.warehouse.errors.busy") });
+        setDetail(true);
+        setSaid({ tone: "warn", text: t("floor.warehouse.errors.busy"), kind: "busy" });
         return;
       case "duplicate":
         setJob(outcome.job);
+        setDetail(true);
+        setRepaired(false);
         setSaid({
           tone: "warn",
           text: `${t("floor.warehouse.status.duplicate")}. ${t("floor.warehouse.hint.duplicate")}`,
+          kind: "duplicate",
         });
         return;
       case "host_error":
-        setSaid({ tone: "error", text: t("floor.warehouse.errors.lookup_failed") });
+        setSaid({
+          tone: "error",
+          text: t("floor.warehouse.errors.lookup_failed"),
+          kind: "lookup_failed",
+        });
         return;
       case "unavailable":
-        setSaid({ tone: "warn", text: t(`floor.warehouse.errors.${outcome.reason}`) });
+        setSaid({
+          tone: "warn",
+          text: t(`floor.warehouse.errors.${outcome.reason}`),
+          kind: outcome.reason,
+        });
         return;
       case "refused":
-        setSaid({ tone: "error", text: t(`floor.warehouse.errors.${outcome.reason}`) });
+        setSaid({
+          tone: "error",
+          text: t(`floor.warehouse.errors.${outcome.reason}`),
+          kind: "refused",
+        });
         return;
       case "invalid_scan":
       case "offline":
@@ -405,6 +434,7 @@ export function WarehouseScreen({
         setSaid({
           tone: outcome.kind === "not_found" || outcome.kind === "offline" ? "warn" : "error",
           text: t(`floor.warehouse.errors.${outcome.kind}`),
+          kind: outcome.kind,
         });
         return;
     }
@@ -429,8 +459,9 @@ export function WarehouseScreen({
       if (!alive.current) return;
       if (open !== null) {
         setJob(open);
-        // «Ничего не напечатано» would be false for a send that was cut: say what it came to.
-        if (open.state === "unknown") setSaid(live.current.jobSaid(open));
+        // «Ничего не напечатано» would be false for a send that was cut: the detail says what it came to.
+        setDetail(true);
+        if (open.state === "unknown") setSaid(null);
       }
       await recount(current.session.id);
     } catch {
@@ -450,9 +481,13 @@ export function WarehouseScreen({
         } catch (error) {
           if (!alive.current) return;
           if (error instanceof WarehousePrinterError) {
-            setSaid({ tone: "error", text: codeText(error.code) });
+            setSaid({ tone: "error", text: codeText(error.code), kind: "printer" });
           } else {
-            setSaid({ tone: "error", text: t("floor.warehouse.errors.write_failed") });
+            setSaid({
+              tone: "error",
+              text: t("floor.warehouse.errors.write_failed"),
+              kind: "write_failed",
+            });
           }
           await settleAfterFailure();
         } finally {
@@ -463,7 +498,9 @@ export function WarehouseScreen({
   };
 
   const reprint = async (session: WarehouseSession, raw: string): Promise<void> => {
-    if (latest.current.online) setSaid({ tone: "info", text: t("floor.warehouse.status.looking") });
+    if (latest.current.online) {
+      setSaid({ tone: "info", text: t("floor.warehouse.status.looking"), kind: "looking" });
+    }
     const outcome = await reprintScan(context, {
       session,
       raw,
@@ -487,7 +524,7 @@ export function WarehouseScreen({
     if (answer.kind === "verified") {
       setVerifying(false);
       setJob(answer.job);
-      setSaid(jobSaid(answer.job));
+      setSaid(null);
       await recount(current.sessionId);
       return;
     }
@@ -498,6 +535,7 @@ export function WarehouseScreen({
           ? "floor.warehouse.errors.verify_mismatch"
           : "floor.warehouse.errors.verify_invalid",
       ),
+      kind: answer.kind === "mismatch" ? "verify_mismatch" : "verify_invalid",
     });
   };
 
@@ -530,6 +568,7 @@ export function WarehouseScreen({
     phase.kind,
     panel.kind,
     job === null ? "" : `${job.id}:${job.state}:${job.attempts}`,
+    detail ? "detail" : "",
     verifying ? "verifying" : "",
   ].join("|");
   const { viewRef, settled } = useViewGuard<HTMLElement>(view, clock);
@@ -553,121 +592,112 @@ export function WarehouseScreen({
 
   const send = (current: WarehouseJob, intent: SendIntent) =>
     run(async () => {
-      setSaid({ tone: "info", text: t("floor.warehouse.status.sending") });
-      const after = await sendWarehouseJob(context, current, intent, operator.id);
-      live.current.onRecorded();
-      if (!alive.current) return;
-      setJob(after);
-      setSaid(jobSaid(after));
-      await recount(after.sessionId);
+      setSending(current.id);
+      setSaid(null);
+      try {
+        const after = await sendWarehouseJob(context, current, intent, operator.id);
+        live.current.onRecorded();
+        if (!alive.current) return;
+        setJob(after);
+        await recount(after.sessionId);
+      } finally {
+        if (alive.current) setSending(null);
+      }
     });
 
-  /** What the session's choice of `kind` is called: a template's name, or for pallets on sheets the sheet's. */
-  const templateName = (chosen: WarehouseTemplates, kind: WarehouseSubjectKind): string => {
-    if (kind === "pallet" && palletPaper === "a4") {
+  /** The words of a code a print failed with. */
+  const codeWords = (code: string | null): string => codeText(code);
+
+  /** One line of «Что и на чём печатаем»: the template (or the sheet) and the printer, in words. */
+  const summaryDetail = (row: SummaryRow, chosen: WarehouseTemplates): string => {
+    const printer = row.printer?.name ?? t("floor.warehouse.summary.noPrinter");
+    if (row.kind === "sheet") {
+      if (row.printer === null) return t("floor.warehouse.summary.noSheetPrinter");
       const named = sheetChoiceName(chosen.pallet, sheets.kind === "ready" ? sheets.sheets : null);
-      if (named === null) return t("floor.warehouse.templateNone");
-      if (named.kind === "auto") return t("floor.warehouse.sheets.lineAuto");
-      return named.name === null
-        ? t("floor.warehouse.sheets.lineSome")
-        : t("floor.warehouse.sheets.line", { name: named.name });
+      const sheet =
+        named === null
+          ? t("floor.warehouse.summary.noSheet")
+          : named.kind === "auto"
+            ? t("floor.warehouse.sheets.auto")
+            : (named.name ?? t("floor.warehouse.sheets.lineSome"));
+      return t("floor.warehouse.summary.sheetLine", { template: sheet, printer: row.printer.name });
     }
-    return (
-      templates.find((template) => template.id === chosen[kind])?.name ??
-      t("floor.warehouse.templateNone")
-    );
+    if (row.state === "sheets_only") return t("floor.warehouse.summary.sheetsOnly");
+    const kind = row.kind;
+    const picked = templates.find((template) => template.id === chosen[kind])?.name ?? null;
+    return t("floor.warehouse.summary.line", {
+      template: picked === null ? t("floor.warehouse.summary.noTemplate") : `«${picked}»`,
+      printer,
+    });
   };
 
-  const templateLines = (chosen: WarehouseTemplates) => (
-    <ul className="warehouse-templates">
-      {WAREHOUSE_SUBJECT_KINDS.map((kind) => (
-        <li key={kind}>
-          {t("floor.warehouse.templateLine", {
-            kind: t(`floor.warehouse.templateFor.${kind}`),
-            name: templateName(chosen, kind),
-          })}
-        </li>
-      ))}
-    </ul>
+  const summaryLines = (chosen: WarehouseTemplates): SummaryLine[] =>
+    summaryRows(settings).map((row) => ({ row, detail: summaryDetail(row, chosen) }));
+
+  /** The template a job froze, by name; a sheet is named by the host's list when it is at hand. */
+  const jobTemplateName = (shown: WarehouseJob): string | null => {
+    if (jobKindView(shown) === "sheet") {
+      const sheet =
+        sheets.kind === "ready"
+          ? sheets.sheets.sheets.find((candidate) => candidate.id === shown.templateId)
+          : undefined;
+      return sheet?.name ?? t("floor.warehouse.sheets.lineSome");
+    }
+    return templates.find((template) => template.id === shown.templateId)?.name ?? null;
+  };
+
+  const heading = (setup: boolean, actions?: ReactNode, title?: string) => (
+    <ReprintHeading
+      eyebrow={t(setup ? "floor.warehouse.eyebrowSetup" : "floor.warehouse.eyebrowSession")}
+      title={title ?? t(setup ? "floor.warehouse.title" : "floor.warehouse.titleSession")}
+      titleId="warehouse-title"
+      {...(actions === undefined ? {} : { actions })}
+    />
   );
 
-  /** A reason as the cloud's radio tile: its dot, then its words; the chosen one is outlined. */
-  const reasonChoices = (
-    picked: WarehouseReason | null,
-    pick: (reason: WarehouseReason) => void,
+  /** The screen's frame: the heading, the body, the answers; a question over it takes the view's focus. */
+  const frame = (
+    head: ReactNode,
+    body: ReactNode,
+    footer: ReactNode = null,
+    overlay: ReactNode = null,
   ) => (
-    <fieldset className="warehouse-reasons">
-      <legend>{t("floor.warehouse.reason")}</legend>
-      <div className="warehouse-reasons__options">
-        {WAREHOUSE_REASONS.map((reason) => {
-          const chosen = picked === reason;
-          const props = press(() => pick(reason));
-          return (
-            <Button
-              key={reason}
-              size="floor"
-              variant="secondary"
-              aria-pressed={chosen}
-              className="warehouse-reason"
-              {...props}
-              style={{
-                ...TILE_STYLE,
-                ...(chosen ? CHOSEN_TILE_STYLE : {}),
-                ...(busy > 0 ? WAITING_STYLE : {}),
-              }}
-            >
-              <span className="warehouse-reason__dot" aria-hidden="true" />
-              {t(`floor.warehouse.reasons.${reason}`)}
-            </Button>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
-
-  /** The screen's frame: the cloud's heading, the work and the session side by side, the footer. */
-  const frame = (heading: ReactNode, body: ReactNode, footer: ReactNode = null) => (
     <section
       className="warehouse-reprint"
       aria-labelledby="warehouse-title"
       tabIndex={-1}
-      ref={viewRef}
+      ref={overlay === null ? viewRef : undefined}
     >
-      <header className="warehouse-heading">
-        <div>
-          <p>{t("floor.warehouse.eyebrow")}</p>
-          <h2 id="warehouse-title">{t("floor.warehouse.title")}</h2>
-        </div>
-        <div className="warehouse-heading-actions">{heading}</div>
-      </header>
+      {head}
       {body}
-      {footer === null ? null : <footer className="warehouse-footer">{footer}</footer>}
+      {footer}
+      {overlay}
     </section>
   );
-  /** A question in the cloud's full-screen dialog layout, inside the same frame. */
+  /** A question in the cloud's full-screen dialog layout, inside the same frame (the templates' picker). */
   const question = (node: ReactNode) => (
     <section className="warehouse-reprint warehouse-reprint--question" tabIndex={-1} ref={viewRef}>
       {node}
     </section>
   );
   const pauseButton = (
-    <Button size="floor" variant="secondary" {...leave(onLeave)}>
+    <FooterButton glyph="arrow-left" {...leave(onLeave)}>
       {t("floor.warehouse.pause")}
-    </Button>
+    </FooterButton>
   );
 
   if (phase.kind === "loading") {
     return frame(
-      null,
-      <section className="warehouse-status" aria-live="polite">
+      heading(true),
+      <section className="rp-status" aria-live="polite">
         <p>{t("floor.warehouse.loading")}</p>
       </section>,
     );
   }
   if (phase.kind === "read_failed") {
     return frame(
-      pauseButton,
-      <section className="warehouse-status warehouse-status--failed">
+      heading(true),
+      <section className="rp-status">
         <Alert
           tone="error"
           action={
@@ -683,6 +713,7 @@ export function WarehouseScreen({
           {t("floor.warehouse.readFailed")}
         </Alert>
       </section>,
+      <ReprintFooter>{pauseButton}</ReprintFooter>,
     );
   }
 
@@ -707,6 +738,7 @@ export function WarehouseScreen({
         sheets={sheets}
         onReloadSheets={() => setSheetsAttempt((value) => value + 1)}
         chosen={phase.kind === "setup" ? phase.templates : phase.session.templates}
+        initialKind={panel.initial}
         source={source}
         clock={clock}
         onApply={applyTemplates}
@@ -715,390 +747,516 @@ export function WarehouseScreen({
     );
   }
 
-  /** «Этот сеанс»: the reason, the count, the templates — the cloud's side panel. */
-  const sessionPanel = (
-    reason: WarehouseReason | null,
-    chosen: WarehouseTemplates,
-    templatesButton: Record<string, unknown>,
-  ) => (
-    <aside className="warehouse-session-panel" aria-labelledby="warehouse-session-title">
-      <h2 id="warehouse-session-title">{t("floor.warehouse.session")}</h2>
-      {reason !== null && (
-        <p>
-          {t("floor.warehouse.sessionReason", { reason: t(`floor.warehouse.reasons.${reason}`) })}
-        </p>
-      )}
-      <strong className="warehouse-sent-count" aria-hidden="true">
-        {counts.sent}
-      </strong>
-      <p>
-        <VisuallyHidden>{t("floor.warehouse.sentCount", { sent: counts.sent })}</VisuallyHidden>
-        <span aria-hidden="true">{t("floor.warehouse.sentLabel")}</span>
-      </p>
-      {counts.waiting > 0 && <p>{t("floor.warehouse.waiting", { waiting: counts.waiting })}</p>}
-      {templateLines(chosen)}
-      <Button size="floor" variant="secondary" {...templatesButton}>
-        {t("floor.warehouse.chooseTemplates")}
-      </Button>
-      <p className="warehouse-session-note">{t("floor.warehouse.scope")}</p>
-    </aside>
+  /** «Изменить» of a row of the summary: its templates, on the tab of its kind. */
+  const changeTemplates = (kind: JobKindView) =>
+    setPanel({ kind: "templates", initial: kind === "sheet" ? "pallet" : kind });
+
+  /**
+   * What stands above the zones: the last thing the screen said (a refusal, a state of the link),
+   * else the link's or the scanner's own state. A job's state is never said here: its detail says it.
+   */
+  const banner = (() => {
+    if (said !== null) {
+      const title =
+        said.kind !== undefined && i18n.exists(`floor.warehouse.banner.title.${said.kind}`)
+          ? t(`floor.warehouse.banner.title.${said.kind}`)
+          : "";
+      const glyph =
+        said.kind === "not_found"
+          ? "search-x"
+          : said.kind === "offline"
+            ? "wifi-slash"
+            : said.tone === "error"
+              ? "x-circle"
+              : said.tone === "warn"
+                ? "warning"
+                : "info";
+      return (
+        <Banner
+          tone={said.tone === "ok" ? "info" : said.tone}
+          glyph={glyph}
+          title={title === "" ? undefined : title}
+        >
+          {said.text}
+        </Banner>
+      );
+    }
+    if (!online) {
+      return (
+        <Banner tone="warn" glyph="wifi-slash" title={t("floor.warehouse.banner.offlineTitle")}>
+          {t("floor.warehouse.banner.offlineText")}
+        </Banner>
+      );
+    }
+    if (scannerState === "disconnected") {
+      return (
+        <Banner tone="error" glyph="plugs" title={t("floor.warehouse.banner.scannerTitle")}>
+          {t("floor.warehouse.banner.scannerText")}
+        </Banner>
+      );
+    }
+    return null;
+  })();
+  /** The banner's place is always in the tree: a polite region has to stand before it is heard. */
+  const bannerRegion = (
+    <div className="rp-banner-region" aria-live="polite">
+      {banner}
+    </div>
+  );
+  const body = (zones: ReactNode) => (
+    <div className={banner === null ? "rp-body" : "rp-body rp-body--banner"}>
+      {bannerRegion}
+      {zones}
+    </div>
   );
 
   if (phase.kind === "setup") {
     const { reason } = phase;
     return frame(
-      pauseButton,
-      <div className="warehouse-work-grid">
-        <div className="warehouse-main">
-          <section className="warehouse-session-setup" aria-labelledby="warehouse-setup-title">
-            <h2 id="warehouse-setup-title">{t("floor.warehouse.sessionSetup")}</h2>
-            <p>{t("floor.warehouse.sessionScope")}</p>
-            {reasonChoices(reason, (picked) => setPhase({ ...phase, reason: picked }))}
-            <Button
-              size="floor"
-              disabled={reason === null}
-              {...press(() => {
-                if (reason === null) return;
-                run(async () => {
-                  const started = await startSession(
-                    local,
-                    { hostId, deviceId },
-                    {
-                      id: newId(),
-                      reason,
-                      templates: phase.templates,
-                      operatorId: operator.id,
-                      at: now().toISOString(),
-                    },
-                  );
-                  if (!alive.current) return;
-                  setPhase({ kind: "working", session: started });
-                  setSaid(null);
-                  await recount(started.id);
-                });
-              })}
-            >
-              {t("floor.warehouse.start")}
-            </Button>
-          </section>
-        </div>
-        {sessionPanel(
-          reason,
-          phase.templates,
-          press(() => setPanel({ kind: "templates" })),
-        )}
+      heading(true),
+      <div className="rp-zones rp-zones--setup">
+        <section className="rp-setup-reasons" aria-labelledby="warehouse-setup-title">
+          <h3 id="warehouse-setup-title" className="rp-label rp-label--hidden">
+            {t("floor.warehouse.sessionSetup")}
+          </h3>
+          <ReasonList
+            picked={reason}
+            onPick={(picked) => setPhase({ ...phase, reason: picked })}
+            press={press}
+            legend={t("floor.warehouse.reason")}
+          />
+          <p>{t("floor.warehouse.reasonHint")}</p>
+          <p>{t("floor.warehouse.scope")}</p>
+        </section>
+        <section aria-labelledby="warehouse-summary-title">
+          <h3 id="warehouse-summary-title" className="rp-label">
+            {t("floor.warehouse.summary.title")}
+          </h3>
+          <SummaryList
+            lines={summaryLines(phase.templates)}
+            press={press}
+            onChange={changeTemplates}
+            disabled={false}
+          />
+        </section>
       </div>,
+      <ReprintFooter>
+        {pauseButton}
+        <FooterButton glyph="gear" {...leave(onSetup)}>
+          {t("floor.warehouse.setup")}
+        </FooterButton>
+        <FooterButton
+          primary
+          glyph="printer"
+          disabled={reason === null}
+          {...press(() => {
+            if (reason === null) return;
+            run(async () => {
+              const started = await startSession(
+                local,
+                { hostId, deviceId },
+                {
+                  id: newId(),
+                  reason,
+                  templates: phase.templates,
+                  operatorId: operator.id,
+                  at: now().toISOString(),
+                },
+              );
+              if (!alive.current) return;
+              setPhase({ kind: "working", session: started });
+              setSaid(null);
+              setDetail(false);
+              await recount(started.id);
+            });
+          })}
+        >
+          {t("floor.warehouse.start")}
+        </FooterButton>
+      </ReprintFooter>,
     );
   }
 
   const { session } = phase;
+  const reasonText = t("floor.warehouse.sessionReason", {
+    reason: t(`floor.warehouse.reasons.${session.reason}`),
+  });
+  const closePanel = press(() => setPanel({ kind: "none" }));
 
-  if (panel.kind === "reason" || panel.kind === "again") {
-    const again = panel.kind === "again";
-    return question(
-      <WarehousePanel
-        titleId="warehouse-reason-title"
-        title={t(again ? "floor.warehouse.againTitle" : "floor.warehouse.changeReason")}
-        backLabel={t("floor.warehouse.cancel")}
-        back={press(() => setPanel({ kind: "none" }))}
-        footer={
-          <Button
-            size="floor"
-            disabled={panel.picked === null}
-            {...press(() => {
-              const { picked } = panel;
-              if (picked === null) return;
-              setPanel({ kind: "none" });
-              if (panel.kind === "again") {
-                send(panel.job, { kind: "again", reason: picked });
-                return;
-              }
-              const changed = { ...session, reason: picked };
-              run(async () => {
-                await updateSession(local, { hostId, deviceId }, changed, now().toISOString());
-                if (alive.current) setPhase({ kind: "working", session: changed });
-              });
-            })}
-          >
-            {t(again ? "floor.warehouse.againConfirm" : "floor.warehouse.applyReason")}
-          </Button>
-        }
-      >
-        <div className="warehouse-confirm-body">
-          {again && <p>{t("floor.warehouse.againText")}</p>}
-          {reasonChoices(panel.picked, (picked) => setPanel({ ...panel, picked }))}
-          {panel.picked !== null && (
-            <p>
-              {t("floor.warehouse.sessionReason", {
-                reason: t(`floor.warehouse.reasons.${panel.picked}`),
-              })}
-            </p>
-          )}
-        </div>
-      </WarehousePanel>,
-    );
-  }
-
-  if (panel.kind === "finish") {
-    return question(
-      <WarehousePanel
-        titleId="warehouse-finish-title"
-        title={t("floor.warehouse.finishTitle")}
-        backLabel={t("floor.warehouse.cancel")}
-        back={press(() => setPanel({ kind: "none" }))}
-        footer={
-          <Button
-            size="floor"
-            {...press(() =>
-              run(async () => {
-                const done = await finishSession(
-                  local,
-                  { hostId, deviceId },
-                  session.id,
-                  operator.id,
-                  now().toISOString(),
-                );
-                if (done === "finished") live.current.onRecorded();
-                if (!alive.current) return;
-                setPanel({ kind: "none" });
-                if (done === "finished") {
-                  onLeave();
-                } else {
-                  setSaid({ tone: "warn", text: t("floor.warehouse.finishBlocked") });
-                }
-              }),
-            )}
-          >
-            {t("floor.warehouse.finishConfirm")}
-          </Button>
-        }
-      >
-        <div className="warehouse-confirm-body">
-          <p>{t("floor.warehouse.finishText", { sent: counts.sent })}</p>
-        </div>
-      </WarehousePanel>,
-    );
-  }
-
+  /** The typed code: its own screen, the reason beside the title, «Отмена» the only way back. */
   if (panel.kind === "manual") {
-    return question(
-      <WarehousePanel
-        titleId="warehouse-manual-title"
-        title={t("floor.warehouse.manual")}
-        backLabel={t("floor.warehouse.cancel")}
-        back={press(() => setPanel({ kind: "none" }))}
-        footer={
-          <Button
-            size="floor"
-            type="submit"
-            form="warehouse-manual-form"
-            disabled={manual.trim() === ""}
-            onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              // The press is the form's submit; one just after the view changed is stopped here.
-              if (!settled()) event.preventDefault();
-            }}
-          >
-            {t("floor.warehouse.manualSubmit")}
-          </Button>
-        }
+    return frame(
+      heading(
+        false,
+        <Tag tone="neutral" glyph="info">
+          {reasonText}
+        </Tag>,
+        t("floor.warehouse.manual"),
+      ),
+      <div
+        className="rp-body"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setPanel({ kind: "none" });
+        }}
       >
-        <form
-          id="warehouse-manual-form"
-          className="warehouse-manual-form"
-          onSubmit={(event) => {
-            event.preventDefault();
+        <ManualEntry
+          value={manual}
+          onChange={setManual}
+          online={online}
+          onSubmit={() => {
             const typed = manual;
             if (typed.trim() === "") return;
             setManual("");
             setPanel({ kind: "none" });
             run(() => reprint(session, typed));
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setPanel({ kind: "none" });
+          submitProps={{
+            onClick: (event: { preventDefault: () => void }) => {
+              // The press is the form's submit; one just after the view changed is stopped here.
+              if (!settled()) event.preventDefault();
+            },
           }}
-        >
-          <Input
-            size="floor"
-            mono
-            label={t("floor.warehouse.manualLabel")}
-            value={manual}
-            autoFocus
-            spellCheck={false}
-            onChange={(event) => setManual(event.target.value)}
-          />
-        </form>
-      </WarehousePanel>,
+        />
+      </div>,
+      <ReprintFooter>
+        <FooterButton glyph="x" {...closePanel}>
+          {t("floor.warehouse.cancel")}
+        </FooterButton>
+      </ReprintFooter>,
     );
   }
 
-  const jobActions = (current: WarehouseJob) => {
+  const unresolved = job !== null && (UNRESOLVED as readonly string[]).includes(job.state);
+  /** The job as the detail shows it: on its way to the printer while its bytes are being sent. */
+  const shown: WarehouseJob | null =
+    job === null ? null : sending === job.id ? { ...job, state: "sending", errorCode: null } : job;
+
+  const nextCode = () => {
+    setDetail(false);
+    setVerifying(false);
+    setSaid(null);
+    setRepaired(false);
+  };
+
+  const jobFooter = (current: WarehouseJob) => {
+    const again = (primary: boolean) => (
+      <FooterButton
+        glyph="refresh"
+        primary={primary}
+        {...press(() => setPanel({ kind: "again", job: current, picked: null }))}
+      >
+        {t("floor.warehouse.printAgain")}
+      </FooterButton>
+    );
+    const next = (
+      <FooterButton primary glyph="barcode" {...press(nextCode)}>
+        {t("floor.warehouse.nextCode")}
+      </FooterButton>
+    );
     switch (current.state) {
+      case "sending":
+        return (
+          <FooterButton primary glyph="circle-notch" aria-disabled="true" style={WAITING_STYLE}>
+            {t("floor.warehouse.printing")}
+          </FooterButton>
+        );
       case "prepared":
         return (
-          <Button size="floor" {...press(() => send(current, { kind: "first" }))}>
+          <FooterButton
+            primary
+            glyph="printer"
+            {...press(() => send(current, { kind: "first" }))}
+          >
             {t("floor.warehouse.send")}
-          </Button>
+          </FooterButton>
         );
-      case "failed":
-        return (
-          <>
-            <Button size="floor" {...press(() => send(current, { kind: "retry" }))}>
-              {t("floor.warehouse.retrySend")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              {...press(() =>
-                run(async () => {
-                  const after = await cancelWarehouseJob(context, current, operator.id);
-                  live.current.onRecorded();
-                  if (!alive.current) return;
-                  setJob(after);
-                  setSaid(jobSaid(after));
-                  await recount(after.sessionId);
-                }),
-              )}
-            >
-              {t("floor.warehouse.cancelJob")}
-            </Button>
-            {(current.errorCode === "printer_unconfigured" ||
-              current.errorCode === "printer_a4" ||
-              current.errorCode === "printer_not_a4") && (
-              <Button size="floor" variant="secondary" {...leave(onSetup)}>
-                {t("floor.warehouse.setup")}
-              </Button>
+      case "failed": {
+        const setupFailure = isPrinterSetupFailure(current.errorCode);
+        const cancel = (
+          <FooterButton
+            glyph="x"
+            {...press(() =>
+              run(async () => {
+                const after = await cancelWarehouseJob(context, current, operator.id);
+                live.current.onRecorded();
+                if (!alive.current) return;
+                setJob(after);
+                await recount(after.sessionId);
+              }),
             )}
+          >
+            {t("floor.warehouse.cancelJob")}
+          </FooterButton>
+        );
+        const retry = (primary: boolean) => (
+          <FooterButton
+            glyph="refresh"
+            primary={primary}
+            {...press(() => send(current, { kind: "retry" }))}
+          >
+            {t("floor.warehouse.retrySend")}
+          </FooterButton>
+        );
+        return setupFailure ? (
+          <>
+            {cancel}
+            {retry(false)}
+            <FooterButton primary glyph="gear" {...leave(onSetup)}>
+              {t("floor.warehouse.setup")}
+            </FooterButton>
+          </>
+        ) : (
+          <>
+            {cancel}
+            <FooterButton glyph="gear" {...leave(onSetup)}>
+              {t("floor.warehouse.setup")}
+            </FooterButton>
+            {retry(true)}
           </>
         );
+      }
       case "unknown":
         return (
           <>
-            <Button
-              size="floor"
-              variant="secondary"
+            {again(false)}
+            <FooterButton
+              primary={!verifying}
+              glyph="scan-frame"
               aria-pressed={verifying}
               {...press(() => setVerifying((value) => !value))}
             >
               {t(verifying ? "floor.warehouse.verifyCancel" : "floor.warehouse.verifyButton")}
-            </Button>
-            <Button
-              size="floor"
-              {...press(() => setPanel({ kind: "again", job: current, picked: null }))}
-            >
-              {t("floor.warehouse.printAgain")}
-            </Button>
+            </FooterButton>
           </>
         );
       case "sent":
       case "verified":
         return (
-          <Button
-            size="floor"
-            variant="secondary"
-            {...press(() => setPanel({ kind: "again", job: current, picked: null }))}
-          >
-            {t("floor.warehouse.printAgain")}
-          </Button>
+          <>
+            {again(false)}
+            {next}
+          </>
         );
-      default:
-        return null;
+      case "cancelled":
+        return next;
     }
   };
 
-  const subject =
-    job === null
-      ? null
-      : job.kind === "unit"
-        ? t("floor.warehouse.subject.unit")
-        : t(`floor.warehouse.subject.${job.kind}`, { sscc: job.identity });
-  const unresolved = job !== null && (UNRESOLVED as readonly string[]).includes(job.state);
-  const statusKey = verifying ? "verify" : (job?.state ?? "ready");
-  const actions = job === null ? null : jobActions(job);
-
-  return frame(
+  /** What the screen's heading carries: in the session the reason (to change) and the count. */
+  const sessionActions = (
     <>
-      <Button size="floor" {...press(() => setPanel({ kind: "manual" }))}>
-        {t("floor.warehouse.manual")}
-      </Button>
+      <FooterButton glyph="info" {...press(() => setPanel({ kind: "reason", picked: session.reason }))}>
+        {reasonText}
+      </FooterButton>
+      <Tag tone="ok" glyph="printer">
+        {t("floor.warehouse.sentChip", { sent: counts.sent })}
+      </Tag>
+    </>
+  );
+  const jobActions = (
+    <>
+      <Tag tone="neutral" glyph="info">
+        {reasonText}
+      </Tag>
       {/* Never held by work: the floor's leave waits for it (N9). */}
       {pauseButton}
-    </>,
-    <div className="warehouse-work-grid">
-      <div className="warehouse-main">
-        <section
-          className={`warehouse-status warehouse-status--${statusKey}`}
-          {...(subject === null ? {} : { "aria-label": subject })}
-        >
-          <ScanMark className="warehouse-scan-mark" />
-          {job === null ? (
-            <>
-              <h2>{t("floor.warehouse.prompt")}</h2>
-              <p>{t("floor.warehouse.hint.ready")}</p>
-            </>
-          ) : (
-            <div className="warehouse-result">
-              <h2>{subject}</h2>
-              <p>
-                {t("floor.warehouse.jobLine", {
-                  state: t(`floor.warehouse.jobState.${job.state}`),
-                })}
-              </p>
-            </div>
-          )}
-          <div className="warehouse-status__said" aria-live="polite">
-            {!online && (
-              <Alert tone="warn" role="presentation">
-                {t("floor.warehouse.offlineNotice")}
-              </Alert>
-            )}
-            {said !== null && (
-              <Alert tone={said.tone} role="presentation">
-                {said.text}
-              </Alert>
-            )}
-            {verifying && (
-              <p>{`${t("floor.warehouse.status.verify")}. ${t("floor.warehouse.hint.verify")}`}</p>
-            )}
-          </div>
-        </section>
-        {actions !== null && <div className="warehouse-recovery-actions">{actions}</div>}
-      </div>
-      {sessionPanel(session.reason, session.templates, {
-        ...press(() => {
-          if (!unresolved) setPanel({ kind: "templates" });
-        }),
-        ...(unresolved ? { "aria-disabled": true, style: WAITING_STYLE } : {}),
-      })}
-    </div>,
-    <>
-      <Button
-        size="floor"
-        variant="secondary"
-        {...press(() => setPanel({ kind: "reason", picked: session.reason }))}
-      >
-        {t("floor.warehouse.changeReason")}
-      </Button>
-      <Button size="floor" variant="secondary" {...press(() => setPanel({ kind: "finish" }))}>
-        {t("floor.warehouse.finish")}
-      </Button>
-    </>,
+    </>
   );
-}
 
-/** The cloud's scan mark (apps/station/src/ui/BarcodeIcon.tsx), bundled: the station is offline-first. */
-function ScanMark({ className }: { className: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 32 32"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M5 7v18M9 7v18M14 7v18M18 7v18M24 7v18M27 7v18" />
-      <path d="M2 10V4h6m16 0h6v6M2 22v6h6m16 0h6v-6" />
-    </svg>
+  const overlay =
+    panel.kind === "reason" || panel.kind === "again" ? (
+      <ReprintDialog
+        titleId="warehouse-reason-title"
+        title={t(panel.kind === "again" ? "floor.warehouse.againTitle" : "floor.warehouse.changeReason")}
+        dialogRef={viewRef}
+        onCancel={closePanel.onClick}
+        actions={
+          <>
+            <FooterButton glyph="x" {...closePanel}>
+              {t("floor.warehouse.cancel")}
+            </FooterButton>
+            <FooterButton
+              primary
+              glyph="printer"
+              disabled={panel.picked === null}
+              {...press(() => {
+                const { picked } = panel;
+                if (picked === null) return;
+                setPanel({ kind: "none" });
+                if (panel.kind === "again") {
+                  send(panel.job, { kind: "again", reason: picked });
+                  return;
+                }
+                const changed = { ...session, reason: picked };
+                run(async () => {
+                  await updateSession(local, { hostId, deviceId }, changed, now().toISOString());
+                  if (alive.current) setPhase({ kind: "working", session: changed });
+                });
+              })}
+            >
+              {t(panel.kind === "again" ? "floor.warehouse.againConfirm" : "floor.warehouse.applyReason")}
+            </FooterButton>
+          </>
+        }
+      >
+        {panel.kind === "again" ? <p>{t("floor.warehouse.againText")}</p> : null}
+        <ReasonList
+          picked={panel.picked}
+          onPick={(picked) => setPanel({ ...panel, picked })}
+          press={press}
+          legend={t("floor.warehouse.reason")}
+          hideLegend
+        />
+      </ReprintDialog>
+    ) : panel.kind === "finish" ? (
+      <ReprintDialog
+        titleId="warehouse-finish-title"
+        title={t("floor.warehouse.finishTitle")}
+        dialogRef={viewRef}
+        onCancel={closePanel.onClick}
+        actions={
+          <>
+            <FooterButton glyph="x" {...closePanel}>
+              {t("floor.warehouse.cancel")}
+            </FooterButton>
+            <FooterButton
+              primary
+              glyph="stop"
+              {...press(() =>
+                run(async () => {
+                  const done = await finishSession(
+                    local,
+                    { hostId, deviceId },
+                    session.id,
+                    operator.id,
+                    now().toISOString(),
+                  );
+                  if (done === "finished") live.current.onRecorded();
+                  if (!alive.current) return;
+                  setPanel({ kind: "none" });
+                  if (done === "finished") {
+                    onLeave();
+                  } else {
+                    setSaid({
+                      tone: "warn",
+                      text: t("floor.warehouse.finishBlocked"),
+                      kind: "busy",
+                    });
+                  }
+                }),
+              )}
+            >
+              {t("floor.warehouse.finishConfirm")}
+            </FooterButton>
+          </>
+        }
+      >
+        <p>{t("floor.warehouse.finishText", { sent: counts.sent })}</p>
+        {counts.waiting > 0 ? (
+          <Tag tone="warn" glyph="upload">
+            {t("floor.warehouse.waiting", { waiting: counts.waiting })}
+          </Tag>
+        ) : null}
+      </ReprintDialog>
+    ) : null;
+
+  if (detail && shown !== null) {
+    const result = resultView(shown, verifying);
+    const resultText =
+      result.body === null
+        ? null
+        : result.body.kind === "hint"
+          ? t(`floor.warehouse.hint.${result.body.key}`)
+          : codeWords(result.body.code);
+    const outcomeNote =
+      shown.state === "unknown" &&
+      !verifying &&
+      shown.errorCode !== null &&
+      i18n.exists(`floor.print.codes.${shown.errorCode}`)
+        ? t(`floor.print.codes.${shown.errorCode}`)
+        : "";
+    const note = [repaired ? t("floor.warehouse.legacyRepair") : "", outcomeNote]
+      .filter((line) => line !== "")
+      .join(" ");
+    return frame(
+      heading(false, jobActions),
+      body(
+        <div className="rp-zones rp-zones--job">
+          <JobSubject job={shown} />
+          <JobPrint
+            templateName={jobTemplateName(shown)}
+            printer={printerView(shown)}
+            reason={t(`floor.warehouse.reasons.${shown.reason}`)}
+            result={result}
+            resultText={resultText}
+            note={note === "" ? null : note}
+          />
+        </div>,
+      ),
+      <ReprintFooter>{jobFooter(shown)}</ReprintFooter>,
+      overlay,
+    );
+  }
+
+  const variant: ZoneVariant =
+    scannerState === "disconnected"
+      ? "scanner"
+      : !online
+        ? "offline"
+        : said?.kind === "not_found"
+          ? "not_found"
+          : "ready";
+  const visible = filterJobs(journal, filter);
+  return frame(
+    heading(false, sessionActions),
+    body(
+      <div className="rp-zones">
+        {journal.length === 0 ? (
+          <JournalEmpty />
+        ) : (
+          <Journal
+            jobs={visible}
+            filter={filter}
+            onFilter={setFilter}
+            onOpen={(opened) => {
+              setJob(opened);
+              setDetail(true);
+              setRepaired(false);
+              setSaid(null);
+            }}
+            press={press}
+          />
+        )}
+        <ScanZone
+          variant={variant}
+          manual={
+            <Button
+              size="floor"
+              variant={variant === "scanner" ? "primary" : "secondary"}
+              icon={<Glyph name="keyboard" size={26} />}
+              disabled={!online}
+              {...press(() => setPanel({ kind: "manual" }))}
+            >
+              {t("floor.warehouse.manual")}
+            </Button>
+          }
+        />
+      </div>,
+    ),
+    <ReprintFooter>
+      {pauseButton}
+      <FooterButton
+        glyph="file"
+        {...press(() => {
+          if (!unresolved) setPanel({ kind: "templates", initial: "unit" });
+        })}
+      >
+        {t("floor.warehouse.chooseTemplates")}
+      </FooterButton>
+      <FooterButton glyph="stop" end {...press(() => setPanel({ kind: "finish" }))}>
+        {t("floor.warehouse.finish")}
+      </FooterButton>
+    </ReprintFooter>,
+    overlay,
   );
 }

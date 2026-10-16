@@ -123,7 +123,11 @@ export async function renderWarehouse(
     </ThemeProvider>
   );
   const view = render(wrap(<WarehouseScreen {...props} />));
-  const click = (name: string | RegExp) => fireEvent.click(screen.getByRole("button", { name }));
+  // A reason is a radio of its group (design 2026-10), every other answer a button.
+  const click = (name: string | RegExp) =>
+    fireEvent.click(
+      screen.queryByRole("button", { name }) ?? screen.getByRole("radio", { name }),
+    );
   return {
     view,
     db,

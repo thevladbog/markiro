@@ -53,6 +53,7 @@ import { ShiftList } from "./shifts/ShiftList.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
+import { useScannerIndicator } from "./scanner-indicator.js";
 import { WarehouseScreen } from "./warehouse/WarehouseScreen.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
@@ -192,6 +193,8 @@ export function FloorApp({
   const { sessionId } = operator;
   // A refusal that waits for the operator stops the link: nothing more goes to that host.
   const online = link?.state === "online" && !rejectionPending;
+  // The scanner as the header says it: the warehouse reprint makes the typed code its main way in when it is away.
+  const scannerState = useScannerIndicator(hardware.watchScanners);
   const [view, setView] = useState<FloorView>({ kind: "list" });
   // How many times an entry was turned back on the list: it reads its copies
   // again, for those it showed are the ones the entry found out of date.
@@ -499,6 +502,7 @@ export function FloorApp({
         local={local}
         pairing={{ hostId, deviceId }}
         online={online}
+        scannerState={scannerState}
         track={gate.track}
         touch={lock.touch}
         isLeaving={isLeaving}

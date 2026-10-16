@@ -6,6 +6,7 @@ import { buildPalletSheetPresets } from "@markiro/domain";
 import type { PrintRuntime, SendOutcome } from "../src/floor/print/print-runtime.js";
 import { HostError } from "../src/host/client.js";
 import type { PalletSheets, WarehouseLookupResult } from "../src/host/protocol.js";
+import { groupSscc } from "../src/floor/warehouse/warehouse-view.js";
 import { openLocalDb } from "./support/local-db.js";
 import { HP_A4, setUpPrinting, TSC, ZEBRA } from "./support/printing.js";
 import {
@@ -157,14 +158,17 @@ describe("the kinds of label", () => {
       }),
     });
     await at.scan(KM);
-    expect(await screen.findByLabelText("Код единицы")).toBeTruthy();
+    expect(await screen.findByLabelText("Единица · дубликат Data Matrix")).toBeTruthy();
+    // The serial (AI 21) is the unit's code on screen, its GTIN beside it.
+    expect(screen.getByText("S000001")).toBeTruthy();
     expect(at.shell.sends[0]?.target).toMatchObject({ kind: "serial", port: "COM4" });
     await at.press("Напечатать ещё раз");
     await at.press("Утеряна");
     await at.press("Напечатать");
     await at.scan(PALLET_SSCC);
     // A sent label is decided by the next scan only through a new job: the code is another.
-    expect(await screen.findByLabelText(`Паллета ${PALLET_SSCC}`)).toBeTruthy();
+    expect(await screen.findByLabelText("Паллета")).toBeTruthy();
+    expect(screen.getByText(groupSscc(PALLET_SSCC))).toBeTruthy();
     expect(at.shell.sends[2]?.target).toMatchObject({ kind: "tcp", host: "192.168.1.50" });
   });
 });
@@ -174,7 +178,7 @@ describe("a label that did not go out", () => {
     const at = await startedWarehouse({ assignments: NO_PRINTERS });
     await at.scan(BOX_SSCC);
     expect(await screen.findByText(/Для этого типа этикетки не назначен принтер/)).toBeTruthy();
-    expect(screen.getByText("Задание: не отправлено")).toBeTruthy();
+    expect(screen.getByText("Принтер не назначен")).toBeTruthy();
     await at.press("Рабочее место");
     expect(at.props.onSetup).toHaveBeenCalledTimes(1);
     await at.scan(PALLET_SSCC);
@@ -241,8 +245,7 @@ describe("a label that did not go out", () => {
         overrides: { palletSheets: async () => HOST_SHEETS },
       });
       await screen.findByRole("button", { name: "Начать перепечатку" });
-      await at.press("Шаблоны");
-      await at.press("Паллеты");
+      await at.press("Изменить: Паллеты");
       return at;
     };
     // A printer of sheets: «по умолчанию товара» (chosen) and the host's sheets, no label template.
@@ -255,7 +258,7 @@ describe("a label that did not go out", () => {
     expect(screen.queryByRole("button", { name: /Палета 100×150/ })).toBeNull();
     await a4.press("Другая");
     await a4.press("Применить шаблоны");
-    expect(screen.getByText(/Паллеты: Лист А4: Другая/)).toBeTruthy();
+    expect(screen.getByText(`Другая · ${HP_A4.name}`)).toBeTruthy();
     cleanup();
     // A label printer: the label templates of the copies, as before.
     await choose({ box: "zebra", pallet: "zebra", duplicate: "tsc" });
@@ -287,8 +290,7 @@ describe("a label that did not go out", () => {
       },
     });
     await screen.findByRole("button", { name: "Начать перепечатку" });
-    await at.press("Шаблоны");
-    await at.press("Паллеты");
+    await at.press("Изменить: Паллеты");
     expect(await screen.findByText("Листы А4 не получены от хоста. Проверьте связь.")).toBeTruthy();
     await at.press("Повторить");
     expect(await screen.findByRole("button", { name: "Вертикальная" })).toBeTruthy();
@@ -297,7 +299,7 @@ describe("a label that did not go out", () => {
   it("retries a failed job on the printer assigned now, once, and says it is sent", async () => {
     const at = await startedWarehouse({ assignments: NO_PRINTERS });
     await at.scan(BOX_SSCC);
-    await screen.findByText("Задание: не отправлено");
+    await screen.findByText("Принтер не назначен");
     await setUpPrinting(at.local, { assignments: { box: "zebra", pallet: null, duplicate: null } });
     await at.press("Повторить отправку");
     expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
@@ -324,7 +326,7 @@ describe("a label whose outcome is not known", () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
     expect(await screen.findByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
-    expect(screen.getByText("Задание: исход неизвестен")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     // Time, the link and a rerender send nothing.
     at.rerender({ online: false });
     at.rerender({ online: true });
@@ -332,7 +334,7 @@ describe("a label whose outcome is not known", () => {
     await at.settled();
     expect(at.shell.sends).toHaveLength(1);
     await at.press("Проверить сканом");
-    expect(screen.getByText(/Отсканируйте новую этикетку\./)).toBeTruthy();
+    expect(screen.getByText("Отсканируйте новую этикетку")).toBeTruthy();
     // The old label with «!1» is not the new one; another box is not either.
     await at.scan(`!1${BOX_SSCC}`);
     expect(await screen.findByText("Это не код новой этикетки.")).toBeTruthy();
@@ -357,13 +359,17 @@ describe("a label whose outcome is not known", () => {
     await screen.findByText(/Неизвестно, вышла ли этикетка/);
     await at.press("Напечатать ещё раз");
     expect(
-      screen.getByText("Этикетка могла уже выйти. На принтер уйдут те же данные."),
+      screen.getByText(
+        "Этикетка могла уже выйти. На принтер уйдут те же данные: код и SSCC не меняются.",
+      ),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Напечатать" }).hasAttribute("disabled")).toBe(true);
     await at.press("Напечатать");
     expect(at.shell.sends).toHaveLength(1);
     await at.press("Не напечаталась");
-    expect(screen.getByText("Причина: Не напечаталась")).toBeTruthy();
+    expect(
+      screen.getByRole("radio", { name: "Не напечаталась" }).getAttribute("aria-checked"),
+    ).toBe("true");
     await at.press("Напечатать");
     expect(at.shell.sends).toHaveLength(2);
     expect(rows(at.db, "SELECT reason, attempts FROM wh_jobs")).toEqual([
@@ -396,7 +402,7 @@ describe("a restart of the screen", () => {
     const again = await renderWarehouse({ seeded: { db: first.db, executor: first.local } });
     expect(await screen.findByText(/Продолжен незавершённый сеанс перепечатки\./)).toBeTruthy();
     expect(screen.getByText(/Неизвестно, вышла ли этикетка/)).toBeTruthy();
-    expect(screen.getByText("Задание: исход неизвестен")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Проверить сканом" })).toBeTruthy();
     expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
     expect(again.shell.sends).toHaveLength(0);
     expect(again.props.onRecorded).toHaveBeenCalled();
@@ -431,10 +437,10 @@ describe("a restart of the screen", () => {
     );
     expect(prepared).toMatchObject({ kind: "job", job: { state: "prepared" } });
     const again = await renderWarehouse({ seeded: { db: first.db, executor: first.local } });
-    expect(await screen.findByText("Задание: готово к отправке")).toBeTruthy();
+    expect(await screen.findByText("Этикетка готова к отправке")).toBeTruthy();
     expect(again.shell.sends).toHaveLength(0);
-    await again.press("Отправить");
-    expect(await screen.findByText("Задание: передано на принтер")).toBeTruthy();
+    await again.press("Напечатать этикетку");
+    expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
     expect(again.shell.sends).toHaveLength(1);
   });
 });
@@ -453,7 +459,7 @@ describe("the operator and the copies", () => {
 describe("the session", () => {
   it("changes its reason for the next labels, and a template for a kind, written for the next entry", async () => {
     const at = await startedWarehouse();
-    await at.press("Изменить причину");
+    await at.press("Причина: Повреждена");
     await at.press("Утеряна");
     await at.press("Применить причину");
     await at.settled();
@@ -462,6 +468,7 @@ describe("the session", () => {
     expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
     expect(rows(at.db, "SELECT reason FROM wh_sessions")).toEqual([{ reason: "lost" }]);
     expect(rows(at.db, "SELECT reason FROM wh_jobs")).toEqual([{ reason: "lost" }]);
+    await at.press("Следующий код");
     await at.press("Шаблоны");
     await at.press("Паллеты");
     await at.press("Применить шаблоны");
@@ -471,16 +478,15 @@ describe("the session", () => {
     ).toHaveLength(1);
   });
 
-  it("does not finish while a label waits, and says so", async () => {
+  it("offers no finish while a label waits: the detail has the label's answers, never the session's end", async () => {
     const at = await startedWarehouse({ answer: UNKNOWN_ANSWER });
     await at.scan(BOX_SSCC);
     await screen.findByText(/Неизвестно, вышла ли этикетка/);
-    await at.press("Завершить сеанс");
-    expect(screen.getByText("Этикеток передано на принтер: 0", { exact: false })).toBeTruthy();
-    await at.press("Завершить");
-    expect(await screen.findByText("Сначала решите незавершённую печать.")).toBeTruthy();
-    expect(at.props.onLeave).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Завершить сеанс" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Следующий код" })).toBeNull();
+    // The store itself refuses a finish while a label waits (warehouse-store.test.ts).
     expect(rows(at.db, "SELECT finished_at FROM wh_sessions")).toEqual([{ finished_at: null }]);
+    expect(at.props.onLeave).not.toHaveBeenCalled();
   });
 
   it("leaves a finished session finished: the next entry starts a new one", async () => {
@@ -496,10 +502,15 @@ describe("the session", () => {
 
   it("counts the labels sent and the records still waiting for the host", async () => {
     const at = await startedWarehouse();
-    expect(screen.getByText("Этикеток передано на принтер: 0")).toBeTruthy();
+    expect(screen.getByText("Передано на принтер: 0")).toBeTruthy();
+    await at.press("Завершить сеанс");
     expect(screen.queryByText(/Записи ждут отправки на хост/)).toBeNull();
+    await at.press("Отмена");
     await at.scan(BOX_SSCC);
-    expect(await screen.findByText("Этикеток передано на принтер: 1")).toBeTruthy();
+    await screen.findByText(/Этикетка передана на принтер/);
+    await at.press("Следующий код");
+    expect(await screen.findByText("Передано на принтер: 1")).toBeTruthy();
+    await at.press("Завершить сеанс");
     expect(screen.getByText("Записи ждут отправки на хост: 1")).toBeTruthy();
   });
 
@@ -553,13 +564,12 @@ describe("the typed code", () => {
 describe("without the link", () => {
   it("says so on the screen at all times, and a code found only when the link is back", async () => {
     const at = await startedWarehouse({ online: false });
-    expect(
-      screen.getByText(
-        "Нет связи с хостом: коды искать нельзя, пока она не вернётся. Начатую печать решить можно.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Нет связи с хостом: найти код нельзя")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ввести код вручную" }).hasAttribute("disabled")).toBe(
+      true,
+    );
     at.rerender({ online: true });
-    expect(screen.queryByText(/коды искать нельзя, пока она не вернётся/)).toBeNull();
+    expect(screen.queryByText("Нет связи с хостом: найти код нельзя")).toBeNull();
     await at.scan(BOX_SSCC);
     expect(at.lookup).toHaveBeenCalledTimes(1);
   });
@@ -567,10 +577,10 @@ describe("without the link", () => {
   it("still decides a label it holds: a retry of a failed job needs no host", async () => {
     const at = await startedWarehouse({ assignments: NO_PRINTERS, lookup: FOUND_BOX });
     await at.scan(BOX_SSCC);
-    await screen.findByText("Задание: не отправлено");
+    await screen.findByText("Принтер не назначен");
     await setUpPrinting(at.local, { assignments: { box: "zebra", pallet: null, duplicate: null } });
     at.rerender({ online: false });
     await at.press("Повторить отправку");
-    expect(await screen.findByText("Задание: передано на принтер")).toBeTruthy();
+    expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
   });
 });
