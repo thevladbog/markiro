@@ -744,8 +744,44 @@
   min-width: 0;
 }
 
+.mk-alert {
+  align-items: flex-start;
+}
+
 .mk-alert > div {
   overflow-wrap: anywhere;
+}
+
+/* Block content inside the text slot stacks with one rhythm; the browser's
+   default paragraph margins used to push the lines far apart. */
+.mk-alert__text > :is(p, ul, ol, div) {
+  margin: 0;
+}
+
+.mk-alert__text > :is(p, ul, ol, div) + :is(p, ul, ol, div) {
+  margin-top: var(--sp-2);
+}
+
+/* An action passed as children (the common pattern). After block content it
+   gets its own line; after plain text the text and the action form one
+   centred row, and the icon centres on that row, so nothing floats high. */
+.mk-alert__text > :is(p, ul, ol, div) ~ .mk-btn {
+  display: flex;
+  width: fit-content;
+  margin-top: var(--sp-3);
+}
+
+.mk-alert__text:has(> .mk-btn):not(:has(> :is(p, ul, ol, div))) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.mk-alert:has(> .mk-alert__body > .mk-alert__text > .mk-btn):not(
+    :has(> .mk-alert__body > .mk-alert__text > :is(p, ul, ol, div))
+  ):not(:has(> .mk-alert__body > .mk-alert__title)) {
+  align-items: center;
 }
 
 @keyframes mk-panel-in {
