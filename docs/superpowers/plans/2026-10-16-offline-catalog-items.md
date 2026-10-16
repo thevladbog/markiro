@@ -2559,3 +2559,7 @@ git commit -m "docs: offline catalog items runbook and browser fixtures"
 - Решения владельца: (1) флаг на позиции, редактор, бейдж, облачные клиенты не затронуты — T1, T3, T6; (2) страж «вид + флаг», форма «Прямое назначение», предложения и счета — T3, T7; (3) выпуск из назначений, замена ручных условий, срок, журнал/аудит — T5, T8; (4) нет автобиллинга — T5, тест «issues a file…» проверяет отсутствие счетов у клиента; (5) выдача кабинета — T4, T7.
 - Контракты и фикстуры — T2; OpenAPI/число схем — T3 (Step 7); миграция — T1; риски блокировок — T3 (комментарий и тест гонки), T4 (порядок замков); фоновые задания — спецификация §13: истёкшее назначение → `assignments_required` покрыто тестом T5.
 - Имена, использованные в нескольких задачах: `assertCatalogAllowedForTenant` (T3), `setOfflineAvailability` (T2, T3), `setCatalogOfflineAvailability` (T6), `offline_assignments` (T1, T2, T5, T8), `sourceAssignments` (T1, T2, T5, T8), `StandaloneAssignmentsSummary` (T8), `offlineTenant` (T7), `demoCreated`/`offlineAssignments` (T2, T4, T7).
+
+## Отклонения при исполнении
+
+(Заполняется по ходу: каждое расхождение плана с фактическим кодом.)
