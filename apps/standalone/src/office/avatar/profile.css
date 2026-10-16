@@ -181,3 +181,26 @@
   align-items: center;
   gap: 6px;
 }
+
+/* The user cell of «Пользователи»: the avatar, then the name over the login. */
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.user-cell__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.user-cell__name {
+  font: 600 14px/20px var(--font-ui);
+}
+
+.user-cell__login {
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-mono);
+}
