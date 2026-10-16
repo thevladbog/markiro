@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@markiro/ui";
 
+import { Glyph, type GlyphName } from "../kit/StatusIcons.js";
 import type { UnitLabelEntry } from "./unit-label-store.js";
 import { unitLabelStatus } from "./unit-label-work.js";
 import "./unit-labels.css";
@@ -87,6 +88,18 @@ export function duplicateSteps(
   return { steps: ["ready", printed, check], checkOff };
 }
 
+/** The glyph beside the line of words: the state's own, never the only sign of it. */
+function statusGlyph(job: UnitLabelShown | null, busy: boolean): GlyphName {
+  if (busy || job === null) return "circle-notch";
+  if (job.verification === "verified" || job.verification === "skipped") return "check-circle";
+  const status = unitLabelStatus(job);
+  if (status === "completed") return "check-circle";
+  if (status === "awaiting_verification") return "scan-frame";
+  if (job.attemptState === "delivery_unknown") return "question-circle";
+  if (job.attemptState === "failed_before_send") return "warning";
+  return "circle-notch";
+}
+
 export interface UnitLabelPanelProps {
   /** The shift's current label: the unresolved one, else the newest; `null` — none yet. */
   job: UnitLabelShown | null;
@@ -100,26 +113,49 @@ export interface UnitLabelPanelProps {
 
 const STEP_KEYS = ["accepted", "printed", "checked"] as const;
 
+/**
+ * A step's glyph: a ticked circle when ready, a crossed one when stopped, a ring in hand (still:
+ * nothing spins), a dashed ring while it waits for its turn. Drawn on 24 px as the floor's glyphs.
+ */
 function StepGlyph({ state }: { state: DuplicateStepState }) {
+  if (state === "ready") return <Glyph name="check-circle" size={36} />;
+  if (state === "error") return <Glyph name="x-circle" size={36} />;
+  if (state === "current") return <Glyph name="circle-notch" size={36} />;
   return (
     <svg
-      width="28"
-      height="28"
-      viewBox="0 0 28 28"
+      className="floor-glyph"
+      width="36"
+      height="36"
+      viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="3"
+      strokeWidth="1.8"
       strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
-      className="work-unit-label__glyph"
+      focusable="false"
     >
-      {state === "ready" && <path d="m6 15 6 6 11-12" />}
-      {state === "error" && <path d="m8 8 12 12M20 8 8 20" />}
-      {state === "current" && <circle cx="14" cy="14" r="5" fill="currentColor" />}
-      {state === "pending" && <circle cx="14" cy="14" r="8" strokeDasharray="3 4" />}
+      <circle cx="12" cy="12" r="8.5" strokeDasharray="3 3.4" />
     </svg>
   );
+}
+
+/** The word on a step's tag, beside its name: the state said in more than a glyph and a colour. */
+function stepTag(
+  index: number,
+  state: DuplicateStepState,
+  off: boolean,
+  skipped: boolean,
+): { key: string; glyph: GlyphName } | null {
+  if (state === "error") return null;
+  if (off) return { key: "off", glyph: "minus-circle" };
+  if (skipped) return { key: "skipped", glyph: "check-circle" };
+  if (state === "ready") return { key: "ready", glyph: "check-circle" };
+  if (state === "current") {
+    return index === 2
+      ? { key: "checking", glyph: "scan-frame" }
+      : { key: "printing", glyph: "printer" };
+  }
+  return { key: "pending", glyph: "circle-notch" };
 }
 
 /**
@@ -144,6 +180,7 @@ export function UnitLabelPanel({ job, busy, verification, onRecover }: UnitLabel
           const key = STEP_KEYS[index] ?? "accepted";
           const off = index === 2 && checkOff && state === "pending";
           const skipped = index === 2 && job?.verification === "skipped";
+          const tag = stepTag(index, state, off, skipped);
           return (
             <li key={key} className="work-unit-label__step" data-state={state}>
               <StepGlyph state={state} />
@@ -156,6 +193,12 @@ export function UnitLabelPanel({ job, busy, verification, onRecover }: UnitLabel
                       : `floor.unitLabels.steps.${key}`,
                 )}
               </span>
+              {tag !== null && (
+                <span className="work-unit-label__tag" data-tag={tag.key}>
+                  <Glyph name={tag.glyph} size={22} />
+                  {t(`floor.unitLabels.stepTag.${tag.key}`)}
+                </span>
+              )}
               {state === "error" && onRecover !== undefined && (
                 <Button size="floor" variant="secondary" onClick={onRecover}>
                   {t("floor.unitLabels.retry")}
@@ -166,6 +209,7 @@ export function UnitLabelPanel({ job, busy, verification, onRecover }: UnitLabel
         })}
       </ol>
       <p className="work-unit-label__status" role="status">
+        <Glyph name={statusGlyph(job, busy)} size={26} />
         {suffix === "" ? status : `${status} …${suffix}`}
       </p>
       <p id="work-unit-label-hint" className="work-sr">

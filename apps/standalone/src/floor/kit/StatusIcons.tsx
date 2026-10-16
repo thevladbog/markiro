@@ -40,7 +40,8 @@ export type GlyphName =
   | "x"
   | "arrow-left"
   | "scan-frame"
-  | "search";
+  | "search"
+  | "minus-circle";
 
 const PATHS: Record<GlyphName, ReactNode> = {
   "wifi-high": (
@@ -226,6 +227,12 @@ const PATHS: Record<GlyphName, ReactNode> = {
   ),
   x: <path d="m6 6 12 12M18 6 6 18" />,
   "arrow-left": <path d="M19.5 12h-15M10.5 6l-6 6 6 6" />,
+  "minus-circle": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 12h7" />
+    </>
+  ),
   search: (
     <>
       <circle cx="10.5" cy="10.5" r="6.5" />
