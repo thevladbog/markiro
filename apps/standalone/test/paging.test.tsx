@@ -173,6 +173,71 @@ describe("the pagination bar", () => {
     expect(screen.getByRole("button", { name: "Первая страница" })).toBeTruthy();
   });
 
+  describe("the page chooser", () => {
+    const chooser = () => screen.getByRole("textbox", { name: "Перейти на страницу (из 10)" });
+
+    it("sits in the pager, labelled, and starts on the current page", () => {
+      bar({ page: 3 });
+      expect(within(pager()).getByRole("textbox", { name: "Перейти на страницу (из 10)" })).toBe(
+        chooser(),
+      );
+      expect((chooser() as HTMLInputElement).value).toBe("3");
+    });
+
+    it("jumps on Enter, and on leaving the field", () => {
+      const onPage = vi.fn();
+      bar({ onPage });
+      fireEvent.change(chooser(), { target: { value: "7" } });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(onPage).toHaveBeenLastCalledWith(7);
+      fireEvent.change(chooser(), { target: { value: "4" } });
+      fireEvent.blur(chooser());
+      expect(onPage).toHaveBeenLastCalledWith(4);
+    });
+
+    it("clamps to 1..M and reads garbage as the current page", () => {
+      const onPage = vi.fn();
+      bar({ onPage, page: 2 });
+      fireEvent.change(chooser(), { target: { value: "999" } });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(onPage).toHaveBeenLastCalledWith(10);
+      fireEvent.change(chooser(), { target: { value: "0" } });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(onPage).toHaveBeenLastCalledWith(1);
+      onPage.mockClear();
+      fireEvent.change(chooser(), { target: { value: "abc" } });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(onPage).not.toHaveBeenCalled();
+      expect((chooser() as HTMLInputElement).value).toBe("2");
+    });
+
+    it("does not jump to the page it is on, and waits while a page is on its way", () => {
+      const onPage = vi.fn();
+      const { unmount } = bar({ onPage, page: 2 });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(onPage).not.toHaveBeenCalled();
+      unmount();
+      bar({ busy: true });
+      expect(chooser().hasAttribute("disabled")).toBe(true);
+    });
+
+    it("is left out where no page count is known (a cursor list still being read) and for one page", () => {
+      const { unmount } = bar({ total: null, pageCount: null, page: 5 });
+      expect(screen.queryByRole("textbox")).toBeNull();
+      unmount();
+      bar({ total: 12, pageCount: 1, hasNext: false });
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
+
+    it("moves a PagedTable to the chosen page", () => {
+      render(table(95));
+      fireEvent.change(chooser(), { target: { value: "5" } });
+      fireEvent.keyDown(chooser(), { key: "Enter" });
+      expect(within(pager()).getByText("Страница 5 из 10")).toBeTruthy();
+      expect(shown()[0]).toContain("Строка 41");
+    });
+  });
+
   it("waits while a page is on its way", () => {
     bar({ busy: true });
     expect(within(pager()).getByRole("button", { name: "Вперёд" }).hasAttribute("disabled")).toBe(

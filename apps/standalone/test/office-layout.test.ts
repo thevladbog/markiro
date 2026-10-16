@@ -51,7 +51,7 @@ describe("the office layout rules", () => {
   it("lays a filter bar's controls in one grid of equal tracks, their tops level, on a page and in a drawer alike", () => {
     const bar = rule(":is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls");
     expect(bar).toContain("display: grid");
-    expect(bar).toContain("grid-template-columns: repeat(auto-fill, minmax(176px, 1fr))");
+    expect(bar).toContain("grid-template-columns: repeat(auto-fill, minmax(212px, 1fr))");
     expect(bar).toContain("align-items: start");
     // A field may shrink to its track; a button starts level with the inputs, not with a hint.
     expect(
@@ -106,5 +106,23 @@ describe("the office layout rules", () => {
     // The office's page stack once shared this name with the station's padded card.
     expect(css).not.toMatch(/\.office-stack\s*\{[^}]*padding/);
     expect(css).toMatch(/\.office-stack\s*\{[^}]*display: grid/);
+  });
+
+  it("centres a banner's icon, its text and its button on one axis, whatever the tone or the line count", () => {
+    const alert = rule(".office-banner .mk-alert");
+    expect(alert).toContain("align-items: center");
+    // The icon and the text share one 20px line box, so a single line has the same centre.
+    expect(rule(".office-banner .mk-alert__icon")).toContain("align-self: center");
+    expect(rule(".office-banner .mk-alert__action")).toContain("align-self: center");
+    expect(rule(".office-banner .mk-alert__action")).toContain("display: flex");
+  });
+
+  it("keeps a date filter's value on one line, with room for the calendar icon and the clear button", () => {
+    expect(rule(".mk-date-picker__trigger > span:first-child")).toContain("white-space: nowrap");
+    expect(
+      rule(
+        ":is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-date-picker",
+      ),
+    ).toContain("min-width: 212px");
   });
 });

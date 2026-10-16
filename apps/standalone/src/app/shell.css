@@ -460,7 +460,7 @@
  */
 :is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
   align-items: start;
   gap: var(--sp-4) var(--sp-3);
 }
@@ -535,6 +535,18 @@
  * The foot of a table: what is shown at the left, then the page size and the pages at the right;
  * all of one height (a control is 40 px), wrapping by whole groups in a narrow drawer.
  */
+/*
+ * A date reads on one line («10 октября 2026»): the value never wraps, and a date field in a filter
+ * bar is wide enough for the value, the calendar icon and the clear button beside it.
+ */
+.mk-date-picker__trigger > span:first-child {
+  white-space: nowrap;
+}
+
+:is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-date-picker {
+  min-width: 212px;
+}
+
 .office-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -573,6 +585,16 @@
   color: var(--fg-2);
   font: var(--text-body-sm);
   font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* The page chooser: a compact number field, as tall as the buttons around it. */
+.office-pagination__jump {
+  width: 72px;
+}
+
+.office-pagination__jump .mk-input input {
+  min-width: 0;
   text-align: center;
 }
 
@@ -636,6 +658,24 @@
 /* The link in a banner's sentence stays whole: it moves to the next line rather than breaking in two. */
 .office-banner .mk-alert__text a {
   white-space: nowrap;
+}
+
+/*
+ * One axis for the icon, the text and the button, in every tone: the alert is a centred row, so a
+ * single line and a wrapped one both keep the three level (the shared alert top-aligns them).
+ */
+.office-banner .mk-alert {
+  align-items: center;
+}
+
+.office-banner .mk-alert__icon {
+  align-self: center;
+}
+
+.office-banner .mk-alert__action {
+  display: flex;
+  align-self: center;
+  align-items: center;
 }
 
 .office-banner:empty {
