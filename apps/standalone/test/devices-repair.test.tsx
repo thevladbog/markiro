@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DeviceRecord, PairingCode } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice } from "./support/office.js";
+import { hasRowAction, pressRowAction } from "./support/row-menu.js";
 
 const TSD: DeviceRecord = {
   id: "2c1f0b7e-8a4d-4c3b-9e2f-1a0b9c8d7e6f",
@@ -49,21 +50,16 @@ async function open(devices: DeviceRecord[] = [TSD, OFFICE, GONE]) {
 describe("«Привязать заново» (plan ТСД-Х, task Х6)", () => {
   it("is offered for a live station or handheld, not for an office PC or a revoked device", async () => {
     await open();
-    expect(
-      screen.getByRole("button", { name: "Привязать заново устройство «ТСД склада»" }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Привязать заново устройство «Офис»/ })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: /Привязать заново устройство «Старый ТСД»/ }),
-    ).toBeNull();
+    // The re-pairing is an entry of the row's «Ещё» menu.
+    expect(hasRowAction(screen, "Привязать заново устройство «ТСД склада»")).toBe(true);
+    expect(hasRowAction(screen, /Привязать заново устройство «Офис»/)).toBe(false);
+    expect(hasRowAction(screen, /Привязать заново устройство «Старый ТСД»/)).toBe(false);
   });
 
   it("asks the host for a code of that device and shows it with what the app must do", async () => {
     const session = await open();
     session.api.createDevicePairingCode.mockResolvedValue(code());
-    fireEvent.click(
-      screen.getByRole("button", { name: "Привязать заново устройство «ТСД склада»" }),
-    );
+    pressRowAction(screen, "Привязать заново устройство «ТСД склада»");
     const dialog = await screen.findByRole("dialog", { name: "Привязать заново: ТСД склада" });
     await waitFor(() =>
       expect(session.api.createDevicePairingCode).toHaveBeenCalledWith(
@@ -84,9 +80,7 @@ describe("«Привязать заново» (plan ТСД-Х, task Х6)", () =>
     const later = { ...OFFICE, pairedAt: new Date(Date.now() + 3_600_000).toISOString() };
     const session = await open([TSD, later]);
     session.api.createDevicePairingCode.mockResolvedValue(code());
-    fireEvent.click(
-      screen.getByRole("button", { name: "Привязать заново устройство «ТСД склада»" }),
-    );
+    pressRowAction(screen, "Привязать заново устройство «ТСД склада»");
     await screen.findByRole("dialog", { name: "Привязать заново: ТСД склада" });
     expect(screen.queryByText(/подключено\./)).toBeNull();
   });
@@ -94,9 +88,7 @@ describe("«Привязать заново» (plan ТСД-Х, task Х6)", () =>
   it("shows the host's refusal and no code when the host will not make one", async () => {
     const session = await open();
     session.api.createDevicePairingCode.mockRejectedValue(new Error("down"));
-    fireEvent.click(
-      screen.getByRole("button", { name: "Привязать заново устройство «ТСД склада»" }),
-    );
+    pressRowAction(screen, "Привязать заново устройство «ТСД склада»");
     await waitFor(() => expect(session.api.createDevicePairingCode).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(await screen.findByRole("alert")).toBeTruthy();

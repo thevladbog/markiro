@@ -8,13 +8,8 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
-  DatePicker,
-  FilterBar,
   Input,
   PageHeader,
-  RowActionMenu,
-  RowActions,
   Select,
   StatusChip,
   type BadgeTone,
@@ -29,8 +24,14 @@ import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { OfficeIcon } from "../OfficeIcon.js";
+import { listViewState } from "../list/list-state.js";
+import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
+import { SortToggle } from "../list/SortToggle.js";
+import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import {
   civilDateLabel,
@@ -52,7 +53,7 @@ import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
-import { datePickerTexts, shiftOutput } from "./shift-text.js";
+import { shiftOutput } from "./shift-text.js";
 
 /**
  * The export dialog comes with the domain's renderers, the source rules and the
@@ -140,9 +141,13 @@ export function ShiftsPage() {
           asked.plannedTo === wanted.plannedTo;
     if (!same) setAsked(none ? null : wanted);
   }
+  // The filters stay once the list has loaded, though a new period is read again behind them: a
+  // filter bar that vanished under the user's hand would also lose what they were typing.
+  const [filtersShown, setFiltersShown] = useState(false);
   const shifts = useOfficeQuery(officeKeys.shiftList(asked), (api, token) =>
     asked === null ? api.listShifts(token) : api.listShifts(token, asked),
   );
+  if (shifts.isSuccess && !filtersShown) setFiltersShown(true);
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>
@@ -175,6 +180,21 @@ export function ShiftsPage() {
 
   const productName = (shift: OfficeShift) =>
     recordLabel("product", products.data, shift.productId, t);
+  /** The product as the list names it in its first line: the full name, marked when archived. */
+  const fullProductName = (shift: OfficeShift) => {
+    const product = products.data?.find((each) => each.id === shift.productId);
+    if (product === undefined) return productName(shift);
+    return product.archived
+      ? t("office.common.archivedName", { name: product.name })
+      : product.name;
+  };
+  /** The name the labels carry, for the second line, when it says more than the first. */
+  const printTitle = (shift: OfficeShift) => {
+    const product = products.data?.find((each) => each.id === shift.productId);
+    if (product === undefined) return null;
+    const title = shiftProductTitle(product);
+    return title === product.name ? null : title;
+  };
   // What the search reads: the product's own names (full and print), not the id-start or the archive mark the list
   // shows in its place.
   const searchName = (shift: OfficeShift) => {
@@ -238,6 +258,16 @@ export function ShiftsPage() {
       { replace: true },
     );
 
+  const sortToggle = (key: ShiftSortKey, label: string, ariaLabel: string) => (
+    <SortToggle
+      label={label}
+      ariaLabel={ariaLabel}
+      active={sort?.key === key}
+      dir={sort?.dir ?? "asc"}
+      onToggle={() => onSort(key)}
+    />
+  );
+
   const columns: TableColumn<OfficeShift>[] = [
     {
       key: "number",
@@ -255,69 +285,91 @@ export function ShiftsPage() {
       ),
     },
     {
-      key: "productionDate",
+      // The product and, under it, the name its labels carry and the counterparty it is made for.
+      key: "product",
       sortable: true,
-      title: t("office.shifts.table.productionDate"),
-      mono: true,
-      render: (shift) => civilDateLabel(shift.productionDate),
-    },
-    {
-      // The shift's own date (beta 3), the working day, beside the production date.
-      key: "plannedDate",
-      sortable: true,
-      title: t("office.shifts.table.plannedDate"),
-      mono: true,
-      render: (shift) => civilDateLabel(shift.plannedDate),
+      title: t("office.shifts.table.productAndPrint"),
+      wrap: true,
+      minWidth: 220,
+      render: (shift) => {
+        const print = printTitle(shift);
+        return (
+          <span className="shift-cell">
+            <span className="shift-cell__name">{fullProductName(shift)}</span>
+            {(print !== null || shift.counterpartyId !== null) && (
+              <span className="shift-cell__quiet shift-cell__sub">
+                {print !== null && (
+                  <span>{t("office.products.printNameShort", { name: print })}</span>
+                )}
+                {print !== null && shift.counterpartyId !== null && (
+                  <span aria-hidden="true"> · </span>
+                )}
+                {shift.counterpartyId !== null && (
+                  <span>
+                    {t("office.shifts.forCounterparty", {
+                      name: recordLabel(
+                        "counterparty",
+                        counterparties.data,
+                        shift.counterpartyId,
+                        t,
+                      ),
+                    })}
+                  </span>
+                )}
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       key: "line",
       sortable: true,
       title: t("office.shifts.table.line"),
       wrap: true,
-      minWidth: 150,
+      minWidth: 110,
       render: (shift) => recordLabel("line", lines.data, shift.lineId, t),
     },
     {
-      key: "product",
-      sortable: true,
-      title: t("office.shifts.table.product"),
+      // Both dates, one over the other: the production date and the shift's own (beta 3).
+      key: "dates",
+      title: (
+        <span className="office-th-sorts">
+          <span>{t("office.shifts.table.dates")}</span>
+          {sortToggle(
+            "productionDate",
+            t("office.shifts.table.productionDateShort"),
+            t("office.shifts.sortBy", { name: t("office.shifts.table.productionDate") }),
+          )}
+          {sortToggle(
+            "plannedDate",
+            t("office.shifts.table.plannedDateShort"),
+            t("office.shifts.sortBy", { name: t("office.shifts.table.plannedDate") }),
+          )}
+        </span>
+      ),
+      mono: true,
       wrap: true,
-      minWidth: 200,
+      minWidth: 150,
       render: (shift) => (
         <span className="shift-cell">
-          <span>{productName(shift)}</span>
-          {shift.counterpartyId !== null && (
-            <span className="shift-cell__quiet">
-              {t("office.shifts.forCounterparty", {
-                name: recordLabel("counterparty", counterparties.data, shift.counterpartyId, t),
-              })}
-            </span>
-          )}
+          <span>
+            <span className="shift-cell__quiet">{t("office.shifts.dateTags.production")} </span>
+            {civilDateLabel(shift.productionDate)}
+          </span>
+          <span>
+            <span className="shift-cell__quiet">{t("office.shifts.dateTags.shift")} </span>
+            {civilDateLabel(shift.plannedDate)}
+          </span>
         </span>
       ),
     },
     {
-      key: "mode",
-      title: t("office.shifts.table.mode"),
-      render: (shift) => (
-        <Badge tone={MODE_TONE[shift.mode]}>{t(`office.shifts.modes.${shift.mode}`)}</Badge>
-      ),
-    },
-    {
-      key: "plannedQty",
-      sortable: true,
-      title: t("office.shifts.table.plannedQty"),
-      mono: true,
-      align: "right",
-      render: (shift) =>
-        shift.plannedQty === null ? t("office.common.none") : UNITS.format(shift.plannedQty),
-    },
-    {
       key: "status",
       sortable: true,
-      title: t("office.shifts.table.status"),
+      title: t("office.shifts.table.statusAndMode"),
       wrap: true,
-      minWidth: 220,
+      minWidth: 200,
       render: (shift) => {
         const blocker = openBlocker(shift, products.data, templates.data);
         return (
@@ -326,6 +378,7 @@ export function ShiftsPage() {
               phase={STATUS_PHASE[shift.status]}
               label={t(`office.shifts.statuses.${shift.status}`)}
             />
+            <Badge tone={MODE_TONE[shift.mode]}>{t(`office.shifts.modes.${shift.mode}`)}</Badge>
             {blocker !== null && (
               // A sentence, not a chip: a long warning in a chip is a tall box in a narrow column.
               <span className="shift-cell__warn">
@@ -356,150 +409,275 @@ export function ShiftsPage() {
       },
     },
     {
-      // What the shift put in closed boxes, as the cloud's list shows it; a planned shift has none.
-      // After the status, so the columns before it keep their places.
+      // What the shift put in closed boxes, as the cloud's list shows it, and under it the plan; a planned
+      // shift has no output yet.
       key: "output",
       sortable: true,
-      title: t("office.shifts.table.output"),
+      title: (
+        <span className="office-th-sorts">
+          <span>{t("office.shifts.table.output")}</span>
+          {sortToggle(
+            "plannedQty",
+            t("office.shifts.table.plannedQtyShort"),
+            t("office.shifts.sortBy", { name: t("office.shifts.table.plannedQty") }),
+          )}
+        </span>
+      ),
       mono: true,
       align: "right",
-      render: (shift) => shiftOutput(shift, t),
+      minWidth: 130,
+      render: (shift) => (
+        <span className="shift-cell shift-cell--end">
+          <span>{shiftOutput(shift, t)}</span>
+          <span className="shift-cell__quiet">
+            {t("office.shifts.planLine", {
+              plan:
+                shift.plannedQty === null
+                  ? t("office.common.none")
+                  : UNITS.format(shift.plannedQty),
+            })}
+          </span>
+        </span>
+      ),
     },
     // Every role reads a shift's figures; the writes are `planShifts`.
     {
       key: "actions",
       stickyEnd: true,
       title: t("office.shifts.table.actions"),
-      render: (shift) => (
-        <RowActions>
-          {shift.status !== "planned" && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.totalsNamed", { number: shift.number })}
-              onClick={() => open({ kind: "totals", shift })}
-            >
-              {t("office.shifts.totalsAction")}
-            </Button>
-          )}
-          {/* A planned shift's fields are its card's: «Открыть» shows them, and «Изменить» there
-              turns them into the form. */}
-          {shift.status === "planned" && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.openNamed", { number: shift.number })}
-              onClick={() => setParams({ shift: shift.id })}
-            >
-              {t("office.shifts.open")}
-            </Button>
-          )}
-          {canPlan && shift.status === "planned" && (
-            <>
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.shifts.deleteNamed", { number: shift.number })}
-                onClick={() => open({ kind: "delete", shift })}
-              >
-                {t("office.shifts.delete")}
-              </Button>
-            </>
-          )}
-          {/* An open shift's plan, close and export are a menu next to its figures: one line per row. */}
-          {canPlan && shift.status === "active" && (
-            <RowActionMenu
-              label={t("office.common.rowActions", { name: shift.number })}
-              items={[
-                {
-                  key: "plan",
-                  label: t("office.shifts.plan"),
-                  ariaLabel: t("office.shifts.planNamed", { number: shift.number }),
-                  onSelect: () => open({ kind: "plan", shift }),
-                },
-                {
-                  key: "export",
-                  label: t("office.shifts.export"),
-                  ariaLabel: t("office.shifts.exportNamed", { number: shift.number }),
-                  onSelect: () => open({ kind: "export", shift }),
-                },
-                {
-                  key: "close",
-                  label: t("office.shifts.close"),
-                  ariaLabel: t("office.shifts.closeNamed", { number: shift.number }),
-                  destructive: true,
-                  onSelect: () => open({ kind: "close", shift }),
-                },
-              ]}
-            />
-          )}
-          {/* Every role exports (the cloud's `OPERATIONS_READ`, plan ЧЗ); a shift to come has nothing yet. */}
-          {shift.status !== "planned" && !(canPlan && shift.status === "active") && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.exportNamed", { number: shift.number })}
-              onClick={() => open({ kind: "export", shift })}
-            >
-              {t("office.shifts.export")}
-            </Button>
-          )}
-        </RowActions>
-      ),
+      render: (shift) => {
+        const named = { number: shift.number };
+        const items: RowMenuItem[] = [];
+        if (canPlan && shift.status === "active") {
+          items.push({
+            key: "plan",
+            label: t("office.shifts.plan"),
+            ariaLabel: t("office.shifts.planNamed", named),
+            icon: "sliders",
+            onSelect: () => open({ kind: "plan", shift }),
+          });
+        }
+        // Every role exports (the cloud's `OPERATIONS_READ`, plan ЧЗ); a shift to come has nothing yet.
+        if (shift.status !== "planned") {
+          items.push({
+            key: "export",
+            label: t("office.shifts.export"),
+            ariaLabel: t("office.shifts.exportNamed", named),
+            icon: "download",
+            onSelect: () => open({ kind: "export", shift }),
+          });
+        }
+        if (canPlan && shift.status === "active") {
+          items.push({
+            key: "close",
+            label: t("office.shifts.close"),
+            ariaLabel: t("office.shifts.closeNamed", named),
+            icon: "stop",
+            destructive: true,
+            onSelect: () => open({ kind: "close", shift }),
+          });
+        }
+        if (canPlan && shift.status === "planned") {
+          items.push({
+            key: "delete",
+            label: t("office.shifts.delete"),
+            ariaLabel: t("office.shifts.deleteNamed", named),
+            icon: "trash",
+            destructive: true,
+            onSelect: () => open({ kind: "delete", shift }),
+          });
+        }
+        return (
+          <RowActionBar
+            actions={[
+              shift.status !== "planned"
+                ? {
+                    key: "totals",
+                    label: t("office.shifts.totalsNamed", named),
+                    icon: "list",
+                    onSelect: () => open({ kind: "totals", shift }),
+                  }
+                : {
+                    // A planned shift's fields are its card's: «Открыть» shows them, and «Изменить»
+                    // there turns them into the form.
+                    key: "open",
+                    label: t("office.shifts.openNamed", named),
+                    icon: "eye",
+                    onSelect: () => setParams({ shift: shift.id }),
+                  },
+            ]}
+            {...(items.length === 0
+              ? {}
+              : { menu: { label: t("office.common.rowActions", { name: shift.number }), items } })}
+          />
+        );
+      },
     },
   ];
 
-  const content = () => {
-    if (shifts.isPending) return <PageLoading />;
-    if (shifts.isError) {
-      return (
-        <LoadError
-          error={shifts.error}
-          onRetry={() => {
-            void shifts.refetch();
-            // One click recovers the names too when they failed as well.
-            for (const lookup of lookups) if (lookup.isError) void lookup.refetch();
-          }}
-        />
-      );
-    }
-    return (
-      <Card>
-        {/* What the filters keep, however many pages: the figures of the period. */}
-        <p className="office-note shift-totals" aria-live="polite">
-          {t("office.shifts.totalsRow.line", {
-            shifts: UNITS.format(totals.shifts),
-            units: UNITS.format(totals.units),
-            boxes: UNITS.format(totals.boxes),
-            pallets: UNITS.format(totals.pallets),
-          })}
-        </p>
-        <PagedTable
-          tableId="shifts"
-          pagerLabel={t("office.shifts.pager")}
-          resetKey={JSON.stringify([
-            from,
-            to,
-            plannedFrom,
-            plannedTo,
-            status,
-            lineId,
-            search,
-            sort,
-          ])}
-          columns={columns}
-          sortKey={sort?.key ?? ""}
-          sortDir={sort?.dir ?? "asc"}
-          onSort={onSort}
-          onRowClick={(shift) => setParams({ shift: shift.id })}
-          rows={found}
-          getRowKey={(shift) => shift.id}
-          empty={t(shifts.data.length === 0 ? "office.shifts.empty" : "office.shifts.nothingFound")}
-          scrollLabel={t("office.shifts.title")}
-        />
-      </Card>
-    );
-  };
+  const view = listViewState({
+    pending: shifts.isPending,
+    failed: shifts.isError,
+    total: shifts.data?.length ?? 0,
+    found: found.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError
+        error={shifts.error}
+        onRetry={() => {
+          void shifts.refetch();
+          // One click recovers the names too when they failed as well.
+          for (const lookup of lookups) if (lookup.isError) void lookup.refetch();
+        }}
+      />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="calendarCheck"
+        title={t("office.shifts.empty")}
+        hint={t("office.shifts.emptyHint")}
+        {...(canPlan
+          ? {
+              action: (
+                <Button
+                  icon={<OfficeIcon name="plus" size={20} />}
+                  onClick={() => open({ kind: "create" })}
+                >
+                  {t("office.shifts.add")}
+                </Button>
+              ),
+            }
+          : {})}
+      />
+    ) : view === "nothing" ? (
+      <ListNothing title={t("office.shifts.nothingFound")} onReset={resetFilters} />
+    ) : null;
+  const periodNote =
+    period.kind === "partial" || plannedPeriod.kind === "partial"
+      ? t("office.shifts.period.partial")
+      : asked === null
+        ? t("office.shifts.period.recent")
+        : asked.from !== undefined && asked.plannedFrom !== undefined
+          ? t("office.shifts.period.shownBoth", {
+              from: civilDateLabel(asked.from),
+              to: civilDateLabel(asked.to ?? asked.from),
+              plannedFrom: civilDateLabel(asked.plannedFrom),
+              plannedTo: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
+            })
+          : asked.plannedFrom !== undefined
+            ? t("office.shifts.period.shownPlanned", {
+                from: civilDateLabel(asked.plannedFrom),
+                to: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
+              })
+            : t("office.shifts.period.shown", {
+                from: civilDateLabel(asked.from ?? ""),
+                to: civilDateLabel(asked.to ?? ""),
+              });
+
+  const content = (
+    <ListCard>
+      {filtersShown && (
+        <ListFilters
+          label={t("office.shifts.filters")}
+          resultSummary={
+            shifts.isSuccess
+              ? t("office.shifts.found", { shown: found.length, total: shifts.data.length })
+              : ""
+          }
+          onReset={filtersOn ? resetFilters : undefined}
+        >
+          <Input
+            label={t("office.shifts.search")}
+            placeholder={t("office.shifts.searchHint")}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+            }}
+          />
+          <StateFilter
+            label={t("office.shifts.statusFilter")}
+            options={STATUS_FILTERS.map((value) => ({
+              value,
+              label: t(`office.shifts.statusFilters.${value}`),
+            }))}
+            value={status}
+            onChange={setStatus}
+          />
+          <Select
+            {...searchableSelect(t)}
+            label={t("office.shifts.lineFilter")}
+            options={[
+              { value: "", label: t("office.shifts.allLines") },
+              ...activeFirstByName(lines.data ?? []).map((line) => ({
+                value: line.id,
+                label: line.archived
+                  ? t("office.common.archivedName", { name: line.name })
+                  : line.name,
+              })),
+            ]}
+            value={lineId}
+            onValueChange={(value) => {
+              setLineId(value);
+            }}
+          />
+          <DateRange
+            label={t("office.shifts.period.productionLabel")}
+            fromLabel={t("office.shifts.period.from")}
+            toLabel={t("office.shifts.period.to")}
+            from={from}
+            to={to}
+            onFrom={setFrom}
+            onTo={setTo}
+            error={periodError}
+          />
+          <DateRange
+            label={t("office.shifts.period.plannedLabel")}
+            fromLabel={t("office.shifts.period.plannedFrom")}
+            toLabel={t("office.shifts.period.plannedTo")}
+            from={plannedFrom}
+            to={plannedTo}
+            onFrom={setPlannedFrom}
+            onTo={setPlannedTo}
+            error={plannedPeriodError}
+          />
+        </ListFilters>
+      )}
+      {filtersShown && (
+        <div className="office-list-notes">
+          <p className="office-list-note" aria-live="polite">
+            {periodNote}
+          </p>
+          {shifts.isSuccess && (
+            // What the filters keep, however many pages: the figures of the period.
+            <p className="office-list-note shift-totals" aria-live="polite">
+              {t("office.shifts.totalsRow.line", {
+                shifts: UNITS.format(totals.shifts),
+                units: UNITS.format(totals.units),
+                boxes: UNITS.format(totals.boxes),
+                pallets: UNITS.format(totals.pallets),
+              })}
+            </p>
+          )}
+        </div>
+      )}
+      <PagedTable
+        tableId="shifts"
+        pagerLabel={t("office.shifts.pager")}
+        resetKey={JSON.stringify([from, to, plannedFrom, plannedTo, status, lineId, search, sort])}
+        columns={columns}
+        sortKey={sort?.key ?? ""}
+        sortDir={sort?.dir ?? "asc"}
+        onSort={onSort}
+        onRowClick={(shift) => setParams({ shift: shift.id })}
+        rows={found}
+        getRowKey={(shift) => shift.id}
+        empty={state}
+        scrollLabel={t("office.shifts.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
@@ -535,116 +713,7 @@ export function ShiftsPage() {
           {t("office.shifts.lookupsFailed")}
         </Alert>
       )}
-      <FilterBar
-        label={t("office.shifts.filters")}
-        resultSummary={
-          shifts.isSuccess
-            ? t("office.shifts.found", {
-                shown: found.length,
-                total: shifts.data.length,
-              })
-            : ""
-        }
-      >
-        <Input
-          label={t("office.shifts.search")}
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-          }}
-        />
-        <Select
-          label={t("office.shifts.statusFilter")}
-          options={STATUS_FILTERS.map((value) => ({
-            value,
-            label: t(`office.shifts.statusFilters.${value}`),
-          }))}
-          value={status}
-          onValueChange={(value) => {
-            setStatus(value);
-          }}
-        />
-        <Select
-          {...searchableSelect(t)}
-          label={t("office.shifts.lineFilter")}
-          options={[
-            { value: "", label: t("office.shifts.allLines") },
-            ...activeFirstByName(lines.data ?? []).map((line) => ({
-              value: line.id,
-              label: line.archived
-                ? t("office.common.archivedName", { name: line.name })
-                : line.name,
-            })),
-          ]}
-          value={lineId}
-          onValueChange={(value) => {
-            setLineId(value);
-          }}
-        />
-        <DatePicker
-          label={t("office.shifts.period.from")}
-          {...datePickerTexts(t)}
-          {...(from === "" ? {} : { value: from })}
-          onValueChange={(value) => {
-            setFrom(value ?? "");
-          }}
-        />
-        <DatePicker
-          label={t("office.shifts.period.to")}
-          {...datePickerTexts(t)}
-          {...(to === "" ? {} : { value: to })}
-          {...(periodError === undefined ? {} : { error: periodError })}
-          onValueChange={(value) => {
-            setTo(value ?? "");
-          }}
-        />
-        <DatePicker
-          label={t("office.shifts.period.plannedFrom")}
-          {...datePickerTexts(t)}
-          {...(plannedFrom === "" ? {} : { value: plannedFrom })}
-          onValueChange={(value) => {
-            setPlannedFrom(value ?? "");
-          }}
-        />
-        <DatePicker
-          label={t("office.shifts.period.plannedTo")}
-          {...datePickerTexts(t)}
-          {...(plannedTo === "" ? {} : { value: plannedTo })}
-          {...(plannedPeriodError === undefined ? {} : { error: plannedPeriodError })}
-          onValueChange={(value) => {
-            setPlannedTo(value ?? "");
-          }}
-        />
-        {/* A button of the same height as the fields beside it, not the filter bar's compact one. */}
-        {filtersOn && (
-          <Button variant="secondary" onClick={resetFilters}>
-            {t("office.shifts.reset")}
-          </Button>
-        )}
-      </FilterBar>
-      <p className="office-note" aria-live="polite">
-        {period.kind === "partial" || plannedPeriod.kind === "partial"
-          ? t("office.shifts.period.partial")
-          : asked === null
-            ? t("office.shifts.period.recent")
-            : asked.from !== undefined && asked.plannedFrom !== undefined
-              ? t("office.shifts.period.shownBoth", {
-                  from: civilDateLabel(asked.from),
-                  to: civilDateLabel(asked.to ?? asked.from),
-                  plannedFrom: civilDateLabel(asked.plannedFrom),
-                  plannedTo: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
-                })
-              : asked.plannedFrom !== undefined
-                ? t("office.shifts.period.shownPlanned", {
-                    from: civilDateLabel(asked.plannedFrom),
-                    to: civilDateLabel(asked.plannedTo ?? asked.plannedFrom),
-                  })
-                : t("office.shifts.period.shown", {
-                    from: civilDateLabel(asked.from ?? ""),
-                    to: civilDateLabel(asked.to ?? ""),
-                  })}
-      </p>
-      {content()}
+      {content}
       {openShiftId !== null && openShiftId !== "" && (
         <ShiftDrawer key={openShiftId} id={openShiftId} onClose={closeDrawer} />
       )}

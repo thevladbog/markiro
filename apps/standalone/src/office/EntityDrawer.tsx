@@ -1,7 +1,9 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, ConfirmDialog, SidePanel, type SidePanelSize } from "@markiro/ui";
+import { Alert, Button, ConfirmDialog, SidePanel, type SidePanelSize } from "@markiro/ui";
+
+import { OfficeIcon } from "./OfficeIcon.js";
 
 import { useReportDirty } from "./dirty-guard.js";
 
@@ -28,6 +30,8 @@ export interface EntityDrawerProps {
   alert?: ReactNode;
   /** Above the form's fields and part of the drawer, not of the form (a photo written on its own). */
   top?: ReactNode;
+  /** How many fields are wrong now: the form says so above its fields. */
+  errorCount?: number;
   children: ReactNode;
 }
 
@@ -56,6 +60,7 @@ export function EntityDrawer({
   onClose,
   alert,
   top,
+  errorCount = 0,
   children,
 }: EntityDrawerProps) {
   const { t } = useTranslation();
@@ -95,6 +100,15 @@ export function EntityDrawer({
         busy={sending}
         closeLabel={t("office.common.close")}
         onClose={close}
+        // A word and a glyph in the warning tone, never colour alone, while something is unsaved.
+        status={
+          dirty ? (
+            <span className="entity-drawer__dirty" role="status">
+              <OfficeIcon name="warning" size={18} />
+              {t("office.drawer.unsaved")}
+            </span>
+          ) : undefined
+        }
         footer={
           <>
             <Button variant="secondary" onClick={close} disabled={sending}>
@@ -115,6 +129,9 @@ export function EntityDrawer({
         <div className="standalone-form">
           {top}
           <form id={formId} className="standalone-form" onSubmit={send} noValidate>
+            {errorCount > 0 && (
+              <Alert tone="error">{t("office.common.fixFields", { count: errorCount })}</Alert>
+            )}
             {alert}
             {children}
           </form>

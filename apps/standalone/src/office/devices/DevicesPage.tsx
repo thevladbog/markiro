@@ -1,23 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  PageHeader,
-  RowActions,
-  StatusChip,
-  type TableColumn,
-} from "@markiro/ui";
+import { Alert, Badge, Button, PageHeader, StatusChip, type TableColumn } from "@markiro/ui";
 
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { DeviceRecord, PairingCode } from "../../host/protocol.js";
 import { pairingCodeRequest } from "../../host/requests.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { useStoreRecord } from "../records.js";
 import { useThisDeviceId } from "../this-device.js";
 import { DeviceDialog } from "./DeviceDialog.js";
@@ -227,61 +222,86 @@ export function DevicesPage() {
       key: "actions",
       stickyEnd: true,
       title: t("office.devices.table.actions"),
-      render: (device) =>
-        device.revokedAt === null ? (
-          <RowActions>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.devices.editNamed", { name: device.name })}
-              onClick={() => open({ kind: "edit", device })}
-            >
-              {t("office.devices.edit")}
-            </Button>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.devices.revokeNamed", { name: device.name })}
-              onClick={() => open({ kind: "revoke", device })}
-            >
-              {t("office.devices.revoke")}
-            </Button>
-            {device.kind !== "office" && (
-              <Button
-                variant="secondary"
-                size="compact"
-                aria-label={t("office.devices.repairNamed", { name: device.name })}
-                onClick={() => void newCode(device)}
-              >
-                {t("office.devices.repair.button")}
-              </Button>
-            )}
-          </RowActions>
-        ) : null,
+      render: (device) => {
+        if (device.revokedAt !== null) return null;
+        const items: RowMenuItem[] = [];
+        if (device.kind !== "office") {
+          items.push({
+            key: "repair",
+            label: t("office.devices.repair.button"),
+            ariaLabel: t("office.devices.repairNamed", { name: device.name }),
+            icon: "qrCode",
+            onSelect: () => void newCode(device),
+          });
+        }
+        items.push({
+          key: "revoke",
+          label: t("office.devices.revoke"),
+          ariaLabel: t("office.devices.revokeNamed", { name: device.name }),
+          icon: "stop",
+          destructive: true,
+          onSelect: () => open({ kind: "revoke", device }),
+        });
+        return (
+          <RowActionBar
+            actions={[
+              {
+                key: "edit",
+                label: t("office.devices.editNamed", { name: device.name }),
+                icon: "pencil",
+                onSelect: () => open({ kind: "edit", device }),
+              },
+            ]}
+            menu={{ label: t("office.common.rowActions", { name: device.name }), items }}
+          />
+        );
+      },
     },
   ];
 
-  const content = () => {
-    if (devices.isPending || lines.isPending) return <PageLoading />;
-    if (devices.isError) {
-      return <LoadError error={devices.error} onRetry={() => void devices.refetch()} />;
-    }
-    if (lines.isError) {
-      return <LoadError error={lines.error} onRetry={() => void lines.refetch()} />;
-    }
-    return (
-      <Card>
-        <PagedTable
-          tableId="devices"
-          columns={columns}
-          rows={devices.data}
-          getRowKey={(device) => device.id}
-          empty={t("office.devices.empty")}
-          scrollLabel={t("office.devices.title")}
-        />
-      </Card>
-    );
-  };
+  const ready = devices.isSuccess && lines.isSuccess;
+  const rows = devices.isSuccess ? devices.data : [];
+  const view = listViewState({
+    pending: devices.isPending || lines.isPending,
+    failed: devices.isError || lines.isError,
+    total: rows.length,
+    found: rows.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError
+        error={devices.isError ? devices.error : lines.error}
+        onRetry={() => void (devices.isError ? devices.refetch() : lines.refetch())}
+      />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="monitor"
+        title={t("office.devices.empty")}
+        action={
+          <Button
+            icon={<OfficeIcon name="plus" size={20} />}
+            loading={create.isPending && !dialogOpen}
+            onClick={() => void newCode()}
+          >
+            {t("office.devices.add")}
+          </Button>
+        }
+      />
+    ) : null;
+  const content = (
+    <ListCard>
+      <PagedTable
+        tableId="devices"
+        columns={columns}
+        rows={ready ? rows : []}
+        getRowKey={(device) => device.id}
+        empty={state}
+        scrollLabel={t("office.devices.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
@@ -296,7 +316,7 @@ export function DevicesPage() {
       {joined && <Alert tone="ok">{t("office.devices.joined", { name: joined.name })}</Alert>}
       {notice && <Alert tone="ok">{notice}</Alert>}
       {failure && !dialogOpen && <Alert tone="error">{t(failure)}</Alert>}
-      {content()}
+      {content}
       {pairing && dialogOpen && (
         <PairingCodeDialog
           code={pairing.code}

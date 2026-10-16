@@ -22,8 +22,20 @@ function rule(selector: string): string {
 
 describe("the office layout rules", () => {
   it("makes the page one column as wide as the window leaves it, so a wide table cannot push the page sideways", () => {
-    expect(rule(".office-shell__content")).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(rule(".office-shell__content")).toContain("flex-direction: column");
+    expect(rule(".office-shell__content > *")).toContain("min-width: 0");
     expect(rule(".office-shell__main")).toContain("min-width: 0");
+  });
+
+  it("is as tall as the window, and the page scrolls inside the shell, not the window (pinned lists need a bounded page)", () => {
+    const shell = rule(".office-shell");
+    expect(shell).toContain("height: 100vh");
+    expect(shell).toContain("overflow: hidden");
+    expect(rule(".office-shell__main")).toContain("min-height: 0");
+    const page = rule(".office-shell__content");
+    expect(page).toContain("min-height: 0");
+    expect(page).toContain("overflow: auto");
+    expect(page).toContain("flex: 1 1 auto");
   });
 
   it("wraps the header, the page header and their buttons in a narrow window", () => {

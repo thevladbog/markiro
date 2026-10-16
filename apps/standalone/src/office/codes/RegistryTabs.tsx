@@ -2,8 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
 
-import { DataTabs } from "@markiro/ui";
-
+import { Segmented } from "../list/Segmented.js";
 import {
   registryHref,
   REGISTRY_PATHS,
@@ -14,7 +13,7 @@ import {
 const TABS = Object.keys(REGISTRY_PATHS) as RegistryTab[];
 
 /**
- * The parts of «Поиск кодов» as the cloud draws them (data tabs): the one
+ * The parts of «Поиск кодов» as the kit draws them (a segmented control with tab semantics): the one
  * open writes down its filters as it is left, and a part opened from
  * another finds them again.
  */
@@ -40,10 +39,11 @@ export function RegistryTabs({ active }: { active: RegistryTab }) {
   }, [memory]);
   return (
     <div ref={wrapper}>
-      <DataTabs
+      <Segmented
+        mode="tabs"
         label={t("office.registry.label")}
-        activeId={active}
-        items={TABS.map((tab) => ({ id: tab, label: t(`office.registry.${tab}`) }))}
+        value={active}
+        options={TABS.map((tab) => ({ id: tab, label: t(`office.registry.${tab}`) }))}
         onChange={(tab) => {
           if (tab === active) return;
           memory.focusTab.pending = true;

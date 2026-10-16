@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
@@ -14,6 +14,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { hasRowAction, pressRowAction } from "./support/row-menu.js";
 import { chooseText, optionTexts } from "./support/select.js";
 
 const GROUPS: ProductGroup[] = [
@@ -98,9 +99,7 @@ function rows(): HTMLElement[] {
 
 /** The names column, top to bottom: each product's name, without its print name. */
 function names(): (string | null | undefined)[] {
-  return rows().map(
-    (row) => within(row).getAllByRole("cell")[2]?.firstElementChild?.firstElementChild?.textContent,
-  );
+  return rows().map((row) => row.querySelector(".product-name__full")?.textContent);
 }
 
 function rowOf(name: string): HTMLElement {
@@ -231,14 +230,22 @@ describe("office products", () => {
   it("says nothing was found apart from an empty catalog", async () => {
     await openProducts(session());
     fireEvent.change(screen.getByLabelText("Поиск"), { target: { value: "кефир" } });
-    expect(screen.getByText("Ничего не найдено. Измените поиск или отбор.")).toBeTruthy();
+    // The state names the filters, not the catalog, and offers to clear them (design 2026-10).
+    expect(screen.getByText("Ничего не найдено.")).toBeTruthy();
+    expect(screen.getByText("Измените поиск или отбор.")).toBeTruthy();
     expect(screen.getByText("Найдено: 0 из 4")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить отбор" }));
+    expect(names()).toHaveLength(4);
+    expect((screen.getByLabelText("Поиск") as HTMLInputElement).value).toBe("");
   });
 
   it("says when the catalog is empty", async () => {
     await openProducts(session([]));
     expect(screen.getByText("Товаров пока нет.")).toBeTruthy();
-    expect(screen.queryByText("Ничего не найдено. Измените поиск или отбор.")).toBeNull();
+    expect(screen.queryByText("Ничего не найдено.")).toBeNull();
+    // An empty catalog has no filters to change; the way out is the first product.
+    expect(screen.queryByLabelText("Поиск")).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Добавить товар" })).toHaveLength(2);
   });
 
   it("pages the list by 10 and goes back to the first page when the search or the filter changes", async () => {
@@ -369,6 +376,121 @@ describe("office products", () => {
     }
   });
 
+  describe("row actions (design 2026-10: icon buttons and the «Ещё» menu, no selection column)", () => {
+    it("has no selection column and no bulk actions", async () => {
+      await openProducts(session());
+      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+      expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+        "Товар",
+        "GTIN",
+        "Товарная группа",
+        "В коробе, шт.",
+        "Состояние",
+        "Действия",
+      ]);
+    });
+
+    it("gives every row an icon button for the edit, named for the product, with a tooltip on focus and hover", async () => {
+      await openProducts(session());
+      const edit = within(rowOf("Молоко 3,2% 0,9 л")).getByRole("button", {
+        name: "Изменить товар «Молоко 3,2% 0,9 л»",
+      });
+      // An icon button: no text of its own, the name is the label.
+      expect(edit.textContent).toBe("");
+      fireEvent.mouseEnter(edit);
+      expect(screen.getByRole("tooltip").textContent).toBe("Изменить товар «Молоко 3,2% 0,9 л»");
+      expect(edit.getAttribute("aria-describedby")).toBe(screen.getByRole("tooltip").id);
+      fireEvent.keyDown(edit, { key: "Escape" });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      fireEvent.mouseLeave(edit);
+      act(() => edit.focus());
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+      act(() => edit.blur());
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    });
+
+    it("opens the edit drawer from the icon button", async () => {
+      await openProducts(session());
+      fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+      expect(await screen.findByRole("dialog", { name: "Товар «Молоко 3,2% 0,9 л»" })).toBeTruthy();
+    });
+
+    it("offers «Изменить» and «Убрать в архив» in the «Ещё» menu, moves with the arrows and closes on Escape with the focus back on the button", async () => {
+      await openProducts(session());
+      const trigger = within(rowOf("Молоко 3,2% 0,9 л")).getByRole("button", {
+        name: "Действия: Молоко 3,2% 0,9 л",
+      });
+      expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+      fireEvent.click(trigger);
+      const items = screen.getAllByRole("menuitem");
+      expect(items.map((item) => item.textContent)).toEqual(["Изменить", "Убрать в архив"]);
+      await waitFor(() => expect(document.activeElement).toBe(items[0]));
+      fireEvent.keyDown(items[0] as HTMLElement, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(items[1]);
+      fireEvent.keyDown(items[1] as HTMLElement, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(items[0]);
+      fireEvent.keyDown(items[0] as HTMLElement, { key: "End" });
+      expect(document.activeElement).toBe(items[1]);
+      fireEvent.keyDown(items[1] as HTMLElement, { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("asks before archiving, then writes the whole record with archived set and the loaded revision", async () => {
+      const fake = session();
+      fake.api.updateProduct.mockResolvedValue({ ...MILK, archived: true, rev: 66 });
+      await openProducts(fake);
+      pressRowAction(
+        within(rowOf("Молоко 3,2% 0,9 л")),
+        "Убрать товар «Молоко 3,2% 0,9 л» в архив",
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Убрать товар в архив?" });
+      expect(fake.api.updateProduct).not.toHaveBeenCalled();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Убрать в архив" }));
+      await screen.findByText("Товар «Молоко 3,2% 0,9 л» убран в архив.");
+      expect(fake.api.updateProduct).toHaveBeenCalledTimes(1);
+      const [token, id, body] = fake.api.updateProduct.mock.calls[0] as [
+        string,
+        string,
+        Record<string, unknown>,
+      ];
+      expect([token, id]).toEqual(["office-session-token", MILK.id]);
+      expect(body).toMatchObject({ archived: true, expectedRev: 65, name: MILK.name });
+    });
+
+    it("does not archive when the question is cancelled", async () => {
+      const fake = session();
+      await openProducts(fake);
+      pressRowAction(
+        within(rowOf("Молоко 3,2% 0,9 л")),
+        "Убрать товар «Молоко 3,2% 0,9 л» в архив",
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Отмена" }));
+      expect(fake.api.updateProduct).not.toHaveBeenCalled();
+    });
+
+    it("brings an archived product back from its menu", async () => {
+      const fake = session();
+      fake.api.updateProduct.mockResolvedValue({ ...AYRAN, archived: false, rev: 73 });
+      await openProducts(fake);
+      expect(hasRowAction(within(rowOf("Айран")), "Убрать товар «Айран» в архив")).toBe(false);
+      pressRowAction(within(rowOf("Айран")), "Вернуть товар «Айран» из архива");
+      fireEvent.click(await screen.findByRole("button", { name: "Вернуть" }));
+      await screen.findByText("Товар «Айран» возвращён из архива.");
+      expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+        archived: false,
+        expectedRev: 72,
+      });
+    });
+
+    it("shows no row actions to a role that cannot edit the catalog", async () => {
+      renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }), { initialPath: "/products" });
+      await screen.findByRole("heading", { name: "Товары" });
+      expect(screen.queryByRole("columnheader", { name: "Действия" })).not.toBeNull();
+    });
+  });
+
   it("shows the loading state until the products arrive", async () => {
     const fake = session();
     let arrive: (products: OfficeProduct[]) => void = () => undefined;
@@ -380,7 +502,9 @@ describe("office products", () => {
     renderOffice(fake, { initialPath: "/products" });
     await screen.findByRole("link", { name: "Товары" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
+    // The card stands with its heading while the rows are on their way; no row, no filters.
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByLabelText("Поиск")).toBeNull();
     arrive([MILK]);
     expect(await screen.findByText("Молоко 3,2% 0,9 л")).toBeTruthy();
     expect(screen.queryByText("Загрузка…")).toBeNull();

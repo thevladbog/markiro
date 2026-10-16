@@ -215,6 +215,7 @@ export function ProductDrawer({ product, onClose, onSaved, onReload }: ProductDr
 
   return (
     <EntityDrawer
+      errorCount={Object.keys(errors).length}
       dirty={isDirty || stagedPhoto !== null}
       title={
         product === null

@@ -51,6 +51,12 @@ export interface TableProps<Row> {
   scrollLabel?: string;
   /** Accessible name of the `<table>` itself (the scroll region has its own). */
   tableLabel?: string;
+  /**
+   * Fills its parent's height: the heading stays pinned at the top and only the rows scroll
+   * (a card of a fixed height with a pagination bar under it). The parent must bound the
+   * height; without a bound the table is as tall as its rows and nothing scrolls.
+   */
+  fill?: boolean;
   className?: string;
   style?: CSSProperties;
 }
@@ -90,6 +96,7 @@ export function Table<Row>({
   empty = "No data",
   scrollLabel,
   tableLabel,
+  fill = false,
   className,
   style,
 }: TableProps<Row>) {
@@ -97,10 +104,12 @@ export function Table<Row>({
     <div
       className={cn("mk-table", className)}
       style={{
-        border: "1px solid var(--line)",
-        borderRadius: "var(--r-3)",
-        background: "var(--surface-card)",
+        // The office's card owns the frame: it sets these three to nothing.
+        border: "var(--table-border, 1px solid var(--line))",
+        borderRadius: "var(--table-radius, var(--r-3))",
+        background: "var(--table-bg, var(--surface-card))",
         overflow: "hidden",
+        ...(fill ? { display: "flex", flexDirection: "column" as const, minHeight: 0 } : {}),
         ...style,
       }}
     >
@@ -110,7 +119,7 @@ export function Table<Row>({
         aria-label={scrollLabel}
         tabIndex={scrollLabel ? 0 : undefined}
         onKeyDown={scrollLabel ? moveHorizontalRegion : undefined}
-        style={{ overflowX: "auto" }}
+        style={fill ? { overflow: "auto", flex: "1 1 auto", minHeight: 0 } : { overflowX: "auto" }}
       >
         <table aria-label={tableLabel} style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -118,6 +127,7 @@ export function Table<Row>({
               {columns.map((column) => (
                 <th
                   key={column.key}
+                  className="mk-table__th"
                   scope="col"
                   onClick={column.sortable && onSort ? () => onSort(column.key) : undefined}
                   // A sortable header is a control: reachable by the keyboard, and it says its order.
@@ -142,16 +152,26 @@ export function Table<Row>({
                   }
                   style={{
                     textAlign: column.align ?? "left",
-                    padding: "10px 16px",
+                    padding: "var(--table-th-py, 10px) var(--table-px, 16px)",
                     font: "var(--text-caption)",
-                    color: "var(--fg-3)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
+                    color: "var(--table-th-fg, var(--fg-3))",
+                    textTransform:
+                      "var(--table-th-case, uppercase)" as CSSProperties["textTransform"],
+                    letterSpacing: "var(--table-th-tracking, 0.05em)",
+                    fontWeight: "var(--table-th-weight, 500)" as CSSProperties["fontWeight"],
                     cursor: column.sortable ? "pointer" : "default",
                     whiteSpace: column.wrapTitle ? "normal" : "nowrap",
                     width: column.width,
                     minWidth: column.minWidth,
                     userSelect: "none",
+                    ...(fill
+                      ? {
+                          position: "sticky" as const,
+                          top: 0,
+                          zIndex: column.stickyEnd ? 3 : 2,
+                          background: "var(--surface-panel)",
+                        }
+                      : {}),
                     ...(column.stickyEnd
                       ? {
                           position: "sticky" as const,
@@ -191,6 +211,7 @@ export function Table<Row>({
             {rows.map((row, index) => (
               <tr
                 key={getRowKey(row, index)}
+                className="mk-table__row"
                 tabIndex={onRowClick ? 0 : undefined}
                 onClick={
                   onRowClick
@@ -227,9 +248,10 @@ export function Table<Row>({
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    className={cn(column.mono && "font-mono nowrap")}
+                    className={cn("mk-table__td", column.mono && "font-mono nowrap")}
                     style={{
-                      padding: "11px 16px",
+                      padding: "var(--table-td-py, 11px) var(--table-px, 16px)",
+                      height: "var(--table-row-h, auto)",
                       textAlign: column.align ?? "left",
                       font: column.mono ? "var(--text-code)" : "var(--text-body)",
                       fontVariantNumeric: "tabular-nums",

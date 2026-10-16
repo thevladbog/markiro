@@ -105,6 +105,7 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
 
   return (
     <FormDialog
+      errorCount={Object.keys(errors).length}
       title={title}
       submitLabel={submitLabel}
       submitDisabled={mode.kind === "rename" && !isDirty}

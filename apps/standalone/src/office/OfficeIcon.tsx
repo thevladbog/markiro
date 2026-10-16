@@ -132,6 +132,33 @@ const PATHS = {
   arrowLeft: <path d="M20 12H5m0 0l6-6m-6 6l6 6" />,
   arrowRight: <path d="M4 12h15m0 0l-6-6m6 6l-6 6" />,
   check: <path d="M5 12.500l4.500 4.500L19 7.500" />,
+  pencil: <path d="M4 20h4L19 9l-4-4L4 16v4zM13.500 6.500l4 4" />,
+  more: <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth="2.600" />,
+  archive: <path d="M3 5h18v4H3zM5 9v10h14V9M10 13h4" />,
+  trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  reset: <path d="M4 12a8 8 0 112.400 5.700M4 20v-5h5" />,
+  caretLeft: <path d="M15 6l-6 6 6 6" />,
+  caretsLeft: <path d="M12 6l-6 6 6 6M19 6l-6 6 6 6" />,
+  caretsRight: <path d="M5 6l6 6-6 6M12 6l6 6-6 6" />,
+  download: <path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14" />,
+  sliders: <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4" />,
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+  qrCode: (
+    <>
+      <rect x="4" y="4" width="6" height="6" rx="1" />
+      <rect x="14" y="4" width="6" height="6" rx="1" />
+      <rect x="4" y="14" width="6" height="6" rx="1" />
+      <path d="M14 14h2v2h-2zM18 14h2v2M14 18h2v2M18 19h2" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V8a4 4 0 018 0v3" />
+    </>
+  ),
+  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
   circleX: (
     <>
       <circle cx="12" cy="12" r="9" />

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react";
 
 import { cn } from "../cn.js";
 
@@ -17,6 +17,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
   /** Иконка (или любой узел) слева от текста */
   icon?: ReactNode;
+  /** The button element, for a control that moves the focus itself (a menu, a segmented control). */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 const HEIGHT: Record<ButtonSize, string> = {

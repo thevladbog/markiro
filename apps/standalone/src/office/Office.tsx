@@ -1,5 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import type { SyncState } from "../app/shell.js";
@@ -95,6 +96,18 @@ export function Office({
   updateOffer = NO_UPDATE,
   updates = TAURI_UPDATES,
 }: OfficeProps) {
+  const { t } = useTranslation();
+  // The word that opens a field's error message (`list.css` draws it before the text): dialogs and
+  // drawers sit in the body, outside the office's own element, so the variable is set on the root.
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--mk-error-prefix",
+      JSON.stringify(t("office.common.errorPrefix")),
+    );
+    return () => {
+      document.documentElement.style.removeProperty("--mk-error-prefix");
+    };
+  }, [t]);
   const [router] = useState(() =>
     createMemoryRouter(officeRoutes, { initialEntries: [initialPath] }),
   );

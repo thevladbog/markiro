@@ -1,15 +1,12 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useSearchParams } from "react-router";
 
 import {
   Button,
-  Card,
-  DatePicker,
   Drawer,
   EmptyState,
-  FilterBar,
   Input,
   PageHeader,
   Table,
@@ -26,12 +23,14 @@ import {
 import { civilToday, isCivilDate } from "../../lib/civil-date.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { DateRange, FilterGroup, FilterPanel, FilterRow, ListCard } from "../list/ListCard.js";
+import { Segmented } from "../list/Segmented.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PaginationBar } from "../paging/PaginationBar.js";
 import { usePageSize } from "../paging/page-size.js";
 import { useHostWindowRows } from "../paging/use-host-window.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
-import { datePickerTexts } from "../shifts/shift-text.js";
 import {
   boxLabel,
   CodeCardView,
@@ -298,84 +297,87 @@ export function CodeSearchPage() {
   ];
 
   const notHere = t("office.codeSearch.notHere");
+  /** What stands in the card in the place of the table: a prompt, a state, one code's card. */
+  const body = (node: ReactNode) => <div className="office-list-body">{node}</div>;
   const results = () => {
     if (codeHash !== null) {
-      if (card.isPending) return <PageLoading />;
+      if (card.isPending) return body(<PageLoading />);
       if (card.isError) {
-        return isNotFound(card.error) ? (
-          <EmptyState title={t("office.codeSearch.codeNotFound")} hint={notHere} />
-        ) : (
-          <LoadError error={card.error} onRetry={() => void card.refetch()} />
+        return body(
+          isNotFound(card.error) ? (
+            <EmptyState title={t("office.codeSearch.codeNotFound")} hint={notHere} />
+          ) : (
+            <LoadError error={card.error} onRetry={() => void card.refetch()} />
+          ),
         );
       }
-      return (
-        <Card>
-          <CodeCardView card={card.data} format={format} headingLevel="h2" />
-        </Card>
-      );
+      return body(<CodeCardView card={card.data} format={format} headingLevel="h2" />);
     }
     if (query === null) {
-      return (
+      return body(
         <EmptyState
+          icon={<OfficeIcon name="search" size={32} />}
           title={t("office.codeSearch.prompt")}
           hint={t("office.codeSearch.promptHint")}
-        />
+        />,
       );
     }
     const periodNote = applied.from === "" && applied.to === "" ? null : periodSentence(t, applied);
-    if (page.isPending) return <PageLoading />;
-    if (page.isError) return <LoadError error={page.error} onRetry={() => void page.refetch()} />;
+    if (page.isPending) return body(<PageLoading />);
+    if (page.isError) {
+      return body(<LoadError error={page.error} onRetry={() => void page.refetch()} />);
+    }
     if (page.data.total === 0) {
-      return (
+      return body(
         <EmptyState
+          icon={<OfficeIcon name="search" size={32} />}
           title={t("office.codeSearch.nothingFound")}
           hint={
             periodNote === null
               ? notHere
               : `${t("office.codeSearch.nothingInPeriod", { period: periodNote })} ${notHere}`
           }
-        />
+        />,
       );
     }
     const rows = window.rows;
     if (rows === undefined) {
-      return window.second.isError ? (
-        <LoadError error={window.second.error} onRetry={() => void window.second.refetch()} />
-      ) : (
-        <PageLoading />
+      return body(
+        window.second.isError ? (
+          <LoadError error={window.second.error} onRetry={() => void window.second.refetch()} />
+        ) : (
+          <PageLoading />
+        ),
       );
     }
     const shown = Math.min(askedPage, window.pageCount);
     return (
-      <Card>
-        <div className="office-paged">
-          <Table
-            columns={columns}
-            rows={rows}
-            getRowKey={(item) => item.scanId}
-            onRowClick={(item) => setSelected(item.codeHash)}
-            empty={t("office.codeSearch.pastLastPage")}
-            scrollLabel={t("office.codeSearch.table.label")}
-          />
-          <PaginationBar
-            label={t("office.codeSearch.pager")}
-            name={t("office.codeSearch.table.label")}
-            page={shown}
-            pageSize={pageSize}
-            shownRows={rows.length}
-            total={window.reachable}
-            pageCount={window.pageCount}
-            hasNext={shown < window.pageCount}
-            onPage={(next) =>
-              setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all))
-            }
-            onPageSize={(size) => {
-              setPageSize(size);
-              setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all));
-            }}
-          />
-        </div>
-      </Card>
+      <div className="office-paged">
+        <Table
+          fill
+          columns={columns}
+          rows={rows}
+          getRowKey={(item) => item.scanId}
+          onRowClick={(item) => setSelected(item.codeHash)}
+          empty={t("office.codeSearch.pastLastPage")}
+          scrollLabel={t("office.codeSearch.table.label")}
+        />
+        <PaginationBar
+          label={t("office.codeSearch.pager")}
+          name={t("office.codeSearch.table.label")}
+          page={shown}
+          pageSize={pageSize}
+          shownRows={rows.length}
+          total={window.reachable}
+          pageCount={window.pageCount}
+          hasNext={shown < window.pageCount}
+          onPage={(next) => setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all))}
+          onPageSize={(size) => {
+            setPageSize(size);
+            setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all));
+          }}
+        />
+      </div>
     );
   };
 
@@ -386,76 +388,98 @@ export function CodeSearchPage() {
       : "";
 
   return (
-    <div className="office-stack">
+    <>
       <PageHeader title={t("office.codeSearch.title")} />
       <RegistryTabs active="codes" />
       <p className="office-note">{t("office.codeSearch.intro")}</p>
-      <form role="search" aria-label={t("office.codeSearch.title")} onSubmit={submit} noValidate>
-        <FilterBar label={t("office.codeSearch.filters")} resultSummary={summary}>
-          <Input
-            mono
-            label={t("office.codeSearch.input")}
-            hint={t("office.codeSearch.inputHint")}
-            value={text}
-            autoComplete="off"
-            spellCheck={false}
-            {...(inputError ? { error: t("office.codeSearch.inputUnknown") } : {})}
-            onChange={(event) => {
-              setText(event.target.value);
-              setInputError(false);
-            }}
-          />
-          <DatePicker
-            label={t("office.codeSearch.from")}
-            {...datePickerTexts(t)}
-            {...(from === "" ? {} : { value: from })}
-            onValueChange={(value) => setEdit({ from: value ?? "", to })}
-          />
-          <DatePicker
-            label={t("office.codeSearch.to")}
-            {...datePickerTexts(t)}
-            {...(to === "" ? {} : { value: to })}
-            {...(periodError ? { error: t("office.codeSearch.periodBackwards") } : {})}
-            onValueChange={(value) => setEdit({ from, to: value ?? "" })}
-          />
-          <Button type="submit">{t("office.codeSearch.submit")}</Button>
-          {/* As tall as the fields beside it: the filter bar's own reset button is the compact one. */}
-          <Button type="button" variant="secondary" onClick={reset}>
-            {t("office.codeSearch.reset")}
-          </Button>
-        </FilterBar>
-        <div className="code-period" role="group" aria-label={t("office.codeSearch.period.label")}>
-          {PERIOD_PRESETS.map((preset) => (
-            <Button
-              key={preset}
-              type="button"
-              variant={activePreset === preset ? "primary" : "secondary"}
-              aria-pressed={activePreset === preset}
-              onClick={() => choosePreset(preset)}
-            >
-              {t(`office.codeSearch.period.${preset}`)}
-            </Button>
-          ))}
-        </div>
-      </form>
-      {codeHash === null && query !== null && (
-        <p className="office-note" data-testid="code-period-note">
-          {[
-            t("office.codeSearch.period.applied", { period: periodSentence(t, applied) }),
-            defaulted ? t("office.codeSearch.period.default") : null,
-            t("office.codeSearch.period.todayIs", { date: civilDateLabel(today) }),
-            activeShift === null
-              ? null
-              : t("office.codeSearch.period.activeShift", { number: activeShift.number }),
-          ]
-            .filter((part) => part !== null)
-            .join(". ")}
-        </p>
-      )}
-      {codeHash !== null && (asked.from !== "" || asked.to !== "") && (
-        <p className="office-note">{t("office.codeSearch.periodIgnored")}</p>
-      )}
-      {results()}
+      <ListCard>
+        <form
+          role="search"
+          aria-label={t("office.codeSearch.title")}
+          className="office-list-form"
+          onSubmit={submit}
+          noValidate
+        >
+          <FilterPanel label={t("office.codeSearch.filters")}>
+            <FilterRow>
+              <Input
+                mono
+                label={t("office.codeSearch.input")}
+                hint={t("office.codeSearch.inputHint")}
+                value={text}
+                autoComplete="off"
+                spellCheck={false}
+                {...(inputError ? { error: t("office.codeSearch.inputUnknown") } : {})}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  setInputError(false);
+                }}
+              />
+              <div className="office-filter-row__end office-filter-row__end--top">
+                <Button type="submit" icon={<OfficeIcon name="search" size={20} />}>
+                  {t("office.codeSearch.submit")}
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<OfficeIcon name="reset" size={20} />}
+                  onClick={reset}
+                >
+                  {t("office.codeSearch.reset")}
+                </Button>
+              </div>
+            </FilterRow>
+            <FilterRow>
+              <FilterGroup label={t("office.codeSearch.period.label")}>
+                <Segmented
+                  label={t("office.codeSearch.period.label")}
+                  value={activePreset}
+                  options={PERIOD_PRESETS.map((preset) => ({
+                    id: preset,
+                    label: t(`office.codeSearch.period.${preset}`),
+                  }))}
+                  onChange={choosePreset}
+                />
+              </FilterGroup>
+              <DateRange
+                label={t("office.codeSearch.scanned")}
+                fromLabel={t("office.codeSearch.from")}
+                toLabel={t("office.codeSearch.to")}
+                from={from}
+                to={to}
+                onFrom={(value) => setEdit({ from: value, to })}
+                onTo={(value) => setEdit({ from, to: value })}
+                error={periodError ? t("office.codeSearch.periodBackwards") : undefined}
+              />
+              <p className="office-list-filters__found office-filter-row__end" aria-live="polite">
+                {summary}
+              </p>
+            </FilterRow>
+          </FilterPanel>
+        </form>
+        {((codeHash === null && query !== null) ||
+          (codeHash !== null && (asked.from !== "" || asked.to !== ""))) && (
+          <div className="office-list-notes">
+            {codeHash === null && query !== null && (
+              <p className="office-list-note" data-testid="code-period-note">
+                {[
+                  t("office.codeSearch.period.applied", { period: periodSentence(t, applied) }),
+                  defaulted ? t("office.codeSearch.period.default") : null,
+                  t("office.codeSearch.period.todayIs", { date: civilDateLabel(today) }),
+                  activeShift === null
+                    ? null
+                    : t("office.codeSearch.period.activeShift", { number: activeShift.number }),
+                ]
+                  .filter((part) => part !== null)
+                  .join(". ")}
+              </p>
+            )}
+            {codeHash !== null && (asked.from !== "" || asked.to !== "") && (
+              <p className="office-list-note">{t("office.codeSearch.periodIgnored")}</p>
+            )}
+          </div>
+        )}
+        {results()}
+      </ListCard>
       <Drawer
         open={selected !== null}
         title={t("office.codeSearch.card.title")}
@@ -464,7 +488,7 @@ export function CodeSearchPage() {
       >
         {selected !== null && <SelectedCard codeHash={selected} format={format} />}
       </Drawer>
-    </div>
+    </>
   );
 }
 

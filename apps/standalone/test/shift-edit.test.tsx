@@ -37,7 +37,6 @@ import {
   waitForList,
 } from "./support/select.js";
 import { pressRowAction } from "./support/row-menu.js";
-import { findRowAction } from "./support/row-menu.js";
 
 const TOKEN = "office-session-token";
 
@@ -121,38 +120,39 @@ describe("office shifts: changing a shift", () => {
     vi.useRealTimers();
   });
 
-  it("offers a planned shift's change and delete, an active one's figures, plan, close and export, and a closed one's figures and export alone, to both roles", async () => {
+  it("offers a planned shift's open and delete, an active one's figures, plan, close and export, and a closed one's figures and export alone, to both roles", async () => {
+    // Icon buttons carry the first action of a row, the «Ещё» menu the rest (design 2026-10).
+    const menuOf = (number: string) => {
+      fireEvent.click(
+        within(shiftRow(number)).getByRole("button", { name: `Действия: ${number}` }),
+      );
+      const items = within(screen.getByRole("menu"))
+        .getAllByRole("menuitem")
+        .map((item) => [item.getAttribute("aria-label"), item.getAttribute("data-destructive")]);
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      return items;
+    };
+    const buttonsOf = (number: string) =>
+      within(shiftRow(number))
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"));
     for (const user of [undefined, TECHNOLOGIST]) {
       const view = await openShifts(shiftsSession(undefined, user));
-      expect(
-        within(shiftRow("OCT26-005"))
-          .getAllByRole("button")
-          .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Открыть смену OCT26-005", "Удалить смену OCT26-005"]);
-      expect(
-        within(shiftRow("OCT26-004"))
-          .getAllByRole("button")
-          .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Итоги смены OCT26-004", "Действия: OCT26-004"]);
+      expect(buttonsOf("OCT26-005")).toEqual(["Открыть смену OCT26-005", "Действия: OCT26-005"]);
+      expect(menuOf("OCT26-005")).toEqual([["Удалить смену OCT26-005", "true"]]);
+      expect(buttonsOf("OCT26-004")).toEqual(["Итоги смены OCT26-004", "Действия: OCT26-004"]);
       // The rest of an active shift's actions are the «⋯» menu's items, the close set apart.
-      const items = findRowAction(within(shiftRow("OCT26-004")), "Изменить план смены OCT26-004");
-      expect(items.getAttribute("role")).toBe("menuitem");
-      expect(
-        within(screen.getByRole("menu"))
-          .getAllByRole("menuitem")
-          .map((item) => [item.getAttribute("aria-label"), item.getAttribute("data-destructive")]),
-      ).toEqual([
+      expect(menuOf("OCT26-004")).toEqual([
         ["Изменить план смены OCT26-004", null],
         ["Выгрузка смены OCT26-004", null],
         ["Закрыть смену OCT26-004", "true"],
       ]);
-      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       // A closed shift only reads: its figures and its export (plan ЧЗ).
-      expect(
-        within(shiftRow(CLOSED.number))
-          .getAllByRole("button")
-          .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Итоги смены OCT26-001/S", "Выгрузка смены OCT26-001/S"]);
+      expect(buttonsOf(CLOSED.number)).toEqual([
+        "Итоги смены OCT26-001/S",
+        "Действия: OCT26-001/S",
+      ]);
+      expect(menuOf(CLOSED.number)).toEqual([["Выгрузка смены OCT26-001/S", null]]);
       view.unmount();
     }
   });

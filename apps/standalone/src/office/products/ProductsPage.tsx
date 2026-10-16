@@ -4,11 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
-  Card,
-  FilterBar,
   Input,
   PageHeader,
-  Select,
   StatusChip,
   type TableColumn,
   type TagPhase,
@@ -18,9 +15,15 @@ import type { OfficeProduct } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { OfficeIcon } from "../OfficeIcon.js";
+import { listViewState } from "../list/list-state.js";
+import { ListCard, ListFilters } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
+import { ArchiveProductDialog } from "./ArchiveProductDialog.js";
 import { ProductDrawer } from "./ProductDrawer.js";
 import { ProductThumb } from "./ProductThumb.js";
 import {
@@ -40,7 +43,11 @@ const STATE_PHASE = {
 
 const FILTERS: readonly ProductFilter[] = ["all", "draft", "active", "archived"];
 
-type ProductsDialog = { kind: "create" } | { kind: "edit"; product: OfficeProduct };
+type ProductsDialog =
+  | { kind: "create" }
+  | { kind: "edit"; product: OfficeProduct }
+  | { kind: "archive"; product: OfficeProduct }
+  | { kind: "restore"; product: OfficeProduct };
 
 /**
  * The catalog's products (spec §4.3, §5.5), archived ones included. The host
@@ -67,31 +74,30 @@ export function ProductsPage() {
 
   const columns: TableColumn<OfficeProduct>[] = [
     {
-      key: "photo",
-      title: t("office.products.table.photo"),
-      render: (product) => <ProductThumb product={product} />,
+      // The photo, the name and the print name are one cell: the product as the eye reads it.
+      key: "name",
+      title: t("office.products.table.product"),
+      wrap: true,
+      minWidth: 260,
+      render: (product) => (
+        <span className="product-cell">
+          <ProductThumb product={product} />
+          <span className="product-name">
+            <span className="product-name__full">{product.name}</span>
+            {product.printName !== null && product.printName !== product.name && (
+              <span className="product-name__print">
+                {t("office.products.printNameShort", { name: product.printName })}
+              </span>
+            )}
+          </span>
+        </span>
+      ),
     },
     {
       key: "gtin14",
       title: t("office.products.table.gtin"),
       mono: true,
       render: (product) => product.gtin14,
-    },
-    {
-      key: "name",
-      title: t("office.products.table.name"),
-      wrap: true,
-      minWidth: 220,
-      render: (product) => (
-        <span className="product-name">
-          <span>{product.name}</span>
-          {product.printName !== null && product.printName !== product.name && (
-            <span className="product-name__print">
-              {t("office.products.printNameShort", { name: product.printName })}
-            </span>
-          )}
-        </span>
-      ),
     },
     {
       key: "group",
@@ -124,41 +130,106 @@ export function ProductsPage() {
       stickyEnd: true,
       title: t("office.products.table.actions"),
       render: (product) => (
-        <Button
-          variant="secondary"
-          size="compact"
-          aria-label={t("office.products.editNamed", { name: product.name })}
-          onClick={() => open({ kind: "edit", product })}
-        >
-          {t("office.products.edit")}
-        </Button>
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.products.editNamed", { name: product.name }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", product }),
+            },
+          ]}
+          menu={{
+            label: t("office.common.rowActions", { name: product.name }),
+            items: [
+              {
+                key: "edit",
+                label: t("office.products.edit"),
+                ariaLabel: t("office.products.editNamed", { name: product.name }),
+                icon: "pencil",
+                onSelect: () => open({ kind: "edit", product }),
+              },
+              product.archived
+                ? {
+                    key: "restore",
+                    label: t("office.products.restore"),
+                    ariaLabel: t("office.products.restoreNamed", { name: product.name }),
+                    icon: "reset",
+                    onSelect: () => open({ kind: "restore", product }),
+                  }
+                : {
+                    key: "archive",
+                    label: t("office.products.archive"),
+                    ariaLabel: t("office.products.archiveNamed", { name: product.name }),
+                    icon: "archive",
+                    destructive: true,
+                    onSelect: () => open({ kind: "archive", product }),
+                  },
+            ],
+          }}
+        />
       ),
     });
   }
 
-  const content = () => {
-    if (products.isPending) return <PageLoading />;
-    if (products.isError) {
-      return (
-        <LoadError
-          error={products.error}
-          onRetry={() => {
-            void products.refetch();
-            // One click recovers both reads when the group names failed too.
-            if (groups.isError) void groups.refetch();
-          }}
-        />
-      );
-    }
-    const found = findProducts(activeFirstByName(products.data), search, filter);
-    return (
-      <>
-        <FilterBar
+  const resetFilters = () => {
+    setSearch("");
+    setFilter("all");
+  };
+  const filtersOn = search.trim() !== "" || filter !== "all";
+  const found = products.isSuccess
+    ? findProducts(activeFirstByName(products.data), search, filter)
+    : [];
+  const view = listViewState({
+    pending: products.isPending,
+    failed: products.isError,
+    total: products.data?.length ?? 0,
+    found: found.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError
+        error={products.error}
+        onRetry={() => {
+          void products.refetch();
+          // One click recovers both reads when the group names failed too.
+          if (groups.isError) void groups.refetch();
+        }}
+      />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="package"
+        title={t("office.products.empty")}
+        hint={t("office.products.emptyHint")}
+        {...(canEdit
+          ? {
+              action: (
+                <Button
+                  icon={<OfficeIcon name="plus" size={20} />}
+                  onClick={() => open({ kind: "create" })}
+                >
+                  {t("office.products.add")}
+                </Button>
+              ),
+            }
+          : {})}
+      />
+    ) : view === "nothing" ? (
+      <ListNothing onReset={resetFilters} />
+    ) : null;
+
+  const content = (
+    <ListCard>
+      {products.isSuccess && (
+        <ListFilters
           label={t("office.products.filters")}
           resultSummary={t("office.products.found", {
             shown: found.length,
             total: products.data.length,
           })}
+          onReset={filtersOn ? resetFilters : undefined}
         >
           <Input
             label={t("office.products.search")}
@@ -168,35 +239,29 @@ export function ProductsPage() {
               setSearch(event.target.value);
             }}
           />
-          <Select
+          <StateFilter
             label={t("office.products.stateFilter")}
             options={FILTERS.map((value) => ({
               value,
               label: t(`office.products.states.${value}`),
             }))}
             value={filter}
-            onValueChange={(value) => {
-              setFilter(value);
-            }}
+            onChange={setFilter}
           />
-        </FilterBar>
-        <Card>
-          <PagedTable
-            tableId="products"
-            pagerLabel={t("office.products.pager.label")}
-            resetKey={`${search}|${filter}`}
-            columns={columns}
-            rows={found}
-            getRowKey={(product) => product.id}
-            empty={t(
-              products.data.length === 0 ? "office.products.empty" : "office.products.nothingFound",
-            )}
-            scrollLabel={t("office.products.title")}
-          />
-        </Card>
-      </>
-    );
-  };
+        </ListFilters>
+      )}
+      <PagedTable
+        tableId="products"
+        pagerLabel={t("office.products.pager.label")}
+        resetKey={`${search}|${filter}`}
+        columns={columns}
+        rows={found}
+        getRowKey={(product) => product.id}
+        empty={state}
+        scrollLabel={t("office.products.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
@@ -222,8 +287,30 @@ export function ProductsPage() {
           {t("office.products.groupsFailed")}
         </Alert>
       )}
-      {content()}
-      {canEdit && dialog !== null && (
+      {content}
+      {canEdit && (dialog?.kind === "archive" || dialog?.kind === "restore") && (
+        <ArchiveProductDialog
+          product={dialog.product}
+          mode={dialog.kind}
+          onClose={() => setDialog(null)}
+          onDone={(product) => {
+            store(product);
+            setDialog(null);
+            setNotice({
+              tone: "ok",
+              text: t(
+                dialog.kind === "archive" ? "office.products.archived" : "office.products.restored",
+                { name: product.name },
+              ),
+            });
+          }}
+          onReload={() => {
+            setDialog(null);
+            void products.refetch();
+          }}
+        />
+      )}
+      {canEdit && (dialog?.kind === "create" || dialog?.kind === "edit") && (
         <ProductDrawer
           product={dialog.kind === "edit" ? dialog.product : null}
           onClose={() => setDialog(null)}

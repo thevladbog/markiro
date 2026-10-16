@@ -42,6 +42,7 @@ export function PagedTable<Row>({
   return (
     <div className="office-paged">
       <Table
+        fill
         {...table}
         rows={paging.rows}
         // Every table is a keyboard-reachable scroll region with a name, as wide as its columns need.

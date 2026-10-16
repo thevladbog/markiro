@@ -72,6 +72,7 @@ export function EditOperatorDialog({
 
   return (
     <FormDialog
+      errorCount={Object.keys(errors).length}
       title={t("office.operators.editTitle", { name: operator.name })}
       submitLabel={t("office.common.save")}
       submitDisabled={!isDirty}

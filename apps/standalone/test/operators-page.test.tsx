@@ -291,6 +291,19 @@ describe("office operators", () => {
     expect(logins()).toEqual(["0042", "0043", "100", "99", "042"]);
   });
 
+  it("says how many fields are wrong when an empty form is refused, and names each one", async () => {
+    const session = adminSession();
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    const summary = await within(dialog()).findByText(/^Исправьте поля с ошибками: \d+\.$/);
+    expect(summary.closest("[role=alert]")).not.toBeNull();
+    const wrong = dialog().querySelectorAll('[aria-invalid="true"]');
+    expect(summary.textContent).toBe(`Исправьте поля с ошибками: ${wrong.length}.`);
+    expect(wrong.length).toBeGreaterThanOrEqual(3);
+    expect(session.api.createOperator).not.toHaveBeenCalled();
+  });
+
   it("sends a blank role as none", async () => {
     const session = adminSession();
     session.api.createOperator.mockImplementation(async (_token, body) => created(body));

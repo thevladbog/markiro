@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, Modal } from "@markiro/ui";
+import { Alert, Button, Modal } from "@markiro/ui";
 
 export interface FormDialogProps {
   title: string;
@@ -26,6 +26,8 @@ export interface FormDialogProps {
   onClose: () => void;
   /** Above the fields: a failed write (`WriteFailureAlert`), or nothing. */
   alert?: ReactNode;
+  /** How many fields are wrong now: above the fields the dialog says so («Исправьте поля с ошибками: 2.»). */
+  errorCount?: number;
   children: ReactNode;
 }
 
@@ -47,6 +49,7 @@ export function FormDialog({
   onSubmit,
   onClose,
   alert,
+  errorCount = 0,
   children,
 }: FormDialogProps) {
   const { t } = useTranslation();
@@ -95,6 +98,9 @@ export function FormDialog({
       }
     >
       <form id={formId} className="standalone-form" onSubmit={send} noValidate>
+        {errorCount > 0 && (
+          <Alert tone="error">{t("office.common.fixFields", { count: errorCount })}</Alert>
+        )}
         {alert}
         {children}
       </form>

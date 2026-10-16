@@ -14,6 +14,7 @@ import {
   startEditing,
   WATER,
 } from "./support/shifts.js";
+import { findRowAction } from "./support/row-menu.js";
 
 // Owner feedback after beta 3.2: «Изменить» in the list becomes «Открыть»; the card shows the
 // shift's data read-only, «Изменить» in it turns the same drawer into the form; planning a new
@@ -36,11 +37,9 @@ describe("office shifts: the list's «Открыть» and the card's «Изме
       expect(
         within(row)
           .getAllByRole("button")
-          .map((button) => [button.textContent, button.getAttribute("aria-label")]),
-      ).toEqual([
-        ["Открыть", "Открыть смену OCT26-005"],
-        ["Удалить", "Удалить смену OCT26-005"],
-      ]);
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Открыть смену OCT26-005", "Действия: OCT26-005"]);
+      expect(findRowAction(within(row), "Удалить смену OCT26-005").textContent).toBe("Удалить");
       expect(screen.queryByRole("button", { name: /^Изменить смену/ })).toBeNull();
       view.unmount();
     }

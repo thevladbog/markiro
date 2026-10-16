@@ -106,6 +106,7 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
 
   return (
     <FormDialog
+      errorCount={Object.keys(errors).length}
       title={t("office.devices.editTitle", { name: device.name })}
       submitLabel={t("office.common.save")}
       submitDisabled={!isDirty}
