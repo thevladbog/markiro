@@ -140,7 +140,7 @@ for (const width of WIDTHS)
     await page.close();
   }
 
-/** The photo's frame fills its banner or card in height, is square, and has the right backing. */
+/** The photo's frame fills its banner or card in height, is square (the work band's; the hub card's is the left half, not square), and has the right backing. */
 function inspectPhoto(selectors) {
   const frame = document.querySelector(selectors.frame);
   const holder = document.querySelector(selectors.holder);
@@ -151,7 +151,7 @@ function inspectPhoto(selectors) {
   const problems = [];
   if (selectors.full && Math.abs(f.height - inner) > 1.5)
     problems.push(`photo ${f.height} high in a ${inner} holder`);
-  if (Math.abs(f.width - f.height) > 1.5)
+  if (selectors.square !== false && Math.abs(f.width - f.height) > 1.5)
     problems.push(`photo frame not square ${f.width}x${f.height}`);
   const img = frame.querySelector("img");
   if (img) {
@@ -176,7 +176,10 @@ for (const [width, height] of [
   for (const kind of ["transparent", "opaque", "jpeg", "none"]) {
     for (const [view, selectors] of [
       ["work", { frame: ".work-shift-band__photo", holder: ".work-shift-band", full: true }],
-      ["hub", { frame: ".shift-card__photo", holder: ".shift-card__body" }],
+      [
+        "hub",
+        { frame: ".shift-card__photo", holder: ".shift-card__body", full: true, square: false },
+      ],
     ]) {
       await page.goto(
         `${base}/test/harness/work-fit/index.html?view=${view === "hub" ? "hub" : "work"}&photo=${kind}`,

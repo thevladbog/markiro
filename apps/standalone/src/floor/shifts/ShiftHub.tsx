@@ -128,7 +128,7 @@ export function ShiftHubView({
           <ShiftCard
             key={copy.id}
             copy={copy}
-            local={local}
+            {...(local === undefined ? {} : { local })}
             accepted={copies.accepted.get(copy.id) ?? null}
             refusal={
               copies.refused.has(copy.id) && copy.localState === "closing"

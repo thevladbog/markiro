@@ -55,7 +55,8 @@ const PHASE: Record<"planned" | "active" | "closing" | "office_closed", TagPhase
   planned: "planned",
   active: "active",
   closing: "running",
-  office_closed: "attention",
+  // Closed in the office, to be finished here: the done tone, as the board draws it (✓).
+  office_closed: "done",
 };
 
 export interface ShiftCardProps {

@@ -511,6 +511,7 @@
 .shift-hub .shift-card__progress {
   display: grid;
   flex: none;
+  margin-top: var(--sp-4);
   gap: var(--sp-2);
 }
 
@@ -572,31 +573,138 @@
 
 /* A short window (1280×800, 1366×768): tighter rows keep every fact and the 84 px action. */
 @media (max-height: 860px) {
+  .station-screen.shift-hub {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+  }
+
   .shift-hub .shift-card__details {
     padding: var(--sp-4);
-    gap: var(--sp-2);
+    gap: var(--sp-1);
   }
 
   .shift-hub .shift-card__product {
-    font: 700 24px/30px var(--font-ui);
+    font: 700 24px/28px var(--font-ui);
   }
 
   .shift-hub .shift-card__counterparty {
     -webkit-line-clamp: 1;
   }
 
+  .shift-hub .shift-card__facts {
+    gap: 0 var(--sp-5);
+  }
+
+  .shift-hub .shift-card__fact {
+    gap: 0;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 18px;
+    line-height: 22px;
+  }
+
   .shift-hub .shift-card__fact dd {
     font-size: 20px;
+    line-height: 22px;
+  }
+
+  .shift-hub .shift-card__progress {
+    margin-top: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .shift-hub .shift-card__progress-line {
+    font-size: 18px;
     line-height: 24px;
   }
 
   .shift-hub .shift-card__progress-count {
     font-size: 20px;
-    line-height: 26px;
+    line-height: 24px;
+  }
+
+  .shift-hub .shift-card__progress-bar {
+    height: 12px;
   }
 
   .shift-hub .shift-card__photo-monogram {
     font-size: 72px;
+  }
+}
+
+/*
+ * A narrow card (a 1024 px window: the details are about 250 px): the number steps down to the
+ * floor's 16 px so it is read whole beside the status chip.
+ */
+@container (max-width: 340px) {
+  .shift-hub .shift-card__number {
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+/*
+ * 1024×640 (the 1280×800 panel at 125 % scaling): the card is about 350 px high. «Для:» goes
+ * (it is on the card in the office), the facts are stacked tight, the action is 64 px, the
+ * smallest touch target of the floor; everything else stays.
+ */
+@media (max-height: 700px) {
+  .station-screen.shift-hub {
+    gap: var(--sp-2);
+  }
+
+  /* 72 px buttons here (the 84 px of the board does not fit): still over the floor's 64 px. */
+  .shift-hub .station-floor-footer {
+    height: 72px;
+    min-height: 72px;
+  }
+
+  .shift-hub .station-floor-footer .mk-btn {
+    height: 72px !important;
+    min-height: 72px !important;
+  }
+
+  .shift-hub .station-screen__subtitle {
+    display: none;
+  }
+
+  .shift-hub .shift-card__product {
+    -webkit-line-clamp: 1;
+  }
+
+  .shift-hub .shift-card__details {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .shift-hub .shift-card__counterparty {
+    display: none;
+  }
+
+  .shift-hub .shift-card__fact dt {
+    font-size: 16px;
+    line-height: 18px;
+  }
+
+  .shift-hub .shift-card__fact dd {
+    font-size: 18px;
+    line-height: 20px;
+  }
+
+  .shift-hub .shift-card__action.mk-btn {
+    height: 64px !important;
+    min-height: 64px !important;
+  }
+
+  /* The banner is one line (the header chip and the title's line say the same): the cards keep the room. */
+  .shift-hub .shift-selection__message .mk-alert {
+    padding: 8px 16px !important;
+  }
+
+  .shift-hub .shift-selection__message .mk-alert__text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

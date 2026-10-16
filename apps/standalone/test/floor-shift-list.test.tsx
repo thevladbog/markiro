@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -585,11 +586,7 @@ describe("the shifts of the station's line", () => {
     const { executor } = await copiesOf([]);
     const handlers = handlersOf();
     const view = render(listOf(executor, handlers, {}));
-    expect(
-      await screen.findByText(
-        "Открытых смен на линии нет",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText("Открытых смен на линии нет")).toBeTruthy();
     await replaceShiftCopies(executor, PAIRING, [PLANNED], SEEN + 1);
     view.rerender(listOf(executor, handlers, { shiftReads: { done: 2, failed: false } }));
     expect(await screen.findByText("OCT26-005/S")).toBeTruthy();
@@ -1093,9 +1090,10 @@ describe("the layout ported from the cloud station's shift selection", () => {
 describe("the hub as the owner-approved board draws it", () => {
   const third = (number: string, id: string): DeviceShift => ({ ...PLANNED, id, number });
   const THIRD = third("OCT26-006", "5b0f9f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b");
-  const gridColumns = () => document.querySelector(".shift-selection__grid")?.getAttribute("data-columns");
+  const gridColumns = () =>
+    document.querySelector(".shift-selection__grid")?.getAttribute("data-columns");
 
-  function accept(db: import("node:sqlite").DatabaseSync, n: number, device = DEVICE_ID) {
+  function accept(db: DatabaseSync, n: number, device = DEVICE_ID) {
     const insert = db.prepare(
       "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, scanned_at) " +
         "VALUES (?, ?, ?, ?, 'box', ?, '2026-10-09T06:12:00.000Z')",
@@ -1203,7 +1201,9 @@ describe("the hub as the owner-approved board draws it", () => {
     accept(db, 3);
     const failing: LocalExecutor = {
       query: (sql, params, row) =>
-        sql.includes("FROM floor_codes") ? Promise.reject(new Error("disk")) : executor.query(sql, params, row),
+        sql.includes("FROM floor_codes")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
       transaction: (statements) => executor.transaction(statements),
     };
     renderList(failing);
@@ -1232,7 +1232,9 @@ describe("the hub as the owner-approved board draws it", () => {
     const view = renderList(executor, { onQueue: vi.fn() });
     const queue = await screen.findByRole("button", { name: "Очередь отправки" });
     await waitFor(() => expect(queue.textContent).toContain("0"));
-    expect(queue.querySelector(".shift-hub__queue-badge")?.getAttribute("data-tone")).toBe("neutral");
+    expect(queue.querySelector(".shift-hub__queue-badge")?.getAttribute("data-tone")).toBe(
+      "neutral",
+    );
     // Three records wait for the host.
     const insert = db.prepare(
       "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
