@@ -275,6 +275,17 @@
   }
 }
 
+/*
+ * Under 1300 px the scanner's «Клавиатурный» keeps only its dot too (its words are the
+ * tooltip): with the warnings, the rail and the three chips the operator's name was cut to
+ * «Анна Кузн…» (station audit, 2026-10).
+ */
+@container (max-width: 1300px) {
+  .station-status-pills__list .station-status-pill[data-tone="neutral"] dd {
+    display: none;
+  }
+}
+
 @container (max-width: 1000px) {
   .station-status-pills__list .station-status-pill:is([data-tone="ok"], [data-tone="neutral"]) dd {
     display: none;
@@ -290,11 +301,19 @@
 }
 
 .floor-link__button.mk-btn {
-  width: 52px;
-  min-width: 52px;
+  width: 64px;
+  min-width: 64px;
   padding: 0;
-  border-color: transparent;
   background: transparent;
+}
+
+/*
+ * Without a border style the browser's `outset` showed (a two-tone 2 px frame round the dot), and
+ * the kit's secondary border colour is `!important`: the dot's frame is drawn here, hairline and
+ * quiet (it is a touch target, not a button with a caption).
+ */
+:where(.floor-frame, .station-screen) .floor-link__button.mk-btn.mk-btn--floor {
+  border: 1px solid transparent !important;
 }
 
 /* The pills' height and padding (their label line is 18 px, 16 px under 1100 px), a ring round the dot. */
@@ -340,10 +359,11 @@
   position: absolute;
   z-index: 20;
   top: calc(100% + var(--sp-2));
-  right: 0;
+  /* From the dot's left edge: anchored at its right edge it ran off the window's left. */
+  left: 0;
   width: max-content;
   min-width: 240px;
-  max-width: min(420px, 80vw);
+  max-width: min(420px, calc(100vw - 2 * var(--sp-4)));
   padding: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r-3);

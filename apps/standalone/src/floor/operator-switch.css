@@ -91,11 +91,13 @@
   right: 0;
   z-index: 5;
   display: flex;
-  max-width: 420px;
-  padding: var(--sp-2);
-  gap: var(--sp-2);
-  border: 1px solid var(--err-solid);
-  border-radius: var(--r-2);
+  /* The parent is one 64 px button wide: without this the box shrank to 230 px and the button overlapped the words. */
+  width: max-content;
+  max-width: min(420px, calc(100vw - 2 * var(--sp-4)));
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  border: 2px solid var(--err);
+  border-radius: var(--floor-r-ctl);
   background: var(--surface-card);
   box-shadow: var(--shadow-2);
   color: var(--fg-1);

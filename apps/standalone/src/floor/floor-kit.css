@@ -180,6 +180,9 @@
 :where(.floor-frame, .station-screen) .mk-input:focus-within {
   border-color: var(--fg) !important;
   box-shadow: none !important;
+  /* The control inside paints no outline of its own: the field wears the kit's 3 px ring (station audit). */
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
 }
 
 :where(.floor-frame, .station-screen) .mk-input--error {
@@ -202,6 +205,23 @@
 :where(.floor-frame, .station-screen) .mk-tag--floor {
   border-radius: var(--r-round);
   font-size: 16px;
+}
+
+/* A tag a shared component writes at the office's size (the host's link line, a status chip) takes
+   the floor's: 12 px text on a touch screen was the smallest on the page (station audit). */
+:where(.floor-frame, .station-screen) .mk-tag--office {
+  height: 34px;
+  min-height: 34px;
+  gap: 7px;
+  padding: 0 14px;
+  border-radius: var(--r-round);
+  font-size: 16px;
+}
+
+:where(.floor-frame, .station-screen) .mk-tag--office .mk-tag__glyph {
+  width: 16px;
+  height: 16px;
+  font-size: 15px;
 }
 
 /* ---- Alert: the glyph on the first text line, the action beside it with a gap. ---- */
