@@ -54,7 +54,7 @@ function currentTotp(uri: string): string {
   return ((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).toString().padStart(6, "0");
 }
 
-describe.skipIf(!ready)("licences are refused for tenants without a cabinet", () => {
+describe.skipIf(!ready)("licences are refused for tenants without a cabinet unless flagged", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let env: ReturnType<typeof loadEnv>;
@@ -64,6 +64,8 @@ describe.skipIf(!ready)("licences are refused for tenants without a cabinet", ()
   let planVersionId = "";
   let addonVersionId = "";
   let serviceVersionId = "";
+  let offlinePlanVersionId = "";
+  let offlineAddonVersionId = "";
 
   async function createPlatformAgent(role: PlatformRole) {
     const password = randomBytes(24).toString("base64url");
@@ -100,13 +102,19 @@ describe.skipIf(!ready)("licences are refused for tenants without a cabinet", ()
   async function createPublishedVersion(
     kind: "plan" | "addon" | "service",
     demoDurationDays: number | null = null,
+    offline = false,
   ): Promise<string> {
     const itemId = randomUUID();
     const versionId = randomUUID();
     const code = `${kind}-${randomUUID()}`;
-    await setup.db
-      .insert(schema.catalogItems)
-      .values({ id: itemId, code, nameRu: code, nameEn: code, kind });
+    await setup.db.insert(schema.catalogItems).values({
+      id: itemId,
+      code,
+      nameRu: code,
+      nameEn: code,
+      kind,
+      offlineAvailable: offline,
+    });
     await setup.db.insert(schema.catalogItemVersions).values({
       id: versionId,
       catalogItemId: itemId,
@@ -209,6 +217,8 @@ describe.skipIf(!ready)("licences are refused for tenants without a cabinet", ()
     planVersionId = await createPublishedVersion("plan");
     addonVersionId = await createPublishedVersion("addon");
     serviceVersionId = await createPublishedVersion("service");
+    offlinePlanVersionId = await createPublishedVersion("plan", null, true);
+    offlineAddonVersionId = await createPublishedVersion("addon", null, true);
     await defaultDemo.install(demoVersionId);
   }, 120_000);
 
@@ -301,6 +311,162 @@ describe.skipIf(!ready)("licences are refused for tenants without a cabinet", ()
       .set("X-Markiro-Commercial-Version", "2")
       .send({ tenantId: id, applicationMode: "manual", lines: [line("service", serviceVersionId)] })
       .expect(201);
+  });
+
+  it("assigns an offline-flagged plan and add-on to a none tenant with exact audit rows", async () => {
+    const id = await createOfflineTenant();
+    const plan = await admin
+      .post(`/platform/tenants/${id}/subscription/plan`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({
+        catalogVersionId: offlinePlanVersionId,
+        activationPolicy: "immediate",
+        reason: "Поставка автонома",
+      })
+      .expect(201);
+    const subscriptionId = (plan.body as { id: string }).id;
+    await admin
+      .post(`/platform/tenants/${id}/subscription/addons`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({
+        catalogVersionId: offlineAddonVersionId,
+        activationPolicy: "immediate",
+        quantity: 2,
+        reason: "Две линии",
+        expectedSubscriptionId: subscriptionId,
+      })
+      .expect(201);
+    expect(await subscriptionCount(id)).toBe(1);
+    const audit = await setup.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, id));
+    expect(audit.map((row) => row.action).sort()).toEqual([
+      "platform.tenant.subscription.addon_assigned",
+      "platform.tenant.subscription.plan_assigned",
+    ]);
+    for (const row of audit) {
+      expect(row).toMatchObject({ actorRole: "platform_admin", tenantId: id, outcome: "success" });
+    }
+  });
+
+  it("refuses an unflagged plan for a none tenant in assignments and offers, admits the flagged one", async () => {
+    const id = await createOfflineTenant();
+    const refused = await admin
+      .post(`/platform/tenants/${id}/subscription/plan`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ catalogVersionId: planVersionId, activationPolicy: "immediate", reason: "x" });
+    expect(refused.status).toBe(409);
+    expect((refused.body as { code: string }).code).toBe(OFFLINE_CODE);
+    const offer = await admin
+      .post("/platform/offers")
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ tenantId: id, lines: [offerLine("plan", planVersionId)] });
+    expect(offer.status).toBe(409);
+    await admin
+      .post("/platform/offers")
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ tenantId: id, lines: [offerLine("plan", offlinePlanVersionId)] })
+      .expect(201);
+  });
+
+  it("refuses an unflagged plan in an invoice for a none tenant and admits the flagged one", async () => {
+    const id = await createOfflineTenant();
+    const line = (catalogVersionId: string) => ({
+      kind: "plan" as const,
+      catalogVersionId,
+      quantity: 1,
+      agreedUnitPrice: "1200.00",
+      vatIncluded: false,
+      activationPolicy: "immediate" as const,
+    });
+    const refused = await admin
+      .post("/platform/invoices")
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ tenantId: id, applicationMode: "manual", lines: [line(planVersionId)] });
+    expect(refused.status).toBe(409);
+    expect((refused.body as { code: string }).code).toBe(OFFLINE_CODE);
+    await admin
+      .post("/platform/invoices")
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ tenantId: id, applicationMode: "manual", lines: [line(offlinePlanVersionId)] })
+      .expect(201);
+  });
+
+  it("does not let one tenant's assignment admit another tenant's unflagged plan", async () => {
+    const flagged = await createOfflineTenant();
+    const other = await createOfflineTenant();
+    await admin
+      .post(`/platform/tenants/${flagged}/subscription/plan`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ catalogVersionId: offlinePlanVersionId, activationPolicy: "immediate", reason: "x" })
+      .expect(201);
+    const refused = await admin
+      .post(`/platform/tenants/${other}/subscription/plan`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({ catalogVersionId: planVersionId, activationPolicy: "immediate", reason: "x" });
+    expect(refused.status).toBe(409);
+    expect(await subscriptionCount(other)).toBe(0);
+  });
+
+  it("refuses a flagged plan used as an add-on kind", async () => {
+    const id = await createOfflineTenant();
+    const response = await admin
+      .post(`/platform/tenants/${id}/subscription/addons`)
+      .set("X-Markiro-Commercial-Version", "2")
+      .send({
+        catalogVersionId: offlinePlanVersionId,
+        activationPolicy: "immediate",
+        quantity: 1,
+        reason: "x",
+        expectedSubscriptionId: randomUUID(),
+      });
+    expect(response.status).toBe(409);
+    expect((response.body as { code: string }).code).toBe(OFFLINE_CODE);
+  });
+
+  it("makes an assignment wait for a withdrawal that holds the item row lock, then refuses it", async () => {
+    const id = await createOfflineTenant();
+    const [version] = await setup.db
+      .select({ itemId: schema.catalogItemVersions.catalogItemId })
+      .from(schema.catalogItemVersions)
+      .where(eq(schema.catalogItemVersions.id, offlinePlanVersionId));
+    const itemId = version?.itemId ?? "";
+    expect(itemId).not.toBe("");
+    const client = await setup.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM catalog_items WHERE id = $1 FOR UPDATE", [itemId]);
+      let settled = false;
+      const assignment = admin
+        .post(`/platform/tenants/${id}/subscription/plan`)
+        .set("X-Markiro-Commercial-Version", "2")
+        .send({
+          catalogVersionId: offlinePlanVersionId,
+          activationPolicy: "immediate",
+          reason: "x",
+        })
+        .then((response) => {
+          settled = true;
+          return response;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(settled).toBe(false);
+      await client.query("UPDATE catalog_items SET offline_available = false WHERE id = $1", [
+        itemId,
+      ]);
+      await client.query("COMMIT");
+      const response = await assignment;
+      expect(response.status).toBe(409);
+      expect((response.body as { code: string }).code).toBe(OFFLINE_CODE);
+      expect(await subscriptionCount(id)).toBe(0);
+    } finally {
+      client.release();
+      await setup.db
+        .update(schema.catalogItems)
+        .set({ offlineAvailable: true })
+        .where(eq(schema.catalogItems.id, itemId));
+    }
   });
 
   it("the same plan assignment for an enabled tenant is unaffected", async () => {

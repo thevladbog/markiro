@@ -306,7 +306,7 @@ export class TenantProvisioningService {
    * - The timeline lock is the first lock every subscription lifecycle path
    *   takes, and none of them takes an e-mail or slug lock, so waiting for it
    *   while holding those cannot close a cycle. Holding it makes the licence
-   *   guard (`assertKindAllowedForTenant`) see either `none` or the committed
+   *   guard (`assertCatalogAllowedForTenant`) see either `none` or the committed
    *   `enabled`, never a switch between its check and its write, and puts the
    *   demo insert under the same lock as every other timeline write. It is
    *   keyed by tenant id, so two grants for one tenant serialize on it too.
@@ -440,6 +440,9 @@ export class TenantProvisioningService {
       userId: owner.user.id,
       memberId: owner.memberId,
       deliveryId: owner.deliveryId,
+      // Replaced by the real counts in the offline-assignments grant change.
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
     };
   }
 

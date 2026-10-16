@@ -707,6 +707,13 @@ export const CURRENT_SAAS_ROUTES = [
     platformCatalogContracts.archiveItem.response,
   ),
   route(
+    "patch",
+    "/platform/catalog/items/{id}/offline-availability",
+    "200",
+    platformCatalogContracts.setOfflineAvailability.response,
+    { body: platformCatalogContracts.setOfflineAvailability.body },
+  ),
+  route(
     "get",
     "/platform/settings/demo-plan",
     "200",

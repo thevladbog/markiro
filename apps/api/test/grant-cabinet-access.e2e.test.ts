@@ -343,6 +343,8 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       userId: expect.any(String),
       memberId: expect.any(String),
       deliveryId: expect.any(String),
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
     });
 
     const state = await tenantState(id);

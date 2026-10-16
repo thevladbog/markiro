@@ -2,7 +2,12 @@ import { SubscriptionLifecycleService } from "../src/subscriptions/subscription-
 import { PlatformEntitlementsController } from "../src/subscriptions/platform-entitlements.controller";
 import { PLATFORM_ACCESS_POLICY } from "../src/platform-auth/platform-access-policy";
 import { signUpAndActivate } from "./support/auth";
-import { createManagedSubscription, createPublishedAddon } from "./support/subscription-fixtures";
+import {
+  createManagedSubscription,
+  createOrganization,
+  createPublishedAddon,
+} from "./support/subscription-fixtures";
+import { createTenantWithoutCabinet } from "./support/standalone-license-fixture";
 import {
   entitlementSourceListSchema,
   entitlementSnapshotV1Schema,
@@ -41,6 +46,7 @@ describe("platform catalog response boundary", () => {
           id: "11111111-1111-4111-8111-111111111111",
           catalogItemId: "21111111-1111-4111-8111-111111111111",
           catalogItemCode: "plan-basic",
+          offlineAvailable: false,
           kind: "plan",
           version: 1,
           status: "published",
@@ -1178,5 +1184,160 @@ describe.skipIf(!ready)("platform catalog", () => {
     } finally {
       await release();
     }
+  });
+  describe("offline availability of a catalog item", () => {
+    const flagPath = (code: string) => `/platform/catalog/items/${code}/offline-availability`;
+
+    async function publishedPlan() {
+      const draft = await admin
+        .post(`/platform/catalog/items/plan-offline-${randomUUID()}/versions`)
+        .send(basicPlan)
+        .expect(201);
+      const versionPath = `/platform/catalog/items/${draft.body.catalogItemCode}/versions/${draft.body.id}`;
+      await publishHttp(versionPath);
+      return {
+        code: draft.body.catalogItemCode as string,
+        itemId: draft.body.catalogItemId as string,
+        versionId: draft.body.id as string,
+        versionPath,
+      };
+    }
+
+    async function flagAudit(itemId: string) {
+      return setup.db
+        .select()
+        .from(schema.platformAuditEvents)
+        .where(
+          and(
+            eq(schema.platformAuditEvents.targetId, itemId),
+            eq(schema.platformAuditEvents.action, "catalog.item.offline_availability_changed"),
+          ),
+        );
+    }
+
+    it("changes the flag with an exact audit row and is idempotent", async () => {
+      const { code, itemId, versionId } = await publishedPlan();
+      expect(
+        (await admin.get(`/platform/catalog/items/${code}/versions/${versionId}`).expect(200)).body
+          .offlineAvailable,
+      ).toBe(false);
+      const first = await admin
+        .patch(flagPath(code))
+        .send({ offlineAvailable: true, reason: "Поставка автонома" })
+        .expect(200);
+      expect(first.body).toEqual({
+        catalogItemId: itemId,
+        catalogItemCode: code,
+        kind: "plan",
+        offlineAvailable: true,
+        changed: true,
+        offlineTenantHolders: 0,
+      });
+      const [audit] = await flagAudit(itemId);
+      expect(audit).toMatchObject({
+        actorPlatformUserId: adminId,
+        actorRole: "platform_admin",
+        tenantId: null,
+        targetType: "catalog_item",
+        targetId: itemId,
+        outcome: "success",
+        reason: "Поставка автонома",
+        before: { offlineAvailable: false },
+        after: {
+          offlineAvailable: true,
+          catalogItemCode: code,
+          kind: "plan",
+          offlineTenantHolders: 0,
+        },
+      });
+      const again = await admin
+        .patch(flagPath(code))
+        .send({ offlineAvailable: true, reason: "Повтор" })
+        .expect(200);
+      expect(again.body).toMatchObject({ changed: false, offlineAvailable: true });
+      expect(await flagAudit(itemId)).toHaveLength(1);
+      expect(
+        (await admin.get(`/platform/catalog/items/${code}/versions/${versionId}`).expect(200)).body
+          .offlineAvailable,
+      ).toBe(true);
+    });
+
+    it("refuses services, archived and unknown items and every role but platform_admin, with no audit row", async () => {
+      const body = { offlineAvailable: true, reason: "x" };
+      const serviceCode = `service-offline-${randomUUID()}`;
+      const [service] = await setup.db
+        .insert(schema.catalogItems)
+        .values({ code: serviceCode, nameRu: "Услуга", nameEn: "Service", kind: "service" })
+        .returning();
+      const serviceRefusal = await admin.patch(flagPath(serviceCode)).send(body);
+      expect(serviceRefusal.status).toBe(409);
+      expect(serviceRefusal.body).toMatchObject({ code: "catalog_item_offline_kind_invalid" });
+      expect(await flagAudit(service!.id)).toHaveLength(0);
+
+      const { code, itemId, versionPath } = await publishedPlan();
+      for (const [agent, status, errorCode] of [
+        [accountant, 409, "catalog_offline_availability_forbidden"],
+        [support, 403, undefined],
+      ] as const) {
+        const refusal = await agent.patch(flagPath(code)).send(body);
+        expect(refusal.status).toBe(status);
+        if (errorCode) expect(refusal.body).toMatchObject({ code: errorCode });
+      }
+      expect(await flagAudit(itemId)).toHaveLength(0);
+
+      const unknown = await admin.patch(flagPath(`plan-missing-${randomUUID()}`)).send(body);
+      expect(unknown.status).toBe(404);
+      expect(unknown.body).toMatchObject({ code: "catalog_item_not_found" });
+
+      await accountant.post(`${versionPath}/retire`).send({}).expect(200);
+      await admin.post(`/platform/catalog/items/${code}/archive`).send({}).expect(200);
+      const archived = await admin.patch(flagPath(code)).send(body);
+      expect(archived.status).toBe(409);
+      expect(archived.body).toMatchObject({ code: "catalog_item_archived" });
+      expect(await flagAudit(itemId)).toHaveLength(0);
+    });
+
+    it("counts only tenants without a cabinet and keeps their assignments when the flag is withdrawn", async () => {
+      const { code, versionId } = await publishedPlan();
+      await admin.patch(flagPath(code)).send({ offlineAvailable: true, reason: "on" }).expect(200);
+      const noneTenant = await createTenantWithoutCabinet(setup.db);
+      const enabledTenant = await createOrganization(setup.db);
+      await createManagedSubscription(setup.db, {
+        tenantId: noneTenant,
+        planVersionId: versionId,
+        status: "active",
+      });
+      await createManagedSubscription(setup.db, {
+        tenantId: enabledTenant,
+        planVersionId: versionId,
+        status: "active",
+      });
+      const withdrawn = await admin
+        .patch(flagPath(code))
+        .send({ offlineAvailable: false, reason: "off" })
+        .expect(200);
+      expect(withdrawn.body).toMatchObject({
+        changed: true,
+        offlineAvailable: false,
+        offlineTenantHolders: 1,
+      });
+      const [kept] = await setup.db
+        .select({ status: schema.tenantSubscriptions.status })
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, noneTenant));
+      expect(kept?.status).toBe("active");
+    });
+
+    it("keeps editing a draft version working now that offlineAvailable is a response field", async () => {
+      const draft = await admin
+        .post(`/platform/catalog/items/plan-offline-draft-${randomUUID()}/versions`)
+        .send(basicPlan)
+        .expect(201);
+      const edited = await admin
+        .patch(`/platform/catalog/items/${draft.body.catalogItemCode}/versions/${draft.body.id}`)
+        .send({ nameRu: "Правка черновика" })
+        .expect(200);
+      expect(edited.body).toMatchObject({ nameRu: "Правка черновика", offlineAvailable: false });
+    });
   });
 });

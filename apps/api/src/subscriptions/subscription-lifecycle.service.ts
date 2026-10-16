@@ -18,7 +18,7 @@ import {
   type CommercialLineTerms,
 } from "@markiro/platform-contracts";
 import { SubscriptionEntitlementsInvalidException } from "./subscription-errors";
-import { assertKindAllowedForTenant } from "./tenant-cabinet-access";
+import { assertCatalogAllowedForTenant } from "./tenant-cabinet-access";
 import { EntitlementsService } from "./entitlements.service";
 import { DB } from "../auth/auth.module";
 import type { AssignAddonDto, AssignPlanDto } from "../modules/platform-tenants/dto";
@@ -342,7 +342,12 @@ export class SubscriptionLifecycleService {
       validateTerm(startsAt, input.endsAt);
       validateActiveEnd(input.endsAt, operationAt);
     }
-    await assertKindAllowedForTenant(tx, tenantId, "plan");
+    await assertCatalogAllowedForTenant(
+      tx,
+      tenantId,
+      { kind: "plan", catalogVersionId: input.catalogVersionId },
+      { lockItem: true },
+    );
     await requireTenant(tx, tenantId);
     const candidate = await requirePublishedVersion(
       tx,
@@ -586,7 +591,12 @@ export class SubscriptionLifecycleService {
     await this.lockTenantTimeline(tx, tenantId);
     const operationAt = context.paid?.operationAt ?? new Date();
     validateEffectiveAt(input.effectiveAt, operationAt);
-    await assertKindAllowedForTenant(tx, tenantId, "addon");
+    await assertCatalogAllowedForTenant(
+      tx,
+      tenantId,
+      { kind: "addon", catalogVersionId: input.catalogVersionId },
+      { lockItem: true },
+    );
     await requireTenant(tx, tenantId);
     const candidate = await requirePublishedVersion(
       tx,

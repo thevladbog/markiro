@@ -7,6 +7,7 @@ const recurringService = {
   id: "11111111-1111-4111-8111-111111111111",
   catalogItemId: "21111111-1111-4111-8111-111111111111",
   catalogItemCode: "support-monthly",
+  offlineAvailable: false,
   kind: "service" as const,
   version: 1,
   status: "draft" as const,

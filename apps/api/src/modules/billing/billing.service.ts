@@ -53,7 +53,7 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
-import { assertKindAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
+import { assertCatalogAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
 import { storedPrintVariant } from "./print-document-layout";
 
 const cents = (value: string): bigint => {
@@ -162,7 +162,10 @@ export class BillingService {
         : normalizedInput.lines;
       for (const line of invoiceLines) {
         if (line.kind !== "custom")
-          await assertKindAllowedForTenant(tx, normalizedInput.tenantId, line.kind);
+          await assertCatalogAllowedForTenant(tx, normalizedInput.tenantId, {
+            kind: line.kind,
+            catalogVersionId: line.catalogVersionId ?? null,
+          });
       }
       assertCommercialPlanSequence(invoiceLines);
       // sourceOfferInvoiceLines validates an exact copy of immutable sold terms.
