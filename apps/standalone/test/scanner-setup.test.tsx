@@ -60,7 +60,7 @@ async function scannerSetup(local: LocalExecutor = openLocalDb().executor) {
       />
     </ThemeProvider>,
   );
-  await screen.findByRole("heading", { name: "Сканеры COM-портов" });
+  await screen.findByRole("heading", { name: "Сканеры" });
   return { local, shell, scanner, onSaved, onBack };
 }
 
@@ -71,15 +71,14 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Звук" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Проверка этикетки" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Что прочитал сканер" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
-    expect(screen.getByLabelText("COM-порт сканера")).toBeTruthy();
-    expect(screen.getByLabelText("Скорость сканера, бод")).toBeTruthy();
-    expect(
-      screen.getByText("Сканер, который работает как клавиатура, настраивать не нужно."),
-    ).toBeTruthy();
-    expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "Сканеры COM-портов" }),
-    );
+    expect(screen.getByLabelText("COM-порт")).toBeTruthy();
+    expect(screen.getByLabelText("Скорость, бод")).toBeTruthy();
+    // The keyboard scanner is a row of the list: always on, nothing to set.
+    expect(screen.getByText("Клавиатурный сканер")).toBeTruthy();
+    expect(screen.getByText("Работает всегда, без настройки")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Сканеры" }));
     for (const button of screen.getAllByRole("button")) {
       expect(button.style.height, button.textContent ?? "").toBe("var(--control-floor)");
     }
@@ -95,18 +94,18 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     };
     await saveWorkstationSettings(local, stored);
     const { shell, onSaved } = await scannerSetup(local);
-    fireEvent.change(screen.getByLabelText("COM-порт сканера"), { target: { value: "com3" } });
-    fireEvent.change(screen.getByLabelText("Скорость сканера, бод"), {
+    fireEvent.change(screen.getByLabelText("COM-порт"), { target: { value: "com3" } });
+    fireEvent.change(screen.getByLabelText("Скорость, бод"), {
       target: { value: "115200" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Добавить сканер" }));
+    fireEvent.click(screen.getByRole("button", { name: "Добавить" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await waitFor(() =>
       expect(shell.hardware.configureScanners).toHaveBeenCalledWith([
         { port: "COM3", baud: 115200 },
       ]),
     );
-    expect(await screen.findByText("Настройки сохранены.")).toBeTruthy();
+    expect(await screen.findByText("Настройки сохранены")).toBeTruthy();
     expect(await readWorkstationSettings(local)).toEqual({
       ...stored,
       scanners: [{ port: "COM3", baud: 115200 }],
@@ -178,7 +177,7 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
         />
       </ThemeProvider>,
     );
-    await screen.findByRole("heading", { name: "Проверить сканер" });
+    await screen.findByRole("heading", { name: "Проверка сканера" });
     const code = (screen.getByTestId("self-test-code").textContent ?? "").replaceAll("␝", "\u001d");
     act(() => listener?.(code.replaceAll("\u001d", ""), "com"));
     expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("problem");
@@ -187,6 +186,6 @@ describe("the scanner settings before pairing (owner feedback, first Windows tes
     expect(screen.getByTestId("self-test-verdict").getAttribute("data-tone")).toBe("ok");
     expect(screen.getByText("сканер как клавиатура")).toBeTruthy();
     // The pairing screen's own check still reads the scan, without its text.
-    expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Что прочитал сканер" })).toBeTruthy();
   });
 });

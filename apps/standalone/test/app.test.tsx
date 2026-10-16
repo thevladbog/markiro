@@ -4924,6 +4924,8 @@ describe("the floor's own controls in the status bar (beta 3)", () => {
     const { device } = await station();
     scan("MRK-000742");
     fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    // The unpairing has its own tab, away from «Сохранить».
+    fireEvent.click(await screen.findByRole("tab", { name: "Станция" }));
     fireEvent.click(await screen.findByRole("button", { name: "Отвязать станцию" }));
     expect(await screen.findByText("Отвязать станцию?")).toBeTruthy();
     const next = await screen.findByRole("button", { name: "Подтвердите, что это вы" });

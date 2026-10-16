@@ -52,6 +52,7 @@ describe("the floor's controls", () => {
     const raw = files.filter((file) => /<button[\s>]/.test(readFileSync(file, "utf8")));
     expect(raw.map((file) => relative(join(__dirname, ".."), file)).sort()).toEqual(
       [
+        "src/floor/kit/IpKeypad.tsx",
         "src/floor/kit/ModeSegment.tsx",
         "src/floor/kit/NumericKeypad.tsx",
         "src/floor/kit/NumericReadout.tsx",
@@ -60,9 +61,10 @@ describe("the floor's controls", () => {
     );
   });
 
+  // The printer form's lists became the kit's segmented control: the setup keeps the USB queue and the three purposes.
   it("finds the Selects of the setup it checks", () => {
     const setup = join(__dirname, "..", "src/floor/setup/WorkstationSetup.tsx");
-    expect(selectTags(readFileSync(setup, "utf8")).length).toBeGreaterThanOrEqual(7);
+    expect(selectTags(readFileSync(setup, "utf8")).length).toBeGreaterThanOrEqual(2);
   });
 
   it("gives every floor-sized Select the product's own list (`custom`)", () => {

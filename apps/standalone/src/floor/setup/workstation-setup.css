@@ -1,7 +1,8 @@
 /*
-  «Настройка рабочего места», ported from the cloud station (apps/station/src/station.css:
-  .workstation-setup, .setup-tabs, .setup-card, .setup-printer-*, .setup-panel--sound). One
-  bounded screen: header, tabs with the active panel, the feedback row, the footer. Tokens only.
+  «Рабочее место», design kit 2026-10 (docs/design-briefs/design-kit-2026-10.md, the owner-approved
+  boards «Станция / Рабочее место»). One bounded screen: header (title, tabs), the active panel, a
+  result line, the 84 px footer. ONE layer (kit §3): L1 cards on the page, rows split by 1 px
+  hairlines, no container inside a container. Tokens only; every target is 64 px and up.
 */
 section.workstation-setup {
   display: grid;
@@ -15,41 +16,47 @@ section.workstation-setup {
      frame gives it and never grows the page with its content. */
   contain: size;
   gap: var(--sp-2);
-  grid-template-rows: auto minmax(0, 1fr) minmax(64px, auto) 64px;
-  color: var(--fg-1);
+  grid-template-rows: auto minmax(0, 1fr) auto 84px;
+  color: var(--fg);
 }
 
-.workstation-setup__header,
-.workstation-setup__header h2 {
+.workstation-setup__header {
+  display: flex;
   min-width: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workstation-setup__heading {
+  min-width: 0;
+}
+
+.workstation-setup__heading h2,
+.workstation-setup__subtitle {
   margin: 0;
 }
 
-.workstation-setup__header h2 {
+.workstation-setup__heading h2 {
   overflow: hidden;
   font: var(--floor-title);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.workstation-setup__subtitle {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
 .workstation-setup__loading {
   align-self: start;
 }
 
-/* One segmented control, the pill language of the rest of the floor. */
-.setup-tabs {
-  display: grid;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  gap: var(--sp-2);
-  /* The track is 64 px of tab plus its 6 px padding and hairline: a fixed 64 px row cut it. */
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-/* The kit's segmented track: tabs take the width of their words («Проверка сканера» was cut in a quarter of 780 px). */
+/* ---- The tabs: the kit's segmented control, 4 segments on the `panel` track. ---- */
 .setup-tabs__list.mk-data-tabs {
   display: flex;
+  flex: none;
   width: fit-content;
   min-width: 0;
   max-width: 100%;
@@ -62,11 +69,14 @@ section.workstation-setup {
 }
 
 .setup-tabs__list .mk-data-tabs__tab {
+  display: flex;
+  gap: 10px;
+  align-items: center;
   justify-content: center;
   flex: 0 1 auto;
   min-width: 0;
   min-height: 64px;
-  padding: 0 var(--sp-5);
+  padding: 0 var(--sp-4);
   overflow: hidden;
   border: 0;
   border-radius: var(--floor-r-ctl);
@@ -78,122 +88,101 @@ section.workstation-setup {
   touch-action: manipulation;
 }
 
-/* Selected = `fg` fill (kit §4): the weight and the fill say it, not the colour alone. */
+/* Selected = `fg` fill, the check and weight 600: three signs, never the colour alone. */
 .setup-tabs__list .mk-data-tabs__tab--active {
   background: var(--fg);
   color: var(--bg);
-  font-weight: 700;
+  font-weight: 600;
 }
 
+.setup-tabs__list .mk-data-tabs__tab--active::before {
+  content: "";
+  flex: none;
+  width: 24px;
+  height: 24px;
+  background: currentColor;
+  -webkit-mask: var(--setup-check) center / contain no-repeat;
+  mask: var(--setup-check) center / contain no-repeat;
+}
+
+/* With a form open the other segments are off: `dis`, and the subtitle says why. */
 .setup-tabs__list .mk-data-tabs__tab:disabled {
-  opacity: 0.45;
+  color: var(--dis);
 }
 
 .setup-tabs__list .mk-data-tabs__tab:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: -3px;
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+section.workstation-setup {
+  --setup-check: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 .setup-tabs__panel {
   min-width: 0;
   min-height: 0;
-  /* The panel scrolls as a whole (beta 3.2): content taller than the screen was cut off and
-     unreachable, the scanner's check with it. */
+  /* The panel scrolls as a whole when its content is taller than the screen (a scan's full verdict). */
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-/* The two-card layout the tabs share: what is set on the left, what follows on the right. */
-.setup-split {
-  display: grid;
-  width: 100%;
-  height: 100%;
+/* ---- L1 cards: one layer, a surface with a hairline. ---- */
+.setup-card,
+.setup-printer-list,
+.setup-printer-assignments,
+.setup-editor__card,
+.setup-scanners__list,
+.setup-sound,
+.setup-station {
   min-width: 0;
   min-height: 0;
-  gap: var(--sp-3);
-  grid-template-columns: minmax(320px, 480px) minmax(0, 1fr);
-}
-
-.setup-split--editor {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
 }
 
 .setup-card {
   display: grid;
-  min-width: 0;
-  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4);
   gap: var(--sp-3);
   align-content: start;
-  border: 1px solid var(--line);
-  border-radius: var(--r-3);
-  background: var(--surface-card);
 }
 
 .setup-card__title {
   margin: 0;
-  font: 700 19px/24px var(--font-ui);
+  font: var(--floor-lg);
 }
 
 .setup-card__title:focus-visible {
-  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
 .setup-card__hint {
   margin: 0;
-  color: var(--fg-2);
+  color: var(--muted2);
   font: var(--floor-body);
 }
 
 .setup-card__waiting {
   margin: 0;
-  color: var(--fg-3);
+  padding: var(--sp-2) var(--sp-4);
+  color: var(--muted2);
   font: var(--floor-body);
 }
 
-.setup-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  justify-content: flex-end;
-}
-
-.setup-card__actions--fill {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
 /* A live region is in the page even when empty: no gap for it then. */
-.setup-card > .workstation-setup__live:empty {
+.workstation-setup__live:empty {
   display: none;
 }
 
-/* The printer's form: name and resolution on one row, the connection's fields side by side. */
-.setup-card--printer-config {
-  padding: var(--sp-3);
-  gap: var(--sp-2);
-}
-
-.setup-printer-identity,
-.setup-printer-connection {
-  display: grid;
-  min-width: 0;
-  gap: var(--sp-2);
-  grid-template-columns: minmax(0, 1fr) minmax(185px, 0.7fr);
-  align-items: end;
-}
-
-.setup-printer-connection:empty {
-  display: none;
-}
-
-/* Printer profiles and their purposes share one bounded screen. */
+/* ---- Printers: the list with its rows, and «Что на каком принтере». ---- */
 .setup-printer-routing {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: var(--sp-3);
   height: 100%;
   min-height: 0;
@@ -203,11 +192,6 @@ section.workstation-setup {
 .setup-printer-list {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-3);
-  background: var(--surface-card);
   overflow: hidden;
 }
 
@@ -216,7 +200,7 @@ section.workstation-setup {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -228,17 +212,12 @@ section.workstation-setup {
 }
 
 .setup-printer-list__count {
-  color: var(--fg-3);
-  font: 400 19px/24px var(--font-ui);
+  color: var(--muted2);
+  font: var(--floor-lg);
 }
 
 .setup-printer-list__header > button {
   flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.setup-card__actions > button,
-.setup-printer-assignments label {
   white-space: nowrap;
 }
 
@@ -247,7 +226,7 @@ section.workstation-setup {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: var(--linectl) transparent;
 }
 
 .setup-printer-list__rows {
@@ -259,64 +238,169 @@ section.workstation-setup {
 .setup-printer-list__empty {
   margin: 0;
   padding: var(--sp-4);
-  color: var(--fg-2);
+  color: var(--muted2);
   font: var(--floor-body);
 }
 
-/* A row is its words over its buttons: a side-by-side row left the words one letter wide once the three buttons took their share. */
+/* A row (84 px): the name with its test's tag over the mono line, and the actions at 64 px. */
 .setup-printer-row {
-  display: grid;
+  display: flex;
   min-width: 0;
+  min-height: 84px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
   gap: var(--sp-2);
-  grid-template-columns: minmax(0, 1fr);
-  padding: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid var(--line);
-}
-
-.setup-printer-row:last-child {
-  border-bottom: 0;
 }
 
 .setup-printer-row__detail {
   display: grid;
   min-width: 0;
-  gap: var(--sp-1);
-  justify-items: start;
+  gap: 2px;
+}
+
+.setup-printer-row__title {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .setup-printer-row h3,
 .setup-printer-row p {
   min-width: 0;
   margin: 0;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .setup-printer-row h3 {
-  font: var(--floor-body-strong);
+  font: var(--floor-lg);
 }
 
 .setup-printer-row__connection {
-  color: var(--fg-3);
-  font: 400 15px/22px var(--font-mono);
+  color: var(--muted);
+  font: 400 18px/26px var(--font-mono);
 }
 
-.setup-printer-row__purposes {
-  color: var(--fg-2);
-  font: 500 16px/22px var(--font-ui);
-}
-
-/* The three buttons share the row, the test print the widest: they never wrap onto a second line. */
 .setup-printer-row__actions {
-  display: grid;
-  min-width: 0;
-  gap: var(--sp-2);
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  display: flex;
+  flex: none;
+  gap: var(--sp-1);
 }
 
 .setup-printer-row__actions > button {
   min-width: 0;
   padding-inline: var(--sp-2);
   white-space: nowrap;
+}
+
+.setup-printer-row__actions > .setup-printer-row__remove {
+  width: 64px;
+  padding: 0;
+}
+
+/* The label check: the kit's switch card as a row of the list, split by its hairline, not a card in a card. */
+.setup-printer-verification .floor-switch-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.setup-printer-assignments {
+  display: grid;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3);
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-printer-assignments .setup-card__title {
+  padding-inline: 4px;
+}
+
+/* The A4 test sheet as it was sent, whole, within the list. */
+.setup-a4-preview {
+  display: flex;
+  height: min(240px, 30vh);
+  padding: var(--sp-3);
+  justify-content: center;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.setup-a4-preview > canvas {
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--line2);
+  background: var(--floor-paper);
+}
+
+/* ---- The printer's form: three columns, or the left column and the keypad. ---- */
+.setup-editor {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-editor--keypad {
+  grid-template-columns: minmax(0, 1fr) 380px;
+}
+
+.setup-editor__card {
+  display: grid;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-editor__grid {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.setup-editor--keypad .setup-editor__grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setup-editor__column {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-editor__top {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.setup-editor--keypad .setup-editor__top {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.setup-printer-connection {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.setup-printer-connection:empty {
+  display: none;
 }
 
 /* A button or a list that takes the whole row of the printer's form, and never breaks its words. */
@@ -328,65 +412,72 @@ section.workstation-setup {
   white-space: nowrap;
 }
 
-.setup-printer-assignments {
-  padding: var(--sp-3);
-  gap: var(--sp-2);
+/* The keypad's field: the field it types into is ringed 2 px `fg`, with the keyboard mark. */
+.setup-keyfield {
+  min-width: 0;
 }
 
-.setup-printer-assignments select {
-  text-overflow: ellipsis;
+.setup-keyfield[data-active="true"] .mk-input:not(.mk-input--error) {
+  border-color: var(--fg) !important;
+  box-shadow: inset 0 0 0 1px var(--fg) !important;
 }
 
-/* The A4 test sheet as it was sent, whole, within the list. */
-.setup-a4-preview {
+.setup-keyfield__icon {
+  flex: none;
+  color: var(--fg);
+}
+
+.setup-editor__summary {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.setup-editor__summary-row {
   display: flex;
-  height: min(240px, 30vh);
-  padding: var(--sp-3);
-  justify-content: center;
+  min-width: 0;
+  gap: var(--sp-2);
   align-items: center;
-  border-top: 1px solid var(--line);
+  justify-content: space-between;
 }
 
-.setup-a4-preview > canvas {
-  max-height: 100%;
-  width: auto;
+.setup-editor__chips {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+/* ---- Scanners: the list and the add form on the left, the check (or the baud keypad) on the right. ---- */
+.setup-scanners {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.setup-scanners--only {
   height: auto;
-  object-fit: contain;
-  border: 1px solid var(--line-strong);
-  background: var(--floor-paper);
 }
 
-/* COM scanners: the form on the left, the scanners with their connection on the right. */
-.setup-split--scanners {
-  height: auto;
-  grid-template-columns: minmax(320px, 480px) minmax(0, 1fr);
+.setup-scanners__list {
+  display: grid;
+  overflow-y: auto;
+  align-content: start;
 }
 
-.setup-card--check-cta {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: var(--sp-4);
+.setup-scanners__side {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
+  align-content: start;
 }
 
-.setup-card--check-cta .setup-card__title,
-.setup-card--check-cta .setup-card__hint {
-  grid-column: 1;
-}
-
-.setup-card--check-cta .mk-btn {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-
-/* Before pairing (scope «scanners»): the cloud's scanner check as a third card. */
-.setup-split--scanners-check {
-  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.setup-card--check {
-  align-content: center;
-  justify-items: center;
-  text-align: center;
+.setup-scanners__side > .floor-ipkeypad {
+  width: 100%;
+  max-width: 380px;
 }
 
 .workstation-setup__single {
@@ -405,13 +496,10 @@ section.workstation-setup {
 
 .setup-scanner-row {
   display: flex;
+  min-height: 84px;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-3) 0;
-  border-top: 1px solid var(--line);
-}
-
-.setup-scanner-row:last-child {
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -419,179 +507,244 @@ section.workstation-setup {
   display: grid;
   flex: 1;
   min-width: 0;
-  gap: var(--sp-1);
-  justify-items: start;
-  font: var(--floor-body-strong);
-  overflow-wrap: break-word;
+  gap: 2px;
+  font: var(--floor-lg);
+  overflow-wrap: anywhere;
 }
 
-/* Sound: one centred card, the mute toggle, the level and the check on one row. */
-.setup-panel--sound {
-  width: min(960px, 100%);
-  height: 100%;
-  margin: 0 auto;
+.setup-scanner-row__kind {
+  color: var(--muted);
+  font: var(--floor-body);
+}
+
+.setup-scanner-row__state {
+  flex: none;
+  min-width: 0;
+}
+
+.setup-scanner-add {
+  display: grid;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  gap: var(--sp-2);
+}
+
+.setup-scanner-add__title {
+  margin: 0;
+  color: var(--muted);
+  font: var(--floor-body-strong);
+}
+
+.setup-scanner-add__fields {
+  display: grid;
+  gap: var(--sp-2);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.setup-scanner-add__ports {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+}
+
+.setup-card--check {
   align-content: center;
 }
 
-.setup-sound__controls {
+/* ---- Sound: the switch card, then the level (a number, ten divisions, and the words). ---- */
+.setup-sound {
   display: grid;
-  min-width: 0;
-  gap: var(--sp-2);
-  grid-template-columns: minmax(200px, 0.6fr) minmax(0, 1.4fr) minmax(200px, 0.6fr);
-  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  align-content: start;
+  overflow-y: auto;
 }
 
-.setup-sound__level {
+.setup-sound > .floor-switch-card {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.setup-volume {
   display: grid;
-  min-width: 0;
-  min-height: 64px;
+  padding: 0 var(--sp-2);
+  gap: var(--sp-2);
+}
+
+.setup-volume__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.setup-volume__value {
+  margin: 0;
+  font: 700 64px/68px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-volume__row {
+  display: grid;
   gap: var(--sp-2);
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
 }
 
-.setup-sound__value {
-  margin: 0;
-  font: var(--floor-body-strong);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-/* A toggle that reads as the cloud's touch checkbox: a box with its mark, then the words. */
-.setup-toggle__box {
-  display: inline-grid;
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 2px solid var(--line-strong);
-  border-radius: var(--r-1);
-  font: 700 18px/1 var(--font-ui);
-}
-
-.setup-toggle[aria-pressed="true"] .setup-toggle__box {
-  border-color: var(--surface-inverse);
-  background: var(--surface-inverse);
-  color: var(--fg-on-inverse);
-}
-
-/* The feedback row: the label check beside the words of what happened (printers), or the words alone. */
-.workstation-setup__feedback {
-  display: grid;
-  min-width: 0;
-  min-height: 0;
-}
-
-.workstation-setup__feedback--printers {
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: var(--sp-3);
-}
-
-.setup-printer-verification .setup-toggle {
-  flex: 0 0 auto;
+.setup-volume__step {
+  min-width: 160px;
+  height: 84px !important;
+  min-height: 84px !important;
   white-space: nowrap;
 }
 
-.setup-printer-verification {
-  position: relative;
-  display: flex;
+.setup-volume__scale {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.setup-volume__division {
+  height: 52px;
+  border-radius: var(--r-sm, 12px);
+  background: var(--panel);
+}
+
+.setup-volume__division[data-filled="true"] {
+  background: var(--fg);
+}
+
+.setup-volume__scale[data-silent="true"] .setup-volume__division {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--dis);
+}
+
+/* ---- Station: the facts (hairline rows), the floor's theme, and the unpairing. ---- */
+.setup-station {
+  display: grid;
+  height: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-content: start;
+  overflow-y: auto;
+}
+
+.setup-station__facts,
+.setup-station__unpair {
+  display: grid;
   min-width: 0;
+  gap: var(--sp-2);
+  align-content: start;
+}
+
+.setup-station__list {
+  display: grid;
+  margin: 0;
+}
+
+.setup-station__row {
+  display: grid;
+  min-height: 64px;
   gap: var(--sp-3);
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
   align-items: center;
-  padding: 0 var(--sp-3) 0 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
+  border-top: 1px solid var(--line);
 }
 
-.setup-printer-verification__state {
-  margin: 0 0 0 auto;
-  color: var(--fg-2);
+.setup-station__row dt {
+  color: var(--muted);
   font: var(--floor-body);
-  text-align: right;
 }
 
+.setup-station__row dd {
+  min-width: 0;
+  margin: 0;
+  font: var(--floor-lg);
+  overflow-wrap: anywhere;
+}
+
+.setup-station__row dd.setup-station__mono {
+  font: 600 22px/30px var(--font-mono);
+}
+
+/* ---- The result line and the 84 px footer. ---- */
 .workstation-setup__result {
   display: grid;
   min-width: 0;
-  min-height: 64px;
-  margin: 0;
   gap: var(--sp-2);
-  align-content: center;
 }
 
-.workstation-setup__result:has(.workstation-setup__hint) {
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-}
-
-.workstation-setup__result > .workstation-setup__live:empty {
-  display: none;
-}
-
-.workstation-setup__hint {
-  display: -webkit-box;
-  margin: 0;
+/* Nothing to say: the row is a zero-height line (a hidden item would hand its row to the footer), the gap taken back. */
+.workstation-setup__result:has(.workstation-setup__live:empty) {
+  height: 0;
+  margin-top: calc(var(--sp-2) * -1);
   overflow: hidden;
-  color: var(--fg-2);
-  font: var(--floor-body);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-p.workstation-setup__result {
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  color: var(--fg-2);
-  font: var(--floor-body);
 }
 
 .workstation-setup__footer {
   display: flex;
   min-width: 0;
-  height: 64px;
+  height: 84px;
   gap: var(--sp-2);
-  align-items: stretch;
+  align-items: center;
 }
 
-.workstation-setup__footer-spacer {
-  min-width: 0;
+/* The button sets its 64 px inline: the 84 px footer's back button says its height with `!important`, as `floor-primary` does. */
+.workstation-setup__footer .setup-footer__back {
+  flex: none;
+  height: 84px !important;
+  min-height: 84px !important;
+  border-radius: var(--floor-r-primary) !important;
+  white-space: nowrap;
+}
+
+.setup-footer__primary {
+  flex: none;
+  width: 300px;
+  white-space: nowrap;
+}
+
+.setup-footer__status {
+  display: flex;
   flex: 1;
+  min-width: 0;
+  align-items: center;
+}
+
+.setup-footer__status > * {
+  min-width: 0;
+}
+
+.setup-footer__hint {
+  margin: 0;
+  color: var(--muted2);
+  font: var(--floor-body);
 }
 
 @media (max-width: 1100px) {
-  /* The state is also the toggle's mark and its pressed state: out of sight here, so the label keeps its one line. */
-  .setup-printer-verification__state {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .setup-editor__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .setup-split,
-  .setup-split--scanners,
-  .setup-split--editor,
-  .setup-printer-routing {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .setup-sound__controls {
+  .setup-station,
+  .setup-scanners {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-volume__step {
+    min-width: 120px;
   }
 }
 
-/* The scanner tab: the connection and its check, and under them the self-test across the width. */
-.setup-scanner-stack {
-  display: grid;
-  gap: var(--sp-4);
-  align-content: start;
-  min-width: 0;
+/* The scanner tab: the check beside the connection; in a half column its body is one column. */
+.setup-scanners .self-test__body {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .self-test {
@@ -810,4 +963,35 @@ p.workstation-setup__result {
   font: 14px/20px var(--font-mono);
   overflow-wrap: anywhere;
   user-select: text;
+}
+
+.self-test__waiting {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+}
+
+.self-test__waiting .setup-card__waiting {
+  padding: 0;
+}
+
+/* The words of the label check's state are in its hint («Выключено. Действует …»): the row stays one line. */
+.setup-printer-verification .floor-switch-card__word {
+  display: none;
+}
+
+/* The form's segments share narrow columns: their words stay on one line. */
+.setup-editor .floor-segmented > .floor-segmented__option {
+  padding-inline: 8px;
+  font: var(--floor-body-strong);
+  white-space: nowrap;
+}
+
+/* In the half column the test symbol is smaller, so its actions stay in sight on a 800 px screen. */
+.setup-scanners .self-test__symbol {
+  max-width: 200px;
+}
+
+.setup-scanners .self-test__figure {
+  padding: 12px;
 }

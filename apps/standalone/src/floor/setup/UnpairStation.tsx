@@ -5,6 +5,7 @@ import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 
 import { DeviceError } from "../../host/device.js";
 import { Reconfirm } from "../Reconfirm.js";
+import { UnlinkIcon } from "./setup-icons.js";
 import { useUnpair } from "./unpair-context.js";
 import "./unpair-station.css";
 
@@ -73,7 +74,8 @@ export function UnpairStation() {
     <>
       <Button
         size="floor"
-        variant="destructive"
+        variant="destructive-outline"
+        icon={<UnlinkIcon />}
         className="unpair-station__button"
         title={t("floor.unpair.hint")}
         onClick={() => {

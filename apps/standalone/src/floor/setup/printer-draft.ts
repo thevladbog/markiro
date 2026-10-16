@@ -3,6 +3,7 @@
  * the profile it describes once checked.
  */
 import type { PrintTarget } from "../../hardware/hardware.js";
+import { addressInvalid } from "../kit/ip-entry.js";
 import {
   parsePrinterProfile,
   printerMode,
@@ -106,7 +107,8 @@ export function settleDraft(draft: PrinterDraft, patch: Partial<PrinterDraft>): 
 }
 
 /** The keys of `floor.setup.printers.errors`. */
-export type DraftError = "name" | "host" | "port" | "serialPort" | "baud" | "usbPrinter" | "paper";
+export type DraftError =
+  "name" | "host" | "address" | "port" | "serialPort" | "baud" | "usbPrinter" | "paper";
 
 function wholeNumber(text: string): number | null {
   return /^[0-9]+$/.test(text.trim()) ? Number(text.trim()) : null;
@@ -126,6 +128,8 @@ export function profileOf(
   if (draft.kind === "tcp") {
     const port = wholeNumber(draft.tcpPort);
     if (draft.host.trim() === "") return { error: "host" };
+    // An IPv4-shaped address is judged to the octet; a host name is the printer's own business.
+    if (addressInvalid(draft.host)) return { error: "address" };
     if (port === null || port < 1 || port > 65_535) return { error: "port" };
     target = { kind: "tcp", host: draft.host.trim(), port };
   } else if (draft.kind === "serial") {

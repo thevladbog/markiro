@@ -358,23 +358,96 @@
   font: 500 22px/1 var(--font-ui);
 }
 
+/* ---- IpKeypad: the printer form's side panel, 380 px: a target segment, 113 x 64 keys, one 84 px action. ---- */
+
+:where(.floor-frame, .station-screen) .floor-mode__label--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad {
+  display: grid;
+  width: 380px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px;
+  gap: 8px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--floor-r-card);
+  background: var(--surface);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad .floor-segmented {
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: calc(var(--floor-r-ctl) + 4px);
+  background: var(--panel);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__keys {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 64px;
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key {
+  display: grid;
+  min-width: 0;
+  height: 64px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--linectl);
+  border-radius: var(--floor-r-ctl);
+  background: var(--panel);
+  color: var(--fg);
+  font: 500 32px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    transform var(--press-ms) var(--ease),
+    background-color var(--press-ms) var(--ease);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key--fn {
+  font: 600 20px/1 var(--font-ui);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__key:active {
+  transform: scale(var(--press-scale));
+  background: var(--line);
+}
+
+:where(.floor-frame, .station-screen) .floor-ipkeypad__action {
+  width: 100%;
+}
+
 /* ---- Reduced motion: no scale and no travel; the press shows as a fill. ---- */
 
 @media (prefers-reduced-motion: reduce) {
   :where(.floor-frame, .station-screen) .floor-segmented__option,
   :where(.floor-frame, .station-screen) .floor-switch-card,
   :where(.floor-frame, .station-screen) .floor-switch-card__knob,
-  :where(.floor-frame, .station-screen) .floor-keypad__key {
+  :where(.floor-frame, .station-screen) .floor-keypad__key,
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key {
     transition: none;
   }
 
   :where(.floor-frame, .station-screen) .floor-segmented__option:active:not(:disabled),
   :where(.floor-frame, .station-screen) .floor-switch-card:active:not(:disabled),
-  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled) {
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key:active {
     transform: none;
   }
 
-  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled) {
+  :where(.floor-frame, .station-screen) .floor-keypad__key:active:not(:disabled),
+  :where(.floor-frame, .station-screen) .floor-ipkeypad__key:active {
     background: var(--fg);
     color: var(--bg);
   }

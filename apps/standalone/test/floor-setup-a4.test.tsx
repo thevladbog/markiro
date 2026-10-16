@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { decodeMonoRaster, type MonoBitmap, type RasterizeTextFn } from "@markiro/domain";
@@ -154,6 +154,13 @@ function choose(label: string, value: string): void {
   setField(label, value);
 }
 
+/** The resolution is a segmented control: locked, every one of its segments is off. */
+function dpiLocked(): boolean {
+  return within(screen.getByLabelText("Разрешение принтера"))
+    .getAllByRole("radio")
+    .every((radio) => (radio as HTMLButtonElement).disabled);
+}
+
 function optionsOf(label: string): string[] {
   return choicesOf(label);
 }
@@ -222,15 +229,15 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     // A Windows queue, but printing in the printer's language: no paper to choose.
     expect(screen.queryByLabelText("Бумага")).toBeNull();
     choose("Способ печати", "windows_driver");
-    expect(optionsOf("Бумага")).toEqual(["Термоэтикетка", "Лист А4 (драйвер Windows)"]);
-    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(false);
+    expect(optionsOf("Бумага")).toEqual(["Этикетка", "Лист А4"]);
+    expect(dpiLocked()).toBe(false);
     choose("Бумага", "a4");
-    expect(shownInList("Разрешение")).toBe("300 dpi");
-    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(true);
+    expect(shownInList("Разрешение принтера")).toBe("300 dpi");
+    expect(dpiLocked()).toBe(true);
     // Back to the language: the hidden paper goes back to the label's, and the resolution is free.
     choose("Способ печати", "raw");
     expect(screen.queryByLabelText("Бумага")).toBeNull();
-    expect(screen.getByLabelText("Разрешение").hasAttribute("disabled")).toBe(false);
+    expect(dpiLocked()).toBe(false);
   });
 
   it("stores an A4 profile and sums it up by its paper, not by a language and a resolution", async () => {
@@ -250,7 +257,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     await act(async () => {
       click("Сохранить");
     });
-    await screen.findByText("Настройки сохранены.");
+    await screen.findByText("Настройки сохранены");
     const stored = await readWorkstationSettings(local);
     expect(stored.printers).toEqual([
       expect.objectContaining({ mode: "windows_driver", paper: "a4", dpi: 300 }),
@@ -286,7 +293,7 @@ describe("the workstation setup's A4 printer (plan А4)", () => {
     await act(async () => {
       click("Сохранить");
     });
-    await screen.findByText("Настройки сохранены.");
+    await screen.findByText("Настройки сохранены");
     expect((await readWorkstationSettings(local)).assignments).toEqual({
       box: null,
       pallet: "godex",

@@ -240,7 +240,7 @@ describe("a station PC before its configuration", () => {
     await openNetworkPairing();
     fireEvent.click(screen.getByRole("button", { name: "Настройки сканера" }));
     expect(await screen.findByRole("heading", { name: "Настройки сканера" })).toBeTruthy();
-    expect(screen.getByLabelText("COM-порт сканера")).toBeTruthy();
+    expect(screen.getByLabelText("COM-порт")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(await screen.findByLabelText("Код с экрана офиса")).toBeTruthy();
     // Typing the code by hand stays open.

@@ -17,6 +17,10 @@ export interface ModeSegmentProps<T extends string> {
   /** One line under the group, said politely when the choice changes. */
   hint?: string;
   disabled?: boolean;
+  /** The caption names the group for a reader and is not drawn (a segment that is a header of its panel). */
+  hideLabel?: boolean;
+  /** Keep a line of its own height for the hint when there is none (the default: groups below never jump). */
+  reserveHint?: boolean;
 }
 
 function Check() {
@@ -51,6 +55,8 @@ export function ModeSegment<T extends string>({
   onChange,
   hint,
   disabled = false,
+  hideLabel = false,
+  reserveHint = true,
 }: ModeSegmentProps<T>) {
   const labelId = useId();
   const hintId = useId();
@@ -72,7 +78,10 @@ export function ModeSegment<T extends string>({
   };
   return (
     <div className="floor-mode">
-      <p id={labelId} className="floor-mode__label">
+      <p
+        id={labelId}
+        className={hideLabel ? "floor-mode__label floor-mode__label--hidden" : "floor-mode__label"}
+      >
         {label}
       </p>
       <div
@@ -104,9 +113,11 @@ export function ModeSegment<T extends string>({
           );
         })}
       </div>
-      <p id={hintId} className="floor-mode__hint" aria-live="polite">
-        {hint}
-      </p>
+      {(reserveHint || hint !== undefined) && (
+        <p id={hintId} className="floor-mode__hint" aria-live="polite">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

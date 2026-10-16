@@ -39,6 +39,7 @@ import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "./idle-lock.js
 import type { RenderLabel } from "./print/print-jobs.js";
 import type { PrintRuntime } from "./print/print-runtime.js";
 import type { ScanSource } from "./scan-source.js";
+import { shortId } from "./setup/setup-parts.js";
 import { WorkstationSetup } from "./setup/WorkstationSetup.js";
 import {
   DEFAULT_SOUND,
@@ -450,6 +451,11 @@ export function FloorApp({
         printing={printing}
         source={source}
         {...(render === undefined ? {} : { render })}
+        facts={{
+          name: device.deviceName,
+          device: shortId(device.deviceId),
+          host: device.hostAddress,
+        }}
         onSaved={(settings) => {
           toneLevel.current = soundLevel(settings.sound);
         }}

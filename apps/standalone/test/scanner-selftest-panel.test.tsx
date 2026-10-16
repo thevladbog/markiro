@@ -45,7 +45,7 @@ const scan = (raw: string, channel: ScanChannel = "keyboard") =>
 describe("«Проверить сканер»", () => {
   it("shows a DataMatrix test code marked ТЕСТ, in words with a visible separator, and waits for a scan", () => {
     render(<Harness />);
-    expect(screen.getByRole("heading", { name: "Проверить сканер" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Проверка сканера" })).toBeTruthy();
     expect(screen.getByTestId("self-test-symbol").querySelector("svg")).toBeTruthy();
     expect(screen.getByText("ТЕСТ")).toBeTruthy();
     expect(screen.getByText(/Не код продукции/)).toBeTruthy();
