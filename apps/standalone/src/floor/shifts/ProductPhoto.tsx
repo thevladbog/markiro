@@ -89,7 +89,9 @@ export function ProductPanel({
   fallback: ReactNode;
 }) {
   if (local === undefined) return <div className={className}>{fallback}</div>;
-  return <PhotoPanel local={local} productId={productId} className={className} fallback={fallback} />;
+  return (
+    <PhotoPanel local={local} productId={productId} className={className} fallback={fallback} />
+  );
 }
 
 function PhotoPanel({
