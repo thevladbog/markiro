@@ -6,6 +6,8 @@ import "./shift-hub.css";
 
 export interface FloorScreenProps {
   title: string;
+  /** A quiet line under the title (the hub's count of shifts and page). */
+  subtitle?: string;
   /** The title takes the focus when the screen asks for it (`tabIndex=-1`). */
   titleRef?: Ref<HTMLHeadingElement>;
   /** Beside the title: the operator, a message slot, a header action. */
@@ -24,6 +26,7 @@ export interface FloorScreenProps {
  */
 export function FloorScreen({
   title,
+  subtitle,
   titleRef,
   header,
   actions,
@@ -31,12 +34,22 @@ export function FloorScreen({
   children,
 }: FloorScreenProps) {
   const titleId = useId();
+  const heading = (
+    <h2 id={titleId} ref={titleRef} tabIndex={titleRef === undefined ? undefined : -1}>
+      {title}
+    </h2>
+  );
   return (
     <section className={cn("station-screen", className)} aria-labelledby={titleId}>
       <header className="station-screen__header">
-        <h2 id={titleId} ref={titleRef} tabIndex={titleRef === undefined ? undefined : -1}>
-          {title}
-        </h2>
+        {subtitle === undefined ? (
+          heading
+        ) : (
+          <div className="station-screen__heading">
+            {heading}
+            <p className="station-screen__subtitle">{subtitle}</p>
+          </div>
+        )}
         {header}
       </header>
       <div className="station-screen__content">{children}</div>

@@ -3221,7 +3221,7 @@ describe("the operator on the floor", () => {
     scan("MRK-000742");
     expect(
       await screen.findByText(
-        "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
+        "Открытых смен на линии нет",
       ),
     ).toBeTruthy();
     host.getDeviceShifts.mockResolvedValue([PLANNED]);

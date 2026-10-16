@@ -565,7 +565,7 @@ describe("the floor after an operator signed in", () => {
     const { executor } = openLocalDb();
     render(floorOf(executor, handlers));
     await screen.findByText(
-      "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
+      "Открытых смен на линии нет",
     );
     await settle();
     expect(handlers.onSignOut).not.toHaveBeenCalled();
@@ -2054,7 +2054,7 @@ describe("what the floor gives the screens it holds", () => {
     render(floorOf(await floorCopies(), handlers, { device: { ...DEVICE_STATUS, lineId: null } }));
     expect(
       await screen.findByText(
-        "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
+        "Открытых смен на линии нет",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Открыть" })).toBeNull();

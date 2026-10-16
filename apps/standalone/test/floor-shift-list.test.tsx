@@ -123,6 +123,12 @@ function card(number: string): HTMLElement {
   return element;
 }
 
+/** The value under the label of a fact of a card (`Дата производства` → `08.10.2026`), or `null`. */
+function fact(element: HTMLElement, label: string): string | null {
+  const term = within(element).queryByText(label);
+  return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+}
+
 /** This station's active shift as the list reads it: owned by this device. */
 const MINE: DeviceShift = { ...ACTIVE, ownerDeviceId: DEVICE_ID };
 const ENTERED_MINE: EnteredShift = { ...ENTERED, ownerDeviceId: DEVICE_ID };
@@ -135,14 +141,14 @@ describe("the shifts of the station's line", () => {
     const active = card("OCT26-004");
     expect(within(active).getByText("В работе")).toBeTruthy();
     expect(within(active).getByText("Молоко 3,2% 0,9 л")).toBeTruthy();
-    expect(within(active).getByText("Дата производства: 08.10.2026")).toBeTruthy();
+    expect(fact(active, "Дата производства")).toBe("08.10.2026");
     // The thousands are parted by a no-break space, as `Intl` writes them for Russian.
-    expect(active.textContent).toContain("План: 1\u00a0200");
+    expect(fact(active, "План")).toBe("1\u00a0200 шт");
     expect(within(active).getByText("Для: ООО «Северный берег»")).toBeTruthy();
     expect(within(active).getByText("Агрегация")).toBeTruthy();
     const planned = card("OCT26-005/S");
     expect(within(planned).getByText("Не начата")).toBeTruthy();
-    expect(within(planned).getByText("План не указан")).toBeTruthy();
+    expect(fact(planned, "План")).toBe("Не указан");
     expect(within(planned).getByRole("button", { name: "Открыть" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Смены линии" })).toBeTruthy();
   });
@@ -186,12 +192,12 @@ describe("the shifts of the station's line", () => {
     renderList(executor);
     await screen.findByText("OCT26-004");
     const withDate = card("OCT26-004");
-    expect(within(withDate).getByText("Дата производства: 08.10.2026")).toBeTruthy();
-    expect(within(withDate).getByText("Дата смены: 12.10.2026")).toBeTruthy();
+    expect(fact(withDate, "Дата производства")).toBe("08.10.2026");
+    expect(fact(withDate, "Дата смены")).toBe("12.10.2026");
     // A copy a host before beta 3 sent has no shift date: the production date alone.
     const plain = card("OCT26-005/S");
-    expect(within(plain).getByText(/Дата производства: /)).toBeTruthy();
-    expect(within(plain).queryByText(/Дата смены/)).toBeNull();
+    expect(fact(plain, "Дата производства")).not.toBeNull();
+    expect(within(plain).queryByText("Дата смены")).toBeNull();
   });
 
   it("opens a planned shift with the host and hands over the shift with its checked snapshot", async () => {
@@ -221,7 +227,9 @@ describe("the shifts of the station's line", () => {
     );
     expect(within(planned).getByText("Нужна связь с хостом")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Новая смена" })).toHaveProperty("disabled", true);
-    expect(screen.getByText("Новую смену можно создать только при связи с хостом.")).toBeTruthy();
+    // The footer says it too, beside the disabled button (the card's hint is the first).
+    const footer = screen.getByRole("contentinfo", { name: "Действия со сменами" });
+    expect(within(footer).getByText("Нужна связь с хостом")).toBeTruthy();
     expect(
       screen.getByText(
         "Нет связи с хостом: показаны смены, полученные раньше. Продолжить можно смену, которую эта станция уже открыла.",
@@ -579,7 +587,7 @@ describe("the shifts of the station's line", () => {
     const view = render(listOf(executor, handlers, {}));
     expect(
       await screen.findByText(
-        "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
+        "Открытых смен на линии нет",
       ),
     ).toBeTruthy();
     await replaceShiftCopies(executor, PAIRING, [PLANNED], SEEN + 1);
@@ -610,13 +618,14 @@ describe("the shifts of the station's line", () => {
 
     /** The polite region, there from the first render, and what sits in it. */
     function region(): HTMLElement {
-      // The region stands in the screen's title row, beside the title and the operator.
+      // The region stands under the screen's title row as a full-width banner (the board's), in
+      // the tree from the first render.
       const element = screen
         .getByRole("heading", { name: "Смены линии" })
-        .closest("header")
-        ?.querySelector('[aria-live="polite"]');
+        .closest("section")
+        ?.querySelector(".shift-selection__message");
       if (!(element instanceof HTMLElement)) {
-        throw new Error("no polite region in the title row");
+        throw new Error("no polite region under the title row");
       }
       return element;
     }
@@ -1068,7 +1077,7 @@ describe("the layout ported from the cloud station's shift selection", () => {
     expect(screen.queryByText("OCT26-006")).toBeNull();
     const pager = screen.getByRole("navigation", { name: "Страницы смен" });
     expect(within(pager).getByText("Страница 1 из 2")).toBeTruthy();
-    fireEvent.click(within(pager).getByRole("button", { name: "Следующая страница" }));
+    fireEvent.click(within(pager).getByRole("button", { name: "Далее" }));
     expect(await screen.findByText("OCT26-006")).toBeTruthy();
     expect(screen.queryByText("OCT26-004")).toBeNull();
   });
@@ -1078,6 +1087,177 @@ describe("the layout ported from the cloud station's shift selection", () => {
     renderList(executor);
     await screen.findByText("OCT26-004");
     expect(screen.queryByRole("navigation", { name: "Страницы смен" })).toBeNull();
+  });
+});
+
+describe("the hub as the owner-approved board draws it", () => {
+  const third = (number: string, id: string): DeviceShift => ({ ...PLANNED, id, number });
+  const THIRD = third("OCT26-006", "5b0f9f7e-1c2d-4e3f-8a9b-0c1d2e3f4a5b");
+  const gridColumns = () => document.querySelector(".shift-selection__grid")?.getAttribute("data-columns");
+
+  function accept(db: import("node:sqlite").DatabaseSync, n: number, device = DEVICE_ID) {
+    const insert = db.prepare(
+      "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, scanned_at) " +
+        "VALUES (?, ?, ?, ?, 'box', ?, '2026-10-09T06:12:00.000Z')",
+    );
+    for (let index = 0; index < n; index += 1) {
+      insert.run(HOST_ID, device, `hash-${device}-${index}`, MINE.id, `scan-${device}-${index}`);
+    }
+  }
+
+  it("lays one shift out as one wide card, two as two columns, more as pages of two", async () => {
+    const one = await copiesOf([MINE]);
+    const view = renderList(one.executor);
+    await screen.findByText("OCT26-004");
+    expect(gridColumns()).toBe("1");
+    view.view.unmount();
+
+    const two = await copiesOf([PLANNED, MINE]);
+    const second = renderList(two.executor);
+    await screen.findByText("OCT26-004");
+    expect(gridColumns()).toBe("2");
+    expect(screen.queryByRole("navigation", { name: "Страницы смен" })).toBeNull();
+    second.view.unmount();
+
+    const many = await copiesOf([PLANNED, MINE, THIRD]);
+    renderList(many.executor);
+    await screen.findByText("OCT26-004");
+    expect(gridColumns()).toBe("2");
+    // The pager stands in the title row, «‹ Назад  1 / 2  Далее ›».
+    const pager = screen.getByRole("navigation", { name: "Страницы смен" });
+    expect(pager.closest("header")).toBe(
+      screen.getByRole("heading", { name: "Смены линии" }).closest("header"),
+    );
+    expect(within(pager).getByRole("button", { name: "Назад" })).toHaveProperty("disabled", true);
+    expect(within(pager).getByRole("button", { name: "Далее" })).toHaveProperty("disabled", false);
+    expect(within(pager).getByText("1 / 2")).toBeTruthy();
+    fireEvent.click(within(pager).getByRole("button", { name: "Далее" }));
+    expect(await screen.findByText("OCT26-006")).toBeTruthy();
+    // The last page holds one card and keeps the two-column grid.
+    expect(gridColumns()).toBe("2");
+    expect(document.querySelectorAll(".shift-card")).toHaveLength(1);
+    expect(within(pager).getByRole("button", { name: "Далее" })).toHaveProperty("disabled", true);
+  });
+
+  it("says how many shifts there are under the title, the page, and that the data is old", async () => {
+    const one = await copiesOf([MINE]);
+    const first = renderList(one.executor);
+    expect(await screen.findByText("1 открытая смена")).toBeTruthy();
+    first.view.unmount();
+
+    const two = await copiesOf([PLANNED, MINE]);
+    const second = renderList(two.executor, { online: false });
+    expect(await screen.findByText("2 смены · данные получены раньше")).toBeTruthy();
+    second.view.unmount();
+
+    const many = await copiesOf([PLANNED, MINE, THIRD]);
+    const third_ = renderList(many.executor);
+    expect(await screen.findByText("3 смены · страница 1 из 2")).toBeTruthy();
+    third_.view.unmount();
+
+    const none = await copiesOf([]);
+    renderList(none.executor);
+    expect(await screen.findByText("Открытых смен нет")).toBeTruthy();
+    // The empty state, with «Новая смена» still in the footer.
+    expect(screen.getByText("Открытых смен на линии нет")).toBeTruthy();
+    expect(screen.getByText("Создайте смену или дождитесь плана из офиса.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Новая смена" })).toHaveProperty("disabled", false);
+  });
+
+  it("shows «Принято N из M» with a bar from this station's own codes and the shift's plan", async () => {
+    const { executor, db } = await copiesOf([MINE], [ENTERED_MINE]);
+    accept(db, 5);
+    // Codes of another device in the same shift are not this station's count.
+    accept(db, 7, OTHER_STATION);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    const active = card("OCT26-004");
+    expect(within(active).getByText("Принято")).toBeTruthy();
+    expect(active.querySelector(".shift-card__progress-count")?.textContent).toBe(
+      "5 из 1\u00a0200",
+    );
+    const bar = within(active).getByRole("progressbar", { name: "Принято" });
+    expect(bar.getAttribute("aria-valuenow")).toBe("5");
+    expect(bar.getAttribute("aria-valuemax")).toBe("1200");
+  });
+
+  it("hides the progress row without a plan, for a shift this station never entered, and for a copy it cannot count", async () => {
+    // Not entered here: the plan is the host's, the count is none of this station's.
+    const planned = await copiesOf([{ ...PLANNED, plannedQty: 500 }]);
+    const first = renderList(planned.executor);
+    await screen.findByText("OCT26-005/S");
+    expect(screen.queryByText("Принято")).toBeNull();
+    first.view.unmount();
+
+    // Entered, but the plan is not set.
+    const noPlan = await copiesOf([{ ...MINE, plannedQty: null }], [ENTERED_MINE]);
+    noPlan.db.prepare("UPDATE floor_shifts SET planned_qty = NULL WHERE id = ?").run(MINE.id);
+    const second = renderList(noPlan.executor);
+    await screen.findByText("OCT26-004");
+    expect(screen.queryByText("Принято")).toBeNull();
+    expect(fact(card("OCT26-004"), "План")).toBe("Не указан");
+    second.view.unmount();
+
+    // A count that cannot be read leaves the row out and the list standing.
+    const { executor, db } = await copiesOf([MINE], [ENTERED_MINE]);
+    accept(db, 3);
+    const failing: LocalExecutor = {
+      query: (sql, params, row) =>
+        sql.includes("FROM floor_codes") ? Promise.reject(new Error("disk")) : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    renderList(failing);
+    await screen.findByText("OCT26-004");
+    expect(screen.queryByText("Принято")).toBeNull();
+    expect(screen.getByRole("button", { name: "Продолжить" })).toBeTruthy();
+  });
+
+  it("draws the tags on the product's panel, and the actions at 84 px: «Продолжить» primary, «Открыть» secondary", async () => {
+    const { executor } = await copiesOf([PLANNED, MINE], [ENTERED_MINE]);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    const panel = card("OCT26-004").querySelector(".shift-card__photo");
+    expect(panel?.getAttribute("data-photo-backing")).toBe("gradient");
+    expect(within(panel as HTMLElement).getByText("Агрегация")).toBeTruthy();
+    const resume = within(card("OCT26-004")).getByRole("button", { name: "Продолжить" });
+    expect(resume.className).toContain("mk-btn--primary");
+    expect(resume.className).toContain("floor-primary");
+    const open = within(card("OCT26-005/S")).getByRole("button", { name: "Открыть" });
+    expect(open.className).toContain("mk-btn--secondary");
+    expect(open.className).toContain("floor-primary");
+  });
+
+  it("counts the queue on its button: a quiet 0, «N ждут», and the host's refusal first", async () => {
+    const { executor, db } = await copiesOf([PLANNED]);
+    const view = renderList(executor, { onQueue: vi.fn() });
+    const queue = await screen.findByRole("button", { name: "Очередь отправки" });
+    await waitFor(() => expect(queue.textContent).toContain("0"));
+    expect(queue.querySelector(".shift-hub__queue-badge")?.getAttribute("data-tone")).toBe("neutral");
+    // Three records wait for the host.
+    const insert = db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
+        "VALUES (?, ?, ?, 'scan', 's', '{}', '2026-10-09T06:20:00.000Z')",
+    );
+    for (const id of ["a", "b", "c"]) insert.run(id, HOST_ID, DEVICE_ID);
+    view.view.rerender(listOf(executor, view.handlers, { onQueue: vi.fn(), outboxVersion: 1 }));
+    await waitFor(() => expect(queue.textContent).toContain("3 ждут"));
+    expect(queue.querySelector(".shift-hub__queue-badge")?.getAttribute("data-tone")).toBe("warn");
+    // The queue's name stays the button's name, the count its description.
+    expect(queue.getAttribute("aria-label")).toBe("Очередь отправки");
+    // The host refused one: that is said first, in the error tone.
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'invalid_record', acked_at = '2026-10-09T06:21:00.000Z' WHERE id = 'a'",
+    ).run();
+    view.view.rerender(listOf(executor, view.handlers, { onQueue: vi.fn(), outboxVersion: 2 }));
+    await waitFor(() => expect(queue.textContent).toContain("Отклонено 1"));
+    expect(queue.querySelector(".shift-hub__queue-badge")?.getAttribute("data-tone")).toBe("error");
+  });
+
+  it("keeps «Новая смена» off without the host exactly as before: opening a shift freezes the host's snapshot", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, { online: false });
+    await screen.findByText("OCT26-005/S");
+    expect(screen.getByRole("button", { name: "Новая смена" })).toHaveProperty("disabled", true);
   });
 });
 
