@@ -4,8 +4,6 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Input } from "@markiro/ui";
-
 import { HostError } from "../host/client.js";
 import type { PasswordChange } from "../host/protocol.js";
 import { isTransferable, passwordRule } from "../lib/rules.js";
@@ -13,6 +11,7 @@ import { useFieldError, writeFailure, type AlertFailure } from "./form-errors.js
 import { FormDialog } from "./FormDialog.js";
 import { useOfficeMutation } from "./office-query.js";
 import { WriteFailureAlert } from "./page-state.js";
+import { PasswordInput } from "./PasswordInput.js";
 
 const passwordSchema = z.object({
   currentPassword: z
@@ -98,28 +97,26 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
       onClose={close}
       alert={<WriteFailureAlert failure={failure} />}
     >
-      <Input
-        type="password"
+      <PasswordInput
         autoComplete="current-password"
         label={t("office.password.current")}
         {...fieldError(errors.currentPassword?.message)}
         {...register("currentPassword")}
       />
-      <Input
-        type="password"
+      <PasswordInput
         autoComplete="new-password"
         label={t("office.password.new")}
         hint={t("office.password.hint")}
         {...fieldError(errors.newPassword?.message)}
         {...register("newPassword")}
       />
-      <Input
-        type="password"
+      <PasswordInput
         autoComplete="new-password"
         label={t("office.password.confirm")}
         {...fieldError(errors.confirmPassword?.message)}
         {...register("confirmPassword")}
       />
+      <p className="office-note">{t("office.password.note")}</p>
     </FormDialog>
   );
 }

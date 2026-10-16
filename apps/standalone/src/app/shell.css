@@ -258,78 +258,142 @@
 }
 
 /*
- * The menu stays in view while the page scrolls, and scrolls by itself when the
- * window is lower than the list (the minimum window is 960 x 600).
+ * The office menu (design 2026-10): one style for every entry, an icon and a name at one height
+ * (`--menu-item-h`, the single token that flips 40 to the kit's 44), the active entry filled with
+ * `fg`. It stays in view while the page scrolls and scrolls by itself when the window is lower than
+ * the list. 272 px open, 76 px (icons only) collapsed; the window collapses it below 1366 px.
  */
-.office-shell > .mk-sidebar {
+.office-menu {
+  box-sizing: border-box;
   position: sticky;
   top: 0;
   align-self: flex-start;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  height: 100vh;
   max-height: 100vh;
-  overflow-y: auto;
+  padding: 12px;
+  overflow: hidden auto;
+  background: var(--surface-card);
+  border-right: 1px solid var(--line);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
-/*
- * The settings groups (Организация, Доступ, Сервис) at the foot of the menu are set apart from the
- * operations above them by a rule alone. Every entry of the menu, in either block, is one style
- * (size, weight, height, colour, active mark: `.mk-sidebar__link` of `@markiro/ui`); only a
- * group's name differs. The entries here carry the same inner box as the ones `Sidebar` draws.
- */
-.office-menu-settings {
-  margin-top: 8px;
-  padding-top: 8px;
+.office-menu--collapsed {
+  width: var(--sidebar-w-collapsed);
+}
+
+.office-menu__brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 5px;
+}
+
+.office-menu__wordmark {
+  font: 600 22px/1 var(--font-mono);
+  letter-spacing: -0.5px;
+}
+
+.office-menu--collapsed .office-menu__wordmark {
+  display: none;
+}
+
+.office-menu__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.office-menu__section {
+  padding: 10px 14px 2px;
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Collapsed: the group's name gives way to a small gap, so the groups still read apart. */
+.office-menu--collapsed .office-menu__section {
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.office-menu--collapsed .office-menu__section > span {
+  display: none;
+}
+
+/* One hairline sets the settings block apart; it is the only difference between the halves. */
+.office-menu__rule {
+  height: 0;
+  margin: 8px 0 0;
   border-top: 1px solid var(--line);
 }
 
-.office-menu-settings ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/*
- * One row height for every entry (a control-sm, 32 px) and one gap above a group's name, so the
- * whole menu, 17 entries and 6 names, stands in the minimum window's height without a scrollbar
- * of its own at 800 px.
- */
-.office-shell > .mk-sidebar .mk-sidebar__link {
-  padding-block: 6px;
-}
-
-.office-shell > .mk-sidebar .mk-sidebar__section {
-  padding-top: 10px;
-}
-
-.office-shell > .mk-sidebar .mk-sidebar__section:first-child {
-  padding-top: 4px;
-}
-
-/*
- * The menu scrolls as one block when the window is lower than it (the minimum window is
- * 960 x 600): no entry is squeezed or cut between a list that scrolls and a pinned foot. `Sidebar`
- * gives its list `flex: 1; overflow-y: auto` inline, hence `!important`.
- */
-.office-shell > .mk-sidebar > ul {
-  flex: none !important;
-  min-height: auto !important;
-  overflow: visible !important;
-}
-
-.office-menu-settings .mk-sidebar__content {
+.office-menu__link {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: 12px;
+  height: var(--menu-item-h);
+  padding: 0 14px;
+  border-radius: var(--r-ctl);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  text-decoration: none;
+  outline: none;
 }
 
-.office-menu-settings .mk-sidebar__content > span {
+.office-menu__link:hover {
+  background: var(--surface-panel);
+  color: var(--fg-1);
+}
+
+.office-menu__link:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.office-menu__link--active,
+.office-menu__link--active:hover {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 700;
+}
+
+.office-menu__link .office-icon {
+  flex: none;
+}
+
+.office-menu__label {
   flex: 1;
-  white-space: nowrap;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Collapsed: the name stays for a screen reader, out of sight (the tooltip is the link's `title`). */
+.office-menu--collapsed .office-menu__link {
+  justify-content: center;
+  padding: 0;
+}
+
+.office-menu--collapsed .office-menu__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .office-shell__main {
@@ -339,28 +403,52 @@
   min-width: 0;
 }
 
-/* The header's identity, link and buttons wrap onto a second line in a narrow window. */
+/*
+ * The top bar: the menu toggle and the crumbs at the left, the link and sync chips, the theme
+ * selector and the person at the right. It wraps onto a second line in a narrow window.
+ */
 .office-header {
+  box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
-  padding: 12px 24px;
+  min-height: 64px;
+  padding: 8px 32px 8px 24px;
   border-bottom: 1px solid var(--line);
 }
 
-.office-header__user {
+.office-header__lead {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.office-header__name {
+.office-crumbs ol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-3);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.office-crumbs li {
+  display: inline-flex;
+  align-items: center;
+}
+
+.office-crumbs__page {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--fg-1);
   font-weight: 600;
-}
-
-.office-header__role {
-  color: var(--fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .office-header__actions {
@@ -368,6 +456,208 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/*
+ * The top bar's controls are `Button`s, whose inline style sets the padding, the radius and the
+ * colours; the design's shapes (48 px, radius 16, a pill chip) override them, hence `!important`.
+ */
+.office-header__actions > .mk-btn,
+.office-header__actions > .user-menu > .mk-btn {
+  min-height: 48px !important;
+  border-radius: 16px !important;
+}
+
+.office-header__actions > .mk-icon-button {
+  width: 48px !important;
+  height: 48px !important;
+  min-width: 48px !important;
+}
+
+/* A chip: an icon and a word on a tinted pill. The state is the icon and the word, never the tint alone. */
+.office-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: 600 12px/16px var(--font-ui);
+  white-space: nowrap;
+}
+
+.office-chip--ok {
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.office-chip--warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.office-chip--info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.office-chip--error {
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+/* The link chip is a button (it opens the details): 40 px to hit, the pill drawn inside it. */
+.host-dot > .mk-btn {
+  padding: 0 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+.theme-switcher {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 16px;
+  background: var(--surface-panel);
+}
+
+.theme-switcher > .theme-switcher__option {
+  width: 40px;
+  min-width: 40px;
+  padding: 0 !important;
+  border-radius: 12px !important;
+  color: var(--fg-2) !important;
+}
+
+.theme-switcher > .theme-switcher__option:hover:not(.theme-switcher__option--on) {
+  background: var(--surface-card) !important;
+  color: var(--fg-1) !important;
+}
+
+.theme-switcher > .theme-switcher__option--on,
+.theme-switcher > .theme-switcher__option--on:hover {
+  background: var(--surface-inverse) !important;
+  color: var(--fg-on-inverse) !important;
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu__trigger {
+  gap: 10px !important;
+  padding: 0 12px 0 8px !important;
+}
+
+/* An initials avatar: a circle on the category tone its person's name fixes (the kit's four). */
+.user-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font: 600 12px/1 var(--font-mono);
+}
+
+.user-avatar--40 {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.user-avatar--violet {
+  background: var(--cat-violet-bg);
+  color: var(--cat-violet-fg);
+}
+
+.user-avatar--teal {
+  background: var(--cat-teal-bg);
+  color: var(--cat-teal-fg);
+}
+
+.user-avatar--magenta {
+  background: var(--cat-magenta-bg);
+  color: var(--cat-magenta-fg);
+}
+
+.user-avatar--steel {
+  background: var(--cat-steel-bg);
+  color: var(--cat-steel-fg);
+}
+
+.user-menu__who {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.user-menu__name {
+  font: 600 14px/18px var(--font-ui);
+}
+
+.user-menu__role {
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-ui);
+}
+
+/* The only shadowed layer of the bar: an overlay (one layer, kit level L2). */
+.user-menu__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-overlay-popover, 30);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.user-menu__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.user-menu__identity-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.user-menu__identity-name {
+  font: 600 14px/20px var(--font-ui);
+}
+
+.user-menu__identity-meta {
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-ui);
+}
+
+.user-menu__panel > .user-menu__item {
+  justify-content: flex-start !important;
+  gap: 12px !important;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0 12px !important;
+  border-color: transparent !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  font-weight: 500 !important;
+}
+
+.user-menu__panel > .user-menu__item:hover {
+  background: var(--surface-panel) !important;
 }
 
 /*
@@ -380,7 +670,7 @@
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 16px;
-  padding: 24px;
+  padding: 24px 32px;
 }
 
 /* A page header's title and buttons wrap; the buttons stay together at the right. */
@@ -648,7 +938,7 @@
 .office-banner {
   display: grid;
   gap: 8px;
-  padding: 12px 24px 0;
+  padding: 16px 32px 0;
 }
 
 .floor-update {
@@ -666,6 +956,9 @@
  */
 .office-banner .mk-alert {
   align-items: center;
+  /* The shared alert sets these inline. */
+  padding: 14px 20px !important;
+  border-radius: var(--r-ctl) !important;
 }
 
 .office-banner .mk-alert__icon {
@@ -1466,11 +1759,58 @@
 }
 
 /* «Обзор»: cards in a grid that wraps by whole cards, a card never narrower than 320 px. */
+/*
+ * «Обзор» (design 2026-10): the cards are L1 layers — a hairline, a large radius, no shadow. The
+ * shifts card is two thirds wide with the devices beside it; the rest are a third each. Below
+ * 1100 px the grid is two columns, below 720 one.
+ */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--sp-4);
   align-items: start;
+}
+
+.overview-grid > .overview-card {
+  grid-column: span 2;
+}
+
+.overview-grid > .overview-card--shifts {
+  grid-column: span 4;
+}
+
+@media (max-width: 1100px) {
+  .overview-grid > .overview-card,
+  .overview-grid > .overview-card--shifts {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 720px) {
+  .overview-grid > .overview-card,
+  .overview-grid > .overview-card--shifts {
+    grid-column: span 6;
+  }
+}
+
+.overview-card {
+  border-radius: var(--r-card) !important;
+  box-shadow: none !important;
+}
+
+.overview-planned {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.overview-planned__title {
+  margin: 0;
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .overview-list {
@@ -1538,56 +1878,25 @@
 }
 
 /*
- * The office sign-in (beta 3.2, approved variant B2): the whole window, the logo at the top left
- * and the theme switcher at the top right, one flat card in the middle with the recent users
- * beside it (from 1100px; under it below), two soft static colour orbs behind (blue above, green
- * below right; paler in the light theme) and the footer centred under the content. It fits the
- * smallest window (960 x 600) without scrolling.
+ * The office sign-in (design 2026-10): the whole window on the page colour, the logo at the top
+ * left, the link chip and the theme selector at the top right, ONE card in the middle (the form,
+ * then the recent users under a hairline), the host's address under it. One layer: no orbs, no
+ * second frame. A window lower than the card scrolls inside itself.
  */
 .office-login {
   position: fixed;
   inset: 0;
-  isolation: isolate;
   overflow: hidden auto;
   display: grid;
-  place-items: center;
-  padding: 72px 24px 24px;
+  place-items: start center;
+  padding: 112px 24px 32px;
   background: var(--surface-page);
-}
-
-.office-login::before,
-.office-login::after {
-  content: "";
-  position: fixed;
-  z-index: -1;
-  width: 480px;
-  height: 480px;
-  border-radius: 50%;
-  filter: blur(120px);
-  opacity: 0.32;
-  pointer-events: none;
-}
-
-.office-login::before {
-  top: -180px;
-  left: 18%;
-  background: #3b6cff;
-}
-
-.office-login::after {
-  right: -140px;
-  bottom: -200px;
-  background: var(--accent-module);
-}
-
-:root[data-theme="light"] .office-login::before,
-:root[data-theme="light"] .office-login::after {
-  opacity: 0.16;
+  color: var(--fg-1);
 }
 
 .office-login__top {
   position: absolute;
-  top: 24px;
+  top: 16px;
   left: 32px;
   right: 32px;
   display: flex;
@@ -1599,7 +1908,7 @@
 .office-login__brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .office-login__wordmark {
@@ -1607,102 +1916,116 @@
   letter-spacing: -0.5px;
 }
 
-.office-login__content {
-  display: grid;
-  justify-items: center;
-  gap: 20px;
-  width: 100%;
-  max-width: 900px;
-}
-
-.office-login__row {
-  display: grid;
-  grid-template-columns: minmax(0, 440px);
-  justify-content: center;
-  align-items: start;
-  gap: 16px;
-  width: 100%;
-}
-
-.office-login__card {
-  display: grid;
-  align-content: start;
-  gap: 16px;
-  padding: 30px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--surface-card);
-}
-
-.office-login__title {
-  margin: 0;
-  font: var(--text-h2);
-}
-
-.office-login__actions {
+.office-login__tools {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
 
-.office-login .office-login__ghost {
-  border-radius: 999px;
-  background: transparent;
-  border-color: transparent;
-  color: var(--fg-2);
+.office-login__content {
+  display: grid;
+  justify-items: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 440px;
 }
 
-.office-login .office-login__submit {
-  margin-left: auto;
-  border-radius: 999px;
-  padding-right: 6px;
+.office-login__card {
+  box-sizing: border-box;
+  display: grid;
+  gap: 24px;
+  width: 100%;
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface-card);
+}
+
+.office-login__main {
+  display: grid;
   gap: 12px;
 }
 
-.office-login__arrow {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--surface-card);
-  color: var(--fg-1);
+.office-login__product {
+  margin: 0;
+  color: var(--fg-3);
+  font: 400 13px/18px var(--font-mono);
+}
+
+.office-login__title {
+  margin: 0;
+  font: var(--text-h1);
+}
+
+.office-login__form {
+  gap: 16px;
+}
+
+/* A refused sign-in marks both fields (a 2 px rule), and the alert above them says why. */
+.office-login__form[data-failed] .mk-input {
+  border: 2px solid var(--err-solid) !important;
+}
+
+.office-login .office-login__submit {
+  min-height: 44px;
+  border-radius: 16px !important;
+}
+
+.office-login .office-login__ghost {
+  align-self: center;
+  color: var(--fg-1) !important;
+}
+
+.office-login__recent {
+  display: grid;
+  gap: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
 }
 
 .office-login__recent-title {
   margin: 0;
-  font: var(--text-h3);
+  color: var(--fg-3);
+  font: 600 11px/12px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .office-login__recent-list {
-  list-style: none;
+  display: grid;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 6px;
+  list-style: none;
 }
 
 .office-login .office-login__recent-pick {
   width: 100%;
+  min-height: 52px;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 12px !important;
+  padding: 0 8px !important;
+  border-radius: 14px !important;
+  font-weight: 500 !important;
 }
 
 .office-login .office-login__recent-pick--selected {
-  background: var(--surface-panel);
-  border-color: var(--ok-solid);
+  background: var(--surface-panel) !important;
 }
 
 .office-login__avatar {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  color: #fff;
-  font: 600 11px/1 var(--font-mono);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: 600 12px/1 var(--font-mono);
+}
+
+.office-login__recent-pick--selected .office-login__avatar {
+  background: var(--surface-card);
 }
 
 .office-login__recent-name {
@@ -1714,28 +2037,37 @@
   white-space: nowrap;
 }
 
+.office-login__go {
+  color: var(--fg-3);
+}
+
 .office-login__check {
   flex: none;
   color: var(--ok-fg);
 }
 
+.office-login .office-login__clear {
+  justify-self: start;
+  color: var(--fg-2) !important;
+}
+
 .office-login__footer {
-  display: flex;
-  align-items: center;
+  display: grid;
+  justify-items: center;
   gap: 8px;
-  margin: 0;
-  color: var(--fg-3);
-  font: 400 12px/16px var(--font-ui);
+  width: 100%;
 }
 
-.office-login__nolink {
-  color: var(--err-fg);
-  font-weight: 500;
+.office-login__address {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 12px;
 }
 
-.theme-switcher .theme-switcher__option:hover {
-  background: var(--surface-card);
-  color: var(--fg-1);
+.office-login__address .mk-btn {
+  color: var(--fg-1) !important;
 }
 
 .theme-switcher .theme-switcher__option:focus-visible {
@@ -1743,32 +2075,15 @@
   outline-offset: -2px;
 }
 
-/* From 1100px the recent users stand to the right of the form; below, under it. */
-@media (min-width: 1100px) {
-  .office-login__row {
-    grid-template-columns: minmax(0, 440px) minmax(0, 300px);
-  }
-}
-
-@media (max-width: 1099px) {
-  .office-login__recent-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-/* The smallest window: a tighter card, so the brand, the form and the footer fit in 600px. */
+/* A low window (the smallest is 960 x 600): a tighter card; the recent users' note goes. */
 @media (max-height: 700px) {
   .office-login {
-    padding-top: 64px;
-  }
-
-  .office-login__content {
-    gap: 12px;
+    padding-top: 80px;
   }
 
   .office-login__card {
-    padding: 22px 30px;
-    gap: 10px;
+    padding: 24px 32px;
+    gap: 16px;
   }
 
   .office-login__recent .office-note {
@@ -1780,4 +2095,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
+}
+
+/* The greeting is the page's subtitle: it hugs the title above it. */
+.office-shell__content .mk-page-header + .overview-who {
+  margin-top: -12px;
 }

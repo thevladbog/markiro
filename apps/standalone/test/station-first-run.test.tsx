@@ -16,6 +16,7 @@ import { DEVICE_STATUS, LINE_ID, NEW_STATION, observation, SESSION } from "./sup
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi } from "./support/office.js";
+import { chooseFromUserMenu } from "./support/user-menu.js";
 
 /**
  * Owner feedback from the first Windows test of a station PC: the app opened
@@ -315,7 +316,7 @@ describe("the host's PC", () => {
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
     await signIn();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    await chooseFromUserMenu("Выйти из офиса");
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "В цех" }));
     expect(await screen.findByText("Вход оператора")).toBeTruthy();

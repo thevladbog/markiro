@@ -66,6 +66,7 @@ import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { DEVICE_INFO, deviceLicense } from "./support/license.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
+import { chooseFromUserMenu, openUserMenu } from "./support/user-menu.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
 /** The body of every entry this station sends (`shift-enter.json`, plan РЕЖ). */
@@ -427,7 +428,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
       target: { value: "correct horse battery" },
     });
@@ -459,7 +460,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
       target: { value: "correct horse battery" },
     });
@@ -489,7 +490,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
       target: { value: "correct horse battery" },
     });
@@ -502,7 +503,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     expect(await screen.findByText("Недостаточно прав для этого действия.")).toBeTruthy();
     expect(await screen.findByText("Ирина Орлова")).toBeTruthy();
-    expect(screen.getByText("технолог")).toBeTruthy();
+    expect(screen.getByText("Технолог")).toBeTruthy();
     expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
   });
 
@@ -523,7 +524,7 @@ describe("App", () => {
     renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
       target: { value: "correct horse battery" },
     });
@@ -4122,7 +4123,7 @@ describe("kiosk mode", () => {
     await signIn();
     await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
       target: { value: "correct horse battery" },
     });
@@ -4370,7 +4371,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     await signIn();
     expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    await chooseFromUserMenu("Выйти из офиса");
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(device.installRole).toHaveBeenCalled();
@@ -4619,7 +4620,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    await chooseFromUserMenu("Выйти из офиса");
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(screen.queryByText("Вход оператора")).toBeNull();
     expect(kiosk.commands).toEqual([]);
@@ -4643,8 +4644,10 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
     await signIn();
     expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
-    // «Выйти» returns to the office sign-in (beta 3.2) and is beside «Выйти в цех».
-    expect(screen.getByRole("button", { name: "Выйти" })).toBeTruthy();
+    // «Выйти из офиса» returns to the office sign-in; it is in the user menu, «Выйти в цех» stays on the bar.
+    expect(
+      within(await openUserMenu()).getByRole("menuitem", { name: "Выйти из офиса" }),
+    ).toBeTruthy();
   });
 
   it("signs out to the office sign-in from «Выйти», telling the host, with no notice and no floor in between", async () => {
@@ -4654,7 +4657,7 @@ describe("an office PC and the host's address (plan УСТ)", () => {
     renderApp({ probe: probeAnswering(true), device, host });
     fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
     await signIn();
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    await chooseFromUserMenu("Выйти из офиса");
     expect(await screen.findByText("Вход в офис")).toBeTruthy();
     expect(host.officeLogout).toHaveBeenCalledWith("office-session-token");
     expect(screen.queryByText("Сессия офиса закончилась. Войдите снова.")).toBeNull();

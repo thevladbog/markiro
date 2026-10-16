@@ -106,7 +106,7 @@ async function openDialog(
 /** The same, once the dialog has checked the formats and offers them. */
 async function openExport(...args: Parameters<typeof openDialog>): Promise<FakeOfficeSession> {
   const session = await openDialog(...args);
-  await screen.findByRole("radiogroup");
+  await within(dialog()).findByRole("radiogroup");
   return session;
 }
 
@@ -1179,7 +1179,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
     const session = await openDialog(CLOSED_PALLETS, rows(), fakeFiles());
     expect(session.api.getShiftExportSource).toHaveBeenCalledTimes(1);
     await within(dialog()).findByText(/^Проверяем, какие форматы доступны: \d+ из 13…$/);
-    await screen.findByRole("radiogroup");
+    await within(dialog()).findByRole("radiogroup");
     expect(within(dialog()).queryByText(/^Проверяем, какие форматы/)).toBeNull();
   });
 });

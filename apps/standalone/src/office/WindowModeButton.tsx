@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button } from "@markiro/ui";
+import { IconButton } from "@markiro/ui";
 
 import { alertFailure, type AlertFailure } from "./form-errors.js";
 import { FormDialog } from "./FormDialog.js";
 import { useOfficeMutation } from "./office-query.js";
 import { useOfficeSession } from "./office-session.js";
 import { WriteFailureAlert } from "./page-state.js";
+import { OfficeIcon } from "./OfficeIcon.js";
 import { useWindowMode } from "./window-mode.js";
 
 /**
@@ -57,15 +58,16 @@ export function WindowModeButton({ onLeft }: { onLeft: () => void }) {
 
   return (
     <>
-      <Button
+      <IconButton
         variant="secondary"
+        icon={<OfficeIcon name="window" />}
+        aria-label={t("office.windowMode.open")}
+        title={t("office.windowMode.open")}
         onClick={() => {
           setFailure(null);
           setOpen(true);
         }}
-      >
-        {t("office.windowMode.open")}
-      </Button>
+      />
       {open && (
         <FormDialog
           title={t("office.windowMode.title")}

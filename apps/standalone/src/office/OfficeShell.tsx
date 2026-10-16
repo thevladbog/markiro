@@ -1,25 +1,24 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { Outlet, useLocation } from "react-router";
 
-import { Alert, Button, ConfirmDialog, cn, Sidebar, type SidebarItem } from "@markiro/ui";
+import { Alert, ConfirmDialog } from "@markiro/ui";
 
-import { HostStatusDot } from "../app/HostStatusDot.js";
 import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { DirtyGuardProvider, useDirtyRegistry } from "./dirty-guard.js";
 import { UpdateBanner } from "./banners/UpdateBanner.js";
 import { LicenseBanner } from "./LicenseBanner.js";
-import { isSettingsItem, OFFICE_NAV, type OfficeNavItem } from "./nav.js";
-import { useOfficeLink } from "./office-link.js";
+import { isMenuCollapsed } from "./menu-collapse.js";
+import { navGroups } from "./nav-groups.js";
+import { OfficeSidebar } from "./OfficeSidebar.js";
+import { OfficeTopBar } from "./OfficeTopBar.js";
 import { useOfficeSession } from "./office-session.js";
-import { ThemeSwitcher } from "./ThemeSwitcher.js";
-import { WindowModeButton } from "./WindowModeButton.js";
+import { useViewportWidth } from "./use-viewport-width.js";
 
-/** Office layout after `apps/admin/src/layout/AppShell.tsx`: sidebar, header, page. */
+/** Office layout: the menu, the top bar, the banners, the page. */
 export function OfficeShell() {
   const { t } = useTranslation();
   const session = useOfficeSession();
-  const link = useOfficeLink();
   const [passwordOpen, setPasswordOpen] = useState(false);
   // What a drawer holds unsaved: leaving the office asks first.
   const dirtyRegistry = useDirtyRegistry();
@@ -46,65 +45,32 @@ export function OfficeShell() {
   const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
   // «Выйти» returns to the office sign-in; a shell without one ends the session as before.
   const signOut = session.signOut ?? session.logout;
-  const visible = useMemo(
-    () => OFFICE_NAV.filter((item) => item.roles.includes(session.user.role)),
-    [session.user.role],
-  );
-  // Operations on top; Организация, Доступ and Сервис go to the foot of the menu.
-  const items = useMemo<SidebarItem[]>(
-    () =>
-      visible
-        .filter((item) => !isSettingsItem(item))
-        .map((item) => ({
-          to: item.to,
-          labelKey: t(item.labelKey),
-          section: t(item.sectionKey),
-        })),
-    [visible, t],
-  );
-  const settings = useMemo(() => visible.filter(isSettingsItem), [visible]);
+  const groups = useMemo(() => navGroups(session.user.role), [session.user.role]);
+  // The menu collapses below 1366 px; the user's own toggle wins over the width.
+  const width = useViewportWidth();
+  const [menuOverride, setMenuOverride] = useState<boolean | null>(null);
+  const collapsed = isMenuCollapsed(width, menuOverride);
+  const menuId = useId();
 
   return (
     <DirtyGuardProvider registry={dirtyRegistry}>
       <div className="office-shell">
-        <Sidebar
-          items={items}
-          navLabel={t("office.nav.label")}
-          renderLink={(item, content) => <MenuLink to={item.to}>{content}</MenuLink>}
-          footer={settings.length > 0 ? <SettingsMenu items={settings} /> : undefined}
-        />
+        <OfficeSidebar groups={groups} collapsed={collapsed} id={menuId} />
         <div className="office-shell__main">
-          <header className="office-header">
-            <div className="office-header__user">
-              <span className="office-header__name">{session.user.name}</span>
-              <span className="office-header__role">{t(`office.roles.${session.user.role}`)}</span>
-            </div>
-            <div className="office-header__actions">
-              <HostStatusDot status={link.status} sync={link.sync} />
-              <ThemeSwitcher />
-              <WindowModeButton onLeft={() => mainRef.current?.focus()} />
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setPasswordChangedAt(null);
-                  setPasswordOpen(true);
-                }}
-              >
-                {t("office.password.open")}
-              </Button>
-              {session.exitTo !== "sign_in" && (
-                <Button variant="secondary" onClick={() => leave(session.logout)}>
-                  {t("office.header.logout")}
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                onClick={() => leave(session.exitTo === "sign_in" ? session.logout : signOut)}
-              >
-                {t("office.header.signOut")}
-              </Button>
-            </div>
-          </header>
+          <OfficeTopBar
+            user={session.user}
+            pathname={location.pathname}
+            menuCollapsed={collapsed}
+            menuId={menuId}
+            onToggleMenu={() => setMenuOverride(!collapsed)}
+            onToFloor={session.exitTo !== "sign_in" ? () => leave(session.logout) : null}
+            onChangePassword={() => {
+              setPasswordChangedAt(null);
+              setPasswordOpen(true);
+            }}
+            onSignOut={() => leave(session.exitTo === "sign_in" ? session.logout : signOut)}
+            onWindowLeft={() => mainRef.current?.focus()}
+          />
           <LicenseBanner />
           <UpdateBanner />
           <main ref={mainRef} tabIndex={-1} className="office-shell__content">
@@ -138,50 +104,5 @@ export function OfficeShell() {
         />
       </div>
     </DirtyGuardProvider>
-  );
-}
-
-/**
- * A menu entry. No `end`: a section stays marked on its own pages («Шаблоны» on `/templates/new`)
- * and not on a path that merely begins like it («Умолчания шаблонов»). «Обзор» (`/`) is marked
- * only on `/` all the same: the router matches `/` by equality.
- */
-function MenuLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => cn("mk-sidebar__link", isActive && "mk-sidebar__link--active")}
-    >
-      {children}
-    </NavLink>
-  );
-}
-
-/**
- * The settings groups at the foot of the menu, apart from the operations by a rule; their entries
- * are the very style of the ones above (beta feedback: no smaller, lighter second half), and a
- * group's name stands over its entries as in the rest of the menu.
- */
-function SettingsMenu({ items }: { items: readonly OfficeNavItem[] }) {
-  const { t } = useTranslation();
-  return (
-    <div className="office-menu-settings">
-      <ul>
-        {items.map((item, index) => (
-          <Fragment key={item.to}>
-            {item.sectionKey !== items[index - 1]?.sectionKey && (
-              <li className="mk-sidebar__section">{t(item.sectionKey)}</li>
-            )}
-            <li>
-              <MenuLink to={item.to}>
-                <span className="mk-sidebar__content">
-                  <span>{t(item.labelKey)}</span>
-                </span>
-              </MenuLink>
-            </li>
-          </Fragment>
-        ))}
-      </ul>
-    </div>
   );
 }

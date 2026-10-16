@@ -16,6 +16,7 @@ import {
   TECHNOLOGIST,
 } from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
+import { chooseFromUserMenu, openUserMenu } from "./support/user-menu.js";
 
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -115,7 +116,7 @@ describe("Office", () => {
   it("shows who is signed in and the sections of their role", async () => {
     renderOffice(fakeOfficeSession());
     expect(await screen.findByText("Ирина Смирнова")).toBeTruthy();
-    expect(screen.getByText("администратор")).toBeTruthy();
+    expect(screen.getByText("Администратор")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Обзор" })).toBeTruthy();
     expect(screen.getByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
     expect(screen.getByText("Роль: администратор.")).toBeTruthy();
@@ -123,7 +124,7 @@ describe("Office", () => {
 
   it("names the technologist role", async () => {
     renderOffice(fakeOfficeSession({ user: { ...SESSION.user, role: "technologist" } }));
-    expect(await screen.findByText("технолог")).toBeTruthy();
+    expect(await screen.findByText("Технолог")).toBeTruthy();
   });
 
   it("leaves for the floor from the header, ending the session", async () => {
@@ -135,23 +136,27 @@ describe("Office", () => {
     expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
   });
 
-  it("signs out to the office sign-in from «Выйти», beside «Сменить пароль» (beta 3.2)", async () => {
+  it("signs out to the office sign-in from the user menu, which also holds «Сменить пароль»", async () => {
     const session = fakeOfficeSession();
     renderOffice(session);
-    const signOut = await screen.findByRole("button", { name: "Выйти" });
-    // Beside «Сменить пароль» in the header's user area.
-    expect(signOut.parentElement).toBe(
-      screen.getByRole("button", { name: "Сменить пароль" }).parentElement,
-    );
-    fireEvent.click(signOut);
+    const menu = await openUserMenu();
+    // The two entries replace the two separate buttons of the old bar.
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Сменить пароль", "Выйти из офиса"]);
+    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сменить пароль" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Выйти из офиса" }));
     expect(session.signOut).toHaveBeenCalledTimes(1);
     expect(session.logout).not.toHaveBeenCalled();
   });
 
-  it("has one way out on an office PC, which has no floor: «Выйти»", async () => {
+  it("has one way out on an office PC, which has no floor: «Выйти из офиса»", async () => {
     const session = { ...fakeOfficeSession(), exitTo: "sign_in" as const };
     renderOffice(session);
-    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    await chooseFromUserMenu("Выйти из офиса");
     expect(session.logout).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
   });
@@ -159,11 +164,12 @@ describe("Office", () => {
   it("has the theme selector in the header", async () => {
     renderOffice(fakeOfficeSession());
     const header = (await screen.findByRole("banner")) as HTMLElement;
-    const trigger = within(header).getByRole("button", { name: "Тема оформления: Тёмная" });
-    fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Светлая/ }));
+    const group = within(header).getByRole("radiogroup", { name: "Тема оформления" });
+    fireEvent.click(within(group).getByRole("radio", { name: "Светлая" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(within(header).getByRole("button", { name: "Тема оформления: Светлая" })).toBeTruthy();
+    expect(within(group).getByRole("radio", { name: "Светлая" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 
   it("offers the organization profile to both roles", async () => {
@@ -315,7 +321,7 @@ describe("ChangePasswordDialog", () => {
   });
 
   async function openDialog(): Promise<void> {
-    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    await chooseFromUserMenu("Сменить пароль");
     await screen.findByText("Смена пароля");
   }
 

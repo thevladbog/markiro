@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { IconButton, VisuallyHidden } from "@markiro/ui";
+import { Button, VisuallyHidden } from "@markiro/ui";
 
 import type { HostStatus } from "../host/protocol.js";
-import { StatusDot, type StatusDotTone } from "../lib/StatusDot.js";
+import type { StatusDotTone } from "../lib/StatusDot.js";
+import { OfficeIcon, type OfficeIconName } from "../office/OfficeIcon.js";
 import { HostStatusLine } from "./HostStatusLine.js";
 import type { SyncState } from "./shell.js";
 import "./host-status-dot.css";
@@ -21,6 +22,26 @@ export function hostDotTone(status: HostStatus | null, sync: SyncState | null): 
   if (status.state === "connecting") return "warn";
   if (sync?.failure != null || (sync?.quarantined ?? 0) > 0) return "warn";
   return "ok";
+}
+
+/** The chip's icon and short words for the link: a picture and a word, never a colour alone. */
+export function hostChipView(
+  status: HostStatus | null,
+  sync: SyncState | null,
+): { tone: StatusDotTone; icon: OfficeIconName; textKey: string } {
+  const tone = hostDotTone(status, sync);
+  if (status === null) return { tone, icon: "wifi", textKey: "office.header.chip.unknown" };
+  if (status.state === "offline") {
+    return { tone, icon: "wifiSlash", textKey: "office.header.chip.offline" };
+  }
+  if (status.state === "connecting") {
+    return { tone, icon: "sync", textKey: "office.header.chip.connecting" };
+  }
+  return {
+    tone,
+    icon: "wifi",
+    textKey: tone === "ok" ? "office.header.chip.online" : "office.header.chip.attention",
+  };
 }
 
 export interface HostStatusDotProps {
@@ -50,6 +71,7 @@ export function HostStatusDot({ status, sync }: HostStatusDotProps) {
           ? t("link.connecting")
           : t("link.offline");
   const label = t("office.header.link", { state });
+  const chip = hostChipView(status, sync);
 
   useEffect(() => {
     if (!open) return;
@@ -71,17 +93,19 @@ export function HostStatusDot({ status, sync }: HostStatusDotProps) {
 
   return (
     <div className="host-dot" ref={root}>
-      <IconButton
-        variant="secondary"
-        icon={
-          <StatusDot tone={tone} label={label} pulse={status?.state === "connecting"} decorative />
-        }
+      <Button
+        variant="ghost"
         aria-label={label}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         title={label}
         onClick={() => setOpen((value) => !value)}
-      />
+      >
+        <span className={`office-chip office-chip--${chip.tone}`}>
+          <OfficeIcon name={chip.icon} size={16} />
+          <span>{t(chip.textKey)}</span>
+        </span>
+      </Button>
       <div aria-live="polite" role="status">
         <VisuallyHidden>{label}</VisuallyHidden>
       </div>
