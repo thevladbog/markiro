@@ -21,83 +21,83 @@ Names are the .pen variables. Values for light and dark are exact. `*` = added b
 kit (existing document variables `bg surface panel fg muted line ok okbg warn warnbg
 err errbg` are unchanged). Contrast column: light / dark.
 
-| Token | Role | Dark | Light | Contrast |
-| --- | --- | --- | --- | --- |
-| `bg` | Фон экрана/страницы | `#131216` | `#FAFAF8` | — |
-| `surface` | Карточка L1 | `#1C1B21` | `#FFFFFF` | — |
-| `panel` | Функциональные вставки: трек сегмента, выбранная строка, клавиши, шапка таблицы | `#232228` | `#F0EFEA` | — |
-| `fg` | Основной текст; заливка primary-кнопки и выбранного | `#FAFAF8` | `#17161A` | 18.01 / 16.36 on `surface` |
-| `muted` | Вторичный текст | `#B6B3AB` | `#45433E` | 9.88 / 8.16 on `surface` |
-| `muted2` * | Подписи, подсказки, плейсхолдеры | `#8E8B83` | `#6B6862` | 5.55 / 5.02 on `surface` |
-| `dis` * | Disabled (вне AA по WCAG 1.4.3) | `#5B5952` | `#A5A29A` | 2.55 / 2.44 (исключён) |
-| `line` | Hairline, разделители | `#2E2D33` | `#E0DED7` | — |
-| `line2` * | Граница кнопок и карточек | `#45444B` | `#C9C6BD` | — |
-| `linectl` * | NEW: граница полей, чекбоксов, радио (UI 3:1) | `#6F6D76` | `#8A877F` | 3.59 / 3.36 on `surface` (UI) |
-| `ok` | Успех, принято, активно | `#3DDC7A` | `#116335` | 6.57 / 8.15 on `okbg` |
-| `okbg` | Фон ok | `#142E1D` | `#E7F6EC` | — |
-| `warn` | Дубль, внимание | `#FFB84D` | `#8A4C07` | 5.99 / 8.65 on `warnbg` |
-| `warnbg` | Фон warn | `#33250E` | `#FDF0DC` | — |
-| `err` | Ошибка, брак, опасное действие | `#FF6B5E` | `#A1231A` | 6.53 / 5.64 on `errbg` |
-| `errbg` | Фон err | `#391A16` | `#FDEAE7` | — |
-| `info` * | Синхронизация, план, справка | `#6DB2FF` | `#1A4F9C` | 6.84 / 6.78 on `infobg` |
-| `infobg` * | Фон info | `#152740` | `#E5EFFC` | — |
-| `done` * | Завершено штатно | `#9CC2A9` | `#3F5E4A` | 6.37 / 8.07 on `donebg` |
-| `donebg` * | Фон done | `#1A251D` | `#EDF2EE` | — |
-| `accent` * | Бренд-зелёный: свечение успеха, заливки (не текст) | `#3DDC7A` | `#0FAF56` | 2.76 / 10.41 on `bg` (только заливка) |
-| `accentui` * | NEW: индикатор вкладки, UI-акцент на bg (3:1) | `#3DDC7A` | `#0B9448` | 3.93 / 9.54 on `surface` (UI) |
-| `focus` * | Кольцо фокуса | `#6DB2FF` | `#1A4F9C` | 7.95 / 7.70 on `surface` (UI) |
-| `onerr` * | NEW: текст на сплошном err | `#391A16` | `#FFFFFF` | 7.58 / 5.64 on `err` |
-| `violet` * | Категория 1 | `#B3A0E0` | `#563091` | 8.09 / 6.93 on `violetbg` |
-| `violetbg` * | Фон категории 1 | `#241C3A` | `#F1EBFB` | — |
-| `teal` * | Категория 2 | `#79C4CB` | `#0E5B63` | 6.82 / 7.51 on `tealbg` |
-| `tealbg` * | Фон категории 2 | `#0F2B2F` | `#E2F3F5` | — |
-| `magenta` * | Категория 3 | `#E094BA` | `#8E2A63` | 6.78 / 7.06 on `magentabg` |
-| `magentabg` * | Фон категории 3 | `#32172A` | `#FBE9F3` | — |
-| `steel` * | Категория 4 | `#A9B3C4` | `#3F4756` | 7.97 / 7.59 on `steelbg` |
-| `steelbg` * | Фон категории 4 | `#1F212A` | `#EBEDF1` | — |
-| `brand1` * | NEW (light): карточка товара, градиент 1 (в dark = прежний #4e1d27) | `#4E1D27` | `#F3D5DB` | — |
-| `brand2` * | Градиент 2 (dark #281015) | `#281015` | `#F8E4E8` | — |
-| `brand3` * | Градиент 3 (dark #15090C) | `#15090C` | `#FCF1F3` | — |
-| `brandline` * | NEW: рамка карточки товара | `#5A2A34` | `#E3B8C0` | — |
-Number and string variables added: `r-card` (now 24), `r-ctl` 20, `r-sm` 12 (`r-core` 20 stays in the .pen but is unused after the one-layer revision and is not carried into code),
-`font-ui` IBM Plex Sans, `font-mono` IBM Plex Mono.
+| Token                                                                                                                                                                                | Role                                                                            | Dark      | Light     | Contrast                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | --------- | --------- | ------------------------------------- |
+| `bg`                                                                                                                                                                                 | Фон экрана/страницы                                                             | `#131216` | `#FAFAF8` | —                                     |
+| `surface`                                                                                                                                                                            | Карточка L1                                                                     | `#1C1B21` | `#FFFFFF` | —                                     |
+| `panel`                                                                                                                                                                              | Функциональные вставки: трек сегмента, выбранная строка, клавиши, шапка таблицы | `#232228` | `#F0EFEA` | —                                     |
+| `fg`                                                                                                                                                                                 | Основной текст; заливка primary-кнопки и выбранного                             | `#FAFAF8` | `#17161A` | 18.01 / 16.36 on `surface`            |
+| `muted`                                                                                                                                                                              | Вторичный текст                                                                 | `#B6B3AB` | `#45433E` | 9.88 / 8.16 on `surface`              |
+| `muted2` *                                                                                                                                                                           | Подписи, подсказки, плейсхолдеры                                                | `#8E8B83` | `#6B6862` | 5.55 / 5.02 on `surface`              |
+| `dis` *                                                                                                                                                                              | Disabled (вне AA по WCAG 1.4.3)                                                 | `#5B5952` | `#A5A29A` | 2.55 / 2.44 (исключён)                |
+| `line`                                                                                                                                                                               | Hairline, разделители                                                           | `#2E2D33` | `#E0DED7` | —                                     |
+| `line2` *                                                                                                                                                                            | Граница кнопок и карточек                                                       | `#45444B` | `#C9C6BD` | —                                     |
+| `linectl` *                                                                                                                                                                          | NEW: граница полей, чекбоксов, радио (UI 3:1)                                   | `#6F6D76` | `#8A877F` | 3.59 / 3.36 on `surface` (UI)         |
+| `ok`                                                                                                                                                                                 | Успех, принято, активно                                                         | `#3DDC7A` | `#116335` | 6.57 / 8.15 on `okbg`                 |
+| `okbg`                                                                                                                                                                               | Фон ok                                                                          | `#142E1D` | `#E7F6EC` | —                                     |
+| `warn`                                                                                                                                                                               | Дубль, внимание                                                                 | `#FFB84D` | `#8A4C07` | 5.99 / 8.65 on `warnbg`               |
+| `warnbg`                                                                                                                                                                             | Фон warn                                                                        | `#33250E` | `#FDF0DC` | —                                     |
+| `err`                                                                                                                                                                                | Ошибка, брак, опасное действие                                                  | `#FF6B5E` | `#A1231A` | 6.53 / 5.64 on `errbg`                |
+| `errbg`                                                                                                                                                                              | Фон err                                                                         | `#391A16` | `#FDEAE7` | —                                     |
+| `info` *                                                                                                                                                                             | Синхронизация, план, справка                                                    | `#6DB2FF` | `#1A4F9C` | 6.84 / 6.78 on `infobg`               |
+| `infobg` *                                                                                                                                                                           | Фон info                                                                        | `#152740` | `#E5EFFC` | —                                     |
+| `done` *                                                                                                                                                                             | Завершено штатно                                                                | `#9CC2A9` | `#3F5E4A` | 6.37 / 8.07 on `donebg`               |
+| `donebg` *                                                                                                                                                                           | Фон done                                                                        | `#1A251D` | `#EDF2EE` | —                                     |
+| `accent` *                                                                                                                                                                           | Бренд-зелёный: свечение успеха, заливки (не текст)                              | `#3DDC7A` | `#0FAF56` | 2.76 / 10.41 on `bg` (только заливка) |
+| `accentui` *                                                                                                                                                                         | NEW: индикатор вкладки, UI-акцент на bg (3:1)                                   | `#3DDC7A` | `#0B9448` | 3.93 / 9.54 on `surface` (UI)         |
+| `focus` *                                                                                                                                                                            | Кольцо фокуса                                                                   | `#6DB2FF` | `#1A4F9C` | 7.95 / 7.70 on `surface` (UI)         |
+| `onerr` *                                                                                                                                                                            | NEW: текст на сплошном err                                                      | `#391A16` | `#FFFFFF` | 7.58 / 5.64 on `err`                  |
+| `violet` *                                                                                                                                                                           | Категория 1                                                                     | `#B3A0E0` | `#563091` | 8.09 / 6.93 on `violetbg`             |
+| `violetbg` *                                                                                                                                                                         | Фон категории 1                                                                 | `#241C3A` | `#F1EBFB` | —                                     |
+| `teal` *                                                                                                                                                                             | Категория 2                                                                     | `#79C4CB` | `#0E5B63` | 6.82 / 7.51 on `tealbg`               |
+| `tealbg` *                                                                                                                                                                           | Фон категории 2                                                                 | `#0F2B2F` | `#E2F3F5` | —                                     |
+| `magenta` *                                                                                                                                                                          | Категория 3                                                                     | `#E094BA` | `#8E2A63` | 6.78 / 7.06 on `magentabg`            |
+| `magentabg` *                                                                                                                                                                        | Фон категории 3                                                                 | `#32172A` | `#FBE9F3` | —                                     |
+| `steel` *                                                                                                                                                                            | Категория 4                                                                     | `#A9B3C4` | `#3F4756` | 7.97 / 7.59 on `steelbg`              |
+| `steelbg` *                                                                                                                                                                          | Фон категории 4                                                                 | `#1F212A` | `#EBEDF1` | —                                     |
+| `brand1` *                                                                                                                                                                           | NEW (light): карточка товара, градиент 1 (в dark = прежний #4e1d27)             | `#4E1D27` | `#F3D5DB` | —                                     |
+| `brand2` *                                                                                                                                                                           | Градиент 2 (dark #281015)                                                       | `#281015` | `#F8E4E8` | —                                     |
+| `brand3` *                                                                                                                                                                           | Градиент 3 (dark #15090C)                                                       | `#15090C` | `#FCF1F3` | —                                     |
+| `brandline` *                                                                                                                                                                        | NEW: рамка карточки товара                                                      | `#5A2A34` | `#E3B8C0` | —                                     |
+| Number and string variables added: `r-card` (now 24), `r-ctl` 20, `r-sm` 12 (`r-core` 20 stays in the .pen but is unused after the one-layer revision and is not carried into code), |
+| `font-ui` IBM Plex Sans, `font-mono` IBM Plex Mono.                                                                                                                                  |
 
 ### 1.1 WCAG contrast (computed in code, WCAG 2.x relative luminance)
 
 Text pairs need 4.5:1; UI pairs (focus ring, input borders, tab indicator) 3:1.
 
-| Pair | Target | Light | Dark |
-| --- | --- | --- | --- |
-| `fg` on `bg` | 4.5 | 17.23 pass | 17.85 pass |
-| `fg` on `surface` | 4.5 | 18.01 pass | 16.36 pass |
-| `fg` on `panel` | 4.5 | 15.64 pass | 15.10 pass |
-| `muted` on `bg` | 4.5 | 9.45 pass | 8.90 pass |
-| `muted` on `surface` | 4.5 | 9.88 pass | 8.16 pass |
-| `muted` on `panel` | 4.5 | 8.58 pass | 7.53 pass |
-| `muted2` on `bg` | 4.5 | 5.31 pass | 5.48 pass |
-| `muted2` on `surface` | 4.5 | 5.55 pass | 5.02 pass |
-| `muted2` on `panel` | 4.5 | 4.82 pass | 4.64 pass |
-| `bg` on `fg` | 4.5 | 17.23 pass | 17.85 pass |
-| `onerr` on `err` | 4.5 | 7.58 pass | 5.64 pass |
-| `fg` on `brand1` | 4.5 | 13.16 pass | 13.14 pass |
-| `ok` on `okbg` | 4.5 | 6.57 pass | 8.15 pass |
-| `warn` on `warnbg` | 4.5 | 5.99 pass | 8.65 pass |
-| `err` on `errbg` | 4.5 | 6.53 pass | 5.64 pass |
-| `info` on `infobg` | 4.5 | 6.84 pass | 6.78 pass |
-| `done` on `donebg` | 4.5 | 6.37 pass | 8.07 pass |
-| `violet` on `violetbg` | 4.5 | 8.09 pass | 6.93 pass |
-| `teal` on `tealbg` | 4.5 | 6.82 pass | 7.51 pass |
-| `magenta` on `magentabg` | 4.5 | 6.78 pass | 7.06 pass |
-| `steel` on `steelbg` | 4.5 | 7.97 pass | 7.59 pass |
-| `ok` on `surface` | 4.5 | 7.34 pass | 9.54 pass |
-| `err` on `surface` | 4.5 | 7.58 pass | 6.12 pass |
-| `focus` on `bg` | 3 | 7.60 pass | 8.41 pass |
-| `accent` on `bg` | 3 | 2.76 FAIL | 10.41 pass |
-| `accentui` on `bg` | 3 | 3.76 pass | 10.41 pass |
-| `line2` on `surface` | 3 | 1.71 FAIL | 1.78 FAIL |
-| `linectl` on `surface` | 3 | 3.59 pass | 3.36 pass |
-| `linectl` on `panel` | 3 | 3.12 pass | 3.10 pass |
-Pairs below AA in the current system and the fixes proposed:
+| Pair                                                         | Target | Light      | Dark       |
+| ------------------------------------------------------------ | ------ | ---------- | ---------- |
+| `fg` on `bg`                                                 | 4.5    | 17.23 pass | 17.85 pass |
+| `fg` on `surface`                                            | 4.5    | 18.01 pass | 16.36 pass |
+| `fg` on `panel`                                              | 4.5    | 15.64 pass | 15.10 pass |
+| `muted` on `bg`                                              | 4.5    | 9.45 pass  | 8.90 pass  |
+| `muted` on `surface`                                         | 4.5    | 9.88 pass  | 8.16 pass  |
+| `muted` on `panel`                                           | 4.5    | 8.58 pass  | 7.53 pass  |
+| `muted2` on `bg`                                             | 4.5    | 5.31 pass  | 5.48 pass  |
+| `muted2` on `surface`                                        | 4.5    | 5.55 pass  | 5.02 pass  |
+| `muted2` on `panel`                                          | 4.5    | 4.82 pass  | 4.64 pass  |
+| `bg` on `fg`                                                 | 4.5    | 17.23 pass | 17.85 pass |
+| `onerr` on `err`                                             | 4.5    | 7.58 pass  | 5.64 pass  |
+| `fg` on `brand1`                                             | 4.5    | 13.16 pass | 13.14 pass |
+| `ok` on `okbg`                                               | 4.5    | 6.57 pass  | 8.15 pass  |
+| `warn` on `warnbg`                                           | 4.5    | 5.99 pass  | 8.65 pass  |
+| `err` on `errbg`                                             | 4.5    | 6.53 pass  | 5.64 pass  |
+| `info` on `infobg`                                           | 4.5    | 6.84 pass  | 6.78 pass  |
+| `done` on `donebg`                                           | 4.5    | 6.37 pass  | 8.07 pass  |
+| `violet` on `violetbg`                                       | 4.5    | 8.09 pass  | 6.93 pass  |
+| `teal` on `tealbg`                                           | 4.5    | 6.82 pass  | 7.51 pass  |
+| `magenta` on `magentabg`                                     | 4.5    | 6.78 pass  | 7.06 pass  |
+| `steel` on `steelbg`                                         | 4.5    | 7.97 pass  | 7.59 pass  |
+| `ok` on `surface`                                            | 4.5    | 7.34 pass  | 9.54 pass  |
+| `err` on `surface`                                           | 4.5    | 7.58 pass  | 6.12 pass  |
+| `focus` on `bg`                                              | 3      | 7.60 pass  | 8.41 pass  |
+| `accent` on `bg`                                             | 3      | 2.76 FAIL  | 10.41 pass |
+| `accentui` on `bg`                                           | 3      | 3.76 pass  | 10.41 pass |
+| `line2` on `surface`                                         | 3      | 1.71 FAIL  | 1.78 FAIL  |
+| `linectl` on `surface`                                       | 3      | 3.59 pass  | 3.36 pass  |
+| `linectl` on `panel`                                         | 3      | 3.12 pass  | 3.10 pass  |
+| Pairs below AA in the current system and the fixes proposed: |
 
 1. `accent` `#0FAF56` on `bg` (light) is 2.76:1 — below 3:1 as an active-tab
    indicator. Fix: new token `accentui` = `#0B9448` (3.76:1 on bg, 3.93 on surface,
@@ -119,15 +119,15 @@ Pairs below AA in the current system and the fixes proposed:
 Only Plex Sans and Plex Mono. All numbers, counters and codes are Plex Mono
 (tabular). Floor minimum 18 px, office minimum 12 px.
 
-| Role | Floor (touch) | Office (desktop) |
-| --- | --- | --- |
-| Counter XL / Counter / Counter S | Mono 600, 96/100, 64/68, 48/52 | Mono 600 28–44 (KPI) |
-| Display / Title | Sans 700 32/38 (was 28) | Display 700 32/38, H1 700 28/34 |
-| Heading | Sans 600 24/30 (was 22) | H2 600 20/26, H3 600 16/22 |
-| Body strong | Sans 600 20/28 (was 18) | Body L 400 16/24 |
-| Body | Sans 400 18/26 | Body 400 14/20, Body S 13/18 |
-| Caption | not used below 18 | Caption 500 12/16 |
-| Code / meta | Mono 400 18/26 | Mono 400 13/18, 12/16 |
+| Role                             | Floor (touch)                  | Office (desktop)                |
+| -------------------------------- | ------------------------------ | ------------------------------- |
+| Counter XL / Counter / Counter S | Mono 600, 96/100, 64/68, 48/52 | Mono 600 28–44 (KPI)            |
+| Display / Title                  | Sans 700 32/38 (was 28)        | Display 700 32/38, H1 700 28/34 |
+| Heading                          | Sans 600 24/30 (was 22)        | H2 600 20/26, H3 600 16/22      |
+| Body strong                      | Sans 600 20/28 (was 18)        | Body L 400 16/24                |
+| Body                             | Sans 400 18/26                 | Body 400 14/20, Body S 13/18    |
+| Caption                          | not used below 18              | Caption 500 12/16               |
+| Code / meta                      | Mono 400 18/26                 | Mono 400 13/18, 12/16           |
 
 ## 3. Spacing, radii, levels (one layer)
 
@@ -157,29 +157,29 @@ Reusable components in the .pen (instances via `ref`, theme-aware through variab
 `Button`, `Chip`, `Switch`, `Field`, `NavItem`, `Tab`, `Alert` (with a nested
 `Button`). Everything else is composed from these inside the boards.
 
-| Component | Variants | Sizes | States | Notes |
-| --- | --- | --- | --- | --- |
-| Button | primary (`fg`), secondary (`surface`+`line2`), danger (`err`), ghost | floor 84 (r28, 22 px label) and 64 (r22, 20 px); office 44 (r16) and 36 (r12) | default, pressed (scale 0.97, 150 ms), focus (3 px `focus` ring outside), disabled (`panel`, `dis`), loading (spinner, label "Загрузка…") | label is always text; icon optional |
-| Segmented | 2–4 options | floor 64, office 36 | selected = `fg` fill + check + weight 600 | |
-| Switch / switch card | on, off | 56×32 | on shows a check inside the knob | switch card is ONE L1 card; selected = 2 px `fg` border + the switch + the word «Включено» |
-| Text / number / date / select field | label, hint, error, read-only, disabled | office 44 (r16), floor 64 (r22) | focus, error (2 px `err` border, "Ошибка ·" prefix, icon) | border uses `linectl` |
-| Search | pill | 44 | | |
-| Checkbox / radio | | 28 box, 44 row target (office), 64 (floor) | checked = fill + check/dot, disabled, error | |
-| Keypad + readout | 3×4 | key 76–96 high | pressed | keys (`panel` faces) on one flat `surface` panel; readout is a plain bordered field, 2 px `fg` only when active |
-| Alert | info, ok, warn, err | width fill | optional action | icon on the first text line; action sits right with a 14 px gap; banner variant for licence/trial |
-| Toast | ok, err, info | 520 | | overlay shadow; errors do not auto-close |
-| Chip / phase tag | 11 phases + 4 category tones | office 22, floor 34, wall 40 | | glyph and tone derive from the phase only (see §6) |
-| Empty state, skeleton | | | | static skeleton (no shimmer under reduced motion) |
-| Confirm dialog, modal, drawer | | modal 560, drawer 520–720 | | L2: single surface + shadow; focus trap; Esc |
-| Sidebar | expanded 272, collapsed 76 | item 44 / 52 | active = `fg` fill, inverse text, weight 600 | ONE item style; group labels 11 px caps |
-| Tabs | | | active = bold + single 3 px `accentui` bar; focus = 3 px ring | no text underline anywhere |
-| Breadcrumbs, page header, theme selector | | | | selector: Системная (default) · Светлая · Тёмная, selected carries a check |
-| SaaS rail | numbered items 01–10 | 44 | active = `fg` fill | numbers are Plex Mono |
-| Table | header 44, row 56 (dense 44) | | selected row: checkbox + `panel` fill + 4 px `fg` bar + weight 600; empty / loading / error | row actions 36 |
-| Pagination | page size 10/25/50/100, default 10 | 44 | first/prev/next/last, disabled | "Показано N–M из K" |
-| Filters row | label above, hint below, aligned | 44 | | |
-| Definition list, KPI, history row | | | | "Принято в смене" is the single large counter (Mono 600 96) |
-| Photo square | any aspect | 132 | | one rounded frame (r 18–20, hairline), image `contain` |
+| Component                                | Variants                                                             | Sizes                                                                         | States                                                                                                                                    | Notes                                                                                                           |
+| ---------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Button                                   | primary (`fg`), secondary (`surface`+`line2`), danger (`err`), ghost | floor 84 (r28, 22 px label) and 64 (r22, 20 px); office 44 (r16) and 36 (r12) | default, pressed (scale 0.97, 150 ms), focus (3 px `focus` ring outside), disabled (`panel`, `dis`), loading (spinner, label "Загрузка…") | label is always text; icon optional                                                                             |
+| Segmented                                | 2–4 options                                                          | floor 64, office 36                                                           | selected = `fg` fill + check + weight 600                                                                                                 |                                                                                                                 |
+| Switch / switch card                     | on, off                                                              | 56×32                                                                         | on shows a check inside the knob                                                                                                          | switch card is ONE L1 card; selected = 2 px `fg` border + the switch + the word «Включено»                      |
+| Text / number / date / select field      | label, hint, error, read-only, disabled                              | office 44 (r16), floor 64 (r22)                                               | focus, error (2 px `err` border, "Ошибка ·" prefix, icon)                                                                                 | border uses `linectl`                                                                                           |
+| Search                                   | pill                                                                 | 44                                                                            |                                                                                                                                           |                                                                                                                 |
+| Checkbox / radio                         |                                                                      | 28 box, 44 row target (office), 64 (floor)                                    | checked = fill + check/dot, disabled, error                                                                                               |                                                                                                                 |
+| Keypad + readout                         | 3×4                                                                  | key 76–96 high                                                                | pressed                                                                                                                                   | keys (`panel` faces) on one flat `surface` panel; readout is a plain bordered field, 2 px `fg` only when active |
+| Alert                                    | info, ok, warn, err                                                  | width fill                                                                    | optional action                                                                                                                           | icon on the first text line; action sits right with a 14 px gap; banner variant for licence/trial               |
+| Toast                                    | ok, err, info                                                        | 520                                                                           |                                                                                                                                           | overlay shadow; errors do not auto-close                                                                        |
+| Chip / phase tag                         | 11 phases + 4 category tones                                         | office 22, floor 34, wall 40                                                  |                                                                                                                                           | glyph and tone derive from the phase only (see §6)                                                              |
+| Empty state, skeleton                    |                                                                      |                                                                               |                                                                                                                                           | static skeleton (no shimmer under reduced motion)                                                               |
+| Confirm dialog, modal, drawer            |                                                                      | modal 560, drawer 520–720                                                     |                                                                                                                                           | L2: single surface + shadow; focus trap; Esc                                                                    |
+| Sidebar                                  | expanded 272, collapsed 76                                           | item 44 / 52                                                                  | active = `fg` fill, inverse text, weight 600                                                                                              | ONE item style; group labels 11 px caps                                                                         |
+| Tabs                                     |                                                                      |                                                                               | active = bold + single 3 px `accentui` bar; focus = 3 px ring                                                                             | no text underline anywhere                                                                                      |
+| Breadcrumbs, page header, theme selector |                                                                      |                                                                               |                                                                                                                                           | selector: Системная (default) · Светлая · Тёмная, selected carries a check                                      |
+| SaaS rail                                | numbered items 01–10                                                 | 44                                                                            | active = `fg` fill                                                                                                                        | numbers are Plex Mono                                                                                           |
+| Table                                    | header 44, row 56 (dense 44)                                         |                                                                               | selected row: checkbox + `panel` fill + 4 px `fg` bar + weight 600; empty / loading / error                                               | row actions 36                                                                                                  |
+| Pagination                               | page size 10/25/50/100, default 10                                   | 44                                                                            | first/prev/next/last, disabled                                                                                                            | "Показано N–M из K"                                                                                             |
+| Filters row                              | label above, hint below, aligned                                     | 44                                                                            |                                                                                                                                           |                                                                                                                 |
+| Definition list, KPI, history row        |                                                                      |                                                                               |                                                                                                                                           | "Принято в смене" is the single large counter (Mono 600 96)                                                     |
+| Photo square                             | any aspect                                                           | 132                                                                           |                                                                                                                                           | one rounded frame (r 18–20, hairline), image `contain`                                                          |
 
 ## 5. Accessibility rules
 
@@ -220,6 +220,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
 ## 8. Migration map (packages/ui and station `--floor-*`)
 
 ### Stays
+
 - Colour semantics and values of: `--surface-page/card/panel` (= `bg/surface/panel`),
   `--fg-1/2` (= `fg/muted`), `--line`, all `--ok-* --err-* --warn-* --info-*` text and
   bg values, `--done-*`, `--cat-*`, `--focus-ring`, the dark theme values.
@@ -230,6 +231,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
   only).
 
 ### Changes
+
 - `--surface-inverse`/`--fg-1` become the primary-button fill (`fg`): the current
   primary is `--ink`; value is the same, the role name changes to `fg`.
 - Radii: `--r-1..3` (4/8/12) → 12/16/20/24; office controls `--control-md` 40 → 44,
@@ -248,6 +250,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
 - Alert: icon on first line, action aligned with a gap; banner variant added.
 
 ### New
+
 - Tokens: `muted2`(alias), `linectl`, `accentui`, `onerr`, `brand1..3`, `brandline`,
   `r-card` 24, `r-ctl`, `r-sm`, motion tokens (`press-scale`, `press-ms`, `ease`).
 - Components: switch card (single L1), flat keypad + readout, theme selector, photo
@@ -255,6 +258,7 @@ lists; hard-code hex in new components; use more than one large counter per scre
 - Light-theme counterpart of the product-card gradient.
 
 ### Removed
+
 - Hard-coded gradient/stroke hexes on the product card (`#4e1d27…`, `#5a2a34`).
 - `--mk-surface-*`, `--mk-border-*`, `--mk-accent-operational` aliases once nothing
   imports them; `--mk-radius-operational`; dpi column in template lists (already out
