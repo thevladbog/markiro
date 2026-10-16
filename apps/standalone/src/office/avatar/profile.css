@@ -1,0 +1,183 @@
+/* «Профиль»: the identity, the photo (the crop, the states) and the data. Tokens only. */
+.profile {
+  display: grid;
+  gap: 20px;
+}
+
+.profile__identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile__who {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profile__name {
+  font: 600 18px/24px var(--font-ui);
+}
+
+.profile__meta {
+  color: var(--fg-3);
+  font: 400 13px/18px var(--font-ui);
+}
+
+.profile__section {
+  display: grid;
+  gap: 12px;
+}
+
+/* A section label: 11 px caps like the menu's group labels. */
+.profile__section-title {
+  margin: 0;
+  color: var(--fg-3);
+  font: 600 11px/16px var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.profile__hint {
+  margin: 0;
+  color: var(--fg-3);
+  font: 400 12px/16px var(--font-ui);
+}
+
+.profile__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* The drop zone and «Убрать фото» side by side; an error turns the frame to `err`, with the Alert under it. */
+.profile__zone {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+}
+
+.profile__zone--error {
+  border: 2px solid var(--err);
+}
+
+.profile__zone > .mk-file-drop {
+  width: 100%;
+}
+
+.profile__uploading {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+}
+
+/* An indeterminate bar: a still band, so nothing moves for a person who asked for less motion. */
+.profile__progress {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--fg-1) 0 40%, var(--surface-panel) 40% 100%);
+}
+
+.profile-crop {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.profile-crop__view {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 20px;
+  background: var(--surface-panel);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.profile-crop__view:active {
+  cursor: grabbing;
+}
+
+.profile-crop__view:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The circle shows what stays: everything outside it is dimmed. */
+.profile-crop__circle {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--surface-page) 62%, transparent);
+  outline: 2px solid var(--fg-1);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+
+.profile-crop__side {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.profile-crop__help {
+  margin: 0;
+  color: var(--fg-2);
+  font: 400 13px/18px var(--font-ui);
+}
+
+.profile-crop__previews {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.profile-crop__preview {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-panel);
+}
+
+.profile-crop__scale {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-crop__scale-label {
+  color: var(--fg-2);
+  font: 500 13px/18px var(--font-ui);
+}
+
+.profile-crop__scale-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.profile-crop__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* «Разобран: [аватар] Иванов П., время» in the conflicts list. */
+.conflict-reviewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

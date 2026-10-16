@@ -16,6 +16,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { hasRowAction, pressRowAction } from "./support/row-menu.js";
 
 const TECH_ID = TECHNOLOGIST.id;
 
@@ -90,13 +91,11 @@ describe("office users", () => {
     const own = rowOf("admin");
     expect(within(own).getByText("это вы")).toBeTruthy();
     expect(within(own).getByText("Администратор")).toBeTruthy();
-    expect(within(own).queryByRole("button", { name: /Задать пароль/ })).toBeNull();
+    expect(hasRowAction(within(own), /Задать пароль/)).toBe(false);
     const tech = rowOf("tech");
     expect(within(tech).getByText("Технолог")).toBeTruthy();
     expect(within(tech).getByText("Входит в офис")).toBeTruthy();
-    expect(
-      within(tech).getByRole("button", { name: "Задать пароль пользователю tech" }),
-    ).toBeTruthy();
+    expect(hasRowAction(within(tech), "Задать пароль пользователю tech")).toBe(true);
   });
 
   it("adds a user", async () => {
@@ -175,7 +174,7 @@ describe("office users", () => {
     // `localeCompare`, would put `A_bc` first instead.
     const table = screen.getByRole("table");
     const rows = within(table).getAllByRole("row").slice(1);
-    const logins = rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    const logins = rows.map((row) => within(row).getAllByRole("cell")[1]?.textContent);
     expect(logins).toEqual(["a-bc", "A_bc", "abc"]);
   });
 
@@ -350,7 +349,7 @@ describe("office users", () => {
     const session = adminSession();
     session.api.setUserPassword.mockResolvedValue(undefined);
     await openUsers(session);
-    fireEvent.click(screen.getByRole("button", { name: "Задать пароль пользователю tech" }));
+    pressRowAction(within(rowOf("tech")), "Задать пароль пользователю tech");
     expect(
       within(dialog()).getByText(
         "Пользователь войдёт с новым паролем; его сессии на всех устройствах закроются.",
@@ -362,6 +361,74 @@ describe("office users", () => {
     expect(await screen.findByText("Пароль пользователя tech изменён.")).toBeTruthy();
     expect(session.api.setUserPassword).toHaveBeenCalledWith("office-session-token", TECH_ID, {
       password: "a brand new password",
+    });
+  });
+
+  describe("photos", () => {
+    const WITH_PHOTO: OfficeUserRecord[] = OFFICE_USERS.map((user) =>
+      user.id === TECH_ID ? { ...user, avatarVersion: 7 } : user,
+    );
+    const photoState = {
+      avatar: {
+        width: 256,
+        height: 256,
+        dataBase64: "QUJD",
+        mediaType: "image/webp" as const,
+        checksum: "a".repeat(64),
+        version: 7,
+        updatedAt: "2026-10-17T10:00:00Z",
+      },
+    };
+
+    it("leads each row with the person's avatar: the photo where there is one, initials otherwise", async () => {
+      const session = adminSession();
+      session.api.listUsers.mockResolvedValue(WITH_PHOTO);
+      session.api.getUserAvatar.mockResolvedValue(photoState);
+      await openUsers(session);
+      const tech = rowOf("tech");
+      await waitFor(() =>
+        expect(tech.querySelector("img.user-avatar--photo")?.getAttribute("src")).toBe(
+          "data:image/webp;base64,QUJD",
+        ),
+      );
+      expect(rowOf("admin").querySelector(".user-avatar")?.textContent).toBe("ИС");
+      // Only the user with a version was read.
+      expect(session.api.getUserAvatar).toHaveBeenCalledTimes(1);
+      expect(session.api.getUserAvatar.mock.calls[0]?.[1]).toBe(TECH_ID);
+    });
+
+    it("lets an administrator take another user's photo down, after a confirmation", async () => {
+      const session = adminSession();
+      session.api.listUsers.mockResolvedValue(WITH_PHOTO);
+      session.api.getUserAvatar.mockResolvedValue(photoState);
+      session.api.deleteUserAvatar.mockResolvedValue({ avatar: null });
+      await openUsers(session);
+      pressRowAction(within(rowOf("tech")), "Убрать фото пользователя tech");
+      const confirm = await screen.findByRole("alertdialog", {
+        name: "Убрать фото пользователя tech?",
+      });
+      // Nothing is sent before the confirmation.
+      expect(session.api.deleteUserAvatar).not.toHaveBeenCalled();
+      fireEvent.click(within(confirm).getByRole("button", { name: "Убрать фото" }));
+      expect(await screen.findByText("Фото пользователя tech убрано.")).toBeTruthy();
+      expect(session.api.deleteUserAvatar).toHaveBeenCalledWith(expect.any(String), TECH_ID);
+      // Another's photo: the signed-in user's own header is not re-read.
+      expect(session.refreshUser).not.toHaveBeenCalled();
+    });
+
+    it("offers nothing to take down for a user without a photo, and «Отмена» sends nothing", async () => {
+      const session = adminSession();
+      session.api.listUsers.mockResolvedValue(WITH_PHOTO);
+      session.api.getUserAvatar.mockResolvedValue(photoState);
+      await openUsers(session);
+      expect(hasRowAction(within(rowOf("admin")), /Убрать фото/)).toBe(false);
+      pressRowAction(within(rowOf("tech")), "Убрать фото пользователя tech");
+      const confirm = await screen.findByRole("alertdialog", {
+        name: "Убрать фото пользователя tech?",
+      });
+      fireEvent.click(within(confirm).getByRole("button", { name: "Отмена" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(session.api.deleteUserAvatar).not.toHaveBeenCalled();
     });
   });
 });

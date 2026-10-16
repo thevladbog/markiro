@@ -159,6 +159,16 @@ const PATHS = {
     </>
   ),
   list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  image: (
+    <>
+      <rect x="3.500" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.500" />
+      <path d="M4 17l5-4.500 4 3.500 3-2.500 4 3.500" />
+    </>
+  ),
+  upload: <path d="M12 16V5m0 0L8 9m4-4l4 4M5 19h14" />,
+  crop: <path d="M7 3v14h14M3 7h14v14" />,
+  minus: <path d="M5 12h14" />,
   circleX: (
     <>
       <circle cx="12" cy="12" r="9" />

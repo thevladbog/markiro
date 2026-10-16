@@ -20,6 +20,7 @@ export interface OfficeTopBarProps {
   onToggleMenu: () => void;
   /** «Выйти в цех»; `null` where the office has no floor to go to. */
   onToFloor: (() => void) | null;
+  onProfile: () => void;
   onChangePassword: () => void;
   onSignOut: () => void;
   /** The window left kiosk mode: the focus goes to the page. */
@@ -38,6 +39,7 @@ export function OfficeTopBar({
   menuId,
   onToggleMenu,
   onToFloor,
+  onProfile,
   onChangePassword,
   onSignOut,
   onWindowLeft,
@@ -89,9 +91,12 @@ export function OfficeTopBar({
           </Button>
         )}
         <UserMenu
+          userId={user.id}
+          avatarVersion={user.avatarVersion}
           name={user.name}
           login={user.login}
           roleLabel={t(`office.users.roles.${user.role}`)}
+          onProfile={onProfile}
           onChangePassword={onChangePassword}
           onSignOut={onSignOut}
         />

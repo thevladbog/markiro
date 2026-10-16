@@ -33,6 +33,7 @@ import { usePageSize } from "../paging/page-size.js";
 import { useHostWindowRows } from "../paging/use-host-window.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 import { searchableSelect } from "../select-search.js";
+import { UserAvatar } from "../UserAvatar.js";
 import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
 import {
   conflictKindKey,
@@ -242,11 +243,14 @@ export function ConflictsPage() {
         row.reviewedAt !== null ? (
           <span className="shift-cell">
             <StatusChip phase="done" label={t("office.conflicts.reviewed")} />
-            <span className="shift-cell__quiet">
-              {t("office.conflicts.reviewedBy", {
-                name: row.reviewedByName ?? t("office.common.none"),
-                at: at(row.reviewedAt),
-              })}
+            <span className="shift-cell__quiet conflict-reviewer">
+              {row.reviewedByName !== null && <UserAvatar name={row.reviewedByName} size={20} />}
+              <span>
+                {t("office.conflicts.reviewedBy", {
+                  name: row.reviewedByName ?? t("office.common.none"),
+                  at: at(row.reviewedAt),
+                })}
+              </span>
             </span>
           </span>
         ) : (

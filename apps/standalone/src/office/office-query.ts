@@ -39,6 +39,11 @@ export const officeKeys = {
   productPhoto: (id: string) => ["office", "product-photo", id],
   /** A list row's thumbnail: keyed by the photo's checksum, so a changed photo is read again. */
   productThumb: (id: string, checksum: string) => ["office", "product-thumb", id, checksum],
+  /**
+   * An office user's photo (plan АВА, `GET /v1/office/users/{id}/avatar`), keyed by the user's
+   * `avatarVersion`: a changed photo has a new version, so it is read once and never again.
+   */
+  userAvatar: (id: string, version: number) => ["office", "user-avatar", id, version],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
   /** The copies of the database in both folders (plan РК). */
