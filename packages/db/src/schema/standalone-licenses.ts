@@ -84,12 +84,19 @@ export const standaloneLicenseIssuances = pgTable(
      * Owner decision 2026-10-13: `subscription` derives the rights from the
      * tenant's cloud subscription; `offline` from the operator's offline terms
      * (a catalog plan version and a term of at most a year) for a tenant
-     * without a cabinet — it never grants cloud access.
+     * without a cabinet — it never grants cloud access. Spec 2026-10-16:
+     * `offline_assignments` derives the rights from the direct assignments of a
+     * tenant without a cabinet; `offline` rows stay in the journal read-only.
      */
-    source: text("source").$type<"subscription" | "offline">().notNull(),
+    source: text("source").$type<"subscription" | "offline" | "offline_assignments">().notNull(),
     validUntilReason: text("valid_until_reason")
       .$type<"subscription_end" | "entitlement_reduction" | "one_year_cap" | "offline_term">()
       .notNull(),
+    /** The plan and add-on rows an `offline_assignments` file was issued from (spec 2026-10-16). */
+    sourceAssignments:
+      jsonb("source_assignments").$type<
+        Array<{ kind: "plan" | "addon"; id: string; catalogVersionId: string }>
+      >(),
     replacesId: uuid("replaces_id"),
     issuedByPlatformUserId: text("issued_by_platform_user_id")
       .notNull()
@@ -116,7 +123,7 @@ export const standaloneLicenseIssuances = pgTable(
     }),
     check(
       "standalone_license_issuances_shape_check",
-      sql`${t.sequence} > 0 and ${t.graceDays} between 0 and 60 and ${t.plan} in ('demo','subscription') and (${t.plan} <> 'demo' or ${t.graceDays} = 0) and ${t.sha256} ~ '^[0-9a-f]{64}$' and length(btrim(${t.kid})) between 1 and 128 and octet_length(${t.compact}) between 1 and 16384 and ${t.entitlementRevision} >= 0 and ${t.validUntilReason} in ('subscription_end','entitlement_reduction','one_year_cap','offline_term') and ${t.source} in ('subscription','offline') and ((${t.source} = 'offline') = (${t.validUntilReason} = 'offline_term')) and (${t.source} <> 'offline' or ${t.plan} = 'subscription')`,
+      sql`${t.sequence} > 0 and ${t.graceDays} between 0 and 60 and ${t.plan} in ('demo','subscription') and (${t.plan} <> 'demo' or ${t.graceDays} = 0) and ${t.sha256} ~ '^[0-9a-f]{64}$' and length(btrim(${t.kid})) between 1 and 128 and octet_length(${t.compact}) between 1 and 16384 and ${t.entitlementRevision} >= 0 and ${t.validUntilReason} in ('subscription_end','entitlement_reduction','one_year_cap','offline_term') and ${t.source} in ('subscription','offline','offline_assignments') and ((${t.source} = 'offline') = (${t.validUntilReason} = 'offline_term')) and (${t.source} not in ('offline','offline_assignments') or ${t.plan} = 'subscription') and ((${t.source} = 'offline_assignments') = (${t.sourceAssignments} is not null)) and (${t.sourceAssignments} is null or (jsonb_typeof(${t.sourceAssignments}) = 'array' and jsonb_array_length(${t.sourceAssignments}) between 1 and 65))`,
     ),
     check(
       "standalone_license_issuances_interval_check",
