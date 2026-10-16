@@ -116,8 +116,8 @@
   align-content: center;
   justify-content: stretch !important;
   justify-items: start;
-  border-color: var(--line) !important;
-  border-radius: var(--r-3) !important;
+  /* The border colour is the kit's (`line2`, floor-kit.css): a `--line` here made the cards fainter than every other button. */
+  border-radius: var(--floor-r-card) !important;
   text-align: left;
 }
 
@@ -173,7 +173,7 @@
   align-items: center;
   padding: var(--sp-3);
   border: 2px dashed var(--line-strong);
-  border-radius: var(--r-2);
+  border-radius: var(--floor-r-ctl);
 }
 
 .exception-target__scan-glyph {
@@ -192,8 +192,9 @@
   margin: 0;
   padding: var(--sp-3);
   overflow: hidden;
-  border: 2px solid var(--focus-ring);
-  border-radius: var(--r-2);
+  /* The kit's active field: a 2 px `fg` border (it was the blue accent ring, and a red one for the destructive actions). */
+  border: 2px solid var(--fg);
+  border-radius: var(--floor-r-ctl);
   background: var(--surface-card);
   color: var(--fg-1) !important;
   font: 600 22px/30px var(--font-mono) !important;
@@ -205,10 +206,6 @@
   color: var(--fg-3) !important;
   font: 400 16px/30px var(--font-ui) !important;
   white-space: normal;
-}
-
-.exception-stage--target[data-action$="disassemble"] .sscc-search__field {
-  border-color: var(--err-border);
 }
 
 .sscc-search__pad {

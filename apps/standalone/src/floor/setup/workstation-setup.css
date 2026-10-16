@@ -43,39 +43,46 @@ section.workstation-setup {
   min-height: 0;
   overflow: hidden;
   gap: var(--sp-2);
-  grid-template-rows: 64px minmax(0, 1fr);
+  /* The track is 64 px of tab plus its 6 px padding and hairline: a fixed 64 px row cut it. */
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* The kit's segmented track: tabs take the width of their words («Проверка сканера» was cut in a quarter of 780 px). */
 .setup-tabs__list.mk-data-tabs {
-  display: grid;
+  display: flex;
+  width: fit-content;
   min-width: 0;
-  width: min(780px, 100%);
+  max-width: 100%;
+  padding: 6px;
   overflow: hidden;
   gap: 6px;
-  border: 0;
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: calc(var(--floor-r-ctl) + 6px);
+  background: var(--panel);
 }
 
 .setup-tabs__list .mk-data-tabs__tab {
   justify-content: center;
+  flex: 0 1 auto;
   min-width: 0;
   min-height: 64px;
-  padding: 0 var(--sp-3);
+  padding: 0 var(--sp-5);
   overflow: hidden;
   border: 0;
-  border-radius: calc(var(--r-2) - 4px);
+  border-radius: var(--floor-r-ctl);
   background: transparent;
-  color: var(--fg-3);
+  color: var(--muted);
   font: var(--floor-body-strong);
   text-overflow: ellipsis;
+  white-space: nowrap;
   touch-action: manipulation;
 }
 
+/* Selected = `fg` fill (kit §4): the weight and the fill say it, not the colour alone. */
 .setup-tabs__list .mk-data-tabs__tab--active {
-  background: var(--surface-panel);
-  color: var(--fg-1);
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 700;
 }
 
 .setup-tabs__list .mk-data-tabs__tab:disabled {
@@ -613,10 +620,8 @@ p.workstation-setup__result {
   gap: var(--sp-2);
 }
 
-.self-test__kind[data-checked="true"] {
-  outline: 3px solid var(--focus);
-  outline-offset: -3px;
-}
+/* The chosen kind is the kit's selected button (`fg` fill and a check, floor-kit.css); a second, blue
+   outline on it read as a focus ring that was not there (station audit). */
 
 .self-test__figure {
   position: relative;

@@ -19,7 +19,8 @@
   padding: var(--sp-4);
   overflow: hidden;
   gap: var(--sp-3);
-  grid-template-rows: auto 64px minmax(0, 1fr) auto;
+  /* The message row grows with its words: a two-line refusal was cut by a fixed 64 px (station audit). */
+  grid-template-rows: auto minmax(64px, auto) minmax(0, 1fr) auto;
   background: var(--surface-page);
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -102,7 +103,6 @@
   min-width: 0;
   min-height: 64px;
   margin-inline: auto;
-  overflow: hidden;
   gap: var(--sp-2);
   align-content: center;
 }
@@ -220,7 +220,8 @@
 
 .operator-login__badge-copy p {
   color: var(--fg-2);
-  font: var(--text-body);
+  /* The floor's body size: the 14 px office text was the smallest on the screen. */
+  font: var(--floor-body);
 }
 
 .badge-scan-illustration {
@@ -411,7 +412,7 @@
 
     padding: var(--sp-2) var(--sp-4);
     gap: var(--sp-2);
-    grid-template-rows: auto 56px minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(56px, auto) minmax(0, 1fr) auto;
   }
 
   .operator-login__prompt h1 {

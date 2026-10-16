@@ -110,7 +110,7 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
             <span className="shift-card__number">{copy.number}</span>
             <StatusChip
               className="shift-card__status"
-              size="office"
+              size="floor"
               phase={PHASE[phase]}
               label={t(`floor.shifts.status.${phase}`)}
             />
@@ -127,11 +127,11 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
             )}
           </div>
           <div className="shift-card__mode">
-            <Badge className="shift-card__mode-badge" size="office">
+            <Badge className="shift-card__mode-badge" size="floor">
               {t(`floor.shifts.mode.${copy.mode}`)}
             </Badge>
             {copy.mode === "aggregation" && copy.palletsEnabled ? (
-              <Badge className="shift-card__pallets" size="office">
+              <Badge className="shift-card__pallets" size="floor">
                 {t("floor.shifts.withPallets")}
               </Badge>
             ) : null}

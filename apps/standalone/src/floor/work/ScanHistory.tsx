@@ -74,7 +74,7 @@ function HistoryRow({ row }: { row: ScanHistoryRow }) {
       </span>
       <span className="scan-history__position">{position}</span>
       <span className="scan-history__result">
-        <StatusChip phase={PHASE[row.verdict]} size="office" label={result.label} />
+        <StatusChip phase={PHASE[row.verdict]} size="floor" label={result.label} />
         {result.reason !== null && <span className="scan-history__reason">{result.reason}</span>}
       </span>
       <span className="scan-history__code">{code}</span>

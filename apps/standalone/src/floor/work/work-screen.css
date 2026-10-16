@@ -210,14 +210,16 @@
   -webkit-line-clamp: 2;
 }
 
+/* The chips wrap (station audit): in one row the counterparty's chip shrank to «для: ...» beside a
+   mode chip and the three counters; two rows still sit within the photo's 104 px. */
 .work-shift-band__chips {
   display: flex;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-/* One row of chips: the counterparty's, last, is the one that shrinks (its full name is the title). */
+/* A chip keeps its words; only one wider than the band is cut (its full name is the title). */
 .work-shift-band__chip {
   overflow: hidden;
   flex: none;
@@ -580,6 +582,27 @@
 .work-scan-result .work-screen__last--cue {
   outline: 4px solid var(--ok-solid);
   outline-offset: -4px;
+}
+
+/* A short window (1280×800): the verdict, the code and the line under it fit the hero's box (the code was cut). */
+@media (max-height: 900px) {
+  .work-scan-result .work-screen__last {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .work-scan-hero__word {
+    font-size: 44px;
+  }
+
+  .work-scan-hero__code {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+  .work-scan-hero__detail {
+    font-size: 16px;
+    line-height: 22px;
+  }
 }
 
 /* A box shift's hero sits above the history in the narrow column: word and code on one row. */
