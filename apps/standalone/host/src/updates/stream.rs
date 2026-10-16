@@ -42,11 +42,15 @@ pub fn file_body<G: Send + 'static>(
             let (back, buffer) = match read {
                 Ok(Ok((back, buffer))) if !buffer.is_empty() => (back, buffer),
                 _ => {
-                    let _ = sender
-                        .send(Err(std::io::Error::other(
+                    // The error waits no longer than a chunk does: a client that
+                    // takes nothing must not keep the slot through it.
+                    let _ = tokio::time::timeout(
+                        stall,
+                        sender.send(Err(std::io::Error::other(
                             "the installer could not be read",
-                        )))
-                        .await;
+                        ))),
+                    )
+                    .await;
                     return;
                 }
             };
@@ -192,6 +196,23 @@ mod tests {
         }
         assert!(CHUNK + rest < CHUNK * 4, "the reader gave up: {rest}");
         assert!(dropped.try_recv().is_ok(), "the slot went with the reader");
+    }
+
+    #[tokio::test]
+    async fn a_read_error_does_not_hold_the_slot_beyond_the_stall_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("installer");
+        // Shorter than the length asked: the second read ends the file.
+        std::fs::write(&path, vec![7u8; CHUNK]).unwrap();
+        let (sender, mut dropped) = tokio::sync::oneshot::channel();
+        let _body = file_body(
+            std::fs::File::open(&path).unwrap(),
+            (CHUNK * 2) as u64,
+            Duration::from_millis(50),
+            Dropped(Some(sender)),
+        );
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(dropped.try_recv().is_ok(), "the error send gave up");
     }
 
     #[tokio::test]
