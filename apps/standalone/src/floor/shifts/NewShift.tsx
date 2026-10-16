@@ -1206,6 +1206,9 @@ export function NewShift({
         </Alert>
       )}
       {busy !== null && <p>{t(`floor.newShift.${busy}`)}</p>}
+      {!online && step.kind === "form" && step.form.created === null && (
+        <p className="new-shift__hint">{t("floor.newShift.needsLink")}</p>
+      )}
     </div>
   );
   // Never held by a request: one that never settles must not trap the station here.
@@ -1328,9 +1331,6 @@ export function NewShift({
           {/* Keyed per view: a scroller reused across the steps kept the last one's scroll. */}
           <div key={formShown.view} className="new-shift__fields">
             {formBody(formShown, ready)}
-            {!online && formShown.form.created === null && (
-              <p className="new-shift__hint">{t("floor.newShift.needsLink")}</p>
-            )}
           </div>
           {messageSlot}
         </section>

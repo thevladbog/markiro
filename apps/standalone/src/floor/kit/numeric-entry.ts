@@ -20,8 +20,8 @@ export function dropDigit(value: string): string {
   return value.slice(0, -1);
 }
 
-/** The digits in groups of three, split by `separator`: "1200" -> "1 200". */
-export function groupDigits(value: string, separator = " "): string {
+/** The digits in groups of three, split by `separator` (a narrow no-break space): "1200" -> "1 200". */
+export function groupDigits(value: string, separator = "\u202f"): string {
   return value.replace(/\B(?=(?:[0-9]{3})+$)/g, separator);
 }
 

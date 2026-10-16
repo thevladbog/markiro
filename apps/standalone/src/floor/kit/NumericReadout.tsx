@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- a kit control: this file IS the floor's own button of its kind, drawn by floor-controls.css (test/floor-controls.test.ts keeps native buttons to this directory). */
 import { Fragment } from "react";
 
 import { groupDigits } from "./numeric-entry.js";
