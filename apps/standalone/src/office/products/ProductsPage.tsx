@@ -6,7 +6,6 @@ import {
   Button,
   Input,
   PageHeader,
-  Select,
   StatusChip,
   type TableColumn,
   type TagPhase,
@@ -21,6 +20,7 @@ import { listViewState } from "../list/list-state.js";
 import { ListCard, ListFilters } from "../list/ListCard.js";
 import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
 import { RowActionBar } from "../list/RowActionBar.js";
+import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
 import { ArchiveProductDialog } from "./ArchiveProductDialog.js";
@@ -239,16 +239,14 @@ export function ProductsPage() {
               setSearch(event.target.value);
             }}
           />
-          <Select
+          <StateFilter
             label={t("office.products.stateFilter")}
             options={FILTERS.map((value) => ({
               value,
               label: t(`office.products.states.${value}`),
             }))}
             value={filter}
-            onValueChange={(value) => {
-              setFilter(value);
-            }}
+            onChange={setFilter}
           />
         </ListFilters>
       )}

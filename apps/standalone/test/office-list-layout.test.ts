@@ -115,6 +115,35 @@ describe("the segmented control", () => {
   });
 });
 
+describe("the destructive button and the field error", () => {
+  it("takes the label colour that pairs with the solid error fill, not a literal white", () => {
+    expect(declarations(".mk-btn--destructive")).toContain(
+      "color: var(--fg-on-err-solid) !important",
+    );
+  });
+
+  it("draws a wrong field with a 2 px border and opens its message with the word from i18n", () => {
+    expect(declarations(".mk-input--error")).toContain("border-width: 2px");
+    const before = declarations('.mk-field > span[id$="-error"]::before');
+    expect(before).toContain("var(--mk-error-prefix");
+  });
+
+  it("marks unsaved changes in the drawer's footer in the warning tone", () => {
+    expect(declarations(".entity-drawer__dirty")).toContain("color: var(--warn-fg)");
+  });
+});
+
+describe("the search form's filter rows", () => {
+  it("lets a search field grow and keeps the buttons level with its input, not with its hint", () => {
+    expect(declarations(".office-filter-row > .mk-field:has(> .mk-input)")).toContain(
+      "flex: 1 1 320px",
+    );
+    const top = declarations(".office-filter-row__end--top");
+    expect(top).toContain("align-self: flex-start");
+    expect(top).toContain("margin-top: 22px");
+  });
+});
+
 describe("motion", () => {
   it("spins only for a visitor who has not asked for less motion", () => {
     const animated = rules.find((rule) => rule.body.includes("animation: office-spin"));

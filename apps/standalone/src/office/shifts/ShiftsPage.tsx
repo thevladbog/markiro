@@ -30,6 +30,7 @@ import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
 import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
 import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
 import { SortToggle } from "../list/SortToggle.js";
+import { StateFilter } from "../list/StateFilter.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { activeFirstByName } from "../records.js";
 import {
@@ -595,16 +596,14 @@ export function ShiftsPage() {
               setSearch(event.target.value);
             }}
           />
-          <Select
+          <StateFilter
             label={t("office.shifts.statusFilter")}
             options={STATUS_FILTERS.map((value) => ({
               value,
               label: t(`office.shifts.statusFilters.${value}`),
             }))}
             value={status}
-            onValueChange={(value) => {
-              setStatus(value);
-            }}
+            onChange={setStatus}
           />
           <Select
             {...searchableSelect(t)}

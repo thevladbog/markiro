@@ -580,7 +580,7 @@
 
 .office-filter-row > .mk-field:has(> .mk-input) {
   flex: 1 1 320px;
-  max-width: 560px;
+  max-width: 760px;
 }
 
 /* The buttons and the count at the end of a row. */
@@ -597,4 +597,13 @@
 .office-filter-row__end--top {
   align-self: flex-start;
   margin-top: 22px;
+}
+
+/*
+ * The destructive button's label is the kit's `onerr` on the solid error fill (white on light,
+ * dark on dark: 7.58 / 5.64). The shared button writes a literal white, which on the dark theme's
+ * coral is 2.6:1; this app takes the token that pairs with the fill.
+ */
+.mk-btn--destructive {
+  color: var(--fg-on-err-solid) !important;
 }
