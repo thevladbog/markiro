@@ -327,7 +327,9 @@ describe("the floor after an operator signed in", () => {
     });
     const view = render(floorOf(await floorCopies(), handlers));
     await enterPlanned();
-    expect(await screen.findByRole("region", { name: "Проверка" })).toBeTruthy();
+    // The validation screen: the last scan and the one history, the mode on the band's chip.
+    expect(await screen.findByRole("region", { name: "Последний скан" })).toBeTruthy();
+    expect(screen.getByText("Проверка", { selector: ".work-shift-band__chip" })).toBeTruthy();
     expect(handlers.enter).toHaveBeenCalledWith(PLANNED.id, STATION_ENTRY);
     await settle();
     expect(screen.queryByText("Открытый короб")).toBeNull();

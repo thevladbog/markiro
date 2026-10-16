@@ -184,6 +184,35 @@ describe("the work screen of a validation shift", () => {
     ).toEqual(["scan"]);
   });
 
+  it("says the last scan as one large word on its tone, and the count once", async () => {
+    const at = await station();
+    const work = renderWork(at, { overrides: { online: true } });
+    await ready(work);
+    const tone = () => document.querySelector(".work-screen__last")?.getAttribute("data-verdict");
+    expect(tone()).toBe("neutral");
+    await work.scan(km("V1"));
+    expect([lastWord(), tone()]).toEqual(["Принят", "ok"]);
+    // The code's tail and the scan's time ride with the word; no count is repeated with it.
+    expect(document.querySelector(".work-scan-hero__code")?.textContent).toMatch(/…V1$/);
+    expect(document.querySelector(".work-scan-result__time")).not.toBeNull();
+    expect(document.querySelector(".work-scan-hero__detail")).toBeNull();
+    await work.scan(km("V1"));
+    expect([lastWord(), tone()]).toEqual(["Дубль", "duplicate"]);
+    await work.scan(km("V2", { gtin: OTHER_GTIN }));
+    expect([lastWord(), tone()]).toEqual(["Ошибка", "error"]);
+    // «Принято» as a word of the screen is the band's label alone, and the count is one element.
+    expect(screen.getAllByText(/принято/i)).toHaveLength(1);
+    expect(document.querySelectorAll(".work-shift-band__count")).toHaveLength(1);
+    expect(screen.getAllByText("1", { selector: ".work-shift-band__count" })).toHaveLength(1);
+    // One list of scans, one button for all of them; no second «Последние сканы».
+    expect(screen.getAllByRole("list", { name: "История сканирований" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Вся история" })).toHaveLength(1);
+    // The footer's actions are the kit's 84 px row.
+    for (const name of ["Выйти из смены", "Закрыть смену"]) {
+      expect(screen.getByRole("button", { name }).className).toContain("floor-primary");
+    }
+  });
+
   it("says a host duplicate with the shift that took the code", async () => {
     const at = await station();
     const work = renderWork(at, {
