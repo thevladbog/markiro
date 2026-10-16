@@ -48,6 +48,8 @@ type Box = { id: string; tenant_id: string };
 type CaseLink = { box_id: string; lot_id: string; tenant_id: string; unlinked_at: string | null };
 type CaseOrigin = { box_id: string; tenant_id: string };
 type Segment = { label: string; queries: number; durationMs: number; outcome: "pass" | "fail" };
+const correctionPerformance = "M11 fresh-correction performance";
+const correctionCorrectness = "M11 fresh-correction correctness";
 
 const inventory = [
   ["M01 same-state-regular0-verify", { kind: "regular", index: 0 }, "verify", 1],
@@ -60,22 +62,58 @@ const inventory = [
   ["M08 same-state-orphan-replay", { kind: "orphan" }, "initialize", 1],
   ["M09 fresh-regular181", { kind: "regular", index: 181 }, "initialize", 0],
   ["M10 fresh-regular259", { kind: "regular", index: 259 }, "initialize", 0],
-  ["M11 fresh-correction", { kind: "correction" }, "initialize", 0],
+  [correctionPerformance, { kind: "correction" }, "initialize", 0],
+  [correctionCorrectness, { kind: "correction" }, "initialize", 0],
   ["M12 fresh-orphan", { kind: "orphan" }, "initialize", 0],
 ] as const satisfies readonly (readonly [string, UsDatasetTraceReadinessUnit, Mode, number])[];
 const base = process.env.US_TEST_DATABASE_URL;
 describe.skipIf(!base)("finite dataset composition public-call measurements", () => {
   const h = specialFixture(base);
   let prepared: UsDatasetUnitCompositionResult[] = [];
+  let freshCorrectionSetup:
+    | {
+        before: Awaited<ReturnType<typeof checkpoint>>;
+        actual: UsDatasetUnitCompositionResult;
+        afterOwner: Awaited<ReturnType<typeof checkpoint>>;
+        segments: Segment[];
+      }
+    | undefined;
   beforeEach(
     h.phase(async (test: TestContext) => {
       prepared = [];
+      freshCorrectionSetup = undefined;
       const selected = inventory.find(([name]) => name === test.task.name);
       if (!selected) throw new Error("Unlisted finite measurement");
       const [, unit, , population] = selected;
       const started = performance.now();
+      const segments: Segment[] = [];
       try {
-        // Only completed-state preconditions; fresh cases install no dataset prerequisites.
+        if (test.task.name === correctionCorrectness) {
+          const before = await measureCall(
+            test.task.name,
+            test,
+            segments,
+            "setup-pre-snapshot-and-census",
+            checkpoint,
+          );
+          emptyState(before);
+          const actual = await measureCall(
+            test.task.name,
+            test,
+            segments,
+            "setup-owner-inclusive-fresh-initialize",
+            () => new UsDatasetUnitCompositionStore(h.f.db).initialize(h.context, unit),
+          );
+          const afterOwner = await measureCall(
+            test.task.name,
+            test,
+            segments,
+            "setup-post-owner-snapshot-and-census",
+            checkpoint,
+          );
+          freshCorrectionSetup = { before, actual, afterOwner, segments };
+        }
+        // Population preconditions are unchanged; correctness setup above has its own ledger.
         for (let index = 0; index < population; index++)
           prepared.push(
             await new UsDatasetUnitCompositionStore(h.f.db).initialize(
@@ -88,6 +126,14 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
           name: test.task.name,
           elapsedMs: performance.now() - started,
         });
+        if (test.task.name === correctionCorrectness)
+          console.info("M correctness setup ledger", {
+            name: test.task.name,
+            outcome: freshCorrectionSetup && !test.signal.aborted ? "pass" : "fail",
+            elapsedMs: performance.now() - started,
+            queries: segments.reduce((total, segment) => total + segment.queries, 0),
+            segments,
+          });
       }
     }),
     60_000,
@@ -126,6 +172,46 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
       )
     ).rows;
     return { snapshot, stages, headers, events, lots, boxes, links, origins, roots };
+  }
+
+  function emptyState(state: Awaited<ReturnType<typeof checkpoint>>) {
+    expect(prepared).toEqual([]);
+    expect(state.headers).toEqual([]);
+    expect(state.stages).toEqual([]);
+    expect(state.lots).toEqual([]);
+    expect(state.events).toEqual([]);
+    expect(state.roots).toEqual([]);
+    expect(state.boxes).toEqual([]);
+    expect(state.links).toEqual([]);
+    expect(state.origins).toEqual([]);
+  }
+
+  async function measureCall<T>(
+    name: string,
+    test: TestContext,
+    segments: Segment[],
+    label: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    // Catch inside the unchanged counter so failed dispatch costs survive; rethrow the exact error.
+    const measured = await countActualQueries(h.f.pool, async () => {
+      try {
+        return { ok: true, value: await run() } as const;
+      } catch (error) {
+        return { ok: false, error } as const;
+      }
+    });
+    const segment: Segment = {
+      label,
+      queries: measured.count,
+      durationMs: measured.durationMs,
+      outcome: measured.value.ok && !test.signal.aborted ? "pass" : "fail",
+    };
+    segments.push(segment);
+    console.info("M public-call forwarding", { name, ...segment });
+    if (!measured.value.ok) throw measured.value.error;
+    if (test.signal.aborted) throw test.signal.reason;
+    return measured.value.value;
   }
 
   function progress(output: UsDatasetUnitCompositionResult, rows: readonly RawStage[]) {
@@ -311,29 +397,13 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
           .digest("hex");
         const segments: Segment[] = [];
         let passed = false;
-        async function measure<T>(label: string, run: () => Promise<T>): Promise<T> {
-          // Catch inside the unchanged counter so failed dispatch costs survive; rethrow the exact error.
-          const measured = await countActualQueries(h.f.pool, async () => {
-            try {
-              return { ok: true, value: await run() } as const;
-            } catch (error) {
-              return { ok: false, error } as const;
-            }
-          });
-          const segment: Segment = {
-            label,
-            queries: measured.count,
-            durationMs: measured.durationMs,
-            outcome: measured.value.ok && !test.signal.aborted ? "pass" : "fail",
-          };
-          segments.push(segment);
-          console.info("M public-call forwarding", { name, ...segment });
-          if (!measured.value.ok) throw measured.value.error;
-          if (test.signal.aborted) throw test.signal.reason;
-          return measured.value.value;
-        }
+        const measure = <T>(label: string, run: () => Promise<T>) =>
+          measureCall(name, test, segments, label, run);
         try {
-          const before = await measure("pre-snapshot-and-census", checkpoint);
+          const setup = name === correctionCorrectness ? freshCorrectionSetup : undefined;
+          if (name === correctionCorrectness && !setup)
+            throw new Error("Missing invocation-local fresh correction setup");
+          const before = setup?.before ?? (await measure("pre-snapshot-and-census", checkpoint));
           const owner = new UsDatasetUnitCompositionStore(h.f.db);
           const stage = new UsDatasetTraceReadinessStageStore(h.f.db);
           let actual: UsDatasetUnitCompositionResult;
@@ -485,18 +555,19 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
           }
 
           if (population === 0) {
-            expect(prepared).toEqual([]);
-            expect(before.headers).toEqual([]);
-            expect(before.stages).toEqual([]);
-            expect(before.lots).toEqual([]);
-            expect(before.events).toEqual([]);
-            expect(before.roots).toEqual([]);
-            expect(before.boxes).toEqual([]);
-            expect(before.links).toEqual([]);
-            expect(before.origins).toEqual([]);
-            actual = await measure("owner-inclusive-fresh-initialize", () =>
-              owner.initialize(h.context, unit),
-            );
+            emptyState(before);
+            actual =
+              setup?.actual ??
+              (await measure("owner-inclusive-fresh-initialize", () =>
+                owner.initialize(h.context, unit),
+              ));
+            if (name === correctionPerformance) {
+              owned(actual);
+              const after = await measure("post-snapshot-and-census", checkpoint);
+              completeState(after, [actual]);
+              passed = true;
+              return;
+            }
             expected = await independent("verify");
           } else {
             expect(prepared).toHaveLength(population);
@@ -537,6 +608,7 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
               false,
             );
           const after = await measure("post-snapshot-and-census", checkpoint);
+          if (setup) expect(after).toEqual(setup.afterOwner);
           const historical = specialHistory;
           if (historical)
             expect(after.events.filter(({ id }) => id === historical.id)).toEqual([historical]);
@@ -566,6 +638,18 @@ describe.skipIf(!base)("finite dataset composition public-call measurements", ()
             segmentMs,
             unclassifiedWallMs: bodyMs - segmentMs,
             segments,
+            ...(name === correctionCorrectness && freshCorrectionSetup
+              ? {
+                  setupQueries: freshCorrectionSetup.segments.reduce(
+                    (total, segment) => total + segment.queries,
+                    0,
+                  ),
+                  logicalQueriesIncludingSetup: [
+                    ...freshCorrectionSetup.segments,
+                    ...segments,
+                  ].reduce((total, segment) => total + segment.queries, 0),
+                }
+              : {}),
           });
         }
       }),
