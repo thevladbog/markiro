@@ -42,11 +42,10 @@ function rule(rules: CssRule[], selector: string, within = ""): Record<string, s
 describe("the status bar", () => {
   const rules = rulesOf("src/floor/floor-status-bar.css");
 
-  it("draws the link dot's frame itself: a 64 px target with a transparent hairline, not the browser's outset", () => {
+  it("draws the link chip's target itself: at least 64 px wide with a transparent hairline, not the browser's outset", () => {
     const button = rule(rules, ".floor-link__button.mk-btn");
-    expect(button["width"]).toBe("64px");
     expect(button["min-width"]).toBe("64px");
-    // The kit's secondary border colour is `!important`; the dot beats it by specificity and says the style.
+    // The kit's secondary border colour is `!important`; the chip's target beats it by specificity.
     const frame = rule(
       rules,
       ":where(.floor-frame, .station-screen) .floor-link__button.mk-btn.mk-btn--floor",
@@ -54,27 +53,38 @@ describe("the status bar", () => {
     expect(frame["border"]).toBe("1px solid transparent !important");
   });
 
-  it("anchors the link popover at the dot's left edge, within the window's width", () => {
+  it("anchors the link popover at the chip's left edge, within the window's width", () => {
     const popover = rule(rules, ".floor-link__popover");
     expect(popover["left"]).toBe("0");
     expect(popover["right"]).toBeUndefined();
     expect(popover["max-width"]).toContain("100vw");
   });
 
-  it("gives the identity room: the scanner's words go before the operator's name does", () => {
-    const narrow = rule(
-      rules,
-      '.station-status-pills__list .station-status-pill[data-tone="neutral"] dd',
-      "@container (max-width: 1300px)",
-    );
-    expect(narrow["display"]).toBe("none");
-    // The warning chips never collapse: the neutral rule names no `warn` or `error` tone.
-    expect(
-      rules
-        .filter((r) => r.within.some((w) => w.startsWith("@container")))
-        .flatMap((r) => selectorParts(r.selector))
-        .some((part) => /data-tone="(warn|error)"/.test(part)),
-    ).toBe(false);
+  it("is one row of 64 px targets and a hairline (73 px), whose rail never shrinks", () => {
+    const bar = rule(rules, ".station-status-bar");
+    expect(bar["grid-template-rows"]).toBe("64px auto");
+    expect(bar["padding"]).toBe("4px var(--sp-4)");
+    expect(rule(rules, ".floor-bar__rail")["flex"]).toBe("none");
+    const chip = rule(rules, ".floor-chip");
+    expect(chip["height"]).toBe("40px");
+    expect(chip["flex"]).toBe("0 0 auto");
+    expect(chip["white-space"]).toBe("nowrap");
+  });
+
+  it("paints the tones with the kit's status tokens, words and glyph with them (no bare dot, no pulse)", () => {
+    for (const tone of ["ok", "warn", "error"]) {
+      const painted = rule(rules, `.floor-chip[data-tone="${tone}"]`);
+      expect(painted["background"], tone).toMatch(/^var\(--(ok|warn|err)-bg\)$/);
+      expect(painted["color"], tone).toMatch(/^var\(--(ok|warn|err)-fg\)$/);
+    }
+    const css = textOf("src/floor/floor-status-bar.css");
+    expect(css).not.toContain("station-status-pill__dot");
+    expect(css).not.toContain("@keyframes");
+    expect(css).not.toContain("animation");
+  });
+
+  it("collapses by script, not by container query: the decision is `useHeaderCollapse`'s", () => {
+    expect(rules.some((r) => r.within.some((w) => w.startsWith("@container")))).toBe(false);
   });
 });
 

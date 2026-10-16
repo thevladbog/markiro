@@ -2,10 +2,13 @@
  * The floor's frame and status bar, forked from the cloud station's header
  * (`apps/station/src/station.css`: `.station-root`, `.station-status-bar`,
  * `.station-status-identity*`, `.station-status-pill*`, `.station-visually-hidden`).
- * Class names, sizes and the one-row layout are the cloud's; the standalone
- * adds the link to the host (`HostStatusLine`, its own tag) at the head of the
- * pills and a full-width row of warnings under the bar, empty and flat until
- * a warning comes. Colours, type and spacing come from @markiro/ui tokens.
+ * The one-row header of the kit (board `SgyS0`): the identity on the left, then
+ * the chips (a glyph and a word on a tone, never a bare dot), then the rail of
+ * 64 px buttons. A full-width row of warnings sits under it, empty and flat until
+ * a warning comes. What does not fit gives way by priority (`header-chips`,
+ * `use-header-collapse`): healthy chips lose their words, «Сменить оператора»
+ * becomes a glyph, the station's name is cut with an ellipsis. Colours, type and
+ * spacing come from @markiro/ui tokens; the only motion is the press feedback.
  */
 
 /* The floor fills the window edge to edge, as the cloud's `.station-root`. */
@@ -30,26 +33,24 @@
 .station-status-bar {
   display: grid;
   min-width: 0;
-  padding: var(--sp-2) var(--sp-4);
+  /* One row of 64 px touch targets and a hairline: 73 px, as drawn. */
+  padding: 4px var(--sp-4);
   gap: 0 var(--sp-4);
   /*
-   * One row of a fixed height (the rail's 64 px touch targets), never taller:
-   * what does not fit shrinks or collapses, it does not wrap (the warnings
-   * have their own row under it). The identity keeps room to be read
-   * whatever the pills and the rail take (beta 3); the pills give way first.
+   * Never taller and never wrapped: what does not fit collapses (`useHeaderCollapse`). The
+   * identity takes what the rail leaves and is cut with an ellipsis; chips and buttons
+   * never shrink.
    */
-  grid-template-columns: minmax(160px, 1fr) minmax(0, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: 64px auto;
   align-items: center;
-  /* The window's width, for the pills' collapse below. */
-  container-type: inline-size;
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   color: var(--fg-1);
   font: var(--floor-body);
 }
 
-/* The identity deck: what/where strong on top, who/which shift under it. */
+/* The identity deck: the station and the line, quiet; the operator under it, strong. */
 .station-status-identity {
   display: grid;
   min-width: 0;
@@ -61,6 +62,7 @@
 .station-status-identity__row {
   display: flex;
   min-width: 0;
+  overflow: hidden;
   gap: var(--sp-2);
   align-items: baseline;
 }
@@ -74,10 +76,6 @@
 /* The shift's number stays whole; the operator and the organization give way to it with an ellipsis. */
 .station-status-item--keep {
   flex: 0 0 auto;
-}
-
-.station-status-identity__row {
-  overflow: hidden;
 }
 
 /* The operator's name, the longest line, gives way first. */
@@ -100,35 +98,30 @@
 }
 
 .station-status-identity__row--primary dd {
-  color: var(--fg-1);
-  font: 700 16px/20px var(--font-ui);
-  letter-spacing: -0.01em;
+  color: var(--fg-2);
+  font: 500 16px/20px var(--font-ui);
 }
 
 .station-status-identity__row--secondary dd {
-  color: var(--fg-2);
-  font: 400 13px/18px var(--font-ui);
+  color: var(--fg-1);
+  font: 600 18px/24px var(--font-ui);
 }
 
-/* The link to the host, then the telemetry pills, on one row. */
+/* The rail: the chips, then the buttons. It never shrinks, and the header measures it. */
+.floor-bar__rail {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* The chips, on one row. */
 .station-status-pills {
   display: flex;
   min-width: 0;
-  gap: var(--sp-2);
-  align-items: center;
-  justify-content: flex-end;
-  /* No wrap: the row stays one line high; chips shrink and collapse (see the container queries). */
-  flex-wrap: nowrap;
-}
-
-.station-status-pills .host-status {
-  justify-items: end;
-}
-
-.station-status-pills__list {
-  display: flex;
-  min-width: 0;
-  margin: 0;
+  flex: none;
   gap: var(--sp-2);
   align-items: center;
   justify-content: flex-end;
@@ -140,71 +133,57 @@
   display: contents;
 }
 
-.floor-stock-chip {
-  flex: 0 0 auto;
-}
-
-.floor-stock-chip__text {
-  color: var(--fg-1);
-  font: 600 14px/18px var(--font-ui);
-  white-space: nowrap;
-}
-
-.floor-stock-chip[data-tone="warn"] .floor-stock-chip__text {
-  color: var(--warn-fg);
-}
-
-.floor-stock-chip[data-tone="error"] .floor-stock-chip__text {
-  color: var(--err-fg);
-}
-
-.station-status-pill {
+/*
+ * A chip: 40 px, a glyph and a word on a tone's quiet fill (the kit's status vocabulary: ok,
+ * warn, error, neutral). The tone is never the only sign: the glyph and the word say it too.
+ * A collapsed chip is its glyph alone, a circle, its words still in the tree.
+ */
+.floor-chip {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 14px;
   gap: 8px;
+  flex: 0 0 auto;
   align-items: center;
-  padding: 8px 14px;
+  justify-content: center;
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-
-.station-status-pill__dot {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 10px;
-  border-radius: 50%;
-  background: var(--fg-3);
-}
-
-.station-status-pill[data-tone="ok"] .station-status-pill__dot {
-  background: var(--ok-solid);
-}
-
-.station-status-pill[data-tone="warn"] .station-status-pill__dot {
-  background: var(--warn-solid);
-}
-
-.station-status-pill[data-tone="warn"] {
-  border-color: var(--warn-border);
-}
-
-.station-status-pill dt {
-  overflow: hidden;
+  background: var(--panel);
   color: var(--fg-2);
-  font: 600 14px/18px var(--font-ui);
+  font: 600 16px/20px var(--font-ui);
   white-space: nowrap;
 }
 
-.station-status-pill dd {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--fg-1);
-  font: 600 14px/18px var(--font-ui);
-  text-overflow: ellipsis;
+.floor-chip[data-form="icon"] {
+  padding: 0;
+}
+
+.floor-chip .floor-glyph {
+  flex: none;
+}
+
+.floor-chip__text {
   white-space: nowrap;
 }
 
-.station-status-pill[data-tone="warn"] dd {
+.floor-chip[data-tone="ok"] {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+}
+
+.floor-chip[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
   color: var(--warn-fg);
+}
+
+.floor-chip[data-tone="error"] {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err-fg);
 }
 
 /*
@@ -241,118 +220,42 @@
     column-gap: var(--sp-2);
   }
 
+  .floor-bar__rail {
+    gap: var(--sp-2);
+  }
+
+  .floor-chip {
+    padding-inline: 12px;
+    font: 600 15px/18px var(--font-ui);
+  }
+
   .station-status-identity__row--primary dd {
-    font: 700 15px/20px var(--font-ui);
-  }
-
-  .station-status-pill {
-    padding: 6px 8px;
-  }
-
-  .station-status-pill dt,
-  .station-status-pill dd {
-    font: 600 13px/16px var(--font-ui);
-  }
-}
-
-@media (max-height: 760px) {
-  .station-status-bar {
-    padding-block: var(--sp-1);
+    font: 500 15px/20px var(--font-ui);
   }
 }
 
 /*
- * What does not fit collapses by priority, by the window's width, never by
- * wrapping. First the chips that say all is well (the scanner, the unsent
- * count, a quiet tone) lose their caption, then their value, keeping the
- * dot; the link's dot, any chip in a warning or error tone, and the one
- * «Заканчиваются номера SSCC» chip stay whole, and the full text of every
- * chip is its tooltip.
- */
-@container (max-width: 1360px) {
-  .station-status-pills__list .station-status-pill:is([data-tone="ok"], [data-tone="neutral"]) dt {
-    display: none;
-  }
-}
-
-/*
- * Under 1300 px the scanner's «Клавиатурный» keeps only its dot too (its words are the
- * tooltip): with the warnings, the rail and the three chips the operator's name was cut to
- * «Анна Кузн…» (station audit, 2026-10).
- */
-@container (max-width: 1300px) {
-  .station-status-pills__list .station-status-pill[data-tone="neutral"] dd {
-    display: none;
-  }
-}
-
-@container (max-width: 1000px) {
-  .station-status-pills__list .station-status-pill:is([data-tone="ok"], [data-tone="neutral"]) dd {
-    display: none;
-  }
-}
-
-/*
- * The link to the host as a dot (beta 3.2): the telemetry pills' own chip holding only the dot,
- * inside a 64 px touch target, the details in a popover.
+ * The link to the host is a chip inside a 64 px touch target: the button is as wide as the chip
+ * and no narrower than 64 px, with no box of its own.
  */
 .floor-link {
   position: relative;
 }
 
 .floor-link__button.mk-btn {
-  width: 64px;
+  width: auto;
   min-width: 64px;
-  padding: 0;
+  padding: 0 4px;
   background: transparent;
 }
 
 /*
- * Without a border style the browser's `outset` showed (a two-tone 2 px frame round the dot), and
- * the kit's secondary border colour is `!important`: the dot's frame is drawn here, hairline and
- * quiet (it is a touch target, not a button with a caption).
+ * Without a border style the browser's `outset` showed (a two-tone 2 px frame round the chip), and
+ * the kit's secondary border colour is `!important`: the target's frame is drawn here, hairline
+ * and quiet (it is a touch target, not a button with a caption).
  */
 :where(.floor-frame, .station-screen) .floor-link__button.mk-btn.mk-btn--floor {
   border: 1px solid transparent !important;
-}
-
-/* The pills' height and padding (their label line is 18 px, 16 px under 1100 px), a ring round the dot. */
-.floor-link__pill {
-  min-width: 36px;
-  min-height: 36px;
-  box-sizing: border-box;
-  justify-content: center;
-}
-
-.station-status-pill[data-tone="error"] {
-  border-color: var(--err-border, var(--err-fg));
-}
-
-.station-status-pill[data-tone="error"] .station-status-pill__dot {
-  background: var(--err-solid, var(--err-fg));
-}
-
-.floor-link__pill--pulse .station-status-pill__dot {
-  animation: floor-link-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes floor-link-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .floor-link__pill--pulse .station-status-pill__dot {
-    animation: none;
-  }
-}
-
-@media (max-width: 1100px) {
-  .floor-link__pill {
-    min-width: 30px;
-    min-height: 30px;
-  }
 }
 
 .floor-link__popover {

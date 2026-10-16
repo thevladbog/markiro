@@ -188,6 +188,42 @@
       "actions": "Действия станции",
       "link": "Связь с хостом"
     },
+    "chips": {
+      "label": "Состояние станции",
+      "link": {
+        "ok": "Связь есть",
+        "attention": "Связь: есть замечания",
+        "weak": "Связь слабая",
+        "none": "Связи нет",
+        "pending": "Связь…"
+      },
+      "printer": {
+        "ok": "Принтер готов",
+        "error": "Принтер: ошибка",
+        "none": "Принтер не задан"
+      },
+      "scanner": {
+        "ready": "Сканер готов",
+        "partial": "Часть сканеров",
+        "disconnected": "Сканер не на связи",
+        "unknown": "Сканер: нет данных"
+      },
+      "queue": {
+        "count": "Очередь {{n}}"
+      },
+      "rejected": {
+        "count": "Отклонено {{n}}"
+      },
+      "conflicts": {
+        "count": "Конфликтов {{n}}"
+      },
+      "displaced": {
+        "count": "Вытеснено {{n}}"
+      },
+      "stranded": {
+        "count": "Прежняя очередь {{n}}"
+      }
+    },
     "operator": {
       "signOut": "Сменить оператора"
     },
@@ -2584,7 +2620,11 @@
             "unknown": "версия неизвестна: {{count}}"
           },
           "device": "Устройство",
-          "kind": { "station": "станция", "office": "офис", "handheld": "ТСД" },
+          "kind": {
+            "station": "станция",
+            "office": "офис",
+            "handheld": "ТСД"
+          },
           "line": "Линия",
           "version": "Версия, протокол",
           "versionProtocol": "{{version}} · {{protocol}}",
