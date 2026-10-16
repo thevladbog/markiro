@@ -1243,6 +1243,20 @@ textarea {
   font: var(--text-meta);
 }
 
+.table-name-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.catalog-offline-availability {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
 .invoice-detail-page {
   min-width: 0;
   display: grid;
@@ -1683,6 +1697,13 @@ textarea {
 
 .version-panel__header-actions > * {
   flex-shrink: 0;
+}
+
+.version-panel__tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .version-panel__grid {
@@ -2543,6 +2564,34 @@ textarea {
 
 .standalone-site-actions {
   min-width: 230px;
+}
+
+.standalone-assignments {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.standalone-assignments h3 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.standalone-assignments ul {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.standalone-assignments a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  justify-self: start;
 }
 
 .standalone-license-dialog__actions {

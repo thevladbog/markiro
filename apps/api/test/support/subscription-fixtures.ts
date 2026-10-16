@@ -29,6 +29,7 @@ export async function createPublishedPlan(
     publicApiEnabled?: boolean;
     palletsEnabled?: boolean;
     lifecyclePolicyId?: string;
+    offlineAvailable?: boolean;
   },
 ): Promise<string> {
   const itemId = randomUUID();
@@ -39,6 +40,7 @@ export async function createPublishedPlan(
     nameRu: `Plan ${itemId}`,
     nameEn: `Plan ${itemId}`,
     kind: "plan",
+    offlineAvailable: input.offlineAvailable ?? false,
   });
   await db.insert(schema.catalogItemVersions).values({
     id: versionId,
@@ -87,6 +89,7 @@ export async function createPublishedAddon(
           | "handheld";
       }
   >,
+  options: { offlineAvailable?: boolean } = {},
 ): Promise<string> {
   const itemId = randomUUID();
   const versionId = randomUUID();
@@ -96,6 +99,7 @@ export async function createPublishedAddon(
     nameRu: `Addon ${itemId}`,
     nameEn: `Addon ${itemId}`,
     kind: "addon",
+    offlineAvailable: options.offlineAvailable ?? false,
   });
   await db.insert(schema.catalogItemVersions).values({
     id: versionId,
@@ -167,4 +171,17 @@ export async function createManagedSubscription(
     source: "manual",
   });
   return { tenantId, planVersionId, subscriptionId };
+}
+
+/** Flags the catalog item that owns the version, as the platform action does (spec 2026-10-16). */
+export async function setItemOfflineAvailable(db: Db, versionId: string, value: boolean) {
+  const [version] = await db
+    .select({ itemId: schema.catalogItemVersions.catalogItemId })
+    .from(schema.catalogItemVersions)
+    .where(eq(schema.catalogItemVersions.id, versionId));
+  if (!version) throw new Error("fixture version missing");
+  await db
+    .update(schema.catalogItems)
+    .set({ offlineAvailable: value })
+    .where(eq(schema.catalogItems.id, version.itemId));
 }

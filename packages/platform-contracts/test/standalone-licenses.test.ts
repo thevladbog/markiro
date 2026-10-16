@@ -14,6 +14,7 @@ import {
   standaloneIssuancePreviewRequestSchema,
   standaloneIssuanceSummarySchema,
   standaloneIssuanceWarningSchema,
+  STANDALONE_ISSUANCE_SOURCES,
   standaloneLicenseFileSchema,
   standaloneLicenseSigningKeysetSchema,
   standaloneLicenseRightsSchema,
@@ -268,6 +269,7 @@ describe("standalone issuance confirmation and file", () => {
       issuedAt: "2026-10-13T00:00:00.000Z",
       issuedByPlatformUserId: "admin",
       replaces: null,
+      sourceAssignments: null,
       customer: { name: "ООО «Завод»", inn: "7707083893" },
       rights: {
         quotas: { lines: null, stations: 3, kiosks: 0, cabinetUsers: 5 },
@@ -292,6 +294,62 @@ describe("standalone issuance confirmation and file", () => {
     ]) {
       expect(standaloneIssuanceSummarySchema.safeParse(invalid).success).toBe(false);
     }
+  });
+
+  it("knows the three sources and ties each to its term reasons and assignments", () => {
+    expect([...STANDALONE_ISSUANCE_SOURCES]).toEqual([
+      "subscription",
+      "offline",
+      "offline_assignments",
+    ]);
+    const base = {
+      licenseId: randomUUID(),
+      siteId: randomUUID(),
+      sequence: 1,
+      hostId: request.hostId,
+      plan: "subscription",
+      planVersionId: randomUUID(),
+      entitlementRevision: "5",
+      validFrom: "2026-10-13T00:00:00.000Z",
+      validUntil: "2027-10-13T00:00:00.000Z",
+      graceDays: 14,
+      kid: "lic-1",
+      sha256: "a".repeat(64),
+      issuedAt: "2026-10-13T00:00:00.000Z",
+      issuedByPlatformUserId: "admin",
+      replaces: null,
+      customer: { name: "ООО «Завод»", inn: "7707083893" },
+      rights: {
+        quotas: { lines: null, stations: 3, kiosks: 0, cabinetUsers: 5 },
+        features: {
+          labelEditor: true,
+          publicApi: false,
+          pallets: true,
+          chzIntegration: false,
+          inventory: false,
+          commerceMl: false,
+          handheld: true,
+          customLogo: false,
+        },
+      },
+    };
+    const refs = [{ kind: "plan", id: randomUUID(), catalogVersionId: randomUUID() }];
+    const ok = (source: string, validUntilReason: string, sourceAssignments: unknown) =>
+      standaloneIssuanceSummarySchema.safeParse({
+        ...base,
+        source,
+        validUntilReason,
+        sourceAssignments,
+      }).success;
+    expect(ok("offline", "offline_term", null)).toBe(true);
+    expect(ok("offline_assignments", "one_year_cap", refs)).toBe(true);
+    expect(ok("offline_assignments", "offline_term", refs)).toBe(false);
+    expect(ok("offline_assignments", "one_year_cap", null)).toBe(false);
+    expect(ok("offline_assignments", "one_year_cap", [])).toBe(false);
+    expect(ok("subscription", "one_year_cap", null)).toBe(true);
+    expect(ok("subscription", "one_year_cap", refs)).toBe(false);
+    expect(ok("subscription", "offline_term", null)).toBe(false);
+    expect(ok("offline", "offline_term", refs)).toBe(false);
   });
 
   it("bounds the file to 16 KiB and the canonical file name", () => {

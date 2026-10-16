@@ -272,4 +272,37 @@ describe("tenant cabinet access", () => {
     const enabledRow = rowOf(screen.getByText("Первый завод"));
     expect(within(enabledRow).queryByText("Без кабинета")).toBeNull();
   });
+  it("warns that offline assignments stay in force before the grant and says so after it", async () => {
+    const detail = {
+      ...structuredClone(OFFLINE_DETAIL),
+      currentSubscription: structuredClone(TENANT_DETAIL.currentSubscription),
+      activeAddons: structuredClone(TENANT_DETAIL.activeAddons),
+    };
+    const api = installTenantApi({
+      me: SUPPORT_ME,
+      detail,
+      detailResponses: [detail, ENABLED_AFTER_GRANT],
+      grantResponses: [
+        {
+          status: 201,
+          body: {
+            tenantId: TENANT_ID,
+            userId: "owner-user-1",
+            memberId: "member-1",
+            deliveryId: "c1111111-1111-4111-8111-111111111111",
+            offlineAssignments: { plans: 1, addons: 1 },
+            demoCreated: false,
+          },
+        },
+      ],
+    });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Выдать доступ в кабинет" }));
+    expect(screen.getByText(/У клиента есть офлайн-назначения/)).toBeDefined();
+    await user.type(screen.getByLabelText("Email владельца"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Выдать и отправить активацию" }));
+    expect(await screen.findByText(/демо не создано/)).toBeDefined();
+    expect(api.mutationCalls()).toHaveLength(1);
+  });
 });

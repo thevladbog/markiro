@@ -236,7 +236,9 @@ SHARE` → `platform-default-demo-setting` advisory lock → `platform_settings`
 ### Deferred follow-ups
 
 - `DocumentComposer` catalog filter: for a `none` tenant offer only
-  `service` items (the server already refuses licences).
+  `service` items (the server already refuses licences). **Closed by
+  `2026-10-16-offline-catalog-items-design.md`:** the composer offers services
+  and the plans and add-ons flagged available to offline customers.
 - A "the platform sends nothing; the operator sends the documents by hand"
   notice on the invoice, act and offer document views. Only the tenant card
   shows it now; the composer and detail pages need the tenant's

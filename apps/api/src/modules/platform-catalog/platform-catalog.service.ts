@@ -26,6 +26,8 @@ import {
   type CatalogPublicationReview,
   type AddonEffectV3 as AddonEffect,
   type ArchiveCatalogItemResponse,
+  type CatalogOfflineAvailabilityBody,
+  type CatalogOfflineAvailabilityResponse,
   type CatalogVersionV4 as CatalogVersion,
   type CatalogVersionCreateV4 as CatalogVersionCreate,
   type CatalogVersionPatchV4 as CatalogVersionPatch,
@@ -358,6 +360,7 @@ export class PlatformCatalogService {
           "id",
           "catalogItemId",
           "catalogItemCode",
+          "offlineAvailable",
           "version",
           "status",
           "publishedAt",
@@ -607,6 +610,83 @@ export class PlatformCatalogService {
     } catch (error) {
       catalogDatabaseError(error);
     }
+  }
+
+  /**
+   * Flags a plan or add-on as assignable to tenants without a cabinet (spec
+   * 2026-10-16). On the item, so every version, past and future, follows it. The
+   * item row is locked FOR UPDATE: an assignment guard holding it FOR SHARE
+   * either finishes first or sees the new value.
+   */
+  async setOfflineAvailability(
+    principal: PlatformPrincipal,
+    itemRef: string,
+    input: CatalogOfflineAvailabilityBody,
+  ): Promise<CatalogOfflineAvailabilityResponse> {
+    if (principal.role !== "platform_admin")
+      throw new ConflictException({ code: "catalog_offline_availability_forbidden" });
+    try {
+      return await this.db.transaction(async (tx) => {
+        const found = await this.findItem(itemRef, tx);
+        if (!found) throw new NotFoundException({ code: "catalog_item_not_found" });
+        const item = await this.lockItem(tx, found.id);
+        if (item.status === "archived")
+          throw new ConflictException({ code: "catalog_item_archived" });
+        if (item.kind !== "plan" && item.kind !== "addon")
+          throw new ConflictException({ code: "catalog_item_offline_kind_invalid" });
+        const holders = await this.offlineTenantHolders(tx, item.id);
+        const answer = {
+          catalogItemId: item.id,
+          catalogItemCode: item.code,
+          kind: item.kind,
+          offlineAvailable: input.offlineAvailable,
+          offlineTenantHolders: holders,
+        } as const;
+        if (item.offlineAvailable === input.offlineAvailable) return { ...answer, changed: false };
+        await tx
+          .update(schema.catalogItems)
+          .set({ offlineAvailable: input.offlineAvailable, updatedAt: sql`now()` })
+          .where(eq(schema.catalogItems.id, item.id));
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "catalog.item.offline_availability_changed",
+          outcome: "success",
+          tenantId: null,
+          targetType: "catalog_item",
+          targetId: item.id,
+          reason: input.reason,
+          before: { offlineAvailable: item.offlineAvailable },
+          after: {
+            offlineAvailable: input.offlineAvailable,
+            catalogItemCode: item.code,
+            kind: item.kind,
+            offlineTenantHolders: holders,
+          },
+          requestId: null,
+        });
+        return { ...answer, changed: true };
+      });
+    } catch (error) {
+      catalogDatabaseError(error);
+    }
+  }
+
+  /** Tenants without a cabinet holding a live assignment of any version of the item. */
+  private async offlineTenantHolders(tx: CatalogTransaction, itemId: string): Promise<number> {
+    const result = await tx.execute<{ holders: number }>(sql`
+      select count(distinct holder.tenant_id)::int as holders from (
+        select s.tenant_id from tenant_subscriptions s
+          join catalog_item_versions v on v.id = s.plan_version_id
+         where v.catalog_item_id = ${itemId}
+           and s.status in ('pending_activation', 'trial', 'active', 'scheduled')
+        union all
+        select a.tenant_id from subscription_addons a
+          join catalog_item_versions v on v.id = a.addon_version_id
+         where v.catalog_item_id = ${itemId} and a.status in ('active', 'scheduled')
+      ) holder
+      join organization o on o.id = holder.tenant_id and o.cabinet_access = 'none'`);
+    return result.rows[0]?.holders ?? 0;
   }
 
   async getDefaultDemo(_principal: PlatformPrincipal): Promise<DefaultDemoPlanResponse> {
@@ -962,6 +1042,7 @@ export class PlatformCatalogService {
       id: version.id,
       catalogItemId: item.id,
       catalogItemCode: item.code,
+      offlineAvailable: item.offlineAvailable,
       version: version.version,
       status: version.status,
       nameRu: version.nameRu,

@@ -116,8 +116,8 @@ export function StandaloneSitesPanel({ tenantId }: { tenantId: string }) {
           {!query.data.signingConfigured ? (
             <Alert tone="info">{t("tenants.detail.standalone.signingUnavailable")}</Alert>
           ) : null}
-          {query.data.issuanceSource === "offline" ? (
-            <Alert tone="info">{t("tenants.detail.standalone.offlineTenant")}</Alert>
+          {query.data.issuanceSource === "offline_assignments" ? (
+            <Alert tone="info">{t("tenants.detail.standalone.assignmentsTenant")}</Alert>
           ) : null}
           {query.data.sites
             .filter((site) => licensePhase(site, now) === "attention")

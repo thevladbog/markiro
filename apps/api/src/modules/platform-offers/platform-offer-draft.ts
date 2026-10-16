@@ -9,14 +9,14 @@ import {
 } from "../billing/commercial-line-terms";
 import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
 import type { CreateOfferDto } from "./dto";
-import { assertKindAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
+import { assertCatalogAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
 import { calculateOfferAmounts } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 
-type OfferDraftExecutor = Pick<Db, "insert" | "select">;
+type OfferDraftExecutor = Pick<Db, "insert" | "select" | "execute">;
 
 export async function prepareOfferDraft(
-  tx: Pick<Db, "select">,
+  tx: Pick<Db, "select" | "execute">,
   input: CreateOfferDto,
   commercialVersion: CommercialVersion = 2,
 ) {
@@ -45,7 +45,10 @@ export async function prepareOfferDraft(
     priceOverrideReason: string | null;
   }> = [];
   for (const line of input.lines) {
-    await assertKindAllowedForTenant(tx, input.tenantId, line.kind);
+    await assertCatalogAllowedForTenant(tx, input.tenantId, {
+      kind: line.kind,
+      catalogVersionId: line.catalogVersionId ?? null,
+    });
     if (!line.catalogVersionId) {
       if (line.kind !== "service") {
         throw new BadRequestException({ code: "offer_catalog_version_invalid" });

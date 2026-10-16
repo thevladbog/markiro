@@ -931,6 +931,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformCatalogController.archive": platform(
     "platform catalog mutation uses the isolated platform principal and capability policy",
   ),
+  "PlatformCatalogController.setOfflineAvailability": platform(
+    "offline availability of a catalog item uses the isolated platform principal, the catalog write capability and a platform_admin role check",
+  ),
   "PlatformCatalogController.approveLifecyclePolicy": platform(
     "offline grant lifecycle approval uses the isolated platform principal and catalog write capability",
   ),

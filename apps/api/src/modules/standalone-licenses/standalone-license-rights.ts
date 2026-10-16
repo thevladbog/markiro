@@ -4,7 +4,6 @@ import type { EntitlementSnapshotV1, StandaloneLicenseRights } from "@markiro/pl
 export type StandaloneFeatureKey = (typeof STANDALONE_FEATURE_KEYS)[number];
 export const MAX_LICENSE_TERM_MS = 365 * 86_400_000;
 export const MAX_VALIDITY_STEPS = 64;
-const DAY_MS = 86_400_000;
 
 export interface LicenseValidity {
   validUntil: Date;
@@ -97,78 +96,4 @@ export async function licenseValidity(input: {
     next = after;
   }
   return limit;
-}
-
-/** A catalog plan version's entitlement row (`plan_entitlements`) as offline terms read it. */
-export interface PlanEntitlementRow {
-  maxLines: number | null;
-  maxStations: number | null;
-  maxKiosks: number | null;
-  maxCabinetUsers: number | null;
-  labelEditorEnabled: boolean;
-  publicApiEnabled: boolean;
-  palletsEnabled: boolean;
-  chzIntegrationEnabled: boolean | null;
-  inventoryEnabled: boolean | null;
-  commerceMlEnabled: boolean | null;
-  handheldEnabled: boolean | null;
-  customLogoEnabled: boolean | null;
-}
-
-/**
- * Offline terms (owner decision 2026-10-13): the rights are the chosen plan
- * version's own quotas and features, exactly as the catalog states them; a
- * feature the catalog never mapped (`null`) is exported as `false` and named,
- * like the subscription path (ЛО26).
- */
-export function exportPlanRights(plan: PlanEntitlementRow): {
-  rights: StandaloneLicenseRights;
-  unmapped: StandaloneFeatureKey[];
-} {
-  const features = {
-    labelEditor: plan.labelEditorEnabled,
-    publicApi: plan.publicApiEnabled,
-    pallets: plan.palletsEnabled,
-    chzIntegration: plan.chzIntegrationEnabled,
-    inventory: plan.inventoryEnabled,
-    commerceMl: plan.commerceMlEnabled,
-    handheld: plan.handheldEnabled,
-    customLogo: plan.customLogoEnabled,
-  } satisfies Record<StandaloneFeatureKey, boolean | null>;
-  return {
-    rights: {
-      quotas: {
-        lines: plan.maxLines,
-        stations: plan.maxStations,
-        kiosks: plan.maxKiosks,
-        cabinetUsers: plan.maxCabinetUsers,
-      },
-      features: {
-        labelEditor: features.labelEditor === true,
-        publicApi: features.publicApi === true,
-        pallets: features.pallets === true,
-        chzIntegration: features.chzIntegration === true,
-        inventory: features.inventory === true,
-        commerceMl: features.commerceMl === true,
-        handheld: features.handheld === true,
-        customLogo: features.customLogo === true,
-      },
-    },
-    unmapped: STANDALONE_FEATURE_KEYS.filter((key) => features[key] === null),
-  };
-}
-
-/**
- * An offline file ends exactly `termDays` after its issuance: 1-365 days, so
- * never later than a year and never open-ended. A term outside that is a
- * programming error here — the contract already refused it at the boundary.
- */
-export function offlineValidity(at: Date, termDays: number): LicenseValidity {
-  if (!Number.isInteger(termDays) || termDays < 1 || termDays * DAY_MS > MAX_LICENSE_TERM_MS)
-    throw new RangeError("Offline term out of range");
-  return {
-    validUntil: new Date(at.getTime() + termDays * DAY_MS),
-    reason: "offline_term",
-    boundaryAt: null,
-  };
 }

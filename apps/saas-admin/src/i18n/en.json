@@ -1781,7 +1781,28 @@
     },
     "policyRequired": "Configure the seller tax policy before publishing.",
     "reviewError": "Review subject, document names and tax terms.",
-    "reviewStale": "Terms changed. Review the refreshed terms and confirm again."
+    "reviewStale": "Terms changed. Review the refreshed terms and confirm again.",
+    "offline": {
+      "badge": "Offline",
+      "label": "Available to offline customers",
+      "hint": "The item can be assigned to tenants without a cabinet. Cloud tenants get it as usual. Applies to every version of the item.",
+      "reason": "Reason",
+      "confirmEnableTitle": "Make this item available to offline customers?",
+      "confirmWithdrawTitle": "Withdraw availability for offline customers?",
+      "enableDescription": "The item can be assigned to tenants without a cabinet and added to their offers and invoices. The reason is written to the audit log.",
+      "withdrawDescription": "New assignments, offers and invoices for this item will no longer be possible for tenants without a cabinet. Assignments already made stay in force. The reason is written to the audit log.",
+      "confirm": "Confirm",
+      "enabled": "The item is available to offline customers.",
+      "withdrawn": "Withdrawn. Assignments stay in force for tenants without a cabinet: {{count}}.",
+      "unchanged": "The value is already set, nothing changed.",
+      "errors": {
+        "generic": "Could not change the availability of the item.",
+        "catalog_offline_availability_forbidden": "Only a platform administrator can change availability.",
+        "catalog_item_offline_kind_invalid": "A service needs no flag: services are always available to tenants without a cabinet.",
+        "catalog_item_archived": "The item is archived.",
+        "catalog_item_not_found": "The item was not found."
+      }
+    }
   },
   "tenants": {
     "title": "Tenants",
@@ -1915,10 +1936,10 @@
         "retry": "Retry",
         "empty": "The tenant has no standalone sites.",
         "signingUnavailable": "Offline license signing is not configured on the server: issuing is unavailable.",
-        "offlineTenant": "Tenant without a cabinet: offline licenses come from offline terms — a plan and a term of up to a year. No cloud access is opened.",
         "source": {
           "subscription": "subscription",
-          "offline": "offline terms"
+          "offline": "offline terms",
+          "offline_assignments": "tenant assignments"
         },
         "scrollLabel": "Standalone sites",
         "noValue": "—",
@@ -2024,20 +2045,7 @@
             "one_year_cap": "one-year cap",
             "offline_term": "offline terms' term"
           },
-          "yearCapNote": "The file is valid for at most a year from issuance (a subscription without an end date or longer than a year). When it lapses, the tenant requests a new file from us free of charge.",
-          "offline": {
-            "title": "Offline",
-            "hint": "Tenant without a cabinet: the file's rights and term come from offline terms, not from a subscription. No cloud access is opened.",
-            "plan": "Plan",
-            "planPlaceholder": "Choose a published plan",
-            "termDays": "Term, days",
-            "termHint": "1 to 365 days from issuance; no unlimited term.",
-            "termInvalid": "A whole number from 1 to 365.",
-            "version": "version {{version}}",
-            "catalogError": "Could not load the catalog plans.",
-            "planEmpty": "No published plans.",
-            "planLoading": "Loading plans…"
-          },
+          "yearCapNote": "The file is valid for at most a year from issuance (a subscription or an assignment without an end date, or a longer one). When it lapses, the tenant requests a new file from us free of charge.",
           "issued": "File No. {{sequence}} issued and downloaded.",
           "openLabel": "Issue offline license: {{name}}"
         },
@@ -2067,10 +2075,20 @@
           "standalone_license_signing_unavailable": "Offline license signing is not configured on the server.",
           "standalone_license_request_conflict": "This issuance was already confirmed with other data — preview again.",
           "standalone_license_grace_invalid": "A demo has a grace period of 0 days.",
-          "standalone_license_offline_terms_required": "The tenant has no cabinet: enter the offline terms — a plan and a term.",
-          "standalone_license_offline_not_allowed": "The tenant has a cabinet: its license comes from its subscription, no offline terms.",
-          "standalone_license_offline_plan_unavailable": "The plan is missing or not published — choose a published plan.",
-          "generic": "The operation failed. Retry."
+          "generic": "The operation failed. Retry.",
+          "standalone_license_assignments_required": "There is no current plan assignment. Change the tenant's rights.",
+          "standalone_license_offline_terms_removed": "Manual offline terms are no longer supported. Reload the page."
+        },
+        "assignmentsTenant": "A tenant without a cabinet: the license is issued from its assignments — the plan and add-ons on the tenant card. No cloud access is opened.",
+        "assignments": {
+          "title": "Rights from the tenant's assignments",
+          "plan": "Plan: {{name}} · version {{version}} · {{term}}",
+          "addon": "Add-on: {{name}} · version {{version}} · quantity {{quantity}} · {{term}}",
+          "until": "until {{date}}",
+          "open": "no end date",
+          "change": "Change the tenant's rights",
+          "empty": "The tenant has no current plan. Assign a plan flagged «Available to offline customers».",
+          "loadError": "Could not load the tenant's assignments."
         }
       },
       "diagnostics": {
@@ -2304,7 +2322,9 @@
         "submit": "Grant and send activation",
         "granted": "Access granted; the activation email is queued.",
         "created": "Tenant created without a cabinet.",
-        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself."
+        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself.",
+        "assignmentsWarning": "The tenant has offline assignments (plans: {{plans}}, add-ons: {{addons}}). They stay in force and no demo is created: the cabinet quotas and features will equal these assignments.",
+        "grantedNoDemo": "Cabinet access granted, the activation e-mail is queued. The offline assignments are kept (plans: {{plans}}, add-ons: {{addons}}), no demo was created: the cabinet quotas equal those assignments."
       }
     },
     "usage": {
@@ -2376,7 +2396,10 @@
         "targetSubscription": "Target subscription: {{id}}",
         "endsAt": "End date: {{value}}",
         "reason": "Reason: {{reason}}"
-      }
+      },
+      "offlineNote": "A tenant without a cabinet can be assigned only plans and add-ons flagged «Available to offline customers». The standalone offline license is issued from these assignments.",
+      "offlineEmpty": "No items are flagged offline. You can flag an item in the catalog.",
+      "openCatalog": "Open the catalog"
     },
     "events": {
       "demo.activated": "Demo activated",
@@ -2416,7 +2439,8 @@
       "tenant_cabinet_access_mismatch": "A tenant with this slug already exists with a different cabinet access mode",
       "grant_owner_conflict": "This tenant already has another cabinet member",
       "tenant_not_found": "Tenant not found",
-      "grant_failed": "Could not grant cabinet access"
+      "grant_failed": "Could not grant cabinet access",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only items flagged as available to offline customers can be assigned. Reload the page: the flag may have been withdrawn."
     },
     "cabinet": {
       "none": "No cabinet"
@@ -2458,7 +2482,7 @@
       "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
       "commercial_amount_out_of_range": "A line, tax or document amount exceeds the supported limit. Reduce the price or quantity.",
       "commercial_line_terms_invalid": "Review the commercial subject and license period.",
-      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only services can be ordered for it.",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: services and items flagged as available to offline customers can be sold to it.",
       "commercial_subject_required": "Select the commercial subject.",
       "document_name_required": "Enter the document name."
     }

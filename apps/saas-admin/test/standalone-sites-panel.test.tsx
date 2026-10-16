@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nextProvider } from "react-i18next";
+import { MemoryRouter } from "react-router";
 import { ThemeProvider } from "@markiro/ui";
 import i18n from "../src/i18n/index.js";
 import { StandaloneSitesPanel } from "../src/pages/tenants/StandaloneSitesPanel.js";
@@ -50,7 +51,9 @@ function renderPanel() {
         }
       >
         <ThemeProvider defaultTheme="light">
-          <StandaloneSitesPanel tenantId={STANDALONE_TENANT_ID} />
+          <MemoryRouter>
+            <StandaloneSitesPanel tenantId={STANDALONE_TENANT_ID} />
+          </MemoryRouter>
         </ThemeProvider>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -125,18 +128,62 @@ describe("standalone sites panel (plan ЛЦ-0)", () => {
     expect(screen.getByText("У клиента нет площадок автонома.")).toBeDefined();
   });
 
-  it("says that a tenant without a cabinet gets offline licenses only, with no cloud access", async () => {
+  it("says the license is issued from the tenant's assignments, with no cloud access", async () => {
     stubApi({
       [`GET ${BASE}`]: [
-        () => jsonResponse(200, { ...STANDALONE_SITE_LIST, issuanceSource: "offline" }),
+        () => jsonResponse(200, { ...STANDALONE_SITE_LIST, issuanceSource: "offline_assignments" }),
       ],
     });
     renderPanel();
     expect(
       await screen.findByText(
-        "Клиент без кабинета: офлайн-лицензии выпускаются по офлайн-условиям — тариф и срок до года. Облачный доступ не открывается.",
+        "Клиент без кабинета: лицензия выпускается по его назначениям — тариф и дополнения с карточки клиента. Облачный доступ не открывается.",
       ),
     ).toBeDefined();
+  });
+
+  it("names the source of every journal row, also the removed manual offline terms and the assignments", async () => {
+    const offlineRow = {
+      ...STANDALONE_ISSUANCE,
+      licenseId: "b2222222-2222-4222-8222-222222222222",
+      sequence: 2,
+      source: "offline",
+      validUntilReason: "offline_term",
+      entitlementRevision: "0",
+    };
+    const assignmentsRow = {
+      ...STANDALONE_ISSUANCE,
+      licenseId: "b3333333-3333-4333-8333-333333333333",
+      sequence: 3,
+      source: "offline_assignments",
+      validUntilReason: "one_year_cap",
+      sourceAssignments: [
+        {
+          kind: "plan",
+          id: "d1111111-1111-4111-8111-111111111111",
+          catalogVersionId: "c1111111-1111-4111-8111-111111111111",
+        },
+      ],
+    };
+    stubApi({
+      [`GET ${BASE}`]: [() => jsonResponse(200, STANDALONE_SITE_LIST)],
+      [`GET ${BASE}/${STANDALONE_SITE_ID}/issuances`]: [
+        () =>
+          jsonResponse(200, {
+            siteId: STANDALONE_SITE_ID,
+            items: [assignmentsRow, offlineRow, STANDALONE_ISSUANCE],
+          }),
+      ],
+    });
+    renderPanel();
+    const user = userEvent.setup();
+    const row = (await screen.findByText("Цех розлива")).closest("tr");
+    if (!row) throw new Error("site row");
+    await user.click(within(row).getByRole("button", { name: "История выпусков: Цех розлива" }));
+    const dialog = await screen.findByRole("dialog", { name: "История выпусков: Цех розлива" });
+    expect(await within(dialog).findByText("назначения клиента")).toBeDefined();
+    expect(within(dialog).getByText("офлайн-условия")).toBeDefined();
+    expect(within(dialog).getByText("подписка")).toBeDefined();
   });
 
   it("offers a retry when the sites cannot be loaded", async () => {

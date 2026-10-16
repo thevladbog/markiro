@@ -8,11 +8,13 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import { SubscriptionLifecycleService } from "../src/subscriptions/subscription-lifecycle.service";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
 import { mountPlatformAuth, setupPlatformAuth } from "../src/platform-auth/platform-auth.setup";
 import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
+import { createManagedSubscription } from "./support/subscription-fixtures";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -343,6 +345,8 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       userId: expect.any(String),
       memberId: expect.any(String),
       deliveryId: expect.any(String),
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
     });
 
     const state = await tenantState(id);
@@ -403,6 +407,8 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
           subscriptionId,
           subscriptionStatus: "pending_activation",
           planVersionId: demoVersionId,
+          demoCreated: true,
+          offlineAssignments: { plans: 0, addons: 0 },
         },
         requestId,
       },
@@ -438,6 +444,137 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       quotas: { lines: 0, stations: 0, kiosks: 0, cabinetUsers: 0 },
       features: { labelEditor: false, publicApi: false, pallets: false },
     });
+  });
+
+  async function auditFor(tenantId: string, action: string) {
+    return setup.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(
+        and(
+          eq(schema.platformAuditEvents.tenantId, tenantId),
+          eq(schema.platformAuditEvents.action, action),
+        ),
+      );
+  }
+
+  async function subscriptionRows(tenantId: string) {
+    return setup.db
+      .select({
+        id: schema.tenantSubscriptions.id,
+        planVersionId: schema.tenantSubscriptions.planVersionId,
+        status: schema.tenantSubscriptions.status,
+        endsAt: schema.tenantSubscriptions.endsAt,
+      })
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
+      .orderBy(schema.tenantSubscriptions.id);
+  }
+
+  it("keeps an offline plan assignment and creates no demo when the cabinet is granted", async () => {
+    const tenantId = await createNoneTenant();
+    const assigned = await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+    });
+    const before = await subscriptionRows(tenantId);
+
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+
+    expect(response.body).toMatchObject({
+      tenantId,
+      offlineAssignments: { plans: 1, addons: 0 },
+      demoCreated: false,
+    });
+    expect(await subscriptionRows(tenantId)).toEqual(before);
+    expect(before.map((row) => row.id)).toEqual([assigned.subscriptionId]);
+    const [audit] = await auditFor(tenantId, "platform.tenant.cabinet_access.granted");
+    expect(audit).toMatchObject({
+      actorPlatformUserId: adminId,
+      actorRole: "platform_admin",
+      targetType: "member",
+      before: { cabinetAccess: "none" },
+      after: {
+        cabinetAccess: "enabled",
+        demoCreated: false,
+        subscriptionId: null,
+        subscriptionStatus: null,
+        planVersionId: null,
+        offlineAssignments: { plans: 1, addons: 0 },
+      },
+    });
+  });
+
+  it("grants without a configured default demo when a current assignment exists, and still refuses without one", async () => {
+    await defaultDemo.install(planVersionId); // a plan without a demo duration is no usable default demo
+    try {
+      const held = await createNoneTenant();
+      await createManagedSubscription(setup.db, {
+        tenantId: held,
+        planVersionId,
+        status: "active",
+      });
+      await admin
+        .post(`/platform/tenants/${held}/cabinet-access`)
+        .send({ email: grantedEmail() })
+        .expect(201);
+      const bare = await createNoneTenant();
+      const refused = await admin
+        .post(`/platform/tenants/${bare}/cabinet-access`)
+        .send({ email: grantedEmail() })
+        .expect(409);
+      expect(refused.body.code).toBe("default_demo_not_configured");
+    } finally {
+      await defaultDemo.install(demoVersionId);
+    }
+  });
+
+  it("still creates the pending demo when the only subscription has expired", async () => {
+    const tenantId = await createNoneTenant();
+    await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt: new Date(Date.now() - 3_600_000),
+    });
+    await setup.db
+      .update(schema.tenantSubscriptions)
+      .set({ status: "expired" })
+      .where(eq(schema.tenantSubscriptions.tenantId, tenantId));
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
+    });
+    const rows = await subscriptionRows(tenantId);
+    expect(rows.map((row) => row.status).sort()).toEqual(["expired", "pending_activation"]);
+  });
+
+  it("activates nothing for the owner of a tenant whose only subscription is the offline assignment", async () => {
+    const tenantId = await createNoneTenant();
+    await createManagedSubscription(setup.db, { tenantId, planVersionId, status: "active" });
+    await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    const before = await subscriptionRows(tenantId);
+    const activated = await setup.db.transaction((tx) =>
+      app!.get(SubscriptionLifecycleService, { strict: false }).activatePendingDemo(tx, {
+        tenantId,
+        activatedAt: new Date(),
+        sourceUserId: "owner",
+      }),
+    );
+    expect(activated).toBeNull();
+    expect(await subscriptionRows(tenantId)).toEqual(before);
   });
 
   it("fails without a configured default demo and changes nothing", async () => {
@@ -559,6 +696,8 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
           subscriptionId: state.demoSubscriptions[0]?.id,
           subscriptionStatus: "pending_activation",
           planVersionId: demoVersionId,
+          demoCreated: true,
+          offlineAssignments: { plans: 0, addons: 0 },
         },
         requestId,
       },

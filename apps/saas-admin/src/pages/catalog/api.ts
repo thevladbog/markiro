@@ -249,3 +249,16 @@ export function getCatalogVersion(itemCode: string, versionId: string) {
     responseSchema: platformCatalogV4Contracts.getVersion.response,
   });
 }
+
+/** Spec 2026-10-16: flag a plan or add-on as assignable to tenants without a cabinet. */
+export function setCatalogOfflineAvailability(
+  itemCode: string,
+  input: { offlineAvailable: boolean; reason: string },
+) {
+  const body = platformCatalogV4Contracts.setOfflineAvailability.body.parse(input);
+  return platformApiFetch(`/catalog/items/${encodeURIComponent(itemCode)}/offline-availability`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    responseSchema: platformCatalogV4Contracts.setOfflineAvailability.response,
+  });
+}

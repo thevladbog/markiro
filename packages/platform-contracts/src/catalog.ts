@@ -213,6 +213,23 @@ export const archiveCatalogItemResponseSchema = z
   .object({ status: z.literal("archived") })
   .strict();
 
+export const catalogOfflineAvailabilityBodySchema = z
+  .object({
+    offlineAvailable: z.boolean(),
+    reason: z.string().trim().min(1).max(1_000),
+  })
+  .strict();
+export const catalogOfflineAvailabilityResponseSchema = z
+  .object({
+    catalogItemId: platformUuidSchema,
+    catalogItemCode: z.string().min(1).max(128),
+    kind: z.enum(["plan", "addon"]),
+    offlineAvailable: z.boolean(),
+    changed: z.boolean(),
+    offlineTenantHolders: z.number().int().min(0),
+  })
+  .strict();
+
 export const platformCatalogContracts = {
   list: { response: catalogVersionListResponseSchema },
   listVersions: { params: catalogItemParamsSchema, response: catalogVersionListResponseSchema },
@@ -230,6 +247,11 @@ export const platformCatalogContracts = {
   publishVersion: { params: catalogVersionParamsSchema, response: publishedCatalogVersionSchema },
   retireVersion: { params: catalogVersionParamsSchema, response: retiredCatalogVersionSchema },
   archiveItem: { params: catalogItemParamsSchema, response: archiveCatalogItemResponseSchema },
+  setOfflineAvailability: {
+    params: catalogItemParamsSchema,
+    body: catalogOfflineAvailabilityBodySchema,
+    response: catalogOfflineAvailabilityResponseSchema,
+  },
   getDefaultDemo: { response: defaultDemoPlanResponseSchema },
   setDefaultDemo: {
     body: setDefaultDemoPlanSchema,
@@ -246,6 +268,10 @@ export type CatalogVersionPatch = z.output<typeof catalogVersionPatchSchema>;
 export type SetDefaultDemoPlan = z.output<typeof setDefaultDemoPlanSchema>;
 export type DefaultDemoPlanResponse = z.output<typeof defaultDemoPlanResponseSchema>;
 export type ArchiveCatalogItemResponse = z.output<typeof archiveCatalogItemResponseSchema>;
+export type CatalogOfflineAvailabilityBody = z.output<typeof catalogOfflineAvailabilityBodySchema>;
+export type CatalogOfflineAvailabilityResponse = z.output<
+  typeof catalogOfflineAvailabilityResponseSchema
+>;
 
 // Existing wire contracts remain V1 until a caller explicitly negotiates V2.
 export const legacyCatalogVersionCreateSchema = catalogVersionCreateSchema;

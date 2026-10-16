@@ -306,7 +306,7 @@ export class TenantProvisioningService {
    * - The timeline lock is the first lock every subscription lifecycle path
    *   takes, and none of them takes an e-mail or slug lock, so waiting for it
    *   while holding those cannot close a cycle. Holding it makes the licence
-   *   guard (`assertKindAllowedForTenant`) see either `none` or the committed
+   *   guard (`assertCatalogAllowedForTenant`) see either `none` or the committed
    *   `enabled`, never a switch between its check and its write, and puts the
    *   demo insert under the same lock as every other timeline write. It is
    *   keyed by tenant id, so two grants for one tenant serialize on it too.
@@ -388,9 +388,25 @@ export class TenantProvisioningService {
     if (tenant.cabinetAccess !== "none") {
       throw new ConflictException({ code: "cabinet_access_already_enabled" });
     }
-    // Never null: without a default demo this throws before any write.
-    const demo = await this.lockDefaultDemo(tx, false);
-    if (!demo) throw new ConflictException({ code: "default_demo_not_configured" });
+    // One current subscription per tenant (`tenant_subscriptions_one_current_uq`):
+    // an offline plan assignment already is that subscription, so no demo is added
+    // and no default demo is required (spec 2026-10-16). The timeline lock held
+    // above makes this read stable against a concurrent assignment.
+    const [current] = await tx
+      .select({ id: schema.tenantSubscriptions.id })
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, tenantId),
+          inArray(schema.tenantSubscriptions.status, ["pending_activation", "trial", "active"]),
+        ),
+      )
+      .limit(1);
+    const offlineAssignments = await this.countOfflineAssignments(tx, tenantId);
+    // Without a current subscription the default demo is required: this throws
+    // before any write when none is configured.
+    const demo = current ? null : await this.lockDefaultDemo(tx, false);
+    if (!current && !demo) throw new ConflictException({ code: "default_demo_not_configured" });
 
     const owner = await this.provisionOwner(tx, {
       tenantId,
@@ -408,13 +424,15 @@ export class TenantProvisioningService {
     // Inserted directly, as provisioning does, not through plan assignment:
     // the licence guard is for operator-assigned licences, and this demo is
     // part of the cabinet being granted.
-    const subscriptionId = await this.insertPendingDemo(tx, {
-      tenantId,
-      demo,
-      operationAt,
-      createId,
-      actor: options.actor,
-    });
+    const subscriptionId = demo
+      ? await this.insertPendingDemo(tx, {
+          tenantId,
+          demo,
+          operationAt,
+          createId,
+          actor: options.actor,
+        })
+      : null;
     await this.audit.record(tx, {
       actorPlatformUserId: options.actor.userId,
       actorRole: options.actor.role,
@@ -430,8 +448,10 @@ export class TenantProvisioningService {
         ownerUserId: owner.user.id,
         deliveryId: owner.deliveryId,
         subscriptionId,
-        subscriptionStatus: "pending_activation",
-        planVersionId: demo.versionId,
+        subscriptionStatus: demo ? "pending_activation" : null,
+        planVersionId: demo?.versionId ?? null,
+        demoCreated: demo !== null,
+        offlineAssignments,
       },
       requestId: null,
     });
@@ -440,7 +460,37 @@ export class TenantProvisioningService {
       userId: owner.user.id,
       memberId: owner.memberId,
       deliveryId: owner.deliveryId,
+      offlineAssignments,
+      demoCreated: demo !== null,
     };
+  }
+
+  /** Live plan and add-on assignments the grant leaves in force (spec 2026-10-16). */
+  private async countOfflineAssignments(tx: ProvisionTransaction, tenantId: string) {
+    const [plans] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, tenantId),
+          inArray(schema.tenantSubscriptions.status, [
+            "pending_activation",
+            "trial",
+            "active",
+            "scheduled",
+          ]),
+        ),
+      );
+    const [addons] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.subscriptionAddons)
+      .where(
+        and(
+          eq(schema.subscriptionAddons.tenantId, tenantId),
+          inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+        ),
+      );
+    return { plans: plans?.count ?? 0, addons: addons?.count ?? 0 };
   }
 
   /**
