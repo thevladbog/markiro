@@ -172,7 +172,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
     let addr = listener.bound_addr();
     let backups = backup::Backups::from_paths(paths, config.host_id.clone());
     // The update packages (plan ОБН-3): strays go before the first request,
-    // but the hashing of `staged` and `current` (up to 512 MiB each) runs in
+    // but the hashing of `staged` and `current` (up to 256 MiB each) runs in
     // the background so a slow disk cannot outlast the service start timeout.
     // Until it ends the state is `verifying` and no package is offered.
     let packages = std::sync::Arc::new(updates::UpdateStore::new(

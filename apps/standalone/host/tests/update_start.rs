@@ -199,3 +199,23 @@ async fn the_hourly_pass_checks_a_bad_current_package_again_and_writes_no_row() 
     worker::tick(&store, &pool, &clock).await;
     assert_eq!(promote_rows(&pool).await, rows);
 }
+
+#[tokio::test]
+async fn a_current_package_no_promotion_row_names_gets_an_unrecorded_row_at_the_start() {
+    let dir = tempfile::tempdir().unwrap();
+    // The host ended after the move of the folders and before the row.
+    write_package(&dir.path().join("updates"), CURRENT, "0.3.0");
+    let (pool, _) = started(dir.path(), "0.3.0").await;
+    assert_eq!(
+        promote_rows(&pool).await,
+        [row(
+            "ok",
+            Some("0.3.0"),
+            json!({ "version": "0.3.0", "previous": null, "reason": "unrecorded" })
+        )]
+    );
+    // A second start finds the row and adds none.
+    drop(pool);
+    let (pool, _) = started(dir.path(), "0.3.0").await;
+    assert_eq!(promote_rows(&pool).await.len(), 1);
+}

@@ -5,6 +5,7 @@
 
 mod support;
 
+use std::io::Read;
 use std::path::Path;
 
 use markiro_host::updates::{
@@ -217,6 +218,9 @@ fn store_without_limit(dir: &Path) -> UpdateStore {
 fn one_upload_at_a_time_becomes_staged_and_a_package_not_newer_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let updates = dir.path().join("updates");
+    // A sound current package: the running version is no news (a missing or
+    // broken one is repaired by it: see the repair test below).
+    write_package(&updates, CURRENT, "0.3.0");
     let store = store(dir.path(), "0.3.0");
     store.open_blocking().unwrap();
     let bytes = installer_bytes("0.3.0");
@@ -247,7 +251,7 @@ fn one_upload_at_a_time_becomes_staged_and_a_package_not_newer_is_refused() {
     assert!(store.upload(&first.id).is_none());
     std::fs::write(second.partial(), &bytes).unwrap();
     store.finish_upload_blocking(&second.id).unwrap();
-    assert_eq!(names(&updates), [STAGED]);
+    assert_eq!(names(&updates), [CURRENT, STAGED]);
     assert_eq!(
         names(&updates.join(STAGED)),
         ["manifest.update.jws".to_owned(), installer_name("0.4.0")]
@@ -410,5 +414,161 @@ fn the_quick_open_of_a_site_without_packages_is_missing_at_once() {
     assert!(matches!(
         store.serve_blocking(),
         Serve::Unavailable(PackageState::Missing)
+    ));
+}
+
+#[test]
+fn an_upload_ends_while_the_promotion_is_still_hashing_a_big_staged_package() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    let size: u64 = 192 * 1024 * 1024;
+    let big = UpdateStore::new(updates.clone(), keyset(), "0.3.0").with_max_installer(size);
+    big.open_blocking().unwrap();
+    // A sparse installer of zeros: the manifest names its real hash.
+    let sha = markiro_proto::update::hash_exact(std::io::repeat(0).take(size), size).unwrap();
+    let mut payload = manifest_payload("0.4.0", &installer_bytes("0.4.0"));
+    payload["installer"]["sha256"] = serde_json::json!(sha);
+    payload["installer"]["sizeBytes"] = serde_json::json!(size);
+    let staged = updates.join(STAGED);
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::write(
+        staged.join("manifest.update.jws"),
+        markiro_proto::update::distribution::testing::sign_update_manifest(&payload),
+    )
+    .unwrap();
+    std::fs::File::create(staged.join(installer_name("0.4.0")))
+        .unwrap()
+        .set_len(size)
+        .unwrap();
+    let big = std::sync::Arc::new(big);
+    let hashed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let promoting = {
+        let (big, hashed) = (big.clone(), hashed.clone());
+        std::thread::spawn(move || {
+            let promotion = big.promote_blocking();
+            hashed.store(true, std::sync::atomic::Ordering::SeqCst);
+            promotion
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let bytes = installer_bytes("0.5.0");
+    let upload = big
+        .begin_upload_blocking(
+            big.check_manifest(&signed_manifest("0.5.0", &bytes))
+                .unwrap(),
+        )
+        .unwrap();
+    std::fs::write(upload.partial(), &bytes).unwrap();
+    big.finish_upload_blocking(&upload.id).unwrap();
+    assert!(
+        !hashed.load(std::sync::atomic::Ordering::SeqCst),
+        "the end of the upload waited for the hashing of the old staged package"
+    );
+    // The pass that hashed the replaced folder changes nothing.
+    assert_eq!(promoting.join().unwrap(), Promotion::None);
+    assert_eq!(big.status_blocking().staged.as_deref(), Some("0.5.0"));
+}
+
+#[test]
+fn concurrent_manifests_leave_one_upload_and_one_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    let store = std::sync::Arc::new(store(dir.path(), "0.3.0"));
+    store.open_blocking().unwrap();
+    let bytes = installer_bytes("0.4.0");
+    let manifest = store
+        .check_manifest(&signed_manifest("0.4.0", &bytes))
+        .unwrap();
+    for _ in 0..30 {
+        let threads: Vec<_> = (0..6)
+            .map(|_| {
+                let (store, manifest) = (store.clone(), manifest.clone());
+                std::thread::spawn(move || store.begin_upload_blocking(manifest).unwrap())
+            })
+            .collect();
+        let uploads: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        let folders: Vec<String> = names(&updates);
+        assert_eq!(folders.len(), 1, "orphaned upload folders: {folders:?}");
+        let alive: Vec<_> = uploads
+            .iter()
+            .filter(|upload| store.upload(&upload.id).is_some())
+            .collect();
+        assert_eq!(alive.len(), 1);
+        assert!(alive[0].dir.exists());
+        store.abandon_upload_blocking(&alive[0].id);
+        assert!(names(&updates).is_empty());
+    }
+}
+
+#[test]
+fn the_package_of_the_running_version_replaces_a_missing_or_broken_current_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    let store = store(dir.path(), "0.3.0");
+    store.open_blocking().unwrap();
+    let bytes = installer_bytes("0.3.0");
+    let same = || {
+        store
+            .check_manifest(&signed_manifest("0.3.0", &bytes))
+            .unwrap()
+    };
+    // No current package: the genuine package of this very version repairs.
+    let upload = store.begin_upload_blocking(same()).unwrap();
+    std::fs::write(upload.partial(), &bytes).unwrap();
+    store.finish_upload_blocking(&upload.id).unwrap();
+    assert_eq!(store.promote_blocking(), {
+        Promotion::Promoted {
+            version: "0.3.0".to_owned(),
+            previous: None,
+        }
+    });
+    store.reverify_blocking();
+    assert!(matches!(store.serve_blocking(), Serve::Ready(_)));
+    // A sound current package: the same version is no news.
+    assert!(matches!(
+        store.begin_upload_blocking(same()),
+        Err(UploadError::NotNewer)
+    ));
+    // A broken one: repaired again.
+    flip_byte(&updates.join(CURRENT).join(installer_name("0.3.0")), 10);
+    store.reverify_blocking();
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Unavailable(PackageState::Invalid)
+    ));
+    assert!(store.begin_upload_blocking(same()).is_ok());
+    // An older version never repairs.
+    let old = installer_bytes("0.2.0");
+    assert!(matches!(
+        store.begin_upload_blocking(
+            store
+                .check_manifest(&signed_manifest("0.2.0", &old))
+                .unwrap()
+        ),
+        Err(UploadError::NotNewer)
+    ));
+}
+
+#[test]
+fn a_file_replaced_after_the_check_is_not_opened_for_a_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let updates = dir.path().join("updates");
+    write_package(&updates, CURRENT, "0.3.0");
+    let store = store(dir.path(), "0.3.0");
+    store.open_blocking().unwrap();
+    let Serve::Ready(package) = store.serve_blocking() else {
+        panic!("not ready")
+    };
+    assert!(store.open_installer_blocking(&package).is_ok());
+    // Another file of the same size renamed over the verified one.
+    let other = updates.join("other");
+    let mut bytes = installer_bytes("0.3.0");
+    bytes[5] ^= 1;
+    std::fs::write(&other, bytes).unwrap();
+    std::fs::rename(&other, &package.installer).unwrap();
+    assert!(store.open_installer_blocking(&package).is_err());
+    assert!(matches!(
+        store.serve_blocking(),
+        Serve::Changed | Serve::Unavailable(PackageState::Verifying)
     ));
 }

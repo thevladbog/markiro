@@ -162,9 +162,22 @@ pub async fn put_installer(
         return Err(refused("installer", reasons::SIZE_MISMATCH));
     }
     receive(&upload, body, state.upload_idle).await?;
+    // The installer is whole and hashed. The row is committed BEFORE the
+    // package becomes `staged\`, and the writer lock is not held while the
+    // folders move: a package never appears without its row. The other way
+    // round can happen (the process ends between the commit and the move):
+    // a row for a package that never arrived, which the next start does not
+    // find in `staged\` and the status shows as absent. A move that fails
+    // writes a second, `failed` row.
+    let version = upload.manifest.version.to_string();
+    let details = json!({
+        "version": version,
+        "sha256": upload.manifest.sha256,
+        "sizeBytes": upload.manifest.size_bytes,
+        "kid": upload.manifest.kid,
+    });
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
-    let version = upload.manifest.version.to_string();
     audit::record(
         &mut tx,
         &state.timestamp(),
@@ -174,29 +187,58 @@ pub async fn put_installer(
             target_type: Some("update_package"),
             target_id: Some(&version),
             outcome: Outcome::Ok,
-            details: json!({
-                "version": version,
-                "sha256": upload.manifest.sha256,
-                "sizeBytes": upload.manifest.size_bytes,
-                "kid": upload.manifest.kid,
-            }),
+            details: details.clone(),
         },
     )
     .await
     .map_err(ApiError::internal)?;
-    // The row and the files go together: a failed rename rolls the row back.
+    tx.commit().await.map_err(ApiError::internal)?;
     let finishing = store.clone();
     let id = upload_id.clone();
-    tokio::task::spawn_blocking(move || finishing.finish_upload_blocking(&id))
+    let moved = tokio::task::spawn_blocking(move || finishing.finish_upload_blocking(&id))
         .await
-        .map_err(ApiError::internal)?
-        .map_err(|error| upload_refused(error, store.host_version()))?;
-    tx.commit().await.map_err(ApiError::internal)?;
+        .map_err(ApiError::internal)?;
+    if let Err(error) = moved {
+        let mut failed = details;
+        failed["reason"] = json!("not_staged");
+        if let Err(row) = record_failed_stage(&state, &context, &version, failed).await {
+            tracing::error!(%row, "a failed staging of an update package was not recorded");
+        }
+        return Err(upload_refused(error, store.host_version()));
+    }
+    // A package of the running version repairs the current one: it is
+    // promoted and checked at once, not at the next start.
+    if upload.manifest.version.to_string() == store.host_version() {
+        crate::updates::worker::tick(&store, &state.pool, &*state.clock).await;
+    }
     Ok(Json(UpdatePackageStaged {
         version,
         size_bytes: upload.manifest.size_bytes,
         sha256: upload.manifest.sha256,
     }))
+}
+
+async fn record_failed_stage(
+    state: &AppState,
+    context: &OfficeContext,
+    version: &str,
+    details: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    let mut tx = begin_write(&state.pool).await?;
+    audit::record(
+        &mut tx,
+        &state.timestamp(),
+        Entry {
+            actor: context.actor(),
+            action: actions::UPDATE_PACKAGE_STAGE,
+            target_type: Some("update_package"),
+            target_id: Some(version),
+            outcome: Outcome::Failed,
+            details,
+        },
+    )
+    .await?;
+    tx.commit().await
 }
 
 enum Written {

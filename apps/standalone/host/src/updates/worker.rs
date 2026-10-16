@@ -80,13 +80,37 @@ async fn write(pool: &SqlitePool, at: &str, row: Option<Row>) -> Result<(), sqlx
     tx.commit().await
 }
 
-/// What the start found, in the audit log.
+/// What the start found, in the audit log. A current package that no `ok`
+/// promotion row names (the host ended between the move of the folders and
+/// the row, or the row failed) gets one now, `reason: "unrecorded"`: a
+/// promotion never stays without its row (plan ОБН-3, review of the audit
+/// ordering). The row of a promotion is written after the move, not before,
+/// so this is the way the other order of that failure is closed.
 pub async fn record_start(
     pool: &SqlitePool,
     at: &str,
     report: &StartReport,
 ) -> Result<(), sqlx::Error> {
-    write(pool, at, start_row(report)).await
+    let mut row = start_row(report);
+    if row.is_none() && report.current == PackageState::Ok {
+        if let Some(version) = &report.current_version {
+            let known: Option<(i64,)> = sqlx::query_as(
+                "SELECT 1 FROM audit_log WHERE action = ? AND target_id = ? AND result = 'ok' LIMIT 1",
+            )
+            .bind(actions::UPDATE_PACKAGE_PROMOTE)
+            .bind(version)
+            .fetch_optional(pool)
+            .await?;
+            if known.is_none() {
+                row = Some((
+                    Outcome::Ok,
+                    Some(version.clone()),
+                    json!({ "version": version, "previous": null, "reason": "unrecorded" }),
+                ));
+            }
+        }
+    }
+    write(pool, at, row).await
 }
 
 /// What a pass did, in the audit log.
