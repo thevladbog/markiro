@@ -203,18 +203,23 @@ impl Host {
         format!("https://{}", self.running.addr)
     }
 
+    fn fingerprint(&self) -> String {
+        self.running.fingerprint.clone()
+    }
+
     fn stop(self) {
         self.runtime.block_on(self.running.stop()).unwrap();
     }
 }
 
-/// A station paired with the host at `address` (no host issued the key).
-fn station_paired_at(dir: &Path, address: &str) -> DeviceState {
+/// A station paired with the host at `address` whose certificate has
+/// `fingerprint` (no host issued the key).
+fn station_paired_at(dir: &Path, address: &str, fingerprint: &str) -> DeviceState {
     device_config::save(
         dir,
         &DeviceConfig {
             host_address: address.into(),
-            fingerprint: "ab".repeat(32),
+            fingerprint: fingerprint.into(),
             host_id: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f".into(),
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
             kind: DeviceKind::Station,
@@ -231,7 +236,7 @@ fn station_paired_at(dir: &Path, address: &str) -> DeviceState {
 fn a_station_does_not_get_ahead_of_its_hosts_protocol() {
     let host = Host::start();
     let device_dir = tempfile::tempdir().unwrap();
-    let device = station_paired_at(device_dir.path(), &host.address());
+    let device = station_paired_at(device_dir.path(), &host.address(), &host.fingerprint());
     let site = site("0.2.0", vec![]);
     let newer = put_package(&site.updates, "0.3.0");
     block_on(site.state.scan()).unwrap();
@@ -273,7 +278,7 @@ fn downloaded_package(data: &Path, version: &str) -> String {
 fn a_package_from_the_host_installs_only_while_the_host_runs_its_version() {
     let host = Host::start();
     let device_dir = tempfile::tempdir().unwrap();
-    let device = station_paired_at(device_dir.path(), &host.address());
+    let device = station_paired_at(device_dir.path(), &host.address(), &host.fingerprint());
     let lockdown = LockdownState::default();
     let site = site("0.0.1", vec![]);
     let data = site._dirs[0].path();
@@ -322,7 +327,7 @@ fn a_station_whose_host_is_silent_needs_a_confirmation() {
         format!("https://{}", listener.local_addr().unwrap())
     };
     let device_dir = tempfile::tempdir().unwrap();
-    let device = station_paired_at(device_dir.path(), &closed);
+    let device = station_paired_at(device_dir.path(), &closed, &"ab".repeat(32));
     let lockdown = LockdownState::default();
     let site = site("0.1.0", vec![]);
     let path = put_package(&site.updates, "0.2.0");
@@ -354,4 +359,29 @@ fn a_station_whose_host_is_silent_needs_a_confirmation() {
             Some(UpdateError::ConfirmationRequired)
         );
     }
+}
+
+#[test]
+fn a_certificate_other_than_the_paired_one_cannot_vouch_for_the_hosts_version() {
+    // The host answers, but the station holds another certificate for it:
+    // whoever answers is not the host it was paired with.
+    let host = Host::start();
+    let device_dir = tempfile::tempdir().unwrap();
+    let device = station_paired_at(device_dir.path(), &host.address(), &"ab".repeat(32));
+    let site = site("0.0.1", vec![]);
+    let data = site._dirs[0].path();
+    let other = {
+        let version: AppVersion = HOST_VERSION.parse().unwrap();
+        AppVersion {
+            minor: version.minor + 1,
+            patch: 0,
+            ..version
+        }
+        .to_string()
+    };
+    let path = downloaded_package(data, &other);
+    let report = block_on(site.state.verify(&device, &path)).unwrap();
+    assert_eq!(report.host, None);
+    assert_eq!(report.confirmations, vec![Confirmation::HostUnreachable]);
+    host.stop();
 }

@@ -20,6 +20,9 @@ use crate::tls::{self, FingerprintMismatch, FingerprintPolicy};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_PATH_LENGTH: usize = 512;
+/// The most of an error answer (or an upload's answer) that is read: those
+/// are small JSON documents, and a host that sends more is not believed.
+const ANSWER_BODY_LIMIT: usize = 64 * 1024;
 /// How long a stream may stay silent before the link counts as lost: three
 /// missed 15 s heartbeats.
 pub const STREAM_SILENCE_LIMIT: Duration = Duration::from_secs(45);
@@ -352,10 +355,8 @@ impl TransferClient {
             Err(_) => return Err(RequestError::Unreachable),
         };
         let status = response.status().as_u16();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|_| RequestError::Unreachable)?;
+        // A body past the limit reads as no body: the status stands.
+        let bytes = bounded_body(response).await.unwrap_or_default();
         Ok(HostResponse {
             status,
             body: serde_json::from_slice(&bytes).ok(),
@@ -394,12 +395,25 @@ impl Download {
     /// An answer that is not the file: the host's error, read whole.
     pub async fn into_error(self) -> HostResponse {
         let status = self.status();
-        let bytes = self.response.bytes().await.unwrap_or_default();
+        let bytes = bounded_body(self.response).await.unwrap_or_default();
         HostResponse {
             status,
             body: serde_json::from_slice(&bytes).ok(),
         }
     }
+}
+
+/// `response`'s body, whole, when it is at most [`ANSWER_BODY_LIMIT`] bytes;
+/// `None` for a longer one (read no further) or a body that broke off.
+async fn bounded_body(mut response: reqwest::Response) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len() + chunk.len() > ANSWER_BODY_LIMIT {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
 }
 
 /// The headers every request to the host carries besides the protocol (plan
@@ -507,6 +521,51 @@ fn wraps_fingerprint_mismatch(error: &(dyn std::error::Error + 'static)) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A plain-HTTP answer of `status` whose body is `size` bytes, written
+    /// as fast as the client takes it; the thread ends when the client goes.
+    fn endless_answer(status: u16, size: usize) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request);
+            let head = format!("HTTP/1.1 {status} X\r\nContent-Length: {size}\r\n\r\n");
+            if socket.write_all(head.as_bytes()).is_err() {
+                return;
+            }
+            let piece = vec![b'x'; 64 * 1024];
+            let mut sent = 0;
+            while sent < size {
+                if socket.write_all(&piece).is_err() {
+                    return;
+                }
+                sent += piece.len();
+            }
+        });
+        format!("http://127.0.0.1:{port}/")
+    }
+
+    #[tokio::test]
+    async fn an_error_body_past_the_limit_is_dropped_not_held() {
+        let response = reqwest::get(endless_answer(503, 64 * 1024 * 1024))
+            .await
+            .unwrap();
+        assert_eq!(bounded_body(response).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_small_body_is_read_whole() {
+        let response = reqwest::get(endless_answer(503, 1000)).await.unwrap();
+        assert_eq!(
+            bounded_body(response).await.map(|body| body.len()),
+            Some(1000)
+        );
+    }
 
     #[test]
     fn only_host_api_paths_pass() {

@@ -88,6 +88,34 @@ pub async fn host_versions(address: &str) -> Result<HostVersions, ProbeError> {
     read_versions(&body)
 }
 
+/// The versions of the host at `address` read through the connection pinned
+/// to `fingerprint` (the paired host's certificate): a host that rolled back
+/// cannot be told from the real one by a stranger on the LAN who answers
+/// `hello`. A certificate that is not the paired one is `Unreachable`.
+pub async fn pinned_host_versions(
+    address: &str,
+    fingerprint: &str,
+) -> Result<HostVersions, ProbeError> {
+    let client = crate::host_client::PinnedClient::new(address, fingerprint)
+        .map_err(|_| ProbeError::Unreachable)?;
+    let answer = client
+        .send(
+            "GET",
+            "/v1/hello",
+            None,
+            crate::host_client::Credentials {
+                device_key: None,
+                office_token: None,
+            },
+        )
+        .await
+        .map_err(|_| ProbeError::Unreachable)?;
+    match (answer.status, answer.body) {
+        (200..=299, Some(body)) => read_versions(&body),
+        _ => Err(ProbeError::NotMarkiroHost),
+    }
+}
+
 pub async fn observe_hello(address: &str) -> Result<HelloObservation, ProbeError> {
     let (body, fingerprint) = fetch_hello(address).await?;
     let hello = classify_hello(body)?;
