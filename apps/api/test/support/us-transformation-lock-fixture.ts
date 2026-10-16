@@ -100,6 +100,30 @@ export async function waitBlocked(
   }
 }
 
+/** Pool shutdown is local bookkeeping; PostgreSQL owns the backend's actual lifetime. */
+export async function waitOwnedBackendsGone(
+  connection: Pick<ReturnType<typeof createDb>, "pool">,
+  pids: readonly number[],
+  signal: AbortSignal,
+) {
+  for (;;) {
+    signal.throwIfAborted();
+    const observed = await abortable(
+      connection.pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND pid=ANY($1::int[])",
+        [pids],
+      ),
+      signal,
+    );
+    signal.throwIfAborted();
+    const count = observed.rows[0]?.n;
+    if (count === 0) return;
+    if (count === undefined || !Number.isInteger(count) || count < 0)
+      throw new Error("owned_backend_probe_invalid");
+    await abortable(pollInterval(10, undefined, { signal }), signal);
+  }
+}
+
 export function driverCode(error: unknown): unknown {
   if (!error || typeof error !== "object") return undefined;
   if ("code" in error) return error.code;

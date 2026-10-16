@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { createDb } from "@markiro/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UsReceivingStore } from "../src/modules/traceability/receiving/us-receiving-store";
@@ -17,6 +18,7 @@ import {
   abortable,
   startObservation,
   waitBlocked,
+  waitOwnedBackendsGone,
   driverCode,
   connectClient,
   ownClient,
@@ -36,6 +38,101 @@ describe.skipIf(!base)("Native Transformation actual PostgreSQL locks", () => {
   afterAll(async () => {
     await f?.close();
   });
+
+  it.for(["release", "cancel"] as const)(
+    "waits for an actually held backend before %s completion",
+    async (mode, test) => {
+      const client = await connectClient(f.pool);
+      let released = false;
+      const close = () => {
+        if (!released) {
+          released = true;
+          client.release(true);
+        }
+      };
+      test.onTestFinished(close);
+      const pid = (await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]
+        ?.pid;
+      if (!pid) throw new Error("Missing held backend identity");
+      const firstProbe = barrier();
+      const query = new Proxy(f.pool.query, {
+        apply(target, receiver, args) {
+          const pending: unknown = Reflect.apply(target, receiver, args);
+          if (pending instanceof Promise) void pending.then(firstProbe.release, firstProbe.release);
+          return pending;
+        },
+      });
+      const observer = new Proxy(f.pool, {
+        get(target, key, receiver) {
+          return key === "query" ? query : Reflect.get(target, key, receiver);
+        },
+      });
+      const injected = new AbortController();
+      const failure = new Error("held_backend_poll_cancel");
+      let settled = false;
+      const waiting = outcome(
+        waitOwnedBackendsGone(
+          { pool: observer },
+          [pid],
+          AbortSignal.any([test.signal, injected.signal]),
+        ),
+      ).then((result) => {
+        settled = true;
+        return result;
+      });
+      try {
+        await abortable(firstProbe.promise, test.signal);
+        await nextTurn();
+        expect(settled).toBe(false);
+        if (mode === "cancel") {
+          injected.abort(failure);
+          expect((await waiting).error).toBe(failure);
+        }
+        close();
+        if (mode === "release") expect((await waiting).error).toBeUndefined();
+        await waitOwnedBackendsGone(f, [pid], test.signal);
+        expect(
+          (
+            await f.pool.query<{ n: number }>(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND pid=$1",
+              [pid],
+            )
+          ).rows[0]?.n,
+        ).toBe(0);
+      } finally {
+        close();
+        await waiting;
+      }
+    },
+  );
+
+  it.for(["cancellation", "query-failure"] as const)(
+    "propagates owned backend absence %s without hiding failure",
+    async (mode, test) => {
+      const injected = new AbortController();
+      const failure = new Error("owned_backend_absence_" + mode);
+      let queries = 0;
+      const observer = new Proxy(f.pool, {
+        get(target, key, receiver) {
+          if (key !== "query") return Reflect.get(target, key, receiver);
+          return () => {
+            queries++;
+            throw failure;
+          };
+        },
+      });
+      if (mode === "cancellation") injected.abort(failure);
+      const result = await outcome(
+        waitOwnedBackendsGone(
+          { pool: observer },
+          [1],
+          AbortSignal.any([test.signal, injected.signal]),
+        ),
+      );
+      expect(result.error).toBe(failure);
+      expect(queries).toBe(mode === "cancellation" ? 0 : 1);
+    },
+  );
 
   it.for(["unlock", "rollback"] as const)(
     "retains primary failure and releases all owned resources after real %s cleanup SQL rejection",
@@ -149,6 +246,7 @@ describe.skipIf(!base)("Native Transformation actual PostgreSQL locks", () => {
         expect(gateDestroyed).toBe(true);
         expect(gateEnded && workerEnded && drained).toBe(true);
         expect((await pending)?.error).toBeUndefined();
+        await waitOwnedBackendsGone(f, [gatePid, workerPid], test.signal);
         expect(
           (
             await f.pool.query<{ n: number }>(
@@ -512,6 +610,7 @@ describe.skipIf(!base)("Native Transformation actual PostgreSQL locks", () => {
       });
       await observation.cleanup();
       expect(ownedPids).toHaveLength(3);
+      await waitOwnedBackendsGone(f, ownedPids, test.signal);
       expect(
         (
           await f.pool.query<{ n: number }>(
@@ -581,6 +680,7 @@ describe.skipIf(!base)("Native Transformation actual PostgreSQL locks", () => {
         await observation.cleanup();
         expect(drained).toBe(true);
         expect(pid).toBeGreaterThan(0);
+        await waitOwnedBackendsGone(f, [pid], test.signal);
         expect(
           (
             await f.pool.query<{ n: number }>(
