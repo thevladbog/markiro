@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { LocalExecutor } from "../../local/executor.js";
+import { usePhotoBacking } from "./photo-backing.js";
+import "./photo-backing.css";
 import {
   onProductPhotosChanged,
   readProductPhoto,
@@ -73,9 +75,9 @@ export function ProductPhoto({
 
 /**
  * A product's frame: the photo (or `fallback`) in the element every card of
- * the floor shows a product on. The frame's face is the kit's `panel`; no
- * colour is derived from the product any more (kit step C: the one brand
- * gradient paints the work band, the frame is neutral).
+ * the floor shows a product on. Its backing is `data-photo-backing`: the kit's
+ * one brand gradient behind a cut-out or the monogram, nothing visible behind
+ * a photo with its own background (`photoBacking`).
  */
 export function ProductPanel({
   local,
@@ -88,7 +90,13 @@ export function ProductPanel({
   className: string;
   fallback: ReactNode;
 }) {
-  if (local === undefined) return <div className={className}>{fallback}</div>;
+  if (local === undefined) {
+    return (
+      <div className={className} data-photo-backing="gradient">
+        {fallback}
+      </div>
+    );
+  }
   return (
     <PhotoPanel local={local} productId={productId} className={className} fallback={fallback} />
   );
@@ -107,7 +115,7 @@ function PhotoPanel({
 }) {
   const photo = useStoredProductPhoto(local, productId);
   return (
-    <div className={className}>
+    <div className={className} data-photo-backing={usePhotoBacking(photo)}>
       <ProductPhotoImage photo={photo} fallback={fallback} />
     </div>
   );

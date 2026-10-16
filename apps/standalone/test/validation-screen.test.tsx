@@ -192,8 +192,8 @@ describe("the work screen of a validation shift", () => {
     expect(tone()).toBe("neutral");
     await work.scan(km("V1"));
     expect([lastWord(), tone()]).toEqual(["Принят", "ok"]);
-    // The code's tail and the scan's time ride with the word; no count is repeated with it.
-    expect(document.querySelector(".work-scan-hero__code")?.textContent).toMatch(/…V1$/);
+    // The code's serial and the scan's time ride with the word; no count is repeated with it.
+    expect(document.querySelector(".scan-code__serial")?.textContent).toBe("V1");
     expect(document.querySelector(".work-scan-result__time")).not.toBeNull();
     expect(document.querySelector(".work-scan-hero__detail")).toBeNull();
     await work.scan(km("V1"));
@@ -339,13 +339,12 @@ describe("the work screen of a validation shift", () => {
       }),
     ]);
   });
-  it("lists the history in a region the keyboard can scroll, named by its heading", async () => {
+  it("lists the history in a list named by its heading, whole rows only", async () => {
     const at = await station();
     const work = renderWork(at);
     await ready(work);
     await work.scan(km("F1"));
     const list = screen.getByRole("list", { name: "История сканирований" });
-    expect(list.tabIndex).toBe(0);
     expect(list.classList.contains("scan-history__list")).toBe(true);
     expect(screen.getByRole("button", { name: "Вся история" })).toBeTruthy();
   });

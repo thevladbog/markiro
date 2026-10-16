@@ -124,7 +124,7 @@ describe("the shift's scan history, from this station's own scans", () => {
     expect(other.total).toBe(0);
   });
 
-  it("lists the last scans with their result chips, reasons and no whole code", async () => {
+  it("lists the last scans with their result chips, reasons and the serial", async () => {
     const local = history(SEEDS);
     render(
       <ThemeProvider>
@@ -144,8 +144,10 @@ describe("the shift's scan history, from this station's own scans", () => {
     expect(items[4]?.textContent).toContain("Принят");
     expect(items[4]?.getAttribute("aria-label")).toContain("№ 1");
     expect(items[3]?.getAttribute("aria-label")).toContain("Анна Кузнецова");
-    expect(items[3]?.textContent).toContain("…0002");
-    expect(list.textContent).not.toContain("AAAA0002");
+    // The serial (AI 21) is the code's main part, the GTIN short and small beside it.
+    expect(items[3]?.textContent).toContain("AAAA0002");
+    expect(items[3]?.textContent).toContain("GTIN …000013");
+    expect(items[3]?.getAttribute("aria-label")).toContain("04600682000013 AAAA0002");
   });
 
   it("is one list of at most eight rows with its «Вся история» button", async () => {
@@ -168,9 +170,9 @@ describe("the shift's scan history, from this station's own scans", () => {
     expect(
       screen.getByText("Показаны последние записи. Полный список — «Вся история»."),
     ).toBeTruthy();
-    // The newest first, and the list is a keyboard-reachable scroll region.
-    expect(within(list).getAllByRole("listitem")[0]?.textContent).toContain("…0010");
-    expect(list.getAttribute("tabindex")).toBe("0");
+    // The newest first; nothing scrolls in the list (whole rows only), so it takes no tab stop.
+    expect(within(list).getAllByRole("listitem")[0]?.textContent).toContain("BBBB0010");
+    expect(list.getAttribute("tabindex")).toBeNull();
   });
 
   it("reads again when the work screen says a scan was made", async () => {

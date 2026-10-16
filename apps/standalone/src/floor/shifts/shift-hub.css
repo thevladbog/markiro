@@ -274,8 +274,9 @@
   flex-shrink: 0;
 }
 
-/* The product's own gradient, its hue derived from the GTIN. */
+/* The product's photo frame, a fixed square beside the details. */
 .shift-hub .shift-card__photo {
+  position: relative;
   display: grid;
   /* One square frame, as the new shift's and the work band's: never a full-height strip. */
   width: var(--hub-photo, 120px);
@@ -284,10 +285,9 @@
   min-height: 0;
   padding: var(--sp-2);
   overflow: hidden;
-  /* The photo as one rounded frame on a `panel` face (kit): the gradient is the work band's. */
+  /* One rounded frame; its face and border colour are the backing's (`data-photo-backing`). */
   border-radius: var(--r-ctl);
-  background: var(--panel);
-  border: 1px solid var(--line2);
+  border: 1px solid transparent;
   place-items: center;
 }
 
@@ -297,8 +297,13 @@
  * follows the picture's alpha (`drop-shadow`), not its rectangle.
  */
 .shift-hub .shift-card__photo .product-photo {
-  max-width: 100%;
-  max-height: 100%;
+  /* Laid over the frame: the picture's natural size never takes part in the layout. */
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-2);
+  box-sizing: border-box;
   object-fit: contain;
 }
 

@@ -1,12 +1,15 @@
-import type { ReactNode, Ref } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, type ButtonProps } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import { productMonogram } from "../shifts/product-accent.js";
+import { usePhotoBacking } from "../shifts/photo-backing.js";
 import { ProductPhotoImage, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
 import { formatQuantity } from "../shifts/shift-text.js";
+import { cellSerialPlan, serialForCell, type CellSerialPlan } from "./box-cells.js";
+import { ScanCode } from "./ScanCode.js";
 
 /*
  * The presentation of the work screen, ported from the cloud station's
@@ -62,13 +65,14 @@ export function ShiftBand({
   const { t } = useTranslation();
   // The photo the station holds; without a database (a test of the band alone) the monogram.
   const photo = useStoredProductPhoto(local ?? NO_LOCAL, productId ?? "");
+  const backing = usePhotoBacking(local === undefined ? null : photo);
   const ratio = plannedQty === null || plannedQty <= 0 ? null : Math.min(1, accepted / plannedQty);
   return (
     <section
       className="work-shift-band"
       aria-label={t("floor.work.product", { name: productName, gtin })}
     >
-      <div className="work-shift-band__photo">
+      <div className="work-shift-band__photo" data-photo-backing={backing}>
         <ProductPhotoImage
           photo={local === undefined ? null : photo}
           fallback={
@@ -198,6 +202,52 @@ export interface BoxFillProps {
   acceptedToken: number;
   /** The action row under the cells (the box's close). */
   actions: ReactNode;
+  /** The serials (AI 21) of the codes in the box, in the order of their places (1, 2, 3...). */
+  serials?: readonly string[];
+}
+
+/**
+ * Whether the cells have room for their serial: the grid's content box is measured (and again
+ * on every resize) and `cellSerialPlan` decides from it; before a layout exists the answer is no.
+ */
+function useCellSerialPlan(
+  gridRef: RefObject<HTMLDivElement | null>,
+  columns: number,
+  rows: number,
+  numbered: boolean,
+  serialLength: number,
+): CellSerialPlan {
+  const [plan, setPlan] = useState<CellSerialPlan>({ show: false });
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (grid === null) return undefined;
+    const measure = () => {
+      const style = getComputedStyle(grid);
+      const next = cellSerialPlan({
+        width: grid.clientWidth,
+        height: grid.clientHeight,
+        columns,
+        rows,
+        gap: parseFloat(style.columnGap) || 0,
+        serialLength,
+        numbered,
+      });
+      setPlan((current) =>
+        current.show === next.show &&
+        (!current.show ||
+          !next.show ||
+          (current.fontPx === next.fontPx && current.chars === next.chars))
+          ? current
+          : next,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [gridRef, columns, rows, numbered, serialLength]);
+  return plan;
 }
 
 /**
@@ -206,14 +256,23 @@ export interface BoxFillProps {
  * under them. The term and its value stay one after the other («Открытый
  * короб» · «2 из 12»), as the floor's figures are read.
  */
-export function BoxFill({ items, capacity, acceptedToken, actions }: BoxFillProps) {
+export function BoxFill({ items, capacity, acceptedToken, actions, serials = [] }: BoxFillProps) {
   const { t } = useTranslation();
+  const gridRef = useRef<HTMLDivElement>(null);
   const usable = capacity > 0 ? capacity : null;
   const fill = usable === null ? 0 : Math.min(items, usable);
   const cells = usable === null ? [] : buildBoxCells(fill, usable);
   const grouped = usable !== null && usable > 100;
   const large = usable !== null && usable <= 10;
   const rows = Math.max(1, Math.ceil(cells.length / 10));
+  const serialLength = serials.reduce((longest, serial) => Math.max(longest, serial.length), 0);
+  const serialPlan = useCellSerialPlan(
+    gridRef,
+    large ? cells.length : 10,
+    large ? 1 : rows,
+    large,
+    serialLength,
+  );
   const text =
     items === 0
       ? t("floor.work.boxEmpty")
@@ -244,6 +303,7 @@ export function BoxFill({ items, capacity, acceptedToken, actions }: BoxFillProp
       </div>
       {usable !== null && (
         <div
+          ref={gridRef}
           className="work-box-fill__grid"
           data-dense={cells.length > 20}
           data-grouped={grouped}
@@ -261,6 +321,8 @@ export function BoxFill({ items, capacity, acceptedToken, actions }: BoxFillProp
         >
           {cells.map((cell) => {
             const latest = acceptedToken > 0 && fill > 0 && fill >= cell.from && fill <= cell.to;
+            const serial =
+              serialPlan.show && cell.state === "filled" ? serials[cell.from - 1] : undefined;
             return (
               <span
                 key={`${cell.from}:${latest ? acceptedToken : "stable"}`}
@@ -269,7 +331,16 @@ export function BoxFill({ items, capacity, acceptedToken, actions }: BoxFillProp
                 data-latest={latest ? "true" : undefined}
                 aria-hidden="true"
               >
-                {large ? cell.from : null}
+                {large ? <span className="work-box-fill__number">{cell.from}</span> : null}
+                {serial !== undefined && serialPlan.show && (
+                  <span
+                    className="work-box-fill__serial"
+                    style={{ fontSize: `${serialPlan.fontPx}px` }}
+                    data-serial-cell=""
+                  >
+                    {serialForCell(serial, serialPlan.chars)}
+                  </span>
+                )}
               </span>
             );
           })}
@@ -290,8 +361,8 @@ export interface LastScanProps {
   /** The verdict in words beyond the status word; empty when the word says it all. */
   text: string;
   tone: LastTone;
-  /** The scanned code as the history lists it (the GTIN and the serial's tail), when known. */
-  code: string | null;
+  /** The scanned code as the history lists it (the serial first, the GTIN short), when known. */
+  code: { gtin14: string | null; serial: string | null; fallback: string } | null;
   /** The scan's time, on this computer's clock; `null` while there is no scan. */
   time: string | null;
   /** Lit for a moment after an accepted code. */
@@ -378,7 +449,11 @@ export function LastScan({ word, text, tone, code, time, cued, lineRef }: LastSc
           <VerdictIcon tone={tone} />
           <span>{word}</span>
         </p>
-        {code !== null && <p className="work-scan-hero__code">{code}</p>}
+        {code !== null && (
+          <p className="work-scan-hero__code">
+            <ScanCode gtin14={code.gtin14} serial={code.serial} fallback={code.fallback} />
+          </p>
+        )}
         {text !== "" && <p className="work-scan-hero__detail">{text}</p>}
       </div>
     </section>

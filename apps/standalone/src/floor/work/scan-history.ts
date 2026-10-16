@@ -16,6 +16,9 @@ export interface ScanHistoryRow {
   boxPosition: number | null;
   /** The code as the list shows it: the GTIN and the tail of the serial, never the whole code. */
   maskedCode: string | null;
+  /** The GTIN-14 and the serial (GS1 AI 21) of a marking code; `null` for a scan that was none. */
+  gtin14: string | null;
+  serial: string | null;
 }
 
 const row = z.object({
@@ -41,6 +44,44 @@ export function maskCode(gtin14: string | null, serial: string | null): string |
   if (gtin14 === null || serial === null) return null;
   const tail = serial.length <= SERIAL_TAIL ? serial : serial.slice(-SERIAL_TAIL);
   return `${gtin14} …${tail}`;
+}
+
+/** The serial's characters a compact line keeps (its head is cut, never its end). */
+export const SERIAL_SHOWN = 14;
+/** The most a GS1 serial has (AI 21), what the full history shows whole. */
+export const SERIAL_FULL = 20;
+/** The digits of the GTIN a line keeps beside the serial. */
+const GTIN_SHORT = 6;
+
+/** What a scan's code line shows: the serial first, the GTIN short and small beside it. */
+export interface CodeDisplay {
+  /** The serial, its head cut to `…` + the last characters when longer than `limit`. */
+  serial: string;
+  /** `…` and the last digits of the GTIN. */
+  gtin: string;
+  /** The whole GTIN and serial, for the title and the screen reader. */
+  full: string;
+}
+
+/**
+ * How a marking code reads on a line: «…900017 · 2L=o8Zk3VqXp1», the serial (GS1 AI 21, from
+ * the shared parser at scan time) as the main part. A serial longer than `limit` loses its
+ * head, so its end, the part that tells units apart, stays. Without a serial (a scan that is no
+ * marking code) the answer is `null` and the caller keeps its old line.
+ */
+export function codeDisplay(
+  gtin14: string | null,
+  serial: string | null,
+  limit: number = SERIAL_SHOWN,
+): CodeDisplay | null {
+  if (serial === null || serial === "") return null;
+  const shown = serial.length <= limit ? serial : `…${serial.slice(-(limit - 1))}`;
+  const gtin = gtin14 === null ? "" : `…${gtin14.slice(-GTIN_SHORT)}`;
+  return {
+    serial: shown,
+    gtin,
+    full: gtin14 === null ? serial : `${gtin14} ${serial}`,
+  };
 }
 
 /**
@@ -84,6 +125,8 @@ export async function readScanHistory(
       operatorName: each.operator_name,
       boxPosition: each.box_position,
       maskedCode: maskCode(each.gtin14, each.serial),
+      gtin14: each.gtin14,
+      serial: each.serial,
     })),
     total: count?.n ?? 0,
   };

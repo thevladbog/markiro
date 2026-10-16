@@ -154,7 +154,8 @@
   display: grid;
   min-width: 0;
   overflow: hidden;
-  padding: var(--sp-3) var(--sp-4);
+  /* No padding on the photo's side: the photo takes the band's full height. */
+  padding: 0 var(--sp-4) 0 0;
   gap: var(--sp-4);
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -163,19 +164,26 @@
   border: 1px solid var(--brandline);
 }
 
-/* The product's photo as one rounded frame, fitted whole (never cropped). */
+/*
+ * The product's photo: a square as tall as the whole band (`aspect-ratio` over the stretched
+ * height), flush with its left edge, fitted whole (never cropped). Its backing is
+ * `data-photo-backing` (shifts/photo-backing.css): the band's own gradient behind a cut-out.
+ */
 .work-shift-band__photo {
+  position: relative;
   display: grid;
-  width: 104px;
-  height: 104px;
+  min-width: 88px;
+  min-height: 88px;
+  align-self: stretch;
   overflow: hidden;
+  aspect-ratio: 1;
   place-items: center;
-  border: 1px solid var(--line2);
-  border-radius: var(--r-ctl);
-  background: var(--panel);
 }
 
+/* The picture is laid over the frame, so its natural size never sizes the band. */
 .work-shift-band__photo .product-photo {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   padding: 6px;
@@ -196,6 +204,7 @@
 .work-shift-band__copy {
   display: grid;
   min-width: 0;
+  padding-block: var(--sp-3);
   gap: var(--sp-2);
 }
 
@@ -247,6 +256,7 @@
 .work-shift-band__counters {
   display: flex;
   min-width: 0;
+  padding-block: var(--sp-3);
   gap: var(--sp-2);
   align-items: stretch;
   font-variant-numeric: tabular-nums;
@@ -340,21 +350,26 @@
   grid-template-rows: auto minmax(96px, 1fr) auto minmax(64px, auto);
 }
 
+/* The title on the left, the counter on the right edge of the block's header, on one baseline. */
 .work-box-fill__head {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--sp-1) var(--sp-3);
   align-items: baseline;
+  justify-content: space-between;
 }
 
 .work-box-fill__head h2 {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   margin: 0;
   font: var(--floor-lg);
 }
 
 .work-box-fill__count {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
   font: var(--floor-counter-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -404,9 +419,12 @@
 }
 
 .work-box-fill__grid[data-large="true"] .work-box-fill__cell {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   aspect-ratio: auto;
-  place-items: center;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
   border-radius: 10px;
   color: var(--fg-3);
   font: 700 clamp(20px, 2vw, 30px) / 1 var(--font-ui);
@@ -419,6 +437,16 @@
 
 .work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="next"] {
   color: var(--fg-1);
+}
+
+/* The serial under the number: one monospace line, only where `cellSerialPlan` found room. */
+.work-box-fill__serial {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .work-box-fill__cell {
@@ -474,12 +502,28 @@
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   grid-row: -2 / -1;
-  align-items: end;
+  /* One height for the three: the tallest label's, never less than the 64 px touch target. */
+  align-items: stretch;
 }
 
+/*
+ * The three buttons under the cells are sized for a two-line label at the narrowest real width
+ * (a 1280 px panel at 125 % scaling is 1024 CSS px, a third of the box column is ~160 px): the
+ * kit's inline 64 px height gives way to `min-height`, the line is 24 px so two lines and the
+ * padding are 64 px exactly, the text is centred and balanced, and a word is never cut.
+ */
 .work-box-fill__actions .mk-btn {
   min-width: 0 !important;
-  padding-inline: var(--sp-2) !important;
+  height: auto !important;
+  min-height: 64px !important;
+  /* 2 x 24 px of text, the padding and the 2 px border are 64 px. */
+  padding: calc(var(--sp-2) - 1px) var(--sp-2) !important;
+  box-sizing: border-box;
+  overflow: hidden;
+  line-height: 24px !important;
+  overflow-wrap: normal;
+  text-align: center;
+  text-wrap: balance;
   white-space: normal;
 }
 
@@ -555,6 +599,15 @@
   white-space: nowrap;
 }
 
+/* The serial is the hero's code; the short GTIN stands small beneath it. */
+.work-scan-hero__code .scan-code {
+  justify-items: center;
+}
+
+.work-scan-hero__code .scan-code__serial {
+  font: 600 28px/32px var(--font-mono);
+}
+
 .work-scan-hero__detail {
   margin: 0;
   max-width: 100%;
@@ -626,6 +679,11 @@
 
 .work-screen__instruments[data-layout="box"] .work-scan-hero__code {
   font-size: 20px;
+  line-height: 28px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__code .scan-code__serial {
+  font-size: 24px;
   line-height: 28px;
 }
 
@@ -828,12 +886,12 @@
 
 @media (max-height: 880px) {
   .work-shift-band {
-    padding: var(--sp-2) var(--sp-3);
+    padding: 0 var(--sp-3) 0 0;
   }
 
-  .work-shift-band__photo {
-    width: 88px;
-    height: 88px;
+  .work-shift-band__copy,
+  .work-shift-band__counters {
+    padding-block: var(--sp-2);
   }
 
   .work-shift-band__count {
@@ -849,3 +907,16 @@
  * A label that waits takes the stage as the cloud's print dialogs do (BoxPrintRecovery,
  * PalletClose, PrintVerification): the panel lays itself out (src/floor/print/label-panel.css).
  */
+
+/* A very low window (a 1280x1024 panel at 150 % is ~680 CSS px high): the shift's figures give
+   the history panel the room its header needs; they are text, not touch targets. */
+@media (max-height: 760px) {
+  .work-facts {
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .work-facts dl > div {
+    min-height: 32px;
+  }
+}

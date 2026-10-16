@@ -1,12 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type { LocalExecutor } from "../../local/executor.js";
+import { usePhotoBacking, type PhotoBacking } from "../shifts/photo-backing.js";
 import { ProductPhotoImage, useStoredProductPhoto } from "../shifts/ProductPhoto.js";
 import "./floor-controls.css";
 
 export interface PhotoSquareProps {
   /** The side of the square in px; the stylesheet sets it from `--floor-photo` when omitted. */
   size?: number;
+  /** What stands behind the picture; the brand gradient unless told it is an opaque photo. */
+  backing?: PhotoBacking;
   /** An `<img class="product-photo">` or a fallback; the frame sizes and clips it. */
   children: ReactNode;
 }
@@ -19,11 +22,15 @@ export interface PhotoSquareProps {
  * the square, never grown past it or cropped (the owner's photo bug: the old
  * `max-height: 100%` inside a grid track grew the track to the picture's height).
  */
-export function PhotoSquare({ size, children }: PhotoSquareProps) {
+export function PhotoSquare({ size, backing = "gradient", children }: PhotoSquareProps) {
   const style =
     size === undefined ? undefined : ({ "--floor-photo": `${size}px` } as CSSProperties);
   return (
-    <div className="floor-photo-square" {...(style === undefined ? {} : { style })}>
+    <div
+      className="floor-photo-square"
+      data-photo-backing={backing}
+      {...(style === undefined ? {} : { style })}
+    >
       {children}
     </div>
   );
@@ -42,8 +49,9 @@ export function ProductPhotoSquare({
   size?: number;
 }) {
   const photo = useStoredProductPhoto(local, productId);
+  const backing = usePhotoBacking(photo);
   return (
-    <PhotoSquare {...(size === undefined ? {} : { size })}>
+    <PhotoSquare backing={backing} {...(size === undefined ? {} : { size })}>
       <ProductPhotoImage photo={photo} fallback={fallback} />
     </PhotoSquare>
   );

@@ -20,9 +20,9 @@
   height: var(--floor-photo, 132px);
   box-sizing: border-box;
   overflow: hidden;
-  border: 1px solid var(--line);
+  /* The face and the border's colour are the backing's (`data-photo-backing`). */
+  border: 1px solid transparent;
   border-radius: 20px;
-  background: var(--floor-paper);
   place-items: center;
 }
 

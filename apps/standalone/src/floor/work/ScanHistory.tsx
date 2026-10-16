@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, StatusChip, type TagPhase } from "@markiro/ui";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
-import { readScanHistory, type ScanHistoryRow } from "./scan-history.js";
+import { ScanCode } from "./ScanCode.js";
+import { codeDisplay, readScanHistory, SERIAL_FULL, type ScanHistoryRow } from "./scan-history.js";
 import "./scan-history.css";
 
 /** Rows in the work screen's own list: the last scans, with «Вся история» for the rest. */
@@ -47,6 +48,49 @@ function useResult() {
   });
 }
 
+/** The code as a screen reader hears it: the whole GTIN and serial, else the masked line. */
+function spokenCode(row: ScanHistoryRow, noCode: string): string {
+  return codeDisplay(row.gtin14, row.serial, SERIAL_FULL)?.full ?? row.maskedCode ?? noCode;
+}
+
+/** How many whole rows a list of `available` px holds: rows of `row` px with `gap` between them. */
+export function wholeRowsThatFit(available: number, row: number, gap: number): number {
+  if (!(row > 0) || !(available > 0)) return 0;
+  return Math.max(0, Math.floor((available + gap) / (row + gap)));
+}
+
+/**
+ * The number of the list's rows that fit WHOLE in its box, or `null` while that is unknown (no
+ * layout yet, as in a test's DOM): the list shows that many rows, never a cut one. Measured from
+ * the list's own height (a flexible grid row) and its first row's height, again on every resize.
+ */
+export function useWholeRows(listRef: RefObject<HTMLUListElement | null>, rowCount: number) {
+  const [fit, setFit] = useState<number | null>(null);
+  // The row's height is read while a row stands; when none fits (fit 0) the last reading holds.
+  const rowHeight = useRef(0);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (list === null || rowCount === 0) return undefined;
+    const measure = () => {
+      const first = list.querySelector<HTMLElement>(".scan-history__row");
+      if (first !== null && first.offsetHeight > 0) rowHeight.current = first.offsetHeight;
+      const height = list.clientHeight;
+      if (!(rowHeight.current > 0)) {
+        setFit(null);
+        return;
+      }
+      const gap = parseFloat(getComputedStyle(list).rowGap) || 0;
+      setFit(wholeRowsThatFit(height, rowHeight.current, gap));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [listRef, rowCount]);
+  return fit;
+}
+
 function HistoryRow({ row }: { row: ScanHistoryRow }) {
   const { t } = useTranslation();
   const result = useResult()(row);
@@ -65,7 +109,7 @@ function HistoryRow({ row }: { row: ScanHistoryRow }) {
         operator,
         position,
         result: result.reason === null ? result.label : `${result.label}: ${result.reason}`,
-        code,
+        code: spokenCode(row, code),
       })}
     >
       <span className="scan-history__time">{timeOf(row.scannedAt)}</span>
@@ -77,7 +121,9 @@ function HistoryRow({ row }: { row: ScanHistoryRow }) {
         <StatusChip phase={PHASE[row.verdict]} size="floor" label={result.label} />
         {result.reason !== null && <span className="scan-history__reason">{result.reason}</span>}
       </span>
-      <span className="scan-history__code">{code}</span>
+      <span className="scan-history__code">
+        <ScanCode gtin14={row.gtin14} serial={row.serial} size="full" fallback={code} />
+      </span>
     </li>
   );
 }
@@ -155,15 +201,15 @@ function CompactRow({ row }: { row: ScanHistoryRow }) {
         operator,
         position,
         result: result.reason === null ? result.label : `${result.label}: ${result.reason}`,
-        code,
+        code: spokenCode(row, code),
       })}
     >
       <span className="scan-history__time">{timeOf(row.scannedAt)}</span>
       <span className="scan-history__result">
         <StatusChip phase={PHASE[row.verdict]} size="floor" label={result.label} />
       </span>
-      <span className="scan-history__code" title={code}>
-        {code}
+      <span className="scan-history__code">
+        <ScanCode gtin14={row.gtin14} serial={row.serial} fallback={code} />
       </span>
     </li>
   );
@@ -183,6 +229,10 @@ export interface ScanHistoryProps {
  */
 export function ScanHistory({ read, onOpenAll }: ScanHistoryProps) {
   const { t } = useTranslation();
+  const listRef = useRef<HTMLUListElement>(null);
+  const rowCount = read.kind === "ready" ? read.rows.length : 0;
+  const fit = useWholeRows(listRef, rowCount);
+  const visible = read.kind === "ready" ? read.rows.slice(0, fit ?? rowCount) : [];
   return (
     <section
       className="work-instrument scan-history scan-history--compact"
@@ -199,15 +249,15 @@ export function ScanHistory({ read, onOpenAll }: ScanHistoryProps) {
         <p className="scan-history__empty">{t("floor.scanHistory.empty")}</p>
       )}
       {read.kind === "ready" && read.rows.length > 0 && (
-        <ul className="scan-history__list" aria-label={t("floor.scanHistory.title")} tabIndex={0}>
-          {read.rows.map((row) => (
+        <ul ref={listRef} className="scan-history__list" aria-label={t("floor.scanHistory.title")}>
+          {visible.map((row) => (
             <CompactRow key={row.id} row={row} />
           ))}
         </ul>
       )}
-      {read.kind === "ready" && read.total > read.rows.length && (
+      {read.kind === "ready" && read.total > visible.length && (
         <p className="scan-history__note">
-          {t("floor.scanHistory.shown", { count: read.rows.length })}
+          {t("floor.scanHistory.shown", { count: visible.length })}
         </p>
       )}
     </section>

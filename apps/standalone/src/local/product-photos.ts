@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { photoMediaTypeSchema, type ProductPhotoState } from "../host/protocol.js";
+import {
+  photoMediaTypeSchema,
+  type PhotoMediaType,
+  type ProductPhotoState,
+} from "../host/protocol.js";
 import type { LocalExecutor } from "./executor.js";
 
 /**
@@ -143,6 +147,8 @@ export interface StoredPhoto {
   /** A `data:` URL the page can show; its type is the one the host named (JPEG, PNG or WebP). */
   src: string;
   checksum: string;
+  /** The picture's type: a JPEG has no transparency, a PNG or WebP may. */
+  mediaType: PhotoMediaType;
 }
 
 const photoRow = z.object({
@@ -162,5 +168,9 @@ export async function readProductPhoto(
     photoRow,
   );
   if (row === undefined) return null;
-  return { src: `data:${row.media_type};base64,${row.data_base64}`, checksum: row.checksum };
+  return {
+    src: `data:${row.media_type};base64,${row.data_base64}`,
+    checksum: row.checksum,
+    mediaType: row.media_type,
+  };
 }
