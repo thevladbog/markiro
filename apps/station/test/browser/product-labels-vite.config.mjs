@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readFixtureBody } from "./read-fixture-body.mjs";
 import base from "../../../../docs/acceptance/station-touch-vite.config.mjs";
 
 // Test-only loopback bridge. Each browser scenario owns a disposable file database;
@@ -37,11 +38,7 @@ export default {
           }
           res.setHeader("Content-Type", "application/json");
           try {
-            let body = "";
-            for await (const chunk of req) {
-              body += chunk;
-              if (body.length > 2 * 1024 * 1024) throw new Error("fixture request too large");
-            }
+            const body = await readFixtureBody(req, 2 * 1024 * 1024);
             const { id, operation, sql, params = [] } = JSON.parse(body);
             if (
               typeof id !== "string" ||
