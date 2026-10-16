@@ -7234,3 +7234,52 @@ node tools/standalone-support/decrypt.mjs --public-jwk --key support-private.pem
 then put the printed `{ kid, jwk }` into `keys` of `proto/fixtures/support-keys.json`
 and build. A key that must stop being used goes into `retiredKids` (an old text still
 opens with its file); the newest key that is not retired is the one the build uses.
+
+## Office user photos
+
+Plan АВА (host and protocol; the profile dialog and the `Avatar` component come in a later
+phase). Migration `0046_user_avatars.sql`, `host/src/avatar.rs`, `host/src/routes/user_avatars.rs`.
+
+- **Routes** (all office routes: a station or an office PC with an office session, a handheld
+  never; `license/gate.rs` `NEVER`, no gate): `GET /v1/office/users/{id}/avatar` (every role, any
+  user; JSON `{ avatar: UserAvatar | null }`, the picture as base64 because the shell passes JSON
+  only; an unknown user is `not_found`), `PUT` (`{ dataBase64 }`, the owner only), `DELETE` (the
+  owner, or an administrator for someone else's) and `GET …/avatar/image` (the raw bytes: the true
+  `Content-Type`, `X-Content-Type-Options: nosniff`, `Content-Disposition: inline`, the checksum
+  as a strong `ETag`, `Cache-Control: private, no-cache`, `If-None-Match` answered `304`;
+  `404 avatar_not_found` without a photo). No path is built from input: the picture is a BLOB and
+  the id a bound parameter; a file name is never read.
+- **What the host accepts**: JPEG (baseline, extended or progressive Huffman, 8-bit, one or three
+  components), PNG or WebP, decided by the first bytes, never by the client; at most 2 MiB; each
+  side 128..=4096 dots and the picture square; no animated PNG or WebP; a WebP's extended
+  canvas must equal its bitstream's own sides. The sides come from the
+  header only (`inspect`), so a decompression bomb costs nothing. The host stores the cropped
+  picture as the office sent it (no re-encoding, so EXIF a client leaves in is kept: the office's
+  canvas crop drops it). Limits: `markiro_proto::avatar` and `proto/fixtures/avatar-limits.json`
+  (mirrored by `AVATAR_*` in `protocol.ts`).
+- **Errors**: `avatar_too_large` 413, `avatar_unsupported_type` 415, `avatar_too_small` /
+  `avatar_dimensions_too_large` / `avatar_not_square` / `avatar_corrupt` 422, `avatar_not_found`
+  404, `forbidden_replace_other` 403 (another user's `PUT`, an administrator's too, and an unknown
+  id alike), `rate_limited` 429 (ten uploads a minute per address, refused ones counted, no row).
+  A malformed body is `validation_failed`. The body of this route is limited to
+  `avatar::MAX_BODY_BYTES` (the base64 of 2 MiB and a kilobyte): the router's 2 MiB JSON limit is
+  below it, so the route has a ceiling of its own; a body past it is `avatar_too_large` too.
+- **Version**: `avatarVersion` (integer or `null`; absent from a host before the photos, which
+  reads as `null`) is on `OfficeUser` (`/me`, sign-in, wizard) and `OfficeUserRecord` (the
+  administrator's list). It is the host's time of the change in milliseconds, raised above the
+  row's previous one if the clock stood or went back while the row lives (a clearing takes the
+  row and its floor, so a clock set back after a clearing can repeat an older version; the raw
+  route's checksum `ETag` cannot); a restore does not repeat one the way a revision counter would. A change takes no host revision and reaches no station.
+- **Audit**: `office_user.avatar.set` (details `width`, `height`, `bytes`, `mediaType`,
+  `replaced`) and `office_user.avatar.clear` (`{}`), target `office_user`/`{id}`; the actor tells
+  the owner from an administrator. The same picture again, a clearing of none and every refusal
+  write no row. The backup and the restore carry the table with the file
+  (`tests/user_avatars_backup.rs`); a copy from before `0046` restores with no photos.
+- **`PROTOCOL_VERSION` stays 6**: new office routes and one additive, defaulted field; the
+  compatibility window (`MIN_PROTOCOL_VERSION` 1, `tools/standalone-release/releases.json`) is
+  untouched, and a newer webview reads an older host's user with `avatarVersion: null`. The first
+  host that answers `GET …/avatar` is the first that stores one: against an older host that call
+  is `not_found` (the host's router has no such route), which the UI phase must read as "no photo".
+- **Webview**: `HostApi.getUserAvatar` / `putUserAvatar` / `deleteUserAvatar` and the Zod
+  `userAvatarStateSchema`, `userAvatarPutSchema` (strict); the texts of the codes are in
+  `errors.api.*` (the profile dialog will override them with its own).

@@ -285,6 +285,7 @@ pub async fn bootstrap(
                 login,
                 name,
                 role: OfficeRole::Admin,
+                avatar_version: None,
             },
             expires_at: format_timestamp(expires),
         },

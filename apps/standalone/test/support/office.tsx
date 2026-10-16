@@ -57,6 +57,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     deleteProductPhoto: vi.fn<HostApi["deleteProductPhoto"]>(() =>
       unexpected("deleteProductPhoto"),
     ),
+    getUserAvatar: vi.fn<HostApi["getUserAvatar"]>(() => unexpected("getUserAvatar")),
+    putUserAvatar: vi.fn<HostApi["putUserAvatar"]>(() => unexpected("putUserAvatar")),
+    deleteUserAvatar: vi.fn<HostApi["deleteUserAvatar"]>(() => unexpected("deleteUserAvatar")),
     listPalletSheets: vi.fn<HostApi["listPalletSheets"]>(() => unexpected("listPalletSheets")),
     createPalletSheet: vi.fn<HostApi["createPalletSheet"]>(() => unexpected("createPalletSheet")),
     updatePalletSheet: vi.fn<HostApi["updatePalletSheet"]>(() => unexpected("updatePalletSheet")),

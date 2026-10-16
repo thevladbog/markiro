@@ -82,6 +82,22 @@ pub mod codes {
     /// Three devices download the update from the host already (plan
     /// ОБН-3): `503` with `Retry-After: 30`.
     pub const UPDATE_BUSY: &str = "update_busy";
+    /// An office user's photo (plan АВА): larger than 2 MiB. `413`.
+    pub const AVATAR_TOO_LARGE: &str = "avatar_too_large";
+    /// Not a JPEG, PNG or WebP by its first bytes, or an animated one. `415`.
+    pub const AVATAR_UNSUPPORTED_TYPE: &str = "avatar_unsupported_type";
+    /// A side under 128 dots. `422`.
+    pub const AVATAR_TOO_SMALL: &str = "avatar_too_small";
+    /// A side over 4096 dots (the header is read, nothing decoded). `422`.
+    pub const AVATAR_DIMENSIONS_TOO_LARGE: &str = "avatar_dimensions_too_large";
+    /// The picture is not square: the office crops before it uploads. `422`.
+    pub const AVATAR_NOT_SQUARE: &str = "avatar_not_square";
+    /// The signature is a picture's but its header is cut or inconsistent. `422`.
+    pub const AVATAR_CORRUPT: &str = "avatar_corrupt";
+    /// The user has no photo (the raw image route). `404`.
+    pub const AVATAR_NOT_FOUND: &str = "avatar_not_found";
+    /// Another user's photo is replaced: only its owner sets one. `403`.
+    pub const FORBIDDEN_REPLACE_OTHER: &str = "forbidden_replace_other";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -108,6 +124,14 @@ pub mod codes {
         EXPORT_FILE_CORRUPTED,
         PACKAGE_VERIFYING,
         UPDATE_BUSY,
+        AVATAR_TOO_LARGE,
+        AVATAR_UNSUPPORTED_TYPE,
+        AVATAR_TOO_SMALL,
+        AVATAR_DIMENSIONS_TOO_LARGE,
+        AVATAR_NOT_SQUARE,
+        AVATAR_CORRUPT,
+        AVATAR_NOT_FOUND,
+        FORBIDDEN_REPLACE_OTHER,
     ];
 }
 
@@ -905,6 +929,11 @@ pub struct OfficeUser {
     pub login: String,
     pub name: String,
     pub role: OfficeRole,
+    /// The version of the user's photo (plan АВА), `null` without one; a host
+    /// before the photos sends none. The client asks for the picture again
+    /// when it changes.
+    #[serde(default)]
+    pub avatar_version: Option<i64>,
 }
 
 /// A new office session; the token is shown exactly once.
@@ -1081,6 +1110,58 @@ pub struct ProductPhotoPut {
     pub data_base64: String,
 }
 
+/// The limits of an office user's photo (plan АВА), the one source the
+/// host's checks and the webview's mirror both read
+/// (`fixtures/avatar-limits.json` holds them for the parity tests).
+pub mod avatar {
+    /// The largest picture, in bytes: 2 MiB.
+    pub const MAX_BYTES: usize = 2 * 1024 * 1024;
+    /// The shortest side, in dots.
+    pub const MIN_SIDE: u32 = 128;
+    /// The longest side, in dots; the host decodes nothing, so this keeps a
+    /// picture that would unpack into gigabytes out of the webview of every
+    /// office PC that shows it.
+    pub const MAX_SIDE: u32 = 4096;
+    /// What the host stores, by the picture's magic bytes.
+    pub const MEDIA_TYPES: &[&str] = &["image/jpeg", "image/png", "image/webp"];
+}
+
+/// An office user's photo (plan АВА): a square JPEG, PNG or WebP the office
+/// cropped before it uploaded, in standard base64 with padding. The host
+/// derives `mediaType`, `width` and `height` from the picture's own header
+/// and never from a word of the client.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserAvatar {
+    pub width: u32,
+    pub height: u32,
+    pub data_base64: String,
+    pub media_type: String,
+    /// SHA-256 of the bytes in lower-case hex.
+    pub checksum: String,
+    /// What [`OfficeUser::avatar_version`] carries: the host's time of the
+    /// change in milliseconds since the Unix epoch, never lower than the
+    /// previous version of the same user.
+    pub version: i64,
+    pub updated_at: String,
+}
+
+/// `GET`, `PUT` and `DELETE /v1/office/users/{id}/avatar`: the photo, or
+/// `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserAvatarState {
+    pub avatar: Option<UserAvatar>,
+}
+
+/// `PUT /v1/office/users/{id}/avatar` (the user's own photo only): the
+/// whole picture, replacing any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UserAvatarPut {
+    pub data_base64: String,
+}
+
 /// An A4 pallet sheet (plan А4; the cloud's `PalletSheetSpecV2`, #702). The
 /// host keeps `spec` an object of `schemaVersion` 2 and `kind`
 /// "pallet_sheet" of at most 64 KiB; the domain checks the layout. A stock
@@ -1230,6 +1311,9 @@ pub struct OfficeUserRecord {
     pub active: bool,
     pub created_at: String,
     pub rev: i64,
+    /// As [`OfficeUser::avatar_version`].
+    #[serde(default)]
+    pub avatar_version: Option<i64>,
 }
 
 /// `POST /v1/office/users`.

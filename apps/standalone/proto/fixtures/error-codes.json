@@ -22,6 +22,14 @@
     "export_file_too_large",
     "export_file_corrupted",
     "package_verifying",
-    "update_busy"
+    "update_busy",
+    "avatar_too_large",
+    "avatar_unsupported_type",
+    "avatar_too_small",
+    "avatar_dimensions_too_large",
+    "avatar_not_square",
+    "avatar_corrupt",
+    "avatar_not_found",
+    "forbidden_replace_other"
   ]
 }
