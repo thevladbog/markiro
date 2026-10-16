@@ -1,22 +1,14 @@
 import { classifyScan } from "@markiro/domain";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 
-import {
-  Button,
-  Card,
-  DatePicker,
-  EmptyState,
-  FilterBar,
-  Input,
-  PageHeader,
-  Select,
-  type TableColumn,
-} from "@markiro/ui";
+import { Button, EmptyState, Input, PageHeader, Select, type TableColumn } from "@markiro/ui";
 
 import type { OfficePalletRow } from "../../host/pack-cards.js";
 import { formTimeZone } from "../forms/render-form.js";
+import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { officeKeys, useOfficeInfiniteQuery, useOfficeQuery } from "../office-query.js";
 import { CursorTable } from "../paging/CursorTable.js";
 import { useCursorPaging, usePaging } from "../paging/use-paging.js";
@@ -25,7 +17,6 @@ import { activeFirstByName } from "../records.js";
 import { searchableSelect } from "../select-search.js";
 import { PalletCountTag } from "../shifts/PalletCountTag.js";
 import { packState } from "../shifts/shift-card.js";
-import { datePickerTexts } from "../shifts/shift-text.js";
 import { instantFormat, ShiftLink } from "./CodeCard.js";
 import { PackStateChip, PalletLinkOrOpen } from "./PackLinks.js";
 import {
@@ -172,128 +163,132 @@ export function PalletsTab() {
     },
   ];
 
+  /** What stands in the card in the place of the table: a prompt, a loading mark, a failed read. */
+  const body = (node: ReactNode) => <div className="office-list-body">{node}</div>;
   const content = () => {
     if (query === null) return null;
-    if (pages.isPending || pages.isPlaceholderData) return <PageLoading />;
-    if (pages.isError && pages.data === undefined)
-      return <LoadError error={pages.error} onRetry={() => void pages.refetch()} />;
-    if (rows.length === 0) return <EmptyState title={t("office.palletList.empty")} />;
+    if (pages.isPending || pages.isPlaceholderData) return body(<PageLoading />);
+    if (pages.isError && pages.data === undefined) {
+      return body(<LoadError error={pages.error} onRetry={() => void pages.refetch()} />);
+    }
+    if (rows.length === 0) return body(<EmptyState title={t("office.palletList.empty")} />);
     return (
-      <Card>
-        <CursorTable
-          paging={view}
-          pagerLabel={t("office.palletList.pager")}
-          columns={columns}
-          getRowKey={(pallet) => pallet.id}
-          onRowClick={(pallet) => void navigate(`/codes/pallet/${pallet.id}`)}
-          scrollLabel={t("office.palletList.table.label")}
-          notice={
-            pages.isFetchNextPageError ? (
-              <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
-            ) : undefined
-          }
-        />
-      </Card>
+      <CursorTable
+        paging={view}
+        pagerLabel={t("office.palletList.pager")}
+        columns={columns}
+        getRowKey={(pallet) => pallet.id}
+        onRowClick={(pallet) => void navigate(`/codes/pallet/${pallet.id}`)}
+        scrollLabel={t("office.palletList.table.label")}
+        notice={
+          pages.isFetchNextPageError ? (
+            <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
+          ) : undefined
+        }
+      />
     );
   };
 
   return (
-    <div className="office-stack">
+    <>
       <PageHeader title={t("office.codeSearch.title")} />
       <RegistryTabs active="pallets" />
-      <form
-        role="search"
-        aria-label={t("office.palletList.filters")}
-        onSubmit={submitSscc}
-        noValidate
-      >
-        <FilterBar
-          label={t("office.palletList.filters")}
-          resultSummary={
-            pages.isSuccess
-              ? t("office.palletList.shown", { shown: COUNT.format(rows.length) })
-              : ""
-          }
+      <ListCard>
+        <form
+          role="search"
+          aria-label={t("office.palletList.filters")}
+          className="office-list-form"
+          onSubmit={submitSscc}
+          noValidate
         >
-          <Select
-            {...searchableSelect(t)}
-            searchLabel={t("office.palletList.productSearch")}
-            label={t("office.palletList.product")}
-            options={[
-              { value: "", label: t("office.palletList.allProducts") },
-              ...activeFirstByName(products.data ?? []).map((product) => ({
-                value: product.id,
-                label: product.archived
-                  ? t("office.common.archivedName", { name: product.name })
-                  : product.name,
-              })),
-            ]}
-            value={filters.product}
-            onValueChange={(product) => apply({ product })}
-          />
-          <Select
-            {...searchableSelect(t)}
-            label={t("office.palletList.line")}
-            options={[
-              { value: "", label: t("office.palletList.allLines") },
-              ...activeFirstByName(lines.data ?? []).map((line) => ({
-                value: line.id,
-                label: line.archived
-                  ? t("office.common.archivedName", { name: line.name })
-                  : line.name,
-              })),
-            ]}
-            value={filters.line}
-            onValueChange={(line) => apply({ line })}
-          />
-          <Select
-            label={t("office.palletList.station")}
-            options={[
-              { value: "", label: t("office.palletList.allStations") },
-              ...stations.map((station) => ({
-                value: station.id,
-                label: station.revoked
-                  ? t("office.palletList.revokedStation", { name: station.name })
-                  : station.name,
-              })),
-            ]}
-            value={filters.device}
-            onValueChange={(device) => apply({ device })}
-          />
-          <DatePicker
-            label={t("office.palletList.from")}
-            {...datePickerTexts(t)}
-            {...(filters.from === "" ? {} : { value: filters.from })}
-            onValueChange={(value) => apply({ from: value ?? "" })}
-          />
-          <DatePicker
-            label={t("office.palletList.to")}
-            {...datePickerTexts(t)}
-            {...(filters.to === "" ? {} : { value: filters.to })}
-            {...(periodError ? { error: t("office.palletList.periodBackwards") } : {})}
-            onValueChange={(value) => apply({ to: value ?? "" })}
-          />
-          <Input
-            mono
-            label={t("office.palletList.sscc")}
-            hint={t("office.palletList.ssccHint")}
-            value={ssccText}
-            autoComplete="off"
-            spellCheck={false}
-            {...(ssccError ? { error: t("office.palletList.ssccInvalid") } : {})}
-            onChange={(event) => {
-              setSsccText(event.target.value);
-              setSsccError(false);
-            }}
-          />
-          <Button type="submit">{t("office.palletList.submit")}</Button>
-          <Button type="button" variant="secondary" onClick={reset}>
-            {t("office.palletList.reset")}
-          </Button>
-        </FilterBar>
-      </form>
-      {content()}
+          <ListFilters
+            label={t("office.palletList.filters")}
+            resultSummary={
+              pages.isSuccess
+                ? t("office.palletList.shown", { shown: COUNT.format(rows.length) })
+                : ""
+            }
+            onReset={reset}
+            resetLabel={t("office.palletList.reset")}
+            actions={
+              <Button type="submit" icon={<OfficeIcon name="search" size={20} />}>
+                {t("office.palletList.submit")}
+              </Button>
+            }
+          >
+            <Select
+              {...searchableSelect(t)}
+              searchLabel={t("office.palletList.productSearch")}
+              label={t("office.palletList.product")}
+              options={[
+                { value: "", label: t("office.palletList.allProducts") },
+                ...activeFirstByName(products.data ?? []).map((product) => ({
+                  value: product.id,
+                  label: product.archived
+                    ? t("office.common.archivedName", { name: product.name })
+                    : product.name,
+                })),
+              ]}
+              value={filters.product}
+              onValueChange={(product) => apply({ product })}
+            />
+            <Select
+              {...searchableSelect(t)}
+              label={t("office.palletList.line")}
+              options={[
+                { value: "", label: t("office.palletList.allLines") },
+                ...activeFirstByName(lines.data ?? []).map((line) => ({
+                  value: line.id,
+                  label: line.archived
+                    ? t("office.common.archivedName", { name: line.name })
+                    : line.name,
+                })),
+              ]}
+              value={filters.line}
+              onValueChange={(line) => apply({ line })}
+            />
+            <Select
+              label={t("office.palletList.station")}
+              options={[
+                { value: "", label: t("office.palletList.allStations") },
+                ...stations.map((station) => ({
+                  value: station.id,
+                  label: station.revoked
+                    ? t("office.palletList.revokedStation", { name: station.name })
+                    : station.name,
+                })),
+              ]}
+              value={filters.device}
+              onValueChange={(device) => apply({ device })}
+            />
+            <DateRange
+              label={t("office.palletList.closedRange")}
+              fromLabel={t("office.palletList.from")}
+              toLabel={t("office.palletList.to")}
+              from={filters.from}
+              to={filters.to}
+              onFrom={(from) => apply({ from })}
+              onTo={(to) => apply({ to })}
+              error={periodError ? t("office.palletList.periodBackwards") : undefined}
+            />
+            <Input
+              mono
+              label={t("office.palletList.sscc")}
+              hint={t("office.palletList.ssccHint")}
+              value={ssccText}
+              autoComplete="off"
+              spellCheck={false}
+              {...(ssccError ? { error: t("office.palletList.ssccInvalid") } : {})}
+              onChange={(event) => {
+                setSsccText(event.target.value);
+                setSsccError(false);
+              }}
+            />
+          </ListFilters>
+        </form>
+        {content()}
+      </ListCard>
       <WarehousePalletsSection zone={zone} />
-    </div>
+    </>
   );
 }

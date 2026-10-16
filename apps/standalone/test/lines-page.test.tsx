@@ -9,6 +9,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { pressRowAction } from "./support/row-menu.js";
 
 const LINE_2: OfficeLine = {
   id: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
@@ -211,7 +212,7 @@ describe("office lines", () => {
     );
     await openLines(session);
     expect(session.api.listLines).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Убрать линию «Фасовка» в архив" }));
+    pressRowAction(screen, "Убрать линию «Фасовка» в архив");
     fireEvent.click(within(dialog()).getByRole("button", { name: "В архив" }));
     fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -228,7 +229,7 @@ describe("office lines", () => {
     const session = adminSession();
     session.api.updateLine.mockResolvedValue({ ...PACKING, archived: true, rev: 52 });
     await openLines(session);
-    fireEvent.click(screen.getByRole("button", { name: "Убрать линию «Фасовка» в архив" }));
+    pressRowAction(screen, "Убрать линию «Фасовка» в архив");
     expect(
       within(dialog()).getByText(
         "Линию «Фасовка» больше нельзя будет выбрать на станции. Станции, которые уже работают на ней, останутся на этой линии, пока их не переведут в разделе «Устройства».",

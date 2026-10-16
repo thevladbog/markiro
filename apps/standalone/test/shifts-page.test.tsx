@@ -33,23 +33,25 @@ import { chooseText, optionTexts, shownIn } from "./support/select.js";
 
 const SESSION_TOKEN = "office-session-token";
 
-/** Where «Дата смены» (beta 3) stands among the cells: right after the production date. */
-const SHIFT_DATE_AT = 2;
-
-/** The text of every cell of the shift numbered `number`, left to right. */
-function allCells(number: string): (string | null)[] {
+/**
+ * The text of every cell of the shift numbered `number`, left to right: the number, the product
+ * (its name, under it the print name and the counterparty), the line, the two dates, the status
+ * with the mode and the warnings, the output with its plan, and the actions.
+ */
+function cells(number: string): (string | null)[] {
   return within(shiftRow(number))
     .getAllByRole("cell")
     .map((cell) => cell.textContent);
 }
 
-/**
- * The text of the cells of the shift numbered `number`, left to right, but the
- * shift date's: the other columns keep the places these tests name them by, and
- * the shift date has a test of its own (`allCells`).
- */
-function cells(number: string): (string | null)[] {
-  return allCells(number).filter((_, at) => at !== SHIFT_DATE_AT);
+const PRODUCT = 1;
+const LINE = 2;
+const DATES = 3;
+const STATUS = 4;
+
+/** The first line of the output cell: what the shift put in closed boxes, without its plan line. */
+function outputOf(number: string): string | null | undefined {
+  return shiftRow(number).querySelector(".shift-cell--end > span:first-child")?.textContent;
 }
 
 /** `count` planned shifts numbered OCT26-001… on line 2. */
@@ -91,28 +93,28 @@ describe("office shifts: the list", () => {
       "OCT26-004",
       "OCT26-001/S",
     ]);
-    // The actions, for those who may plan, follow in the last column.
-    expect(cells("OCT26-005").slice(0, 7)).toEqual([
+    // The product's name, then the name its labels carry and the counterparty on the line under it;
+    // both dates in one cell; the status with the mode under it; the output with the plan under it.
+    // The actions follow in the last column.
+    expect(cells("OCT26-005").slice(0, 6)).toEqual([
       "OCT26-005",
-      "09.10.2026",
-      "Линия 10",
       "Вода 0,5 л",
-      "Агрегация",
-      "—",
-      "◷Запланирована",
+      "Линия 10",
+      "пр. 09.10.2026смена 10.10.2026",
+      "◷ЗапланированаАгрегация",
+      "—план —",
     ]);
-    expect(cells("OCT26-004").slice(0, 7)).toEqual([
+    expect(cells("OCT26-004").slice(0, 6)).toEqual([
       "OCT26-004",
-      "08.10.2026",
+      "Молоко 3,2% 0,9 лДля печати: Молоко 3,2% · для: ООО «Северный берег»",
       "Линия 2",
-      "Молоко 3,2%для: ООО «Северный берег»",
-      "Агрегация",
+      "пр. 08.10.2026смена 08.10.2026",
+      "▸АктивнаАгрегация",
       // A no-break space between the thousands.
-      "1\u00a0200",
-      "▸Активна",
+      "540 шт · 45 кор.план 1\u00a0200",
     ]);
     expect(screen.getByText("Показано 3 из 3")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Выпуск" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Выпуск/ })).toBeTruthy();
     expect(
       screen.getByText(
         "Показаны запланированные и активные смены и закрытые за последний 31 день. Чтобы найти другие, выберите период.",
@@ -133,12 +135,12 @@ describe("office shifts: the list", () => {
       },
     };
     await openShifts(shiftsSession([PLANNED, ACTIVE, CLOSED, big]));
-    expect(cells("OCT26-005")[7]).toBe("—");
+    expect(outputOf("OCT26-005")).toBe("—");
     // The codes in closed boxes, not every accepted code: one box of the active shift is open.
-    expect(cells("OCT26-004")[7]).toBe("540 шт · 45 кор.");
-    expect(cells("OCT26-001/S")[7]).toBe("492 шт · 41 кор.");
+    expect(outputOf("OCT26-004")).toBe("540 шт · 45 кор.");
+    expect(outputOf("OCT26-001/S")).toBe("492 шт · 41 кор.");
     // A no-break space between the thousands.
-    expect(cells("B-1")[7]).toBe("12\u00a0000 шт · 1\u00a0000 кор.");
+    expect(outputOf("B-1")).toBe("12\u00a0000 шт · 1\u00a0000 кор.");
   });
 
   it("says why a closed shift closed, with data after closing, a station's reason in words and the office's in its own", async () => {
@@ -158,12 +160,14 @@ describe("office shifts: the list", () => {
       lateDataAt: null,
     };
     await openShifts(shiftsSession([CLOSED, byOffice, newerCode]));
-    expect(cells("OCT26-001/S")[6]).toBe(
-      "✓Закрыта!Данные после закрытияПричина расхождения: Остановка оборудования",
+    expect(cells("OCT26-001/S")[STATUS]).toBe(
+      "✓ЗакрытаАгрегация!Данные после закрытияПричина расхождения: Остановка оборудования",
     );
-    expect(cells("OCT26-002")[6]).toBe("✓ЗакрытаЗакрыта в офисе: Станция линии 2 вышла из строя");
+    expect(cells("OCT26-002")[STATUS]).toBe(
+      "✓ЗакрытаАгрегацияЗакрыта в офисе: Станция линии 2 вышла из строя",
+    );
     // A code a newer host adds is shown as it is.
-    expect(cells("OCT26-003/S")[6]).toBe("✓ЗакрытаПричина расхождения: power_cut");
+    expect(cells("OCT26-003/S")[STATUS]).toBe("✓ЗакрытаАгрегацияПричина расхождения: power_cut");
   });
 
   it("marks a planned shift a station will not open: an archived or draft product, a template off or not of the product's group", async () => {
@@ -220,20 +224,20 @@ describe("office shifts: the list", () => {
       },
     ];
     await openShifts(shiftsSession(shifts));
-    expect(cells("A-1")[6]).toBe("◷Запланирована!Не откроется: товар в архиве");
-    expect(cells("A-2")[6]).toBe("◷Запланирована!Не откроется: товар — черновик");
-    expect(cells("A-3")[6]).toBe(
-      "◷Запланирована!Не откроется: шаблон выключен или не подходит товару",
+    expect(cells("A-1")[STATUS]).toBe("◷ЗапланированаАгрегация!Не откроется: товар в архиве");
+    expect(cells("A-2")[STATUS]).toBe("◷ЗапланированаАгрегация!Не откроется: товар — черновик");
+    expect(cells("A-3")[STATUS]).toBe(
+      "◷ЗапланированаАгрегация!Не откроется: шаблон выключен или не подходит товару",
     );
-    expect(cells("A-4")[6]).toBe(
-      "◷Запланирована!Не откроется: шаблон выключен или не подходит товару",
+    expect(cells("A-4")[STATUS]).toBe(
+      "◷ЗапланированаАгрегация!Не откроется: шаблон выключен или не подходит товару",
     );
-    expect(cells("A-5")[6]).toBe("◷Запланирована");
-    expect(cells("A-7")[6]).toBe(
-      "◷Запланирована!Не откроется: шаблон паллеты выключен или не подходит товару",
+    expect(cells("A-5")[STATUS]).toBe("◷ЗапланированаАгрегация");
+    expect(cells("A-7")[STATUS]).toBe(
+      "◷ЗапланированаАгрегация!Не откроется: шаблон паллеты выключен или не подходит товару",
     );
-    expect(cells("A-8")[6]).toBe("◷Запланирована");
-    expect(cells("A-6")[6]).toBe("▸Активна");
+    expect(cells("A-8")[STATUS]).toBe("◷ЗапланированаАгрегация");
+    expect(cells("A-6")[STATUS]).toBe("▸АктивнаАгрегация");
     // A warning is a sentence of its own under the status chip, never a chip: a long warning in
     // a chip is a tall box in a narrow column.
     const warning = screen.getByText("Не откроется: товар в архиве");
@@ -252,15 +256,18 @@ describe("office shifts: the list", () => {
     );
     await openShifts(session);
     await screen.findByText(/Не все справочники загрузились/);
-    expect(cells("OCT26-005").slice(2, 4)).toEqual(["Линия 0b7e7dcb…", "Вода 0,5 л"]);
-    expect(cells("OCT26-005")[6]).toBe("◷Запланирована");
+    expect([cells("OCT26-005")[PRODUCT], cells("OCT26-005")[LINE]]).toEqual([
+      "Вода 0,5 л",
+      "Линия 0b7e7dcb…",
+    ]);
+    expect(cells("OCT26-005")[STATUS]).toBe("◷ЗапланированаАгрегация");
     session.api.listLines.mockResolvedValue([LINE_10, LINE_2]);
     session.api.listTemplates.mockResolvedValue([BOX_58, OLD_BOX]);
     session.api.listProducts.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    await waitFor(() => expect(cells("OCT26-005")[2]).toBe("Линия 10"));
-    expect(cells("OCT26-005")[6]).toBe(
-      "◷Запланирована!Не откроется: шаблон выключен или не подходит товару",
+    await waitFor(() => expect(cells("OCT26-005")[LINE]).toBe("Линия 10"));
+    expect(cells("OCT26-005")[STATUS]).toBe(
+      "◷ЗапланированаАгрегация!Не откроется: шаблон выключен или не подходит товару",
     );
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
     // Only what failed is read again.
@@ -275,7 +282,7 @@ describe("office shifts: the list", () => {
       productId: "5e6f7081-92a3-4b45-8d6e-7f8091a2b3c4",
     };
     await openShifts(shiftsSession([shift]));
-    expect(cells("OCT26-004").slice(2, 4)).toEqual([
+    expect([cells("OCT26-004")[LINE], cells("OCT26-004")[PRODUCT]]).toEqual([
       "Линия 1 (в архиве)",
       "Товар 5e6f7081…для: ООО «Юг» (в архиве)",
     ]);
@@ -306,11 +313,33 @@ describe("office shifts: the list", () => {
     expect(numbers()).toEqual(["OCT26-005", "OCT26-004", "OCT26-001/S"]);
     expect(header("Номер").getAttribute("aria-sort")).toBe("descending");
     // The keyboard does what the mouse does: the header is a stop of Tab.
-    expect(header("Выпуск").tabIndex).toBe(0);
-    fireEvent.keyDown(header("Выпуск"), { key: "Enter" });
-    expect(header("Выпуск").getAttribute("aria-sort")).toBe("ascending");
+    const output = () => screen.getByRole("columnheader", { name: /^Выпуск/ });
+    expect(output().tabIndex).toBe(0);
+    fireEvent.keyDown(output(), { key: "Enter" });
+    expect(output().getAttribute("aria-sort")).toBe("ascending");
     // A planned shift put nothing out; the closed one's output is the least of the two after it.
     expect(numbers()[0]).toBe("OCT26-005");
+  });
+
+  it("sorts by the second key of a heading that holds two: the shift's date beside the production date, the plan beside the output", async () => {
+    await openShifts(shiftsSession());
+    const numbers = () =>
+      shiftRows().map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    const toggle = (name: string) => screen.getByRole("button", { name });
+    expect(toggle("Сортировать по: Дата смены").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle("Сортировать по: Дата смены"));
+    expect(toggle("Сортировать по: Дата смены").getAttribute("aria-pressed")).toBe("true");
+    // 08.10 (the active one and the closed one), then the planned shift on 10.10.
+    expect(numbers()[2]).toBe("OCT26-005");
+    fireEvent.click(toggle("Сортировать по: Дата смены"));
+    expect(numbers()[0]).toBe("OCT26-005");
+    // A chip is not its heading: pressing it does not sort by the heading's own key.
+    fireEvent.click(toggle("Сортировать по: План, шт"));
+    expect(toggle("Сортировать по: План, шт").getAttribute("aria-pressed")).toBe("true");
+    expect(toggle("Сортировать по: Дата смены").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("columnheader", { name: /^Выпуск/ }).getAttribute("aria-sort")).toBe(
+      "none",
+    );
   });
 
   it("sums the shifts the filters keep, whatever the page, in a line over the table", async () => {
@@ -345,7 +374,8 @@ describe("office shifts: the list", () => {
       target: { value: "кефир" },
     });
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
+    // The state offers the same way out as the filter bar: both clear every filter.
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить отбор" }));
     expect(numbers()).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Сбросить" })).toBeNull();
   });
@@ -399,9 +429,9 @@ describe("office shifts: the list", () => {
     await openShifts(session);
     // The planned shift works on 10 October and is produced on 9 October.
     const row = shiftRow(PLANNED.number);
-    expect(allCells(PLANNED.number).slice(1, 3)).toEqual(["09.10.2026", "10.10.2026"]);
-    expect(within(row).getByText("10.10.2026")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "Дата смены" })).toBeTruthy();
+    expect(cells(PLANNED.number)[DATES]).toBe("пр. 09.10.2026смена 10.10.2026");
+    expect(within(row).getByText("10.10.2026", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: /^Даты/ })).toBeTruthy();
     pickDate("Дата смены с", "8 октября 2026");
     expect(screen.getByText("Укажите обе даты периода. Пока показан прежний список.")).toBeTruthy();
     expect(session.api.listShifts).toHaveBeenCalledTimes(1);
@@ -632,8 +662,13 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(shownIn("Статус")).toBe("Все статусы");
     expect(shownIn("Линия")).toBe("Все линии");
     expect((search as HTMLInputElement).value).toBe("");
-    for (const label of ["Дата производства с", "Дата производства по"]) {
-      expect(screen.getByRole("button", { name: label }).textContent).toContain("Не выбрана");
+    // An empty date reads «с» or «по» in its place: the group's label says what the period is of.
+    for (const [label, word] of [
+      ["Дата производства с", "с"],
+      ["Дата производства по", "по"],
+    ] as const) {
+      expect(screen.getByRole("button", { name: label }).textContent).toContain(word);
+      expect(screen.getByRole("button", { name: label }).textContent).not.toContain("Не выбрана");
     }
     await screen.findByText(/Показаны запланированные и активные смены/);
     expect(reset()).toBeNull();
@@ -676,7 +711,9 @@ describe("office shifts: the list, boundaries and states", () => {
     await screen.findByRole("link", { name: "Смены" });
     await screen.findByRole("heading", { name: "Смены" });
     expect(await screen.findByText("Загрузка…")).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
+    // The card stands with its heading, and nothing else of the list yet: no row, no filters.
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByLabelText("Поиск по номеру и товару")).toBeNull();
     expect(screen.queryByText(/Показано \d+ из/)).toBeNull();
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
   });
@@ -689,14 +726,14 @@ describe("office shifts: the list, boundaries and states", () => {
     await screen.findByRole("link", { name: "Смены" });
     const retry = await screen.findByRole("button", { name: "Повторить" });
     expect(screen.queryByText(/Не все справочники загрузились/)).toBeNull();
-    expect(screen.queryByRole("table")).toBeNull();
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2);
     session.api.listProducts.mockClear();
     fireEvent.click(retry);
     expect(await screen.findByText("OCT26-004")).toBeTruthy();
     expect(session.api.listShifts).toHaveBeenCalledTimes(2);
     expect(session.api.listLines).toHaveBeenCalledTimes(2);
     expect(session.api.listProducts).not.toHaveBeenCalled();
-    expect(cells("OCT26-005")[2]).toBe("Линия 10");
+    expect(cells("OCT26-005")[LINE]).toBe("Линия 10");
   });
 
   it("names records by their ids and claims no mark when the products and the counterparties do not load", async () => {
@@ -713,12 +750,12 @@ describe("office shifts: the list, boundaries and states", () => {
     session.api.listCounterparties.mockRejectedValue(unreachable());
     await openShifts(session);
     await screen.findByText(/Не все справочники загрузились/);
-    expect(cells("OCT26-004").slice(2, 4)).toEqual([
+    expect([cells("OCT26-004")[LINE], cells("OCT26-004")[PRODUCT]]).toEqual([
       "Линия 2",
       "Товар f1e2d3c4…для: Контрагент d2b7c9e1…",
     ]);
-    expect(cells("A-7")[3]).toBe("Товар 4d5e6f70…");
-    expect(cells("A-7")[6]).toBe("◷Запланирована");
+    expect(cells("A-7")[PRODUCT]).toBe("Товар 4d5e6f70…");
+    expect(cells("A-7")[STATUS]).toBe("◷ЗапланированаАгрегация");
   });
 
   it("searches the product's own name only, never the placeholder or the mark that stand in for it", async () => {
@@ -739,7 +776,7 @@ describe("office shifts: the list, boundaries and states", () => {
       { ...PLANNED, id: "10000000-0000-4000-8000-000000000007", productId: AYRAN_ARCHIVED.id },
     ]);
     await openShifts(marked);
-    expect(cells("OCT26-005")[3]).toBe("Айран (в архиве)");
+    expect(cells("OCT26-005")[PRODUCT]).toBe("Айран (в архиве)");
     const again = screen.getByLabelText("Поиск по номеру и товару");
     fireEvent.change(again, { target: { value: "в архиве" } });
     expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
@@ -757,14 +794,14 @@ describe("office shifts: the list, boundaries and states", () => {
         "Не все справочники загрузились: названия, которых нет, показаны началами кодов, а смены, которые не откроются, могут быть не помечены.",
       ),
     ).toBeTruthy();
-    expect(cells("OCT26-005")[3]).toBe("Вода 0,5 л");
+    expect(cells("OCT26-005")[PRODUCT]).toBe("Вода 0,5 л");
   });
 
   it("names a line the loaded list lacks by its id, and an archived line in the filter as archived", async () => {
     const session = shiftsSession([ACTIVE]);
     session.api.listLines.mockResolvedValue([LINE_10, OLD_LINE]);
     await openShifts(session);
-    expect(cells("OCT26-004")[2]).toBe("Линия 5f0c6a52…");
+    expect(cells("OCT26-004")[LINE]).toBe("Линия 5f0c6a52…");
     expect(optionTexts("Линия")).toEqual(["Все линии", "Линия 10", "Линия 1 (в архиве)"]);
   });
 
@@ -776,7 +813,7 @@ describe("office shifts: the list, boundaries and states", () => {
       closeReasonCode: code,
     }));
     await openShifts(shiftsSession(shifts));
-    const said = shifts.map((shift) => cells(shift.number)[6]);
+    const said = shifts.map((shift) => cells(shift.number)[STATUS]);
     for (const [n, code] of SHIFT_CLOSE_REASON_CODES.entries()) {
       expect(said[n]).not.toContain(code);
       expect(said[n]).toContain("Причина расхождения: ");

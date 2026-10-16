@@ -1,20 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 
-import {
-  Card,
-  EmptyState,
-  FilterBar,
-  Input,
-  PageHeader,
-  Select,
-  type TableColumn,
-} from "@markiro/ui";
+import { EmptyState, Input, PageHeader, Select, type TableColumn } from "@markiro/ui";
 
 import type { OfficeBox, OfficeShift } from "../../host/protocol.js";
 import { isPackId } from "../../host/pack-cards.js";
 import { formTimeZone } from "../forms/render-form.js";
+import { ListCard, ListFilters } from "../list/ListCard.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -144,75 +137,86 @@ export function BoxesTab() {
     setParams(id === "" ? new URLSearchParams() : new URLSearchParams({ shift: id }));
   };
 
+  /** What stands in the card in the place of the table: a prompt, a loading mark, a failed read. */
+  const body = (node: ReactNode) => <div className="office-list-body">{node}</div>;
+  const kept = boxes.isSuccess ? boxes.data.filter((box) => endsWithTail(box.sscc, tail)) : [];
   const content = () => {
     if (shiftId === "") {
-      return <EmptyState title={t("office.boxList.selectShift")} />;
+      return body(<EmptyState title={t("office.boxList.selectShift")} />);
     }
-    if (boxes.isPending) return <PageLoading />;
-    if (boxes.isError)
-      return <LoadError error={boxes.error} onRetry={() => void boxes.refetch()} />;
-    const kept = boxes.data.filter((box) => endsWithTail(box.sscc, tail));
+    if (boxes.isPending) return body(<PageLoading />);
+    if (boxes.isError) {
+      return body(<LoadError error={boxes.error} onRetry={() => void boxes.refetch()} />);
+    }
     return (
-      <Card>
-        <Input
-          label={t("office.shiftCard.boxes.tail")}
-          hint={t("office.shiftCard.boxes.tailHint")}
-          inputMode="numeric"
-          value={tail}
-          onChange={(event) => {
-            setTail(ssccTail(event.target.value));
-          }}
-        />
-        <p className="office-note" aria-live="polite">
-          {t("office.shiftCard.boxes.found", { shown: kept.length, total: boxes.data.length })}
-        </p>
-        <PagedTable
-          tableId="codes-boxes"
-          pagerLabel={t("office.boxList.pager")}
-          resetKey={`${shiftId}|${tail}`}
-          columns={columns}
-          rows={kept}
-          getRowKey={(box) => box.id}
-          onRowClick={(box) => void navigate(`/codes/box/${box.id}`)}
-          empty={t(boxes.data.length === 0 ? "office.boxList.empty" : "office.boxList.none")}
-          scrollLabel={t("office.boxList.table")}
-        />
-      </Card>
+      <PagedTable
+        tableId="codes-boxes"
+        pagerLabel={t("office.boxList.pager")}
+        resetKey={`${shiftId}|${tail}`}
+        columns={columns}
+        rows={kept}
+        getRowKey={(box) => box.id}
+        onRowClick={(box) => void navigate(`/codes/box/${box.id}`)}
+        empty={t(boxes.data.length === 0 ? "office.boxList.empty" : "office.boxList.none")}
+        scrollLabel={t("office.boxList.table")}
+      />
     );
   };
 
   return (
-    <div className="office-stack">
+    <>
       <PageHeader title={t("office.codeSearch.title")} />
       <RegistryTabs active="boxes" />
-      <FilterBar label={t("office.boxList.shift")}>
-        <Select
-          {...searchableSelect(t)}
-          searchLabel={t("office.boxList.shiftSearch")}
-          label={t("office.boxList.shift")}
-          placeholder={t("office.boxList.shiftPlaceholder")}
-          options={options.map((each) => ({
-            value: each.id,
-            label: t("office.boxList.shiftOption", {
-              number: each.number,
-              date: civilDateLabel(each.productionDate),
-              product: recordLabel("product", products.data, each.productId, t),
-            }),
-          }))}
-          value={shiftId}
-          onValueChange={select}
-        />
-      </FilterBar>
-      {shift !== undefined && (
-        <p className="office-note">
-          {t("office.boxList.shiftLine", {
-            line: recordLabel("line", lines.data, shift.lineId, t),
-            status: t(`office.shifts.statuses.${shift.status}`),
-          })}
-        </p>
-      )}
       {shifts.isError && <LoadError error={shifts.error} onRetry={() => void shifts.refetch()} />}
-      {content()}
-    </div>
+      <ListCard>
+        <ListFilters
+          label={t("office.boxList.shift")}
+          resultSummary={
+            boxes.isSuccess
+              ? t("office.shiftCard.boxes.found", { shown: kept.length, total: boxes.data.length })
+              : ""
+          }
+        >
+          <Select
+            {...searchableSelect(t)}
+            searchLabel={t("office.boxList.shiftSearch")}
+            label={t("office.boxList.shift")}
+            placeholder={t("office.boxList.shiftPlaceholder")}
+            options={options.map((each) => ({
+              value: each.id,
+              label: t("office.boxList.shiftOption", {
+                number: each.number,
+                date: civilDateLabel(each.productionDate),
+                product: recordLabel("product", products.data, each.productId, t),
+              }),
+            }))}
+            value={shiftId}
+            onValueChange={select}
+          />
+          {boxes.isSuccess && (
+            <Input
+              label={t("office.shiftCard.boxes.tail")}
+              hint={t("office.shiftCard.boxes.tailHint")}
+              inputMode="numeric"
+              value={tail}
+              onChange={(event) => {
+                setTail(ssccTail(event.target.value));
+              }}
+            />
+          )}
+        </ListFilters>
+        {shift !== undefined && (
+          <div className="office-list-notes">
+            <p className="office-list-note">
+              {t("office.boxList.shiftLine", {
+                line: recordLabel("line", lines.data, shift.lineId, t),
+                status: t(`office.shifts.statuses.${shift.status}`),
+              })}
+            </p>
+          </div>
+        )}
+        {content()}
+      </ListCard>
+    </>
   );
 }

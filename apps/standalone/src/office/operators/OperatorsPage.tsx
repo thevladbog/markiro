@@ -1,21 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  Alert,
-  Button,
-  Card,
-  PageHeader,
-  RowActionMenu,
-  RowActions,
-  StatusChip,
-  type TableColumn,
-} from "@markiro/ui";
+import { Alert, Button, PageHeader, StatusChip, type TableColumn } from "@markiro/ui";
 
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { useChangeList, useStoreRecord } from "../records.js";
 import { AddBadgeDialog } from "./AddBadgeDialog.js";
 import { BadgesDialog } from "./BadgesDialog.js";
@@ -94,8 +89,13 @@ export function OperatorsPage() {
     {
       key: "pin",
       title: t("office.operators.table.pin"),
-      render: (operator) =>
-        t(operator.hasPin ? "office.operators.pinSet" : "office.operators.pinUnset"),
+      render: (operator) => (
+        // A glyph and a word, not a colour: «PIN не задан» is the one that needs attention.
+        <StatusChip
+          phase={operator.hasPin ? "done" : "attention"}
+          label={t(operator.hasPin ? "office.operators.pinSet" : "office.operators.pinUnset")}
+        />
+      ),
     },
     {
       key: "badges",
@@ -121,28 +121,30 @@ export function OperatorsPage() {
       stickyEnd: true,
       title: t("office.operators.table.actions"),
       render: (operator) => (
-        <RowActions>
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.operators.editNamed", { name: operator.name })}
-            onClick={() => open({ kind: "edit", operator })}
-          >
-            {t("office.operators.edit")}
-          </Button>
-          <RowActionMenu
-            label={t("office.common.rowActions", { name: operator.name })}
-            items={[
+        <RowActionBar
+          actions={[
+            {
+              key: "edit",
+              label: t("office.operators.editNamed", { name: operator.name }),
+              icon: "pencil",
+              onSelect: () => open({ kind: "edit", operator }),
+            },
+          ]}
+          menu={{
+            label: t("office.common.rowActions", { name: operator.name }),
+            items: [
               {
                 key: "pin",
                 label: t("office.operators.pin"),
                 ariaLabel: t("office.operators.pinNamed", { name: operator.name }),
+                icon: "key",
                 onSelect: () => open({ kind: "pin", operator }),
               },
               {
                 key: "badges",
                 label: t("office.operators.badgesOpen"),
                 ariaLabel: t("office.operators.badgesNamed", { name: operator.name }),
+                icon: "badge",
                 onSelect: () => open({ kind: "badges", operatorId: operator.id, notice: null }),
               },
               {
@@ -156,12 +158,13 @@ export function OperatorsPage() {
                     : "office.operators.activateNamed",
                   { name: operator.name },
                 ),
+                icon: operator.active ? "stop" : "reset",
                 destructive: operator.active,
                 onSelect: () => open({ kind: "access", operator }),
               },
-            ]}
-          />
-        </RowActions>
+            ],
+          }}
+        />
       ),
     },
   ];
@@ -222,23 +225,44 @@ export function OperatorsPage() {
     }
   };
 
-  const content = () => {
-    if (operators.isPending) return <PageLoading />;
-    if (operators.isError)
-      return <LoadError error={operators.error} onRetry={() => void operators.refetch()} />;
-    return (
-      <Card>
-        <PagedTable
-          tableId="operators"
-          columns={columns}
-          rows={activeFirstByLogin(operators.data)}
-          getRowKey={(operator) => operator.id}
-          empty={t("office.operators.empty")}
-          scrollLabel={t("office.operators.title")}
-        />
-      </Card>
-    );
-  };
+  const rows = operators.isSuccess ? activeFirstByLogin(operators.data) : [];
+  const view = listViewState({
+    pending: operators.isPending,
+    failed: operators.isError,
+    total: rows.length,
+    found: rows.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={operators.error} onRetry={() => void operators.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="badge"
+        title={t("office.operators.empty")}
+        action={
+          <Button
+            icon={<OfficeIcon name="plus" size={20} />}
+            onClick={() => open({ kind: "create" })}
+          >
+            {t("office.operators.add")}
+          </Button>
+        }
+      />
+    ) : null;
+  const content = (
+    <ListCard>
+      <PagedTable
+        tableId="operators"
+        columns={columns}
+        rows={rows}
+        getRowKey={(operator) => operator.id}
+        empty={state}
+        scrollLabel={t("office.operators.title")}
+      />
+    </ListCard>
+  );
 
   return (
     <>
@@ -249,7 +273,7 @@ export function OperatorsPage() {
         }
       />
       {notice && <Alert tone="ok">{notice}</Alert>}
-      {content()}
+      {content}
       {dialog?.kind === "create" && (
         <CreateOperatorDialog
           onClose={() => setDialog(null)}

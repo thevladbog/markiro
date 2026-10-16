@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, cn, Modal, StatusChip } from "@markiro/ui";
 
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { badgeLabel } from "./operator-records.js";
 
 const DATE = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short" });
@@ -54,10 +55,14 @@ export function BadgesDialog({ operator, notice, onAdd, onRevoke, onClose }: Bad
                   key={badge.id}
                   className={cn("badge-list__item", revoked && "badge-list__item--revoked")}
                 >
+                  <OfficeIcon name="badge" size={24} />
                   <span className="badge-list__name">
-                    <span>{label}</span>
+                    <span className="badge-list__label">{label}</span>
                     <span className="badge-list__date">
-                      {t("office.operators.badges.addedAt", { date })}
+                      <span>{t("office.operators.badges.addedAt", { date })}</span>
+                      <span aria-hidden="true"> · </span>
+                      {/* The code is never shown, only its hash is kept. */}
+                      <span>{t("office.operators.badges.codeHidden")}</span>
                     </span>
                   </span>
                   <StatusChip
@@ -71,7 +76,7 @@ export function BadgesDialog({ operator, notice, onAdd, onRevoke, onClose }: Bad
                   {!revoked && (
                     <Button
                       variant="secondary"
-                      size="compact"
+                      icon={<OfficeIcon name="stop" size={20} />}
                       aria-label={t("office.operators.badges.revokeNamed", { label, date })}
                       onClick={() => onRevoke(badge)}
                     >

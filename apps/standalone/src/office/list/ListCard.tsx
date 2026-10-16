@@ -24,6 +24,8 @@ export interface ListFiltersProps {
   /** The «Сбросить» button, shown only when there is something to reset. */
   onReset?: (() => void) | undefined;
   resetLabel?: string;
+  /** Buttons of the aside that come before «Сбросить» (a search form's submit). */
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -36,6 +38,7 @@ export function ListFilters({
   resultSummary,
   onReset,
   resetLabel,
+  actions,
   children,
 }: ListFiltersProps) {
   const { t } = useTranslation();
@@ -46,6 +49,7 @@ export function ListFilters({
         <p className="office-list-filters__found" aria-live="polite">
           {resultSummary}
         </p>
+        {actions}
         {onReset !== undefined && (
           <Button
             variant="secondary"
@@ -118,4 +122,33 @@ export function DateRange({
       </div>
     </div>
   );
+}
+
+/** A labelled group of controls in a filter row that is not a field (the period's segments). */
+export function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="office-range">
+      <span className="office-range__label" aria-hidden="true">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The filter area of a search that needs rows of its own (the code search): `FilterRow`s one under
+ * another in the card, instead of `ListFilters`' single flowing row with an aside.
+ */
+export function FilterPanel({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="office-list-filters office-list-filters--panel" role="group" aria-label={label}>
+      {children}
+    </div>
+  );
+}
+
+/** One row of a `FilterPanel`: fields side by side, wrapping when the card is narrow. */
+export function FilterRow({ children }: { children: ReactNode }) {
+  return <div className="office-filter-row">{children}</div>;
 }

@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, PageHeader, RowActions, type TableColumn } from "@markiro/ui";
+import { Alert, Button, PageHeader, type TableColumn } from "@markiro/ui";
 
+import { listViewState } from "../list/list-state.js";
+import { ListCard } from "../list/ListCard.js";
+import { ListEmpty, ListError, ListSkeleton } from "../list/ListStates.js";
+import { RowActionBar } from "../list/RowActionBar.js";
+import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { OfficeLine } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, ArchiveStatus, useStoreRecord } from "../records.js";
 import { ArchiveLineDialog } from "./ArchiveLineDialog.js";
 import { LineDialog, type LineDialogMode } from "./LineDialog.js";
@@ -63,57 +67,90 @@ export function LinesPage() {
       key: "actions",
       stickyEnd: true,
       title: t("office.lines.table.actions"),
-      render: (line) =>
-        line.archived ? (
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.lines.restoreNamed", { name: line.name })}
-            onClick={() => open({ kind: "restore", line })}
-          >
-            {t("office.lines.restore")}
-          </Button>
-        ) : (
-          <RowActions>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.lines.renameNamed", { name: line.name })}
-              onClick={() => open({ kind: "rename", line })}
-            >
-              {t("office.lines.rename")}
-            </Button>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.lines.archiveNamed", { name: line.name })}
-              onClick={() => open({ kind: "archive", line })}
-            >
-              {t("office.lines.archive")}
-            </Button>
-          </RowActions>
-        ),
+      render: (line) => (
+        <RowActionBar
+          actions={[
+            line.archived
+              ? {
+                  key: "restore",
+                  label: t("office.lines.restoreNamed", { name: line.name }),
+                  icon: "reset",
+                  onSelect: () => open({ kind: "restore", line }),
+                }
+              : {
+                  key: "rename",
+                  label: t("office.lines.renameNamed", { name: line.name }),
+                  icon: "pencil",
+                  onSelect: () => open({ kind: "rename", line }),
+                },
+          ]}
+          {...(line.archived
+            ? {}
+            : {
+                menu: {
+                  label: t("office.common.rowActions", { name: line.name }),
+                  items: [
+                    {
+                      key: "archive",
+                      label: t("office.lines.archive"),
+                      ariaLabel: t("office.lines.archiveNamed", { name: line.name }),
+                      icon: "archive" as const,
+                      destructive: true,
+                      onSelect: () => open({ kind: "archive", line }),
+                    },
+                  ],
+                },
+              })}
+        />
+      ),
     });
   }
 
-  const content = () => {
-    if (lines.isPending) return <PageLoading />;
-    if (lines.isError)
-      return <LoadError error={lines.error} onRetry={() => void lines.refetch()} />;
-    return (
-      <Card>
-        <PagedTable
-          tableId="lines"
-          columns={columns}
-          rows={activeFirstByName(lines.data)}
-          getRowKey={(line) => line.id}
-          empty={t("office.lines.empty")}
-          scrollLabel={t("office.lines.title")}
-        />
-        {!canEdit && <p className="office-note">{t("office.common.readOnly")}</p>}
-      </Card>
-    );
-  };
+  const rows = lines.isSuccess ? activeFirstByName(lines.data) : [];
+  const view = listViewState({
+    pending: lines.isPending,
+    failed: lines.isError,
+    total: rows.length,
+    found: rows.length,
+  });
+  const state =
+    view === "loading" ? (
+      <ListSkeleton />
+    ) : view === "error" ? (
+      <ListError error={lines.error} onRetry={() => void lines.refetch()} />
+    ) : view === "empty" ? (
+      <ListEmpty
+        icon="factory"
+        title={t("office.lines.empty")}
+        {...(canEdit
+          ? {
+              action: (
+                <Button
+                  icon={<OfficeIcon name="plus" size={20} />}
+                  onClick={() => open({ kind: "create" })}
+                >
+                  {t("office.lines.add")}
+                </Button>
+              ),
+            }
+          : {})}
+      />
+    ) : null;
+  const content = (
+    <ListCard>
+      <PagedTable
+        tableId="lines"
+        columns={columns}
+        rows={rows}
+        getRowKey={(line) => line.id}
+        empty={state}
+        scrollLabel={t("office.lines.title")}
+      />
+      {!canEdit && (
+        <p className="office-list-note office-list-foot">{t("office.common.readOnly")}</p>
+      )}
+    </ListCard>
+  );
 
   return (
     <>
@@ -126,7 +163,7 @@ export function LinesPage() {
         }
       />
       {notice && <Alert tone="ok">{notice}</Alert>}
-      {content()}
+      {content}
       {canEdit && dialog !== null && dialog.kind === "archive" && (
         <ArchiveLineDialog
           line={dialog.line}

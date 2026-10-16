@@ -91,7 +91,8 @@
 
 .office-list-filters__fields {
   display: flex;
-  flex: 1 1 auto;
+  /* Zero basis: the fields wrap inside the room beside the aside, not under it. */
+  flex: 1 1 0;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 12px 16px;
@@ -243,6 +244,7 @@
 
 .office-row-menu__item {
   display: flex;
+  justify-content: flex-start !important;
   align-items: center;
   gap: 12px !important;
   box-sizing: border-box;
@@ -466,4 +468,133 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---- A heading with more than one sort: «Даты» sorts by production date or by the shift's date ---- */
+
+.office-th-sorts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.office-sort-toggle {
+  min-height: 24px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--fg-2) !important;
+  font: 500 12px/16px var(--font-ui) !important;
+}
+
+.office-sort-toggle[aria-pressed="true"] {
+  background: var(--surface-panel) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--fg-1) !important;
+  font-weight: 600 !important;
+}
+
+.office-sort-toggle:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Note lines inside the card, between the filters and the table: side by side while they fit. */
+.office-list-notes {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  padding: 0 16px 12px;
+}
+
+.office-list-note {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.office-list-note:empty {
+  display: none;
+}
+
+/* The search form is the card's first row; its body (a prompt, a state, one code's card) scrolls by itself. */
+.office-list-form {
+  flex: none;
+}
+
+.office-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+/* A note at the foot of a card (a read-only role's reminder), under the table. */
+.office-list-foot {
+  flex: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* The drawer's footer says in a word and a glyph, in the warning tone, that something is unsaved. */
+.entity-drawer__dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--warn-fg);
+  font: 600 13px/18px var(--font-ui);
+}
+
+/*
+ * A field with a wrong value (kit): a 2 px border in the error colour, and its message starts with
+ * a glyph and the word «Ошибка ·» (the word comes from i18n through `--mk-error-prefix`, set once by
+ * the office), so the error is never colour alone. The message itself stays the field's own text.
+ */
+.mk-input--error {
+  border-width: 2px !important;
+}
+
+.mk-field > span[id$="-error"] {
+  font-weight: 500;
+}
+
+.mk-field > span[id$="-error"]::before {
+  content: "⚠ " var(--mk-error-prefix, "");
+}
+
+.office-list-filters--panel {
+  display: grid;
+  gap: 16px;
+}
+
+.office-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  min-width: 0;
+}
+
+.office-filter-row > .mk-field:has(> .mk-input) {
+  flex: 1 1 320px;
+  max-width: 560px;
+}
+
+/* The buttons and the count at the end of a row. */
+.office-filter-row__end {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-left: auto;
+}
+
+/* The buttons beside a search field start level with its input, not with the hint under it (a label is 16 px and its gap 6). */
+.office-filter-row__end--top {
+  align-self: flex-start;
+  margin-top: 22px;
 }

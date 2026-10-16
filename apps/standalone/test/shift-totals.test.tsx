@@ -387,10 +387,8 @@ describe("office shifts: a shift's figures", () => {
     await openShifts(session);
     // «Выпуск»: the codes it accepted, never «0 шт · 0 кор.».
     expect(
-      within(shiftRow(validation.number))
-        .getAllByRole("cell")
-        .map((cell) => cell.textContent),
-    ).toContain("1\u00a0300 шт");
+      shiftRow(validation.number).querySelector(".shift-cell--end > span:first-child")?.textContent,
+    ).toBe("1\u00a0300 шт");
     fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
     await screen.findByRole("dialog", { name: "Итоги смены OCT26-004" });
     await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(4));

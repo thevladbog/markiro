@@ -91,10 +91,8 @@ describe("«Поиск кодов» in the office", () => {
       toMs: Date.parse("2026-10-09T21:00:00.000Z"),
     });
     expect(value.api.getCodeCard).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "7 дней" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Сегодня" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("radio", { name: "7 дней" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Сегодня" }).getAttribute("aria-checked")).toBe(
       "false",
     );
     const note = await screen.findByTestId("code-period-note");
@@ -111,27 +109,27 @@ describe("«Поиск кодов» in the office", () => {
     await openSearch(value);
     await screen.findByText("Найдено: 2");
     const lastCall = () => value.api.searchCodes.mock.calls.at(-1)?.[1];
-    fireEvent.click(screen.getByRole("button", { name: "Сегодня" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Сегодня" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
         fromMs: Date.parse("2026-10-08T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "30 дней" }));
+    fireEvent.click(screen.getByRole("radio", { name: "30 дней" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
         fromMs: Date.parse("2026-09-09T21:00:00.000Z"),
         toMs: Date.parse("2026-10-09T21:00:00.000Z"),
       }),
     );
-    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("radio", { name: "30 дней" }).getAttribute("aria-checked")).toBe(
       "true",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Всё время" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Всё время" }));
     await waitFor(() => expect(lastCall()).toEqual({ fromMs: 0 }));
     expect(screen.getByTestId("code-period-note").textContent).toContain("Период: всё время");
-    fireEvent.click(screen.getByRole("button", { name: "7 дней" }));
+    fireEvent.click(screen.getByRole("radio", { name: "7 дней" }));
     await waitFor(() =>
       expect(lastCall()).toEqual({
         fromMs: Date.parse("2026-10-02T21:00:00.000Z"),
@@ -161,7 +159,7 @@ describe("«Поиск кодов» in the office", () => {
       target: { value: "(00)046006820000015000" },
     });
     // Typing a criterion over the untouched default days leaves the pickers empty.
-    expect(screen.getByRole("button", { name: "Всё время" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("radio", { name: "Всё время" }).getAttribute("aria-checked")).toBe(
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Найти" }));

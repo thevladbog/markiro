@@ -39,7 +39,7 @@ function dialog(name: string): HTMLElement {
 
 async function openDelete(session: FakeOfficeSession): Promise<HTMLElement> {
   await openShifts(session);
-  fireEvent.click(screen.getByRole("button", { name: "Удалить смену OCT26-005" }));
+  pressRowAction(screen, "Удалить смену OCT26-005");
   return screen.findByRole("dialog", { name: "Удалить смену OCT26-005?" });
 }
 
@@ -269,7 +269,7 @@ describe("office shifts: deleting a planned shift", () => {
     const session = shiftsSession([PLANNED, PLANNED_2, ACTIVE]);
     session.api.deleteShift.mockResolvedValue(undefined);
     await openShifts(session);
-    fireEvent.click(screen.getByRole("button", { name: "Удалить смену OCT26-006" }));
+    pressRowAction(screen, "Удалить смену OCT26-006");
     const confirm = await screen.findByRole("dialog", { name: "Удалить смену OCT26-006?" });
     expect(within(confirm).getByText(/^Смена OCT26-006 /)).toBeTruthy();
     fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
@@ -323,10 +323,11 @@ describe("office shifts: deleting a planned shift", () => {
       const session = shiftsSession(undefined, user);
       session.api.deleteShift.mockResolvedValue(undefined);
       const view = await openShifts(session);
-      expect(screen.getAllByRole("button", { name: /^Удалить смену / })).toHaveLength(1);
-      expect(within(shiftRow("OCT26-004")).queryByRole("button", { name: /Удалить/ })).toBeNull();
-      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Удалить/ })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Удалить смену OCT26-005" }));
+      // The delete sits in the «Ещё» menu of the planned shift's row, and in no other row's.
+      expect(hasRowAction(within(shiftRow("OCT26-005")), "Удалить смену OCT26-005")).toBe(true);
+      expect(hasRowAction(within(shiftRow("OCT26-004")), /Удалить/)).toBe(false);
+      expect(hasRowAction(within(shiftRow("OCT26-001/S")), /Удалить/)).toBe(false);
+      pressRowAction(screen, "Удалить смену OCT26-005");
       fireEvent.click(
         within(await screen.findByRole("dialog", { name: "Удалить смену OCT26-005?" })).getByRole(
           "button",

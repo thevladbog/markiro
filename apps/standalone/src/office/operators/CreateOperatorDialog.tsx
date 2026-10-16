@@ -97,6 +97,7 @@ export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialo
 
   return (
     <FormDialog
+      errorCount={Object.keys(errors).length}
       title={t("office.operators.createTitle")}
       submitLabel={t("office.operators.create")}
       onSubmit={submit}

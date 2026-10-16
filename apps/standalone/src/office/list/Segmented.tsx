@@ -16,7 +16,8 @@ export interface SegmentOption<Id extends string = string> {
 
 export interface SegmentedProps<Id extends string = string> {
   options: readonly SegmentOption<Id>[];
-  value: Id;
+  /** The selected option; `null` when none is (a custom period): the first one is then the tab stop. */
+  value: Id | null;
   onChange: (id: Id) => void;
   /** The group's accessible name. */
   label: string;
@@ -66,8 +67,9 @@ export function Segmented<Id extends string>({
       role={tabs ? "tablist" : "radiogroup"}
       aria-label={label}
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const selected = option.id === value;
+        const stop = selected || (value === null && index === 0);
         return (
           <Button
             key={option.id}
@@ -80,7 +82,7 @@ export function Segmented<Id extends string>({
             aria-label={option.label}
             {...(tabs ? { "aria-selected": selected } : { "aria-checked": selected })}
             {...(tabs && option.panelId !== undefined ? { "aria-controls": option.panelId } : {})}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={stop ? 0 : -1}
             disabled={option.disabled ?? false}
             className={
               selected

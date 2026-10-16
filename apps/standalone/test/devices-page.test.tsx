@@ -8,6 +8,7 @@ import { HostError } from "../src/host/client.js";
 import { stationShift } from "../src/office/devices/station-shift.js";
 import type { DeviceRecord, OfficeLine, PairingCode } from "../src/host/protocol.js";
 import { LINE_ID } from "./support/fixtures.js";
+import { pressRowAction } from "./support/row-menu.js";
 import { ACTIVE, CLOSED, PLANNED } from "./support/shifts.js";
 import {
   fakeOfficeSession,
@@ -414,7 +415,7 @@ describe("office devices", () => {
     const revoked = { ...PACKING, revokedAt: "2026-09-28T10:00:00Z" };
     session.api.revokeDevice.mockResolvedValue(revoked);
     await openDevices(session);
-    fireEvent.click(screen.getByRole("button", { name: "Отозвать устройство «Станция упаковки»" }));
+    pressRowAction(screen, "Отозвать устройство «Станция упаковки»");
     expect(
       within(dialog()).getByText(
         "Устройство «Станция упаковки» больше не сможет обращаться к хосту, его сессии офиса закроются. Отменить отзыв нельзя: чтобы снова работать на этом устройстве, подключите его заново.",
@@ -461,13 +462,11 @@ describe("office devices", () => {
     expect(within(rowOf("Рабочее место хоста")).getByText("Этот ПК")).toBeTruthy();
     expect(screen.getAllByText("Этот ПК")).toHaveLength(1);
     // Another device: the usual confirmation.
-    fireEvent.click(screen.getByRole("button", { name: "Отозвать устройство «Станция упаковки»" }));
+    pressRowAction(screen, "Отозвать устройство «Станция упаковки»");
     expect(within(dialog()).getByText("Отозвать устройство?")).toBeTruthy();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
     // This PC: the app here disconnects and has to be paired again. Nothing stops it.
-    fireEvent.click(
-      screen.getByRole("button", { name: "Отозвать устройство «Рабочее место хоста»" }),
-    );
+    pressRowAction(screen, "Отозвать устройство «Рабочее место хоста»");
     expect(within(dialog()).getByText("Отозвать этот ПК?")).toBeTruthy();
     expect(
       within(dialog()).getByText(
@@ -487,7 +486,7 @@ describe("office devices", () => {
       new HostError({ kind: "api", code: "not_found", status: 404, message: "no such device" }),
     );
     await openDevices(session);
-    fireEvent.click(screen.getByRole("button", { name: "Отозвать устройство «Станция упаковки»" }));
+    pressRowAction(screen, "Отозвать устройство «Станция упаковки»");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отозвать" }));
     expect(await within(dialog()).findByText("Запись не найдена.")).toBeTruthy();
   });

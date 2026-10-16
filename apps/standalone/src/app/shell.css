@@ -1293,9 +1293,19 @@
 
 .badge-list__item {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.badge-list__item:last-child {
+  border-bottom: 0;
+}
+
+.badge-list__label {
+  font-weight: 600;
 }
 
 .badge-list__item--revoked {
@@ -1308,6 +1318,7 @@
 
 .badge-list__date {
   color: var(--fg-2);
+  font: var(--text-body-sm);
 }
 
 .pairing-code {
@@ -2131,4 +2142,21 @@
 
 .product-name__full {
   font-weight: 600;
+}
+
+/* A shift's product line, its quiet second line, and a figure cell aligned to the end. */
+.shift-cell__name {
+  font-weight: 600;
+}
+
+.shift-cell__sub {
+  font: var(--text-body-sm);
+}
+
+.shift-cell--end {
+  justify-items: end;
+}
+
+.shift-cell--end > .shift-cell__quiet {
+  font: var(--text-body-sm);
 }
