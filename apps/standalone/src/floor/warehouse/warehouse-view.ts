@@ -96,7 +96,11 @@ export function jobRowParts(job: WarehouseJob): JobRowParts {
   return { kind, title, count };
 }
 
-const TIME = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", hour12: false });
+const TIME = new Intl.DateTimeFormat("ru-RU", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 /** The minute of an instant on this PC's clock, `ЧЧ:ММ`; nothing for text that is no instant. */
 export function jobTime(instant: string): string {
@@ -169,7 +173,10 @@ export interface ResultView {
   body: { kind: "hint"; key: string } | { kind: "code"; code: string } | null;
 }
 
-export function resultView(job: Pick<WarehouseJob, "state" | "errorCode">, verifying: boolean): ResultView {
+export function resultView(
+  job: Pick<WarehouseJob, "state" | "errorCode">,
+  verifying: boolean,
+): ResultView {
   if (verifying) {
     return {
       tone: "info",
@@ -187,7 +194,12 @@ export function resultView(job: Pick<WarehouseJob, "state" | "errorCode">, verif
         body: { kind: "hint", key: "sending" },
       };
     case "sent":
-      return { tone: "ok", glyph: "check-circle", title: "sent", body: { kind: "hint", key: "sent" } };
+      return {
+        tone: "ok",
+        glyph: "check-circle",
+        title: "sent",
+        body: { kind: "hint", key: "sent" },
+      };
     case "verified":
       return { tone: "ok", glyph: "check-circle", title: "verified", body: null };
     case "unknown":

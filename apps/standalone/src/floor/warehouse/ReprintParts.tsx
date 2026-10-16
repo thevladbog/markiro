@@ -1,10 +1,4 @@
-import {
-  useRef,
-  type CSSProperties,
-  type KeyboardEvent,
-  type ReactNode,
-  type Ref,
-} from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Input } from "@markiro/ui";
@@ -283,7 +277,8 @@ export function Journal({
             const parts = jobRowParts(job);
             const code = jobCode(job);
             const tag = jobTag(job);
-            const main = code.kind === "unreadable" ? t("floor.warehouse.journal.unreadable") : code.main;
+            const main =
+              code.kind === "unreadable" ? t("floor.warehouse.journal.unreadable") : code.main;
             const state = t(`floor.warehouse.tag.${tag.key}`);
             const count =
               parts.count === null
@@ -440,7 +435,14 @@ export interface JobPrintProps {
 }
 
 /** The detail's right column: what goes (template, printer, reason) and where the print stands. */
-export function JobPrint({ templateName, printer, reason, result, resultText, note }: JobPrintProps) {
+export function JobPrint({
+  templateName,
+  printer,
+  reason,
+  result,
+  resultText,
+  note,
+}: JobPrintProps) {
   const { t } = useTranslation();
   return (
     <section className="rp-print" aria-labelledby="rp-print-title">

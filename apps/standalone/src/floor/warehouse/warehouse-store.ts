@@ -129,8 +129,7 @@ export const JOB_BY_IDENTITY_SQL =
   "AND state <> 'cancelled' ORDER BY rowid DESC LIMIT 1";
 
 /** The session's journal: every job of it, the newest first (presentation only, no state is moved). */
-export const SESSION_JOBS_SQL =
-  `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND session_id = ? ORDER BY rowid DESC`;
+export const SESSION_JOBS_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND session_id = ? ORDER BY rowid DESC`;
 
 export const JOB_SQL = `${JOB_COLUMNS} WHERE host_id = ? AND device_id = ? AND id = ?`;
 
