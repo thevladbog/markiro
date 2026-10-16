@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, PageHeader, Table, type TableColumn } from "@markiro/ui";
+import { Alert, Button, Card, PageHeader, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { CounterpartyRecord } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
@@ -90,7 +91,8 @@ export function CounterpartiesPage() {
     }
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="counterparties"
           columns={columns}
           rows={activeFirstByName(counterparties.data)}
           getRowKey={(counterparty) => counterparty.id}

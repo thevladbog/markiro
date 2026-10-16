@@ -65,7 +65,7 @@ describe("the template import dialog", () => {
   it("opens on the layout's format and resolution, wide, with both buttons off until there is code", () => {
     const { dialog } = open({ initialFormat: "tspl", initialDpi: 300 });
     expect(valueOf("Формат кода")).toBe("tspl");
-    expect(valueOf("Разрешение кода")).toBe("300");
+    expect(valueOf("Разрешение принтера, для которого написан код")).toBe("300");
     expect(screen.getByLabelText("Код TSPL (TSC)")).toHaveProperty("value", "");
     expect(button("Проверить код")).toHaveProperty("disabled", true);
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
@@ -119,7 +119,7 @@ describe("the template import dialog", () => {
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
 
     fireEvent.click(button("Проверить код"));
-    chooseValue("Разрешение кода", "300");
+    chooseValue("Разрешение принтера, для которого написан код", "300");
     expect(button("Заменить макет")).toHaveProperty("disabled", true);
 
     fireEvent.click(button("Проверить код"));
@@ -145,7 +145,9 @@ describe("the template import dialog", () => {
   it("takes JSON without a resolution, passes a wrapper's name and warns about another purpose", async () => {
     const { onReplace } = open();
     chooseValue("Формат кода", "json");
-    expect(screen.queryByRole("combobox", { name: "Разрешение кода" })).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Разрешение принтера, для которого написан код" }),
+    ).toBeNull();
     paste(
       "JSON шаблона",
       JSON.stringify({ name: "Паллета <b>1</b>", purpose: "pallet", spec: JSON_SPEC }),

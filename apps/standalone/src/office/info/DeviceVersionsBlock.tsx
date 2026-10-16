@@ -1,8 +1,9 @@
 import type { i18n, TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import { Card, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import { Card, StatusChip, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { DeviceVersion, OfficeUpdateStatus } from "../../host/distribution.js";
 import { formatSize } from "../backups/backup-format.js";
 import { useBackupTime } from "../backups/backup-time.js";
@@ -133,7 +134,8 @@ function Versions({
       {status.package.staged !== null && (
         <p>{t("office.about.update.package.staged", { version: status.package.staged })}</p>
       )}
-      <Table
+      <PagedTable
+        tableId="device-versions"
         columns={columns}
         rows={status.devices}
         scrollLabel={t("office.about.update.devices.table")}

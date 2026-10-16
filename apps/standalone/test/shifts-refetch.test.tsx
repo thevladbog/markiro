@@ -58,7 +58,7 @@ describe("office shifts: the list read again", () => {
   });
 
   it("never shows an empty page when the list is read again shorter than the page it is on", async () => {
-    const session = shiftsSession(numbered(26));
+    const session = shiftsSession(numbered(11));
     await openShifts(session);
     fireEvent.click(
       within(screen.getByRole("navigation", { name: "Страницы списка смен" })).getByRole("button", {

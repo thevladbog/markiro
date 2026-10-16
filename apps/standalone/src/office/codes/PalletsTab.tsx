@@ -12,13 +12,14 @@ import {
   Input,
   PageHeader,
   Select,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
 import type { OfficePalletRow } from "../../host/pack-cards.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeInfiniteQuery, useOfficeQuery } from "../office-query.js";
+import { CursorTable } from "../paging/CursorTable.js";
+import { useCursorPaging, usePaging } from "../paging/use-paging.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import { searchableSelect } from "../select-search.js";
@@ -74,6 +75,13 @@ export function PalletsTab() {
     () => (listed ? (pages.data?.pages.flatMap((page) => page.items) ?? []) : []),
     [listed, pages.data],
   );
+  const view = useCursorPaging(usePaging("codes-pallets", JSON.stringify(query)), {
+    rows,
+    hasMore: listed && pages.hasNextPage && !pages.isPlaceholderData,
+    fetching: pages.isFetching,
+    failed: pages.isFetchNextPageError,
+    fetchMore: () => void pages.fetchNextPage(),
+  });
   const stations = pages.data?.pages[0]?.stations ?? [];
   const periodError = filters.from !== "" && filters.to !== "" && filters.to < filters.from;
 
@@ -172,25 +180,19 @@ export function PalletsTab() {
     if (rows.length === 0) return <EmptyState title={t("office.palletList.empty")} />;
     return (
       <Card>
-        <Table
+        <CursorTable
+          paging={view}
+          pagerLabel={t("office.palletList.pager")}
           columns={columns}
-          rows={rows}
           getRowKey={(pallet) => pallet.id}
           onRowClick={(pallet) => void navigate(`/codes/pallet/${pallet.id}`)}
           scrollLabel={t("office.palletList.table.label")}
+          notice={
+            pages.isFetchNextPageError ? (
+              <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
+            ) : undefined
+          }
         />
-        {pages.isFetchNextPageError && (
-          <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
-        )}
-        {pages.hasNextPage && (
-          <Button
-            variant="secondary"
-            loading={pages.isFetchingNextPage}
-            onClick={() => void pages.fetchNextPage()}
-          >
-            {t("office.palletList.loadMore")}
-          </Button>
-        )}
       </Card>
     );
   };

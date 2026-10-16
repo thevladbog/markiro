@@ -10,10 +10,10 @@ import {
   PageHeader,
   RowActions,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import { HostError } from "../../host/client.js";
 import {
   CARD_ROW_LIMIT,
@@ -281,7 +281,8 @@ function BoxItems({ card, at }: { card: OfficeBoxCard; at: (instant: string | nu
     <section className="shift-card__section" aria-labelledby="box-items">
       <h2 id="box-items">{t("office.boxCard.items.title")}</h2>
       <Card>
-        <Table
+        <PagedTable
+          tableId="box-card-items"
           columns={columns}
           rows={card.items}
           getRowKey={(item) => item.scanId}

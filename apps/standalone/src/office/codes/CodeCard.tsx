@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { DefinitionGrid, StatusChip, Table, type TableColumn, type TagPhase } from "@markiro/ui";
+import { DefinitionGrid, StatusChip, type TableColumn, type TagPhase } from "@markiro/ui";
 
 import type {
   CodePlacementState,
@@ -10,6 +10,7 @@ import type {
   OfficeCodeEvent,
   OfficeCodeItem,
 } from "../../host/code-search.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
 import { PackTextLink } from "./PackLinks.js";
 
@@ -268,7 +269,8 @@ export function CodeCardView({ card, format, headingLevel: Heading }: CodeCardVi
       />
       <section className="shift-card__section">
         <Heading>{t("office.codeSearch.card.placements")}</Heading>
-        <Table
+        <PagedTable
+          tableId="code-card-placements"
           columns={columns}
           rows={card.placements}
           getRowKey={(item) => item.scanId}

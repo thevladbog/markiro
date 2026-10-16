@@ -340,6 +340,8 @@ describe("the thumbnails' extra guards", () => {
       return layoutOf(summary);
     });
     const { tools, show, watching } = drawingTools();
+    // The list shows ten rows to a page; all 24 are on one page of a hundred.
+    localStorage.setItem("markiro.office.pageSize.templates", "100");
     renderOffice(fake, { labels: tools });
     await openTemplates();
     expect(watching()).toBe(24);
@@ -359,6 +361,18 @@ describe("the thumbnails' extra guards", () => {
       "00000000-0000-4000-8000-000000000024",
     ]);
     expect(thumbOf("Шаблон 04").querySelector("canvas")).toBeNull();
+  });
+
+  it("watches only the rows of the page that is shown", async () => {
+    const many: LabelTemplateSummary[] = Array.from({ length: 24 }, (_, index) => ({
+      ...MILK,
+      id: `00000000-0000-4000-8000-0000000000${String(index + 1).padStart(2, "0")}`,
+      name: `Шаблон ${String(index + 1).padStart(2, "0")}`,
+    }));
+    const { tools, watching } = drawingTools();
+    renderOffice(session(many), { labels: tools });
+    await openTemplates();
+    expect(watching()).toBe(10);
   });
 
   it("fits the label into the box by the tighter side, and draws it at that scale with its purpose's sample", async () => {

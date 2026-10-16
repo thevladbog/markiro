@@ -80,7 +80,7 @@ function session(list: PalletSheets, user?: FakeOfficeSession["user"]): FakeOffi
 async function openSheets(fake: FakeOfficeSession): Promise<void> {
   renderOffice(fake);
   fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
-  fireEvent.click(await screen.findByRole("link", { name: "Листы А4" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Листы А4" }));
   await screen.findByRole("heading", { name: "Листы паллет А4" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
 }
@@ -199,7 +199,7 @@ describe("the A4 sheets page: reading", () => {
     fake.api.listPalletSheets.mockRejectedValueOnce(down()).mockResolvedValueOnce(STOCK);
     renderOffice(fake);
     fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
-    fireEvent.click(await screen.findByRole("link", { name: "Листы А4" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Листы А4" }));
     await screen.findByText(
       "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
     );

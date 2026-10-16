@@ -144,17 +144,17 @@ describe("office template defaults: the organization's", () => {
       // (beta 3.2): no catalog item of its own for the defaults.
       expect(items[catalog + 3]).toBe("Организация");
       fireEvent.click(within(menu).getByRole("link", { name: "Шаблоны" }));
-      const tabs = await screen.findByRole("navigation", { name: "Разделы шаблонов" });
+      const tabs = await screen.findByRole("tablist", { name: "Разделы шаблонов" });
       expect(
         within(tabs)
-          .getAllByRole("link")
-          .map((link) => link.textContent),
+          .getAllByRole("tab")
+          .map((tab) => tab.textContent),
       ).toEqual(["Этикетки", "Листы А4", "По умолчанию"]);
-      fireEvent.click(within(tabs).getByRole("link", { name: "По умолчанию" }));
+      fireEvent.click(within(tabs).getByRole("tab", { name: "По умолчанию" }));
       await screen.findByRole("heading", { name: "Шаблоны по умолчанию" });
       expect(
-        within(tabs).getByRole("link", { name: "По умолчанию" }).getAttribute("aria-current"),
-      ).toBe("page");
+        within(tabs).getByRole("tab", { name: "По умолчанию" }).getAttribute("aria-selected"),
+      ).toBe("true");
       view.unmount();
     }
   });
@@ -379,7 +379,7 @@ describe("office template defaults: the organization's", () => {
     await openDefaults(fake);
     fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
     fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
-    fireEvent.click(await screen.findByRole("link", { name: "По умолчанию" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "По умолчанию" }));
     // The way back passes the «Этикетки» tab, which reads the templates once more.
     await waitFor(() => expect(fake.api.getTemplateDefaults).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(3));

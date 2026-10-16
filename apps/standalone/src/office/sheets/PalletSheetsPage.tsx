@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { PagedTable } from "../paging/PagedTable.js";
 import { shiftCardPath } from "../shifts/shift-card.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,7 +18,6 @@ import {
   RowActionMenu,
   RowActions,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -410,7 +410,8 @@ export function PalletSheetsPage() {
       )}
       <Card>
         <p>{t("office.palletSheets.intro")}</p>
-        <Table
+        <PagedTable
+          tableId="pallet-sheets"
           columns={columns}
           rows={rows}
           getRowKey={(sheet) => sheet.id}

@@ -447,8 +447,8 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     expect(within(section).getByRole("heading", { name: "Печать дубликата" })).toBeTruthy();
     // Enabled duplicate templates covering milk, by name: not the switched-off one, not a box's.
     expect(optionsOf(NEW, TEMPLATE)).toEqual([
-      { text: "Дубликат 58×40 · 58 × 40 мм · 203 dpi", disabled: false },
-      { text: "Дубликат молока · 43 × 25 мм · 300 dpi", disabled: false },
+      { text: "Дубликат 58×40 · 58 × 40 мм", disabled: false },
+      { text: "Дубликат молока · 43 × 25 мм", disabled: false },
     ]);
     expect(valueOf(NEW, TEMPLATE)).toBe("");
     const check = checkbox(NEW, CHECK);
@@ -472,7 +472,7 @@ describe("office shifts: the duplicate print under «Проверка» (plan Р
     fireEvent.click(mode(NEW, "Проверка"));
     fireEvent.click(checkbox(NEW, PRINT));
     expect(optionsOf(NEW, TEMPLATE)).toEqual([
-      { text: "Дубликат 58×40 · 58 × 40 мм · 203 dpi", disabled: false },
+      { text: "Дубликат 58×40 · 58 × 40 мм", disabled: false },
     ]);
   });
 

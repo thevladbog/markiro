@@ -41,19 +41,53 @@ describe("the office layout rules", () => {
   });
 
   it("lays a card's parts one gap apart, so a note, a table and a pager never touch", () => {
-    const body = rule(".office-shell__content .mk-card__body");
+    // The same rhythm on a page and in a drawer (`.mk-side-panel`): a card there is not a page's.
+    const body = rule(":is(.office-shell__content, .mk-side-panel) .mk-card__body");
     expect(body).toContain("display: grid");
     expect(body).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(body).toContain("gap: var(--sp-4)");
   });
 
-  it("keeps a filter bar's controls level and wrapping, with a minimum width for each", () => {
-    expect(rule(".office-shell__content .mk-filter-bar__controls")).toContain(
-      "align-items: flex-start",
+  it("lays a filter bar's controls in one grid of equal tracks, their tops level, on a page and in a drawer alike", () => {
+    const bar = rule(":is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls");
+    expect(bar).toContain("display: grid");
+    expect(bar).toContain("grid-template-columns: repeat(auto-fill, minmax(176px, 1fr))");
+    expect(bar).toContain("align-items: start");
+    // A field may shrink to its track; a button starts level with the inputs, not with a hint.
+    expect(
+      rule(":is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-field"),
+    ).toContain("min-width: 0");
+    const button = rule(
+      ":is(.office-shell__content, .mk-side-panel) .mk-filter-bar__controls > .mk-btn",
     );
-    expect(rule(".office-shell__content .mk-filter-bar__controls > .mk-field")).toContain(
-      "min-width: 168px",
-    );
+    expect(button).toContain("margin-top: 22px");
+    expect(button).toContain("justify-self: start");
+  });
+
+  it("makes every table a scroll region with an edge shade, a thin scrollbar and a focus ring", () => {
+    const scroll = rule(".office-shell .mk-table__scroll,\n.mk-side-panel .mk-table__scroll");
+    expect(scroll).toContain("scrollbar-width: thin");
+    // The shade is drawn only where more lies beyond: `local` covers hide it at the ends.
+    expect(scroll).toContain("local");
+    expect(scroll).toContain("scroll");
+    expect(
+      rule(
+        ".office-shell .mk-table__scroll:focus-visible,\n.mk-side-panel .mk-table__scroll:focus-visible",
+      ),
+    ).toContain("outline: var(--focus-ring-w) solid var(--focus-ring)");
+  });
+
+  it("keeps a table and its pagination one block, the pagination one step under the table", () => {
+    expect(rule(".office-paged")).toContain("gap: var(--sp-3)");
+    expect(rule(".office-pagination")).toContain("flex-wrap: wrap");
+  });
+
+  it("draws every menu entry in one style: the settings block has a rule above it and nothing more", () => {
+    // The first and the second half of the menu are the same size, weight and colour (beta feedback).
+    expect(css).not.toMatch(/\.office-menu-settings\s+\.mk-sidebar__link/);
+    expect(css).not.toMatch(/\.office-menu-settings\s+\.mk-sidebar__section/);
+    expect(rule(".office-menu-settings")).toContain("border-top: 1px solid var(--line)");
+    expect(rule(".office-shell > .mk-sidebar .mk-sidebar__link")).toContain("padding-block: 6px");
   });
 
   it("starts a table row's buttons at their heading and keeps them on one line", () => {

@@ -210,7 +210,7 @@ describe("a shift's review on its card (plan КНФ)", () => {
     ).toBeTruthy();
   });
 
-  it("says a list holds the newest 500 of more, and pages them by fifty", async () => {
+  it("says a list holds the newest 500 of more, and pages them by ten", async () => {
     const session = cardSession(ACTIVE);
     const first = EXCEPTIONS.items[0];
     if (first === undefined) throw new Error("fixture");
@@ -223,13 +223,13 @@ describe("a shift's review on its card (plan КНФ)", () => {
     openTab("Исключения");
     const exceptions = section("Исключения");
     expect(await within(exceptions).findByText("Показаны последние 500 из 900.")).toBeTruthy();
-    expect(await rowsOf("Исключения")).toHaveLength(50);
+    expect(await rowsOf("Исключения")).toHaveLength(10);
     const pager = within(exceptions).getByRole("navigation", {
       name: "Страницы раздела «Исключения»",
     });
-    expect(within(pager).getByText("Страница 1 из 10")).toBeTruthy();
+    expect(within(pager).getByText("Страница 1 из 50")).toBeTruthy();
     fireEvent.click(within(pager).getByRole("button", { name: "Вперёд" }));
-    expect(within(pager).getByText("Страница 2 из 10")).toBeTruthy();
+    expect(within(pager).getByText("Страница 2 из 50")).toBeTruthy();
   });
 
   it("shows the conflicts this shift lost, how many are unreviewed and a link to all of them", async () => {

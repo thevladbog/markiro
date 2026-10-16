@@ -2,8 +2,9 @@ import { getPalletExportFormat, getShiftExportFormat } from "@markiro/domain";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Card, Table, type TableColumn } from "@markiro/ui";
+import { Card, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { ExportFile } from "../../host/export-files.js";
 import type { OfficeShiftExport } from "../../host/review.js";
 import { StoredFiles } from "../exports/StoredFiles.js";
@@ -160,7 +161,8 @@ export function ShiftExports({
           ) : exports.isError ? (
             <LoadError error={exports.error} onRetry={() => void exports.refetch()} />
           ) : (
-            <Table
+            <PagedTable
+              tableId="shift-exports"
               columns={columns}
               rows={exports.data.items}
               getRowKey={(row) => String(row.id)}
@@ -179,7 +181,8 @@ export function ShiftExports({
           ) : forms.isError ? (
             <LoadError error={forms.error} onRetry={() => void forms.refetch()} />
           ) : (
-            <Table
+            <PagedTable
+              tableId="shift-export-files"
               columns={formColumns}
               rows={forms.data.items}
               getRowKey={(row) => row.id}

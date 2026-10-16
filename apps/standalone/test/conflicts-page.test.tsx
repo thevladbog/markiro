@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
@@ -275,15 +275,85 @@ describe("«Конфликты» in the office (plan КНФ)", () => {
     await waitFor(() => expect(shownIn("Смена")).toBe("Смена из ссылки"));
   });
 
-  it("pages through the conflicts", async () => {
-    const value = session({ ...PAGE, pageCount: 3, total: 120 });
+  it("pages through the conflicts ten at a time out of the host's pages of fifty, asking the host only for the pages it needs", async () => {
+    const [first] = PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no conflicts");
+    const row = (n: number) => ({
+      ...first,
+      id: `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+      serial: `S${String(n).padStart(6, "0")}`,
+    });
+    const value = session();
+    value.api.listConflicts.mockImplementation(async (_token, query) => {
+      const page = query.page ?? 1;
+      const count = Math.min(50, 120 - (page - 1) * 50);
+      return {
+        items: Array.from({ length: count }, (_, index) => row((page - 1) * 50 + index + 1)),
+        page,
+        pageCount: 3,
+        total: 120,
+      };
+    });
     await openConflicts(value);
-    const pager = screen.getByRole("navigation", { name: "Страницы конфликтов" });
-    expect(within(pager).getByRole("button", { name: "Назад" }).hasAttribute("disabled")).toBe(
+    const pager = () => screen.getByRole("navigation", { name: "Страницы конфликтов" });
+    expect(rows()).toHaveLength(10);
+    expect(within(pager()).getByText("Страница 1 из 12")).toBeTruthy();
+    expect(screen.getByText("Показано 1–10 из 120")).toBeTruthy();
+    expect(within(pager()).getByRole("button", { name: "Назад" }).hasAttribute("disabled")).toBe(
       true,
     );
-    fireEvent.click(within(pager).getByRole("button", { name: "Вперёд" }));
+    // The second page of ten is in the host's first page: nothing more is asked.
+    fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
+    expect(cell(0, "Код").textContent).toContain("S000011");
+    expect(value.api.listConflicts).toHaveBeenCalledTimes(1);
+    // The sixth page of ten starts the host's second page.
+    for (let step = 0; step < 4; step += 1) {
+      fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
+    }
     await waitFor(() => expect(lastQuery(value)).toEqual({ reviewed: false, page: 2 }));
+    expect(await screen.findByText("Показано 51–60 из 120")).toBeTruthy();
+    expect(cell(0, "Код").textContent).toContain("S000051");
+    // «В конец» and «В начало» appear with many pages.
+    fireEvent.click(within(pager()).getByRole("button", { name: "Последняя страница" }));
+    expect(await screen.findByText("Показано 111–120 из 120")).toBeTruthy();
+    expect(within(pager()).getByRole("button", { name: "Вперёд" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    fireEvent.click(within(pager()).getByRole("button", { name: "Первая страница" }));
+    expect(await screen.findByText("Показано 1–10 из 120")).toBeTruthy();
+  });
+
+  it("pages a hundred at a time out of two of the host's pages, and keeps the size chosen", async () => {
+    const [first] = PAGE.items;
+    if (first === undefined) throw new Error("the fixture has no conflicts");
+    const value = session();
+    value.api.listConflicts.mockImplementation(async (_token, query) => {
+      const page = query.page ?? 1;
+      const count = Math.min(50, 120 - (page - 1) * 50);
+      return {
+        items: Array.from({ length: count }, (_, index) => ({
+          ...first,
+          id: `c0000000-0000-4000-8000-${String((page - 1) * 50 + index + 1).padStart(12, "0")}`,
+        })),
+        page,
+        pageCount: 3,
+        total: 120,
+      };
+    });
+    await openConflicts(value);
+    chooseText("Строк на странице: Список конфликтов", "100");
+    await waitFor(() => expect(rows()).toHaveLength(100));
+    expect(value.api.listConflicts).toHaveBeenCalledWith(TOKEN, { reviewed: false, page: 2 });
+    expect(screen.getByText("Показано 1–100 из 120")).toBeTruthy();
+    expect(screen.getByText("Страница 1 из 2")).toBeTruthy();
+    // The last page of a hundred is the host's third page alone.
+    fireEvent.click(screen.getByRole("button", { name: "Вперёд" }));
+    await waitFor(() => expect(rows()).toHaveLength(20));
+    expect(lastQuery(value)).toEqual({ reviewed: false, page: 3 });
+    // The size is kept per table: the list opens on it again.
+    cleanup();
+    await openConflicts(value);
+    await waitFor(() => expect(rows()).toHaveLength(100));
   });
 
   it("says there are none, and none with the filter", async () => {

@@ -10,7 +10,6 @@ import {
   EmptyState,
   PageHeader,
   RowActions,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -19,6 +18,7 @@ import {
   type OfficePalletBox,
   type OfficePalletCard,
 } from "../../host/pack-cards.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { CardFiles } from "../exports/CardFiles.js";
 import { hasPlacard } from "../forms/form-data.js";
 import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
@@ -292,7 +292,8 @@ function PalletMembers({
     <section className="shift-card__section" aria-labelledby="pallet-members">
       <h2 id="pallet-members">{t("office.palletCard.members.title")}</h2>
       <Card>
-        <Table
+        <PagedTable
+          tableId="pallet-card-members"
           columns={columns}
           rows={card.members}
           getRowKey={(box) => box.id}

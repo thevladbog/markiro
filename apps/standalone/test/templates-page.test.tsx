@@ -153,37 +153,33 @@ describe("office label templates", () => {
     ]);
   });
 
-  it("shows the purpose in words, the size, the layout's resolution, the categories and the state in words with its glyph, and tags a stock template", async () => {
+  it("shows the purpose in words, the size, the categories and the state in words with its glyph, and tags a stock template", async () => {
     await openTemplates(session());
-    // The six columns of the list; the write buttons have a column of their own.
-    expect(cells("Коробка 58×40").slice(0, 6)).toEqual([
+    // The five columns of the list; the write buttons have a column of their own.
+    expect(cells("Коробка 58×40").slice(0, 5)).toEqual([
       "Коробка 58×40Типовой",
       "Короб",
       "58 × 40 мм",
-      "203 dpi",
       "Все категории",
       "▸Включён",
     ]);
-    expect(cells("Молоко 58×40").slice(0, 6)).toEqual([
+    expect(cells("Молоко 58×40").slice(0, 5)).toEqual([
       "Молоко 58×40",
       "Короб",
       "58 × 40 мм",
-      "203 dpi",
       "Молочная продукция",
       "▸Включён",
     ]);
-    expect(cells("Вода и молоко").slice(0, 6)).toEqual([
+    expect(cells("Вода и молоко").slice(0, 5)).toEqual([
       "Вода и молоко",
       "Короб",
       "58,5 × 40 мм",
-      "—",
       "Категорий: 3 (Молочная продукция, Упакованная вода, Код 99)",
       "✕Выключен",
     ]);
-    expect(cells("Импорт без размера").slice(0, 6)).toEqual([
+    expect(cells("Импорт без размера").slice(0, 5)).toEqual([
       "Импорт без размера",
       "Короб",
-      "—",
       "—",
       "Все категории",
       "▸Включён",
@@ -221,7 +217,7 @@ describe("office label templates", () => {
 
   it("reads the count and its names as one phrase in the cell, the names in one span a screen reader can reach, and keeps the title", async () => {
     await openTemplates(session());
-    const cell = within(rowOf("Вода и молоко")).getAllByRole("cell")[4];
+    const cell = within(rowOf("Вода и молоко")).getAllByRole("cell")[3];
     expect(cell?.textContent).toBe("Категорий: 3 (Молочная продукция, Упакованная вода, Код 99)");
     // The names are one hidden span next to the count, in the same cell, readable by a screen reader.
     const hidden = cell?.querySelectorAll(".mk-visually-hidden");
@@ -239,7 +235,7 @@ describe("office label templates", () => {
       chzProductGroupCodes: [],
     });
     await openTemplates(session([...TEMPLATES, empty]));
-    expect(cells("Без категорий")[4]).toBe("Категорий: 0");
+    expect(cells("Без категорий")[3]).toBe("Категорий: 0");
     expect(rowOf("Без категорий").querySelectorAll(".mk-visually-hidden")).toHaveLength(0);
   });
 
@@ -421,14 +417,13 @@ describe("office label templates", () => {
 
   // Beyond the plan: each test below kills a mutant the plan's tests let through.
 
-  it("titles the seven columns, the last one «Действия», and calls the resolution the layout's", async () => {
+  it("titles the six columns, the last one «Действия», with no resolution among them: a template has none", async () => {
     await openTemplates(session());
     const headers = within(screen.getByRole("table")).getAllByRole("columnheader");
     expect(headers.map((header) => header.textContent)).toEqual([
       "Название",
       "Назначение",
       "Размер",
-      "Разрешение макета",
       "Категории",
       "Состояние",
       "Действия",
@@ -464,13 +459,12 @@ describe("office label templates", () => {
     expect(name.nextElementSibling?.textContent).toBe("Типовой");
   });
 
-  it("sets the size and the resolution in the mono face, and lets the name and the categories wrap; the cell with the two action buttons stays on one line", async () => {
+  it("sets the size in the mono face, and lets the name and the categories wrap; the cell with the two action buttons stays on one line", async () => {
     await openTemplates(session());
     const row = within(rowOf("Коробка 58×40")).getAllByRole("cell");
     expect(row.map((cell) => cell.classList.contains("font-mono"))).toEqual([
       false,
       false,
-      true,
       true,
       false,
       false,
@@ -478,7 +472,6 @@ describe("office label templates", () => {
     ]);
     expect(row.map((cell) => cell.style.whiteSpace)).toEqual([
       "normal",
-      "nowrap",
       "nowrap",
       "nowrap",
       "normal",
@@ -614,11 +607,10 @@ describe("office label templates: switching on and off", () => {
       ["office-session-token", MILK.id, { enabled: false, expectedRev: 60 }],
     ]);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(cells("Молоко 58×40").slice(0, 6)).toEqual([
+    expect(cells("Молоко 58×40").slice(0, 5)).toEqual([
       "Молоко 58×40",
       "Короб",
       "58 × 40 мм",
-      "203 dpi",
       "Молочная продукция",
       "✕Выключен",
     ]);

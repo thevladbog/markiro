@@ -5,17 +5,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { z } from "zod";
 
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Input,
-  PageHeader,
-  Table,
-  type TableColumn,
-} from "@markiro/ui";
+import { Alert, Button, Card, Checkbox, Input, PageHeader, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { DisaggregationReason } from "../../host/disaggregation.js";
 import { characters, isPlainText } from "../../lib/rules.js";
 import { useCan } from "../access.js";
@@ -240,7 +232,8 @@ export function DisaggregationReasonsPage() {
     }
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="disaggregation-reasons"
           columns={columns}
           rows={[...reasons.data].sort(byReasonOrder)}
           getRowKey={(reason) => reason.id}

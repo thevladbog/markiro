@@ -50,8 +50,7 @@ export function Alert({
   const containerStyle: CSSProperties = {
     display: "flex",
     gap: 12,
-    alignItems: "flex-start",
-    padding: 14,
+    padding: "12px 16px",
     borderRadius: "var(--r-2)",
     background: config.bg,
     border: `1px solid ${config.border}`,
@@ -67,22 +66,48 @@ export function Alert({
     >
       <span
         aria-hidden="true"
-        style={{ flexShrink: 0, marginTop: 1, color: config.fg, font: "600 16px/1 var(--font-ui)" }}
+        className="mk-alert__icon"
+        // Same 20px line box as the title and the body text, so the glyph
+        // sits on the first text line instead of floating above it.
+        style={{
+          flexShrink: 0,
+          width: 16,
+          textAlign: "center",
+          color: config.fg,
+          font: "600 14px/20px var(--font-ui)",
+        }}
       >
         {config.glyph}
       </span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+      <div
+        className="mk-alert__body"
+        style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}
+      >
         {title && (
-          <span style={{ font: "600 14px/20px var(--font-ui)", color: config.fg }}>{title}</span>
+          <span
+            className="mk-alert__title"
+            style={{ font: "600 14px/20px var(--font-ui)", color: config.fg }}
+          >
+            {title}
+          </span>
         )}
         {children && (
           // `div`, not `span`: children are often block content (e.g. the
           // pickup order detail page's conflict list), and phrasing content
           // (span) cannot contain a list -- that's invalid HTML.
-          <div style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>{children}</div>
+          <div
+            className="mk-alert__text"
+            style={{ font: "var(--text-body)", color: "var(--fg-2)" }}
+          >
+            {children}
+          </div>
         )}
       </div>
-      {action ? <div style={{ alignSelf: "center", flexShrink: 0 }}>{action}</div> : null}
+      {action ? (
+        <div className="mk-alert__action" style={{ alignSelf: "center", flexShrink: 0 }}>
+          {action}
+        </div>
+      ) : null}
     </div>
   );
 }

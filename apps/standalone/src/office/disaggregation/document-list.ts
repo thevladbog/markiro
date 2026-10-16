@@ -11,9 +11,6 @@ export interface DocumentFilterState {
   to: string;
 }
 
-/** Rows on one page of the list. */
-export const DOCUMENT_PAGE_SIZE = 50;
-
 const CIVIL = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
 /** Milliseconds the zone is ahead of UTC at `at` (its wall clock read back as UTC). */

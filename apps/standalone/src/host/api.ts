@@ -447,6 +447,8 @@ export interface HostApi {
     id: string,
     query: ScanHistoryQuery,
     cursor: string | null,
+    /** The rows of a page (1-100, the host's own 50 when left out). */
+    limit?: number,
   ) => Promise<OfficeScanHistoryPage>;
   /**
    * One page of the placements of codes the criteria find, newest scan
@@ -1159,8 +1161,8 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: officeShiftRejectionsSchema,
       }),
-    listShiftScans: (token, id, query, cursor) =>
-      client.request("GET", shiftScansPath(id, query, cursor), {
+    listShiftScans: (token, id, query, cursor, limit) =>
+      client.request("GET", shiftScansPath(id, query, cursor, limit), {
         officeToken: token,
         schema: officeScanHistoryPageSchema,
       }),

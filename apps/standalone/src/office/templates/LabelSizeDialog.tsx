@@ -7,14 +7,7 @@ import { Alert, Input, Select } from "@markiro/ui";
 import type { TemplatePurpose } from "../../host/protocol.js";
 import { errorProp } from "../../lib/form-error.js";
 import { FormDialog } from "../FormDialog.js";
-import {
-  DPI_CHOICES,
-  parseSizeMm,
-  presetOf,
-  resizedSpec,
-  SIZE_PRESETS,
-  toDpi,
-} from "./editor-model.js";
+import { parseSizeMm, presetOf, resizedSpec, SIZE_PRESETS } from "./editor-model.js";
 
 /** Millimetres as the office writes them: «58», «58,06». */
 const MM = new Intl.NumberFormat("ru", { maximumFractionDigits: 2 });
@@ -44,7 +37,6 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
   const shownHeight = MM.format(spec.heightMm);
   const [width, setWidth] = useState(shownWidth);
   const [height, setHeight] = useState(shownHeight);
-  const [dpi, setDpi] = useState(String(spec.dpi));
   const [touched, setTouched] = useState({ width: false, height: false });
   const [invalid, setInvalid] = useState({ width: false, height: false });
   const [tooLarge, setTooLarge] = useState(false);
@@ -68,7 +60,7 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
     setTooLarge(false);
     setInvalid({ width: widthMm === null, height: heightMm === null });
     if (widthMm === null || heightMm === null) return Promise.resolve();
-    const next = resizedSpec({ ...spec, dpi: toDpi(dpi) }, widthMm, heightMm, purpose);
+    const next = resizedSpec(spec, widthMm, heightMm, purpose);
     if (next === null) setTooLarge(true);
     else onResize(next);
     return Promise.resolve();
@@ -129,16 +121,6 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
           {...errorProp(invalid.height ? t("office.templateEditor.sizeDialog.invalid") : undefined)}
         />
       </div>
-      <Select
-        label={t("office.templateEditor.sizeDialog.dpi")}
-        hint={t("office.templateEditor.sizeDialog.dpiHint")}
-        options={DPI_CHOICES.map((value) => ({
-          value: String(value),
-          label: t("office.templates.dpi", { dpi: value }),
-        }))}
-        value={dpi}
-        onValueChange={setDpi}
-      />
     </FormDialog>
   );
 }

@@ -241,34 +241,35 @@ describe("office products", () => {
     expect(screen.queryByText("Ничего не найдено. Измените поиск или отбор.")).toBeNull();
   });
 
-  it("pages the list by 25 and goes back to the first page when the search or the filter changes", async () => {
-    const many = Array.from({ length: 30 }, (_, n) => ({
+  it("pages the list by 10 and goes back to the first page when the search or the filter changes", async () => {
+    const many = Array.from({ length: 25 }, (_, n) => ({
       ...MILK,
       id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
       name: `Товар ${n + 1}`,
       printName: null,
     }));
     await openProducts(session(many));
-    expect(rows()).toHaveLength(25);
-    expect(names()[24]).toBe("Товар 25");
+    expect(rows()).toHaveLength(10);
+    expect(names()[9]).toBe("Товар 10");
     const pager = () => screen.getByRole("navigation", { name: "Страницы списка товаров" });
     const next = () => within(pager()).getByRole("button", { name: "Вперёд" });
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     // The page label is a live region: a screen reader hears «Вперёд» and «Назад» take effect.
-    expect(within(pager()).getByText("Страница 1 из 2").getAttribute("aria-live")).toBe("polite");
+    expect(within(pager()).getByText("Страница 1 из 3").getAttribute("aria-live")).toBe("polite");
     fireEvent.click(next());
-    expect(names()).toEqual(["Товар 26", "Товар 27", "Товар 28", "Товар 29", "Товар 30"]);
+    fireEvent.click(next());
+    expect(names()).toEqual(["Товар 21", "Товар 22", "Товар 23", "Товар 24", "Товар 25"]);
     expect(next()).toHaveProperty("disabled", true);
-    // A new search starts again from the first page, though both pages stay.
+    // A new search starts again from the first page, though the pages stay.
     fireEvent.change(screen.getByLabelText("Поиск"), { target: { value: "Товар" } });
     expect(names()[0]).toBe("Товар 1");
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     // So does a new state filter.
     fireEvent.click(next());
     chooseText("Состояние", "Активен");
     expect(names()[0]).toBe("Товар 1");
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
-    // A search that leaves one page shows it without the pager.
+    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
+    // A search that leaves two pages shows the first of them.
     fireEvent.change(screen.getByLabelText("Поиск"), { target: { value: "Товар 1" } });
     expect(names()).toEqual([
       "Товар 1",
@@ -281,8 +282,11 @@ describe("office products", () => {
       "Товар 16",
       "Товар 17",
       "Товар 18",
-      "Товар 19",
     ]);
+    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
+    // A search that leaves one page shows it without the pager.
+    fireEvent.change(screen.getByLabelText("Поиск"), { target: { value: "Товар 2" } });
+    expect(names()).toHaveLength(7);
     expect(screen.queryByRole("navigation", { name: "Страницы списка товаров" })).toBeNull();
   });
 
@@ -408,20 +412,20 @@ describe("office products", () => {
   });
 
   it("goes back a page with «Назад», which is off on the first page", async () => {
-    await openProducts(session(numbered(30)));
+    await openProducts(session(numbered(15)));
     const previous = () => within(pagerNav()).getByRole("button", { name: "Назад" });
     expect(previous()).toHaveProperty("disabled", true);
     fireEvent.click(within(pagerNav()).getByRole("button", { name: "Вперёд" }));
     expect(names()).toHaveLength(5);
     expect(previous()).toHaveProperty("disabled", false);
     fireEvent.click(previous());
-    expect(names()).toHaveLength(25);
+    expect(names()).toHaveLength(10);
     expect(names()[0]).toBe("Товар 1");
     expect(previous()).toHaveProperty("disabled", true);
   });
 
   it("shows the last page that is left when the list gets shorter under an open page", async () => {
-    const many = numbered(30);
+    const many = numbered(15);
     const queryClient = createOfficeQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
@@ -437,8 +441,8 @@ describe("office products", () => {
     // «Активен», or renamed out of a search); it never shortens the cached list, which
     // it replaces in place or appends to. The test stands in for that shrinking by
     // setting a shorter cached list with `setQueryData`.
-    queryClient.setQueryData(officeKeys.products, many.slice(0, 20));
-    await waitFor(() => expect(names()).toHaveLength(20));
+    queryClient.setQueryData(officeKeys.products, many.slice(0, 10));
+    await waitFor(() => expect(names()).toHaveLength(10));
     expect(screen.queryByRole("navigation", { name: "Страницы списка товаров" })).toBeNull();
   });
 });

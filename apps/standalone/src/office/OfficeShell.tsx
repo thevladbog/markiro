@@ -158,8 +158,9 @@ function MenuLink({ to, children }: { to: string; children: ReactNode }) {
 }
 
 /**
- * The settings groups at the foot of the menu, apart from the operations by a rule and quieter
- * (smaller type, a softer tone); a group's name stands over its entries as in the rest of the menu.
+ * The settings groups at the foot of the menu, apart from the operations by a rule; their entries
+ * are the very style of the ones above (beta feedback: no smaller, lighter second half), and a
+ * group's name stands over its entries as in the rest of the menu.
  */
 function SettingsMenu({ items }: { items: readonly OfficeNavItem[] }) {
   const { t } = useTranslation();
@@ -172,7 +173,11 @@ function SettingsMenu({ items }: { items: readonly OfficeNavItem[] }) {
               <li className="mk-sidebar__section">{t(item.sectionKey)}</li>
             )}
             <li>
-              <MenuLink to={item.to}>{t(item.labelKey)}</MenuLink>
+              <MenuLink to={item.to}>
+                <span className="mk-sidebar__content">
+                  <span>{t(item.labelKey)}</span>
+                </span>
+              </MenuLink>
             </li>
           </Fragment>
         ))}

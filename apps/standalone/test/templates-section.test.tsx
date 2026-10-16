@@ -22,11 +22,11 @@ function session() {
 }
 
 function current(): string[] {
-  const tabs = screen.getByRole("navigation", { name: "Разделы шаблонов" });
+  const tabs = screen.getByRole("tablist", { name: "Разделы шаблонов" });
   return within(tabs)
-    .getAllByRole("link")
-    .filter((link) => link.getAttribute("aria-current") === "page")
-    .map((link) => link.textContent ?? "");
+    .getAllByRole("tab")
+    .filter((tab) => tab.getAttribute("aria-selected") === "true")
+    .map((tab) => tab.textContent ?? "");
 }
 
 describe("«Шаблоны» as one section", () => {
@@ -39,6 +39,8 @@ describe("«Шаблоны» as one section", () => {
       const view = renderOffice(session(), { initialPath: path });
       expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
       expect(current()).toEqual([tab]);
+      // The open part is the tab's panel, named as the tab is.
+      expect(screen.getByRole("tabpanel", { name: tab })).toBeTruthy();
       // The menu marks «Шаблоны» on every tab.
       expect(screen.getByRole("link", { name: "Шаблоны" }).getAttribute("aria-current")).toBe(
         "page",

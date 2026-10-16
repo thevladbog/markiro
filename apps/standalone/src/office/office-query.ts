@@ -111,7 +111,13 @@ export const officeKeys = {
   /** A shift's refused records (`GET /v1/office/shifts/{id}/rejections`, plan КНФ). */
   shiftRejections: (id: string) => ["office", "shift-rejections", id],
   /** Every page of one query of a shift's scan history (`GET /v1/office/shifts/{id}/scans`). */
-  shiftScans: (id: string, query: ScanHistoryQuery) => ["office", "shift-scans", id, query],
+  shiftScans: (id: string, query: ScanHistoryQuery, limit?: number) => [
+    "office",
+    "shift-scans",
+    id,
+    query,
+    limit ?? null,
+  ],
   /** A shift's saved exports (`GET /v1/office/shifts/{id}/exports`), for the drawer's history. */
   shiftExports: (id: string) => ["office", "shift-exports", id],
   /** Every list of stored files (host migration `0029`): a new export or form reads them all again. */

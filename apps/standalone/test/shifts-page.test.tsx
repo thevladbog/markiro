@@ -355,19 +355,19 @@ describe("office shifts: the list", () => {
     expect(screen.getByText("Смен пока нет.")).toBeTruthy();
   });
 
-  it("pages 25 shifts at a time, and a new filter goes back to the first page", async () => {
-    await openShifts(shiftsSession(numbered(26)));
-    expect(shiftRows()).toHaveLength(25);
+  it("pages 10 shifts at a time, and a new filter goes back to the first page", async () => {
+    await openShifts(shiftsSession(numbered(11)));
+    expect(shiftRows()).toHaveLength(10);
     const pager = screen.getByRole("navigation", { name: "Страницы списка смен" });
     fireEvent.click(within(pager).getByRole("button", { name: "Вперёд" }));
     expect(shiftRows().map((row) => within(row).getAllByRole("cell")[0]?.textContent)).toEqual([
-      "OCT26-026",
+      "OCT26-011",
     ]);
     expect(within(pager).getByText("Страница 2 из 2")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
       target: { value: "OCT26" },
     });
-    expect(shiftRows()).toHaveLength(25);
+    expect(shiftRows()).toHaveLength(10);
   });
 
   it("asks the host for a chosen period of production dates, and for its own list again once both dates are cleared", async () => {
@@ -495,12 +495,12 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(numbersOnScreen()).toEqual(["OCT26-001/S", "OCT26-005", "OCT26-004"]);
   });
 
-  it("shows no pager up to 25 shifts, and 25 a page after that: 24, 25, 26 and 51", async () => {
+  it("shows no pager up to 10 shifts, and 10 a page after that: 9, 10, 11 and 51", async () => {
     for (const [count, rows, pages] of [
-      [24, 24, null],
-      [25, 25, null],
-      [26, 25, 2],
-      [51, 25, 3],
+      [9, 9, null],
+      [10, 10, null],
+      [11, 10, 2],
+      [51, 10, 6],
     ] as const) {
       await openShifts(shiftsSession(numbered(count)));
       expect(shiftRows()).toHaveLength(rows);
@@ -512,7 +512,7 @@ describe("office shifts: the list, boundaries and states", () => {
   });
 
   it("walks the pages forward and back, and disables the button at either end", async () => {
-    await openShifts(shiftsSession(numbered(51)));
+    await openShifts(shiftsSession(numbered(25)));
     const pager = screen.getByRole("navigation", { name: "Страницы списка смен" });
     const back = within(pager).getByRole("button", { name: "Назад" });
     const forward = within(pager).getByRole("button", { name: "Вперёд" });
@@ -521,12 +521,18 @@ describe("office shifts: the list, boundaries and states", () => {
     fireEvent.click(forward);
     fireEvent.click(forward);
     expect(within(pager).getByText("Страница 3 из 3")).toBeTruthy();
-    expect(numbersOnScreen()).toEqual(["OCT26-051"]);
+    expect(numbersOnScreen()).toEqual([
+      "OCT26-021",
+      "OCT26-022",
+      "OCT26-023",
+      "OCT26-024",
+      "OCT26-025",
+    ]);
     expect((forward as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(back);
     expect(within(pager).getByText("Страница 2 из 3")).toBeTruthy();
-    expect(numbersOnScreen()).toHaveLength(25);
-    expect(numbersOnScreen()[0]).toBe("OCT26-026");
+    expect(numbersOnScreen()).toHaveLength(10);
+    expect(numbersOnScreen()[0]).toBe("OCT26-011");
   });
 
   it("goes back to the first page when the status, the line, the search or a date changes", async () => {
@@ -534,30 +540,30 @@ describe("office shifts: the list, boundaries and states", () => {
     const pager = () => screen.getByRole("navigation", { name: "Страницы списка смен" });
     const second = () => {
       fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
-      expect(within(pager()).getByText("Страница 2 из 3")).toBeTruthy();
+      expect(within(pager()).getByText("Страница 2 из 6")).toBeTruthy();
     };
     second();
     chooseText("Статус", "Запланирована");
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
-    chooseText("Статус", "Все статусы");
     expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
+    chooseText("Статус", "Все статусы");
+    expect(within(pager()).getByText("Страница 1 из 6")).toBeTruthy();
     second();
     chooseText("Линия", LINE_10.name);
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     chooseText("Линия", "Все линии");
     second();
     fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), {
       target: { value: "OCT26" },
     });
-    expect(within(pager()).getByText("Страница 1 из 2")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Поиск по номеру и товару"), { target: { value: "" } });
     second();
     // The first date of a period, then the second.
     pickDate("Дата производства с", "1 сентября 2026", 1);
-    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 6")).toBeTruthy();
     second();
     pickDate("Дата производства по", "8 октября 2026");
-    expect(await screen.findByText("Страница 1 из 3")).toBeTruthy();
+    expect(await screen.findByText("Страница 1 из 6")).toBeTruthy();
   });
 
   it("goes back to the first page of the whole list when «Сбросить» clears a filter", async () => {
@@ -565,9 +571,9 @@ describe("office shifts: the list, boundaries and states", () => {
     const pager = () => screen.getByRole("navigation", { name: "Страницы списка смен" });
     chooseText("Статус", "Запланирована");
     fireEvent.click(within(pager()).getByRole("button", { name: "Вперёд" }));
-    expect(within(pager()).getByText("Страница 2 из 2")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 2 из 3")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Сбросить" }));
-    expect(within(pager()).getByText("Страница 1 из 3")).toBeTruthy();
+    expect(within(pager()).getByText("Страница 1 из 6")).toBeTruthy();
   });
 
   it("keeps a shift only when the status, the line and the search all keep it, and finds a number without case", async () => {

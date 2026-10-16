@@ -17,11 +17,18 @@ import {
 } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
-import { CODE_MAX_PAGE, type OfficeCodeItem } from "../../host/code-search.js";
+import {
+  CODE_PAGE_SIZE,
+  CODE_SEARCH_CAP,
+  type OfficeCodeItem,
+  type OfficeCodePage,
+} from "../../host/code-search.js";
 import { civilToday, isCivilDate } from "../../lib/civil-date.js";
 import { formTimeZone } from "../forms/render-form.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PaginationBar } from "../paging/PaginationBar.js";
+import { usePageSize } from "../paging/page-size.js";
+import { useHostWindowRows } from "../paging/use-host-window.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { civilDateLabel } from "../shifts/shift-list.js";
 import { datePickerTexts } from "../shifts/shift-text.js";
@@ -90,7 +97,7 @@ function askedOf(params: URLSearchParams): {
     from: isCivilDate(from) ? from : "",
     to: isCivilDate(to) ? to : "",
     all: params.get("period") === "all",
-    page: Number.isInteger(page) && page > 1 && page <= CODE_MAX_PAGE ? page : 1,
+    page: Number.isInteger(page) && page > 1 && page <= CODE_SEARCH_CAP ? page : 1,
   };
 }
 
@@ -181,7 +188,13 @@ export function CodeSearchPage() {
   const shown: CivilPeriod = edit ?? (typing && defaulted ? { from: "", to: "" } : applied);
   const from = shown.from;
   const to = shown.to;
-  const query = searchQuery(asked.input, applied.from, applied.to, zone, asked.page, asked.all);
+  // The host pages a search by number, 50 rows a page; the office shows pages of its own size, and
+  // `?page=` is the office's page.
+  const [pageSize, setPageSize] = usePageSize("code-search");
+  const askedPage = Math.min(asked.page, Math.ceil(CODE_SEARCH_CAP / pageSize));
+  const hostQuery = (hostPage: number) =>
+    searchQuery(asked.input, applied.from, applied.to, zone, hostPage, asked.all);
+  const query = hostQuery(1);
   const activeShifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) =>
     api.listShifts(token),
   );
@@ -192,14 +205,19 @@ export function CodeSearchPage() {
     (api, token) => api.getCodeCard(token, codeHash ?? ""),
     { enabled: codeHash !== null },
   );
-  const page = useOfficeQuery(
-    codeKeys.page(query),
-    (api, token) => {
-      if (query === null) throw new Error("no search");
-      return api.searchCodes(token, query);
+  const window = useHostWindowRows<OfficeCodeItem, OfficeCodePage>({
+    page: askedPage,
+    pageSize,
+    hostSize: CODE_PAGE_SIZE,
+    keyOf: (hostPage) => codeKeys.page(hostQuery(hostPage)),
+    read: (api, token, hostPage) => {
+      const next = hostQuery(hostPage);
+      if (next === null) throw new Error("no search");
+      return api.searchCodes(token, next);
     },
-    { enabled: zoneReady && query !== null && codeHash === null },
-  );
+    enabled: zoneReady && query !== null && codeHash === null,
+  });
+  const page = window.first;
   const periodError = from !== "" && to !== "" && to < from;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -319,26 +337,44 @@ export function CodeSearchPage() {
         />
       );
     }
+    const rows = window.rows;
+    if (rows === undefined) {
+      return window.second.isError ? (
+        <LoadError error={window.second.error} onRetry={() => void window.second.refetch()} />
+      ) : (
+        <PageLoading />
+      );
+    }
+    const shown = Math.min(askedPage, window.pageCount);
     return (
       <Card>
-        <Table
-          columns={columns}
-          rows={page.data.items}
-          getRowKey={(item) => item.scanId}
-          onRowClick={(item) => setSelected(item.codeHash)}
-          empty={t("office.codeSearch.pastLastPage")}
-          scrollLabel={t("office.codeSearch.table.label")}
-        />
-        {page.data.pageCount > 1 && (
-          <OfficePager
+        <div className="office-paged">
+          <Table
+            columns={columns}
+            rows={rows}
+            getRowKey={(item) => item.scanId}
+            onRowClick={(item) => setSelected(item.codeHash)}
+            empty={t("office.codeSearch.pastLastPage")}
+            scrollLabel={t("office.codeSearch.table.label")}
+          />
+          <PaginationBar
             label={t("office.codeSearch.pager")}
-            page={page.data.page}
-            pageCount={page.data.pageCount}
+            name={t("office.codeSearch.table.label")}
+            page={shown}
+            pageSize={pageSize}
+            shownRows={rows.length}
+            total={window.reachable}
+            pageCount={window.pageCount}
+            hasNext={shown < window.pageCount}
             onPage={(next) =>
               setParams(paramsOf(asked.input, asked.from, asked.to, next, asked.all))
             }
+            onPageSize={(size) => {
+              setPageSize(size);
+              setParams(paramsOf(asked.input, asked.from, asked.to, 1, asked.all));
+            }}
           />
-        )}
+        </div>
       </Card>
     );
   };

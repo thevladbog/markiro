@@ -7,7 +7,6 @@ import {
   MAX_PERIOD_DAYS,
   openBlocker,
   periodState,
-  SHIFT_PAGE_SIZE,
   sortShifts,
   totalShifts,
 } from "../src/office/shifts/shift-list.js";
@@ -165,8 +164,7 @@ describe("the shifts list's rules", () => {
   });
 
   // Added by the task 3 implementer: the plan's tests leave these boundaries unpinned.
-  it("pages by 25 and sends a period of at most 366 days with both ends", () => {
-    expect(SHIFT_PAGE_SIZE).toBe(25);
+  it("sends a period of at most 366 days with both ends", () => {
     // 2026 is not a leap year: 365 days, then 366, then 367 with both ends.
     expect(periodState("2026-01-01", "2026-12-31").kind).toBe("ready");
     expect(periodState("2026-01-01", "2027-01-01").kind).toBe("ready");

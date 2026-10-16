@@ -10,7 +10,6 @@ import {
   Input,
   Select,
   StatusChip,
-  Table,
   type TableColumn,
   type TagPhase,
 } from "@markiro/ui";
@@ -28,6 +27,8 @@ import { BoxLink, PalletLink } from "../codes/PackLinks.js";
 import { nextDay, zonedDayStartMs } from "../codes/code-query.js";
 import { officeKeys, useOfficeInfiniteQuery, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { CursorTable } from "../paging/CursorTable.js";
+import { useCursorPaging, usePaging } from "../paging/use-paging.js";
 import { endsWithTail, ssccTail } from "./shift-card.js";
 import { datePickerTexts } from "./shift-text.js";
 
@@ -38,9 +39,6 @@ const VERDICT_PHASE = {
   wrong_gtin: "failed",
   invalid: "failed",
 } as const satisfies Record<ScanVerdict, TagPhase>;
-
-/** Counts with the thousands apart by a no-break space: «1 200». */
-const COUNT = new Intl.NumberFormat("ru");
 
 /** The filters as the person set them; an empty text is an unset filter. */
 interface Filters {
@@ -126,9 +124,13 @@ export function ShiftScans({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, zone, periodBackwards, boxPending, boxError, boxes.data]);
 
+  // The host pages the history by cursor and takes a limit: the page size is the request's limit,
+  // so a page of the table is one read, and a change of the size starts the list over.
+  const paging = usePaging("shift-scans", JSON.stringify(query));
   const pages = useOfficeInfiniteQuery(
-    officeKeys.shiftScans(shift.id, query ?? {}),
-    (api, token, cursor) => api.listShiftScans(token, shift.id, query ?? {}, cursor),
+    officeKeys.shiftScans(shift.id, query ?? {}, paging.pageSize),
+    (api, token, cursor) =>
+      api.listShiftScans(token, shift.id, query ?? {}, cursor, paging.pageSize),
     (page) => page.nextCursor,
     { enabled: query !== null },
   );
@@ -137,6 +139,14 @@ export function ShiftScans({
     () => (listed ? (pages.data?.pages.flatMap((page) => page.items) ?? []) : []),
     [listed, pages.data],
   );
+
+  const view = useCursorPaging(paging, {
+    rows,
+    hasMore: listed && pages.hasNextPage && !pages.isPlaceholderData,
+    fetching: pages.isFetching,
+    failed: pages.isFetchNextPageError,
+    fetchMore: () => void pages.fetchNextPage(),
+  });
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -265,24 +275,18 @@ export function ShiftScans({
     }
     return (
       <>
-        <Table
+        <CursorTable
+          paging={view}
+          pagerLabel={t("office.shiftCard.scans.pager")}
           columns={columns}
-          rows={rows}
           getRowKey={(scan) => scan.id}
           scrollLabel={t("office.shiftCard.scans.table")}
+          notice={
+            pages.isFetchNextPageError ? (
+              <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
+            ) : undefined
+          }
         />
-        {pages.isFetchNextPageError && (
-          <LoadError error={pages.error} onRetry={() => void pages.fetchNextPage()} />
-        )}
-        {pages.hasNextPage && (
-          <Button
-            variant="secondary"
-            loading={pages.isFetchingNextPage}
-            onClick={() => void pages.fetchNextPage()}
-          >
-            {t("office.shiftCard.scans.loadMore")}
-          </Button>
-        )}
       </>
     );
   };
@@ -297,14 +301,7 @@ export function ShiftScans({
         onSubmit={submit}
         noValidate
       >
-        <FilterBar
-          label={t("office.shiftCard.scans.filters")}
-          resultSummary={
-            pages.isSuccess && listed
-              ? t("office.shiftCard.scans.shown", { shown: COUNT.format(rows.length) })
-              : ""
-          }
-        >
+        <FilterBar label={t("office.shiftCard.scans.filters")}>
           <Select
             label={t("office.shiftCard.scans.resultFilter")}
             options={[

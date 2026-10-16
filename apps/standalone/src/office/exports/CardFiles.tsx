@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 
-import { Card, Table, type TableColumn } from "@markiro/ui";
+import { Card, type TableColumn } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { ExportFile, ExportTargetType } from "../../host/export-files.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { StoredFiles } from "./StoredFiles.js";
@@ -60,7 +61,8 @@ export function CardFiles({
       <h2>{t("office.storedFiles.card.title")}</h2>
       <Card>
         <p className="office-note">{t("office.storedFiles.card.hint")}</p>
-        <Table
+        <PagedTable
+          tableId="card-files"
           columns={columns}
           rows={items}
           getRowKey={(row) => row.id}

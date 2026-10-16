@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { PagedTable } from "../paging/PagedTable.js";
 import { shiftCardPath } from "../shifts/shift-card.js";
 import type { TFunction } from "i18next";
 import { useEffect, useId, useRef, useState } from "react";
@@ -17,7 +18,6 @@ import {
   RowActions,
   Select,
   StatusChip,
-  Table,
   Textarea,
   type DefinitionGridItem,
   type TableColumn,
@@ -713,7 +713,8 @@ export function DisaggregationDocumentPage() {
         />
       )}
       <Card title={t("office.disaggregation.detail.linesTitle")} titleAs="h2">
-        <Table
+        <PagedTable
+          tableId="disaggregation-document-lines"
           columns={columns}
           rows={lines}
           getRowKey={(line) => line.id}

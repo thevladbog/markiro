@@ -1,10 +1,10 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
-import { useId, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Card, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import { Card, StatusChip, type TableColumn } from "@markiro/ui";
 
 import { FACT_KINDS, FACT_RECEIPT_CODES, type OfficeShift } from "../../host/protocol.js";
 import type {
@@ -15,9 +15,9 @@ import type {
 } from "../../host/review.js";
 import { conflictKindKey } from "../conflicts/conflict-list.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { OfficePager } from "../OfficePager.js";
+import { PagedTable } from "../paging/PagedTable.js";
 import { LoadError, PageLoading } from "../page-state.js";
-import { BOX_PAGE_SIZE, ssccText } from "./shift-card.js";
+import { ssccText } from "./shift-card.js";
 
 /**
  * A shift's review on its card (plan КНФ, pilot spec §7): the exceptions its
@@ -74,6 +74,8 @@ function refusedField(details: OfficeShiftRejection["details"]): string | null {
 
 interface ReviewSectionShellProps<T> {
   title: string;
+  /** The table's name for its kept page size. */
+  tableId: string;
   query: UseQueryResult<{ items: T[]; total: number }, Error>;
   columns: TableColumn<T>[];
   rowKey: (row: T) => string;
@@ -90,6 +92,7 @@ interface ReviewSectionShellProps<T> {
  */
 function ReviewSection<T>({
   title,
+  tableId,
   query,
   columns,
   rowKey,
@@ -99,15 +102,12 @@ function ReviewSection<T>({
 }: ReviewSectionShellProps<T>) {
   const { t } = useTranslation();
   const titleId = useId();
-  const [page, setPage] = useState(1);
   const content = () => {
     if (query.isPending) return <PageLoading />;
     if (query.isError) {
       return <LoadError error={query.error} onRetry={() => void query.refetch()} />;
     }
     const { items, total } = query.data;
-    const pageCount = Math.max(1, Math.ceil(items.length / BOX_PAGE_SIZE));
-    const shown = Math.min(page, pageCount);
     return (
       <>
         {total > items.length && (
@@ -118,21 +118,15 @@ function ReviewSection<T>({
             })}
           </p>
         )}
-        <Table
+        <PagedTable
+          tableId={tableId}
+          pagerLabel={t("office.shiftCard.review.pager", { title })}
           columns={columns}
-          rows={items.slice((shown - 1) * BOX_PAGE_SIZE, shown * BOX_PAGE_SIZE)}
+          rows={items}
           getRowKey={rowKey}
           empty={empty}
           scrollLabel={tableLabel}
         />
-        {pageCount > 1 && (
-          <OfficePager
-            label={t("office.shiftCard.review.pager", { title })}
-            page={shown}
-            pageCount={pageCount}
-            onPage={setPage}
-          />
-        )}
       </>
     );
   };
@@ -221,6 +215,7 @@ export function ShiftExceptions({ shift, at }: ReviewSectionProps) {
   return (
     <ReviewSection
       title={t("office.shiftCard.review.exceptions.title")}
+      tableId="shift-exceptions"
       query={list}
       columns={columns}
       rowKey={(item) => item.id}
@@ -281,6 +276,7 @@ export function ShiftRejections({ shift, at }: ReviewSectionProps) {
   return (
     <ReviewSection
       title={t("office.shiftCard.review.rejections.title")}
+      tableId="shift-rejections"
       query={list}
       columns={columns}
       rowKey={(item) => `${item.deviceId}:${item.recordId}`}
@@ -372,6 +368,7 @@ export function ShiftConflicts({ shift }: ReviewSectionProps) {
   return (
     <ReviewSection
       title={t("office.shiftCard.review.conflicts.title")}
+      tableId="shift-conflicts"
       query={list}
       columns={columns}
       rowKey={(row) => row.id}

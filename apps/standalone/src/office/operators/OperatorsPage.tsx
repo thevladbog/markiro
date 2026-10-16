@@ -9,10 +9,10 @@ import {
   RowActionMenu,
   RowActions,
   StatusChip,
-  Table,
   type TableColumn,
 } from "@markiro/ui";
 
+import { PagedTable } from "../paging/PagedTable.js";
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -228,7 +228,8 @@ export function OperatorsPage() {
       return <LoadError error={operators.error} onRetry={() => void operators.refetch()} />;
     return (
       <Card>
-        <Table
+        <PagedTable
+          tableId="operators"
           columns={columns}
           rows={activeFirstByLogin(operators.data)}
           getRowKey={(operator) => operator.id}

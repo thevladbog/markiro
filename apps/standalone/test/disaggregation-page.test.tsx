@@ -256,15 +256,15 @@ describe("office «Дезагрегация»: the list", () => {
     expect(screen.queryByRole("button", { name: "Сбросить фильтры" })).toBeNull();
   });
 
-  it("divides 51 documents into two pages of 50", async () => {
-    const many = Array.from({ length: 51 }, (_, n) => document_(100 - n));
+  it("divides 11 documents into two pages of 10", async () => {
+    const many = Array.from({ length: 11 }, (_, n) => document_(100 - n));
     await openList(session(many));
-    expect(rows().length).toBe(50);
+    expect(rows().length).toBe(10);
     expect(screen.getByText("Страница 1 из 2")).toBeTruthy();
     const pager = screen.getByRole("navigation", { name: "Страницы документов" });
     fireEvent.click(within(pager).getByRole("button", { name: "Вперёд" }));
     expect(rows().length).toBe(1);
-    expect(rows()[0]?.["№ документа"]?.textContent).toBe("DSG-26-0050");
+    expect(rows()[0]?.["№ документа"]?.textContent).toBe("DSG-26-0090");
   });
 
   it("makes a document with no reason and no comment and opens it", async () => {
