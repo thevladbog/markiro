@@ -7,13 +7,25 @@ import { useCallback, useRef, type KeyboardEvent } from "react";
  * (`plannedQtyRule`, `shiftBoxCapacityRule`) still judge it at «Далее».
  */
 
-/** `value` with `digit` appended: nothing for a non-digit, a leading zero or a full entry. */
-export function appendDigit(value: string, digit: string, maxLength: number): string {
+/**
+ * `value` with `digit` appended: nothing for a non-digit, a full entry, or (unless `leadingZero`)
+ * a leading zero. A quantity has none; a personnel number and a PIN may start with 0.
+ */
+export function appendDigit(
+  value: string,
+  digit: string,
+  maxLength: number,
+  leadingZero = false,
+): string {
   if (!/^[0-9]$/.test(digit)) return value;
-  if (value === "" && digit === "0") return value;
+  if (!leadingZero && value === "" && digit === "0") return value;
   if (value.length >= maxLength) return value;
   return value + digit;
 }
+
+/** One key of the keypad: what a screen with its own rules for the entry (two fields) is told. */
+export type KeypadKey =
+  { kind: "digit"; digit: string } | { kind: "backspace" } | { kind: "clear" };
 
 /** `value` without its last digit. */
 export function dropDigit(value: string): string {

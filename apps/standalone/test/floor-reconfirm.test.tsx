@@ -150,7 +150,7 @@ describe("the identity re-confirmation", () => {
   it("refuses a wrong PIN, empties it and stays on the PIN", async () => {
     const { onConfirmed } = renderReconfirm(await synced([SITE, anna]), ANNA);
     await typeNumberAndPin("0042", "1111", "Подтвердить");
-    expect(await screen.findByText("Неверный табельный номер или PIN.")).toBeTruthy();
+    expect(await screen.findByText("Неверный табельный номер или PIN")).toBeTruthy();
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
     expect(onConfirmed).not.toHaveBeenCalled();
   });
@@ -168,7 +168,9 @@ describe("the identity re-confirmation", () => {
     }
     press(..."4821");
     fireEvent.click(screen.getByRole("button", { name: "Подтвердить" }));
-    expect(await screen.findByText(/Слишком много неверных PIN.*приостановлен/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Вход по PIN для этого табельного номера приостановлен/),
+    ).toBeTruthy();
     expect(onConfirmed).not.toHaveBeenCalled();
   });
 
