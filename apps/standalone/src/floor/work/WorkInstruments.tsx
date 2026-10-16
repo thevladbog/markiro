@@ -395,7 +395,9 @@ export function WorkFacts({ facts }: WorkFactsProps) {
   if (facts.length === 0) return null;
   return (
     <section className="work-instrument work-facts" aria-labelledby="work-facts-title">
-      <h2 id="work-facts-title">{t("floor.work.layout.summary")}</h2>
+      <h2 id="work-facts-title" className="work-sr">
+        {t("floor.work.layout.summary")}
+      </h2>
       <dl>
         {facts.map((fact) => (
           <div key={fact.term}>

@@ -12,6 +12,23 @@
   justify-self: stretch;
 }
 
+/*
+ * The frame is `min-height: 100dvh`, so a taller screen would grow the page and scroll it. The work
+ * screen is a fixed-height grid: the frame is the window's height, the window never scrolls, and
+ * whatever cannot fit scrolls inside its own region (the history list).
+ */
+.standalone-screen:has(> .floor-frame > .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.floor-frame:has(> .work-screen) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .work-screen {
   /* The 84 px action row and the gap under it. */
   --work-footer-h: calc(var(--control-floor-primary) + var(--sp-3));
@@ -59,6 +76,8 @@
   height: 100%;
   gap: var(--sp-3);
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  /* The one row is the region's height, never its content's: a long list scrolls inside. */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .work-screen__primary,
@@ -94,6 +113,7 @@
 }
 
 .work-screen__instruments[data-layout="validation"] > .work-screen__primary > .work-instrument {
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: none;
@@ -193,12 +213,14 @@
 .work-shift-band__chips {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
 }
 
+/* One row of chips: the counterparty's, last, is the one that shrinks (its full name is the title). */
 .work-shift-band__chip {
   overflow: hidden;
+  flex: none;
   max-width: 100%;
   padding: 5px 14px;
   border-radius: var(--r-round);
@@ -207,6 +229,11 @@
   font: 600 16px/22px var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.work-shift-band__chip[title] {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .work-shift-band__chip--mono {
@@ -555,24 +582,40 @@
   outline-offset: -4px;
 }
 
-/* A box shift's hero sits above the history in the narrow column: a compact one. */
+/* A box shift's hero sits above the history in the narrow column: word and code on one row. */
 .work-screen__instruments[data-layout="box"] .work-scan-result {
   grid-template-rows: auto auto;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.work-screen__instruments[data-layout="box"] .work-screen__last {
+  display: flex;
+  padding: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  gap: 0 var(--sp-4);
+  align-items: center;
+  justify-content: center;
 }
 
 .work-screen__instruments[data-layout="box"] .work-scan-hero__word {
-  font-size: 40px;
+  font-size: 36px;
 }
 
 .work-screen__instruments[data-layout="box"] .work-scan-hero__code {
-  font-size: 22px;
+  font-size: 20px;
   line-height: 28px;
+}
+
+.work-screen__instruments[data-layout="box"] .work-scan-hero__detail {
+  flex-basis: 100%;
+  font-size: 16px;
+  line-height: 22px;
 }
 
 /* The shift's figures of a box shift, in the cloud journal's quality row style. */
 .work-facts {
   display: grid;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   gap: var(--sp-2);
 }
 
@@ -586,7 +629,7 @@
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  min-height: 44px;
+  min-height: 40px;
   padding-inline: var(--sp-2);
   gap: var(--sp-3);
   align-items: center;
