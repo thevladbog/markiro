@@ -2587,3 +2587,205 @@ describe("the box template step of a new shift always offers the templates that 
     expect(createButton()).toHaveProperty("disabled", true);
   });
 });
+
+describe("the details step on the design kit (step B)", () => {
+  it("shows the product's facts as plain chips, the mode hints, and the pallet card in words", async () => {
+    renderNew(await copiesOf(PALLET_COPIES));
+    await chooseMilk();
+    // Only the box and the pallet: the product has no separate volume.
+    expect(screen.getByText("В коробе: 12 шт.")).toBeTruthy();
+    expect(screen.getByText("Паллета: 40 коробов")).toBeTruthy();
+    expect(screen.queryByText(/Объём/)).toBeNull();
+    expect(
+      screen.getByText("Продукция собирается в короба, печатаются этикетки коробов."),
+    ).toBeTruthy();
+    const pallets = screen.getByRole("switch", { name: "С паллетами" });
+    expect(pallets.textContent).toContain(
+      "Короба складываются на паллету: печатаются этикетки коробов и паллет, SSCC выдаётся станцией.",
+    );
+    expect(pallets.textContent).toContain("Включено");
+    fireEvent.click(pallets);
+    expect(pallets.getAttribute("aria-checked")).toBe("false");
+    expect(pallets.textContent).toContain("Выключено");
+    fireEvent.click(screen.getByRole("radio", { name: "Проверка" }));
+    expect(
+      screen.getByText("Коды сверяются при сканировании, этикетки коробов не печатаются."),
+    ).toBeTruthy();
+    // The scanner is not listening on this step: the keypad takes no scan.
+  });
+
+  it("makes the duplicate a switch card that names the one template that fits", async () => {
+    const one = [...CATALOG, duplicateTemplate(DUPLICATE_TEMPLATE, "Дубликат 40×30", [8])];
+    const { scanner } = renderNew(await copiesOf(one));
+    await chooseMilk();
+    expect(scanner.listening()).toBe(false);
+    fireEvent.click(screen.getByRole("radio", { name: "Проверка" }));
+    const card = screen.getByRole("switch", { name: "Печатать дубликат Data Matrix" });
+    expect(card.getAttribute("aria-checked")).toBe("false");
+    expect(card.textContent).toContain("Выключено");
+    expect(card.textContent).not.toContain("Шаблон:");
+    expect(card.textContent).toContain(
+      "На внешнюю упаковку переносится полный код с продукции. Количество продукции не меняется.",
+    );
+    fireEvent.click(card);
+    expect(card.getAttribute("aria-checked")).toBe("true");
+    expect(card.textContent).toContain("Включено");
+    expect(card.textContent).toContain("Шаблон: Дубликат 40×30");
+    // «Далее» still goes to the template step: that is where the check of the label is chosen.
+    next();
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Предыдущий шаг" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Печатать дубликат Data Matrix" }));
+    expect(screen.queryByRole("button", { name: "Далее" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Создать и открыть" })).toBeTruthy();
+  });
+
+  it("leaves the template to the next step when several duplicate templates fit", async () => {
+    renderNew(await copiesOf(DUPLICATE_COPIES));
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("radio", { name: "Проверка" }));
+    setSwitch("Печатать дубликат Data Matrix", true);
+    const card = screen.getByRole("switch", { name: "Печатать дубликат Data Matrix" });
+    expect(card.textContent).not.toContain("Шаблон:");
+    next();
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки продукции" })).toBeTruthy();
+  });
+
+  it("types the plan on the keypad: a thin-spaced readout over the bare digits, and no plan when empty", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("radio", { name: "Проверка" }));
+    expect(screen.getByText("Можно оставить пустым — смена без плана.")).toBeTruthy();
+    expect(digitsOf("План, шт.")).toBe("");
+    pressKey("0");
+    expect(digitsOf("План, шт.")).toBe("");
+    for (const digit of "1200") pressKey(digit);
+    expect(digitsOf("План, шт.")).toBe("1200");
+    expect(readout("План, шт.").querySelectorAll(".floor-readout__thin")).toHaveLength(1);
+    pressKey("Стереть цифру");
+    expect(digitsOf("План, шт.")).toBe("120");
+    pressKey("Очистить");
+    expect(digitsOf("План, шт.")).toBe("");
+    // An empty plan is allowed: a shift without a plan.
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({ ...CREATED_BODY, mode: "validation" });
+  });
+
+  it("takes eight digits of the plan and six of the capacity, and the rule still judges the number", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    for (const digit of "123456789") pressKey(digit);
+    // The keypad is on the plan, not the capacity, until the capacity is tapped.
+    expect(digitsOf("План, шт.")).toBe("12345678");
+    expect(digitsOf("В коробе, шт.")).toBe("12");
+    fireEvent.click(readout("В коробе, шт."));
+    pressKey("Очистить");
+    for (const digit of "1234567") pressKey(digit);
+    expect(digitsOf("В коробе, шт.")).toBe("123456");
+    expect(digitsOf("План, шт.")).toBe("12345678");
+    // 12 345 678 is eight digits but more than 10 000 000: «Далее» says so.
+    next();
+    expect(await screen.findByText(/^Укажите целое число от 1 до 100 000$/)).toBeTruthy();
+  });
+
+  it("edits the capacity in aggregation by tapping its readout, and the plan by tapping the plan's", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    expect(readout("План, шт.").getAttribute("aria-pressed")).toBe("true");
+    expect(readout("В коробе, шт.").getAttribute("aria-pressed")).toBe("false");
+    enterDigits("В коробе, шт.", "6");
+    expect(readout("В коробе, шт.").getAttribute("aria-pressed")).toBe("true");
+    expect(readout("План, шт.").getAttribute("aria-pressed")).toBe("false");
+    expect(digitsOf("В коробе, шт.")).toBe("6");
+    expect(digitsOf("План, шт.")).toBe("");
+    enterDigits("План, шт.", "1200");
+    expect(digitsOf("В коробе, шт.")).toBe("6");
+    createShift();
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual({
+      ...CREATED_BODY,
+      plannedQty: 1200,
+      boxCapacity: 6,
+    });
+  });
+
+  it("shows one plain readout in validation, and no capacity", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("radio", { name: "Проверка" }));
+    expect(screen.queryByRole("button", { name: /^В коробе, шт\./ })).toBeNull();
+    // Nothing to choose between: no pressed state on the only field.
+    expect(readout("План, шт.").hasAttribute("aria-pressed")).toBe(false);
+    pressKey("7");
+    expect(digitsOf("План, шт.")).toBe("7");
+  });
+
+  it("takes an error away at the next key, and keeps its slot, so the keys do not move", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    enterDigits("План, шт.", "99999999");
+    const slot = document.querySelector(".new-shift__pad-slot");
+    expect(slot).not.toBeNull();
+    const before = document.querySelector(".floor-keypad")?.previousElementSibling;
+    next();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Ошибка");
+    expect(alert.textContent).toContain(
+      "Укажите целое число от 1 до 10 000 000 или оставьте пустым",
+    );
+    expect(readout("План, шт.").getAttribute("aria-invalid")).toBe("true");
+    expect(readout("План, шт.").getAttribute("aria-describedby")).toBe(alert.id);
+    // The same slot holds the hint and the error: nothing around the keys is added or removed.
+    expect(document.querySelector(".new-shift__pad-slot")).toBe(slot);
+    expect(document.querySelector(".floor-keypad")?.previousElementSibling).toBe(before);
+    pressKey("Стереть цифру");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(readout("План, шт.").hasAttribute("aria-invalid")).toBe(false);
+    expect(screen.getByText("Можно оставить пустым — смена без плана.")).toBeTruthy();
+  });
+
+  it("takes the keys of a physical keyboard on the keypad's area, but a scanner's run of digits is no entry", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    const pad = document.querySelector(".new-shift__pad") as HTMLElement;
+    fireEvent.keyDown(pad, { key: "5" });
+    expect(digitsOf("План, шт.")).toBe("5");
+    // The hand is slower than the scan gap: let it pass, then a scanner's burst arrives at once.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    fireEvent.keyDown(pad, { key: "4" });
+    expect(digitsOf("План, шт.")).toBe("54");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    fireEvent.keyDown(pad, { key: "9" });
+    fireEvent.keyDown(pad, { key: "8" });
+    fireEvent.keyDown(pad, { key: "7" });
+    // The burst took back its first digit and dropped the rest; what stood before it stays.
+    expect(digitsOf("План, шт.")).toBe("54");
+    expect(fireEvent.keyDown(pad, { key: "Enter" })).toBe(false);
+    fireEvent.keyDown(pad, { key: "Delete" });
+    expect(digitsOf("План, шт.")).toBe("");
+  });
+
+  it("listens on the keypad's area, not the window: keys elsewhere edit nothing", async () => {
+    renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    fireEvent.keyDown(document.body, { key: "5" });
+    fireEvent.keyDown(screen.getByRole("radio", { name: "Агрегация" }), { key: "5" });
+    expect(digitsOf("План, шт.")).toBe("");
+  });
+
+  it("freezes the keypad with the form once the host has made the shift", async () => {
+    renderNew(await copiesOf(CATALOG), {
+      enter: () =>
+        Promise.reject(new HostError({ kind: "transport", code: "timeout", message: "x" })),
+    });
+    await chooseMilk();
+    createShift();
+    await screen.findByRole("button", { name: /Открыть смену/ });
+    backToDetails();
+    for (const button of within(keypad()).getAllByRole("button")) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(screen.getByRole("radio", { name: "Проверка" })).toHaveProperty("disabled", true);
+  });
+});

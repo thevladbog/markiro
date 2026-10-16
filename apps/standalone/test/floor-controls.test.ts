@@ -39,9 +39,25 @@ describe("the floor's controls", () => {
     ["a raw <textarea>", /<textarea[\s>]/],
     ["a raw <button>", /<button[\s>]/],
     ["a Select that renders the browser's own list", /<Select\b[^>]*\snative\b/s],
-  ])("has no %s", (_name, pattern) => {
-    const found = files.filter((file) => pattern.test(readFileSync(file, "utf8")));
+  ])("has no %s", (name, pattern) => {
+    const found = files
+      // The kit's own controls (src/floor/kit: keypad keys, radios, switch cards, readouts) ARE
+      // the product's buttons, drawn by floor-controls.css; a screen still takes none raw.
+      .filter((file) => !(name === "a raw <button>" && file.includes(join("src", "floor", "kit"))))
+      .filter((file) => pattern.test(readFileSync(file, "utf8")));
     expect(found.map((file) => relative(join(__dirname, ".."), file))).toEqual([]);
+  });
+
+  it("keeps the raw buttons of the floor to the kit directory alone", () => {
+    const raw = files.filter((file) => /<button[\s>]/.test(readFileSync(file, "utf8")));
+    expect(raw.map((file) => relative(join(__dirname, ".."), file)).sort()).toEqual(
+      [
+        "src/floor/kit/ModeSegment.tsx",
+        "src/floor/kit/NumericKeypad.tsx",
+        "src/floor/kit/NumericReadout.tsx",
+        "src/floor/kit/SwitchCard.tsx",
+      ].sort(),
+    );
   });
 
   it("finds the Selects of the setup it checks", () => {
