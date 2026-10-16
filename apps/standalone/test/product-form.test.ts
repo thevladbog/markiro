@@ -76,3 +76,36 @@ describe("the product form's EGAIS code and default counterparty (plan ТОВ)",
     ).toBeNull();
   });
 });
+
+describe("an archived product is not checked for GTIN (owner's rule)", () => {
+  const WRONG = "04607001234561";
+
+  it("checks the GTIN of a product in use, whole", () => {
+    const values = { ...productFields(BEER), gtin14: WRONG };
+    const checked = productFieldsSchema.safeParse(values);
+    expect(checked.success).toBe(false);
+    expect(productFieldsSchema.safeParse({ ...values, gtin14: "12" }).success).toBe(false);
+  });
+
+  it("lets an archived product keep a wrong or odd GTIN: no check digit, no shape error", () => {
+    const archived = { ...productFields(BEER), archived: true };
+    expect(productFieldsSchema.safeParse({ ...archived, gtin14: WRONG }).success).toBe(true);
+    expect(productFieldsSchema.safeParse({ ...archived, gtin14: "12" }).success).toBe(true);
+    expect(productFieldsSchema.safeParse({ ...archived, gtin14: "" }).success).toBe(true);
+  });
+
+  it("sends an archived product's GTIN as stored, without the check digit throwing", () => {
+    const archived = { ...productFields(BEER), archived: true };
+    expect(toProductInput({ ...archived, gtin14: WRONG }).gtin14).toBe(WRONG);
+    // Digits short of 14 are zero-padded, as the host keeps 14.
+    expect(toProductInput({ ...archived, gtin14: " 4607001234561 " }).gtin14).toBe(WRONG);
+    // Anything else goes as typed: the host answers on the field.
+    expect(toProductInput({ ...archived, gtin14: "46O7" }).gtin14).toBe("46O7");
+  });
+
+  it("still normalizes a valid GTIN of a product in use and throws on a wrong one", () => {
+    const values = productFields(BEER);
+    expect(toProductInput({ ...values, gtin14: "4607001234562" }).gtin14).toBe("04607001234562");
+    expect(() => toProductInput({ ...values, gtin14: WRONG })).toThrow();
+  });
+});

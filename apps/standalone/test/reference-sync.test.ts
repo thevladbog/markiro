@@ -2785,6 +2785,35 @@ describe("catalog copies", () => {
     expect(layouts()).toEqual([JSON.stringify(layout(100))]);
   });
 
+  it("keeps an archived product whose GTIN is wrong or shared: an archived product is not checked for GTIN", async () => {
+    const { db, executor } = openLocalDb();
+    const OLD = "11111111-2222-4333-8444-555555555555";
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(30, [
+            // A correct card in use, and two archived cards: one with the same GTIN,
+            // one whose check digit is wrong (14 digits, as the host keeps it).
+            product(MILK, 28),
+            product(KEFIR, 29, { archived: true }),
+            product(OLD, 30, { archived: true, gtin14: "04600682000001" }),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 0 });
+    expect(catalog(db).products.map((each) => [each.id, each.gtin14, each.archived])).toEqual(
+      [
+        [OLD, "04600682000001", 1],
+        [KEFIR, "04600682000013", 1],
+        [MILK, "04600682000013", 0],
+      ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+    expect(quarantine(db)).toEqual([]);
+  });
+
   it("looks a scanned product up by its GTIN through an index, for plan 2a", () => {
     const { db } = openLocalDb();
     const plan = Array.from(

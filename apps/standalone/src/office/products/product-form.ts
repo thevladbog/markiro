@@ -27,7 +27,8 @@ import { activeFirstByName } from "../records.js";
  */
 export const productFieldsSchema = z
   .object({
-    gtin14: gtinRule,
+    // Checked in `superRefine`: an archived product is not checked for GTIN.
+    gtin14: z.string(),
     name: productNameRule,
     printName: printNameRule,
     chzProductGroupCode: productGroupRule,
@@ -44,6 +45,16 @@ export const productFieldsSchema = z
   // The EGAIS code is checked only while it shows (ЧЗ group 15): a code left in
   // the hidden field is not sent, so it never blocks a save it cannot show.
   .superRefine((values, context) => {
+    // The owner's rule: an archived product is not checked for GTIN (no check
+    // digit, no shape). One that comes back from the archive is checked whole.
+    if (!values.archived) {
+      const gtin = gtinRule.safeParse(values.gtin14);
+      if (!gtin.success) {
+        for (const issue of gtin.error.issues) {
+          context.addIssue({ code: "custom", path: ["gtin14"], message: issue.message });
+        }
+      }
+    }
     if (!showsEgais(values.chzProductGroupCode)) return;
     const checked = egaisCodeRule.safeParse(values.egaisCode);
     if (checked.success) return;
@@ -124,12 +135,22 @@ export function productFields(product: OfficeProduct | null): ProductFields {
 }
 
 /**
+ * The GTIN of an archived product as it goes to the host: not checked. Digits
+ * short of 14 are zero-padded (the host keeps 14), anything else goes as
+ * typed and the host answers on the field.
+ */
+export function storedGtin14(gtin: string): string {
+  const text = gtin.trim();
+  return /^[0-9]{1,14}$/u.test(text) ? text.padStart(14, "0") : text;
+}
+
+/**
  * The host's product fields for values the form accepted: trimmed, the GTIN
  * as its 14 digits, `null` for a field left blank.
  */
 export function toProductInput(values: ProductFields): ProductInput {
   return {
-    gtin14: toGtin14(values.gtin14),
+    gtin14: values.archived ? storedGtin14(values.gtin14) : toGtin14(values.gtin14),
     name: values.name.trim(),
     printName: toOptionalText(values.printName),
     chzProductGroupCode: toGroupCode(values.chzProductGroupCode),

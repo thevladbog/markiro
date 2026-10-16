@@ -106,18 +106,20 @@ export function ProductDrawer({ product, onClose, onSaved, onReload }: ProductDr
     control,
     handleSubmit,
     setError,
+    trigger,
     watch,
     formState: { errors, isDirty },
   } = useForm<ProductFields>({
     resolver: zodResolver(productFieldsSchema),
     defaultValues: productFields(product),
   });
-  const [typedGtin, group, boxCapacity, palletBoxCapacity, egaisCode] = watch([
+  const [typedGtin, group, boxCapacity, palletBoxCapacity, egaisCode, isArchived] = watch([
     "gtin14",
     "chzProductGroupCode",
     "boxCapacity",
     "palletBoxCapacity",
     "egaisCode",
+    "archived",
   ]);
 
   const gtin = gtinRule.safeParse(typedGtin);
@@ -239,7 +241,11 @@ export function ProductDrawer({ product, onClose, onSaved, onReload }: ProductDr
       <div className="product-gtin">
         <Input
           label={t("office.products.fields.gtin")}
-          hint={t("office.products.fields.gtinHint")}
+          hint={t(
+            isArchived
+              ? "office.products.fields.gtinArchivedHint"
+              : "office.products.fields.gtinHint",
+          )}
           inputMode="numeric"
           mono
           {...fieldError(errors.gtin14?.message)}
@@ -400,7 +406,12 @@ export function ProductDrawer({ product, onClose, onSaved, onReload }: ProductDr
             <Checkbox
               label={t("office.products.fields.archived")}
               checked={field.value}
-              onCheckedChange={field.onChange}
+              onCheckedChange={(checked) => {
+                field.onChange(checked);
+                // The GTIN is checked only while the product is in use: the refusal on
+                // it follows the mark, both ways.
+                if (errors.gtin14 !== undefined || checked === false) void trigger("gtin14");
+              }}
             />
           )}
         />

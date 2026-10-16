@@ -3,11 +3,17 @@ import { useTranslation } from "react-i18next";
 
 import type { OfficeProduct } from "../../host/protocol.js";
 import { productUpdate } from "../../host/requests.js";
-import { alertFailure, type AlertFailure } from "../form-errors.js";
+import { writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
-import { productFields, toProductInput } from "./product-form.js";
+import { gtinRule } from "../../lib/rules.js";
+import {
+  PRODUCT_CONFLICTS,
+  PRODUCT_FIELDS,
+  productFields,
+  toProductInput,
+} from "./product-form.js";
 
 export interface ArchiveProductDialogProps {
   product: OfficeProduct;
@@ -38,9 +44,17 @@ export function ArchiveProductDialog({
     api.updateProduct(
       token,
       product.id,
-      productUpdate(toProductInput(productFields(product)), archiving, product.rev),
+      // The GTIN goes as stored: an archived product is not checked for it, and the one
+      // that comes back is checked here before the write (`gtinFails`) and by the host.
+      productUpdate(
+        toProductInput({ ...productFields(product), archived: archiving }),
+        archiving,
+        product.rev,
+      ),
     ),
   );
+  // A card comes back only with a GTIN that passes the whole check.
+  const gtinFails = !archiving && !gtinRule.safeParse(product.gtin14).success;
 
   const submit = async () => {
     setFailure(null);
@@ -48,7 +62,13 @@ export function ArchiveProductDialog({
     try {
       saved = await write.mutateAsync();
     } catch (error) {
-      setFailure(alertFailure(error));
+      const outcome = writeFailure(error, PRODUCT_FIELDS, PRODUCT_CONFLICTS);
+      // The GTIN is taken: the dialog has no field, so it says so above.
+      setFailure(
+        outcome.kind === "field"
+          ? { kind: "alert", message: "office.products.restoreGtinTaken" }
+          : outcome,
+      );
       return;
     }
     onDone(saved);
@@ -59,6 +79,7 @@ export function ArchiveProductDialog({
       title={t(archiving ? "office.products.archiveTitle" : "office.products.restoreTitle")}
       submitLabel={t(archiving ? "office.products.archiveSubmit" : "office.products.restoreSubmit")}
       submitVariant={archiving ? "destructive" : "primary"}
+      submitDisabled={gtinFails}
       onSubmit={submit}
       onClose={onClose}
       alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
@@ -68,6 +89,7 @@ export function ArchiveProductDialog({
           name: product.name,
         })}
       </p>
+      {gtinFails && <p role="alert">{t("office.products.restoreGtinInvalid")}</p>}
     </FormDialog>
   );
 }
