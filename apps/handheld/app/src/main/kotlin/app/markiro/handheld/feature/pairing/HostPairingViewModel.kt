@@ -162,7 +162,10 @@ class HostPairingViewModel(
     private suspend fun finish(pairing: PairedDto, next: Pending, changedPin: Boolean) {
         runCatching {
             store.persist(pairing, "https://${next.address}:${next.port}", next.observed.fingerprint, next.addresses, changedPin)
-        }.onFailure { return _state.update { _ -> HostPairingUi.Failed(HostPairingError.OTHER) } }
+        }.onFailure {
+            // The code is spent and the key is in memory: the retry publishes the same candidate again, never asks for another code.
+            return _state.update { _ -> HostPairingUi.Failed(HostPairingError.OTHER, canRetrySync = true) }
+        }
         val synced = bootstrap.initialSync()
         _state.value = if (synced.isSuccess) HostPairingUi.Success else HostPairingUi.Failed(HostPairingError.SYNC_FAILED, canRetrySync = true)
     }

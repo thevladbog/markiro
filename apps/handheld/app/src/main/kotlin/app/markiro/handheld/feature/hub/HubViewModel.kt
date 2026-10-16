@@ -273,7 +273,7 @@ class HubViewModel(
             inventories = cfg?.inventoryCount,
             countsAt = cfg?.countsAt,
             // A host device is reachable as its heartbeat says: the cloud's reachability probe never sees the host's answers.
-            reachable = if (cfg?.backend == "host") link != null && link != app.markiro.handheld.core.host.HostLinkStatus.Offline else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
+            reachable = if (cfg?.backend == "host") link != null && link != app.markiro.handheld.core.host.HostLinkStatus.Offline && link != app.markiro.handheld.core.host.HostLinkStatus.CertificateChanged else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS,
             hostLink = link,
             hostQuarantined = if (cfg?.backend == "host") values[19] as Int else 0,
             scannerLabel = scannerLabel(),
@@ -372,4 +372,12 @@ class HubViewModel(
     }
 
     fun signOut() = session.signOut()
+
+    /**
+     * The host's certificate changed and the person chose to pair again: the credential is sealed exactly as a rejected key seals it (the queue
+     * and the data stay), and the shell goes to the pairing screen, which asks for the office's new fingerprint and a new code.
+     */
+    fun repairHostLink() {
+        viewModelScope.launch { runCatching { recovery.reject(recovery.token()) } }
+    }
 }

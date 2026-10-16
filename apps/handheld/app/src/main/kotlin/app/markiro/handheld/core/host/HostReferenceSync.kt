@@ -62,6 +62,19 @@ class HostReferenceSync(
         config.get()?.let { config.upsert(it.copy(hostRev = rev)) }
     }
 
+    /**
+     * The device's own record (`GET /v1/device`): the line the office assigned, which may come after the pairing or change later. A new line is
+     * stored with its name when the feed already carried it. A failure changes nothing and is the caller's to ignore (the next beat asks again).
+     */
+    suspend fun refreshDevice(): Result<Unit> = runCatching {
+        val device = api.device().getOrThrow()
+        db.recovery.commit {
+            val own = config.get() ?: return@commit
+            if (own.lineId != device.lineId) config.upsert(own.copy(lineId = device.lineId, lineName = null))
+            resolveLineName()
+        }
+    }
+
     /** The name of the device's own line from the lines the feed carried (the line may be assigned after the feed was read). */
     suspend fun refreshLineName() = db.recovery.commit { resolveLineName() }
 

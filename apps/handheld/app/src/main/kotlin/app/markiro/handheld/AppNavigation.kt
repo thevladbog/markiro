@@ -296,6 +296,7 @@ fun MarkiroApp(shell: AppShellViewModel, session: SessionHolder, refresher: Rost
                     onSignOut = vm::signOut,
                     onLabelQueue = { nav.navigate(Routes.LABEL_QUEUE) },
                     onHostQueue = { nav.navigate(Routes.HOST_QUEUE) },
+                    onRepairHost = vm::repairHostLink,
                     onDismissDialog = vm::dismissDialog,
                 )
             }

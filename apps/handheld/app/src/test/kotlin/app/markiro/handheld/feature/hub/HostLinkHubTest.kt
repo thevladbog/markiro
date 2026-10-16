@@ -62,4 +62,18 @@ class HostLinkHubTest {
         compose.onNodeWithText("Сеть").assertIsDisplayed()
         compose.onNodeWithText("Нет связи с хостом — работа продолжается").assertDoesNotExist()
     }
+
+    @Test
+    fun aChangedCertificateOffersPairingAgainAndAsksBeforeSealing() {
+        var repaired = 0
+        compose.setContent {
+            MarkiroTheme { HubScreen(HubUi(hostMode = true, hostLink = HostLinkStatus.CertificateChanged), onTile = {}, onSignOut = {}, onRepairHost = { repaired++ }) }
+        }
+        compose.onNodeWithText("Сертификат хоста изменился").assertIsDisplayed()
+        compose.onNodeWithText("Сертификат хоста изменился — нажмите, чтобы привязать ТСД заново").performClick()
+        compose.onNodeWithText("Привязать заново?").assertIsDisplayed()
+        assertEquals("nothing happens before the person confirms", 0, repaired)
+        compose.onNodeWithText("Привязать заново").performClick()
+        assertEquals(1, repaired)
+    }
 }

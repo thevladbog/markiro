@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -94,9 +95,18 @@ class ShiftListViewModel(
     scans: ScanEvents,
     /** Re-evaluates the reachability window while nothing else changes; tests pass a single tick. */
     tick: Flow<Unit>,
+    /** Whether the host answered its last heartbeat: the reachability of a host device (the cloud's tracker never moves for it). */
+    hostReachable: Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false),
 ) : ViewModel() {
     @Inject
-    constructor(repository: ShiftRepository, config: DeviceConfigDao, recovery: DeviceRecovery, reachability: ReachabilityTracker, scans: ScanEvents) : this(
+    constructor(
+        repository: ShiftRepository,
+        config: DeviceConfigDao,
+        recovery: DeviceRecovery,
+        reachability: ReachabilityTracker,
+        scans: ScanEvents,
+        hostLink: app.markiro.handheld.core.host.HostLinkMonitor,
+    ) : this(
         repository,
         config,
         recovery,
@@ -108,6 +118,7 @@ class ShiftListViewModel(
                 delay(REACHABLE_TICK_MS)
             }
         },
+        hostLink.state.map { it.reachable == true },
     )
 
     val grantDenial = app.markiro.handheld.core.grants.GrantDenialUi()
@@ -130,11 +141,13 @@ class ShiftListViewModel(
     private val _events = MutableSharedFlow<ShiftListEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<ShiftListEvent> = _events
 
-    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt, tick) { shifts, cfg, lastOk, _ ->
+    private val lists = combine(repository.observeShifts(), config.observe(), reachability.lastSuccessAt, tick, hostReachable) { shifts, cfg, lastOk, _, host ->
         val open = shifts.filter { it.status != "closed" }
         val current = cfg?.activeShiftId?.let { id -> open.firstOrNull { it.id == id } }
         val mine = open.filter { it.id != current?.id && (it.lineId == cfg?.lineId || it.lineId == null) }
-        Lists(current, mine, cfg, lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS)
+        // A device of a host reaches the host, never the cloud: the cloud's tracker says nothing for it.
+        val reachable = if (cfg?.backend == "host") host else lastOk != null && now() - lastOk <= REACHABLE_WINDOW_MS
+        Lists(current, mine, cfg, reachable)
     }
 
     val state: StateFlow<ShiftListUi> =

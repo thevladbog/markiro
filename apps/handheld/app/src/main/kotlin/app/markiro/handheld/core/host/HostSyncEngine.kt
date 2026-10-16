@@ -2,8 +2,10 @@ package app.markiro.handheld.core.host
 
 import app.markiro.handheld.core.network.host.FactReceiptDto
 import app.markiro.handheld.core.network.host.HostApi
+import app.markiro.handheld.core.network.host.HostApiError
 import app.markiro.handheld.core.storage.DeviceConfigDao
 import app.markiro.handheld.core.storage.HandheldDatabase
+import app.markiro.handheld.core.storage.HostOutboxEntity
 import app.markiro.handheld.core.storage.RecoveryBlocked
 import app.markiro.handheld.core.sync.Backoff
 import app.markiro.handheld.core.sync.SyncDriver
@@ -99,6 +101,11 @@ class HostSyncEngine(
             db.recovery.work { drainOwned() }.also { if (it) lastSuccess.value = clock() }
         } catch (_: RecoveryBlocked) {
             false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // A defect of the host's answer (or of one record) must not end the loop: the pass is a failed one and the queue stays as it is.
+            false
         }
     }
 
@@ -116,33 +123,73 @@ class HostSyncEngine(
         return true
     }
 
+    /** The batch the host refused as a whole (`400`/`403`…): how many passes in a row, for which head, and which channels send one record at a time. */
+    private var refusedHeads: List<String>? = null
+    private var refusals = 0
+    private val isolating = mutableSetOf<String>()
+
     private suspend fun drainTarget(target: String, post: suspend (String) -> Result<List<FactReceiptDto>>): Boolean {
         val dao = db.hostOutboxDao()
         var previous: List<String>? = null
         while (true) {
-            val batch = dao.queuedFor(target, MAX_BATCH)
-            if (batch.isEmpty()) return true
+            val batch = dao.queuedFor(target, if (target in isolating) 1 else MAX_BATCH)
+            if (batch.isEmpty()) {
+                isolating.remove(target)
+                return true
+            }
             // The same head again means the answer settled nothing that left the queue: end the pass, never ask in a circle.
             val heads = batch.map { it.recordId }
             if (heads == previous) return false
             previous = heads
             // The stored bodies are joined, never parsed and written again: a record goes out in the bytes it was frozen in.
             val body = batch.joinToString(separator = ",", prefix = "{\"records\":[", postfix = "]}") { it.body }
+            val answer = post(body)
+            val refusal = (answer.exceptionOrNull() as? HostApiError)?.takeIf { it.status in PERMANENT_STATUSES }
+            if (refusal != null) {
+                if (!handleRefusal(target, batch, refusal.status ?: 0)) return false
+                previous = null
+                continue
+            }
             val receipts = try {
-                calls.run { post(body) }
+                calls.run { answer }
             } catch (_: IOException) {
                 return false
             } catch (_: HttpException) {
                 return false
             }
             if (mapper.apply(batch, receipts) == 0) return false
+            refusedHeads = null
+            refusals = 0
         }
+    }
+
+    /**
+     * A refusal of the whole envelope is not a receipt for any record. It is retried a few passes (a host that is being reconfigured says `403`
+     * for a moment); then the channel sends one record at a time until it is empty, and a record the host still refuses alone is quarantined with the status
+     * (support sees it like any other quarantined record, the source is not acknowledged), so the records behind it can go. Returns `true` when
+     * the queue changed and the pass may go on, `false` when this pass ends.
+     */
+    private suspend fun handleRefusal(target: String, batch: List<HostOutboxEntity>, status: Int): Boolean {
+        val heads = batch.map { it.recordId }
+        refusals = if (heads == refusedHeads) refusals + 1 else 1
+        refusedHeads = heads
+        if (refusals < MAX_REFUSALS) return false
+        refusedHeads = null
+        refusals = 0
+        if (batch.size > 1) {
+            isolating += target
+        } else {
+            db.hostOutboxDao().quarantine(batch.single().recordId, "refused_$status")
+        }
+        return true
     }
 
     companion object {
         const val TARGET = "facts"
         const val EVENTS = "events"
         private const val MAX_ROUNDS = 4
+        private const val MAX_REFUSALS = 3
+        private val PERMANENT_STATUSES = setOf(400, 403, 413, 422)
 
         /** The host's own limit of `POST /v1/device/facts` (1–100 records). */
         const val MAX_BATCH = 100

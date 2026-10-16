@@ -42,9 +42,13 @@ class HostPairingViewModelTest {
         }
     }
 
-    private class FakeStore : HostProvisioningStore {
+    private class FakeStore(var failures: Int = 0) : HostProvisioningStore {
         val saved = mutableListOf<List<Any?>>()
         override suspend fun persist(paired: PairedDto, origin: String, pin: String, addresses: List<String>, changedPin: Boolean) {
+            if (failures > 0) {
+                failures--
+                throw IllegalStateException("the credential store failed")
+            }
             saved += listOf(paired.deviceId, origin, pin, addresses, changedPin)
         }
     }
@@ -243,5 +247,25 @@ class HostPairingViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf(Triple("192.168.1.10", "7K3MQ9XV2D", "d1")), gateway.claims)
         assertTrue(vm.state.value is HostPairingUi.Success)
+    }
+
+    @Test
+    fun aFailureOfThePublicationAfterTheClaimIsRetriedWithTheSameKeyNeverWithAnotherCode() = runTest {
+        val gateway = FakeGateway(mapOf("192.168.1.10" to Result.success(Observed(pin, hello()))))
+        val store = FakeStore(failures = 1)
+        val vm = viewModel(gateway, store)
+        vm.onAddress("192.168.1.10")
+        vm.onCode("7K3MQ9XV2D")
+        vm.onContinue()
+        advanceUntilIdle()
+        vm.onFingerprintConfirmed()
+        advanceUntilIdle()
+        val failed = vm.state.value as HostPairingUi.Failed
+        assertTrue("the retry that is offered keeps the claimed key", failed.canRetrySync)
+        vm.onRetrySync()
+        advanceUntilIdle()
+        assertTrue(vm.state.value is HostPairingUi.Success)
+        assertEquals("the one-time code was spent once", 1, gateway.claims.size)
+        assertEquals(1, store.saved.size)
     }
 }

@@ -29,4 +29,12 @@ class HostLinkStatusTest {
         // A host that answers "restoring" is being restored, not lost.
         assertEquals(HostLinkStatus.Restoring, HostLinkStatus.of(HostLinkState(reachable = false, failure = HostFailure.RestorePending(30))))
     }
+
+    @Test
+    fun aChangedCertificateIsNamedAndNeverReadAsAMereOutage() {
+        assertEquals(
+            HostLinkStatus.CertificateChanged,
+            HostLinkStatus.of(HostLinkState(reachable = false, failure = HostFailure.CertificateMismatch)),
+        )
+    }
 }

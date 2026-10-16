@@ -80,6 +80,19 @@ interface PalletMembershipDao {
     )
     suspend fun markAccepted(palletId: String, sscc: String, at: String)
 
+    /** The host's receipt names the add it was sent (`addedAt`): a row re-added since is another fact and is left alone. */
+    @Query(
+        "UPDATE pallet_memberships SET status = 'accepted', ackedAt = :at, reason = NULL, winningPalletSscc = NULL " +
+            "WHERE palletId = :palletId AND sscc = :sscc AND (:addedAt IS NULL OR addedAt = :addedAt)",
+    )
+    suspend fun markAcceptedAt(palletId: String, sscc: String, addedAt: String?, at: String): Int
+
+    @Query(
+        "UPDATE pallet_memberships SET status = 'rejected', reason = :reason, winningPalletSscc = :winner, ackedAt = :at " +
+            "WHERE palletId = :palletId AND sscc = :sscc AND (:addedAt IS NULL OR addedAt = :addedAt)",
+    )
+    suspend fun markRejectedAt(palletId: String, sscc: String, addedAt: String?, reason: String, winner: String?, at: String): Int
+
     @Query(
         "UPDATE pallet_memberships SET status = 'rejected', reason = :reason, winningPalletSscc = :winner, ackedAt = :at " +
             "WHERE palletId = :palletId AND sscc = :sscc",

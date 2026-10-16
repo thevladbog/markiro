@@ -19,6 +19,9 @@ enum class HostLinkStatus(val scanningAllowed: Boolean = true) {
 
     /** The host's clock and the device's differ by more than two minutes: the order in which codes are displaced would suffer. */
     ClockSkew,
+
+    /** The host presents another certificate than the paired one: nothing is sent to it; the office's new fingerprint must be confirmed by pairing again. */
+    CertificateChanged,
     ;
 
     companion object {
@@ -34,6 +37,7 @@ enum class HostLinkStatus(val scanningAllowed: Boolean = true) {
         /** `null` before the first heartbeat: nothing is known, nothing is claimed. */
         fun of(state: HostLinkState): HostLinkStatus? {
             val reachable = state.reachable ?: return null
+            if (state.failure is HostFailure.CertificateMismatch) return CertificateChanged
             // A host that answers "restoring" is not reachable for work, but it is not gone either.
             if (state.failure is HostFailure.RestorePending) return Restoring
             return of(reachable, state.restoreEpochChanged, (state.clockSkewMs ?: 0L) / 1000L)

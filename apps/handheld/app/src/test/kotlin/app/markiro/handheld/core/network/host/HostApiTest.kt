@@ -79,4 +79,27 @@ class HostApiTest {
         assertEquals(listOf("accepted", "rejected"), receipts.map { it.outcome })
         assertEquals("box_on_pallet", receipts[1].code)
     }
+
+    @Test
+    fun aDetailThatIsNotAStringIsABadResponseNotACrash() = runTest {
+        val cases = listOf(
+            error(409, "conflict", """{"constraint":{"a":1}}"""),
+            error(409, "conflict", """{"constraint":["seat_limit"]}"""),
+            error(401, "unauthorized", """{"credential":{"x":1}}"""),
+        )
+        for (answer in cases) {
+            val (_, host) = api(answer)
+            val failure = (host.postFacts("{}").exceptionOrNull() as HostApiError).failure
+            assertTrue(failure.toString(), failure == HostFailure.BadResponse)
+        }
+    }
+
+    @Test
+    fun anEntryNamesTheValidationCapabilityButNotTheDuplicate() = runTest {
+        val (transport, host) = api(error(409, "conflict", """{"constraint":"station_update"}"""))
+        host.enter("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
+        val body = transport.sent.single().third.orEmpty()
+        assertTrue(body, body.contains("\"supports\":[\"handheld-host-v1\",\"validation-v1\"]"))
+        assertTrue(!body.contains("duplicate"))
+    }
 }

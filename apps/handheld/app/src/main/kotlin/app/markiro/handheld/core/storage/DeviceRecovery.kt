@@ -40,6 +40,14 @@ data class DeviceOwner(
 /** The same device and server, whatever certificate it was paired with: a re-pairing may be allowed to change the pin. */
 fun DeviceOwner.sameDevice(other: DeviceOwner) = copy(pinSha256 = null) == other.copy(pinSha256 = null)
 
+/**
+ * The same host device (its host id and device id) at another address: a host answers on every interface of its PC, and a re-pairing may come
+ * through another one. The certificate must be the same unless the caller allows it to change; a cloud owner (no pin) is never matched.
+ */
+fun DeviceOwner.sameHostDevice(other: DeviceOwner, pinMayChange: Boolean): Boolean =
+    pinSha256 != null && other.pinSha256 != null &&
+        copy(serverOrigin = "", pinSha256 = if (pinMayChange) null else pinSha256) == other.copy(serverOrigin = "", pinSha256 = if (pinMayChange) null else other.pinSha256)
+
 /** What a pairing with a host adds to a publication: the pin, the host and the addresses of the payload (active one first). */
 @Serializable
 data class HostPairing(val pinSha256: String, val hostId: String, val addresses: List<String>)
@@ -146,7 +154,8 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         }
         val configOwner = ownerOf(config.serverUrl, config.tenantId, config.deviceId, config.kind, config.pinSha256)
         // While a re-pairing with a changed certificate is being published, the config still holds the old pin until the commit.
-        val sameOwner = configOwner == owner || row.phase == RecoveryPhase.RESTORING.name && configOwner?.sameDevice(owner) == true
+        val sameOwner = configOwner == owner || row.phase == RecoveryPhase.RESTORING.name &&
+            (configOwner?.sameDevice(owner) == true || configOwner?.sameHostDevice(owner, pinMayChange = true) == true)
         return sameOwner && legacyOwnerConsistent(owner)
     }
 
@@ -300,7 +309,8 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
         if (response.recovery != null && (row.owner() == null || db.deviceConfigDao().get() == null)) throw RecoveryMismatch()
         val owner = ownerOf(serverUrl, response.device.tenantId, response.device.id, response.device.kind, host?.pinSha256) ?: throw RecoveryMismatch()
         if (row.phase == RecoveryPhase.OWNER_UNRESOLVED.name || row.owner()?.let { existing ->
-                if (allowPinChange && host != null) !existing.sameDevice(owner) else existing != owner
+                if (host != null && existing.pinSha256 != null) !existing.sameHostDevice(owner, pinMayChange = allowPinChange)
+                else if (allowPinChange && host != null) !existing.sameDevice(owner) else existing != owner
             } == true) throw RecoveryMismatch()
         if (row.phase == RecoveryPhase.ACTIVE.name && row.owner() == owner && credential.read() == response.credential.apiKey) {
             credential.clearStaged()
@@ -362,6 +372,8 @@ class DeviceRecovery(private val db: HandheldDatabase, private val credential: C
             val config = old?.copy(deviceName = device.name, organizationName = device.organizationName,
                 lineId = device.line?.id, lineName = device.line?.name, rosterFetchedAt = if (recovery != null) old.rosterFetchedAt else System.currentTimeMillis(),
                 backend = if (host != null) "host" else old.backend,
+                // A host paired again through another of its addresses: the owner's origin moved with it.
+                serverUrl = if (host != null) publication.owner.serverOrigin else old.serverUrl,
                 pinSha256 = host?.pinSha256 ?: old.pinSha256, hostId = host?.hostId ?: old.hostId,
                 hostAddresses = addresses ?: old.hostAddresses,
                 // The sealing erased the operators and badges; the full feed brings them back.
