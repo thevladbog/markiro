@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Badge,
-  Button,
   Card,
   DefinitionGrid,
   PageHeader,
@@ -13,6 +12,7 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
+import { RowActionBar } from "../list/RowActionBar.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import type { SsccCounter, SsccState } from "../../host/protocol.js";
 import { useCan } from "../access.js";
@@ -112,20 +112,22 @@ function SsccContent() {
       title: t("office.sscc.table.actions"),
       render: (counter) =>
         isExhausted(counter) ? null : (
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.sscc.editNamed", {
-              kind: kindOf(counter),
-              prefix: counter.issuerPrefix,
-            })}
-            onClick={() => {
-              setSaved(null);
-              setEditing(counter);
-            }}
-          >
-            {t("office.sscc.edit")}
-          </Button>
+          <RowActionBar
+            actions={[
+              {
+                key: "edit",
+                label: t("office.sscc.editNamed", {
+                  kind: kindOf(counter),
+                  prefix: counter.issuerPrefix,
+                }),
+                icon: "pencil",
+                onSelect: () => {
+                  setSaved(null);
+                  setEditing(counter);
+                },
+              },
+            ]}
+          />
         ),
     });
   }

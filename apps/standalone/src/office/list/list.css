@@ -77,6 +77,25 @@
   outline-offset: -2px;
 }
 
+/*
+ * A table inside an ordinary card (counters, copies, sheets of a document, a card's files) has no frame
+ * of its own: the card is the one layer, the heading is cut off by a hairline and the rows are divided
+ * by hairlines, as in a list card. Without this the table's own frame sat inside the card's (two frames).
+ */
+.office-shell .mk-card {
+  --table-border: 0;
+  --table-radius: 0;
+  --table-bg: transparent;
+}
+
+.office-shell .mk-card .mk-table__th {
+  border-bottom: 1px solid var(--line);
+}
+
+.office-shell .mk-card .mk-table__row:first-child {
+  --mk-table-row-rule: 0;
+}
+
 /* ---- Filters ---- */
 
 .office-list-filters {

@@ -938,18 +938,44 @@
 }
 
 /* A page's table of contents: plain links to its sections' anchors in a row. */
+/* The anchors of «Информация» as the kit's segments (a link each, not a tab list: the page reads as a whole). */
 .office-toc {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
+  gap: 4px;
   margin: 0;
-  padding: 0;
+  padding: 4px;
+  border-radius: var(--r-ctl);
+  background: var(--surface-panel);
   list-style: none;
 }
 
 .office-toc a {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: 500 14px/20px var(--font-ui);
+  text-decoration: none;
+}
+
+.office-toc a:hover {
+  background: color-mix(in srgb, var(--fg-1) 8%, transparent);
   color: var(--fg-1);
-  text-decoration: underline;
+}
+
+.office-toc a[aria-current="location"] {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font-weight: 600;
+}
+
+.office-toc a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 /* The license section (plan ЛЦ-3): its parts one under another, each feature as its name and a word. */
@@ -975,9 +1001,33 @@
 
 .license-features li {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
   justify-content: space-between;
+}
+
+.license-features__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.license-features__state {
+  border-radius: var(--r-sm);
+}
+
+.license-features__state:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Why a feature is off, on the page under its row (the tooltip repeats it). */
+.license-features__why {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
 }
 
 /*
@@ -1174,7 +1224,89 @@
   max-height: 96px;
   image-rendering: pixelated;
   background: var(--paper);
-  border: 1px solid var(--line-strong);
+}
+
+/* Two columns on a wide window: the data at the left, the logo at the right; one column below 1100 px. */
+.office-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.office-split--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .office-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.office-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/*
+ * The office's cards are the kit's one layer: radius 24, a hairline, no shadow (the shadow is off in the
+ * kit scope), the title seated at the top with no divider under it. The card draws these from tokens.
+ */
+.office-shell {
+  --r-3: var(--r-card);
+  --mk-card-pad: 24px;
+  --mk-card-head-pad: 20px 24px 0;
+  --mk-card-head-rule: 0;
+}
+
+.org-logo-card .mk-card__body {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.org-logo-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.org-logo-card__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font: var(--text-h3);
+}
+
+.org-logo-card__intro {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* Paper is paper in both themes: literal white, the logo printed black on it. */
+.org-logo-paper {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: #ffffff;
+  color: #17161a;
+}
+
+.org-logo-paper__none {
+  margin: 0;
+  color: #17161a;
+  font: var(--text-body-sm);
+  text-align: center;
 }
 
 /* An A4 sheet's preview: the page shrunk to the dialog's width. */
@@ -1355,22 +1487,35 @@
   font: var(--text-body-sm);
 }
 
+/* The matrix at the left, its code at the right (the kit's pairing dialog); one column in a narrow window. */
 .pairing-code {
-  display: grid;
-  justify-items: center;
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
 }
 
-/* The card's paper, A4 and A5 side by side (the group's own column is inline, hence !important). */
-.pairing-card-paper [role="radiogroup"] {
-  flex-direction: row !important;
-  gap: 24px !important;
+.pairing-code__side {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pairing-code__label {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+/* The card's paper, A4 and A5 side by side (the group draws its direction and gap from these). */
+.pairing-card-paper {
+  --mk-radio-dir: row;
+  --mk-radio-gap: 24px;
 }
 
 /* The SVG has only a viewBox: the box gives it a size, and a light quiet zone in both themes. */
 .pairing-code__matrix {
-  width: 200px;
-  height: 200px;
+  width: 148px;
+  height: 148px;
   padding: 12px;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -1386,7 +1531,9 @@
 .pairing-code__digits {
   font: var(--text-h1);
   font-family: var(--font-mono);
-  letter-spacing: 0.12em;
+  font-size: 40px;
+  line-height: 44px;
+  letter-spacing: 0.08em;
 }
 
 /* The import dialog: the code and its check beside the fields a layout can print. */
@@ -1853,11 +2000,6 @@
   }
 }
 
-/* A card of the overview: radius 24 (the card draws it from `--r-3`); the shadow is off in the kit scope. */
-.overview-card {
-  --r-3: var(--r-card);
-}
-
 .overview-planned {
   display: grid;
   gap: var(--sp-3);
@@ -2191,4 +2333,18 @@
 
 .shift-cell--end > .shift-cell__quiet {
   font: var(--text-body-sm);
+}
+
+/* The export formats as rows divided by hairlines (the kit's export dialog), one choice among them. */
+.export-formats {
+  --mk-radio-gap: 0;
+}
+
+.export-formats [role="radiogroup"] > div {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.export-formats [role="radiogroup"] > div:last-child {
+  border-bottom: 0;
 }

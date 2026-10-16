@@ -22,7 +22,6 @@ import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.j
 import { listViewState } from "../list/list-state.js";
 import { DateRange, ListCard, ListFilters } from "../list/ListCard.js";
 import { ListEmpty, ListError, ListNothing, ListSkeleton } from "../list/ListStates.js";
-import { OfficeIcon } from "../OfficeIcon.js";
 import { PagedTable } from "../paging/PagedTable.js";
 import { searchableSelect } from "../select-search.js";
 import { documentFilter, type DocumentFilterState } from "./document-list.js";

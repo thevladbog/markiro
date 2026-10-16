@@ -952,4 +952,27 @@ describe("the activation request and the emergency extension", () => {
       within(tech).queryByRole("button", { name: "Сохранить запрос на активацию" }),
     ).toBeNull();
   });
+
+  it("shows the switched-off custom logo as locked: a lock, the reason on the page, and the same reason on hover and focus", async () => {
+    const license = licenseOf({ features: { ...ACTIVE_LICENSE.features, customLogo: false } });
+    const card = await openLicense(sessionWith(license));
+    const row = within(card).getByText("Логотип организации на формах и этикетках").closest("li");
+    if (row === null) throw new Error("no feature row");
+    const reason =
+      "Загрузка логотипа требует отдельной лицензии. Загруженный ранее логотип остаётся и печатается как раньше.";
+    // A lock and the word «выключено», and the reason in the row itself, not in the tooltip alone.
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(within(row).getByText("выключено")).toBeTruthy();
+    expect(within(row).getAllByText(reason)).toHaveLength(1);
+    // The tooltip repeats it for hover and for the keyboard.
+    const state = row.querySelector(".license-features__state");
+    if (!(state instanceof HTMLElement)) throw new Error("no state");
+    expect(state.getAttribute("tabindex")).toBe("0");
+    fireEvent.focus(state);
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+    expect(screen.getByRole("tooltip").textContent).toBe(reason);
+    // The features that are on carry no lock and no reason.
+    const other = within(card).getByText("Открытый API").closest("li");
+    expect(other?.querySelector("svg")).toBeNull();
+  });
 });

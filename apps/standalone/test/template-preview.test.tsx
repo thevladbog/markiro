@@ -425,7 +425,8 @@ describe("the office's own way of drawing labels", () => {
       );
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
       await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
-      fireEvent.click(screen.getByRole("button", { name: "Создать шаблон" }));
+      // An empty list offers «Создать шаблон» in its state as well as in the header: the header's is the first.
+      fireEvent.click(screen.getAllByRole("button", { name: "Создать шаблон" })[0] as HTMLElement);
       await screen.findByRole("heading", { name: "Новый шаблон" });
     } finally {
       restore();

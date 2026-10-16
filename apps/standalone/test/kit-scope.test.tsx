@@ -31,8 +31,8 @@ describe("the 2026 sizing scope", () => {
 });
 
 describe("the office stylesheets", () => {
-  /** The one rule that still fights an inline style: the pairing card's radio group, outside the office. */
-  const ALLOWED = ["flex-direction: row !important", "gap: 24px !important"];
+  /** No rule may use it: the shared components draw shape, ink and rule from tokens and hooks. */
+  const ALLOWED: string[] = [];
   it.each(["src/app/shell.css", "src/office/list/list.css"])(
     "%s draws buttons and fields through the kit's hooks, not !important",
     (file) => {

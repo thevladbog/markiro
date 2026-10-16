@@ -172,8 +172,11 @@ describe("office devices", () => {
     expect(within(retired).getByText("ТСД")).toBeTruthy();
     // A line the host's list does not know shows its short id.
     expect(within(retired).getByText("9b2e4a6c…")).toBeTruthy();
-    expect(within(retired).getByText("—")).toBeTruthy();
+    // «Связь»: never heard (or revoked) is «нет связи»; heard long ago is «давно не было» with the exact time.
+    expect(within(retired).getByText("нет связи")).toBeTruthy();
     expect(within(retired).getByText("Отозвано")).toBeTruthy();
+    expect(within(station).getByText("давно не было")).toBeTruthy();
+    expect(within(station).getByText(/^Слышали: /)).toBeTruthy();
     // A revoked device is a dead record: nothing to change on it.
     expect(within(retired).queryByRole("button")).toBeNull();
   });

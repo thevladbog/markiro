@@ -37,7 +37,12 @@ export function AboutPage() {
         <ul className="office-toc">
           {sections.map((section) => (
             <li key={section.id}>
-              <a href={`#${section.id}`}>{t(section.titleKey)}</a>
+              <a
+                href={`#${section.id}`}
+                {...(location.hash === `#${section.id}` ? { "aria-current": "location" } : {})}
+              >
+                {t(section.titleKey)}
+              </a>
             </li>
           ))}
         </ul>

@@ -549,7 +549,9 @@ describe("the logo upload and the license (customLogo)", () => {
     const fake = session(null);
     fake.api.getLicense.mockResolvedValue(NO_LOGO_LICENSE);
     await openProfile(fake);
-    const note = await screen.findByText(LOCK_TEXT);
+    // The reason is an info note (an Alert since the 2026 kit); its box is the focusable, described element.
+    const note = (await screen.findByText(LOCK_TEXT)).closest("[tabindex]");
+    if (note === null) throw new Error("no focusable lock note");
     expect(note.getAttribute("tabindex")).toBe("0");
     const zone = screen.getByRole("button", { name: "Загрузить логотип" });
     expect(zone.getAttribute("aria-disabled")).toBe("true");

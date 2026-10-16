@@ -25,7 +25,6 @@ import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.j
 import { LoadError, PageLoading } from "../page-state.js";
 import { ListCard } from "../list/ListCard.js";
 import { RowActionBar, type RowMenuItem } from "../list/RowActionBar.js";
-import { OfficeIcon } from "../OfficeIcon.js";
 import { byNameThenId, withRecord } from "../records.js";
 import { downloadFile } from "../templates/download.js";
 import { TemplateTabPanel, TemplateTabsBar } from "../templates/TemplatesSection.js";
