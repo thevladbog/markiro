@@ -82,7 +82,7 @@ describe.skipIf(!databaseUrl)("working device replacement forward migration", ()
 
   afterAll(async () => {
     await closeFixturePool(pool);
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });

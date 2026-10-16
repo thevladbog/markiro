@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
+import { closeFixturePool } from "./support/close-pool.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 import { supportTranscriptNotice } from "../../platform-contracts/src/support-chat.js";
 
@@ -93,8 +94,8 @@ describe.skipIf(!databaseUrl)("support chat forward migration", () => {
   }, 180_000);
 
   afterAll(async () => {
-    await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    await closeFixturePool(pool);
+    if (created) await maintenance.query(`DROP DATABASE "${databaseName}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
     if (preNoticeRoot) await rm(preNoticeRoot, { recursive: true, force: true });
