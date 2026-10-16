@@ -104,10 +104,18 @@ async function openPicker(purpose: Purpose) {
   } else {
     fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
     if (purpose === "pallet") fireEvent.click(screen.getByRole("button", { name: "With pallets" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    // The template step opens after awaited client reads. Run the click in an
+    // async act scope so the resulting commit and its passive effects (the
+    // preview request) flush deterministically instead of on React's scheduler,
+    // whose timing a loaded host can stretch past a waitFor budget.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    });
     await screen.findByRole("button", { name: /Label 1/ });
     if (purpose === "pallet") {
-      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      });
       await screen.findByText("Pallet label template");
     }
   }
