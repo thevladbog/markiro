@@ -174,11 +174,16 @@ async fn host_check(device: &DeviceState) -> HostCheck {
     if device.install_role() == Some(InstallRole::Host) {
         return HostCheck::NotNeeded;
     }
-    let address = match device.status() {
-        Ok(Some(status)) => status.host_address,
-        _ => crate::local_host_address(),
+    // A paired PC reads the host's versions through the pinned connection:
+    // only the host it was paired with can say what version it runs. An
+    // unpaired PC has no certificate to hold the host to and only looks.
+    let seen = match device.status() {
+        Ok(Some(status)) => {
+            host_probe::pinned_host_versions(&status.host_address, &status.fingerprint).await
+        }
+        _ => host_probe::host_versions(&crate::local_host_address()).await,
     };
-    match host_probe::host_versions(&address).await {
+    match seen {
         Ok(seen) => HostCheck::Seen(seen),
         Err(_) => HostCheck::Silent,
     }

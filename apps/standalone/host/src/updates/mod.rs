@@ -31,18 +31,49 @@ pub async fn serve(store: &Arc<UpdateStore>) -> Result<Package, PackageState> {
     match tokio::task::spawn_blocking(move || checking.serve_blocking()).await {
         Ok(Serve::Ready(package)) => Ok(package),
         Ok(Serve::Changed) => {
-            let verifying = store.clone();
-            let check = tokio::task::spawn_blocking(move || verifying.reverify_blocking());
-            // A check that panicked must not leave `verifying` for good.
-            let store = store.clone();
-            tokio::spawn(async move {
-                if check.await.is_err() {
-                    store.fail_verifying();
-                }
-            });
+            recheck_in_background(store);
             Err(PackageState::Verifying)
         }
         Ok(Serve::Unavailable(state)) => Err(state),
         Err(_) => Err(PackageState::Invalid),
     }
+}
+
+/// The installer of `package` as an open file that is the one hashed (see
+/// [`UpdateStore::open_installer_blocking`]); another file is checked again
+/// in the background, and this answer is `verifying`.
+pub async fn open_installer(
+    store: &Arc<UpdateStore>,
+    package: &Package,
+    start: u64,
+) -> Result<std::fs::File, PackageState> {
+    use std::io::{Seek, SeekFrom};
+    let opening = store.clone();
+    let package = package.clone();
+    let opened = tokio::task::spawn_blocking(move || {
+        let mut file = opening.open_installer_blocking(&package)?;
+        file.seek(SeekFrom::Start(start))?;
+        Ok::<_, std::io::Error>(file)
+    })
+    .await;
+    match opened {
+        Ok(Ok(file)) => Ok(file),
+        Ok(Err(_)) => {
+            recheck_in_background(store);
+            Err(PackageState::Verifying)
+        }
+        Err(_) => Err(PackageState::Invalid),
+    }
+}
+
+fn recheck_in_background(store: &Arc<UpdateStore>) {
+    let verifying = store.clone();
+    let check = tokio::task::spawn_blocking(move || verifying.reverify_blocking());
+    // A check that panicked must not leave `verifying` for good.
+    let store = store.clone();
+    tokio::spawn(async move {
+        if check.await.is_err() {
+            store.fail_verifying();
+        }
+    });
 }

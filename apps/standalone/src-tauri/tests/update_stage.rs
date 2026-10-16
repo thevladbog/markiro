@@ -112,11 +112,29 @@ async fn a_found_package_goes_to_the_host_and_waits_there_as_staged() {
 #[tokio::test]
 async fn a_wrong_file_stops_here_and_an_old_package_at_the_host() {
     let host_dir = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    // A sound current package of the host's version: the same version is no
+    // news (without one, it repairs: see the next test).
+    let current = package(&files.path().join("current"), HOST_VERSION);
+    let folder = HostPaths::new(host_dir.path())
+        .updates_dir()
+        .join("current");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::copy(&current, folder.join("manifest.update.jws")).unwrap();
+    std::fs::copy(
+        files
+            .path()
+            .join("current")
+            .join(installer_name(HOST_VERSION)),
+        folder.join(installer_name(HOST_VERSION)),
+    )
+    .unwrap();
     let host = start_host(host_dir.path()).await;
     let app_dir = tempfile::tempdir().unwrap();
     let (station, token) = office(&host, app_dir.path()).await;
     let link = station.watch_link().borrow().clone().unwrap();
-    let files = tempfile::tempdir().unwrap();
+    // The start checks the package in the background.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     let same = package(&files.path().join("same"), HOST_VERSION);
     assert_eq!(
@@ -201,4 +219,23 @@ async fn an_oversized_manifest_is_refused_without_reading_it_whole() {
         StageError::ManifestRefused
     );
     host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_package_of_the_hosts_version_repairs_a_host_without_a_current_one() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let app_dir = tempfile::tempdir().unwrap();
+    let (station, token) = office(&host, app_dir.path()).await;
+    let link = station.watch_link().borrow().clone().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let manifest = package(files.path(), HOST_VERSION);
+    stage(&link, &token, &manifest).await.unwrap();
+    host.stop().await.unwrap();
+    let updates = HostPaths::new(host_dir.path()).updates_dir();
+    assert!(updates
+        .join("current")
+        .join(installer_name(HOST_VERSION))
+        .exists());
+    assert!(!updates.join("staged").exists());
 }

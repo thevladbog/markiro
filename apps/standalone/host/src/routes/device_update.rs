@@ -7,8 +7,6 @@
 //! `AuthDevice` records the device's version too (plan ОБН-1), so every
 //! read keeps «Устройства и версии» current.
 
-use std::io::{Seek, SeekFrom};
-
 use axum::extract::State;
 use axum::http::header::{
     HeaderName, ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, IF_RANGE, RANGE,
@@ -161,15 +159,13 @@ pub async fn installer(
         Span::Whole => (0, package.size_bytes - 1),
         Span::Part { start, end } => (start, end),
     };
-    let path = package.installer.clone();
-    let file = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
-        let mut file = std::fs::File::open(&path)?;
-        file.seek(SeekFrom::Start(start))?;
-        Ok(file)
-    })
-    .await
-    .map_err(ApiError::internal)?
-    .map_err(|_| unavailable())?;
+    // The file served is the file hashed: opened, then compared by what the
+    // handle is (not by its path).
+    let file = match crate::updates::open_installer(store, &package, start).await {
+        Ok(file) => file,
+        Err(PackageState::Verifying) => return Ok(verifying()),
+        Err(_) => return Err(unavailable()),
+    };
     if start == 0 {
         let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
         device.require_live_in(&mut tx).await?;

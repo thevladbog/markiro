@@ -34,6 +34,9 @@ pub struct Package {
     pub size_bytes: u64,
     pub kid: String,
     pub installer: PathBuf,
+    /// The installer as it was when it was hashed: a file opened for a
+    /// download must still be this one ([`UpdateStore::open_installer_blocking`]).
+    pub installer_stamp: FileStamp,
 }
 
 /// Size, change time, creation time and, on Unix, the inode of a file: what
@@ -51,14 +54,23 @@ pub struct FileStamp {
 
 impl FileStamp {
     pub fn of(path: &Path) -> io::Result<Self> {
-        let meta = fs::metadata(path)?;
-        Ok(Self {
+        Ok(Self::from_metadata(&fs::metadata(path)?))
+    }
+
+    /// The stamp of an opened file: what that handle is, whatever its path
+    /// names by now.
+    pub fn of_file(file: &fs::File) -> io::Result<Self> {
+        Ok(Self::from_metadata(&file.metadata()?))
+    }
+
+    fn from_metadata(meta: &fs::Metadata) -> Self {
+        Self {
             len: meta.len(),
             modified: meta.modified().ok(),
             created: meta.created().ok(),
             #[cfg(unix)]
-            inode: std::os::unix::fs::MetadataExt::ino(&meta),
-        })
+            inode: std::os::unix::fs::MetadataExt::ino(meta),
+        }
     }
 }
 
@@ -203,6 +215,7 @@ fn read_package(
             size_bytes: checked.size_bytes,
             kid: checked.kid,
             installer,
+            installer_stamp: before.clone(),
         },
         Stamps {
             manifest,
@@ -317,6 +330,10 @@ pub struct UpdateStore {
     /// replace folders of `updates\` — but never across the long hashing of
     /// a check, so the hourly pass never sees a half-replaced `staged\`.
     swap: Mutex<()>,
+    /// Held across the whole opening of an upload: the replaced upload is
+    /// taken out, its folder removed and the new one published as one step,
+    /// so two manifests never leave two uploads behind.
+    begin: Mutex<()>,
 }
 
 impl UpdateStore {
@@ -336,6 +353,7 @@ impl UpdateStore {
             }),
             generation: AtomicU64::new(0),
             swap: Mutex::new(()),
+            begin: Mutex::new(()),
         }
     }
 
@@ -435,13 +453,27 @@ impl UpdateStore {
     /// `previous\` (the previous one goes); an older or broken `staged\`
     /// goes; a newer one waits.
     pub fn promote_blocking(&self) -> Promotion {
-        let _swap = self.lock_swap();
         let staged = self.dir.join(STAGED);
         if !staged.is_dir() {
             return Promotion::None;
         }
-        let package = match read_package(&staged, &self.keyset, self.max_installer) {
-            Ok((package, _)) => package,
+        // The whole check reads the installer: it runs before the swap lock
+        // is taken (an upload's end must never wait for a hash). What was
+        // read must still be the folder in place once the lock is held.
+        let identity = FileStamp::of(&staged).ok();
+        let read = read_package(&staged, &self.keyset, self.max_installer);
+        let _swap = self.lock_swap();
+        if !staged.is_dir() || FileStamp::of(&staged).ok() != identity {
+            // An upload replaced it meanwhile: the next pass looks again.
+            return Promotion::None;
+        }
+        let package = match read {
+            Ok((package, stamps)) => {
+                if FileStamp::of(&package.installer).ok().as_ref() != Some(&stamps.installer) {
+                    return Promotion::None;
+                }
+                package
+            }
             Err(_) => {
                 let version = signed_version(&staged, &self.keyset);
                 remove_any(&staged);
@@ -572,6 +604,26 @@ impl UpdateStore {
         }
     }
 
+    /// The installer of `package` opened for a download, and only that
+    /// file: what the handle is must be what was hashed (size, times and,
+    /// on Unix, the inode), whatever the path names by now. Another file
+    /// turns the state to `verifying` like a change seen by
+    /// [`UpdateStore::serve_blocking`]. A write in place that keeps size and
+    /// times is not seen here; the device's own hash check is the last guard.
+    pub fn open_installer_blocking(&self, package: &Package) -> io::Result<fs::File> {
+        let file = fs::File::open(&package.installer)?;
+        if FileStamp::of_file(&file)? == package.installer_stamp {
+            return Ok(file);
+        }
+        let mut inner = self.lock();
+        if matches!(&inner.current, Current::Ready(ready, _) if ready.sha256 == package.sha256) {
+            inner.current = Current::Verifying;
+        }
+        Err(io::Error::other(
+            "the installer is not the file that was checked",
+        ))
+    }
+
     /// The packages as the office sees them.
     pub fn status_blocking(&self) -> HostPackage {
         let (state, version) = self.current_state();
@@ -589,11 +641,26 @@ impl UpdateStore {
         check_manifest(text, &self.keyset, self.max_installer)
     }
 
-    /// Open the upload of a package newer than the running host: its folder
-    /// with the manifest. An upload in progress goes first.
+    /// Open the upload of a package newer than the running host (or of the
+    /// running version, to repair a missing, broken or foreign current
+    /// package): its folder with the manifest. An upload in progress goes
+    /// first, under the same gate, so a replaced upload is always removed
+    /// by its own id and never orphaned.
     pub fn begin_upload_blocking(&self, manifest: CheckedManifest) -> Result<Upload, UploadError> {
+        let _begin = self
+            .begin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let repairable = matches!(
+            self.lock().current,
+            Current::Missing | Current::Invalid | Current::Mismatch(_)
+        );
         match self.host_version.parse::<AppVersion>().ok() {
             Some(host) if manifest.version > host => {}
+            // Repair (spec §10.11.2, recovery): the genuine package of the
+            // running version when the current one is gone, broken or of
+            // another version. A sound current package is no reason.
+            Some(host) if manifest.version == host && repairable => {}
             _ => return Err(UploadError::NotNewer),
         }
         let replaced = {
@@ -613,6 +680,8 @@ impl UpdateStore {
             return Err(UploadError::Io(error));
         }
         let upload = Upload { id, dir, manifest };
+        // Still inside the gate: no other opening ran between the removal of
+        // the old upload and this publication.
         let mut inner = self.lock();
         inner.upload = Some(upload.clone());
         inner.receiving = false;

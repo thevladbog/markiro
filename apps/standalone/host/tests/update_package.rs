@@ -16,6 +16,7 @@ use support::app::{
 use support::backup::names;
 use support::update::{
     installer_bytes, installer_name, keyset, manifest_payload, sha256_hex, signed_manifest,
+    write_package,
 };
 
 async fn host_of(version: &str) -> Admin {
@@ -159,7 +160,10 @@ async fn only_an_administrators_session_uploads() {
 
 #[tokio::test]
 async fn a_package_not_newer_than_the_running_host_is_refused() {
-    let admin = host_of("0.2.0").await;
+    let mut admin = host_of("0.2.0").await;
+    // A sound current package of the running version: it is no news.
+    write_package(&updates(&admin), CURRENT, "0.2.0");
+    admin.app.keep_updates("0.2.0");
     let rows = audit_rows(&admin.app).await;
     for version in ["0.2.0", "0.1.9"] {
         let bytes = installer_bytes(version);
@@ -174,8 +178,42 @@ async fn a_package_not_newer_than_the_running_host_is_refused() {
             "{version}"
         );
     }
-    assert!(names(&updates(&admin)).is_empty());
+    assert_eq!(names(&updates(&admin)), [CURRENT]);
     assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+#[tokio::test]
+async fn the_package_of_the_running_version_repairs_a_missing_current_package() {
+    let admin = host_of("0.2.0").await;
+    let bytes = installer_bytes("0.2.0");
+    let (status, upload) =
+        post_manifest(&admin, &admin.token, &signed_manifest("0.2.0", &bytes)).await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    let id = upload["uploadId"].as_str().unwrap().to_owned();
+    let (status, staged) =
+        put_installer(&admin, &admin.token, &id, bytes.clone(), Some(bytes.len())).await;
+    assert_eq!(status, StatusCode::OK, "{staged}");
+    // Current at once, not staged and not waiting for the next start.
+    assert_eq!(names(&updates(&admin)), [CURRENT]);
+    let (_, status) = admin.call("GET", "/v1/office/update-status", None).await;
+    assert_eq!(status["package"]["state"], json!("ok"), "{status}");
+    assert_eq!(status["package"]["version"], json!("0.2.0"));
+    assert_eq!(
+        audit_trail(&admin.app, "update.package.stage").await.len(),
+        1
+    );
+    assert_eq!(
+        audit_trail(&admin.app, "update.package.promote").await,
+        [(
+            "system".to_owned(),
+            None,
+            "update.package.promote".to_owned(),
+            Some("update_package".to_owned()),
+            Some("0.2.0".to_owned()),
+            "ok".to_owned(),
+            json!({ "version": "0.2.0", "previous": null })
+        )]
+    );
 }
 
 #[tokio::test]
@@ -410,4 +448,28 @@ async fn an_upload_that_sends_nothing_for_the_idle_limit_is_dropped() {
     );
     assert!(names(&updates(&admin)).is_empty(), "the folder went");
     assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_package_that_could_not_move_to_staged_leaves_its_row_and_a_failed_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let admin = host_of("0.2.0").await;
+    let bytes = installer_bytes("0.3.0");
+    let (_, upload) = post_manifest(&admin, &admin.token, &signed_manifest("0.3.0", &bytes)).await;
+    let id = upload["uploadId"].as_str().unwrap().to_owned();
+    // The folder may not be renamed any more: the audit row is already in.
+    let folder = updates(&admin);
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let (status, _) =
+        put_installer(&admin, &admin.token, &id, bytes.clone(), Some(bytes.len())).await;
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!status.is_success(), "{status}");
+    assert!(!folder.join(STAGED).exists());
+    let rows = audit_trail(&admin.app, "update.package.stage").await;
+    assert_eq!(
+        rows.iter().map(|row| row.5.as_str()).collect::<Vec<_>>(),
+        ["ok", "failed"]
+    );
+    assert_eq!(rows[1].6["reason"], json!("not_staged"));
 }

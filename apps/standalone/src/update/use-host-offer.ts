@@ -13,22 +13,34 @@ interface OfferRead {
 }
 
 /**
+ * How long to wait before asking again while the host still says
+ * `verifying` (it hashes its packages in the background after a start): the
+ * tries are bounded, about two minutes in all.
+ */
+export const VERIFYING_RETRY_MS: readonly number[] = [
+  3000, 3000, 5000, 5000, 10000, 10000, 15000, 15000, 30000, 30000,
+];
+
+/**
  * The update the host offers this PC, for the office's banner, the
  * station's line and the version screen. The offer is read (with the shell
  * checking its manifest) only while the host is newer than this PC, again
  * when the host's version changes and each time the link comes online or
- * the host refuses this app; never on a timer.
+ * the host refuses this app; never on a timer, except a bounded retry while
+ * the host itself says its package is `verifying`.
  */
 export function useHostUpdateOffer({
   link,
   paired,
   host,
   updates,
+  retryDelaysMs = VERIFYING_RETRY_MS,
 }: {
   link: HostStatus | null;
   paired: boolean;
   host: Pick<HostApi, "getDeviceUpdate">;
   updates: Pick<UpdatesApi, "appVersion" | "checkManifest">;
+  retryDelaysMs?: readonly number[];
 }): HostUpdateOffer {
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -57,9 +69,16 @@ export function useHostUpdateOffer({
   const moment = link?.state === "online" ? "online" : appTooOld ? "too_old" : "away";
   const fetchKey = newer && moment !== "away" ? `${hostVersion}:${moment}` : null;
   const [read, setRead] = useState<OfferRead | null>(null);
+  // The tries made for this key; a new key starts again.
+  const [tries, setTries] = useState<{ key: string | null; count: number }>({
+    key: null,
+    count: 0,
+  });
+  const attempt = tries.key === fetchKey ? tries.count : 0;
   useEffect(() => {
     if (fetchKey === null || hostVersion === null) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
       let offer: DeviceUpdateOffer | null = null;
       let manifest: OfferRead["manifest"] = null;
@@ -80,11 +99,18 @@ export function useHostUpdateOffer({
           ? previous
           : { hostVersion, offer, manifest },
       );
+      const delay = retryDelaysMs[attempt];
+      if (offer?.package.state === "verifying" && delay !== undefined) {
+        timer = setTimeout(() => {
+          setTries({ key: fetchKey, count: attempt + 1 });
+        }, delay);
+      }
     })();
     return () => {
       alive = false;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [fetchKey, hostVersion, host, updates]);
+  }, [fetchKey, hostVersion, host, updates, attempt, retryDelaysMs]);
   const current = read !== null && read.hostVersion === hostVersion ? read : null;
   return hostUpdateOffer({
     appVersion,
