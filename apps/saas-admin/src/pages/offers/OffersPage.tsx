@@ -208,7 +208,7 @@ function OfferRegistryPage() {
           ) : offers.error ? (
             <Alert tone="error">
               {t("offers.loadError")}{" "}
-              <Button variant="secondary" onClick={() => void offers.refetch()}>
+              <Button size="compact" variant="secondary" onClick={() => void offers.refetch()}>
                 {t("offerWorkspace.retry")}
               </Button>
             </Alert>

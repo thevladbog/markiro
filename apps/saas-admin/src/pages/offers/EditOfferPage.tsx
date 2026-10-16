@@ -90,6 +90,8 @@ function OfferDraftEditor({ workspace }: { workspace: OfferWorkspaceV4 }) {
       <Alert tone="error">
         {t("offers.loadError")}
         <Button
+          size="compact"
+          variant="secondary"
           onClick={() => {
             void catalog.refetch();
             void accounts.refetch();

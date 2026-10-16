@@ -50,6 +50,7 @@ export function PanelState({
           <p className="panel-state__request-id">
             <span>{t("panelState.requestId", { requestId })}</span>
             <Button
+              size="compact"
               variant="secondary"
               onClick={() => {
                 try {
@@ -64,7 +65,7 @@ export function PanelState({
           </p>
         ) : null}
         {canRetry ? (
-          <Button variant="secondary" onClick={onRetry}>
+          <Button size="compact" variant="secondary" onClick={onRetry}>
             {t("panelState.retry")}
           </Button>
         ) : null}

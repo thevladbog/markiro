@@ -170,7 +170,7 @@ export function DiagnosticsHistory({ tenantId }: { tenantId: string }) {
         <Alert
           tone="error"
           action={
-            <Button variant="secondary" onClick={() => void query.refetch()}>
+            <Button size="compact" variant="secondary" onClick={() => void query.refetch()}>
               {t("tenants.detail.diagnostics.retry")}
             </Button>
           }

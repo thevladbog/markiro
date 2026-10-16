@@ -74,7 +74,12 @@ export function DiagnosticsIngestForm({ tenantId }: { tenantId: string }) {
         <Alert
           tone="warn"
           action={
-            <Button variant="secondary" disabled={ingest.isPending} onClick={() => submit(true)}>
+            <Button
+              size="compact"
+              variant="secondary"
+              disabled={ingest.isPending}
+              onClick={() => submit(true)}
+            >
               {t(`${prefix}.confirmUnboundAction`)}
             </Button>
           }

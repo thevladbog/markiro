@@ -471,8 +471,14 @@ textarea {
 .saas-admin .mk-input,
 .saas-admin .mk-input__control,
 .saas-admin .mk-select__control,
+.saas-admin .mk-combobox__trigger,
 .saas-admin textarea {
   min-height: 44px !important;
+}
+
+/* A retry action inside an alert is secondary to the message. */
+.saas-admin .mk-alert .mk-btn {
+  min-height: 36px !important;
 }
 
 .mk-confirm-dialog .mk-btn {
@@ -834,7 +840,7 @@ textarea {
 
 .catalog-page {
   display: grid;
-  gap: var(--sp-6);
+  gap: var(--stack-page);
 }
 
 .catalog-page .mk-section-header__actions > a,
@@ -1894,7 +1900,7 @@ textarea {
 .tenant-detail-page,
 .subscription-panel {
   display: grid;
-  gap: var(--sp-6);
+  gap: var(--stack-page);
   scroll-margin-top: calc(var(--mk-workspace-header-height) + 24px);
 }
 
@@ -2381,6 +2387,13 @@ textarea {
   min-height: 22px;
   color: var(--fg-2);
   font: var(--text-body-sm);
+}
+
+/* The live region stays in the DOM for announcements; while it is empty it
+   must not add a blank band (min-height plus the card's block gap). */
+.tenant-operation-status:empty {
+  min-height: 0;
+  margin-top: calc(-1 * var(--stack-block));
 }
 
 .tenant-operation-status [data-tone="ok"] {
@@ -4385,6 +4398,16 @@ textarea {
   margin-bottom: var(--sp-2);
 }
 
+/* ---- Vertical rhythm tokens ---------------------------------------------
+   --stack-page: between top-level sections of a page.
+   --stack-block: between stacked blocks inside a card or panel.
+   --panel-pad: inner padding shared by cards, panels and alerts placed in them. */
+.saas-admin {
+  --stack-page: var(--sp-6);
+  --stack-block: var(--sp-4);
+  --panel-pad: var(--sp-5);
+}
+
 /* ---- Shared page rhythm ------------------------------------------------
    Pages are a column of sections 24px apart; content inside a card or a
    filter row is 16px apart. Pages that stack their own children (.catalog-page
@@ -4412,7 +4435,7 @@ textarea {
 
 .saas-admin .mk-card__body {
   display: grid;
-  gap: var(--sp-4);
+  gap: var(--stack-block);
   min-width: 0;
 }
 
@@ -4825,4 +4848,52 @@ textarea {
 
 .diagnostics-bars__swatch--muted {
   background: var(--fg-3);
+}
+
+/* ---- Alerts and loading text placed straight into a panel ----------------
+   A panel (header plus body, no inner wrapper) gives its children no padding,
+   so an alert there touched the border. Same inset as the panel header. */
+.payments-panel > .mk-alert,
+.payment-match-card > .mk-alert,
+.overview-panel > .mk-alert,
+.commerce-ledger > .mk-alert,
+.commerce-detail-panel > .mk-alert,
+.platform-action-panel > .mk-alert {
+  margin: var(--stack-block) var(--panel-pad);
+}
+
+.payments-panel > p:not(.payments-empty) {
+  margin: 0;
+  padding: var(--panel-pad);
+  color: var(--fg-2);
+}
+
+.payment-match-list:empty {
+  display: none;
+}
+
+/* Offers filters: one baseline for every control, quiet helper text. */
+p.offer-muted {
+  margin: 0;
+  font: var(--text-body-sm);
+}
+
+/* Addon cards use the same header band and inset as every other card. */
+.tenant-section {
+  padding: 0;
+}
+
+.tenant-section > h2 {
+  margin: 0;
+  padding: 14px var(--panel-pad);
+  border-bottom: 1px solid var(--line);
+  font: var(--text-h3);
+}
+
+.tenant-section > :not(h2) {
+  margin: var(--panel-pad);
+}
+
+.subscription-grid {
+  align-items: start;
 }
