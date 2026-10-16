@@ -52,6 +52,7 @@ describe("the floor's controls", () => {
     const raw = files.filter((file) => /<button[\s>]/.test(readFileSync(file, "utf8")));
     expect(raw.map((file) => relative(join(__dirname, ".."), file)).sort()).toEqual(
       [
+        "src/floor/kit/IpKeypad.tsx",
         "src/floor/kit/ModeSegment.tsx",
         "src/floor/kit/NumericKeypad.tsx",
         "src/floor/kit/NumericReadout.tsx",
