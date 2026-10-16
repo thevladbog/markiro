@@ -109,6 +109,7 @@ describe("syncProductPhotos", () => {
     expect(await readProductPhoto(executor, A)).toEqual({
       src: `data:image/jpeg;base64,${DATA}`,
       checksum: SUM_1,
+      mediaType: "image/jpeg",
     });
     expect(await readProductPhoto(executor, B)).toBeNull();
   });
@@ -125,6 +126,7 @@ describe("syncProductPhotos", () => {
     expect(await readProductPhoto(executor, A)).toEqual({
       src: `data:image/png;base64,${DATA}`,
       checksum: SUM_1,
+      mediaType: "image/png",
     });
     // A copy stored before migration 0019 has the column's default.
     db.exec("DELETE FROM ref_product_photos");
@@ -132,6 +134,7 @@ describe("syncProductPhotos", () => {
       "INSERT INTO ref_product_photos (product_id, checksum, width, height, data_base64) VALUES (?, ?, 2, 1, ?)",
     ).run(A, SUM_1, DATA);
     expect((await readProductPhoto(executor, A))?.src).toBe(`data:image/jpeg;base64,${DATA}`);
+    expect((await readProductPhoto(executor, A))?.mediaType).toBe("image/jpeg");
   });
 
   it("fetches nothing again while the stored checksum is the record's, and again when it changes", async () => {

@@ -383,6 +383,7 @@
       "confirmClose": "Закрыть неполный короб? В коробе {{quantity}} из {{capacity}}.",
       "keepFilling": "Продолжить сборку",
       "closeBox": "Закрыть короб",
+      "boxUndoShort": "Снять последний",
       "leaving": "Дожидаемся окончания начатой работы…",
       "officeClosed": {
         "title": "Смену закрыли в офисе",

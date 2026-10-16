@@ -126,6 +126,7 @@ import { playSignalTone } from "./signal-sound.js";
 import { createWorkQueue } from "./work-queue.js";
 import {
   readOpenBox,
+  readOpenBoxSerials,
   readValidationCounts,
   readWorkTotals,
   type ValidationCounts,
@@ -1138,6 +1139,31 @@ export function WorkScreen(props: WorkScreenProps) {
     last,
     totals !== null,
   );
+
+  // The serials (AI 21) of the open box's codes, for the cells' second line: read again with the
+  // box's count; a failed read leaves the cells with their numbers alone.
+  const openBoxId = totals?.openBox?.id ?? null;
+  const openBoxCount = totals?.openBox?.itemCount ?? 0;
+  const [boxSerials, setBoxSerials] = useState<string[]>([]);
+  const { local: boxLocal, pairing: boxPairing } = props;
+  useEffect(() => {
+    if (openBoxId === null) {
+      setBoxSerials([]);
+      return undefined;
+    }
+    let cancelled = false;
+    readOpenBoxSerials(boxLocal, boxPairing, openBoxId).then(
+      (serials) => {
+        if (!cancelled) setBoxSerials(serials);
+      },
+      () => {
+        if (!cancelled) setBoxSerials([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [boxLocal, boxPairing, openBoxId, openBoxCount]);
 
   /** «Пауза»: out of the shift; the label is kept for the next entry, where its window opens. */
   const pauseUnit = () => {
@@ -2313,7 +2339,10 @@ export function WorkScreen(props: WorkScreenProps) {
     lastOutcomeAt === null || history.kind !== "ready"
       ? undefined
       : history.rows.find((row) => row.scannedAt === lastOutcomeAt);
-  const lastCode = lastRow?.maskedCode ?? null;
+  const lastCode =
+    lastRow === undefined || lastRow.maskedCode === null
+      ? null
+      : { gtin14: lastRow.gtin14, serial: lastRow.serial, fallback: lastRow.maskedCode };
   const facts = validation
     ? []
     : [
@@ -2420,6 +2449,7 @@ export function WorkScreen(props: WorkScreenProps) {
                   items={items}
                   capacity={capacity}
                   acceptedToken={last?.kind === "accepted" ? (totals?.accepted ?? 0) : 0}
+                  serials={boxSerials}
                   actions={
                     <>
                       {!confirming && (
@@ -2444,9 +2474,11 @@ export function WorkScreen(props: WorkScreenProps) {
                             variant="secondary"
                             data-action="box-undo"
                             disabled={!canClose}
+                            aria-label={t("floor.exceptions.actions.undo")}
+                            title={t("floor.exceptions.actions.undo")}
                             onClick={() => openExceptions("box-undo")}
                           >
-                            {t("floor.exceptions.actions.undo")}
+                            {t("floor.work.boxUndoShort")}
                           </Button>
                           <Button
                             size="floor"

@@ -69,6 +69,11 @@
   white-space: nowrap;
 }
 
+/* A row's code cell holds two lines (serial, GTIN): its own box, no cell ellipsis. */
+.scan-history__row > .scan-history__code {
+  overflow: visible;
+}
+
 .scan-history__time,
 .scan-history__code,
 .scan-history__position {
@@ -130,15 +135,15 @@
   font: var(--floor-body-strong);
 }
 
+/*
+ * The list shows whole rows only: `useWholeRows` renders as many rows as fit its box (a flexible
+ * grid row, `min-height: 0`), and what is left over is clipped, never a part of a row. The
+ * rest of the scans are one press away («Вся история»).
+ */
 .scan-history--compact .scan-history__list {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   align-content: start;
-}
-
-.scan-history--compact .scan-history__list:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
 }
 
 /* The empty and failed states take the list's row, so the note stays at the foot. */
@@ -165,9 +170,50 @@
   text-align: right;
 }
 
+/* A scan's code: the serial (AI 21) as the main part, the short GTIN small under it. */
+.scan-code {
+  display: grid;
+  min-width: 0;
+  justify-items: inherit;
+  line-height: 1.1;
+}
+
+.scan-code__serial {
+  overflow: hidden;
+  font: 600 20px/22px var(--font-mono);
+  letter-spacing: -0.01em;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.scan-code__gtin {
+  overflow: hidden;
+  color: var(--muted);
+  font: 400 14px/16px var(--font-mono);
+  white-space: nowrap;
+}
+
+.scan-code--fallback {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The full history: the whole serial, left-aligned in its column. */
+.scan-history--full .scan-code__serial {
+  font-size: 18px;
+}
+
 .scan-history__note {
   margin: 0;
   color: var(--muted);
   font: 400 14px/20px var(--font-ui);
   text-align: center;
+}
+
+/* A low window gives the note's line to the rows: «Вся история» above says the same. */
+@media (max-height: 860px) {
+  .scan-history--compact .scan-history__note {
+    display: none;
+  }
 }

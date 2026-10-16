@@ -121,3 +121,25 @@ export async function readValidationCounts(
   );
   return { duplicates: row?.duplicates ?? 0, errors: row?.errors ?? 0 };
 }
+
+const serialRow = z.object({ serial: z.string() });
+
+/**
+ * The serials (GS1 AI 21) of the codes in the open box, in the order they took their places
+ * (the cell numbers 1, 2, 3...): from `floor_codes` of the box joined to its scan. A code taken
+ * out of the box (an exception) is no longer in `floor_codes`, so its place is free again.
+ */
+export async function readOpenBoxSerials(
+  local: LocalExecutor,
+  pairing: Pairing,
+  boxId: string,
+): Promise<string[]> {
+  const rows = await local.query(
+    "SELECT s.serial AS serial FROM floor_codes AS c JOIN floor_scans AS s ON s.id = c.scan_id " +
+      "WHERE c.host_id = ? AND c.device_id = ? AND c.box_id = ? AND s.serial IS NOT NULL " +
+      "ORDER BY c.scanned_at, c.rowid",
+    [pairing.hostId, pairing.deviceId, boxId],
+    serialRow,
+  );
+  return rows.map((row) => row.serial);
+}

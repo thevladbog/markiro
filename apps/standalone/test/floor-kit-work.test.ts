@@ -48,8 +48,11 @@ describe("the work screen's no-scroll contract", () => {
     expect(rule(WORK, ".work-screen__work")).toMatch(
       /grid-template-rows:\s*auto minmax\(0,\s*1fr\)/,
     );
-    // The history list is the one region that scrolls.
-    expect(rule(HISTORY, ".scan-history--compact .scan-history__list")).toMatch(/overflow:\s*auto/);
+    // The history list shows whole rows only: the rows that fit are rendered, the rest is clipped
+    // (`useWholeRows`), never a partly visible row and never a scrolling page.
+    expect(rule(HISTORY, ".scan-history--compact .scan-history__list")).toMatch(
+      /overflow:\s*hidden/,
+    );
     expect(rule(HISTORY, ".scan-history--compact .scan-history__list")).toMatch(/min-height:\s*0/);
   });
 

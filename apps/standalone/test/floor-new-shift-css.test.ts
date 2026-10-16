@@ -63,7 +63,9 @@ describe("the photo square", () => {
     expect(frame).toContain("width: var(--floor-photo, 132px)");
     expect(frame).toContain("height: var(--floor-photo, 132px)");
     expect(frame).toContain("overflow: hidden");
-    expect(frame).toContain("border: 1px solid var(--line)");
+    // The border's colour and the face are the backing's (`data-photo-backing`).
+    expect(frame).toContain("border: 1px solid transparent");
+    expect(frame).not.toContain("background:");
     const image = declarations(controls, `${FLOOR} .floor-photo-square > .product-photo`);
     expect(image).toContain("position: absolute");
     expect(image).toContain("inset: 0");
@@ -81,14 +83,14 @@ describe("the photo square", () => {
     expect(controls).not.toMatch(/floor-photo-square[^{]*\{[^}]*max-height:\s*100%/);
   });
 
-  it("takes a smaller side on a short panel and the same neutral fill in both themes", () => {
+  it("takes a smaller side on a short panel; its face is the backing's, the same in both themes", () => {
     expect(hub).toMatch(/@media \(max-height: 860px\)[\s\S]*--floor-photo: 104px/);
     expect(declarations(hub, ".new-shift .new-shift__panel--found")).toContain(
       "--floor-photo: 208px",
     );
-    expect(declarations(controls, `${FLOOR} .floor-photo-square`)).toContain(
-      "background: var(--floor-paper)",
-    );
+    // No flat grey (or paper) face of its own: the brand gradient behind a cut-out, nothing
+    // behind an opaque photo (shifts/photo-backing.css), both from theme tokens.
+    expect(declarations(controls, `${FLOOR} .floor-photo-square`)).not.toContain("background");
   });
 });
 
