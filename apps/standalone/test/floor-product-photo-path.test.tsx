@@ -2,7 +2,6 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProductPanel } from "../src/floor/shifts/ProductPhoto.js";
-import { dominantAccent } from "../src/floor/shifts/photo-accent.js";
 import { ShiftBand } from "../src/floor/work/WorkInstruments.js";
 import { productPhotoStateSchema, type ChangeItem } from "../src/host/protocol.js";
 import { PHOTOS_PER_PASS, syncAllProductPhotos } from "../src/local/product-photos.js";
@@ -92,7 +91,6 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
       <ProductPanel
         local={executor}
         productId={id(last)}
-        gtin="04600682001000"
         className="shift-card__photo"
         fallback={<span>монограмма</span>}
       />,
@@ -126,38 +124,29 @@ describe("a product's photo, from the host's answer to the rendered picture (bet
   });
 });
 
-/** An RGBA sample of `pixels` pixels, each given as [r, g, b, a]. */
-function sample(...groups: [count: number, rgba: [number, number, number, number]][]): number[] {
-  return groups.flatMap(([count, rgba]) => Array.from({ length: count }, () => rgba).flat());
-}
-
-describe("the colour a photo gives its panel", () => {
-  it("takes the dominant vivid hue, not the white or grey around the product", () => {
-    // A blue bottle (hue 220) on white, with a little red.
-    const accent = dominantAccent(
-      sample([600, [255, 255, 255, 255]], [300, [30, 80, 220, 255]], [40, [220, 30, 30, 255]]),
+describe("the product frame carries no per-product colour (station audit, 2026-10)", () => {
+  it("a card's photo frame has no accent attribute or hue variable, with or without a photo", async () => {
+    const { executor } = openLocalDb();
+    const view = render(
+      <ProductPanel
+        local={executor}
+        productId={id(1)}
+        className="shift-card__photo"
+        fallback={<span>монограмма</span>}
+      />,
     );
-    expect(accent).not.toBeNull();
-    expect(accent?.hue).toBeGreaterThanOrEqual(215);
-    expect(accent?.hue).toBeLessThanOrEqual(225);
-    expect(accent?.saturation).toBeGreaterThanOrEqual(25);
-    expect(accent?.saturation).toBeLessThanOrEqual(55);
-  });
-
-  it("finds red across the 0/360 seam", () => {
-    const accent = dominantAccent(
-      sample([200, [230, 20, 40, 255]], [200, [230, 40, 20, 255]], [50, [255, 255, 255, 255]]),
+    const bare = render(
+      <ProductPanel
+        local={undefined}
+        productId={id(1)}
+        className="shift-card__photo"
+        fallback={<span>монограмма</span>}
+      />,
     );
-    expect(accent).not.toBeNull();
-    const hue = accent?.hue ?? 180;
-    expect(Math.min(hue, 360 - hue)).toBeLessThan(15);
-  });
-
-  it("has none for a grey or transparent picture: the GTIN's hue stays", () => {
-    expect(dominantAccent(sample([500, [120, 120, 120, 255]]))).toBeNull();
-    expect(dominantAccent(sample([500, [255, 0, 0, 0]]))).toBeNull();
-    expect(dominantAccent([])).toBeNull();
-    // A few coloured pixels in a grey picture are noise, not an accent.
-    expect(dominantAccent(sample([990, [128, 128, 128, 255]], [10, [255, 0, 0, 255]]))).toBeNull();
+    for (const frame of [view.container.firstElementChild, bare.container.firstElementChild]) {
+      expect(frame?.getAttribute("data-accent")).toBeNull();
+      expect(frame?.getAttribute("style")).toBeNull();
+      expect(frame?.textContent).toBe("монограмма");
+    }
   });
 });

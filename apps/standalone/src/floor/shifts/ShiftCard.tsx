@@ -98,7 +98,6 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
         <ProductPanel
           local={local}
           productId={copy.productId}
-          gtin={copy.productGtin14}
           className="shift-card__photo"
           fallback={
             <span className="shift-card__photo-monogram" aria-hidden="true">

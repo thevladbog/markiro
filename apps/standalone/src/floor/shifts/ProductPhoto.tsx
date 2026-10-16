@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { LocalExecutor } from "../../local/executor.js";
 import {
@@ -6,8 +6,6 @@ import {
   readProductPhoto,
   type StoredPhoto,
 } from "../../local/product-photos.js";
-import { accentOfPhoto, type PhotoAccent } from "./photo-accent.js";
-import { hueFromGtin } from "./product-accent.js";
 
 /**
  * The product's photo as the station holds it (`ref_product_photos`), read
@@ -33,35 +31,6 @@ export function useStoredProductPhoto(local: LocalExecutor, productId: string): 
     };
   }, [local, productId, version]);
   return photo;
-}
-
-/**
- * The panel's colour variables: the hue from the photo's dominant colour when
- * the picture has one, the GTIN's hue otherwise (and until the sample is
- * done). `--product-sat` is set only with a photo accent; the stylesheets
- * default it to their own saturation.
- */
-export function useProductAccent(photo: StoredPhoto | null, gtin: string): CSSProperties {
-  const [accent, setAccent] = useState<{ checksum: string; accent: PhotoAccent | null } | null>(
-    null,
-  );
-  const src = photo?.src ?? null;
-  const checksum = photo?.checksum ?? null;
-  useEffect(() => {
-    if (src === null || checksum === null) return undefined;
-    let cancelled = false;
-    void accentOfPhoto(src, checksum).then((found) => {
-      if (!cancelled) setAccent({ checksum, accent: found });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [src, checksum]);
-  const fromPhoto = checksum !== null && accent?.checksum === checksum ? accent.accent : null;
-  return {
-    "--product-hue": String(fromPhoto?.hue ?? hueFromGtin(gtin)),
-    ...(fromPhoto === null ? {} : { "--product-sat": `${fromPhoto.saturation}%` }),
-  } as CSSProperties;
 }
 
 /**
@@ -103,62 +72,40 @@ export function ProductPhoto({
 }
 
 /**
- * A product's colour panel: the photo (or `fallback`) on a gradient whose hue
- * comes from the photo's dominant colour, the GTIN's without one. The one
- * element every card and band of the floor shows a product on.
+ * A product's frame: the photo (or `fallback`) in the element every card of
+ * the floor shows a product on. The frame's face is the kit's `panel`; no
+ * colour is derived from the product any more (kit step C: the one brand
+ * gradient paints the work band, the frame is neutral).
  */
 export function ProductPanel({
   local,
   productId,
-  gtin,
   className,
   fallback,
 }: {
   local: LocalExecutor | undefined;
   productId: string;
-  gtin: string;
   className: string;
   fallback: ReactNode;
 }) {
-  if (local === undefined) {
-    return (
-      <div
-        className={className}
-        data-accent="true"
-        style={{ "--product-hue": String(hueFromGtin(gtin)) } as CSSProperties}
-      >
-        {fallback}
-      </div>
-    );
-  }
-  return (
-    <PhotoPanel
-      local={local}
-      productId={productId}
-      gtin={gtin}
-      className={className}
-      fallback={fallback}
-    />
-  );
+  if (local === undefined) return <div className={className}>{fallback}</div>;
+  return <PhotoPanel local={local} productId={productId} className={className} fallback={fallback} />;
 }
 
 function PhotoPanel({
   local,
   productId,
-  gtin,
   className,
   fallback,
 }: {
   local: LocalExecutor;
   productId: string;
-  gtin: string;
   className: string;
   fallback: ReactNode;
 }) {
   const photo = useStoredProductPhoto(local, productId);
-  const style = useProductAccent(photo, gtin);
   return (
-    <div className={className} data-accent="true" style={style}>
+    <div className={className}>
       <ProductPhotoImage photo={photo} fallback={fallback} />
     </div>
   );
