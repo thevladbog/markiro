@@ -18,6 +18,7 @@ import type {
 import type { DeviceShiftInput } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import {
   MAX_BOX_CAPACITY,
   MAX_PLANNED_QTY,
@@ -677,7 +678,11 @@ export function NewShift({
       letters(needle) < MIN_QUERY_LETTERS
         ? []
         : choices.choices.products
-            .filter((product) => product.name.toLocaleLowerCase("ru").includes(needle))
+            .filter(
+              (product) =>
+                product.name.toLocaleLowerCase("ru").includes(needle) ||
+                shiftProductTitle(product).toLocaleLowerCase("ru").includes(needle),
+            )
             .slice(0, RESULTS);
     return (
       <>
@@ -705,16 +710,19 @@ export function NewShift({
                 variant="secondary"
                 fullWidth
                 className="new-shift__result"
-                title={t("floor.newShift.result", { name: product.name, gtin: product.gtin14 })}
+                title={t("floor.newShift.result", {
+                  name: shiftProductTitle(product),
+                  gtin: product.gtin14,
+                })}
                 aria-label={t("floor.newShift.result", {
-                  name: product.name,
+                  name: shiftProductTitle(product),
                   gtin: product.gtin14,
                 })}
                 onClick={() => choose(product)}
               >
                 {/* A long name is cut with an ellipsis, never a sideways scroll;
                     the full text is the button's title. */}
-                <span className="new-shift__result-name">{product.name}</span>
+                <span className="new-shift__result-name">{shiftProductTitle(product)}</span>
                 <span className="new-shift__result-gtin">{` — ${product.gtin14}`}</span>
               </Button>
             ))
@@ -756,12 +764,12 @@ export function NewShift({
               productId={form.product.id}
               fallback={
                 <span className="new-shift__product-monogram" aria-hidden="true">
-                  {productMonogram(form.product.name)}
+                  {productMonogram(shiftProductTitle(form.product))}
                 </span>
               }
             />
             <div className="new-shift__product-text">
-              <h3 title={form.product.name}>{form.product.name}</h3>
+              <h3 title={shiftProductTitle(form.product)}>{shiftProductTitle(form.product)}</h3>
               <div className="new-shift__code">{form.product.gtin14}</div>
               <div className="new-shift__facts">
                 {form.product.boxCapacity !== null && (

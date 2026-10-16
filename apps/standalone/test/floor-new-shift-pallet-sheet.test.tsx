@@ -178,8 +178,8 @@ function renderNew(
 
 async function toPalletStep(): Promise<void> {
   fireEvent.change(await screen.findByLabelText("Название товара"), { target: { value: "мол" } });
-  fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
-  await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+  fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% — 04600682000013" }));
+  await screen.findByRole("heading", { name: "Молоко 3,2%" });
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
   fireEvent.click(screen.getByRole("button", { name: "Далее" }));
 }

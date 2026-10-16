@@ -244,6 +244,7 @@ const COPY: ShiftCopy = {
   createdFrom: "office",
   lineId: "33333333-3333-4333-8333-333333333333",
   productId: A,
+  productPrintName: null,
   productName: "Молоко 3,2% 0,9 л",
   productGtin14: "04600682000013",
   counterpartyName: null,

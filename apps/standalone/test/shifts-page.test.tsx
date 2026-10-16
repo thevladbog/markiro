@@ -105,7 +105,7 @@ describe("office shifts: the list", () => {
       "OCT26-004",
       "08.10.2026",
       "Линия 2",
-      "Молоко 3,2% 0,9 лдля: ООО «Северный берег»",
+      "Молоко 3,2%для: ООО «Северный берег»",
       "Агрегация",
       // A no-break space between the thousands.
       "1\u00a0200",
@@ -459,7 +459,10 @@ describe("office shifts: the list", () => {
 
   it("shows names with markup as text", async () => {
     const session = shiftsSession([{ ...ACTIVE, closeReasonText: null }]);
-    session.api.listProducts.mockResolvedValue([{ ...MILK, name: "<b>Молоко</b>" }, WATER]);
+    session.api.listProducts.mockResolvedValue([
+      { ...MILK, name: "<b>Молоко</b>", printName: null },
+      WATER,
+    ]);
     await openShifts(session);
     expect(screen.getByText("<b>Молоко</b>")).toBeTruthy();
     expect(document.querySelector("b")).toBeNull();

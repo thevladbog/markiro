@@ -23,6 +23,7 @@ import {
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { searchableSelect } from "../select-search.js";
@@ -284,7 +285,7 @@ function useShiftEditor({
   const productMarkedLabel = (id: string): string => {
     const record = products.data?.find((each) => each.id === id);
     return record !== undefined && !record.archived && record.status !== "active"
-      ? t("office.shifts.draftName", { name: record.name })
+      ? t("office.shifts.draftName", { name: shiftProductTitle(record) })
       : recordLabel("product", products.data, id, t);
   };
   // A product in use: active and not archived, by name, its GTIN beside it.
@@ -292,7 +293,7 @@ function useShiftEditor({
     .filter((each) => !each.archived && each.status === "active")
     .map((each) => ({
       value: each.id,
-      label: t("office.shifts.productOption", { name: each.name, gtin: each.gtin14 }),
+      label: t("office.shifts.productOption", { name: shiftProductTitle(each), gtin: each.gtin14 }),
     }));
   const lineOptions = activeFirstByName(lines.data ?? [])
     .filter((line) => !line.archived)

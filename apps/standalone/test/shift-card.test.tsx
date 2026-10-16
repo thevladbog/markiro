@@ -170,7 +170,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(session, "OCT26-004");
     expect(session.api.getShift).toHaveBeenCalledWith("office-session-token", ACTIVE.id);
     const drawer = screen.getByRole("dialog", { name: "Смена OCT26-004" });
-    expect(within(drawer).getByText("Молоко 3,2% 0,9 л")).toBeTruthy();
+    expect(within(drawer).getByText("Молоко 3,2%")).toBeTruthy();
     expect(within(drawer).getByText("По 40 кор.")).toBeTruthy();
     // The sections read when they are opened, not before.
     expect(session.api.listShiftBoxes).not.toHaveBeenCalled();
@@ -347,7 +347,7 @@ describe("the card of a shift (plan О-Ф)", () => {
     await openCard(session, "OCT26-004");
     await waitFor(() => expect(facts()["Открыта"]).toBe("08.10.2026, 18:02"));
     expect(facts()).toEqual({
-      Товар: "Молоко 3,2% 0,9 л",
+      Товар: "Молоко 3,2%",
       "Дата смены": "08.10.2026",
       "Дата производства": "08.10.2026",
       Линия: "Линия 2",

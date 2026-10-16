@@ -3315,7 +3315,7 @@ describe("the operator on the floor", () => {
     await screen.findByLabelText("Название товара");
     await flush();
     scan("4600682000013");
-    expect(await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Молоко 3,2%" })).toBeTruthy();
     // The details, then the box template's step (the cloud station's order).
     fireEvent.click(screen.getByRole("button", { name: "Далее" }));
     fireEvent.click(await screen.findByRole("button", { name: "Создать и открыть" }));

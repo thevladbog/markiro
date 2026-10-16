@@ -152,7 +152,7 @@ describe("office shifts: planning a shift", () => {
     await openCreate(shiftsSession());
     expect(options("Товар")).toEqual([
       "Вода 0,5 л — 04601234000017",
-      "Молоко 3,2% 0,9 л — 04600682000013",
+      "Молоко 3,2% — 04600682000013",
     ]);
     expect(options("Линия")).toEqual(["Линия 2", "Линия 10"]);
     expect(options("Контрагент")).toEqual(["Не выбран", "ООО «Северный берег»"]);
@@ -891,7 +891,11 @@ describe("office shifts: planning a shift", () => {
 
   it("shows a product's name with markup as text, never as markup", async () => {
     const session = shiftsSession();
-    const hostile = { ...MILK, name: '<img src="x" onerror="window.pwned = 1"> Сок' };
+    const hostile = {
+      ...MILK,
+      name: '<img src="x" onerror="window.pwned = 1"> Сок',
+      printName: null,
+    };
     session.api.listProducts.mockResolvedValue([hostile]);
     await openCreate(session);
     expect(options("Товар")).toEqual([
@@ -954,27 +958,27 @@ describe("office shifts: planning a shift", () => {
       api("conflict", { constraint: "product_inactive" }),
       "Товар",
       "listProducts",
-      "Молоко 3,2% 0,9 л",
+      "Молоко 3,2%",
       MILK.id,
-      "Молоко 3,2% 0,9 л (в архиве)",
+      "Молоко 3,2% (в архиве)",
     ],
     [
       "a product the host does not find",
       api("validation_failed", { field: "productId" }),
       "Товар",
       "listProducts",
-      "Молоко 3,2% 0,9 л",
+      "Молоко 3,2%",
       MILK.id,
-      "Молоко 3,2% 0,9 л (в архиве)",
+      "Молоко 3,2% (в архиве)",
     ],
     [
       "a product that became a draft",
       api("conflict", { constraint: "product_inactive" }),
       "Товар",
       "listProducts",
-      "Молоко 3,2% 0,9 л",
+      "Молоко 3,2%",
       MILK.id,
-      "Молоко 3,2% 0,9 л (черновик)",
+      "Молоко 3,2% (черновик)",
     ],
     [
       "an archived line",

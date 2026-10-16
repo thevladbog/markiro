@@ -24,6 +24,7 @@ import {
 
 import type { ShiftPeriod } from "../../host/api.js";
 import type { OfficeShift, ShiftMode, ShiftStatus } from "../../host/protocol.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import { useCan } from "../access.js";
 import { searchableSelect } from "../select-search.js";
 import { useTemplates } from "../catalog-queries.js";
@@ -174,10 +175,12 @@ export function ShiftsPage() {
 
   const productName = (shift: OfficeShift) =>
     recordLabel("product", products.data, shift.productId, t);
-  // What the search reads: the product's own name, not the id-start or the archive mark the list
+  // What the search reads: the product's own names (full and print), not the id-start or the archive mark the list
   // shows in its place.
-  const searchName = (shift: OfficeShift) =>
-    products.data?.find((each) => each.id === shift.productId)?.name ?? "";
+  const searchName = (shift: OfficeShift) => {
+    const product = products.data?.find((each) => each.id === shift.productId);
+    return product === undefined ? "" : `${product.name}\n${shiftProductTitle(product)}`;
+  };
   const filtersOn =
     from !== "" ||
     to !== "" ||
@@ -212,7 +215,9 @@ export function ShiftsPage() {
       ? filtered
       : sortShifts(filtered, sort.key, sort.dir, {
           line: (shift) => lines.data?.find((each) => each.id === shift.lineId)?.name ?? "",
-          product: searchName,
+          // The column sorts by what it shows: the print name, else the name.
+          product: (shift) =>
+            shiftProductTitle(products.data?.find((each) => each.id === shift.productId)),
         });
   const totals = totalShifts(filtered);
   const onSort = (key: string) => {

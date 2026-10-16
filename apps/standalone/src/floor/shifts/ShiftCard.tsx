@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import { Badge, Button, Card, StatusChip, type TagPhase } from "@markiro/ui";
 
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { LicenseRefusal } from "../license.js";
 import { ProductPanel } from "./ProductPhoto.js";
@@ -88,6 +89,7 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
         : copy.status === "closed"
           ? "office_closed"
           : "planned";
+  const title = shiftProductTitle({ name: copy.productName, printName: copy.productPrintName });
   const enabled =
     action.kind === "finish" ||
     ((action.kind === "open" || action.kind === "continue") && action.enabled);
@@ -101,7 +103,7 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
           className="shift-card__photo"
           fallback={
             <span className="shift-card__photo-monogram" aria-hidden="true">
-              {productMonogram(copy.productName)}
+              {productMonogram(title)}
             </span>
           }
         />
@@ -115,7 +117,7 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction, local 
               label={t(`floor.shifts.status.${phase}`)}
             />
           </div>
-          <div className="shift-card__product shift-card__product--only">{copy.productName}</div>
+          <div className="shift-card__product shift-card__product--only">{title}</div>
           <div className="shift-card__dates">
             <span className="shift-card__date-part">
               {t("floor.shifts.productionDate", { date: formatCivilDate(copy.productionDate) })}

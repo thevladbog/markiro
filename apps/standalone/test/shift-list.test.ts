@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { describe, expect, it } from "vitest";
 
 import { officeKeys } from "../src/office/office-query.js";
@@ -7,6 +8,7 @@ import {
   MAX_PERIOD_DAYS,
   openBlocker,
   periodState,
+  recordLabel,
   sortShifts,
   totalShifts,
 } from "../src/office/shifts/shift-list.js";
@@ -314,5 +316,35 @@ describe("the shifts list's order and totals", () => {
       pallets: 2,
     });
     expect(totalShifts([])).toEqual({ shifts: 0, units: 0, boxes: 0, pallets: 0 });
+  });
+});
+
+describe("how the list names a shift's product", () => {
+  // The key and the name it was given, so a test sees which name reached the screen.
+  const t = ((key: string, options?: { name?: string; id?: string }) =>
+    `${key}|${options?.name ?? options?.id ?? ""}`) as unknown as TFunction;
+
+  it("is the print name, and the full name when the print name is blank", () => {
+    const printed = { ...MILK, name: "Молоко питьевое 3,2 %", printName: "Молоко" };
+    expect(recordLabel("product", [printed], MILK.id, t)).toBe("Молоко");
+    for (const blank of [null, "", "  "]) {
+      expect(recordLabel("product", [{ ...printed, printName: blank }], MILK.id, t)).toBe(
+        "Молоко питьевое 3,2 %",
+      );
+    }
+  });
+
+  it("marks an archived product by its print name, and names a missing one by its id", () => {
+    const archived = { ...MILK, name: "Молоко питьевое", printName: "Молоко", archived: true };
+    expect(recordLabel("product", [archived], MILK.id, t)).toBe(
+      "office.common.archivedName|Молоко",
+    );
+    expect(recordLabel("product", [], MILK.id, t)).toBe(
+      `office.shifts.unknown.product|${MILK.id.slice(0, 8)}`,
+    );
+  });
+
+  it("leaves a line's name alone", () => {
+    expect(recordLabel("line", [LINE_10], LINE_10.id, t)).toBe(LINE_10.name);
   });
 });

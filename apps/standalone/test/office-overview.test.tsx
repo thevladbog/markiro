@@ -149,7 +149,7 @@ describe("«Обзор» of the office (beta 3.2)", () => {
     expect(card).not.toBeNull();
     const link = await within(card as HTMLElement).findByRole("link", { name: ACTIVE.number });
     expect(link.getAttribute("href")).toBe(`/shifts?shift=${ACTIVE.id}`);
-    expect(within(card as HTMLElement).getByText(/Молоко 3,2% 0,9 л · Линия 2/)).toBeTruthy();
+    expect(within(card as HTMLElement).getByText(/Молоко 3,2% · Линия 2/)).toBeTruthy();
     expect(within(card as HTMLElement).getByText("540 из 1 200 (45 %)")).toBeTruthy();
     const bar = within(card as HTMLElement).getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("45");

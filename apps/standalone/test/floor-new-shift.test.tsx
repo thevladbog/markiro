@@ -168,8 +168,8 @@ async function chooseMilk(): Promise<void> {
   fireEvent.change(await screen.findByLabelText("Название товара"), {
     target: { value: "мол" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
-  await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+  fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% — 04600682000013" }));
+  await screen.findByRole("heading", { name: "Молоко 3,2%" });
   // The product card names the product, and its GTIN under the name (the cloud station's card).
   expect(screen.getByText("04600682000013")).toBeTruthy();
 }
@@ -899,7 +899,7 @@ describe("a new shift on the station", () => {
       // The scanner listens once the screen's effect has run, after the field shows.
       await waitFor(() => expect(scanner.listening()).toBe(true));
       scanner.read(raw);
-      expect(await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
+      expect(await screen.findByRole("heading", { name: "Молоко 3,2%" })).toBeTruthy();
       // The scanner listens on the first step only.
       expect(scanner.listening()).toBe(false);
       view.unmount();
@@ -1264,8 +1264,8 @@ describe("a new shift on the station", () => {
     expect(scanner.manual.mock.calls).toEqual([[true]]);
     fireEvent.change(field, { target: { value: "мол" } });
     // Choosing a result takes the field away without a blur.
-    fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
-    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% — 04600682000013" }));
+    await screen.findByRole("heading", { name: "Молоко 3,2%" });
     expect(scanner.manual.mock.calls.at(-1)).toEqual([false]);
   });
 
@@ -1502,7 +1502,7 @@ describe("the search of a product", () => {
     expect(productButtons()).toEqual([]);
     expect(screen.queryByText(/Ничего не нашли/)).toBeNull();
     fireEvent.change(field, { target: { value: "  МОЛ " } });
-    expect(productButtons()).toEqual(["Молоко 3,2% 0,9 л — 04600682000013"]);
+    expect(productButtons()).toEqual(["Молоко 3,2% — 04600682000013"]);
   });
 
   it("says there is no product to choose when none is in use", async () => {
@@ -1548,7 +1548,7 @@ describe("the search of a product", () => {
     scanner.read(SSCC);
     await screen.findByText("Это не код товара. Отсканируйте штрихкод товара или код маркировки.");
     scanner.read("4600682000013");
-    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    await screen.findByRole("heading", { name: "Молоко 3,2%" });
     expect(screen.queryByText(/Это не код товара/)).toBeNull();
   });
 });
@@ -1707,7 +1707,7 @@ describe("the template, the date and the capacity of a new shift", () => {
     // Another product: a form of its own, with none of the old complaints.
     fireEvent.click(screen.getByRole("button", { name: "Другой товар" }));
     fireEvent.click(await screen.findByRole("button", { name: /Молоко/ }));
-    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    await screen.findByRole("heading", { name: "Молоко 3,2%" });
     expect(screen.queryByText(/Укажите целое число/)).toBeNull();
     enterDigits("План, шт.", "99999999");
     next();
@@ -2414,7 +2414,11 @@ describe("the creation of a shift, apart from its screen", () => {
     );
     expect(result).toEqual({ kind: "created", shift: PLANNED });
     expect(create.mock.calls).toEqual([[CREATED_BODY]]);
-    expect(await readShiftCopy(local, PAIRING, PLANNED.id)).toEqual(createdCopy(PLANNED));
+    // The stored copy names the print name of the product in the reference copy.
+    expect(await readShiftCopy(local, PAIRING, PLANNED.id)).toEqual({
+      ...createdCopy(PLANNED),
+      productPrintName: "Молоко 3,2%",
+    });
     expect(
       await local.query(
         "SELECT seen_at FROM floor_shifts WHERE id = ?",
@@ -2427,6 +2431,7 @@ describe("the creation of a shift, apart from its screen", () => {
   it("makes the copy of a created shift one nobody has entered and nobody is closing", () => {
     expect(createdCopy(PLANNED)).toEqual({
       ...PLANNED,
+      productPrintName: null,
       // A host before beta 3 names no shift date: the copy keeps none.
       plannedDate: null,
       palletBoxCapacity: null,
@@ -2446,6 +2451,7 @@ describe("the creation of a shift, apart from its screen", () => {
     };
     expect(createdCopy(palletsShift)).toEqual({
       ...palletsShift,
+      productPrintName: null,
       plannedDate: null,
       localState: null,
       entered: false,

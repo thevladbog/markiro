@@ -22,6 +22,8 @@ export interface ShiftProduct {
   id: string;
   gtin14: string;
   name: string;
+  /** The «наименование для печати»: what a shift shows (`shiftProductTitle`); `null` for none. */
+  printName: string | null;
   chzProductGroupCode: number | null;
   boxCapacity: number | null;
   defaultBoxTemplateId: string | null;
@@ -51,6 +53,7 @@ const productRow = z.object({
   id: z.string(),
   gtin14: z.string(),
   name: z.string(),
+  print_name: z.string().nullable(),
   chz_group_code: z.number().nullable(),
   box_capacity: z.number().nullable(),
   default_box_template_id: z.string().nullable(),
@@ -89,7 +92,7 @@ export async function readNewShiftChoices(
 ): Promise<NewShiftChoices | null> {
   if (!(await copiesReady(local, pairing))) return null;
   const products = await local.query(
-    "SELECT id, gtin14, name, chz_group_code, box_capacity, default_box_template_id, " +
+    "SELECT id, gtin14, name, print_name, chz_group_code, box_capacity, default_box_template_id, " +
       "pallet_box_capacity, default_pallet_template_id " +
       "FROM ref_products WHERE status = 'active' AND archived = 0 ORDER BY name, id",
     [],
@@ -116,6 +119,7 @@ export async function readNewShiftChoices(
       id: row.id,
       gtin14: row.gtin14,
       name: row.name,
+      printName: row.print_name,
       chzProductGroupCode: row.chz_group_code,
       boxCapacity: row.box_capacity,
       defaultBoxTemplateId: row.default_box_template_id,
@@ -354,10 +358,15 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
   );
 }
 
-/** The copy of a shift the station has just created, to enter it at once. */
+/**
+ * The copy of a shift the station has just created, to enter it at once. It
+ * names no print name: the entry brings the snapshot, which has it as the
+ * shift froze it, and every screen of the shift reads that.
+ */
 export function createdCopy(shift: DeviceShift): ShiftCopy {
   return {
     ...shift,
+    productPrintName: null,
     plannedDate: shift.plannedDate ?? null,
     palletBoxCapacity: shift.palletBoxCapacity ?? null,
     palletTemplateId: shift.palletTemplateId ?? null,

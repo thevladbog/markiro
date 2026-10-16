@@ -680,10 +680,8 @@ describe("the work screen of plan 2a5", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
     // The shift band of the cloud's design: the product as its heading, the band named by both.
-    expect(
-      screen.getByRole("region", { name: "Молоко 3,2% 0,9 л · GTIN 04600682000013" }),
-    ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Молоко 3,2% 0,9 л" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Молоко 3,2% · GTIN 04600682000013" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Молоко 3,2%" })).toBeTruthy();
     expect(screen.getByText("Отсканируйте код маркировки.")).toBeTruthy();
   });
 });
@@ -751,7 +749,7 @@ describe("the work screen's product", () => {
       ...OPENED,
       snapshot: {
         ...OPENED.snapshot,
-        product: { ...OPENED.snapshot.product, name: "Молоко из снимка" },
+        product: { ...OPENED.snapshot.product, name: "Молоко из снимка", printName: null },
       },
     };
     const handlers = handlersOf({ enter: async () => renamed });
@@ -761,6 +759,22 @@ describe("the work screen's product", () => {
       await screen.findByRole("region", { name: "Молоко из снимка · GTIN 04600682000013" }),
     ).toBeTruthy();
     expect(screen.queryByText(/Молоко 3,2% 0,9 л/)).toBeNull();
+  });
+
+  it("is shown by the print name the snapshot froze, the full name only without one", async () => {
+    const printed: EnteredShift = {
+      ...OPENED,
+      snapshot: {
+        ...OPENED.snapshot,
+        product: { ...OPENED.snapshot.product, name: "Молоко из снимка", printName: "Из снимка" },
+      },
+    };
+    render(floorOf(await floorCopies(), handlersOf({ enter: async () => printed })));
+    await enterPlanned();
+    expect(
+      await screen.findByRole("region", { name: "Из снимка · GTIN 04600682000013" }),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Молоко из снимка/)).toBeNull();
   });
 });
 
@@ -960,7 +974,9 @@ describe("what the workstation setup does to the floor around it", () => {
     const broken: LocalExecutor = {
       ...local,
       query: (sql, params, row) =>
-        sql.includes("snapshot")
+        // The stored shift's read, which brings the snapshot column: the list's reads name the
+        // snapshot too, for the print name, and must keep working.
+        sql.includes(", snapshot FROM")
           ? Promise.reject(new Error("disk I/O error"))
           : local.query(sql, params, row),
     };
@@ -1439,8 +1455,8 @@ describe("«Назад» from the new shift (minor 13)", () => {
     fireEvent.change(await screen.findByLabelText("Название товара"), {
       target: { value: "мол" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% 0,9 л — 04600682000013" }));
-    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    fireEvent.click(screen.getByRole("button", { name: "Молоко 3,2% — 04600682000013" }));
+    await screen.findByRole("heading", { name: "Молоко 3,2%" });
     toTheLastStep();
     const again = (next: Options) =>
       view.rerender(floorOf(local, handlers, { workScreen: work.Work, ...next }));
@@ -1526,7 +1542,7 @@ describe("«Назад» from the new shift (minor 13)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Новая смена" }));
     await waitFor(() => expect(scanner.listening()).toBe(true));
     scanner.read("4600682000013");
-    await screen.findByRole("heading", { name: "Молоко 3,2% 0,9 л" });
+    await screen.findByRole("heading", { name: "Молоко 3,2%" });
     toTheLastStep();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await waitFor(() =>

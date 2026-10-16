@@ -79,6 +79,7 @@ describe("the station's copies of its shifts", () => {
       lineId: LINE_ID,
       productId: ACTIVE.productId,
       productName: "Молоко 3,2% 0,9 л",
+      productPrintName: null,
       productGtin14: "04600682000013",
       counterpartyName: "ООО «Северный берег»",
       productionDate: "2026-10-08",
@@ -1005,5 +1006,53 @@ describe("checkShiftSnapshot, at its edges", () => {
         checkShiftSnapshot({ ...snapshot, boxTemplate: { ...snapshot.boxTemplate, spec } }),
       ).toEqual({ ok: false, reason: "layout" });
     }
+  });
+});
+
+describe("the print name a copy shows for its product", () => {
+  function setRef(db: DatabaseSync, id: string, printName: string | null) {
+    db.prepare(
+      "INSERT OR REPLACE INTO ref_products (id, gtin14, name, print_name, archived, status, rev) " +
+        "VALUES (?, '04600682000013', 'Молоко 3,2% 0,9 л', ?, 0, 'active', 1)",
+    ).run(id, printName);
+  }
+
+  it("is the product's print name from the reference copy before the station enters", async () => {
+    const { executor, db } = openLocalDb();
+    await replaceShiftCopies(executor, PAIRING, [ACTIVE], SEEN);
+    expect(await readShiftCopy(executor, PAIRING, ACTIVE.id)).toMatchObject({
+      productPrintName: null,
+    });
+    setRef(db, ACTIVE.productId, "Молоко");
+    expect(await readShiftCopy(executor, PAIRING, ACTIVE.id)).toMatchObject({
+      productPrintName: "Молоко",
+    });
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toMatchObject([
+      { productPrintName: "Молоко" },
+    ]);
+  });
+
+  it("is the snapshot's once entered, whatever the product says now", async () => {
+    const { executor, db } = openLocalDb();
+    await replaceShiftCopies(executor, PAIRING, [PLANNED], SEEN);
+    await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN + 1);
+    setRef(db, ENTERED.productId, "Новое имя");
+    expect(await readShiftCopy(executor, PAIRING, ENTERED.id)).toMatchObject({
+      productPrintName: ENTERED.snapshot.product.printName,
+    });
+    expect(ENTERED.snapshot.product.printName).toBe("Молоко 3,2%");
+  });
+
+  it("stays none when the entered snapshot froze no print name", async () => {
+    const { executor, db } = openLocalDb();
+    const bare: EnteredShift = {
+      ...ENTERED,
+      snapshot: { ...ENTERED.snapshot, product: { ...ENTERED.snapshot.product, printName: null } },
+    };
+    await keepEnteredShift(executor, PAIRING, bare, AT, SEEN);
+    setRef(db, bare.productId, "Появилось позже");
+    expect(await readShiftCopy(executor, PAIRING, bare.id)).toMatchObject({
+      productPrintName: null,
+    });
   });
 });

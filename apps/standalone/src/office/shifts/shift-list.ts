@@ -9,6 +9,7 @@ import type {
   ShiftStatus,
 } from "../../host/protocol.js";
 import { civilDaysBetween, isCivilDate } from "../../lib/civil-date.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import { templateFitsSlot } from "../../lib/template-eligibility.js";
 
 /** What the status filter keeps. */
@@ -27,7 +28,8 @@ export function civilDateLabel(date: string): string {
 type NamedKind = "product" | "line" | "counterparty";
 
 /**
- * How the list names a record a shift points to: its name, marked when it is
+ * How the list names a record a shift points to: its name (a product's print
+ * name when it has one), marked when it is
  * archived; while its list is not loaded, or when the list lacks it, the first
  * eight characters of its id.
  */
@@ -39,7 +41,10 @@ export function recordLabel(
 ): string {
   const record = records?.find((each) => each.id === id);
   if (record === undefined) return t(`office.shifts.unknown.${kind}`, { id: id.slice(0, 8) });
-  return record.archived ? t("office.common.archivedName", { name: record.name }) : record.name;
+  // A product is named as a shift shows it: by its print name, else its name (`shiftProductTitle`).
+  const name =
+    kind === "product" && "printName" in record ? shiftProductTitle(record) : record.name;
+  return record.archived ? t("office.common.archivedName", { name }) : name;
 }
 
 /** Why a planned shift will not open on a station (`shift.open` refuses it). */

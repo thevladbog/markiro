@@ -34,6 +34,13 @@ export interface ShiftCopy {
   lineId: string;
   productId: string;
   productName: string;
+  /**
+   * The product's «наименование для печати», what the screens show instead of
+   * `productName` (`shiftProductTitle`): the entered shift's snapshot has it as
+   * the shift froze it, any other copy reads the reference copy of the product;
+   * `null` for none, a product not in the copy included.
+   */
+  productPrintName: string | null;
   productGtin14: string;
   counterpartyName: string | null;
   productionDate: string;
@@ -251,6 +258,7 @@ const copyRow = z.object({
   line_id: z.string(),
   product_id: z.string(),
   product_name: z.string(),
+  product_print_name: z.string().nullable(),
   product_gtin14: z.string(),
   counterparty_name: z.string().nullable(),
   production_date: z.string(),
@@ -268,7 +276,11 @@ const copyRow = z.object({
 
 const COPY_COLUMNS =
   "id, number, status, local_state, mode, pallets_enabled, created_from, line_id, product_id, " +
-  "product_name, product_gtin14, counterparty_name, production_date, planned_date, planned_qty, " +
+  "product_name, " +
+  "CASE WHEN snapshot IS NOT NULL THEN json_extract(snapshot, '$.product.printName') " +
+  "ELSE (SELECT print_name FROM ref_products WHERE ref_products.id = floor_shifts.product_id) " +
+  "END AS product_print_name, " +
+  "product_gtin14, counterparty_name, production_date, planned_date, planned_qty, " +
   "box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, " +
   "opened_at, closed_at, " +
   "entered_at IS NOT NULL AS entered";
@@ -285,6 +297,7 @@ function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
     lineId: row.line_id,
     productId: row.product_id,
     productName: row.product_name,
+    productPrintName: row.product_print_name,
     productGtin14: row.product_gtin14,
     counterpartyName: row.counterparty_name,
     productionDate: row.production_date,

@@ -5,6 +5,7 @@ import { Alert, Card } from "@markiro/ui";
 
 import type { DeviceKind } from "../../host/protocol.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import { useBackupTime } from "../backups/backup-time.js";
 import { backupWarnings } from "../backups/backup-warnings.js";
 import { useAboutData } from "../info/about-data.js";
@@ -109,7 +110,8 @@ export function ShiftsCards() {
   const today = civilToday(zone);
   const buckets = shiftBuckets(shifts.data, today);
   const names = (shift: OfficeShift) => ({
-    product: products.data?.find((product) => product.id === shift.productId)?.name ?? null,
+    product:
+      shiftProductTitle(products.data?.find((product) => product.id === shift.productId)) || null,
     line: lines.data?.find((line) => line.id === shift.lineId)?.name ?? null,
   });
   return (

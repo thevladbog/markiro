@@ -147,6 +147,36 @@ describe("the shifts of the station's line", () => {
     expect(screen.getByRole("heading", { name: "Смены линии" })).toBeTruthy();
   });
 
+  it("names a shift's product by its print name, the full name where there is none", async () => {
+    const other = { ...PLANNED, productId: "5d5d5d5d-0000-4000-8000-000000000009" };
+    const { executor, db } = await copiesOf([other, MINE]);
+    const insert = db.prepare(
+      "INSERT INTO ref_products (id, gtin14, name, print_name, archived, status, rev) " +
+        "VALUES (?, ?, ?, ?, 0, 'active', 1)",
+    );
+    insert.run(MINE.productId, "04600682000013", "Молоко 3,2% 0,9 л", "Молоко");
+    insert.run(other.productId, "04601234000017", other.productName, "   ");
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    const named = card("OCT26-004");
+    expect(within(named).getByText("Молоко")).toBeTruthy();
+    expect(within(named).queryByText("Молоко 3,2% 0,9 л")).toBeNull();
+    // A blank print name falls back to the full name the host sent.
+    expect(card("OCT26-005/S").textContent).toContain(other.productName);
+  });
+
+  it("keeps showing the print name an entered shift's snapshot froze", async () => {
+    const { executor, db } = await copiesOf([MINE], [ENTERED_MINE]);
+    db.prepare(
+      "INSERT INTO ref_products (id, gtin14, name, print_name, archived, status, rev) " +
+        "VALUES (?, '04600682000013', 'Молоко 3,2% 0,9 л', 'Переименовано', 0, 'active', 1)",
+    ).run(MINE.productId);
+    renderList(executor);
+    await screen.findByText("OCT26-004");
+    expect(within(card("OCT26-004")).getByText("Молоко 3,2%")).toBeTruthy();
+    expect(screen.queryByText("Переименовано")).toBeNull();
+  });
+
   it("shows the shift date beside the production date, and nothing extra for a copy without one", async () => {
     const [dated] = deviceShiftsSchema.parse(fixture("device-shifts-planned-date.json")).shifts as [
       DeviceShift,

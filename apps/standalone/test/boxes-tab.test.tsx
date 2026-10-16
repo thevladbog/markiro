@@ -14,7 +14,7 @@ import {
 import { chooseText, optionTexts } from "./support/select.js";
 import { ACTIVE, PLANNED } from "./support/shifts.js";
 
-const OPTION = "OCT26-003 · 08.10.2026 · Молоко 3,2% 0,9 л";
+const OPTION = "OCT26-003 · 08.10.2026 · Молоко 3,2%";
 const CHECK_SHIFT = {
   ...ACTIVE,
   id: "3e1b7a5d-9f4a-4c6b-8d0e-5a8f1b4c7d9e",

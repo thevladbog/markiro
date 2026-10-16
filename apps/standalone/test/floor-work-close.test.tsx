@@ -117,7 +117,7 @@ describe("the close of a shift on the work screen", () => {
     const work = renderWork(at, { onLeave });
     await fillBox(work);
     await openSummary(work);
-    expect(fact("Товар")).toBe("Молоко 3,2% 0,9 л");
+    expect(fact("Товар")).toBe("Молоко 3,2%");
     expect(fact("План")).toBe("1\u00a0200");
     expect(fact("Факт")).toBe("12");
     expect(fact("Отклонение")).toBe("−1\u00a0188");

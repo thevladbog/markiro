@@ -17,6 +17,7 @@ import { Alert, Button, SignalOverlay, type SignalTone } from "@markiro/ui";
 import type { FloorSession } from "../../app/shell.js";
 import type { SystemAwake } from "../../hardware/awake.js";
 import type { CodeCheck, SsccBlock, SsccBlockRequest } from "../../host/protocol.js";
+import { shiftProductTitle } from "../../lib/shift-product.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import {
@@ -2364,7 +2365,7 @@ export function WorkScreen(props: WorkScreenProps) {
         {/* Under a stage the instruments are out of reach (`inert`), and still say the last scan. */}
         <div className="work-screen__work" inert={staged}>
           <ShiftBand
-            productName={shift.snapshot.product.name}
+            productName={shiftProductTitle(shift.snapshot.product)}
             gtin={shift.snapshot.product.gtin14}
             number={shift.copy.number}
             counterpartyName={shift.snapshot.counterpartyName}
@@ -2742,7 +2743,7 @@ export function WorkScreen(props: WorkScreenProps) {
           <div className="work-screen__stage" data-centred="true">
             <ShiftClosePanel
               number={shift.copy.number}
-              productName={shift.snapshot.product.name}
+              productName={shiftProductTitle(shift.snapshot.product)}
               summary={stop.summary}
               note={stop.note}
               waitingSscc={stop.waitingSscc}
