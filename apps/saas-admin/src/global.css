@@ -834,7 +834,7 @@ textarea {
 
 .catalog-page {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-6);
 }
 
 .catalog-page .mk-section-header__actions > a,
@@ -1894,7 +1894,7 @@ textarea {
 .tenant-detail-page,
 .subscription-panel {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-6);
   scroll-margin-top: calc(var(--mk-workspace-header-height) + 24px);
 }
 
@@ -2123,7 +2123,7 @@ textarea {
 .tenant-tab-panel {
   min-width: 0;
   display: grid;
-  gap: 16px;
+  gap: var(--sp-5);
 }
 
 .tenant-overview-grid,
@@ -2800,6 +2800,10 @@ textarea {
     align-items: stretch;
   }
 
+  .tenant-detail-page .mk-section-header__actions > .mk-tag {
+    justify-self: start;
+  }
+
   .tenant-detail-page .mk-section-header__actions > a {
     justify-content: center;
     text-align: center;
@@ -2912,7 +2916,7 @@ textarea {
   }
 
   .app-main {
-    padding: 18px 14px;
+    padding: 20px 16px 32px;
   }
 
   .status-rail {
@@ -4381,26 +4385,272 @@ textarea {
   margin-bottom: var(--sp-2);
 }
 
-/* The agreements forms had no layout of their own, so every field sat flush
-   against the next one. Same grid and gap as the rest of the commerce pages. */
+/* ---- Shared page rhythm ------------------------------------------------
+   Pages are a column of sections 24px apart; content inside a card or a
+   filter row is 16px apart. Pages that stack their own children (.catalog-page
+   and the cards inside it) inherit this instead of repeating margins. */
+.page-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-4) var(--sp-5);
+}
+
+.page-filters > * {
+  min-width: 0;
+}
+
+.page-filters > :not(.mk-checkbox):not(.mk-btn) {
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+
+.catalog-page > .mk-tag,
+.catalog-page > .mk-status-chip {
+  justify-self: start;
+}
+
+.saas-admin .mk-card__body {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.saas-admin .mk-card__body > p,
+.saas-admin .mk-card__body > h3 {
+  margin: 0;
+}
+
+.saas-admin .mk-card__header {
+  min-height: 56px;
+  flex-wrap: wrap;
+}
+
+/* ---- Agreements -------------------------------------------------------- */
+.agreement-muted {
+  color: var(--fg-3);
+}
+
+.agreement-tenant-link {
+  color: var(--fg-1);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.agreement-tenant-link:hover {
+  text-decoration-color: currentColor;
+}
+
 .agreement-form {
   display: grid;
-  gap: 16px;
+  gap: var(--sp-6);
+  max-width: 1080px;
 }
 
-.agreement-form h3 {
-  margin: 8px 0 0;
-}
-
-.agreement-requisites {
+.agreement-form__row {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-6);
+}
+
+.agreement-requisites,
+.agreement-panel {
+  display: grid;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.agreement-panel > p {
+  margin: 0;
+}
+
+.agreement-panel__note {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.agreement-panel__value {
+  color: var(--fg-1);
+  font: var(--text-h3);
+  overflow-wrap: anywhere;
+}
+
+.agreement-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.agreement-group + .agreement-group,
+.agreement-summary__group + .agreement-summary__group {
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--line);
+}
+
+.agreement-group__title {
+  margin: 0;
+  padding: 0;
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agreement-group__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+
+.agreement-group__grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.agreement-group__wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.agreement-group__grid > * {
+  min-width: 0;
+}
+
+.agreement-summary {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.agreement-summary__group {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.agreement-summary__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agreement-facts {
+  background: var(--surface-card);
 }
 
 .agreement-transitions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
+}
+
+.agreement-link-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  text-decoration: none;
+  font: 600 13px/1 var(--font-ui);
+}
+
+.agreement-link-button:hover {
+  background: var(--surface-panel);
+}
+
+.agreement-docs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+}
+
+.agreement-docs__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4);
+}
+
+.agreement-docs__item + .agreement-docs__item {
+  border-top: 1px solid var(--line);
+}
+
+.agreement-docs__main {
+  min-width: 0;
+  flex: 1 1 260px;
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-1);
+}
+
+.agreement-docs__name {
+  color: var(--fg-1);
+  font: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.agreement-docs__meta {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.agreement-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.agreement-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.agreement-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.agreement-layout__main,
+.agreement-layout__side {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-6);
+}
+
+@media (min-width: 1100px) {
+  .agreement-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  /* The side column is first in the DOM (status and tenant are what an
+     operator acts on) but sits on the right on a wide screen. */
+  .agreement-layout__side {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .agreement-layout__main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .agreement-group__grid,
+  .agreement-summary__grid,
+  .agreement-form__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tenant-diagnostics {

@@ -16,6 +16,7 @@ import {
 } from "@markiro/ui";
 
 import { listAgreements, type AgreementStatus, type AgreementSummary } from "./api.js";
+import { TenantLink, useTenantNames } from "./tenantNames.js";
 
 const STATUSES = ["draft", "in_review", "sent", "signed", "terminated"] as const;
 
@@ -51,15 +52,24 @@ export function AgreementsPage() {
     queryFn: () => listAgreements(query),
   });
 
+  const tenantNames = useTenantNames(
+    agreements.data?.agreements.map((agreement) => agreement.tenantId) ?? [],
+  );
+
   return (
     <section className="catalog-page">
       <SectionHeader
         eyebrow="COMMERCE / AGREEMENTS"
         title={t("agreements.title")}
         description={t("agreements.description")}
+        actions={
+          <Button type="button" onClick={() => void navigate("/agreements/new")}>
+            {t("agreements.create")}
+          </Button>
+        }
       />
 
-      <div className="agreements-filters">
+      <div className="page-filters" role="group" aria-label={t("agreements.filters.label")}>
         <Select
           id="agreements-status"
           label={t("agreements.filters.status")}
@@ -82,9 +92,6 @@ export function AgreementsPage() {
           onCheckedChange={setWithoutTenant}
           label={t("agreements.filters.withoutTenant")}
         />
-        <Button type="button" onClick={() => void navigate("/agreements/new")}>
-          {t("agreements.create")}
-        </Button>
       </div>
 
       {agreements.isPending && <Spinner label={t("shell.routeLoading")} />}
@@ -148,7 +155,12 @@ export function AgreementsPage() {
               key: "tenant",
               title: t("agreements.columns.tenant"),
               wrap: true,
-              render: (row) => row.tenantId ?? t("agreements.list.noTenant"),
+              render: (row) =>
+                row.tenantId ? (
+                  <TenantLink tenantId={row.tenantId} name={tenantNames.get(row.tenantId)} />
+                ) : (
+                  <span className="agreement-muted">{t("agreements.list.noTenant")}</span>
+                ),
             },
           ]}
         />

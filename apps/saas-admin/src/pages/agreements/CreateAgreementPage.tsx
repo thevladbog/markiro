@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { Alert, Button, DatePicker, Field, Input, SectionHeader } from "@markiro/ui";
+import { Alert, Button, Card, DatePicker, Field, Input, SectionHeader } from "@markiro/ui";
 
 import type { AgreementDocumentForm } from "@markiro/platform-contracts";
 
@@ -76,99 +76,116 @@ export function CreateAgreementPage() {
           create.mutate();
         }}
       >
-        <h3>{t("agreements.sections.counterparty")}</h3>
-        <AgreementRequisitesForm value={counterparty} onChange={setCounterparty} />
+        <Card title={t("agreements.sections.requisites")} titleAs="h2">
+          <AgreementRequisitesForm value={counterparty} onChange={setCounterparty} />
+        </Card>
 
-        <h3>{t("agreements.sections.signatory")}</h3>
-        <Field
-          label={t("agreements.fields.signatoryPosition")}
-          htmlFor="agreement-signatory-position"
-        >
-          <Input
-            id="agreement-signatory-position"
-            value={position}
-            onChange={(event) => setPosition(event.target.value)}
-          />
-        </Field>
-        <Field label={t("agreements.fields.signatoryName")} htmlFor="agreement-signatory-name">
-          <Input
-            id="agreement-signatory-name"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-          />
-        </Field>
-        <Field label={t("agreements.fields.authorityBasis")} htmlFor="agreement-authority">
-          <Input
-            id="agreement-authority"
-            value={authorityBasis}
-            onChange={(event) => setAuthorityBasis(event.target.value)}
-          />
-        </Field>
+        <div className="agreement-form__row">
+          <Card title={t("agreements.sections.signatory")} titleAs="h2">
+            <div className="agreement-group__grid agreement-group__grid--single">
+              <Field
+                label={t("agreements.fields.signatoryPosition")}
+                htmlFor="agreement-signatory-position"
+              >
+                <Input
+                  id="agreement-signatory-position"
+                  value={position}
+                  onChange={(event) => setPosition(event.target.value)}
+                />
+              </Field>
+              <Field
+                label={t("agreements.fields.signatoryName")}
+                htmlFor="agreement-signatory-name"
+              >
+                <Input
+                  id="agreement-signatory-name"
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                />
+              </Field>
+              <Field label={t("agreements.fields.authorityBasis")} htmlFor="agreement-authority">
+                <Input
+                  id="agreement-authority"
+                  value={authorityBasis}
+                  onChange={(event) => setAuthorityBasis(event.target.value)}
+                />
+              </Field>
+            </div>
+          </Card>
 
-        <h3>{t("agreements.sections.terms")}</h3>
-        <Field label={t("agreements.fields.disputeVenue")} htmlFor="agreement-venue">
-          <Input
-            id="agreement-venue"
-            value={disputeVenue}
-            onChange={(event) => setDisputeVenue(event.target.value)}
-          />
-        </Field>
-        <Field label={t("agreements.fields.penaltyRate")} htmlFor="agreement-penalty-rate">
-          <Input
-            id="agreement-penalty-rate"
-            value={penaltyRatePercent}
-            placeholder="0,05"
-            onChange={(event) => setPenaltyRatePercent(event.target.value)}
-          />
-        </Field>
-        <Field label={t("agreements.fields.penaltyCap")} htmlFor="agreement-penalty-cap">
-          <Input
-            id="agreement-penalty-cap"
-            value={penaltyCapPercent}
-            placeholder="10"
-            onChange={(event) => setPenaltyCapPercent(event.target.value)}
-          />
-        </Field>
+          <Card title={t("agreements.sections.terms")} titleAs="h2">
+            <div className="agreement-group__grid agreement-group__grid--single">
+              <Field label={t("agreements.fields.disputeVenue")} htmlFor="agreement-venue">
+                <Input
+                  id="agreement-venue"
+                  value={disputeVenue}
+                  onChange={(event) => setDisputeVenue(event.target.value)}
+                />
+              </Field>
+              <Field label={t("agreements.fields.penaltyRate")} htmlFor="agreement-penalty-rate">
+                <Input
+                  id="agreement-penalty-rate"
+                  value={penaltyRatePercent}
+                  placeholder="0,05"
+                  onChange={(event) => setPenaltyRatePercent(event.target.value)}
+                />
+              </Field>
+              <Field label={t("agreements.fields.penaltyCap")} htmlFor="agreement-penalty-cap">
+                <Input
+                  id="agreement-penalty-cap"
+                  value={penaltyCapPercent}
+                  placeholder="10"
+                  onChange={(event) => setPenaltyCapPercent(event.target.value)}
+                />
+              </Field>
+            </div>
+          </Card>
+        </div>
 
-        <h3>{t("agreements.sections.header")}</h3>
-        <Field
-          label={t("agreements.fields.number")}
-          htmlFor="agreement-number"
-          hint={t("agreements.fields.numberHint")}
-        >
-          <Input
-            id="agreement-number"
-            value={number}
-            placeholder={t("agreements.fields.numberAuto")}
-            onChange={(event) => setNumber(event.target.value)}
-          />
-        </Field>
-        <DatePicker
-          id="agreement-date"
-          label={t("agreements.fields.conclusionDate")}
-          locale={i18n.language}
-          placeholder={t("reports.calendar.placeholder")}
-          clearLabel={t("reports.calendar.clear")}
-          calendarLabel={t("reports.calendar.title")}
-          previousMonthLabel={t("reports.calendar.previousMonth")}
-          nextMonthLabel={t("reports.calendar.nextMonth")}
-          value={conclusionDate}
-          onValueChange={(value) => setConclusionDate(value ?? "")}
-        />
-        <Field label={t("agreements.fields.city")} htmlFor="agreement-city">
-          <Input
-            id="agreement-city"
-            value={city}
-            onChange={(event) => setCity(event.target.value)}
-          />
-        </Field>
-        <AgreementDocumentFormField value={documentForm} onChange={setDocumentForm} />
+        <Card title={t("agreements.sections.header")} titleAs="h2">
+          <div className="agreement-group__grid">
+            <Field
+              label={t("agreements.fields.number")}
+              htmlFor="agreement-number"
+              hint={t("agreements.fields.numberHint")}
+            >
+              <Input
+                id="agreement-number"
+                value={number}
+                placeholder={t("agreements.fields.numberAuto")}
+                onChange={(event) => setNumber(event.target.value)}
+              />
+            </Field>
+            <DatePicker
+              id="agreement-date"
+              label={t("agreements.fields.conclusionDate")}
+              locale={i18n.language}
+              placeholder={t("reports.calendar.placeholder")}
+              clearLabel={t("reports.calendar.clear")}
+              calendarLabel={t("reports.calendar.title")}
+              previousMonthLabel={t("reports.calendar.previousMonth")}
+              nextMonthLabel={t("reports.calendar.nextMonth")}
+              value={conclusionDate}
+              onValueChange={(value) => setConclusionDate(value ?? "")}
+            />
+            <Field label={t("agreements.fields.city")} htmlFor="agreement-city">
+              <Input
+                id="agreement-city"
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+              />
+            </Field>
+            <AgreementDocumentFormField value={documentForm} onChange={setDocumentForm} />
+          </div>
+        </Card>
 
         {formError && <Alert tone="error">{formError}</Alert>}
 
-        <Button type="submit" disabled={create.isPending || counterparty.name.trim() === ""}>
-          {t("agreements.createSubmit")}
-        </Button>
+        <div className="agreement-transitions">
+          <Button type="submit" disabled={create.isPending || counterparty.name.trim() === ""}>
+            {t("agreements.createSubmit")}
+          </Button>
+        </div>
       </form>
     </section>
   );
