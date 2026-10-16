@@ -693,7 +693,10 @@ describe("commercial catalog", () => {
   it("submits complete plan commercial terms", async () => {
     const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
     renderSaasApp();
-    const user = userEvent.setup();
+    // Set text and number fields in one change event each: typing "30" after clearing
+    // re-rendered the whole form four times for the same resulting value, and the
+    // slowest test of this file was the one that did it (see `testTimeout`).
+    const user = userEvent.setup({ delay: null });
 
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
     fireEvent.change(screen.getByLabelText("Код позиции"), { target: { value: "plan-complete" } });
@@ -710,9 +713,8 @@ describe("commercial catalog", () => {
       target: { value: "For production" },
     });
     await chooseOption(user, "Линии: режим", "Ограничено");
-    await user.type(screen.getByLabelText("Линии"), "10");
-    await user.clear(screen.getByLabelText("Дней демо"));
-    await user.type(screen.getByLabelText("Дней демо"), "30");
+    fireEvent.change(screen.getByLabelText("Линии"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Дней демо"), { target: { value: "30" } });
     await user.click(screen.getByLabelText("Редактор этикеток"));
     await user.click(screen.getByLabelText("Публичный API"));
     await user.click(screen.getByLabelText("Работа с палетами"));
