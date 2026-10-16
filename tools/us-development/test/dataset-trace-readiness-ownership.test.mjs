@@ -135,6 +135,64 @@ test("Trace/Readiness native suites have a dedicated serial CI job after isolati
   assertOwnership(readWorkflows());
 });
 
+for (const minutes of [30, 44, 45, 46]) {
+  test(`Trace/Readiness ownership ${minutes === 45 ? "accepts" : "rejects"} a ${minutes}-minute full-suite budget`, () => {
+    const all = readWorkflows();
+    const changed = all["us-development.yml"];
+    changed.jobs[traceReadinessJobId]["timeout-minutes"] = minutes;
+    const bytes = source.replace(
+      /(  dataset_trace_readiness:\n    runs-on: ubuntu-latest\n    needs: isolation\n    timeout-minutes: )\d+/,
+      `$1${minutes}`,
+    );
+    assert.deepEqual(load(bytes), withoutPreparedServicesOwner(changed));
+    if (minutes === 45) {
+      assertOwnership(all);
+      assert.equal(hasExactTraceReadinessOwner(changed), true);
+      assert.equal(
+        digest(withoutTraceReadinessOwnerBytes(bytes)),
+        predecessorBytes,
+        "only the reviewed 45-minute block restores the strict predecessor bytes",
+      );
+    } else {
+      assert.throws(
+        () => assertOwnership(all),
+        /complete unconditional failure-propagating native job/,
+      );
+      assert.equal(hasExactTraceReadinessOwner(changed), false);
+      assert.deepEqual(withoutTraceReadinessOwner(changed), changed);
+      assert.equal(withoutTraceReadinessOwnerBytes(bytes), bytes);
+    }
+  });
+}
+
+test("the expanded Trace budget cannot hide other-job limits or native selection filters", () => {
+  for (const id of ["isolation", "dataset_prepared_services"]) {
+    const all = readWorkflows();
+    const changed = all["us-development.yml"];
+    changed.jobs[traceReadinessJobId]["timeout-minutes"] = 45;
+    changed.jobs[id]["timeout-minutes"] = 45;
+    assert.throws(
+      () => assertOwnership(all),
+      /predecessor workflow is unchanged|only one additive job/,
+    );
+    assert.equal(withoutTraceReadinessOwner(changed).jobs[id]["timeout-minutes"], 45);
+    assert.notEqual(
+      hash(withoutParallelSegments(changed)),
+      "64ba03ef3513c852d107ae434bfaa67995fdcd67944471a35ca9e4a7f9fb0de5",
+    );
+  }
+  const all = readWorkflows();
+  const changed = all["us-development.yml"];
+  changed.jobs[traceReadinessJobId]["timeout-minutes"] = 45;
+  changed.jobs[traceReadinessJobId].steps.at(-1).run += " --testNamePattern=small";
+  assert.throws(
+    () => assertOwnership(all),
+    /complete unconditional failure-propagating native job/,
+  );
+  assert.equal(hasExactTraceReadinessOwner(changed), false);
+  assert.deepEqual(withoutTraceReadinessOwner(changed), changed);
+});
+
 test("successful contracts build precedes every Node tool and API build precedes native execution", () => {
   const job = workflow.jobs[traceReadinessJobId];
   const steps = job.steps;

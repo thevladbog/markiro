@@ -14,7 +14,7 @@ export const traceReadinessCommand = `corepack pnpm --filter @markiro/api exec v
 export const traceReadinessJob = {
   "runs-on": "ubuntu-latest",
   needs: "isolation",
-  "timeout-minutes": 30,
+  "timeout-minutes": 45,
   services: {
     "us-postgres": {
       image: "postgres:17-alpine",
@@ -66,7 +66,7 @@ export const traceReadinessJobBlock = `
   dataset_trace_readiness:
     runs-on: ubuntu-latest
     needs: isolation
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       us-postgres:
         image: postgres:17-alpine

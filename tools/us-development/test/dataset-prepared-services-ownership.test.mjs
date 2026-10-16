@@ -27,6 +27,8 @@ import {
 
 import { assertNativeFixtureGate } from "./support/native-fixture-gate.mjs";
 import {
+  hasExactTraceReadinessOwner,
+  traceReadinessJobBlock,
   withoutTraceReadinessOwner,
   withoutTraceReadinessOwnerBytes,
 } from "./support/trace-readiness-owner.mjs";
@@ -119,6 +121,28 @@ const readWorkflows = () =>
       .map((name) => [name, load(readFileSync(`.github/workflows/${name}`, "utf8"))]),
   );
 
+// Preserve the original complete predecessor pins, including its 30-minute Trace
+// budget. Restore that historical value only after recognizing the entire current
+// reviewed owner; all other job fields and bytes remain in the comparison.
+function historicalTraceBudget(predecessor) {
+  assert.ok(
+    hasExactTraceReadinessOwner(predecessor),
+    "complete matrix and Trace predecessor workflow is unchanged: exact current Trace/Readiness owner",
+  );
+  const historical = structuredClone(predecessor);
+  historical.jobs.dataset_trace_readiness["timeout-minutes"] = 30;
+  return historical;
+}
+
+function historicalTraceBudgetBytes(predecessor) {
+  const beforeTrace = withoutTraceReadinessOwnerBytes(predecessor);
+  if (beforeTrace === predecessor) return predecessor;
+  return (
+    beforeTrace +
+    traceReadinessJobBlock.replace("    timeout-minutes: 45", "    timeout-minutes: 30")
+  );
+}
+
 const rawSources = () =>
   Object.fromEntries(
     readdirSync(".github/workflows")
@@ -167,7 +191,7 @@ function assertOwnership(all, sources = rawSources()) {
     "only the reviewed additive job",
   );
   assert.equal(
-    hash(withoutPreparedServicesOwner(w)),
+    hash(historicalTraceBudget(withoutPreparedServicesOwner(w))),
     predecessorHash,
     "complete matrix and Trace predecessor workflow is unchanged",
   );
@@ -187,6 +211,46 @@ test("prepared services have an explicit native owner", () => {
   assert.equal(owner.run, expectedCommand);
   assert.equal(job.steps[10].run, expectedDbCommand);
   assertOwnership(readWorkflows());
+});
+
+test("prepared historical pins accept only the complete current 45-minute Trace owner", () => {
+  for (const minutes of [30, 44, 45, 46]) {
+    const all = readWorkflows();
+    all["us-development.yml"].jobs.dataset_trace_readiness["timeout-minutes"] = minutes;
+    const bytes = withoutPreparedServicesOwnerBytes(source).replace(
+      /(  dataset_trace_readiness:\n    runs-on: ubuntu-latest\n    needs: isolation\n    timeout-minutes: )\d+/,
+      `$1${minutes}`,
+    );
+    if (minutes === 45) {
+      assertOwnership(all);
+      assert.equal(digest(historicalTraceBudgetBytes(bytes)), predecessorBytes);
+    } else {
+      assert.throws(() => assertOwnership(all), /exact current Trace\/Readiness owner/);
+      assert.equal(
+        historicalTraceBudgetBytes(bytes),
+        bytes,
+        "unapproved raw budgets remain visible",
+      );
+    }
+  }
+  const all = readWorkflows();
+  all["us-development.yml"].jobs.dataset_trace_readiness.steps.at(-1).run +=
+    " --testNamePattern=small";
+  assert.throws(() => assertOwnership(all), /exact current Trace\/Readiness owner/);
+  const predecessor = withoutPreparedServicesOwnerBytes(source);
+  for (const bytes of [
+    predecessor.replace(
+      traceReadinessJobBlock,
+      traceReadinessJobBlock.replace(" --maxWorkers=1", " --maxWorkers=1 --testNamePattern=small"),
+    ),
+    predecessor.replace(
+      traceReadinessJobBlock,
+      traceReadinessJobBlock.replace("# v4", "# altered"),
+    ),
+  ]) {
+    assert.equal(historicalTraceBudgetBytes(bytes), bytes);
+    assert.notEqual(digest(historicalTraceBudgetBytes(bytes)), predecessorBytes);
+  }
 });
 
 test("prepared primary ownership checks current supplemental mutation and third selector", () => {
@@ -235,8 +299,8 @@ test("successful contracts build precedes every Node tool and API build precedes
 test("exact additive removal restores the matrix and Trace bytes and AST without changing pins", () => {
   assert.ok(hasExactPreparedServicesOwner(workflow));
   const original = structuredClone(workflow);
-  const predecessor = withoutPreparedServicesOwner(workflow);
-  const bytes = withoutPreparedServicesOwnerBytes(source);
+  const predecessor = historicalTraceBudget(withoutPreparedServicesOwner(workflow));
+  const bytes = historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(source));
   assert.deepEqual(workflow, original, "normalization never changes its input");
   assert.equal(Buffer.byteLength(bytes), 39780);
   assert.equal(digest(bytes), predecessorBytes, "complete predecessor bytes unchanged");
@@ -715,7 +779,7 @@ test("historical normalization leaves malformed jobs and AST-neutral byte tamper
     source.replace("pnpm install --frozen-lockfile", "pnpm install --frozen-lockfile || true"),
   ])
     assert.notEqual(
-      digest(withoutPreparedServicesOwnerBytes(changed)),
+      digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
       predecessorBytes,
       "prior byte tamper remains observable",
     );
@@ -789,7 +853,7 @@ test("malformed prepared additions survive Trace and parallel historical normali
   ]) {
     assert.deepEqual(load(changed), workflow, "byte mutants preserve the parsed workflow");
     assert.notEqual(
-      digest(withoutPreparedServicesOwnerBytes(changed)),
+      digest(historicalTraceBudgetBytes(withoutPreparedServicesOwnerBytes(changed))),
       predecessorBytes,
       "complete pre-task raw pin rejects matrix and Trace byte drift",
     );
