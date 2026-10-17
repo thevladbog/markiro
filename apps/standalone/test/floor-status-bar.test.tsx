@@ -1863,4 +1863,35 @@ describe("the header's chips (kit header: a glyph and a word on a tone, never a 
         .map((button) => button.getAttribute("aria-label") ?? button.textContent),
     ).toEqual(["Синхронизация", "Сменить оператора"]);
   });
+
+  it.each([
+    ["kiosk", "Выйти из полноэкранного режима"],
+    ["fullscreen", "Выйти из полноэкранного режима"],
+  ] as const)(
+    "puts the %s window mode between sync and the operator, on the sign-in and when signed in",
+    async (kind, name) => {
+      const { executor } = openLocalDb();
+      const tools = {
+        retry: vi.fn(),
+        lastSyncedAt: null,
+        windowMode: {
+          kind,
+          snapshot: { mode: "locked", pending: false, error: null },
+          enter: vi.fn(async () => undefined),
+          exit: vi.fn(async () => undefined),
+          clearError: vi.fn(),
+        },
+        source: { subscribe: () => () => undefined } as never,
+        onMute: vi.fn(),
+      } as const;
+      const names = async () =>
+        within(await screen.findByRole("group", { name: "Действия станции" }))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label") ?? button.textContent);
+      const view = render(bar({ local: executor, tools }));
+      expect(await names()).toEqual(["Синхронизация", name]);
+      view.rerender(bar({ local: executor, operator, onSwitchOperator: vi.fn(), tools }));
+      expect(await names()).toEqual(["Синхронизация", name, "Сменить оператора"]);
+    },
+  );
 });

@@ -11,6 +11,13 @@ import type { ScanSource } from "./scan-source.js";
 
 /** The window mode the floor can change (`createLockdownLifecycle`). */
 export interface FloorWindowMode {
+  /**
+   * `kiosk` (the default): the shell's kiosk mode of a station, left only after a fresh proof
+   * of identity. `fullscreen`: the plain full-screen window of a PC that is never locked (the
+   * host's), where `snapshot.mode === "locked"` reads «in full screen»; nothing is locked, so
+   * leaving needs no proof (and Esc leaves it as well).
+   */
+  kind?: "kiosk" | "fullscreen";
   snapshot: LockdownSnapshot;
   enter: () => Promise<void>;
   exit: () => Promise<void>;
@@ -35,7 +42,9 @@ export interface FloorWindowControlProps {
  * compact): a 64 px icon button whose name says what it does. Leaving the
  * full-screen mode asks for a fresh proof of identity first (`Reconfirm`: the
  * operator's badge, or number and PIN; owner decision, beta 3), so a stray
- * touch cannot do it; the way back needs none. An office administrator's
+ * touch cannot do it; the way back needs none. On the host's PC, which is never
+ * locked, the same control is the plain full-screen window and asks for no proof
+ * (`kind: "fullscreen"`). An office administrator's
  * sign-in on this PC opens an ordinary window by itself, as before.
  */
 export function FloorWindowControl({
@@ -51,9 +60,11 @@ export function FloorWindowControl({
   const [asking, setAsking] = useState(false);
   const { snapshot } = windowMode;
   const locked = snapshot.mode === "locked";
+  const plain = windowMode.kind === "fullscreen";
+  const words = plain ? "floor.windowMode.fullscreen" : "floor.windowMode";
   const label = snapshot.pending
     ? t("floor.windowMode.pending")
-    : t(locked ? "floor.windowMode.exitLabel" : "floor.windowMode.enterLabel");
+    : t(locked ? `${words}.exitLabel` : `${words}.enterLabel`);
   return (
     <div className="floor-window-control">
       <Button
@@ -62,11 +73,12 @@ export function FloorWindowControl({
         variant="secondary"
         className="station-rail-button station-rail-button--icon floor-window-control__button"
         aria-label={label}
-        title={t(locked ? "floor.windowMode.exit" : "floor.windowMode.enter")}
+        title={t(locked ? `${words}.exit` : `${words}.enter`)}
         disabled={snapshot.pending}
         onClick={() => {
           windowMode.clearError();
-          if (locked) setAsking(true);
+          if (locked && !plain) setAsking(true);
+          else if (locked) void windowMode.exit();
           else void windowMode.enter();
         }}
         icon={
@@ -78,20 +90,14 @@ export function FloorWindowControl({
       />
       {snapshot.error !== null && (
         <div className="floor-window-control__error" role="alert">
-          <span>
-            {t(
-              snapshot.error === "exit"
-                ? "floor.windowMode.exitError"
-                : "floor.windowMode.enterError",
-            )}
-          </span>
+          <span>{t(snapshot.error === "exit" ? `${words}.exitError` : `${words}.enterError`)}</span>
           <Button size="floor" variant="secondary" onClick={windowMode.clearError}>
             {t("floor.windowMode.dismiss")}
           </Button>
         </div>
       )}
       <Reconfirm
-        open={asking && locked}
+        open={asking && locked && !plain}
         title={t("floor.windowMode.confirmTitle")}
         detail={t("floor.windowMode.confirmDetail")}
         confirmLabel={t("floor.windowMode.confirm")}

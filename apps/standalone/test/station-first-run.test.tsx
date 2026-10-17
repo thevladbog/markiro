@@ -4,8 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
 import { App } from "../src/app/App.js";
+import type { FullscreenController } from "../src/app/fullscreen.js";
 import type { KioskPolicyApi } from "../src/app/kiosk-policy.js";
-import { createLockdownLifecycle, type LockdownCommand } from "../src/app/lockdown.js";
+import {
+  createLockdownLifecycle,
+  type LockdownCommand,
+  type LockdownSnapshot,
+} from "../src/app/lockdown.js";
 import type { HardwareApi } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -133,6 +138,31 @@ function comHardware() {
   };
 }
 
+/** The webview's full-screen window as a controller that records what it was asked. */
+function fakeFullscreen({ enabled = true }: { enabled?: boolean } = {}) {
+  let snapshot: LockdownSnapshot = { mode: "windowed", pending: false, error: null };
+  const listeners = new Set<() => void>();
+  const set = (mode: LockdownSnapshot["mode"]) => {
+    snapshot = { mode, pending: false, error: null };
+    listeners.forEach((listener) => listener());
+  };
+  return {
+    enabled,
+    enter: vi.fn(async () => set("locked")),
+    exit: vi.fn(async () => {
+      if (snapshot.mode === "locked") set("windowed");
+    }),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot: () => snapshot,
+    clearError: vi.fn(),
+  } satisfies FullscreenController;
+}
+
 /** What the shell permits; `turnOff` is a second launch with `--windowed`. */
 function fakeKioskPolicy(permitted = true) {
   let turnedOff: (() => void) | null = null;
@@ -172,11 +202,13 @@ function renderStation({
   host = fakeHostApi({
     officeLogin: vi.fn<HostApi["officeLogin"]>(async () => SESSION),
   }),
+  fullscreen,
 }: {
   status?: DeviceStatus | null;
   role?: InstallRole;
   permitted?: boolean;
   host?: HostApi;
+  fullscreen?: FullscreenController;
 } = {}) {
   const kiosk = recordingLockdown();
   const com = comHardware();
@@ -195,6 +227,7 @@ function renderStation({
         hardware={com.hardware}
         lockdown={kiosk.lockdown}
         kioskPolicy={shell.policy}
+        {...(fullscreen === undefined ? {} : { fullscreen })}
       />
     </ThemeProvider>,
   );
@@ -325,6 +358,50 @@ describe("the host's PC", () => {
     await settle();
     expect(kiosk.commands).toEqual([]);
     expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+  });
+
+  // Owner report (beta 4.5): «на хосте решил зайти в цех — нет кнопки полноэкранного
+  // режима». The kiosk (locking) mode stays off for this PC (decision 2026-10-13); the
+  // floor's rail offers the plain full-screen window instead, with the way out one press away.
+  it("offers the plain full-screen window on the floor, never the locking kiosk mode", async () => {
+    const fullscreen = fakeFullscreen();
+    const { kiosk } = renderStation({ status: DEVICE_STATUS, role: "host", fullscreen });
+    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Полноэкранный режим" }));
+    await waitFor(() => expect(fullscreen.enter).toHaveBeenCalledTimes(1));
+    // Full screen, and the button now says how to leave it: no identity proof, no dialog.
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти из полноэкранного режима" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(fullscreen.exit).toHaveBeenCalledTimes(1));
+    expect(kiosk.commands).toEqual([]);
+  });
+
+  it("leaves full screen on its own when the host goes from the floor to the office", async () => {
+    const fullscreen = fakeFullscreen();
+    renderStation({ status: DEVICE_STATUS, role: "host", fullscreen });
+    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Полноэкранный режим" }));
+    await waitFor(() => expect(fullscreen.enter).toHaveBeenCalledTimes(1));
+    await signInToOffice();
+    await waitFor(() => expect(fullscreen.exit).toHaveBeenCalledTimes(1));
+  });
+
+  it("offers it nowhere without the webview's Fullscreen API, and not on a station", async () => {
+    renderStation({
+      status: DEVICE_STATUS,
+      role: "host",
+      fullscreen: fakeFullscreen({ enabled: false }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "В цех" }));
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Полноэкранный режим" })).toBeNull();
+    cleanup();
+    const station = fakeFullscreen();
+    renderStation({ status: DEVICE_STATUS, role: "station", fullscreen: station });
+    expect(await screen.findByText("Вход оператора")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Полноэкранный режим" })).toBeNull();
+    expect(station.enter).not.toHaveBeenCalled();
   });
 
   it("starts in the office again at the next launch, whatever the last session chose", async () => {
