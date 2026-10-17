@@ -124,3 +124,27 @@
 .pallet-strip__warning strong {
   font: var(--floor-body-strong);
 }
+
+/* A window up to 780 px high: the strip is as tall as its own 64 px early-close button. */
+@media (max-height: 780px) {
+  .pallet-strip {
+    padding: var(--sp-2) var(--sp-3);
+    gap: var(--sp-1) var(--sp-3);
+  }
+
+  .pallet-strip__summary {
+    gap: 2px;
+  }
+
+  .pallet-strip__count .work-of-count__number {
+    font: 600 20px/26px var(--font-mono);
+  }
+
+  .pallet-strip__bar {
+    height: 6px;
+  }
+
+  .pallet-strip__meta {
+    font: 400 14px/18px var(--font-ui);
+  }
+}
