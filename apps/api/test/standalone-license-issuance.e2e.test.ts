@@ -1142,6 +1142,176 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await issuedRows(f.tenantId)).toEqual([]);
     });
 
+    it("names only the assignments that contribute at the issuance instant", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 2, maxStations: 3, maxKiosks: 0, maxCabinetUsers: 5 },
+        endsAt: null,
+        addonLines: { increment: 3, quantity: 2 },
+      });
+      // Not yet started: the entitlement projection ignores it until it starts.
+      const futureVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: 7 },
+      ]);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId: f.tenantId,
+        subscriptionId: f.subscriptionId,
+        addonVersionId: futureVersionId,
+        quantity: 1,
+        startsAt: new Date(clock.getTime() + 10 * DAY),
+        status: "scheduled",
+        source: "manual",
+      });
+      // Past its end but not yet materialized by the status job: still `active` in the row.
+      const endedVersionId = await createPublishedAddon(db, [
+        { entitlementKey: "lines", increment: 11 },
+      ]);
+      await db.insert(schema.subscriptionAddons).values({
+        tenantId: f.tenantId,
+        subscriptionId: f.subscriptionId,
+        addonVersionId: endedVersionId,
+        quantity: 1,
+        startsAt: new Date(clock.getTime() - 2 * DAY),
+        endsAt: new Date(clock.getTime() - 60_000),
+        status: "active",
+        source: "manual",
+      });
+      const contributing = [
+        { kind: "plan", id: f.subscriptionId, catalogVersionId: f.planVersionId },
+        { kind: "addon", id: f.addonId, catalogVersionId: f.addonVersionId },
+      ];
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.sourceAssignments).toEqual(contributing);
+      expect(preview.next.rights.quotas.lines).toBe(8);
+
+      const requestId = randomUUID();
+      const file = await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+        requestId,
+        graceDays: null,
+        offline: null,
+        expected: preview.expected,
+      });
+      const [row] = await issuedRows(f.tenantId);
+      expect(row).toMatchObject({ source: "offline_assignments", sourceAssignments: contributing });
+      const issued = (await auditRows(db, f.tenantId)).filter(
+        (entry) => entry.action === "standalone_license.issued",
+      );
+      expect(issued).toHaveLength(1);
+      expect(issued[0]).toMatchObject({
+        actorPlatformUserId: f.admin.userId,
+        actorRole: "platform_admin",
+        tenantId: f.tenantId,
+        action: "standalone_license.issued",
+        outcome: "success",
+        targetType: "standalone_license",
+        targetId: file.issuance.licenseId,
+        requestId,
+        after: {
+          source: "offline_assignments",
+          sourceAssignments: contributing,
+          quotas: { lines: 8 },
+        },
+      });
+    });
+
+    it("issues a plan with 64 add-ons: 65 references are the journal's whole capacity", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 64 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next.sourceAssignments).toHaveLength(65);
+      expect(preview.next.rights.quotas.lines).toBe(65);
+      await issuance.confirm(f.admin, f.tenantId, f.site.id, {
+        requestId: randomUUID(),
+        graceDays: null,
+        offline: null,
+        expected: preview.expected,
+      });
+      const [row] = await issuedRows(f.tenantId);
+      expect(row?.sourceAssignments).toHaveLength(65);
+    });
+
+    it("refuses 66 references with a clear code, in the preview and the confirmation, and writes nothing", async () => {
+      const f = await offlineSiteFor({
+        plan: { maxLines: 1, maxStations: 1, maxKiosks: 0, maxCabinetUsers: 1 },
+        endsAt: null,
+      });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 65 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const refusal = { status: 409, body: { code: "standalone_assignment_limit_reached" } };
+      expect(
+        await httpRefusal(
+          issuance.preview(f.admin, f.tenantId, f.site.id, { graceDays: null, offline: null }),
+        ),
+      ).toEqual(refusal);
+      expect(
+        await httpRefusal(
+          issuance.confirm(f.admin, f.tenantId, f.site.id, {
+            requestId: randomUUID(),
+            graceDays: null,
+            offline: null,
+            expected: {
+              entitlementRevision: "0",
+              previousSequence: 0,
+              boundaryAt: null,
+              termsDigest: "0".repeat(64),
+            },
+          }),
+        ),
+      ).toEqual(refusal);
+      expect(await issuedRows(f.tenantId)).toEqual([]);
+    });
+
+    it("does not cap a tenant with a cabinet: it names no assignments, however many add-ons it has", async () => {
+      const f = await siteFor({ endsAt: null });
+      const versionId = await createPublishedAddon(db, [{ entitlementKey: "lines", increment: 1 }]);
+      await db.insert(schema.subscriptionAddons).values(
+        Array.from({ length: 65 }, () => ({
+          tenantId: f.tenantId,
+          subscriptionId: f.subscriptionId,
+          addonVersionId: versionId,
+          quantity: 1,
+          startsAt: new Date(clock.getTime() - 60_000),
+          status: "active" as const,
+          source: "manual" as const,
+        })),
+      );
+      const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {
+        graceDays: null,
+        offline: null,
+      });
+      expect(preview.next).toMatchObject({ source: "subscription", sourceAssignments: null });
+      expect(preview.next.rights.quotas.lines).toBe(67);
+    });
+
     it("refuses the previewed file when the tenant got a cabinet before confirmation", async () => {
       const f = await offlineSiteFor();
       const preview = await issuance.preview(f.admin, f.tenantId, f.site.id, {

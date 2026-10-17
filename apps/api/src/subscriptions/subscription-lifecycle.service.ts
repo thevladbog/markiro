@@ -18,7 +18,10 @@ import {
   type CommercialLineTerms,
 } from "@markiro/platform-contracts";
 import { SubscriptionEntitlementsInvalidException } from "./subscription-errors";
-import { assertCatalogAllowedForTenant } from "./tenant-cabinet-access";
+import {
+  assertCatalogAllowedForTenant,
+  assertStandaloneAssignmentCapacity,
+} from "./tenant-cabinet-access";
 import { EntitlementsService } from "./entitlements.service";
 import { DB } from "../auth/auth.module";
 import type { AssignAddonDto, AssignPlanDto } from "../modules/platform-tenants/dto";
@@ -658,6 +661,7 @@ export class SubscriptionLifecycleService {
       throw new BadRequestException({ code: "addon_exceeds_subscription_term" });
     }
     const status = input.activationPolicy === "after_current" ? "scheduled" : "active";
+    await assertStandaloneAssignmentCapacity(tx, tenantId, target.id, operationAt);
     const [created] = await tx
       .insert(schema.subscriptionAddons)
       .values({

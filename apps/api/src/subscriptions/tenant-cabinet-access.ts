@@ -1,6 +1,7 @@
 import { ConflictException } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { STANDALONE_ASSIGNMENT_REFS_MAX } from "@markiro/platform-contracts";
 
 export const OFFLINE_TENANT_KIND_ERROR = "catalog_kind_not_allowed_for_offline_tenant";
 
@@ -53,4 +54,45 @@ export async function assertCatalogAllowedForTenant(
     if (row?.offlineAvailable === true && row.kind === target.kind) return;
   }
   throw new ConflictException({ code: OFFLINE_TENANT_KIND_ERROR });
+}
+
+export const STANDALONE_ASSIGNMENT_LIMIT_ERROR = "standalone_assignment_limit_reached";
+
+/**
+ * The license of a tenant without a cabinet names its plan and add-on
+ * assignments in the issuance journal, which holds at most
+ * `STANDALONE_ASSIGNMENT_REFS_MAX` references: the plan and the rest add-ons.
+ * Refuse the add-on that would make one subscription exceed it, so no live
+ * combination of assignments makes issuance impossible. A tenant with a cabinet
+ * is issued from its subscription and names no assignments, so it is not bound.
+ * Every add-on creation path (platform assignment, invoice and offer
+ * application) runs this in the transaction that holds the timeline lock.
+ */
+export async function assertStandaloneAssignmentCapacity(
+  tx: Pick<Db, "select">,
+  tenantId: string,
+  subscriptionId: string,
+  at: Date,
+): Promise<void> {
+  const [tenant] = await tx
+    .select({ cabinetAccess: schema.organization.cabinetAccess })
+    .from(schema.organization)
+    .where(eq(schema.organization.id, tenantId))
+    .limit(1);
+  if (tenant?.cabinetAccess !== "none") return;
+  const [live] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.subscriptionAddons)
+    .where(
+      and(
+        eq(schema.subscriptionAddons.tenantId, tenantId),
+        eq(schema.subscriptionAddons.subscriptionId, subscriptionId),
+        inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+        // Past its end, unsettled by the status job: issuance never names it. A scheduled
+        // add-on that has not started still counts: it can be named once it starts.
+        or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
+      ),
+    );
+  if ((live?.count ?? 0) >= STANDALONE_ASSIGNMENT_REFS_MAX - 1)
+    throw new ConflictException({ code: STANDALONE_ASSIGNMENT_LIMIT_ERROR });
 }
