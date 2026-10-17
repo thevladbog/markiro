@@ -151,7 +151,7 @@ export function Table<Row>({
                       : undefined
                   }
                   style={{
-                    textAlign: column.align ?? "left",
+                    textAlign: column.align ?? (column.stickyEnd ? "center" : "left"),
                     padding: "var(--table-th-py, 10px) var(--table-px, 16px)",
                     font: "var(--text-caption)",
                     color: "var(--table-th-fg, var(--fg-3))",
@@ -161,7 +161,8 @@ export function Table<Row>({
                     fontWeight: "var(--table-th-weight, 500)" as CSSProperties["fontWeight"],
                     cursor: column.sortable ? "pointer" : "default",
                     whiteSpace: column.wrapTitle ? "normal" : "nowrap",
-                    width: column.width,
+                    // An end-pinned actions column is as wide as its buttons (1px in an auto layout).
+                    width: column.width ?? (column.stickyEnd ? 1 : undefined),
                     minWidth: column.minWidth,
                     userSelect: "none",
                     ...(fill
@@ -253,7 +254,7 @@ export function Table<Row>({
                     style={{
                       padding: "var(--table-td-py, 11px) var(--table-px, 16px)",
                       height: "var(--table-row-h, auto)",
-                      textAlign: column.align ?? "left",
+                      textAlign: column.align ?? (column.stickyEnd ? "center" : "left"),
                       font: column.mono ? "var(--text-code)" : "var(--text-body)",
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
