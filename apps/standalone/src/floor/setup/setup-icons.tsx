@@ -38,3 +38,21 @@ export function UnlinkIcon() {
     </svg>
   );
 }
+
+/** The printer of a row's test-print button. */
+export function PrintIcon() {
+  return (
+    <svg {...ICON}>
+      <path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2M7 14h10v6H7z" />
+    </svg>
+  );
+}
+
+/** The pencil of a row's edit button. */
+export function PencilIcon() {
+  return (
+    <svg {...ICON}>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17zM14.5 7.5l3 3" />
+    </svg>
+  );
+}
