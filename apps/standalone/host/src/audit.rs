@@ -97,6 +97,9 @@ pub mod actions {
     /// The cloud's data moved into this site (plan IMP); the row holds the
     /// import's summary, which a repeat of the same import answers with.
     pub const IMPORT_CLOUD: &str = "import.cloud";
+    pub const IMPORT_CLOUD_HISTORY_PART: &str = "import.cloud_history.part";
+    pub const IMPORT_CLOUD_HISTORY_COMPLETE: &str = "import.cloud_history.complete";
+    pub const IMPORT_CLOUD_HISTORY_CANCEL: &str = "import.cloud_history.cancel";
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";

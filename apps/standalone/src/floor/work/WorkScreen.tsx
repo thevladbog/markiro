@@ -428,10 +428,15 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
     case "duplicate":
       return last.source === "local"
         ? t("floor.work.last.duplicateLocal", { time: scanTime(last.firstScannedAt) })
-        : t("floor.work.last.duplicateHost", {
-            number: last.shiftNumber,
-            time: scanTime(last.firstScannedAt),
-          });
+        : t(
+            last.cloudHistory === true
+              ? "floor.work.last.duplicateCloud"
+              : "floor.work.last.duplicateHost",
+            {
+              number: last.shiftNumber,
+              time: scanTime(last.firstScannedAt),
+            },
+          );
     case "wrong_gtin":
       return t("floor.work.last.wrongGtin", { gtin: last.gtin14 });
     case "invalid":

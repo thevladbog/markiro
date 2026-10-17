@@ -89,7 +89,7 @@ pub async fn apply(
             .fetch_optional(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
-    if taken.is_some() {
+    if taken.is_some() || crate::cloud_history::reserved_sscc(&mut *conn, &closed.sscc).await? {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }
     // The pallet is this device's in this shift (`pallet_unknown`

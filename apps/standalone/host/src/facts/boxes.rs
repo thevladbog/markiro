@@ -27,6 +27,9 @@ pub async fn find(
     context: &Context<'_>,
     id: &str,
 ) -> Result<Option<OwnBox>, Failure> {
+    if crate::cloud_history::reserved_identity(&mut *conn, id).await? {
+        return Err(Reject::new(receipt_codes::BOX_UNKNOWN).into());
+    }
     type BoxRow = (
         String,
         String,

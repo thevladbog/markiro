@@ -20,7 +20,8 @@ use crate::shifts;
 /// The scan that owns a code now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Owner {
-    pub scan_id: String,
+    /// Imported ownership has no local scan; never synthesize a journal fact.
+    pub scan_id: Option<String>,
     pub shift_id: String,
     pub shift_number: String,
     pub device_id: String,
@@ -35,7 +36,7 @@ impl Owner {
             shift_number: self.shift_number.clone(),
             device_id: self.device_id.clone(),
             scanned_at: self.scanned_at.clone(),
-            same_device: self.device_id == device_id,
+            same_device: self.scan_id.is_some() && self.device_id == device_id,
         }
     }
 }
@@ -45,6 +46,16 @@ pub async fn owner(
     conn: &mut SqliteConnection,
     code_hash: &str,
 ) -> Result<Option<Owner>, ApiError> {
+    if let Some(cloud) = crate::cloud_history::completed_owner(&mut *conn, code_hash).await? {
+        return Ok(Some(Owner {
+            scan_id: None,
+            shift_id: cloud.shift_id,
+            shift_number: cloud.number,
+            // Protocol sentinel: cloud provenance has no device in this installation.
+            device_id: uuid::Uuid::nil().to_string(),
+            scanned_at: cloud.scanned_at,
+        }));
+    }
     type OwnerRow = (String, String, String, i64, String, String, String);
     let row: Option<OwnerRow> = sqlx::query_as(
         "SELECT o.scan_id, o.shift_id, s.number_month_key, s.number_seq, s.created_from, \
@@ -59,7 +70,7 @@ pub async fn owner(
         |(scan_id, shift_id, month_key, seq, created_from, device_id, scanned_at)| {
             let origin: ShiftOrigin = created_from.parse().map_err(ApiError::internal)?;
             Ok(Owner {
-                scan_id,
+                scan_id: Some(scan_id),
                 shift_id,
                 shift_number: shifts::format_number(&month_key, seq, origin),
                 device_id,
@@ -114,11 +125,25 @@ pub async fn claim(
     claim: &Claim<'_>,
 ) -> Result<Applied, ApiError> {
     match owner(&mut *conn, claim.code_hash).await? {
+        Some(owner) if owner.scan_id.is_none() => {
+            sqlx::query("INSERT INTO cloud_history_conflicts(id,code_hash,loser_scan_id,winner_shift_id,winner_number,winner_scanned_at,winner_box_id,detected_at) SELECT ?,hash,?,shift_id,number,scanned_at,box_id,? FROM cloud_history_owners WHERE hash=? AND released_at IS NULL")
+                .bind(uuid::Uuid::new_v4().to_string()).bind(claim.scan_id)
+                .bind(context.received_at).bind(claim.code_hash)
+                .execute(&mut *conn).await.map_err(ApiError::internal)?;
+            return Ok(Applied {
+                outcome: FactOutcome::Conflict,
+                details: Some(serde_json::json!({"winner": owner.to_wire(context.device_id)})),
+                close: None,
+            });
+        }
         Some(owner) if claim.scanned_at >= owner.scanned_at.as_str() => {
             conflict_row(
                 &mut *conn,
                 claim.code_hash,
-                &owner.scan_id,
+                owner
+                    .scan_id
+                    .as_deref()
+                    .ok_or_else(|| ApiError::internal("missing native scan"))?,
                 claim.scan_id,
                 ConflictKind::Late,
                 context.received_at,
@@ -148,7 +173,10 @@ pub async fn claim(
                 &mut *conn,
                 claim.code_hash,
                 claim.scan_id,
-                &owner.scan_id,
+                owner
+                    .scan_id
+                    .as_deref()
+                    .ok_or_else(|| ApiError::internal("missing native scan"))?,
                 ConflictKind::Displaced,
                 context.received_at,
             )

@@ -120,6 +120,40 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateTemplateDefaults"),
     ),
     importFromCloud: vi.fn<HostApi["importFromCloud"]>(() => unexpected("importFromCloud")),
+    getCloudHistoryState: vi.fn<HostApi["getCloudHistoryState"]>(() =>
+      unexpected("getCloudHistoryState"),
+    ),
+    importCloudHistory: vi.fn<HostApi["importCloudHistory"]>(() =>
+      unexpected("importCloudHistory"),
+    ),
+    completeCloudHistory: vi.fn<HostApi["completeCloudHistory"]>(() =>
+      unexpected("completeCloudHistory"),
+    ),
+    cancelCloudHistory: vi.fn<HostApi["cancelCloudHistory"]>(() =>
+      unexpected("cancelCloudHistory"),
+    ),
+    listCloudShifts: vi.fn<HostApi["listCloudShifts"]>(() => unexpected("listCloudShifts")),
+    getCloudShift: vi.fn<HostApi["getCloudShift"]>(() => unexpected("getCloudShift")),
+    getCloudShiftExportSource: vi.fn<HostApi["getCloudShiftExportSource"]>(() =>
+      unexpected("getCloudShiftExportSource"),
+    ),
+    listCloudShiftBoxes: vi.fn<HostApi["listCloudShiftBoxes"]>(() =>
+      unexpected("listCloudShiftBoxes"),
+    ),
+    listCloudShiftPallets: vi.fn<HostApi["listCloudShiftPallets"]>(() =>
+      unexpected("listCloudShiftPallets"),
+    ),
+    getCloudBox: vi.fn<HostApi["getCloudBox"]>(() => unexpected("getCloudBox")),
+    getCloudBoxReportRows: vi.fn<HostApi["getCloudBoxReportRows"]>(() =>
+      unexpected("getCloudBoxReportRows"),
+    ),
+    getCloudPallet: vi.fn<HostApi["getCloudPallet"]>(() => unexpected("getCloudPallet")),
+    listCloudPalletExports: vi.fn<HostApi["listCloudPalletExports"]>(() =>
+      unexpected("listCloudPalletExports"),
+    ),
+    recordCloudPalletExport: vi.fn<HostApi["recordCloudPalletExport"]>(() =>
+      unexpected("recordCloudPalletExport"),
+    ),
     listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
     getShift: vi.fn<HostApi["getShift"]>(() => unexpected("getShift")),
     createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),

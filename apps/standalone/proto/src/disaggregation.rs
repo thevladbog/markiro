@@ -196,6 +196,9 @@ pub struct DisaggregationDocument {
 #[serde(rename_all = "camelCase")]
 pub struct DisaggregationLine {
     pub id: String,
+    /// Explicit provenance for cloud card navigation and the administrator boundary.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cloud_history: bool,
     pub sscc_input: String,
     pub sscc: Option<String>,
     pub box_id: Option<String>,

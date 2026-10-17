@@ -12,6 +12,22 @@ import {
   type KnownBlocksRequest,
   type KnownBlocksResponse,
 } from "./backups.js";
+import {
+  cloudHistoryImportStateSchema,
+  type CloudHistoryImportRequest,
+  type CloudHistoryImportState,
+  type CloudHistoryCompleteRequest,
+} from "./cloud-history.js";
+import {
+  cloudShiftCardSchema,
+  cloudShiftPageSchema,
+  cloudBoxCardSchema,
+  cloudPalletRowsSchema,
+  type CloudShiftCard,
+  type CloudShiftPage,
+  type CloudBoxCard,
+  type CloudPalletRows,
+} from "./cloud-history-read.js";
 import type { HostClient } from "./client.js";
 import {
   deviceUpdateOfferSchema,
@@ -276,6 +292,19 @@ export function shiftPeriodQuery(period: ShiftPeriod | undefined): string {
  * routed to the shell. Members are function-typed properties, not methods,
  * so they can be passed around unbound (`@typescript-eslint/unbound-method`).
  */
+export interface CloudShiftQuery {
+  page?: number;
+  productId?: string;
+  mode?: "aggregation" | "validation";
+  from?: string;
+  to?: string;
+}
+export function cloudShiftsPath(query: CloudShiftQuery = {}): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query))
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  return `/v1/office/cloud-shifts${params.size === 0 ? "" : `?${params}`}`;
+}
 export interface HostApi {
   bootstrap: (request: BootstrapRequest) => Promise<BootstrapResponse>;
   officeLogin: (request: OfficeLoginRequest) => Promise<OfficeSession>;
@@ -376,6 +405,26 @@ export interface HostApi {
   ) => Promise<TemplateDefaults>;
   /** The cloud's data into a new site, or its trial (`dryRun`); administrators only. */
   importFromCloud: (token: string, request: CloudImportRequest) => Promise<CloudImportSummary>;
+  getCloudHistoryState: (token: string) => Promise<CloudHistoryImportState | null>;
+  importCloudHistory: (
+    token: string,
+    request: CloudHistoryImportRequest,
+  ) => Promise<CloudHistoryImportState>;
+  completeCloudHistory: (
+    token: string,
+    request: CloudHistoryCompleteRequest,
+  ) => Promise<CloudHistoryImportState>;
+  cancelCloudHistory: (token: string, request: CloudHistoryCompleteRequest) => Promise<null>;
+  listCloudShifts: (token: string, query?: CloudShiftQuery) => Promise<CloudShiftPage>;
+  getCloudShift: (token: string, id: string) => Promise<CloudShiftCard>;
+  getCloudShiftExportSource: (token: string, id: string) => Promise<ShiftExportRows>;
+  listCloudShiftBoxes: (token: string, id: string) => Promise<CloudBoxCard[]>;
+  listCloudShiftPallets: (token: string, id: string) => Promise<CloudPalletRows[]>;
+  getCloudBox: (token: string, id: string) => Promise<CloudBoxCard>;
+  getCloudBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
+  getCloudPallet: (token: string, id: string) => Promise<CloudPalletRows>;
+  listCloudPalletExports: (token: string, id: string) => Promise<OfficeShiftExports>;
+  recordCloudPalletExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
   /**
    * Without a period every planned and active shift and the closed ones
    * produced in the last 31 days of the host's clock; with one, every shift
@@ -1004,6 +1053,81 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: cloudImportSummarySchema,
       }),
+    getCloudHistoryState: (token) =>
+      client.request("GET", "/v1/office/import/history", {
+        officeToken: token,
+        schema: cloudHistoryImportStateSchema.nullable(),
+      }),
+    importCloudHistory: (token, body) =>
+      client.request("POST", "/v1/office/import/history", {
+        officeToken: token,
+        body,
+        schema: cloudHistoryImportStateSchema,
+      }),
+    completeCloudHistory: (token, body) =>
+      client.request("POST", "/v1/office/import/history/complete", {
+        officeToken: token,
+        body,
+        schema: cloudHistoryImportStateSchema,
+      }),
+    cancelCloudHistory: (token, body) =>
+      client.request("POST", "/v1/office/import/history/cancel", {
+        officeToken: token,
+        body,
+        schema: z.null(),
+      }),
+    listCloudShifts: (token, query) =>
+      client.request("GET", cloudShiftsPath(query), {
+        officeToken: token,
+        schema: cloudShiftPageSchema,
+      }),
+    getCloudShift: (token, id) =>
+      client.request("GET", `/v1/office/cloud-shifts/${id}`, {
+        officeToken: token,
+        schema: cloudShiftCardSchema,
+      }),
+    getCloudShiftExportSource: (token, id) =>
+      client.request("GET", `/v1/office/cloud-shifts/${id}/export-source`, {
+        officeToken: token,
+        schema: shiftExportRowsSchema,
+      }),
+    listCloudShiftBoxes: (token, id) =>
+      client.request("GET", `/v1/office/cloud-shifts/${id}/boxes`, {
+        officeToken: token,
+        schema: z.array(cloudBoxCardSchema),
+      }),
+    listCloudShiftPallets: (token, id) =>
+      client.request("GET", `/v1/office/cloud-shifts/${id}/pallets`, {
+        officeToken: token,
+        schema: z.array(cloudPalletRowsSchema),
+      }),
+    getCloudBox: (token, id) =>
+      client.request("GET", `/v1/office/cloud-boxes/${id}`, {
+        officeToken: token,
+        schema: cloudBoxCardSchema,
+      }),
+    getCloudBoxReportRows: (token, id) =>
+      client.request("GET", `/v1/office/cloud-boxes/${id}/report-data`, {
+        officeToken: token,
+        schema: boxReportRowsSchema,
+      }),
+    getCloudPallet: (token, id) =>
+      client.request("GET", `/v1/office/cloud-pallets/${id}`, {
+        officeToken: token,
+        schema: cloudPalletRowsSchema,
+      }),
+    listCloudPalletExports: (token, id) =>
+      client.request("GET", `/v1/office/cloud-pallets/${id}/exports`, {
+        officeToken: token,
+        schema: officeShiftExportsSchema,
+      }),
+    recordCloudPalletExport: async (token, id, body) => {
+      await client.request("POST", `/v1/office/cloud-pallets/${id}/exports`, {
+        officeToken: token,
+        body,
+        schema: NO_CONTENT,
+      });
+    },
     listShifts: (token, period) =>
       client.request("GET", `/v1/office/shifts${shiftPeriodQuery(period)}`, {
         officeToken: token,

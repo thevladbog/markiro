@@ -572,6 +572,15 @@ mod tests {
         for path in [
             "/v1/device",
             "/v1/office/sscc/counters/460068200/0",
+            "/v1/office/import/history",
+            "/v1/office/cloud-shifts?page=2",
+            "/v1/office/cloud-shifts/abc/export-source",
+            "/v1/office/cloud-shifts/abc/boxes",
+            "/v1/office/cloud-shifts/abc/pallets",
+            "/v1/office/cloud-boxes/abc/report-data",
+            "/v1/office/cloud-pallets/abc/exports",
+            "/v1/office/import/history/complete",
+            "/v1/office/import/history/cancel",
             "/v1/changes?since=5&limit=100",
             // The query part is never split into path segments (`route`
             // stops at `?`), so a `.` there is unaffected by the `.` segment

@@ -1,0 +1,709 @@
+{
+  "request": {
+    "manifest": {
+      "format": "markiro-cloud-history",
+      "formatVersion": 1,
+      "exportedAt": "2026-10-17T00:00:00.000Z",
+      "since": "2025-10-17",
+      "source": {
+        "tenantId": "imp-test-atoll",
+        "tenantName": "Example"
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "gln": "4600682000010",
+        "timeZone": "Europe/Moscow"
+      },
+      "counts": {
+        "shifts": 3,
+        "codes": 5,
+        "boxes": 4,
+        "items": 4,
+        "pallets": 3,
+        "owners": 5
+      },
+      "parts": [
+        {
+          "index": 0,
+          "checksum": "sha256:54f2032c9d762e801871913eb93d5c218f32a1711fd7ea9b35bdc7edda22a1b1",
+          "counts": {
+            "shifts": 3,
+            "codes": 5,
+            "boxes": 4,
+            "items": 4,
+            "pallets": 3,
+            "owners": 5
+          }
+        }
+      ],
+      "checksum": "sha256:78d8bae6763675d3b60beef121a58e1de60022c9dcb89fbe447e27f9f541b5fe"
+    },
+    "part": {
+      "index": 0,
+      "payload": {
+        "shifts": [
+          {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "number": "OCT26-007/S",
+            "mode": "aggregation",
+            "productionDate": "2026-10-16",
+            "plannedDate": null,
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T11:30:00.123Z",
+            "productId": "40000000-0000-4000-8000-000000000001",
+            "productName": "Milk",
+            "gtin14": "04600682000013",
+            "lineId": null,
+            "lineName": null,
+            "palletsEnabled": true,
+            "inWindow": true,
+            "createdFrom": "station",
+            "numberMonthKey": "OCT26",
+            "numberSeq": 7,
+            "createdAt": "2026-10-16T10:00:00.000Z",
+            "plannedQty": 2,
+            "boxCapacity": 2,
+            "palletBoxCapacity": 4,
+            "counterpartyId": null,
+            "counterpartyName": null,
+            "closeReason": null,
+            "shelfLifeDays": 30
+          },
+          {
+            "id": "10000000-0000-4000-8000-000000000003",
+            "number": "OCT26-008",
+            "mode": "validation",
+            "productionDate": "2026-10-16",
+            "plannedDate": null,
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T11:30:00.123Z",
+            "productId": "40000000-0000-4000-8000-000000000001",
+            "productName": "Milk",
+            "gtin14": "04600682000013",
+            "lineId": null,
+            "lineName": null,
+            "palletsEnabled": false,
+            "inWindow": true,
+            "createdFrom": "admin",
+            "numberMonthKey": "OCT26",
+            "numberSeq": 8,
+            "createdAt": "2026-10-16T10:00:00.000Z",
+            "plannedQty": 1,
+            "boxCapacity": null,
+            "palletBoxCapacity": null,
+            "counterpartyId": null,
+            "counterpartyName": null,
+            "closeReason": null,
+            "shelfLifeDays": 30
+          },
+          {
+            "id": "10000000-0000-4000-8000-000000000004",
+            "number": "OCT26-009/S",
+            "mode": "aggregation",
+            "productionDate": null,
+            "plannedDate": "2026-10-15",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T11:30:00.123Z",
+            "productId": "40000000-0000-4000-8000-000000000001",
+            "productName": "Milk",
+            "gtin14": "04600682000013",
+            "lineId": null,
+            "lineName": null,
+            "palletsEnabled": true,
+            "inWindow": true,
+            "createdFrom": "station",
+            "numberMonthKey": "OCT26",
+            "numberSeq": 9,
+            "createdAt": "2026-10-16T10:00:00.000Z",
+            "plannedQty": 2,
+            "boxCapacity": 2,
+            "palletBoxCapacity": 4,
+            "counterpartyId": null,
+            "counterpartyName": null,
+            "closeReason": null,
+            "shelfLifeDays": 30
+          }
+        ],
+        "codes": [
+          {
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "hash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d",
+            "canonical": "010460068200001321SERIAL\u001d91TEST",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "gtin14": "04600682000013",
+            "serial": "SERIAL",
+            "flatOnly": false
+          },
+          {
+            "shiftId": "10000000-0000-4000-8000-000000000003",
+            "hash": "22e35770c8302c84137a6baaf9f1be8d81b13b360894e16d346a173b87e1d542",
+            "canonical": "010460068200001321REPEAT\u001d91TEST",
+            "scannedAt": "2026-10-16T10:01:00.000Z",
+            "gtin14": null,
+            "serial": null,
+            "flatOnly": true
+          },
+          {
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "hash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13",
+            "canonical": "010460068200001321REPORT2\u001d93Tail",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "gtin14": "04600682000013",
+            "serial": "REPORT2",
+            "flatOnly": false
+          },
+          {
+            "shiftId": "10000000-0000-4000-8000-000000000004",
+            "hash": "d0dc3be22dbf69ad16f46af1eae943b623d3353dfbd4517751525ae6b7a4ea08",
+            "canonical": "010460068200001321REPORT3\u001d93Tail",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "gtin14": "04600682000013",
+            "serial": "REPORT3",
+            "flatOnly": false
+          },
+          {
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "hash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37",
+            "canonical": "010460068200001321REPORT4\u001d93Tail",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "gtin14": "04600682000013",
+            "serial": "REPORT4",
+            "flatOnly": false
+          }
+        ],
+        "boxes": [
+          {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000013",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000001"
+          },
+          {
+            "id": "20000000-0000-4000-8000-000000000002",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000020",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000002"
+          },
+          {
+            "id": "20000000-0000-4000-8000-000000000003",
+            "shiftId": "10000000-0000-4000-8000-000000000004",
+            "sscc": "046006820000000037",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000002"
+          },
+          {
+            "id": "20000000-0000-4000-8000-000000000004",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000044",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "items": [
+          {
+            "boxId": "20000000-0000-4000-8000-000000000001",
+            "hash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d",
+            "addedAt": "2026-10-16T10:00:00.000Z"
+          },
+          {
+            "boxId": "20000000-0000-4000-8000-000000000002",
+            "hash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13",
+            "addedAt": "2026-10-16T10:00:00.000Z"
+          },
+          {
+            "boxId": "20000000-0000-4000-8000-000000000003",
+            "hash": "d0dc3be22dbf69ad16f46af1eae943b623d3353dfbd4517751525ae6b7a4ea08",
+            "addedAt": "2026-10-16T10:00:00.000Z"
+          },
+          {
+            "boxId": "20000000-0000-4000-8000-000000000004",
+            "hash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37",
+            "addedAt": "2026-10-16T10:00:00.000Z"
+          }
+        ],
+        "pallets": [
+          {
+            "id": "30000000-0000-4000-8000-000000000001",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "kind": "production",
+            "productId": null,
+            "sscc": "146006820000000010",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "productName": "Milk",
+            "gtin14": "04600682000013",
+            "shelfLifeDays": 30
+          },
+          {
+            "id": "30000000-0000-4000-8000-000000000002",
+            "shiftId": null,
+            "kind": "warehouse",
+            "productId": "40000000-0000-4000-8000-000000000001",
+            "sscc": "146006820000000027",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "productName": "Frozen warehouse product",
+            "gtin14": "04600682000013",
+            "shelfLifeDays": 15
+          },
+          {
+            "id": "30000000-0000-4000-8000-000000000003",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "kind": "production",
+            "productId": null,
+            "sscc": "146006820000000034",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "productName": "Milk",
+            "gtin14": "04600682000013",
+            "shelfLifeDays": 30
+          }
+        ],
+        "owners": [
+          {
+            "hash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "number": "OCT26-007/S",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "boxId": "20000000-0000-4000-8000-000000000001"
+          },
+          {
+            "hash": "22e35770c8302c84137a6baaf9f1be8d81b13b360894e16d346a173b87e1d542",
+            "shiftId": "10000000-0000-4000-8000-000000000002",
+            "number": "JAN24-001",
+            "scannedAt": "2024-01-01T00:00:00.000Z",
+            "boxId": null
+          },
+          {
+            "hash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "number": "OCT26-007/S",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "boxId": "20000000-0000-4000-8000-000000000002"
+          },
+          {
+            "hash": "d0dc3be22dbf69ad16f46af1eae943b623d3353dfbd4517751525ae6b7a4ea08",
+            "shiftId": "10000000-0000-4000-8000-000000000004",
+            "number": "OCT26-009/S",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "boxId": "20000000-0000-4000-8000-000000000003"
+          },
+          {
+            "hash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "number": "OCT26-007/S",
+            "scannedAt": "2026-10-16T10:00:00.000Z",
+            "boxId": "20000000-0000-4000-8000-000000000004"
+          }
+        ]
+      },
+      "checksum": "sha256:54f2032c9d762e801871913eb93d5c218f32a1711fd7ea9b35bdc7edda22a1b1"
+    },
+    "dryRun": false
+  },
+  "exportSources": [
+    {
+      "shift": {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "number": "OCT26-007/S",
+        "status": "closed",
+        "productionDate": "2026-10-16",
+        "productName": "Milk",
+        "palletsEnabled": true,
+        "closedAt": "2026-10-16T11:30:00.123Z",
+        "stationClosedAt": null,
+        "lateDataAt": null,
+        "effectiveOperationDateTime": "2026-10-16T11:30:00.123Z"
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "codes": [
+        {
+          "codeHash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d",
+          "scannedAt": "2026-10-16T10:00:00.000Z",
+          "canonical": "010460068200001321SERIAL\u001d91TEST"
+        },
+        {
+          "codeHash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37",
+          "scannedAt": "2026-10-16T10:00:00.000Z",
+          "canonical": "010460068200001321REPORT4\u001d93Tail"
+        },
+        {
+          "codeHash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13",
+          "scannedAt": "2026-10-16T10:00:00.000Z",
+          "canonical": "010460068200001321REPORT2\u001d93Tail"
+        }
+      ],
+      "boxes": [
+        {
+          "id": "20000000-0000-4000-8000-000000000001",
+          "sscc": "046006820000000013",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null,
+          "palletId": "30000000-0000-4000-8000-000000000001"
+        },
+        {
+          "id": "20000000-0000-4000-8000-000000000002",
+          "sscc": "046006820000000020",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null,
+          "palletId": "30000000-0000-4000-8000-000000000002"
+        },
+        {
+          "id": "20000000-0000-4000-8000-000000000004",
+          "sscc": "046006820000000044",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null,
+          "palletId": "30000000-0000-4000-8000-000000000003"
+        }
+      ],
+      "items": [
+        {
+          "boxId": "20000000-0000-4000-8000-000000000001",
+          "codeHash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d"
+        },
+        {
+          "boxId": "20000000-0000-4000-8000-000000000002",
+          "codeHash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13"
+        },
+        {
+          "boxId": "20000000-0000-4000-8000-000000000004",
+          "codeHash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37"
+        }
+      ],
+      "pallets": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "sscc": "146006820000000010",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000003",
+          "sscc": "146006820000000034",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null
+        }
+      ]
+    },
+    {
+      "shift": {
+        "id": "10000000-0000-4000-8000-000000000003",
+        "number": "OCT26-008",
+        "status": "closed",
+        "productionDate": "2026-10-16",
+        "productName": "Milk",
+        "palletsEnabled": false,
+        "closedAt": "2026-10-16T11:30:00.123Z",
+        "stationClosedAt": null,
+        "lateDataAt": null,
+        "effectiveOperationDateTime": "2026-10-16T11:30:00.123Z"
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "codes": [
+        {
+          "codeHash": "22e35770c8302c84137a6baaf9f1be8d81b13b360894e16d346a173b87e1d542",
+          "scannedAt": "2026-10-16T10:01:00.000Z",
+          "canonical": "010460068200001321REPEAT\u001d91TEST",
+          "flatOnly": true
+        }
+      ],
+      "boxes": [],
+      "items": [],
+      "pallets": []
+    },
+    {
+      "shift": {
+        "id": "10000000-0000-4000-8000-000000000004",
+        "number": "OCT26-009/S",
+        "status": "closed",
+        "productionDate": "2026-10-15",
+        "productName": "Milk",
+        "palletsEnabled": true,
+        "closedAt": "2026-10-16T11:30:00.123Z",
+        "stationClosedAt": null,
+        "lateDataAt": null,
+        "effectiveOperationDateTime": "2026-10-16T11:30:00.123Z"
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "codes": [
+        {
+          "codeHash": "d0dc3be22dbf69ad16f46af1eae943b623d3353dfbd4517751525ae6b7a4ea08",
+          "scannedAt": "2026-10-16T10:00:00.000Z",
+          "canonical": "010460068200001321REPORT3\u001d93Tail"
+        }
+      ],
+      "boxes": [
+        {
+          "id": "20000000-0000-4000-8000-000000000003",
+          "sscc": "046006820000000037",
+          "openedAt": "2026-10-16T10:00:00.000Z",
+          "closedAt": "2026-10-16T10:00:00.000Z",
+          "disassembledAt": null,
+          "palletId": "30000000-0000-4000-8000-000000000002"
+        }
+      ],
+      "items": [
+        {
+          "boxId": "20000000-0000-4000-8000-000000000003",
+          "codeHash": "d0dc3be22dbf69ad16f46af1eae943b623d3353dfbd4517751525ae6b7a4ea08"
+        }
+      ],
+      "pallets": []
+    }
+  ],
+  "palletSources": [
+    {
+      "pallet": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "shiftId": "10000000-0000-4000-8000-000000000001",
+        "kind": "production",
+        "productId": null,
+        "sscc": "146006820000000010",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "productName": "Milk",
+        "gtin14": "04600682000013",
+        "shelfLifeDays": 30
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "boxes": [
+        {
+          "pack": {
+            "id": "20000000-0000-4000-8000-000000000001",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000013",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000001"
+          },
+          "shiftNumber": "OCT26-007/S",
+          "productName": "Milk",
+          "productionDate": "2026-10-16",
+          "units": 1,
+          "sourceTimeZone": "Europe/Moscow"
+        }
+      ]
+    },
+    {
+      "pallet": {
+        "id": "30000000-0000-4000-8000-000000000002",
+        "shiftId": null,
+        "kind": "warehouse",
+        "productId": "40000000-0000-4000-8000-000000000001",
+        "sscc": "146006820000000027",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "productName": "Frozen warehouse product",
+        "gtin14": "04600682000013",
+        "shelfLifeDays": 15
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "boxes": [
+        {
+          "pack": {
+            "id": "20000000-0000-4000-8000-000000000002",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000020",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000002"
+          },
+          "shiftNumber": "OCT26-007/S",
+          "productName": "Milk",
+          "productionDate": "2026-10-16",
+          "units": 1,
+          "sourceTimeZone": "Europe/Moscow"
+        },
+        {
+          "pack": {
+            "id": "20000000-0000-4000-8000-000000000003",
+            "shiftId": "10000000-0000-4000-8000-000000000004",
+            "sscc": "046006820000000037",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000002"
+          },
+          "shiftNumber": "OCT26-009/S",
+          "productName": "Milk",
+          "productionDate": null,
+          "units": 1,
+          "sourceTimeZone": "Europe/Moscow"
+        }
+      ]
+    },
+    {
+      "pallet": {
+        "id": "30000000-0000-4000-8000-000000000003",
+        "shiftId": "10000000-0000-4000-8000-000000000001",
+        "kind": "production",
+        "productId": null,
+        "sscc": "146006820000000034",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "productName": "Milk",
+        "gtin14": "04600682000013",
+        "shelfLifeDays": 30
+      },
+      "organization": {
+        "name": "Example",
+        "inn": "7701234567",
+        "timeZone": "Europe/Moscow"
+      },
+      "boxes": [
+        {
+          "pack": {
+            "id": "20000000-0000-4000-8000-000000000004",
+            "shiftId": "10000000-0000-4000-8000-000000000001",
+            "sscc": "046006820000000044",
+            "openedAt": "2026-10-16T10:00:00.000Z",
+            "closedAt": "2026-10-16T10:00:00.000Z",
+            "disassembledAt": null,
+            "palletId": "30000000-0000-4000-8000-000000000003"
+          },
+          "shiftNumber": "OCT26-007/S",
+          "productName": "Milk",
+          "productionDate": "2026-10-16",
+          "units": 1,
+          "sourceTimeZone": "Europe/Moscow"
+        }
+      ]
+    }
+  ],
+  "nullCloseExportSource": {
+    "shift": {
+      "id": "10000000-0000-4000-8000-000000000001",
+      "number": "OCT26-007/S",
+      "status": "closed",
+      "productionDate": "2026-10-16",
+      "productName": "Milk",
+      "palletsEnabled": true,
+      "closedAt": null,
+      "stationClosedAt": null,
+      "lateDataAt": null,
+      "effectiveOperationDateTime": "2026-10-17T00:00:00.000Z"
+    },
+    "organization": {
+      "name": "Example",
+      "inn": "7701234567",
+      "timeZone": "Europe/Moscow"
+    },
+    "codes": [
+      {
+        "codeHash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d",
+        "scannedAt": "2026-10-16T10:00:00.000Z",
+        "canonical": "010460068200001321SERIAL\u001d91TEST"
+      },
+      {
+        "codeHash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37",
+        "scannedAt": "2026-10-16T10:00:00.000Z",
+        "canonical": "010460068200001321REPORT4\u001d93Tail"
+      },
+      {
+        "codeHash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13",
+        "scannedAt": "2026-10-16T10:00:00.000Z",
+        "canonical": "010460068200001321REPORT2\u001d93Tail"
+      }
+    ],
+    "boxes": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "sscc": "046006820000000013",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "palletId": "30000000-0000-4000-8000-000000000001"
+      },
+      {
+        "id": "20000000-0000-4000-8000-000000000002",
+        "sscc": "046006820000000020",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "palletId": "30000000-0000-4000-8000-000000000002"
+      },
+      {
+        "id": "20000000-0000-4000-8000-000000000004",
+        "sscc": "046006820000000044",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null,
+        "palletId": "30000000-0000-4000-8000-000000000003"
+      }
+    ],
+    "items": [
+      {
+        "boxId": "20000000-0000-4000-8000-000000000001",
+        "codeHash": "001017f7cf0407aa8955fb37a72dbd63e7b57123800904d8a3544074d11d1d5d"
+      },
+      {
+        "boxId": "20000000-0000-4000-8000-000000000002",
+        "codeHash": "c94db5412b04bdb534c2b40e5f53d4ff9b6792f5d29c539849740765b2ea1f13"
+      },
+      {
+        "boxId": "20000000-0000-4000-8000-000000000004",
+        "codeHash": "750aea62f62d2a669b836aa36340a316d3f8b6d895d28e8de71969d7259f5e37"
+      }
+    ],
+    "pallets": [
+      {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "sscc": "146006820000000010",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null
+      },
+      {
+        "id": "30000000-0000-4000-8000-000000000003",
+        "sscc": "146006820000000034",
+        "openedAt": "2026-10-16T10:00:00.000Z",
+        "closedAt": "2026-10-16T10:00:00.000Z",
+        "disassembledAt": null
+      }
+    ]
+  }
+}

@@ -29,6 +29,7 @@ import { errorMessageKey } from "../../host/errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { useOfficeSession } from "../office-session.js";
+import { CloudHistoryImport } from "./CloudHistoryImport.js";
 import { noteText } from "./import-notes.js";
 
 /**
@@ -53,6 +54,7 @@ export function CloudImportPage() {
         description={t("office.cloudImport.subtitle")}
       />
       <CloudImportContent />
+      <CloudHistoryImport />
     </>
   );
 }

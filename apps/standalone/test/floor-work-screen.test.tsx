@@ -441,6 +441,23 @@ describe("the work screen of a shift", () => {
     expect(checkCode).toHaveBeenCalledTimes(1);
   });
 
+  it("names cloud origin and the original shift in an online duplicate notice", async () => {
+    const at = await station();
+    const screenWork = work(at, {
+      online: true,
+      checkCode: async () => ({
+        ...TAKEN,
+        owner: { ...TAKEN.owner, deviceId: "00000000-0000-0000-0000-000000000000" },
+      }),
+    });
+    await screenWork.scanner.listening();
+    await screenWork.scan(km("CLOUD1"));
+    expect(lastLine()).toBe(
+      `Дубль: облачная история · смена OCT26-003, ${scanTime(TAKEN.owner.scannedAt)}.`,
+    );
+    expect(screen.queryByRole("link", { name: /OCT26-003/ })).toBeNull();
+  });
+
   it("hands a refused key of the code check to the shell, and takes the scan", async () => {
     const at = await station();
     const refused = new HostError({

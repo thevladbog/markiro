@@ -13,6 +13,8 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
+import { CloudOrigin } from "../shifts/CloudOrigin.js";
+import { CLOUD_HISTORY_DEVICE_ID } from "../../host/cloud-history-read.js";
 import { errorMessageKey } from "../../host/errors.js";
 import {
   CONFLICT_PAGE_SIZE,
@@ -35,7 +37,7 @@ import { ListError, ListSkeleton } from "../list/ListStates.js";
 import { StateFilter } from "../list/StateFilter.js";
 import { searchableSelect } from "../select-search.js";
 import { UserAvatar } from "../UserAvatar.js";
-import { shiftCardPath, ssccText } from "../shifts/shift-card.js";
+import { ssccText } from "../shifts/shift-card.js";
 import {
   conflictKindKey,
   conflictQuery,
@@ -399,17 +401,16 @@ function ScanCell({ scan, at }: { scan: OfficeConflictScan; at: FormatInstant })
         : t("office.conflicts.scan.box", { sscc: ssccText(scan.boxSscc) });
   return (
     <span className="shift-cell">
-      <Link to={shiftCardPath(scan.shiftId)}>
-        {t("office.conflicts.scan.shift", { number: scan.shiftNumber })}
-      </Link>
-      <span>{scan.deviceName}</span>
+      <CloudOrigin scan={scan} />
       <span className="shift-cell__quiet">
         {scan.operatorName === null
           ? t("office.conflicts.scan.noOperator")
           : t("office.conflicts.scan.operator", { name: scan.operatorName })}
       </span>
       <span className="shift-cell__quiet">{at(scan.scannedAt)}</span>
-      <span className="shift-cell__quiet">{box}</span>
+      <span className="shift-cell__quiet">
+        {scan.deviceId === CLOUD_HISTORY_DEVICE_ID && scan.boxId !== null ? null : box}
+      </span>
     </span>
   );
 }

@@ -3253,7 +3253,7 @@ describe("a box's form data (plan О-Ф)", () => {
       ["openedAt", null],
       ["closedAt", "2026-10-08"],
       ["disassembledAt", 5],
-      ["productName", null],
+      ["productName", 42],
       ["organization", null],
       ["items", null],
     ];

@@ -229,6 +229,9 @@ async fn opened(
     uuid_field("data.palletId", &data.pallet_id)?;
     uuid_field("data.productId", &data.product_id)?;
     instant_field("data.openedAt", &data.opened_at)?;
+    if crate::cloud_history::reserved_identity(&mut *conn, &data.pallet_id).await? {
+        return Err(Reject::field("data.palletId").into());
+    }
     let existing: Option<(String, String)> =
         sqlx::query_as("SELECT device_id, product_id FROM warehouse_pallets WHERE id = ?")
             .bind(&data.pallet_id)
@@ -247,6 +250,11 @@ async fn opened(
         Some(_) => return Ok(Applied::accepted()),
         None => {}
     }
+    // Under the batch writer lock, before any insert or abandoned-draft cleanup.
+    // An ApiError fails/rolls back the batch without a permanent rejected receipt,
+    // so the queued open can retry after activation. Existing acceptances above
+    // (including the stored receipt in receive) retain their idempotent reply.
+    crate::cloud_history::require_ready(conn).await?;
     // An archived product is still a product: the operator opened this pallet offline before the
     // office archived it, and queued work is never refused for what happened later. Only a
     // product the host has never known is the device's fault.
@@ -506,7 +514,7 @@ async fn closed(
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    if taken.is_some() {
+    if taken.is_some() || crate::cloud_history::reserved_sscc(&mut *conn, &data.sscc).await? {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }
     // A box the production side took apart after the scan stays live in the table but is not on

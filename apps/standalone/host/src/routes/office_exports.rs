@@ -138,9 +138,30 @@ pub async fn list_exports(
     _context: OfficeContext,
     ApiPath(id): ApiPath<String>,
 ) -> Result<Json<OfficeShiftExports>, ApiError> {
+    list_exports_in(state, id, false).await
+}
+pub async fn list_cloud_pallet_exports(
+    State(state): State<AppState>,
+    _context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<OfficeShiftExports>, ApiError> {
+    list_exports_in(state, id, true).await
+}
+async fn list_exports_in(
+    state: AppState,
+    id: String,
+    cloud_pallet: bool,
+) -> Result<Json<OfficeShiftExports>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let read = async {
-        require_shift(&mut tx, &id).await?;
+        if cloud_pallet {
+            require_cloud_pallet(&mut tx, &id).await?;
+        } else if crate::cloud_history::read::shift(&mut tx, &id)
+            .await?
+            .is_none()
+        {
+            require_shift(&mut tx, &id).await?;
+        }
         let rows = sqlx::query_as::<_, HistoryRow>(EXPORT_HISTORY_SQL)
             .bind(&id)
             .bind(i64::from(SHIFT_EXPORT_HISTORY_LIMIT))
@@ -284,15 +305,21 @@ where
             pallets_enabled: shift.pallets_enabled,
             closed_at: shift.closed_at,
             station_closed_at: shift.station_closed_at,
+            effective_operation_date_time: None,
             late_data_at: shift.late_data_at,
         },
-        organization: ExportOrganization { name, inn },
+        organization: ExportOrganization {
+            name,
+            inn,
+            time_zone: None,
+        },
         codes: codes
             .into_iter()
             .map(|(code_hash, scanned_at, canonical)| ExportCode {
                 code_hash,
                 scanned_at,
                 canonical,
+                flat_only: false,
             })
             .collect(),
         boxes: boxes
@@ -338,6 +365,29 @@ pub async fn record_export(
     ApiPath(id): ApiPath<String>,
     ApiJson(record): ApiJson<ShiftExportRecord>,
 ) -> Result<StatusCode, ApiError> {
+    record_export_in(state, context, id, record, false).await
+}
+pub async fn record_cloud_pallet_export(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(record): ApiJson<ShiftExportRecord>,
+) -> Result<StatusCode, ApiError> {
+    if record.pallet_id.as_deref() != Some(&id) {
+        return Err(ApiError::validation(
+            "palletId",
+            "must name the requested cloud pallet",
+        ));
+    }
+    record_export_in(state, context, id, record, true).await
+}
+async fn record_export_in(
+    state: AppState,
+    context: OfficeContext,
+    id: String,
+    record: ShiftExportRecord,
+    cloud_pallet: bool,
+) -> Result<StatusCode, ApiError> {
     let format = (record.format_id.as_str(), record.format_version);
     let of_pallet = PALLET_FORMATS.contains(&format);
     if !of_pallet && !SHIFT_FORMATS.contains(&format) {
@@ -374,12 +424,16 @@ pub async fn record_export(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_session_in(&mut tx).await?;
-    let status: Option<String> = sqlx::query_scalar("SELECT status FROM shifts WHERE id = ?")
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM shifts WHERE id = ?1 UNION ALL SELECT 'closed' FROM cloud_history_shifts s JOIN cloud_history_batches b ON b.id=s.batch_id AND b.status='complete' WHERE s.id=?1")
         .bind(&id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(ApiError::internal)?;
+    if cloud_pallet {
+        require_cloud_pallet(&mut tx, &id).await?;
+    }
     let status: ShiftStatus = status
+        .or_else(|| cloud_pallet.then(|| "closed".to_owned()))
         .ok_or_else(|| ApiError::not_found("no such shift"))?
         .parse()
         .map_err(ApiError::internal)?;
@@ -388,13 +442,13 @@ pub async fn record_export(
     }
     if let Some(pallet) = &record.pallet_id {
         let found: Option<i64> =
-            sqlx::query_scalar("SELECT 1 FROM pallets WHERE id = ? AND shift_id = ?")
+            sqlx::query_scalar("SELECT 1 FROM pallets WHERE id = ?1 AND shift_id = ?2 UNION ALL SELECT 1 FROM cloud_history_pallets p JOIN cloud_history_batches b ON b.id=p.batch_id AND b.status='complete' WHERE p.id=?1 AND p.shift_id=?2")
                 .bind(pallet)
                 .bind(&id)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(ApiError::internal)?;
-        if found.is_none() {
+        if found.is_none() && !cloud_pallet {
             return Err(ApiError::validation(
                 "palletId",
                 "no such pallet in the shift",
@@ -407,7 +461,7 @@ pub async fn record_export(
         Entry {
             actor: context.actor(),
             action: actions::SHIFT_EXPORT,
-            target_type: Some("shift"),
+            target_type: Some(if cloud_pallet { "pallet" } else { "shift" }),
             target_id: Some(&id),
             outcome: Outcome::Ok,
             details: json!({
@@ -428,4 +482,12 @@ pub async fn record_export(
     .map_err(ApiError::internal)?;
     tx.commit().await.map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn require_cloud_pallet(conn: &mut SqliteConnection, id: &str) -> Result<(), ApiError> {
+    let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM cloud_history_pallets p JOIN cloud_history_batches b ON b.id=p.batch_id AND b.status='complete' WHERE p.id=?)").bind(id).fetch_one(conn).await.map_err(ApiError::internal)?;
+    if !exists {
+        return Err(ApiError::not_found("no such cloud pallet"));
+    }
+    Ok(())
 }

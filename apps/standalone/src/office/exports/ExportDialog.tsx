@@ -5,6 +5,12 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Checkbox, Input, Modal, RadioGroup } from "@markiro/ui";
 
+import {
+  isSupportedHistoryTimeZone,
+  requireHistoryTimeZone,
+  UnsupportedHistoryTimeZoneError,
+} from "../import/history-time-zone.js";
+import { historyFailure } from "../import/history-errors.js";
 import { errorMessageKey } from "../../host/errors.js";
 import type { OfficeShift, ShiftExportRecord } from "../../host/protocol.js";
 import type { ConflictQuery } from "../../host/review.js";
@@ -63,7 +69,8 @@ type Outcome =
 
 export interface ExportDialogProps {
   /** An active or closed shift. */
-  shift: OfficeShift;
+  shift: Pick<OfficeShift, "id" | "number" | "mode">;
+  sourceKind?: "native" | "cloud";
   /**
    * Only this pallet's ЧЗ document (plan КРТ, the pallet's card): the dialog
    * shows its row and its «XML паллеты», not the shift's formats.
@@ -90,7 +97,12 @@ export interface ExportDialogProps {
  * What the dialog says it does goes into one polite region, where the focus
  * goes when an export starts; the focus then goes to its result.
  */
-export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
+export function ExportDialog({
+  shift,
+  palletId,
+  onClose,
+  sourceKind = "native",
+}: ExportDialogProps) {
   const { t } = useTranslation();
   const formId = useId();
   const progressId = useId();
@@ -99,8 +111,14 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const session = useOfficeSession();
   const queryClient = useQueryClient();
   const refreshFiles = useRefreshStoredFiles();
-  const source = useOfficeQuery(officeKeys.shiftExportSource(shift.id), (api, token) =>
-    api.getShiftExportSource(token, shift.id),
+  const sourceKey =
+    sourceKind === "cloud"
+      ? officeKeys.cloudExportSource(shift.id)
+      : officeKeys.shiftExportSource(shift.id);
+  const source = useOfficeQuery(sourceKey, (api, token) =>
+    sourceKind === "cloud"
+      ? api.getCloudShiftExportSource(token, shift.id)
+      : api.getShiftExportSource(token, shift.id),
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const rows = source.data;
@@ -109,7 +127,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const palletList = useOfficeQuery(
     officeKeys.shiftPallets(shift.id),
     (api, token) => api.listShiftPallets(token, shift.id),
-    { enabled: rows?.shift.palletsEnabled === true },
+    { enabled: sourceKind === "native" && rows?.shift.palletsEnabled === true },
   );
   // The shift's unreviewed conflicts (plan КНФ): information, so a list that does not load
   // leaves the dialog whole and the warning out (ПР-12: never a refusal).
@@ -134,16 +152,23 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   // The rows of a shift of 200 000 codes are tens of megabytes: they do not stay in the cache
   // once the dialog is gone, and the next opening reads them again.
   useEffect(() => {
-    const key = officeKeys.shiftExportSource(shift.id);
+    const key =
+      sourceKind === "cloud"
+        ? officeKeys.cloudExportSource(shift.id)
+        : officeKeys.shiftExportSource(shift.id);
     return () => queryClient.removeQueries({ queryKey: key });
-  }, [queryClient, shift.id]);
+  }, [queryClient, shift.id, sourceKind]);
 
   // The time zone of the organization, this PC's while its profile is unread or names a zone
   // this PC lacks: it names the folder, and writes the time of late data.
-  const timeZone =
+  const nativeTimeZone =
     org.data !== undefined && isKnownTimeZone(org.data.timeZone)
       ? org.data.timeZone
       : Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const sourceZoneSupported =
+    sourceKind !== "cloud" || isSupportedHistoryTimeZone(rows?.organization.timeZone);
+  const reportTimeZone = () =>
+    sourceKind === "cloud" ? requireHistoryTimeZone(rows?.organization.timeZone) : nativeTimeZone;
 
   const checks = plan.status === "ready" ? plan.plan.checks : [];
   // A pallet's own dialog (plan КРТ) lists that pallet only.
@@ -208,11 +233,18 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
       let fresh;
       try {
         fresh = await Promise.race([
-          session.call((token) => session.api.getShiftExportSource(token, shift.id)),
+          session.call((token) =>
+            sourceKind === "cloud"
+              ? session.api.getCloudShiftExportSource(token, shift.id)
+              : session.api.getShiftExportSource(token, shift.id),
+          ),
           calledOffWhileReading,
         ]);
       } catch (error) {
-        setOutcome({ kind: "failed", message: t(errorMessageKey(error)) });
+        setOutcome({
+          kind: "failed",
+          message: sourceKind === "cloud" ? historyFailure(t, error) : t(errorMessageKey(error)),
+        });
         return;
       } finally {
         wake.current = null;
@@ -221,6 +253,10 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
         setOutcome({ kind: "cancelled" });
         return;
       }
+      const originalZone =
+        sourceKind === "cloud"
+          ? requireHistoryTimeZone(fresh.organization.timeZone)
+          : nativeTimeZone;
       setPhase("forming");
       await yieldToUi();
       const formedAt = new Date().toISOString();
@@ -272,7 +308,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
       let folderFailure: string | null = null;
       try {
         saved = await files.save(
-          exportFolder(fresh.shift.number, format.id, formedAt, timeZone),
+          exportFolder(fresh.shift.number, format.id, formedAt, originalZone),
           result.parts.map((part) => ({ name: part.filename, bytes: part.bytes })),
         );
       } catch (error) {
@@ -298,8 +334,13 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
       // Nothing above is meant to throw; if it does, the dialog says so instead of going quiet.
       setOutcome({
         kind: "failed",
-        message: t("office.exports.failures.GENERATION_FAILED"),
-        reason: error instanceof Error && error.name !== "" ? error.name : "Error",
+        message:
+          error instanceof UnsupportedHistoryTimeZoneError
+            ? historyFailure(t, error)
+            : t("office.exports.failures.GENERATION_FAILED"),
+        ...(error instanceof UnsupportedHistoryTimeZoneError
+          ? {}
+          : { reason: error instanceof Error && error.name !== "" ? error.name : "Error" }),
       });
     } finally {
       inFlight.current = false;
@@ -356,7 +397,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (selected === undefined || lineLimitError !== undefined) return;
+    if (selected === undefined || lineLimitError !== undefined || !sourceZoneSupported) return;
     void exportNow(selected.format, maxLines, null);
   };
 
@@ -364,7 +405,7 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
     switch (warning.kind) {
       case "late_data":
         return t("office.exports.warnings.late_data", {
-          at: new Date(warning.at).toLocaleString("ru", { timeZone }),
+          at: new Date(warning.at).toLocaleString("ru", { timeZone: reportTimeZone() }),
         });
       case "open_pallets":
         return t("office.exports.warnings.open_pallets", { count: warning.boxes });
@@ -478,8 +519,25 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
   const content = () => {
     if (source.isPending || org.isPending) return <PageLoading />;
     if (source.isError || rows === undefined) {
-      return <LoadError error={source.error} onRetry={() => void source.refetch()} />;
+      return sourceKind === "cloud" ? (
+        <Alert
+          tone="error"
+          action={
+            <Button variant="secondary" onClick={() => void source.refetch()}>
+              {t("office.common.retry")}
+            </Button>
+          }
+        >
+          {historyFailure(t, source.error)}
+        </Alert>
+      ) : (
+        <LoadError error={source.error} onRetry={() => void source.refetch()} />
+      );
     }
+    if (!sourceZoneSupported)
+      return (
+        <Alert tone="error">{t("office.cloudHistory.errors.history_time_zone_unsupported")}</Alert>
+      );
     return (
       <>
         <p>
@@ -649,7 +707,9 @@ export function ExportDialog({ shift, palletId, onClose }: ExportDialogProps) {
               type="submit"
               form={formId}
               loading={busy}
-              disabled={selected === undefined || lineLimitError !== undefined}
+              disabled={
+                selected === undefined || lineLimitError !== undefined || !sourceZoneSupported
+              }
             >
               {t("office.exports.submit")}
             </Button>

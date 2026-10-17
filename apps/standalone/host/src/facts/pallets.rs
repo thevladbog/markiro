@@ -35,6 +35,9 @@ pub async fn find(
     context: &Context<'_>,
     id: &str,
 ) -> Result<Option<OwnPallet>, Failure> {
+    if crate::cloud_history::reserved_identity(&mut *conn, id).await? {
+        return Err(Reject::new(receipt_codes::PALLET_UNKNOWN).into());
+    }
     type PalletRow = (
         String,
         String,

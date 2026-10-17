@@ -13,6 +13,28 @@ import {
 
 import { shiftExportRowsSchema, type ShiftExportRows } from "../src/host/protocol.js";
 import { runExport } from "../src/office/exports/run-export.js";
+import { shiftOperationDateTime } from "../src/office/exports/export-source.js";
+
+it("preserves native station, host close and generation-time fallback precedence", () => {
+  const native = shiftExportRowsSchema.parse(
+    JSON.parse(
+      readFileSync(new URL("../proto/fixtures/shift-export-rows.json", testModuleUrl), "utf8"),
+    ),
+  ).shift;
+  expect(native).not.toHaveProperty("effectiveOperationDateTime");
+  const station = "2026-10-16T10:00:00.123Z";
+  const closed = "2026-10-16T10:01:00.000Z";
+  const formed = "2026-10-18T12:00:00.000Z";
+  expect(
+    shiftOperationDateTime({ ...native, stationClosedAt: station, closedAt: closed }, formed),
+  ).toBe(station);
+  expect(
+    shiftOperationDateTime({ ...native, stationClosedAt: null, closedAt: closed }, formed),
+  ).toBe(closed);
+  expect(shiftOperationDateTime({ ...native, stationClosedAt: null, closedAt: null }, formed)).toBe(
+    formed,
+  );
+});
 
 /**
  * The standalone's half of the export parity with the cloud (plan ЧЗ). The

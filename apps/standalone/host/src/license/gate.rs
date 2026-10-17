@@ -25,6 +25,7 @@ pub async fn require_new_shifts(
     app: &AppState,
     conn: &mut SqliteConnection,
 ) -> Result<(), ApiError> {
+    crate::cloud_history::require_ready(conn).await?;
     let snapshot = app
         .license
         .snapshot(app, conn)
@@ -173,6 +174,16 @@ pub const NEVER: &[(&str, &str)] = &[
     ("DELETE", "/v1/office/pallet-sheets/{id}"),
     ("PUT", "/v1/office/pallet-sheet-default"),
     ("GET", "/v1/office/shifts"),
+    ("GET", "/v1/office/cloud-shifts"),
+    ("GET", "/v1/office/cloud-shifts/{id}/boxes"),
+    ("GET", "/v1/office/cloud-shifts/{id}/pallets"),
+    ("GET", "/v1/office/cloud-boxes/{id}"),
+    ("GET", "/v1/office/cloud-boxes/{id}/report-data"),
+    ("GET", "/v1/office/cloud-pallets/{id}"),
+    ("GET", "/v1/office/cloud-pallets/{id}/exports"),
+    ("POST", "/v1/office/cloud-pallets/{id}/exports"),
+    ("GET", "/v1/office/cloud-shifts/{id}"),
+    ("GET", "/v1/office/cloud-shifts/{id}/export-source"),
     ("POST", "/v1/office/shifts"),
     ("GET", "/v1/office/shifts/{id}"),
     ("PUT", "/v1/office/shifts/{id}"),
@@ -216,6 +227,10 @@ pub const NEVER: &[(&str, &str)] = &[
     ("POST", "/v1/office/backups/resume"),
     ("POST", "/v1/office/updates/started"),
     ("POST", "/v1/office/import"),
+    ("POST", "/v1/office/import/history"),
+    ("GET", "/v1/office/import/history"),
+    ("POST", "/v1/office/import/history/complete"),
+    ("POST", "/v1/office/import/history/cancel"),
     ("POST", "/v1/office/update-package/manifest"),
     ("PUT", "/v1/office/update-package/{upload_id}/installer"),
     ("GET", "/v1/office/update-status"),

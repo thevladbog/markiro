@@ -36,7 +36,9 @@ pub struct Target {
     pub box_id: Option<String>,
     pub pallet_id: Option<String>,
     pub status: LineStatus,
-    pub product_id: String,
+    pub product_id: Option<String>,
+    pub cloud: bool,
+    pub product_name: Option<String>,
     pub code_count: i64,
 }
 
@@ -83,6 +85,21 @@ pub async fn apply_targets(
     let mut applied = Applied::default();
     let mut shifts: BTreeSet<String> = BTreeSet::new();
     for target in targets {
+        if target.cloud {
+            let changed = crate::cloud_history::operations::apply_target(
+                &mut *conn,
+                document_id,
+                target,
+                instant,
+                at,
+                rev,
+            )
+            .await?;
+            applied.boxes += changed.boxes;
+            applied.pallets += changed.pallets;
+            applied.codes += changed.codes;
+            continue;
+        }
         if let Some(box_id) = &target.box_id {
             // As a station's `disassemble` (facts/exception.rs): the code
             // every live item's scan owns is free (what
@@ -197,7 +214,9 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
             box_id: Some(id),
             pallet_id: None,
             status: classify(closed, shift_closed, disassembled),
-            product_id,
+            product_id: Some(product_id),
+            cloud: false,
+            product_name: None,
             code_count,
         }));
     }
@@ -206,12 +225,17 @@ pub async fn resolve(conn: &mut SqliteConnection, sscc: &str) -> Result<Option<T
         .fetch_optional(&mut *conn)
         .await
         .map_err(ApiError::internal)?;
+    if found.is_none() {
+        return crate::cloud_history::operations::resolve(conn, sscc).await;
+    }
     Ok(found.map(
         |(id, closed, shift_closed, disassembled, product_id, code_count)| Target {
             box_id: None,
             pallet_id: Some(id),
             status: classify(closed, shift_closed, disassembled),
-            product_id,
+            product_id: Some(product_id),
+            cloud: false,
+            product_name: None,
             code_count,
         },
     ))

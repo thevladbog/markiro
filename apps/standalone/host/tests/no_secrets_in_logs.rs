@@ -2078,7 +2078,16 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
         "routes/office_shifts.rs",
         "routes/warehouse.rs",
     ];
-    let import_path = ["cloud_import.rs", "routes/cloud_import.rs"];
+    let import_path = [
+        "cloud_import.rs",
+        "routes/cloud_import.rs",
+        "cloud_history/mod.rs",
+        "cloud_history/read.rs",
+        "cloud_history/operations.rs",
+        "routes/cloud_shifts.rs",
+        "cloud_history/validation.rs",
+        "routes/cloud_history.rs",
+    ];
     let mut import_files = 0;
     let mut license_files = 0;
     let mut facts_files = 0;
@@ -2158,6 +2167,6 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_four_audited_lines()
     // СКЛ: the lookup answers a unit's full code and logs nothing, the
     // records' batch has the one `error!` by device and position.
     assert_eq!(facts_files, 20);
-    assert_eq!(import_files, 2, "the import modules were not found");
+    assert_eq!(import_files, 8, "the import modules were not found");
     assert_eq!(license_files, 9, "the license's modules were not found");
 }

@@ -1475,6 +1475,48 @@ file chooser in WebView2, a real 32 MiB file and the import of a large catalog
 over IPC. The tool's Postgres test ran on a disposable Postgres 17 container
 only.
 
+### Imported shift history (cloud → standalone)
+
+Catalog formats 1/2 stay unchanged. History is a separate `markiro-cloud-history`
+version-1 JSONL: manifest followed by bounded parts (5,000 rows / 4 MiB each).
+`CloudHistoryImport` below «Перенос из облака» streams the selected Blob to EOF
+before enabling checks, dry-runs every part, resumes by the accepted receipt
+inventory and calls complete only after EOF. Blob/code rows stay in local refs,
+never mutation variables, persisted caches, logs or storage. Production remains
+blocked while pending; only a complete response is shown as ready. Administrators
+alone manage state/import/complete/cancel. Cancel names the actual pending batch,
+deletes staging, and tombstones its checksum: the same canceled file cannot be
+uploaded again; generate a new snapshot, possibly from the same restored copy.
+
+Cloud UI routes are `/cloud-shifts`, `/cloud-shifts/:id`, `/cloud-boxes/:id` and
+`/cloud-pallets/:id`, reached from the source links under «Смены». Do not cast an
+imported object to `OfficeShift` or synthesize a template, device or scan. Native
+`/codes` remains a local journal. `CloudOrigin` branches on NIL device provenance:
+it links only after the dedicated cloud object resolves, otherwise keeps the
+original number/pack provenance as text. Imported disaggregation lines carry
+`cloudHistory:true`; their writes require the current administrator, while native
+permissions and both office roles' report/conflict-review access are preserved.
+
+Reports use the established domain renderers, `ExportDialog`'s explicit cloud
+source adapter and ordinary saved-file controls. Cloud forms use frozen names,
+product data, null original logo and original time zone. Cloud shift/box cards
+carry `sourceTimeZone`; cloud organization DTOs carry `timeZone`. Shared
+`ExportOrganization.timeZone` is optional and omitted in native responses; never
+substitute a later local profile zone into a historical form. Closed task blanks
+remain unavailable. Missing date and unavailable original disassembled contents
+have precise source errors. Flat-only repeats stay in flat TXT/CSV only; a card's
+owner count is labeled as current authoritative owners. New files never imply
+submission to ЧЗ. Online floor duplicates retain an additive `cloudHistory:true`
+outcome from the NIL owner and show cloud origin plus the original shift number;
+the native/local outcome, queued journal and ownership behavior are unchanged.
+
+The controlled browser harness `test/harness/cloud-history/index.html` mounts the
+real Office, host client schemas, real generators and stored-file checksum reader
+against the shared `cloud-history-read.json` fixture using an in-memory transport.
+`measure.mjs` exercises import, every shift export, production/warehouse pallet
+XML, box/pallet/placard/shift placard forms and file readback. This proves browser
+integration, not Rust IPC, WebView2, Windows, printing or external acceptance.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host

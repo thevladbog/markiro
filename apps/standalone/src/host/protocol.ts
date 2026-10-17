@@ -1114,7 +1114,8 @@ export type OfficeShift = z.infer<typeof officeShiftSchema>;
  * SSCCs and codes are read as plain text: the ported source rules and the
  * domain's renderer say what is wrong with one (`INVALID_BOX_SSCC`,
  * `INVALID_CIS`), as the cloud's export does, instead of the whole answer
- * failing as an invalid response.
+ * failing as an invalid response. Imported source instants retain PostgreSQL's
+ * RFC3339 offsets and precision; these report schemas do not rewrite them.
  */
 export const shiftExportRowsSchema = z.object({
   shift: z.object({
@@ -1124,21 +1125,31 @@ export const shiftExportRowsSchema = z.object({
     productionDate: civilDateTextSchema,
     productName: z.string(),
     palletsEnabled: z.boolean(),
-    closedAt: z.iso.datetime().nullable(),
-    stationClosedAt: z.iso.datetime().nullable(),
-    lateDataAt: z.iso.datetime().nullable(),
+    closedAt: z.iso.datetime({ offset: true }).nullable(),
+    stationClosedAt: z.iso.datetime({ offset: true }).nullable(),
+    effectiveOperationDateTime: z.iso.datetime({ offset: true }).optional(),
+    lateDataAt: z.iso.datetime({ offset: true }).nullable(),
   }),
-  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  organization: z.object({
+    name: z.string(),
+    inn: z.string().nullable(),
+    timeZone: z.string().optional(),
+  }),
   codes: z.array(
-    z.object({ codeHash: z.string(), scannedAt: z.iso.datetime(), canonical: z.string() }),
+    z.object({
+      codeHash: z.string(),
+      scannedAt: z.iso.datetime({ offset: true }),
+      canonical: z.string(),
+      flatOnly: z.boolean().optional(),
+    }),
   ),
   boxes: z.array(
     z.object({
       id: z.string(),
       sscc: z.string().nullable(),
-      openedAt: z.iso.datetime(),
-      closedAt: z.iso.datetime().nullable(),
-      disassembledAt: z.iso.datetime().nullable(),
+      openedAt: z.iso.datetime({ offset: true }),
+      closedAt: z.iso.datetime({ offset: true }).nullable(),
+      disassembledAt: z.iso.datetime({ offset: true }).nullable(),
       palletId: z.string().nullable(),
     }),
   ),
@@ -1147,9 +1158,9 @@ export const shiftExportRowsSchema = z.object({
     z.object({
       id: z.string(),
       sscc: z.string().nullable(),
-      openedAt: z.iso.datetime(),
-      closedAt: z.iso.datetime().nullable(),
-      disassembledAt: z.iso.datetime().nullable(),
+      openedAt: z.iso.datetime({ offset: true }),
+      closedAt: z.iso.datetime({ offset: true }).nullable(),
+      disassembledAt: z.iso.datetime({ offset: true }).nullable(),
     }),
   ),
 });
@@ -1246,11 +1257,15 @@ export const boxReportRowsSchema = z.object({
   id: z.string(),
   shiftId: z.uuid(),
   sscc: z.string().nullable(),
-  openedAt: z.iso.datetime(),
-  closedAt: z.iso.datetime().nullable(),
-  disassembledAt: z.iso.datetime().nullable(),
-  productName: z.string(),
-  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  openedAt: z.iso.datetime({ offset: true }),
+  closedAt: z.iso.datetime({ offset: true }).nullable(),
+  disassembledAt: z.iso.datetime({ offset: true }).nullable(),
+  productName: z.string().nullable(),
+  organization: z.object({
+    name: z.string(),
+    inn: z.string().nullable(),
+    timeZone: z.string().optional(),
+  }),
   items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
 });
 export type BoxReportRows = z.infer<typeof boxReportRowsSchema>;
@@ -1272,7 +1287,11 @@ export const palletReportRowsSchema = z.object({
     gtin14: z.string(),
     shelfLifeDays: z.number().int().positive().nullable(),
   }),
-  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  organization: z.object({
+    name: z.string(),
+    inn: z.string().nullable(),
+    timeZone: z.string().optional(),
+  }),
   pallets: z.array(
     z.object({
       id: z.string(),

@@ -14,6 +14,14 @@ use markiro_proto::{entities, ChangesResponse, ErrorBody};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
+#[test]
+fn imported_line_keeps_explicit_provenance_on_round_trip() {
+    let line = round_trip::<markiro_proto::disaggregation::DisaggregationLine>(
+        "cloud-history-disaggregation-line.json",
+    );
+    assert!(line.cloud_history);
+}
+
 fn fixture(name: &str) -> Value {
     let path = format!("{}/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     let text =

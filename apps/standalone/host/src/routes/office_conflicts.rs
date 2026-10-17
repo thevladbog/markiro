@@ -52,14 +52,24 @@ const COLUMNS: &str = "SELECT c.id, c.kind, c.code_hash, l.gtin14, l.serial, c.d
      ws.created_from AS w_origin, w.device_id AS w_device_id, wd.name AS w_device_name, \
      wo.name AS w_operator_name, w.scanned_at AS w_scanned_at, w.box_id AS w_box_id, \
      wb.sscc AS w_box_sscc, ws.status = 'closed' AS w_shift_closed, \
-     wb.disassembled_at IS NOT NULL AS w_box_disassembled ";
+     wb.disassembled_at IS NOT NULL AS w_box_disassembled, NULL AS w_number ";
 
-const FILTER: &str = " WHERE (?1 IS NULL OR l.shift_id = ?1) \
-     AND (?2 IS NULL OR (c.reviewed_at IS NOT NULL) = ?2)";
+const CLOUD: &str = "SELECT c.id, 'late' AS kind, c.code_hash, l.gtin14, l.serial, c.detected_at,
+ c.reviewed_at, ru.name AS reviewed_by_name,
+ l.shift_id AS l_shift_id,ls.number_month_key AS l_month_key,ls.number_seq AS l_seq,ls.created_from AS l_origin,
+ l.device_id AS l_device_id,ld.name AS l_device_name,lo.name AS l_operator_name,l.scanned_at AS l_scanned_at,
+ l.box_id AS l_box_id,lb.sscc AS l_box_sscc,ls.status='closed' AS l_shift_closed,lb.disassembled_at IS NOT NULL AS l_box_disassembled,
+ c.winner_shift_id AS w_shift_id,'' AS w_month_key,0 AS w_seq,'' AS w_origin,
+ '00000000-0000-0000-0000-000000000000' AS w_device_id,'Облачная история' AS w_device_name,NULL AS w_operator_name,
+ c.winner_scanned_at AS w_scanned_at,c.winner_box_id AS w_box_id,wb.sscc AS w_box_sscc,1 AS w_shift_closed,
+ wb.disassembled_at IS NOT NULL AS w_box_disassembled,c.winner_number AS w_number
+ FROM cloud_history_conflicts c JOIN scans l ON l.id=c.loser_scan_id JOIN shifts ls ON ls.id=l.shift_id
+ JOIN devices ld ON ld.id=l.device_id LEFT JOIN operators lo ON lo.id=l.operator_id LEFT JOIN boxes lb ON lb.id=l.box_id
+ LEFT JOIN cloud_history_boxes wb ON wb.id=c.winner_box_id LEFT JOIN office_users ru ON ru.id=c.reviewed_by";
 
-/// The list's order: newest detection first; one batch detects several at one
-/// instant, so the later losing scan, then the id, keep the order fixed.
-const ORDER: &str = " ORDER BY c.detected_at DESC, l.scanned_at DESC, c.id DESC LIMIT ?3 OFFSET ?4";
+fn union_query() -> String {
+    format!("{COLUMNS}{FROM} UNION ALL {CLOUD}")
+}
 
 pub const COUNT: &str = "SELECT COUNT(*) FROM code_conflicts c \
      JOIN scans l ON l.id = c.loser_scan_id \
@@ -87,6 +97,7 @@ struct ConflictRow {
     l_box_sscc: Option<String>,
     l_shift_closed: bool,
     l_box_disassembled: bool,
+    w_number: Option<String>,
     w_shift_id: String,
     w_month_key: String,
     w_seq: i64,
@@ -125,7 +136,10 @@ fn conflict(row: ConflictRow) -> Result<OfficeConflict, ApiError> {
             box_disassembled: row.l_box_disassembled,
         },
         winner: OfficeConflictScan {
-            shift_number: number(&row.w_month_key, row.w_seq, &row.w_origin)?,
+            shift_number: match row.w_number {
+                Some(number) => number,
+                None => number(&row.w_month_key, row.w_seq, &row.w_origin)?,
+            },
             shift_id: row.w_shift_id,
             device_id: row.w_device_id,
             device_name: row.w_device_name,
@@ -151,11 +165,12 @@ pub(crate) async fn read_conflict(
     conn: &mut SqliteConnection,
     id: &str,
 ) -> Result<Option<OfficeConflict>, ApiError> {
-    let row: Option<ConflictRow> = sqlx::query_as(&format!("{COLUMNS}{FROM} WHERE c.id = ?"))
-        .bind(id)
-        .fetch_optional(conn)
-        .await
-        .map_err(ApiError::internal)?;
+    let row: Option<ConflictRow> =
+        sqlx::query_as(&format!("SELECT * FROM ({}) WHERE id = ?", union_query()))
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+            .map_err(ApiError::internal)?;
     row.map(conflict).transpose()
 }
 
@@ -201,13 +216,13 @@ pub async fn list_conflicts(
     // One snapshot: the count and the rows agree.
     let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
     let read = async {
-        let total: i64 = sqlx::query_scalar(COUNT)
+        let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM ({}) WHERE (?1 IS NULL OR l_shift_id=?1) AND (?2 IS NULL OR (reviewed_at IS NOT NULL)=?2)",union_query()))
             .bind(&query.shift)
             .bind(reviewed)
             .fetch_one(&mut *tx)
             .await
             .map_err(ApiError::internal)?;
-        let rows: Vec<ConflictRow> = sqlx::query_as(&format!("{COLUMNS}{FROM}{FILTER}{ORDER}"))
+        let rows: Vec<ConflictRow> = sqlx::query_as(&format!("SELECT * FROM ({}) WHERE (?1 IS NULL OR l_shift_id=?1) AND (?2 IS NULL OR (reviewed_at IS NOT NULL)=?2) ORDER BY detected_at DESC,l_scanned_at DESC,id DESC LIMIT ?3 OFFSET ?4",union_query()))
             .bind(&query.shift)
             .bind(reviewed)
             .bind(size)
@@ -252,10 +267,14 @@ pub async fn review_conflict(
         return Ok(Json(current));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    let updated = sqlx::query(
-        "UPDATE code_conflicts SET reviewed_at = ?, reviewed_by = ? \
-         WHERE id = ? AND reviewed_at IS NULL",
-    )
+    let table = if current.winner.device_id == uuid::Uuid::nil().to_string() {
+        "cloud_history_conflicts"
+    } else {
+        "code_conflicts"
+    };
+    let updated = sqlx::query(&format!(
+        "UPDATE {table} SET reviewed_at = ?, reviewed_by = ? WHERE id = ? AND reviewed_at IS NULL"
+    ))
     .bind(&at)
     .bind(&context.user.id)
     .bind(&id)

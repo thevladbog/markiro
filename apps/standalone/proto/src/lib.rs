@@ -274,6 +274,7 @@ pub mod shift_close_reasons {
 }
 
 pub mod backup;
+pub mod cloud_history;
 pub mod cloud_import;
 pub mod code_search;
 pub mod disaggregation;
@@ -2945,6 +2946,9 @@ pub struct FactReceipts {
 /// The scan that owns a code (stage 2a spec §4.6): the earliest accepted
 /// scan of it. `sameDevice` tells the asking device that the scan is its
 /// own. It is a `conflict` receipt's `details.winner` too.
+/// Imported cloud ownership has no local scan/device: `deviceId` is the
+/// NIL UUID and `sameDevice` is always false. This is provenance, not a
+/// navigable device or native shift-journal identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodeOwner {
@@ -3214,6 +3218,10 @@ pub struct ExportShift {
     pub pallets_enabled: bool,
     pub closed_at: Option<String>,
     pub station_closed_at: Option<String>,
+    /// Frozen report operation time for imported snapshots; not a close event.
+    /// Native sources omit this and retain their existing close/fallback rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_operation_date_time: Option<String>,
     pub late_data_at: Option<String>,
 }
 
@@ -3223,6 +3231,9 @@ pub struct ExportShift {
 pub struct ExportOrganization {
     pub name: String,
     pub inn: Option<String>,
+    /// Frozen source zone for imported reports. Native responses preserve omission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
 }
 
 /// A code the shift owns: its hash, the instant of its owning scan and that
@@ -3233,6 +3244,9 @@ pub struct ExportCode {
     pub code_hash: String,
     pub scanned_at: String,
     pub canonical: String,
+    /// Validation reprocessing contributes only to flat TXT/CSV exports.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flat_only: bool,
 }
 
 /// A box of the shift; the device's instants as it sent them.
@@ -3285,7 +3299,7 @@ pub struct BoxReportRows {
     pub opened_at: String,
     pub closed_at: Option<String>,
     pub disassembled_at: Option<String>,
-    pub product_name: String,
+    pub product_name: Option<String>,
     pub organization: ExportOrganization,
     pub items: Vec<BoxReportItem>,
 }

@@ -207,6 +207,7 @@ pub async fn register_known_blocks(
     for block in &request.blocks {
         let (outcome, registered) = decide(&mut tx, &device.id, block).await?;
         if let Some((from, to)) = registered {
+            crate::cloud_history::require_ready(&mut tx).await?;
             let rev = match rev {
                 Some(rev) => rev,
                 None => {

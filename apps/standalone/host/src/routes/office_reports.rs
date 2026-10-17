@@ -119,8 +119,12 @@ where
         opened_at: found.opened_at,
         closed_at: found.closed_at,
         disassembled_at: found.disassembled_at,
-        product_name: found.product_name,
-        organization: ExportOrganization { name, inn },
+        product_name: Some(found.product_name),
+        organization: ExportOrganization {
+            name,
+            inn,
+            time_zone: None,
+        },
         items: items
             .into_iter()
             .map(|(gtin14, serial, canonical)| BoxReportItem {
@@ -275,7 +279,11 @@ where
             gtin14: shift.gtin14,
             shelf_life_days: shift.shelf_life_days,
         },
-        organization: ExportOrganization { name, inn },
+        organization: ExportOrganization {
+            name,
+            inn,
+            time_zone: None,
+        },
         pallets: pallets
             .into_iter()
             .map(|row| ReportPallet {

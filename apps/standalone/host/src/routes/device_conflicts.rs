@@ -25,7 +25,7 @@ use crate::validate;
 pub const STATUS_SQL: &str = "SELECT l.record_id, c.reviewed_at FROM scans l \
      JOIN code_conflicts c ON c.loser_scan_id = l.id \
      WHERE l.device_id = ?1 AND l.record_id IN (SELECT value FROM json_each(?2)) \
-     AND c.reviewed_at IS NOT NULL ORDER BY l.record_id";
+     AND c.reviewed_at IS NOT NULL UNION ALL SELECT l.record_id,c.reviewed_at FROM scans l JOIN cloud_history_conflicts c ON c.loser_scan_id=l.id WHERE l.device_id=?1 AND l.record_id IN (SELECT value FROM json_each(?2)) AND c.reviewed_at IS NOT NULL ORDER BY record_id";
 
 /// The conflicts after the cursor drive the read (`code_conflicts_detected`,
 /// migration 0022), in their order: `CROSS JOIN` keeps the planner from

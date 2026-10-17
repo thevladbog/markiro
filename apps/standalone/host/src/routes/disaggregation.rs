@@ -63,14 +63,18 @@ const DOCUMENTS_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.reason_id, r.nam
      JOIN office_users cu ON cu.id = d.created_by \
      LEFT JOIN office_users au ON au.id = d.applied_by";
 
-const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, l.box_id, l.pallet_id, l.status, \
-     l.product_id, p.name AS product_name, l.code_count, l.validated_at, s.id AS shift_id, \
-     s.number_month_key, s.number_seq, s.created_from \
+const LINES_SQL: &str = "SELECT l.id, l.sscc_input, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, l.status, \
+     COALESCE(l.product_id,l.cloud_product_id) AS product_id, COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count, l.validated_at, COALESCE(s.id,cs.id) AS shift_id, \
+     s.number_month_key, s.number_seq, s.created_from, cs.number AS cloud_number, \
+     (l.cloud_box_id IS NOT NULL OR l.cloud_pallet_id IS NOT NULL) AS cloud_history \
      FROM disaggregation_document_lines l \
      LEFT JOIN products p ON p.id = l.product_id \
      LEFT JOIN boxes b ON b.id = l.box_id \
      LEFT JOIN pallets pl ON pl.id = l.pallet_id \
      LEFT JOIN shifts s ON s.id = COALESCE(b.shift_id, pl.shift_id) \
+     LEFT JOIN cloud_history_boxes cb ON cb.id=l.cloud_box_id \
+     LEFT JOIN cloud_history_pallets cp ON cp.id=l.cloud_pallet_id \
+     LEFT JOIN cloud_history_shifts cs ON cs.id=COALESCE(cb.shift_id,cp.shift_id) \
      WHERE l.document_id = ? ORDER BY l.position";
 
 #[derive(sqlx::FromRow)]
@@ -123,6 +127,7 @@ impl DocumentRow {
 #[derive(sqlx::FromRow)]
 struct LineRow {
     id: String,
+    cloud_history: bool,
     sscc_input: String,
     sscc: Option<String>,
     box_id: Option<String>,
@@ -133,6 +138,7 @@ struct LineRow {
     code_count: i64,
     validated_at: String,
     shift_id: Option<String>,
+    cloud_number: Option<String>,
     number_month_key: Option<String>,
     number_seq: Option<i64>,
     created_from: Option<String>,
@@ -149,12 +155,13 @@ impl LineRow {
         };
         Ok(DisaggregationLine {
             id: self.id,
+            cloud_history: self.cloud_history,
             sscc_input: self.sscc_input,
             sscc: self.sscc,
             box_id: self.box_id,
             pallet_id: self.pallet_id,
             shift_id: self.shift_id,
-            shift_number,
+            shift_number: self.cloud_number.or(shift_number),
             status: self.status.parse().map_err(ApiError::internal)?,
             product_id: self.product_id,
             product_name: self.product_name,
@@ -473,6 +480,7 @@ pub async fn update_document(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
     let current = draft(&mut tx, &id).await?;
+    require_cloud_admin(&mut tx, &context, &id).await?;
     if current.rev != update.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
@@ -578,21 +586,25 @@ async fn insert_line(
 ) -> Result<(), ApiError> {
     sqlx::query(
         "INSERT INTO disaggregation_document_lines (id, document_id, position, sscc_input, sscc, \
-         box_id, pallet_id, status, product_id, code_count, validated_at, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         box_id, pallet_id, status, product_id, code_count, validated_at, created_at, cloud_box_id, cloud_pallet_id, cloud_product_id, cloud_product_name) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(document_id)
     .bind(position)
     .bind(input)
     .bind(sscc)
-    .bind(target.and_then(|t| t.box_id.as_deref()))
-    .bind(target.and_then(|t| t.pallet_id.as_deref()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.box_id.as_deref()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.pallet_id.as_deref()))
     .bind(status.as_str())
-    .bind(target.map(|t| t.product_id.as_str()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.map_or(0, |t| t.code_count))
     .bind(at)
     .bind(at)
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.box_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.pallet_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
     .execute(conn)
     .await
     .map_err(ApiError::internal)?;
@@ -612,6 +624,7 @@ pub async fn add_lines(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
     let current = draft(&mut tx, &id).await?;
+    require_cloud_admin(&mut tx, &context, &id).await?;
     let (count, last): (i64, i64) = sqlx::query_as(
         "SELECT COUNT(*), COALESCE(MAX(position), 0) FROM disaggregation_document_lines \
          WHERE document_id = ?",
@@ -685,6 +698,9 @@ pub async fn add_lines(
                 .await?;
             }
             Some(target) => {
+                if target.cloud {
+                    context.require_admin_in(&mut tx).await?;
+                }
                 insert_line(
                     &mut tx,
                     &id,
@@ -737,6 +753,7 @@ pub async fn delete_line(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
     let current = draft(&mut tx, &id).await?;
+    require_cloud_admin(&mut tx, &context, &id).await?;
     let input: Option<String> = sqlx::query_scalar(
         "DELETE FROM disaggregation_document_lines WHERE id = ? AND document_id = ? \
          RETURNING sscc_input",
@@ -778,6 +795,7 @@ pub async fn cancel_document(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_disaggregation_in(&mut tx).await?;
     let current = draft(&mut tx, &id).await?;
+    require_cloud_admin(&mut tx, &context, &id).await?;
     if current.rev != transition.expected_rev {
         return Err(ApiError::stale_revision(current.rev));
     }
@@ -821,14 +839,18 @@ async fn revalidate_line(
     let status = target.map_or(LineStatus::NotFound, |target| target.status);
     sqlx::query(
         "UPDATE disaggregation_document_lines SET status = ?, box_id = ?, pallet_id = ?, \
-         product_id = ?, code_count = ?, validated_at = ? WHERE id = ?",
+         product_id = ?, code_count = ?, validated_at = ?, cloud_box_id=?, cloud_pallet_id=?, cloud_product_id=?, cloud_product_name=? WHERE id = ?",
     )
     .bind(status.as_str())
-    .bind(target.and_then(|t| t.box_id.as_deref()))
-    .bind(target.and_then(|t| t.pallet_id.as_deref()))
-    .bind(target.map(|t| t.product_id.as_str()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.box_id.as_deref()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.pallet_id.as_deref()))
+    .bind(target.filter(|t| !t.cloud).and_then(|t| t.product_id.as_deref()))
     .bind(target.map_or(0, |t| t.code_count))
     .bind(at)
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.box_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.pallet_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.product_id.as_deref()))
+    .bind(target.filter(|t| t.cloud).and_then(|t| t.product_name.as_deref()))
     .bind(line_id)
     .execute(conn)
     .await
@@ -887,6 +909,7 @@ async fn apply(
     let now = state.now();
     let at = format_timestamp(now);
     let doc = draft(&mut tx, &id).await?;
+    require_cloud_admin(&mut tx, &context, &id).await?;
     if doc.rev != transition.expected_rev {
         return Err(ApiError::stale_revision(doc.rev));
     }
@@ -920,6 +943,9 @@ async fn apply(
             continue;
         };
         let target = disaggregation::resolve(&mut tx, sscc).await?;
+        if target.as_ref().is_some_and(|t| t.cloud) {
+            context.require_admin_in(&mut tx).await?;
+        }
         revalidate_line(&mut tx, line_id, target.as_ref(), &at).await?;
         match target {
             Some(target) if target.status == LineStatus::Ok => targets.push(target),
@@ -985,4 +1011,16 @@ async fn apply(
         .await
         .map_err(ApiError::internal)?;
     Ok(answer)
+}
+
+async fn require_cloud_admin(
+    conn: &mut SqliteConnection,
+    context: &OfficeContext,
+    id: &str,
+) -> Result<(), ApiError> {
+    let cloud:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM disaggregation_document_lines WHERE document_id=? AND (cloud_box_id IS NOT NULL OR cloud_pallet_id IS NOT NULL))").bind(id).fetch_one(&mut *conn).await.map_err(ApiError::internal)?;
+    if cloud {
+        context.require_admin_in(conn).await?;
+    }
+    Ok(())
 }

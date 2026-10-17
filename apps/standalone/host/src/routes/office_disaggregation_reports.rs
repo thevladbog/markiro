@@ -42,8 +42,8 @@ pub const DOCUMENT_SQL: &str = "SELECT d.id, d.doc_no, d.status, d.created_at, d
 
 /// The lines with an SSCC, in the order they were added, each with its
 /// product's name now (the cloud's `listLines` joins the live product).
-pub const LINES_SQL: &str = "SELECT l.id, l.sscc, l.box_id, l.pallet_id, \
-     p.name AS product_name, l.code_count FROM disaggregation_document_lines l \
+pub const LINES_SQL: &str = "SELECT l.id, l.sscc, COALESCE(l.box_id,l.cloud_box_id) AS box_id, COALESCE(l.pallet_id,l.cloud_pallet_id) AS pallet_id, \
+     COALESCE(l.cloud_product_name,p.name) AS product_name, l.code_count FROM disaggregation_document_lines l \
      LEFT JOIN products p ON p.id = l.product_id \
      WHERE l.document_id = ? AND l.sscc IS NOT NULL ORDER BY l.position, l.id";
 
@@ -193,6 +193,13 @@ where
                 });
             }
         }
+        let cloud_boxes:Vec<String>=sqlx::query_scalar("SELECT cloud_box_id FROM disaggregation_document_lines WHERE document_id=? AND cloud_box_id IS NOT NULL AND sscc IS NOT NULL ORDER BY position").bind(id).fetch_all(&mut *conn).await.map_err(ApiError::internal)?;
+        for id in cloud_boxes {
+            let report = crate::cloud_history::read::box_report(&mut *conn, &id)
+                .await?
+                .ok_or_else(|| ApiError::internal("missing imported box"))?;
+            items.insert(id, report.items);
+        }
         after_query("items").await;
         let rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(PALLET_BOXES_SQL)
             .bind(id)
@@ -207,6 +214,25 @@ where
                     sscc,
                     units: u32::try_from(units).map_err(ApiError::internal)?,
                 });
+        }
+        let cloud_pallets:Vec<String>=sqlx::query_scalar("SELECT cloud_pallet_id FROM disaggregation_document_lines WHERE document_id=? AND cloud_pallet_id IS NOT NULL AND sscc IS NOT NULL ORDER BY position").bind(id).fetch_all(&mut *conn).await.map_err(ApiError::internal)?;
+        for id in cloud_pallets {
+            let rows = crate::cloud_history::read::pallet_rows(&mut *conn, &id)
+                .await?
+                .ok_or_else(|| ApiError::internal("missing imported pallet"))?;
+            boxes.insert(
+                id,
+                rows.boxes
+                    .into_iter()
+                    .filter(|b| b.pack.disassembled_at.is_none())
+                    .map(|b| {
+                        Ok(DisaggregationReportBox {
+                            sscc: b.pack.sscc,
+                            units: u32::try_from(b.units).map_err(ApiError::internal)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ApiError>>()?,
+            );
         }
         after_query("boxes").await;
     }
@@ -245,7 +271,11 @@ where
         applied_by_name: document.applied_by_name,
         reason_name: document.reason_name,
         comment: document.comment,
-        organization: ExportOrganization { name, inn },
+        organization: ExportOrganization {
+            name,
+            inn,
+            time_zone: None,
+        },
         variant,
         lines,
     }))

@@ -4,6 +4,7 @@ import type {
   ShiftExportSource,
 } from "@markiro/domain";
 
+import type { CloudPalletRows } from "../../host/cloud-history-read.js";
 import type { ShiftExportRows } from "../../host/protocol.js";
 
 /**
@@ -17,9 +18,8 @@ import type { ShiftExportRows } from "../../host/protocol.js";
  * test and `test/export-parity.test.ts` read them. A change of the cloud's
  * rules is a change here, in the same commit as a regenerated golden.
  *
- * Left out, with the reason: `SHIFT_DATE_MISSING` (a host shift always has
- * its production date) and the validation reprocessings the flat formats add
- * in the cloud (validation is stage 3).
+ * Imported sources enforce the date fallback on the host and mark validation
+ * reprocessings with flatOnly; only flat TXT/CSV formats include those codes.
  */
 
 /** The cloud's refusals of an export's source (`ShiftExportSourceErrorCode`), less `SHIFT_DATE_MISSING`. */
@@ -97,7 +97,10 @@ function compareNullableInstants(left: string | null, right: string | null): num
 }
 
 /** The cloud's `loadOrganization`: trimmed, and `null` when blank. */
-function organization(rows: ShiftExportRows): { inn: string | null; name: string | null } {
+function organization(rows: Pick<ShiftExportRows, "organization">): {
+  inn: string | null;
+  name: string | null;
+} {
   return {
     inn: rows.organization.inn?.trim() || null,
     name: rows.organization.name.trim() || null,
@@ -109,11 +112,14 @@ function organization(rows: ShiftExportRows): { inn: string | null; name: string
  * `closed_at`, which for a station's close is the station's own instant; the
  * host keeps whole seconds in `closedAt` and the station's instant as
  * `stationClosedAt`, so that one comes first. The office's close is the
- * host's instant. `formedAt` stands in only for a closed shift without
- * either, as the cloud's snapshot instant does.
+ * host's instant. Imported sources provide an explicit frozen effective
+ * operation time, using their snapshot time when the original close is missing.
+ * Native sources without either close retain the `formedAt` fallback.
  */
 export function shiftOperationDateTime(shift: ShiftExportRows["shift"], formedAt: string): string {
-  return new Date(shift.stationClosedAt ?? shift.closedAt ?? formedAt).toISOString();
+  return new Date(
+    shift.effectiveOperationDateTime ?? shift.stationClosedAt ?? shift.closedAt ?? formedAt,
+  ).toISOString();
 }
 
 /** The cloud's `loadFromTransaction` over the host's rows. */
@@ -133,7 +139,8 @@ export function shiftExportSnapshot(
     if (organizationInn === null) return { ok: false, refusal: "ORG_INN_MISSING" };
     if (organizationName === null) return { ok: false, refusal: "ORG_NAME_MISSING" };
   }
-  const authoritative = rows.codes
+  const selected = rows.codes.filter((code) => format.boxMode === "flat" || !code.flatOnly);
+  const authoritative = selected
     .map((code) => ({
       codeHash: code.codeHash,
       time: Date.parse(code.scannedAt),
@@ -319,6 +326,29 @@ export function palletExportSnapshot(
   rows: ShiftExportRows,
   palletId: string,
 ): SourceResult<PalletExportSnapshot> {
+  return palletSource(rows, palletId, rows.shift.productName);
+}
+
+/** A warehouse pallet source carries all member shifts without inventing a selected shift. */
+export function cloudPalletExportSnapshot(
+  rows: CloudPalletRows,
+): SourceResult<PalletExportSnapshot> {
+  return palletSource(
+    {
+      organization: rows.organization,
+      pallets: [rows.pallet],
+      boxes: rows.boxes.map((box) => box.pack),
+    },
+    rows.pallet.id,
+    rows.pallet.productName ?? "Продукция",
+  );
+}
+
+function palletSource(
+  rows: Pick<ShiftExportRows, "pallets" | "boxes" | "organization">,
+  palletId: string,
+  productName: string,
+): SourceResult<PalletExportSnapshot> {
   const pallet = rows.pallets.find((each) => each.id === palletId);
   if (pallet === undefined || pallet.sscc === null || pallet.closedAt === null) {
     return { ok: false, refusal: "PALLET_NOT_CLOSED" };
@@ -340,7 +370,7 @@ export function palletExportSnapshot(
   return {
     ok: true,
     value: {
-      productName: rows.shift.productName,
+      productName,
       closedDate: closedAt.slice(0, 10),
       operationDateTime: closedAt,
       organizationInn: org.inn,

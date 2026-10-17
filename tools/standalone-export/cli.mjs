@@ -37,6 +37,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ExportError, buildExportFile } from "./transform.mjs";
+import { isCivilDate, runHistoryPsql, writeHistory } from "./history.mjs";
 
 const SQL = fileURLToPath(new URL("./export.sql", import.meta.url));
 const EXTENSIONS = { 0: "короба", 1: "паллеты" };
@@ -48,6 +49,8 @@ export const USAGE = [
   "  --out-dir <dir>  каталог файла переноса (обязательно): личная папка, закрытая для других,",
   "                   не каталог репозитория и не общий диск",
   "  --rehearsal      пробный файл из нечистого облака; не для переключения",
+  "  --history        история закрытых смен и все текущие владельцы кодов, отдельный JSONL",
+  "  --history-since <YYYY-MM-DD>  начало истории (по умолчанию 12 календарных месяцев)",
   "  --accept-shared-prefix  выгружать, хотя другой арендатор базы выпускал SSCC под префиксом",
   "                   организации (только по решению владельца, памятка переключения, 4.3)",
   "  --psql <path>    путь к psql (по умолчанию psql из PATH)",
@@ -80,13 +83,20 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--rehearsal") options.rehearsal = true;
+    else if (arg === "--history") options.history = true;
     else if (arg === "--accept-shared-prefix") options.acceptSharedPrefix = true;
-    else if (arg === "--tenant" || arg === "--out-dir" || arg === "--psql") {
+    else if (
+      arg === "--tenant" ||
+      arg === "--out-dir" ||
+      arg === "--psql" ||
+      arg === "--history-since"
+    ) {
       const value = argv[index + 1];
       if (value === undefined) throw new Error(`${arg} needs a value`);
       index += 1;
       if (arg === "--tenant") options.tenantId = value;
       else if (arg === "--out-dir") options.outDir = value;
+      else if (arg === "--history-since") options.historySince = value;
       else options.psql = value;
     } else throw new Error(`unknown argument ${arg}`);
   }
@@ -98,6 +108,13 @@ export function parseArgs(argv) {
       "--out-dir <dir> is required: the file holds credential verifiers, so it goes to a folder you name",
     );
   }
+  if (
+    options.historySince !== undefined &&
+    (!options.history || !isCivilDate(options.historySince))
+  )
+    throw new Error("--history-since requires --history and a valid YYYY-MM-DD date");
+  if (options.history && (options.rehearsal || options.acceptSharedPrefix))
+    throw new Error("--history requires a clean cloud and does not accept catalog override flags");
   return options;
 }
 
@@ -292,6 +309,33 @@ export async function main(argv, deps = {}) {
     return 64;
   }
   try {
+    if (options.history) {
+      const exportedAt = now().toISOString();
+      const since = options.historySince;
+      const path = join(
+        options.outDir,
+        `markiro-cloud-history-${options.tenantId}-${exportedAt.slice(0, 10)}.jsonl`,
+      );
+      const manifest = await (deps.writeHistory ?? writeHistory)(
+        path,
+        (deps.runHistory ?? runHistoryPsql)({
+          psql: options.psql,
+          tenantId: options.tenantId,
+          since,
+          env,
+        }),
+        { exportedAt, since },
+      );
+      stdout(`Файл: ${path}`);
+      stdout(
+        `История с ${manifest.since}: смен ${manifest.counts.shifts}, кодов ${manifest.counts.codes}, коробов ${manifest.counts.boxes}, вложений ${manifest.counts.items}, паллет ${manifest.counts.pallets}, владельцев ${manifest.counts.owners}; частей ${manifest.parts.length}`,
+      );
+      stdout(`Контрольная сумма: ${manifest.checksum}`);
+      stderr(
+        "Файл содержит коды маркировки и их хеши. Храните у владельца и удалите после переноса.",
+      );
+      return 0;
+    }
     const raw = parseRaw(await run({ psql: options.psql, tenantId: options.tenantId, env }));
     const file = buildExportFile(raw, {
       exportedAt: now().toISOString(),
@@ -305,6 +349,16 @@ export async function main(argv, deps = {}) {
     for (const line of CREDENTIAL_WARNING) stderr(line);
     return 0;
   } catch (error) {
+    if (options.history) {
+      // Do not relay database/parser/filesystem messages: they may quote private source values.
+      const reason = /^history_[a-z_]+$/u.test(error?.message ?? "")
+        ? error.message
+        : error?.code === "EEXIST"
+          ? "history_file_exists"
+          : "history_failed";
+      stderr(`Выгрузка истории не удалась: ${reason}`);
+      return reason === "history_cloud_not_clean" || reason === "history_missing_canonical" ? 2 : 1;
+    }
     if (error instanceof ExportError) {
       stderr(`Выгрузка невозможна: ${error.code}: ${error.message}`);
       for (const blocker of error.blockers ?? []) {

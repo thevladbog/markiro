@@ -12,6 +12,7 @@ import {
 import type { DisaggregationReportRows } from "../../host/disaggregation.js";
 import type { BoxReportRows, OrgProfile, PalletReportRows } from "../../host/protocol.js";
 import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { requireHistoryTimeZone } from "../import/history-time-zone.js";
 import { actData } from "../disaggregation/act-data.js";
 import {
   boxReportData,
@@ -92,7 +93,13 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       const data = boxReportData(request.rows, logo);
       return {
         kind: "box",
-        draw: () => renderBoxReportHtml(data, request.timeZone),
+        draw: () =>
+          renderBoxReportHtml(
+            data,
+            request.rows.organization.timeZone === undefined
+              ? request.timeZone
+              : requireHistoryTimeZone(request.rows.organization.timeZone),
+          ),
         fileName: `Состав короба ${request.rows.sscc ?? "без SSCC"}.html`,
       };
     }
@@ -102,7 +109,13 @@ export function prepareForm(request: FormRequest): PreparedForm | null {
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
         kind: "pallet",
-        draw: () => renderPalletReportHtml(data, request.timeZone),
+        draw: () =>
+          renderPalletReportHtml(
+            data,
+            request.rows.organization.timeZone === undefined
+              ? request.timeZone
+              : requireHistoryTimeZone(request.rows.organization.timeZone),
+          ),
         fileName: `Состав паллеты ${sscc ?? "без SSCC"}.html`,
       };
     }

@@ -99,6 +99,7 @@ pub async fn issue_block(
         // Nothing to write: the transaction rolls back when dropped.
         return Ok(Json(block));
     }
+    crate::cloud_history::require_ready(&mut tx).await?;
     let next: Option<i64> = sqlx::query_scalar(
         "SELECT next_serial FROM sscc_counters WHERE issuer_prefix = ? AND extension = ?",
     )

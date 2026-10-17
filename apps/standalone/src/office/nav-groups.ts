@@ -47,6 +47,7 @@ export function navGroups(role: OfficeRole): NavGroup[] {
  * menu has none.
  */
 export function crumbsFor(pathname: string): { sectionKey: string; labelKey: string } | null {
+  if (/^\/cloud-(shifts|boxes|pallets)(?:\/|$)/.test(pathname)) pathname = "/shifts";
   let best: OfficeNavItem | null = null;
   for (const item of OFFICE_NAV) {
     const matches =

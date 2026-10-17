@@ -53,6 +53,7 @@ import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftCreateDrawer } from "./ShiftEditor.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
+import { ShiftSourceLinks } from "./CloudShifts.js";
 import { shiftOutput } from "./shift-text.js";
 
 /**
@@ -690,6 +691,7 @@ export function ShiftsPage() {
           ) : null
         }
       />
+      <ShiftSourceLinks />
       {notice && (
         <Alert tone="ok" id={noticeId} tabIndex={-1}>
           {notice}

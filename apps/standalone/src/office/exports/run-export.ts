@@ -7,9 +7,13 @@ import {
   type ShiftExportPart,
 } from "@markiro/domain";
 
+import type { CloudPalletRows } from "../../host/cloud-history-read.js";
 import type { ShiftExportRows } from "../../host/protocol.js";
 import {
   palletExportSnapshot,
+  cloudPalletExportSnapshot,
+  type PalletExportSnapshot,
+  type SourceResult,
   shiftExportSnapshot,
   type ExportSourceRefusal,
 } from "./export-source.js";
@@ -139,6 +143,26 @@ function renderForShift(rows: ShiftExportRows, run: ExportRun): ExportResult {
 function renderForPallet(rows: ShiftExportRows, run: ExportRun, palletId: string): ExportResult {
   const format = getPalletExportFormat(run.formatId, run.formatVersion);
   const snapshot = palletExportSnapshot(rows, palletId);
+  return renderPalletSnapshot(snapshot, run, format);
+}
+
+export function runCloudPalletExport(rows: CloudPalletRows, run: ExportRun): ExportResult {
+  try {
+    const format = getPalletExportFormat(run.formatId, run.formatVersion);
+    if (run.palletId !== rows.pallet.id) return { ok: false, failure: "PALLET_NOT_CLOSED" };
+    return renderPalletSnapshot(cloudPalletExportSnapshot(rows), run, format);
+  } catch (error) {
+    if (error instanceof ShiftExportDomainError && isFailure(error.code))
+      return { ok: false, failure: error.code };
+    return { ok: false, failure: "GENERATION_FAILED", reason: failureReason(error) };
+  }
+}
+
+function renderPalletSnapshot(
+  snapshot: SourceResult<PalletExportSnapshot>,
+  run: ExportRun,
+  format: ReturnType<typeof getPalletExportFormat>,
+): ExportResult {
   if (!snapshot.ok) return { ok: false, failure: snapshot.refusal };
   const part = renderPalletAggregationExport({
     formatId: format.id,

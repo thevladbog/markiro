@@ -1,6 +1,7 @@
 import { classifyScan, type ParsedKm } from "@markiro/domain";
 import { z } from "zod";
 
+import { CLOUD_HISTORY_DEVICE_ID } from "../../host/cloud-history-read.js";
 import type { CodeCheck, CodeOwner, ScanFact, ScanRawKind } from "../../host/protocol.js";
 import type { LocalExecutor, LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
@@ -91,7 +92,13 @@ export type ScanOutcome = { scannedAt: string } & (
       label?: UnitLabelRef;
     }
   | { kind: "duplicate"; source: "local"; firstScannedAt: string }
-  | { kind: "duplicate"; source: "host"; firstScannedAt: string; shiftNumber: string }
+  | {
+      kind: "duplicate";
+      source: "host";
+      firstScannedAt: string;
+      shiftNumber: string;
+      cloudHistory?: true;
+    }
   | { kind: "wrong_gtin"; gtin14: string }
   | { kind: "invalid"; rawKind: Exclude<ScanRawKind, "km"> }
 );
@@ -242,6 +249,7 @@ export async function processScan(context: ScanContext, raw: string): Promise<Sc
       source: "host",
       firstScannedAt: owner.scannedAt,
       shiftNumber: owner.shiftNumber,
+      ...(owner.deviceId === CLOUD_HISTORY_DEVICE_ID ? { cloudHistory: true as const } : {}),
       scannedAt,
     };
   }

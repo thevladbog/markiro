@@ -550,6 +550,43 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::pallet_sheets::put_default),
         )
         .route(
+            "/v1/office/cloud-shifts",
+            get(crate::routes::cloud_shifts::list),
+        )
+        .route(
+            "/v1/office/cloud-shifts/{id}",
+            get(crate::routes::cloud_shifts::detail),
+        )
+        .route(
+            "/v1/office/cloud-shifts/{id}/boxes",
+            get(crate::routes::cloud_shifts::boxes),
+        )
+        .route(
+            "/v1/office/cloud-shifts/{id}/pallets",
+            get(crate::routes::cloud_shifts::pallets),
+        )
+        .route(
+            "/v1/office/cloud-boxes/{id}",
+            get(crate::routes::cloud_shifts::box_card),
+        )
+        .route(
+            "/v1/office/cloud-boxes/{id}/report-data",
+            get(crate::routes::cloud_shifts::box_report),
+        )
+        .route(
+            "/v1/office/cloud-pallets/{id}",
+            get(crate::routes::cloud_shifts::pallet),
+        )
+        .route(
+            "/v1/office/cloud-pallets/{id}/exports",
+            get(crate::routes::office_exports::list_cloud_pallet_exports)
+                .post(crate::routes::office_exports::record_cloud_pallet_export),
+        )
+        .route(
+            "/v1/office/cloud-shifts/{id}/export-source",
+            get(crate::routes::cloud_shifts::export_source),
+        )
+        .route(
             "/v1/office/shifts",
             get(crate::routes::office_shifts::list_shifts)
                 .post(crate::routes::office_shifts::create_shift),
@@ -667,6 +704,24 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/updates/started",
             post(crate::routes::app_updates::record_started),
+        )
+        .route(
+            "/v1/office/import/history",
+            get(crate::routes::cloud_history::get)
+                .post(crate::routes::cloud_history::import)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    markiro_proto::cloud_history::MAX_HISTORY_REQUEST_BYTES,
+                )),
+        )
+        .route(
+            "/v1/office/import/history/complete",
+            post(crate::routes::cloud_history::complete)
+                .layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
+        .route(
+            "/v1/office/import/history/cancel",
+            post(crate::routes::cloud_history::cancel)
+                .layer(axum::extract::DefaultBodyLimit::max(1024)),
         )
         .route(
             "/v1/office/import",

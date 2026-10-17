@@ -328,6 +328,29 @@ describe("a scan of the work screen", () => {
     expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 0 }]);
   });
 
+  it("preserves explicit cloud origin for an online duplicate without creating local ownership", async () => {
+    const { db, local, shift } = await station();
+    const owner = { ...TAKEN.owner, deviceId: "00000000-0000-0000-0000-000000000000" };
+    const outcome = await processScan(
+      scanContext(local, shift, {
+        online: () => true,
+        checkCode: async () => ({ status: "taken", owner }),
+      }),
+      km("CLOUD1"),
+    );
+    expect(outcome).toMatchObject({
+      kind: "duplicate",
+      source: "host",
+      cloudHistory: true,
+      shiftNumber: owner.shiftNumber,
+      firstScannedAt: owner.scannedAt,
+    });
+    expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 0 }]);
+    expect(rows(db, "SELECT verdict, duplicate_source FROM floor_scans")).toEqual([
+      { verdict: "duplicate", duplicate_source: "host" },
+    ]);
+  });
+
   it("accepts without the host when offline, when the check fails or times out, and over its own scan", async () => {
     const { db, local, shift } = await station();
     const timeout = new HostError({ kind: "transport", code: "timeout", message: "300 ms" });

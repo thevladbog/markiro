@@ -1671,7 +1671,7 @@ fn box_report_rows_round_trip_and_agree_with_the_export_source() {
     let report: BoxReportRows = round_trip("box-report-rows.json");
     let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
     assert_eq!(report.shift_id, rows.shift.id);
-    assert_eq!(report.product_name, rows.shift.product_name);
+    assert_eq!(report.product_name, Some(rows.shift.product_name));
     assert_eq!(report.organization, rows.organization);
     let source = rows.boxes.iter().find(|b| b.id == report.id).unwrap();
     assert_eq!(

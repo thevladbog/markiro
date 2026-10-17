@@ -136,7 +136,7 @@ pub async fn files_of_batches(
         return Ok(by_batch);
     }
     let rows: Vec<FileRow> = sqlx::query_as(&format!(
-        "{FILE_SQL} WHERE f.shift_id = ?1 AND f.state = 'ready' \
+        "{FILE_SQL} WHERE (f.shift_id = ?1 OR (f.target_type = 'pallet' AND f.target_id = ?1)) AND f.state = 'ready' \
          AND f.kind IN ('shift_export', 'pallet_export') ORDER BY f.batch_id, f.part_no"
     ))
     .bind(shift_id)
@@ -304,7 +304,7 @@ async fn resolve_target(
 ) -> Result<Option<Option<String>>, ApiError> {
     let found: Option<Option<String>> = match target_type {
         ExportTargetType::Shift => {
-            sqlx::query_scalar::<_, String>("SELECT id FROM shifts WHERE id = ?")
+            sqlx::query_scalar::<_, String>("SELECT id FROM shifts WHERE id = ?1 UNION ALL SELECT s.id FROM cloud_history_shifts s JOIN cloud_history_batches b ON b.id=s.batch_id AND b.status='complete' WHERE s.id=?1")
                 .bind(target_id)
                 .fetch_optional(&mut *conn)
                 .await
@@ -312,15 +312,14 @@ async fn resolve_target(
                 .map(Some)
         }
         ExportTargetType::Pallet => {
-            sqlx::query_scalar::<_, String>("SELECT shift_id FROM pallets WHERE id = ?")
+            sqlx::query_scalar::<_, Option<String>>("SELECT shift_id FROM pallets WHERE id = ?1 UNION ALL SELECT p.shift_id FROM cloud_history_pallets p JOIN cloud_history_batches b ON b.id=p.batch_id AND b.status='complete' WHERE p.id=?1")
                 .bind(target_id)
                 .fetch_optional(&mut *conn)
                 .await
                 .map_err(ApiError::internal)?
-                .map(Some)
         }
         ExportTargetType::Box => {
-            sqlx::query_scalar::<_, String>("SELECT shift_id FROM boxes WHERE id = ?")
+            sqlx::query_scalar::<_, String>("SELECT shift_id FROM boxes WHERE id = ?1 UNION ALL SELECT x.shift_id FROM cloud_history_boxes x JOIN cloud_history_batches b ON b.id=x.batch_id AND b.status='complete' WHERE x.id=?1")
                 .bind(target_id)
                 .fetch_optional(&mut *conn)
                 .await

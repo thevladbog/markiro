@@ -24,6 +24,12 @@ import { PalletSheetsPage } from "./sheets/PalletSheetsPage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
 import { ShiftCardRedirect } from "./shifts/ShiftCardRedirect.js";
+import {
+  CloudShifts,
+  CloudShiftPage,
+  CloudBoxPage,
+  CloudPalletPage,
+} from "./shifts/CloudShifts.js";
 import { ShiftsPage } from "./shifts/ShiftsPage.js";
 import { SsccPage } from "./sscc/SsccPage.js";
 import { TemplateDefaultsPage } from "./templates/TemplateDefaultsPage.js";
@@ -48,6 +54,10 @@ export const officeRoutes: RouteObject[] = [
       { path: "counterparties", element: <CounterpartiesPage /> },
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
+      { path: "cloud-shifts", element: <CloudShifts /> },
+      { path: "cloud-shifts/:id", element: <CloudShiftPage /> },
+      { path: "cloud-boxes/:id", element: <CloudBoxPage /> },
+      { path: "cloud-pallets/:id", element: <CloudPalletPage /> },
       { path: "shifts/:id", element: <ShiftCardRedirect /> },
       { path: "disaggregation", element: <DisaggregationPage /> },
       // A static segment ranks above `:id`, so «reasons» is never a document.

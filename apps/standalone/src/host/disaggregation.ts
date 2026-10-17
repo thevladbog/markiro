@@ -72,6 +72,7 @@ export const disaggregationDocumentSchema = z.object({
 });
 export const disaggregationLineSchema = z.object({
   id: z.uuid(),
+  cloudHistory: z.literal(true).optional(),
   ssccInput: z.string(),
   sscc: ssccSchema.nullable(),
   boxId: z.uuid().nullable(),

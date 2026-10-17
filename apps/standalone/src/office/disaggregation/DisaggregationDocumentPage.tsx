@@ -23,6 +23,8 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
+import { useOfficeSession } from "../office-session.js";
+import { historyFailure } from "../import/history-errors.js";
 import { HostError } from "../../host/client.js";
 import type {
   DisaggregationDetail,
@@ -224,6 +226,7 @@ export function DisaggregationDocumentPage() {
   const { t } = useTranslation();
   const { id = "" } = useParams();
   const canWrite = useCan("planShifts");
+  const administrator = useOfficeSession().user.role === "admin";
   const queryClient = useQueryClient();
   const noticeId = useId();
   const hintId = useId();
@@ -353,6 +356,8 @@ export function DisaggregationDocumentPage() {
         };
       }
     }
+    if (error instanceof HostError && error.code === "forbidden")
+      return { stale: false, tone: "error", text: historyFailure(t, error), reread: false };
     const failure = alertFailure(error);
     if (failure.kind === "stale") return { stale: true };
     return { stale: false, tone: "error", text: t(failure.message), reread: false };
@@ -512,7 +517,8 @@ export function DisaggregationDocumentPage() {
   }
   const { document: header, lines } = doc.data;
   const draft = header.status === "draft";
-  const editable = draft && canWrite;
+  const cloudLocked = !administrator && lines.some((line) => line.cloudHistory === true);
+  const editable = draft && canWrite && !cloudLocked;
   const zone = formTimeZone(org.data);
   const time = new Intl.DateTimeFormat("ru", {
     dateStyle: "short",
@@ -521,7 +527,10 @@ export function DisaggregationDocumentPage() {
   });
   const at = (instant: string) => time.format(new Date(instant));
   const canApply =
-    lines.length > 0 && lines.every((line) => line.status === "ok") && header.reasonId !== null;
+    !cloudLocked &&
+    lines.length > 0 &&
+    lines.every((line) => line.status === "ok") &&
+    header.reasonId !== null;
 
   const meta: DefinitionGridItem[] = [
     {
@@ -594,7 +603,15 @@ export function DisaggregationDocumentPage() {
       mono: true,
       render: (line) =>
         line.shiftId !== null && line.shiftNumber !== null ? (
-          <Link to={shiftCardPath(line.shiftId)}>{line.shiftNumber}</Link>
+          <Link
+            to={
+              line.cloudHistory === true
+                ? `/cloud-shifts/${line.shiftId}`
+                : shiftCardPath(line.shiftId)
+            }
+          >
+            {line.shiftNumber}
+          </Link>
         ) : (
           t("office.common.none")
         ),
@@ -649,6 +666,7 @@ export function DisaggregationDocumentPage() {
   return (
     <>
       {back}
+      {cloudLocked && <Alert tone="warn">{t("office.cloudHistory.adminRequired")}</Alert>}
       <PageHeader
         title={t("office.disaggregation.detail.title", { docNo: header.docNo })}
         actions={

@@ -247,7 +247,11 @@ function choose(text: string): void {
 }
 
 function chooseFile(file: File): void {
-  fireEvent.change(screen.getByTestId("file-drop-input"), { target: { files: [file] } });
+  const input = screen
+    .getAllByTestId("file-drop-input")
+    .find((each) => each.getAttribute("accept") === ".json,application/json");
+  if (input === undefined) throw new Error("catalog file chooser missing");
+  fireEvent.change(input, { target: { files: [file] } });
 }
 
 /** The golden file with `change` applied, its checksum computed again. */
@@ -913,7 +917,11 @@ describe("«Перенос из облака»", () => {
         .closest("[role=button]")
         ?.getAttribute("aria-disabled"),
     ).toBe("true");
-    expect(screen.getByTestId("file-drop-input")).toHaveProperty("disabled", true);
+    expect(
+      screen
+        .getAllByTestId("file-drop-input")
+        .find((each) => each.getAttribute("accept") === ".json,application/json"),
+    ).toHaveProperty("disabled", true);
     await act(async () => {
       answer.resolve({ ...SUMMARY, dryRun: true });
       await answer.promise;

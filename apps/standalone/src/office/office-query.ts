@@ -11,7 +11,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HostApi } from "../host/api.js";
+import type { CloudShiftQuery, HostApi } from "../host/api.js";
 import type { DisaggregationFilter } from "../host/disaggregation.js";
 import type { PalletListQuery } from "../host/pack-cards.js";
 import type { ConflictQuery, ScanHistoryQuery } from "../host/review.js";
@@ -19,6 +19,15 @@ import { useOfficeSession } from "./office-session.js";
 
 /** Query keys of office data, one per host resource. */
 export const officeKeys = {
+  historyState: ["office", "cloud-history-state"],
+  cloudShifts: ["office", "cloud-shifts"],
+  cloudShiftList: (query: CloudShiftQuery) => ["office", "cloud-shifts", query],
+  cloudShift: (id: string) => ["office", "cloud-shift", id],
+  cloudExportSource: (id: string) => ["office", "cloud-export-source", id],
+  cloudBoxes: (id: string) => ["office", "cloud-boxes", id],
+  cloudPallets: (id: string) => ["office", "cloud-pallets", id],
+  cloudBox: (id: string) => ["office", "cloud-box", id],
+  cloudPallet: (id: string) => ["office", "cloud-pallet", id],
   org: ["office", "org"],
   orgLogo: ["office", "org-logo"],
   /** The site's license (`GET /v1/office/license`): the license section, the band and «Обзор» (plan ЛЦ-3), and custom branding's features. */

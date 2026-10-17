@@ -365,6 +365,7 @@ pub async fn create_shift(
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_shift_planning_in(&mut tx).await?;
+    crate::cloud_history::require_ready(&mut tx).await?;
     // Pallets are a feature of the license (plan ЛЦ-2 Д8): a new plan with
     // them asks.
     if create.pallets_enabled {

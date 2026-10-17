@@ -2,6 +2,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { CloudOrigin } from "./CloudOrigin.js";
 import { Link } from "react-router";
 
 import { Card, StatusChip, type TableColumn } from "@markiro/ui";
@@ -326,10 +327,7 @@ export function ShiftConflicts({ shift }: ReviewSectionProps) {
       wrap: true,
       render: (row) => (
         <span className="shift-cell">
-          <Link to={`/shifts/${row.winner.shiftId}`}>
-            {t("office.conflicts.scan.shift", { number: row.winner.shiftNumber })}
-          </Link>
-          <span>{row.winner.deviceName}</span>
+          <CloudOrigin scan={row.winner} />
         </span>
       ),
     },
