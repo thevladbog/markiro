@@ -15,6 +15,7 @@ import {
   standaloneLicensePayloadV1Schema,
 } from "@markiro/domain";
 import {
+  STANDALONE_ASSIGNMENT_REFS_MAX,
   standaloneIssuanceListSchema,
   standaloneIssuancePreviewSchema,
   type PlatformPrincipal,
@@ -32,6 +33,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import { signCompactJws } from "../../signing/compact-jws";
+import { sourceActiveAt } from "../../subscriptions/entitlement-projection";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { SubscriptionTransaction } from "../../subscriptions/entitlements.types";
 import {
@@ -523,6 +525,18 @@ export class StandaloneLicenseIssuanceService {
     )
       throw new ConflictException({ code: missingCode });
     const exported = exportStandaloneRights(first);
+    // Only what the entitlement projection counts at this instant: the same predicate
+    // as the rights, so an add-on that has not started or has ended is not named.
+    const asOf = new Date(first.asOf);
+    const sourceAssignments = first.sources.flatMap((source): StandaloneAssignmentRef[] =>
+      (source.kind === "plan" || source.kind === "addon") && sourceActiveAt(source, asOf)
+        ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
+        : [],
+    );
+    // The journal holds a bounded list; assignment creation enforces the same bound, so this
+    // is a defence for rows that predate it, and answers with a code rather than a 500.
+    if (sourceAssignments.length > STANDALONE_ASSIGNMENT_REFS_MAX)
+      throw new ConflictException({ code: "standalone_assignment_limit_reached" });
     return {
       plan: subscription.status === "trial" ? ("demo" as const) : ("subscription" as const),
       planVersionId: subscription.planVersionId,
@@ -534,11 +548,7 @@ export class StandaloneLicenseIssuanceService {
       }),
       rights: exported.rights,
       unmapped: exported.unmapped,
-      sourceAssignments: first.sources.flatMap((source): StandaloneAssignmentRef[] =>
-        source.kind === "plan" || source.kind === "addon"
-          ? [{ kind: source.kind, id: source.id, catalogVersionId: source.versionId }]
-          : [],
-      ),
+      sourceAssignments,
     };
   }
 }

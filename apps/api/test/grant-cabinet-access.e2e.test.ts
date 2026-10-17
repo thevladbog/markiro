@@ -14,7 +14,7 @@ import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
 import { mountPlatformAuth, setupPlatformAuth } from "../src/platform-auth/platform-auth.setup";
 import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
-import { createManagedSubscription } from "./support/subscription-fixtures";
+import { createManagedSubscription, createPublishedAddon } from "./support/subscription-fixtures";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -556,6 +556,104 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     });
     const rows = await subscriptionRows(tenantId);
     expect(rows.map((row) => row.status).sort()).toEqual(["expired", "pending_activation"]);
+  });
+
+  it("creates the pending demo when the only subscription has ended but the status job has not run", async () => {
+    const tenantId = await createNoneTenant();
+    const endsAt = new Date(Date.now() - 3_600_000);
+    const ended = await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt,
+    });
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      offlineAssignments: { plans: 0, addons: 0 },
+      demoCreated: true,
+    });
+    const rows = await subscriptionRows(tenantId);
+    expect(rows.map((row) => [row.id === ended.subscriptionId, row.status]).sort()).toEqual([
+      [false, "pending_activation"],
+      [true, "expired"],
+    ]);
+    // The ended term is recorded as the status job records it, so the job finds nothing left to do.
+    const events = await setup.db
+      .select()
+      .from(schema.subscriptionEvents)
+      .where(
+        and(
+          eq(schema.subscriptionEvents.tenantId, tenantId),
+          eq(schema.subscriptionEvents.eventKind, "plan.expired"),
+        ),
+      );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      subscriptionId: ended.subscriptionId,
+      effectiveAt: endsAt,
+      actorPlatformUserId: null,
+      source: "subscription_status_job",
+      reason: "term_ended",
+    });
+    const [audit] = await auditFor(tenantId, "platform.tenant.cabinet_access.granted");
+    expect(audit).toMatchObject({
+      actorPlatformUserId: adminId,
+      after: { demoCreated: true, subscriptionStatus: "pending_activation" },
+    });
+  });
+
+  it("does not count an add-on past its end that the status job has not settled", async () => {
+    const tenantId = await createNoneTenant();
+    const assigned = await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+      endsAt: null,
+    });
+    const addonVersionId = await createPublishedAddon(setup.db, [
+      { entitlementKey: "lines", increment: 1 },
+    ]);
+    await setup.db.insert(schema.subscriptionAddons).values({
+      tenantId,
+      subscriptionId: assigned.subscriptionId,
+      addonVersionId,
+      quantity: 1,
+      startsAt: new Date(Date.now() - 7_200_000),
+      endsAt: new Date(Date.now() - 3_600_000),
+      status: "active",
+      source: "manual",
+    });
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      offlineAssignments: { plans: 1, addons: 0 },
+      demoCreated: false,
+    });
+  });
+
+  it("keeps counting an assignment that has not started yet as current", async () => {
+    const tenantId = await createNoneTenant();
+    await createManagedSubscription(setup.db, {
+      tenantId,
+      planVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() + 3_600_000),
+      endsAt: null,
+    });
+    const response = await admin
+      .post(`/platform/tenants/${tenantId}/cabinet-access`)
+      .send({ email: grantedEmail() })
+      .expect(201);
+    expect(response.body).toMatchObject({
+      offlineAssignments: { plans: 1, addons: 0 },
+      demoCreated: false,
+    });
   });
 
   it("activates nothing for the owner of a tenant whose only subscription is the offline assignment", async () => {

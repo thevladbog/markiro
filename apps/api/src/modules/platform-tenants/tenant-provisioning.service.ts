@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
@@ -17,6 +17,8 @@ import type { PlatformPrincipal } from "../../platform-auth/platform-access-poli
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { GrantCabinetAccessDto, GrantCabinetAccessResult } from "@markiro/platform-contracts";
 import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
+import { transitionSubscriptionStatus } from "../../subscriptions/subscription-status-transition";
+import { termEnded } from "../../subscriptions/subscription-term";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { activationIdentifier } from "../tenant-owner-activation/token";
 import { provisionTenantSchema, type ProvisionTenantDto, type ProvisionTenantInput } from "./dto";
@@ -391,18 +393,27 @@ export class TenantProvisioningService {
     // One current subscription per tenant (`tenant_subscriptions_one_current_uq`):
     // an offline plan assignment already is that subscription, so no demo is added
     // and no default demo is required (spec 2026-10-16). The timeline lock held
-    // above makes this read stable against a concurrent assignment.
-    const [current] = await tx
-      .select({ id: schema.tenantSubscriptions.id })
+    // above makes this read stable against a concurrent assignment. "Current" is
+    // judged by the term, as the entitlements are: a row still `trial`/`active`
+    // after its end, before the status job has run, is settled as expired here
+    // (the same transition the job writes) so it neither counts as an assignment
+    // nor blocks the demo through the one-current index.
+    const stored = await tx
+      .select()
       .from(schema.tenantSubscriptions)
       .where(
         and(
           eq(schema.tenantSubscriptions.tenantId, tenantId),
           inArray(schema.tenantSubscriptions.status, ["pending_activation", "trial", "active"]),
         ),
-      )
-      .limit(1);
-    const offlineAssignments = await this.countOfflineAssignments(tx, tenantId);
+      );
+    let current = false;
+    for (const row of stored) {
+      if (row.status !== "pending_activation" && termEnded(row, operationAt))
+        await transitionSubscriptionStatus(tx, row, "expired", row.endsAt!, "term_ended");
+      else current = true;
+    }
+    const offlineAssignments = await this.countOfflineAssignments(tx, tenantId, operationAt);
     // Without a current subscription the default demo is required: this throws
     // before any write when none is configured.
     const demo = current ? null : await this.lockDefaultDemo(tx, false);
@@ -466,7 +477,7 @@ export class TenantProvisioningService {
   }
 
   /** Live plan and add-on assignments the grant leaves in force (spec 2026-10-16). */
-  private async countOfflineAssignments(tx: ProvisionTransaction, tenantId: string) {
+  private async countOfflineAssignments(tx: ProvisionTransaction, tenantId: string, at: Date) {
     const [plans] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.tenantSubscriptions)
@@ -488,6 +499,8 @@ export class TenantProvisioningService {
         and(
           eq(schema.subscriptionAddons.tenantId, tenantId),
           inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+          // An add-on past its end that the status job has not settled is not in force.
+          or(isNull(schema.subscriptionAddons.endsAt), gt(schema.subscriptionAddons.endsAt, at)),
         ),
       );
     return { plans: plans?.count ?? 0, addons: addons?.count ?? 0 };

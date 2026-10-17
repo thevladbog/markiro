@@ -14,6 +14,7 @@ import type {
   SubscriptionEnforcementMode,
 } from "./entitlements.types";
 import { SubscriptionEntitlementsInvalidException } from "./subscription-errors";
+import { termContains } from "./subscription-term";
 
 export interface EntitlementProjectionInput {
   current: EffectiveEntitlements;
@@ -27,10 +28,8 @@ export interface EntitlementProjectionInput {
   readinessReasons: string[];
 }
 export function sourceActiveAt(source: EntitlementSource, at: Date): boolean {
-  return (
-    (source.startsAt === null || Date.parse(source.startsAt) <= at.getTime()) &&
-    (source.endsAt === null || Date.parse(source.endsAt) > at.getTime())
-  );
+  const instant = (value: string | null) => (value === null ? null : new Date(value));
+  return termContains({ startsAt: instant(source.startsAt), endsAt: instant(source.endsAt) }, at);
 }
 function quotas(
   limits: EffectiveEntitlements["quotas"],

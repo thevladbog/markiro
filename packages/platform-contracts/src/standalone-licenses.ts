@@ -160,7 +160,17 @@ export const standaloneAssignmentRefSchema = z
   })
   .strict();
 export type StandaloneAssignmentRef = z.infer<typeof standaloneAssignmentRefSchema>;
-export const standaloneAssignmentRefsSchema = z.array(standaloneAssignmentRefSchema).min(1).max(65);
+/**
+ * The issuance journal names at most this many assignments: the plan and up to
+ * `STANDALONE_ASSIGNMENT_REFS_MAX - 1` add-ons. The migration's `jsonb_array_length`
+ * bound is the same number; assignment creation for a tenant without a cabinet
+ * refuses the add-on that would exceed it, so issuance can always be journalled.
+ */
+export const STANDALONE_ASSIGNMENT_REFS_MAX = 65;
+export const standaloneAssignmentRefsSchema = z
+  .array(standaloneAssignmentRefSchema)
+  .min(1)
+  .max(STANDALONE_ASSIGNMENT_REFS_MAX);
 
 /**
  * `offline` rows (the removed manual terms) are paid plans with the offline
