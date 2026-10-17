@@ -168,6 +168,8 @@ function inspectPhoto(selectors) {
   };
 }
 const EXPECT = { transparent: "gradient", opaque: "none", jpeg: "none", none: "gradient" };
+// The hub card's photo panel paints the brand gradient behind every kind of photo (station-fit-2).
+const expected = (view, kind) => (view === "hub" ? "gradient" : EXPECT[kind]);
 for (const [width, height] of [
   [1280, 1024],
   [1024, 800],
@@ -187,8 +189,8 @@ for (const [width, height] of [
       await page.waitForSelector(selectors.frame);
       await page.waitForTimeout(400);
       const result = await page.evaluate(inspectPhoto, selectors);
-      if (result.backing !== EXPECT[kind])
-        result.problems.push(`backing ${result.backing}, expected ${EXPECT[kind]}`);
+      if (result.backing !== expected(view, kind))
+        result.problems.push(`backing ${result.backing}, expected ${expected(view, kind)}`);
       if ((result.backing === "gradient") !== result.gradient)
         result.problems.push("backing attribute and painted face differ");
       if (process.env.SHOT)
