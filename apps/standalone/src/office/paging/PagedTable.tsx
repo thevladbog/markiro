@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import { Table, type TableProps } from "@markiro/ui";
 
+import { tableFloorStyle } from "../list/fill-model.js";
 import { PaginationBar } from "./PaginationBar.js";
 import { useClientPaging } from "./use-paging.js";
 
@@ -44,6 +45,7 @@ export function PagedTable<Row>({
       <Table
         fill
         {...table}
+        style={{ ...tableFloorStyle(paging.rows.length), ...table.style }}
         rows={paging.rows}
         // Every table is a keyboard-reachable scroll region with a name, as wide as its columns need.
         scrollLabel={name ?? t("office.common.pagination.table")}
