@@ -16,6 +16,8 @@ const VIEWPORTS = process.env.SIZES
       [1024, 640],
       [1024, 700],
       [1024, 768],
+      [1024, 820],
+      [1280, 700],
       [1280, 800],
       [1280, 1024],
     ];
@@ -54,6 +56,11 @@ const WORK_CASES = [
   "mode=check",
   "mode=pallets&capacity=12&items=5",
   "mode=plain&capacity=48&items=20",
+  "mode=pallets&capacity=3&items=3&rows=0",
+  "mode=plain&capacity=12&items=5&rows=1&photo=transparent",
+  "mode=pallets&capacity=6&items=4&big=1&long=1&photo=jpeg",
+  "mode=check&rows=3&big=1",
+  "mode=check&rows=0",
 ];
 const HUB_CASES = [
   "view=hub&shifts=1&queue=2&photo=jpeg",

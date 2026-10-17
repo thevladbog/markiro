@@ -37,6 +37,9 @@ const items = Math.min(capacity, Number(query.get("items") ?? "1"));
 const rowCount = Number(query.get("rows") ?? "8");
 const validation = mode === "check";
 const photoKind = query.get("photo") ?? "none";
+/** `big=1`: a six-figure count over a seven-figure plan; `long=1`: a long counterparty's name. */
+const big = query.get("big") === "1";
+const longName = query.get("long") === "1";
 
 /** A bottle-ish picture drawn on a canvas: transparent PNG, opaque PNG (white), or a JPEG. */
 function drawPhoto(kind: string): { media: string; base64: string } | null {
@@ -173,10 +176,14 @@ function Harness() {
                   productName="Сидр «Яблочный» полусладкий газированный 0,45 л"
                   gtin="04680089900017"
                   number="№ 12"
-                  counterpartyName="ООО «Атолл»"
+                  counterpartyName={
+                    longName
+                      ? "Общество с ограниченной ответственностью «Атолл-Холдинг»"
+                      : "ООО «Атолл»"
+                  }
                   {...(fakeLocal === undefined ? {} : { local: fakeLocal, productId: "p" })}
-                  accepted={items}
-                  plannedQty={600}
+                  accepted={big ? 123456 : items}
+                  plannedQty={big ? 1200000 : 600}
                   modeLabel={validation ? "Проверка" : "Агрегация"}
                   {...(validation ? { refused: { duplicates: 1, errors: 0 } } : {})}
                 />

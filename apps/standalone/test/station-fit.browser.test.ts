@@ -4,20 +4,23 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * The measuring guard of the floor's fit in a real browser: `test/harness/station-fit/measure.mjs`
- * renders «Новая смена», «Рабочее место» and the sign-in at the real terminal's window sizes
- * (1024 x 640 to 1280 x 1024, both themes) and fails on a clipped text or box, a text that spills out
- * of its box or lies over another text or a control, a control under 64 px, cut at a side, outside
- * the window or covered (by the footer, say), a primary under 72 px (84 in a tall window), or a page
- * that scrolls. `measure-others.mjs` runs the same guard over the other floor screens' harness pages
- * (the hub, the work screen, the reprint). It needs Chromium, so it runs only where
- * `PLAYWRIGHT_CORE` names a `playwright-core` (and the loopback is open):
+ * The measuring guard of the station floor's fit in a real browser, over the real terminal's window
+ * sizes (1024 x 640 to 1280 x 1024, both themes): a 1280 x 1024 panel at Windows 125 % gives the app
+ * about 1024 x 640-720 CSS px. It fails on a clipped text or box, a text that spills out of its box
+ * or lies over another text or a control, a control under 64 px, cut at a side, outside the window
+ * or covered (by the footer, say), a primary under 72 px (84 px in a tall window), or a page that
+ * scrolls. Three scripts, one rule set (`measure-fit.ts`):
+ *   - `measure.mjs`: «Новая смена», «Рабочее место» (all four tabs, the printer form with its
+ *     keypad, the A4 test, the version block of «Станция») and the sign-in;
+ *   - `measure-others.mjs`: the hub and its header, the work screen (aggregation, pallets, plain,
+ *     «Проверка», long and big texts), the warehouse reprint in all its states;
+ *   - `measure-screens.mjs`: the work screen's stages (exceptions, the close and the closed shift,
+ *     the full scan history, the labels' history) and the re-confirmation card, where nothing may
+ *     scroll but a list long by nature and no control may wait below the fold.
+ * It needs Chromium, so it runs only where `PLAYWRIGHT_CORE` names a `playwright-core` (and the
+ * loopback is open; on macOS the sandbox is off):
  *
  *   PLAYWRIGHT_CORE=/path/to/playwright-core pnpm --filter @markiro/standalone exec vitest run test/station-fit.browser.test.ts
- *
- * The others' known violations (the work screen below 720 px, the hub's offline banner, the reprint's
- * hint on a 640 px window) are listed in the report of this guard, not hidden: `OTHERS_ALL=1` also
- * runs them as a failing check; by default only the screens this guard fixed are asserted.
  */
 const playwright = process.env.PLAYWRIGHT_CORE;
 
@@ -54,7 +57,7 @@ const problemsOf = (stdout: string) =>
     }));
 
 describe.skipIf(playwright === undefined)("the floor's fit in a browser", () => {
-  it("fits the new shift, the workstation setup and the sign-in at the terminal's sizes", async () => {
+  it("fits every station screen at the terminal's sizes", async () => {
     const { createServer } = await import("vite");
     const server = await createServer({
       root: process.cwd(),
@@ -73,12 +76,16 @@ describe.skipIf(playwright === undefined)("the floor's fit in a browser", () => 
       const hub = await run("test/harness/hub-header/measure.mjs", port);
       expect(problemsOf(hub.stdout)).toEqual([]);
       expect(hub.status).toBe(0);
-      if (process.env.OTHERS_ALL === "1") {
-        const others = await run("test/harness/station-fit/measure-others.mjs", port);
-        expect(problemsOf(others.stdout)).toEqual([]);
-      }
+      // The hub's cases, the work screen and the reprint, on the whole matrix.
+      const others = await run("test/harness/station-fit/measure-others.mjs", port);
+      expect(problemsOf(others.stdout)).toEqual([]);
+      expect(others.status).toBe(0);
+      // The work screen's stages and the re-confirmation card.
+      const screens = await run("test/harness/station-fit/measure-screens.mjs", port);
+      expect(problemsOf(screens.stdout)).toEqual([]);
+      expect(screens.status).toBe(0);
     } finally {
       await server.close();
     }
-  }, 1_800_000);
+  }, 3_600_000);
 });

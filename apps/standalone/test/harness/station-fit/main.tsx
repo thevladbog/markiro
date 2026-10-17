@@ -15,6 +15,8 @@ import { createPrintRuntime } from "../../../src/floor/print/print-runtime.js";
 import type { LocalExecutor } from "../../../src/local/executor.js";
 import { ENTITY_SET } from "../../../src/local/reference-sync.js";
 import type { HostStatus } from "../../../src/host/protocol.js";
+import { FloorFrameWithUpdateEntry } from "../../../src/update/floor-update-entry-context.js";
+import type { FloorUpdateEntry } from "../../../src/update/floor-update-entry-context.js";
 import { measureFit } from "./measure-fit.js";
 
 /**
@@ -56,19 +58,26 @@ const TEMPLATE = "44444444-4444-4444-8444-444444444444";
 const PALLET_TEMPLATE = "55555555-5555-4555-8555-555555555555";
 const DUP_TEMPLATE = "66666666-6666-4666-8666-666666666666";
 
+const a4 = query.get("a4") === "1";
+/* The three kinds of a printer's endpoint: a network one, a Windows queue (`usb`), a COM port. With
+   `a4=1` the queue's printer prints A4 pallet sheets through the driver (300 dpi). */
 const printers = Array.from({ length: printerCount }, (_, i) => ({
   id: `p${i}`,
-  name: long
-    ? `Принтер этикеток Zebra ZT411 у линии розлива сидра № ${i + 1} (цех 2)`
-    : `Zebra у линии ${i + 1}`,
+  name:
+    a4 && i % 3 === 1
+      ? "HP LaserJet Pro M404 (лист А4)"
+      : long
+        ? `Принтер этикеток Zebra ZT411 у линии розлива сидра № ${i + 1} (цех 2)`
+        : `Zebra у линии ${i + 1}`,
   target:
     i % 3 === 0
       ? { kind: "tcp", host: `192.168.1.${50 + i}`, port: 9100 }
       : i % 3 === 1
-        ? { kind: "windows", name: "ZDesigner ZT411-203dpi ZPL" }
+        ? { kind: "usb", printer: a4 ? "HP LaserJet Pro M404" : "ZDesigner ZT411-203dpi ZPL" }
         : { kind: "serial", port: `COM${3 + i}`, baud: 9600 },
   language: "zpl",
-  dpi: 203,
+  dpi: a4 && i % 3 === 1 ? 300 : 203,
+  ...(a4 && i % 3 === 1 ? { mode: "windows_driver", paper: "a4" } : {}),
 }));
 
 const settingsRows = [
@@ -76,7 +85,11 @@ const settingsRows = [
     key: "printers",
     value: JSON.stringify({
       printers,
-      assignments: { box: printers[0]?.id ?? null, pallet: null, duplicate: null },
+      assignments: {
+        box: printers[0]?.id ?? null,
+        pallet: a4 ? (printers[1]?.id ?? null) : null,
+        duplicate: null,
+      },
     }),
   },
   {
@@ -193,7 +206,36 @@ const hardware = {
   },
 } as never;
 
-const printing = createPrintRuntime(() => Promise.resolve({ sent: true }));
+const printing = createPrintRuntime(() => Promise.resolve({ sent: true }), {
+  // A Windows queue that takes every page: the A4 test sheet reaches its «sent» screen.
+  windows: { printWindowsRaster: () => Promise.resolve({ sent: true }) } as never,
+});
+
+/** The station's update entry («Станция → Версия программы»): `update` = available | required | latest | unreachable | held. */
+const updateKind = query.get("update") ?? "latest";
+const NOTES = [
+  "Исправлено зависание очереди отправки после обрыва связи.",
+  "Новая сводка смены на экране работы.",
+  "Печать листа А4 для паллет через драйвер Windows.",
+];
+const updateEntry: FloorUpdateEntry = {
+  offer:
+    updateKind === "available" || updateKind === "required" || updateKind === "held"
+      ? ({
+          kind: "available",
+          hostVersion: "2.4.0",
+          manifest: { version: "2.4.0", notes: NOTES },
+          required: updateKind === "required",
+        } as never)
+      : { kind: "none" },
+  appVersion: "2.3.1",
+  check: () => undefined,
+  checking: false,
+  checked: updateKind !== "latest" || query.get("checked") === "1",
+  reachable: updateKind !== "unreachable",
+  inShift: updateKind === "held",
+  open: () => undefined,
+};
 
 const LINK: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
 
@@ -201,7 +243,7 @@ function Page() {
   return (
     <ThemeProvider defaultTheme={query.get("theme") === "dark" ? "dark" : "light"}>
       <div className="standalone-screen">
-        <div className="floor-frame">
+        <FloorFrameWithUpdateEntry value={updateEntry}>
           <FloorStatusBar
             local={local}
             pairing={{ hostId: HOST, deviceId: DEVICE }}
@@ -276,7 +318,7 @@ function Page() {
               initialTab={(query.get("tab") ?? "printer") as "printer"}
             />
           )}
-        </div>
+        </FloorFrameWithUpdateEntry>
       </div>
     </ThemeProvider>
   );

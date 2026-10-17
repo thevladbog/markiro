@@ -109,6 +109,69 @@ const CASES = [
   { name: "setup-sound", query: "view=setup&tab=sound", steps: null },
   { name: "setup-station", query: "view=setup&tab=station", steps: null },
   {
+    name: "setup-station-latest",
+    query: "view=setup&tab=station&update=latest&checked=1",
+    steps: null,
+  },
+  {
+    name: "setup-station-available",
+    query: "view=setup&tab=station&update=available",
+    steps: null,
+  },
+  { name: "setup-station-required", query: "view=setup&tab=station&update=required", steps: null },
+  { name: "setup-station-held", query: "view=setup&tab=station&update=held", steps: null },
+  {
+    name: "setup-station-unreachable",
+    query: "view=setup&tab=station&update=unreachable",
+    steps: null,
+  },
+  { name: "setup-printers-a4", query: "view=setup&tab=printer&printers=3&a4=1", steps: null },
+  {
+    name: "setup-a4-test",
+    query: "view=setup&tab=printer&printers=3&a4=1",
+    steps: async (page) => {
+      await page.getByRole("button", { name: /Пробная печать на «HP LaserJet/ }).click();
+      await page.waitForTimeout(1200);
+    },
+  },
+  {
+    name: "setup-printer-edit-tcp-keypad",
+    query: "view=setup&tab=printer&printers=3",
+    steps: async (page) => {
+      await page.getByRole("button", { name: /Изменить принтер «Zebra у линии 1»/ }).click();
+      await page.waitForTimeout(250);
+      await page
+        .getByLabel(/Адрес принтера/)
+        .first()
+        .click();
+      await page.waitForTimeout(250);
+    },
+  },
+  {
+    name: "setup-printer-edit-queue",
+    query: "view=setup&tab=printer&printers=3",
+    steps: async (page) => {
+      await page.getByRole("button", { name: /Изменить принтер «Zebra у линии 2»/ }).click();
+      await page.waitForTimeout(250);
+    },
+  },
+  {
+    name: "setup-printer-edit-a4",
+    query: "view=setup&tab=printer&printers=3&a4=1",
+    steps: async (page) => {
+      await page.getByRole("button", { name: /Изменить принтер «HP LaserJet/ }).click();
+      await page.waitForTimeout(250);
+    },
+  },
+  {
+    name: "setup-printer-edit-serial",
+    query: "view=setup&tab=printer&printers=3",
+    steps: async (page) => {
+      await page.getByRole("button", { name: /Изменить принтер «Zebra у линии 3»/ }).click();
+      await page.waitForTimeout(250);
+    },
+  },
+  {
     name: "setup-printer-editor-tcp",
     query: "view=setup&tab=printer&printers=2",
     steps: async (page) => {
