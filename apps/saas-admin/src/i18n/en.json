@@ -513,7 +513,7 @@
       "downloadPdf": "Download PDF",
       "retry": "Retry generation",
       "confirmTitle": "Generate a new revision?",
-      "confirmDescription": "A new immutable HTML and PDF revision will be created. Ready earlier revisions remain available.",
+      "confirmDescription": "A new immutable HTML and PDF revision will be created without a signature and seal, plus a signed and sealed variant for the authorized supplier. Ready earlier revisions remain available.",
       "nextRevision": "Revision {{revision}}",
       "confirm": "Generate new revision",
       "cancel": "Cancel",

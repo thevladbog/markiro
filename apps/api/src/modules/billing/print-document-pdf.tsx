@@ -37,7 +37,10 @@ import {
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
-const markiroLogo = readFileSync(join(__dirname, "assets/markiro-logo-on-light.svg"), "utf8");
+// Use the complete bundled logo: SVG text rasterization depends on host fonts.
+const markiroLogo = `data:image/png;base64,${readFileSync(
+  join(__dirname, "assets/markiro-logo-on-light.png"),
+).toString("base64")}`;
 const authorizedSignature = `data:image/png;base64,${readFileSync(
   join(__dirname, "assets/vb-signature-ink.png"),
 ).toString("base64")}`;
@@ -231,10 +234,10 @@ const styles = StyleSheet.create({
   barcode: { width: 148, height: 16 },
   barcodeCaption: {
     fontFamily: "IBM Plex Sans",
-    fontSize: 5.8,
-    fontWeight: 600,
+    fontSize: 6.5,
+    fontWeight: 400,
     letterSpacing: 0.35,
-    color: colors.muted,
+    color: "#000000",
   },
   footerText: { fontSize: 6.2, color: colors.muted },
 });
@@ -542,7 +545,7 @@ export async function renderPrintPdf(
   options: PrintRenderOptions = {},
 ): Promise<Buffer> {
   const printVariant = resolvePrintVariant(model, options);
-  const logo = await svgDataUri(markiroLogo, 1120);
+  const logo = markiroLogo;
   const qrPayload = paymentQrPayload(model);
   const qr = qrPayload ? qrVector(renderQrSvg(qrPayload)) : null;
   const barcode = await svgDataUri(
