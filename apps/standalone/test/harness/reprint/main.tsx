@@ -255,9 +255,12 @@ const handlers = {
   onVerify: noop,
   onSetup: noop,
   onLeave: noop,
+  onFinish: noop,
 };
 
-const lines = (sheets: boolean, none: boolean): SummaryLine[] =>
+const LONG_PRINTER =
+  "HP LaserJet Enterprise M609 (драйвер Windows, бухгалтерия, второй этаж, копия 3) — очередь А4";
+const lines = (sheets: boolean, none: boolean, long = false): SummaryLine[] =>
   summaryRows({
     printers: none ? [] : [ZEBRA, TSC, HP],
     assignments: none
@@ -269,10 +272,10 @@ const lines = (sheets: boolean, none: boolean): SummaryLine[] =>
       row.kind === "sheet"
         ? row.printer === null
           ? "Лист «Паллета · стандарт» · принтер не назначен"
-          : `Лист «Паллета · стандарт» · ${row.printer.name}`
+          : `Лист «Паллета · стандарт» · ${long ? LONG_PRINTER : row.printer.name}`
         : row.state === "sheets_only"
           ? "Принтер паллет печатает листы А4"
-          : `«${{ box: "Короб 100×150", pallet: "Паллета 100×150", unit: "Дубликат Data Matrix 40×30" }[row.kind]}» · ${row.printer?.name ?? "принтер не назначен"}`,
+          : `«${{ box: "Короб 100×150", pallet: "Паллета 100×150", unit: "Дубликат Data Matrix 40×30" }[row.kind]}» · ${long ? LONG_PRINTER : (row.printer?.name ?? "принтер не назначен")}`,
   }));
 
 const sessionProps = {
@@ -289,9 +292,14 @@ const sessionProps = {
   onFinish: noop,
   onLeave: noop,
   onOpen: noop,
+  finishBlocked: false,
 };
-const jobProps = (shown: WarehouseJob, over: { verifying?: boolean; said?: Said | null } = {}) => ({
+const jobProps = (
+  shown: WarehouseJob,
+  over: { verifying?: boolean; said?: Said | null; check?: "none" | "required" } = {},
+) => ({
   job: shown,
+  check: over.check ?? "none",
   verifying: over.verifying ?? false,
   templateName:
     shown.kind === "unit"
@@ -351,8 +359,14 @@ function Screen() {
       return setup(true, false);
     case "setup-none":
       return setup(false, true);
+    case "setup-long":
+      return setup(true, false, true);
+    case "setup-check":
+      return setup(true, false, true, "required");
     case "empty":
       return session({ journal: [] });
+    case "journal-blocked":
+      return session({ finishBlocked: true });
     case "journal":
     case "scanner":
     case "offline":
@@ -371,6 +385,32 @@ function Screen() {
       return <JobView {...jobProps(BOX)} />;
     case "unit-sent":
       return <JobView {...jobProps(UNIT)} />;
+    case "sent-check":
+      return <JobView {...jobProps({ ...BOX, state: "sent" }, { check: "required" })} />;
+    case "sent-check-verifying":
+      return (
+        <JobView {...jobProps({ ...BOX, state: "sent" }, { check: "required", verifying: true })} />
+      );
+    case "failed-setup":
+      return (
+        <JobView
+          {...jobProps({
+            ...BOX,
+            state: "failed",
+            errorCode: "printer_unconfigured",
+            printer: null,
+          })}
+        />
+      );
+    case "sent-check-long":
+      return (
+        <JobView
+          {...jobProps(
+            { ...BOX, state: "sent", printer: { ...ZEBRA, name: LONG_PRINTER } },
+            { check: "required" },
+          )}
+        />
+      );
     case "unknown":
       return <JobView {...jobProps({ ...UNIT, state: "unknown", errorCode: "outcome_unknown" })} />;
     case "verifying":
@@ -429,11 +469,11 @@ function Screen() {
   }
 }
 
-function setup(sheets: boolean, none: boolean) {
+function setup(sheets: boolean, none: boolean, long = false, check: "none" | "required" = "none") {
   return (
     <SetupView
       reason="damaged"
-      lines={lines(sheets, none)}
+      lines={lines(sheets, none, long)}
       press={press}
       leave={press}
       onPick={noop}
@@ -441,6 +481,8 @@ function setup(sheets: boolean, none: boolean) {
       onLeave={noop}
       onSetup={noop}
       onStart={noop}
+      check={check}
+      onCheck={noop}
     />
   );
 }
@@ -455,6 +497,9 @@ function ManualScreen() {
       reasonText={reasonText}
       press={press}
       onCancel={noop}
+      onLeave={noop}
+      onFinish={noop}
+      finishBlocked={query.get("blocked") === "1"}
       onSubmit={noop}
       submitProps={{}}
     />
@@ -593,12 +638,12 @@ createRoot(document.getElementById("root")!).render(<Page />);
     if (f.bottom > window.innerHeight + 0.5)
       problems.push(`frame past the window by ${f.bottom - window.innerHeight}px`);
     for (const el of frame.querySelectorAll(
-      ".rp-footer, .rp-footer > *, .rp-journal__row, .rp-tag, .rp-summary__row",
+      ".rp-footer, .rp-footer__row, .rp-footer__row > *, .rp-journal__row, .rp-tag, .rp-summary__row",
     )) {
       const b = box(el);
       if (b.width === 0) continue;
-      // The journal's list is a scroll region: a row below its edge is reached by scrolling it.
-      if (el.closest(".rp-journal__list")) continue;
+      // A scroll region: a row below its edge is reached by scrolling it (checked below).
+      if (el.closest(".rp-scroll")) continue;
       if (b.right > f.right + 0.5 || b.left < f.left - 0.5) {
         problems.push(`${el.className.toString().split(" ")[0]} leaves the frame sideways`);
       }
@@ -606,7 +651,7 @@ createRoot(document.getElementById("root")!).render(<Page />);
         problems.push(`${el.className.toString().split(" ")[0]} leaves the frame below`);
     }
     for (const el of frame.querySelectorAll(
-      ".rp-tag, .rp-banner__text, .rp-subject__code, .rp-print__row dd, .rp-journal__code",
+      ".rp-tag, .rp-banner__text, .rp-subject__code, .rp-print__row dd, .rp-journal__code, .rp-footer__note, .rp-summary__text",
     )) {
       if (el.scrollWidth - el.clientWidth > 1 && getComputedStyle(el).overflow === "visible") {
         problems.push(`${el.className.toString().split(" ")[0]} overflows sideways`);
@@ -622,17 +667,72 @@ createRoot(document.getElementById("root")!).render(<Page />);
       if (el.scrollWidth - el.clientWidth > 1)
         problems.push(`footer button clipped: ${(el.textContent ?? "").trim()}`);
     }
-    const list = frame.querySelector(".rp-journal__list");
-    if (list) {
-      out.journal = {
-        listH: Math.round(box(list).height),
-        scrolls: list.scrollHeight - list.clientHeight,
-      };
-      if (box(list).bottom > f.bottom + 0.5) problems.push("journal list leaves the frame below");
+    const footerTop = (frame.querySelector(".rp-footer") ?? frame).getBoundingClientRect().top;
+    // Every zone that scrolls: inside its row, above the footer, a track of 12 px at least and a
+    // fade while more stands below; text never cut inside a zone that does not scroll.
+    const scrolls: unknown[] = [];
+    for (const scroller of frame.querySelectorAll(".rp-scroll")) {
+      const sb = box(scroller);
+      const over = scroller.scrollHeight - scroller.clientHeight;
+      const track = (scroller as HTMLElement).offsetWidth - scroller.clientWidth;
+      const col = scroller.closest(".rp-col");
+      const more = col?.getAttribute("data-more");
+      scrolls.push({ over, track, more, h: Math.round(sb.height) });
+      if (sb.bottom > footerTop + 0.5)
+        problems.push(
+          `scroll zone (${Math.round(sb.bottom)}) runs into the footer (${Math.round(footerTop)})`,
+        );
+      if (over > 1) {
+        if (track < 12) problems.push(`scroll zone has no visible track (${track}px)`);
+        if (
+          more !== "true" &&
+          scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1
+        )
+          problems.push("scroll zone has more below and no fade");
+        // Touch: a drag moves it (nothing locks the overflow), the keyboard reaches its last control.
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + 40;
+        if (scroller.scrollTop === before) problems.push("scroll zone does not scroll");
+        scroller.scrollTop = before;
+      }
+      for (const el of scroller.querySelectorAll("button, [role=radio], [role=switch]")) {
+        const b = box(el);
+        if (b.right > sb.right + 0.5 || b.left < sb.left - 0.5)
+          problems.push(
+            `control inside a scroll zone leaves it sideways: ${(el.textContent ?? "").trim().slice(0, 24)}`,
+          );
+      }
     }
+    out.scrolls = scrolls;
+    // The session's finish is on every screen of a session after the start, disabled with its reason.
+    const finish = [...frame.querySelectorAll(".rp-footer .mk-btn")].find((el) =>
+      (el.textContent ?? "").includes("Завершить сеанс"),
+    );
+    const isSession =
+      frame.classList.contains("warehouse-reprint") &&
+      !frame.querySelector(".rp-setup-reasons") &&
+      !frame.querySelector(".rp-dialog");
+    if (isSession && !finish) problems.push("no «Завершить сеанс» on a session screen");
+    if (
+      finish &&
+      finish.getAttribute("aria-disabled") === "true" &&
+      !frame.querySelector(".rp-footer__note")
+    )
+      problems.push("a disabled finish has no reason beside it");
+    if (isSession && !frame.querySelector(".rp-footer .mk-btn > svg, .rp-footer .mk-btn"))
+      problems.push("no footer");
     // The zones and the footer keep their own rows: nothing of the body runs into the footer.
     const footer = frame.querySelector(".rp-footer");
     const body = frame.querySelector(".rp-body, .rp-zones, .rp-manual");
+    // A scroll zone's own children never end past the footer unless they scroll (no overlay).
+    for (const el of frame.querySelectorAll(".rp-scroll *")) {
+      if (el.closest(".rp-scroll")?.scrollHeight === el.closest(".rp-scroll")?.clientHeight) {
+        if (footer && box(el).bottom > box(footer).top + 0.5 && box(el).height > 0)
+          problems.push(
+            `${el.className.toString().split(" ")[0] || el.tagName} runs under the footer`,
+          );
+      }
+    }
     if (footer && body && box(body).bottom > box(footer).top + 0.5) {
       problems.push(
         `body (${Math.round(box(body).bottom)}) runs into the footer (${Math.round(box(footer).top)})`,

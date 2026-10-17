@@ -262,27 +262,46 @@ section.warehouse-reprint {
   list-style: none;
 }
 
+/* A row: the kind and its words on the left, «Изменить» on the right, the printer's state under
+   the words (so the words keep their width); a long printer name is two lines at most. */
 .rp-summary__row {
   display: grid;
   min-width: 0;
   padding: var(--sp-3) 0;
-  gap: var(--sp-3) var(--sp-4);
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: var(--sp-2) var(--sp-4);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "glyph text change"
+    "glyph tag change";
   align-items: center;
   border-bottom: 1px solid var(--line);
 }
 
 .rp-summary__glyph {
   display: grid;
+  grid-area: glyph;
+  align-self: start;
+  padding-top: var(--sp-1);
   place-items: center;
   color: var(--fg);
 }
 
 .rp-summary__text {
   display: grid;
+  grid-area: text;
   min-width: 0;
   font: var(--floor-body);
   overflow-wrap: anywhere;
+}
+
+.rp-summary__row > .rp-summary__tag {
+  grid-area: tag;
+  justify-self: start;
+}
+
+.rp-summary__row > .mk-btn {
+  grid-area: change;
+  min-width: 0;
 }
 
 .rp-summary__text strong {
@@ -292,6 +311,13 @@ section.warehouse-reprint {
 
 .rp-summary__text span {
   color: var(--muted);
+}
+
+.rp-summary__detail {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* ---- Journal ---- */
@@ -317,12 +343,9 @@ section.warehouse-reprint {
 
 .rp-journal__list {
   display: block;
-  min-height: 0;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
-  overscroll-behavior: contain;
 }
 
 .rp-journal__list li {
@@ -594,23 +617,45 @@ section.warehouse-reprint {
 /* ---- Footer: the answers, the one primary at the right ---- */
 
 .rp-footer {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+}
+
+.rp-footer__row {
   display: flex;
   min-width: 0;
   gap: var(--sp-3);
   align-items: stretch;
 }
 
-.rp-footer > .rp-footer__primary,
-.rp-footer > .rp-footer__end {
+/* Why a button is disabled stands in words above the row, never as a colour or a tooltip alone. */
+.rp-footer__note {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  gap: var(--sp-3);
+  align-items: center;
+  color: var(--warn-fg);
+  font: var(--floor-body-strong);
+}
+
+.rp-footer__note .floor-glyph {
+  flex: none;
+}
+
+.rp-footer__row > .rp-footer__primary,
+.rp-footer__row > .rp-footer__end {
   margin-inline-start: auto;
 }
 
-.rp-footer > .rp-footer__primary ~ .rp-footer__primary {
+.rp-footer__row > .rp-footer__primary ~ .rp-footer__primary {
   margin-inline-start: 0;
 }
 
 .rp-footer .mk-btn {
   min-width: 0;
+  white-space: nowrap;
 }
 
 /* The answers of a screen are the kit's 84 px, the primary and the others alike. */
@@ -627,7 +672,7 @@ section.warehouse-reprint {
 
 .rp-footer .rp-footer__primary {
   flex: 0 1 auto;
-  min-width: 260px;
+  min-width: 220px;
   padding-inline: var(--sp-7);
 }
 
@@ -935,4 +980,120 @@ section.warehouse-reprint {
   .rp-manual__pad {
     gap: var(--sp-2);
   }
+}
+
+/* ---- A zone that scrolls on its own: a track and a thumb a glove can take, a fade at the foot ---- */
+
+.rp-col {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.rp-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: var(--sp-4);
+}
+
+/* A zone fills its column (the scan zone stands in the middle of it), and grows past it to scroll. */
+.rp-scroll > * {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+/* Taller than its row: the fade at the foot says there is more below (the track stays beside it). */
+.rp-col::after {
+  position: absolute;
+  inset: auto 16px 0 0;
+  height: 56px;
+  background: linear-gradient(to bottom, transparent, var(--surface-page));
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rp-col[data-more="true"]::after {
+  opacity: 1;
+}
+
+/*
+ * The track is always drawn, 16 px wide with a 12 px thumb. The global style hides the platform's
+ * scrollbar until a hover (`scrollbar-width: thin`, a transparent colour): a glove has no hover, so
+ * the standard properties go back to `auto` here, which is what lets the `-webkit-` pieces count.
+ */
+.warehouse-reprint .rp-scroll,
+.warehouse-reprint .rp-dialog {
+  scrollbar-color: auto;
+  scrollbar-width: auto;
+}
+
+.warehouse-reprint .rp-scroll::-webkit-scrollbar,
+.warehouse-reprint .rp-dialog::-webkit-scrollbar {
+  width: 16px;
+}
+
+.warehouse-reprint .rp-scroll::-webkit-scrollbar-track,
+.warehouse-reprint .rp-dialog::-webkit-scrollbar-track {
+  border-radius: 8px;
+  background: var(--line);
+}
+
+.warehouse-reprint .rp-scroll::-webkit-scrollbar-thumb,
+.warehouse-reprint .rp-dialog::-webkit-scrollbar-thumb {
+  min-height: 56px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background-color: var(--muted);
+  transition: none;
+}
+
+.warehouse-reprint .rp-scroll:hover::-webkit-scrollbar-thumb,
+.warehouse-reprint .rp-dialog:hover::-webkit-scrollbar-thumb,
+.warehouse-reprint .rp-scroll::-webkit-scrollbar-thumb:hover,
+.warehouse-reprint .rp-dialog::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fg);
+}
+
+/* Four answers or more in a row on a narrow window: the words keep the room, the glyphs go. */
+@media (max-width: 1100px) {
+  .rp-footer__row:has(> :nth-child(4)) .mk-btn > .floor-glyph {
+    display: none;
+  }
+
+  .rp-footer__row .mk-btn {
+    padding-inline: var(--sp-4) !important;
+  }
+}
+
+@media (max-height: 700px) {
+  .rp-footer__note {
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  .rp-col::after {
+    height: 40px;
+  }
+}
+
+/* The session's check switch: the kit's card, a little tighter than the setup's own (its column is narrow). */
+.warehouse-reprint .rp-check .floor-switch-card {
+  padding: var(--sp-3) var(--sp-4);
+  column-gap: var(--sp-3);
+}
+
+.warehouse-reprint .rp-check .floor-switch-card__title {
+  font-size: 20px;
+  line-height: 26px;
+}
+
+.warehouse-reprint .rp-check .floor-switch-card__hint {
+  font-size: 16px;
+  line-height: 22px;
 }
