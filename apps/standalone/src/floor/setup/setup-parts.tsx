@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useTheme, type Theme } from "@markiro/ui";
 
 import { ModeSegment } from "../kit/ModeSegment.js";
+import { StationUpdateBlock } from "./StationUpdateBlock.js";
 import { UnpairStation } from "./UnpairStation.js";
 import { useUnpair } from "./unpair-context.js";
 
@@ -97,6 +98,7 @@ export function StationPanel({ facts }: StationPanelProps) {
           reserveHint={false}
         />
       </section>
+      <StationUpdateBlock />
       {unpair !== null && (
         <section className="setup-station__unpair" aria-labelledby="setup-unpair-title">
           <h2 id="setup-unpair-title" className="setup-card__title">

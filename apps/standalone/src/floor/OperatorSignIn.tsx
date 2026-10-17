@@ -57,6 +57,7 @@ import {
   type LockView,
 } from "./sign-in/lock-view.js";
 import { problemWords, type SignInMessage } from "./sign-in/messages.js";
+import { SignInVersionFooter } from "./sign-in/SignInVersionFooter.js";
 import { StationBrand } from "./sign-in/StationBrand.js";
 import "./sign-in/operator-sign-in.css";
 
@@ -817,6 +818,7 @@ export function OperatorSignIn({
       >
         {stepActions}
       </div>
+      <SignInVersionFooter />
     </section>
   );
 }

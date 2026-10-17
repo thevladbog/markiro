@@ -1,0 +1,18 @@
+/* A fifth row under the sign-in's actions, only where the footer is drawn. */
+.operator-login:has(> .sign-in-version) {
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+}
+
+.sign-in-version {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  color: var(--muted2);
+  font: var(--floor-body);
+}
+
+.sign-in-version__text {
+  font-family: var(--font-mono);
+}
