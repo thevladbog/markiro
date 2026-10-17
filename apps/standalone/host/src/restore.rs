@@ -126,9 +126,10 @@ pub const UNREAD_SSCC_ROUNDING: i64 = 10_000;
 /// database could not be read (or there was none): an audit id is never
 /// issued twice, and a million is far more than a day of events.
 pub const UNREADABLE_CURRENT_MARGIN: i64 = 1_000_000;
-/// How often a rename that fails is tried again (a virus scanner on
-/// Windows may hold a file for a moment).
-const RENAME_ATTEMPTS: u32 = 5;
+/// How often a rename that fails with a transient error is tried again (a
+/// virus scanner on Windows may hold a file for a moment): ten tries, about
+/// three seconds in all.
+const RENAME_ATTEMPTS: u32 = 10;
 const RENAME_RETRY_DELAY: Duration = Duration::from_millis(300);
 /// How often the current database is read before it counts as unreadable
 /// (a moment's I/O error or lock is not a dead disk).
@@ -1160,23 +1161,50 @@ fn aside_dir(paths: &HostPaths, now: OffsetDateTime) -> PathBuf {
     candidate
 }
 
-/// `operation`, tried up to `attempts` times with `delay` between, unless the
-/// error says the file is not there.
-fn retrying<T>(
+/// Windows' `ERROR_ACCESS_DENIED`, `ERROR_SHARING_VIOLATION` and
+/// `ERROR_LOCK_VIOLATION`: another handle (a virus scanner, the search
+/// indexer, a connection still closing) holds the file for a moment.
+fn is_busy_code(code: i32) -> bool {
+    matches!(code, 5 | 32 | 33)
+}
+
+/// Whether a failed rename is worth trying again: a permission error on any
+/// system, and on Windows the busy codes above. Anything else (a missing
+/// file, a full disk, a bad path) fails at once.
+fn is_transient(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+        || (cfg!(windows) && error.raw_os_error().is_some_and(is_busy_code))
+}
+
+/// `operation`, tried up to `attempts` times, `sleep`ing `delay` between,
+/// while `transient` says the error may pass. Each retry is logged.
+fn retrying_with<T>(
     attempts: u32,
     delay: Duration,
+    transient: impl Fn(&std::io::Error) -> bool,
+    mut sleep: impl FnMut(Duration),
     mut operation: impl FnMut() -> std::io::Result<T>,
 ) -> std::io::Result<T> {
     let mut attempt = 1;
     loop {
         match operation() {
-            Err(error) if attempt < attempts && error.kind() != std::io::ErrorKind::NotFound => {
+            Err(error) if attempt < attempts && transient(&error) => {
+                tracing::warn!(%error, attempt, attempts, "a file is held by another process: trying again");
                 attempt += 1;
-                std::thread::sleep(delay);
+                sleep(delay);
             }
             other => return other,
         }
     }
+}
+
+/// [`retrying_with`] for a rename: real sleeping, [`is_transient`] errors.
+fn retrying<T>(
+    attempts: u32,
+    delay: Duration,
+    operation: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    retrying_with(attempts, delay, is_transient, std::thread::sleep, operation)
 }
 
 fn rename_retrying(from: &Path, to: &Path, delay: Duration) -> std::io::Result<()> {
@@ -1455,13 +1483,14 @@ async fn read_epoch(db: &Path) -> Option<String> {
     let visit = Visit::begin(db);
     let epoch = async {
         let mut conn = open_read_only(db, false).connect().await.ok()?;
-        let epoch: Option<Option<String>> =
+        let epoch: Result<Option<Option<String>>, sqlx::Error> =
             sqlx::query_scalar("SELECT restore_epoch FROM site WHERE id = 1")
                 .fetch_optional(&mut conn)
-                .await
-                .ok()?;
+                .await;
+        // Closed on every path: a connection that is only dropped closes on
+        // its own thread, later, and would hold the file when it is renamed.
         let _ = conn.close().await;
-        epoch.flatten()
+        epoch.ok()?.flatten()
     }
     .await;
     visit.end();
@@ -3041,6 +3070,81 @@ mod tests {
         });
         assert!(missing.is_err());
         assert_eq!(calls.get(), 1, "a file that is not there is not waited for");
+    }
+
+    #[test]
+    fn a_busy_file_is_waited_for_a_bounded_number_of_times() {
+        let busy = |error: &std::io::Error| error.raw_os_error().is_some_and(is_busy_code);
+        let (calls, slept) = (Cell::new(0), Cell::new(Duration::ZERO));
+        let delay = Duration::from_millis(300);
+        // A rename that fails with os error 32 twice, then goes through.
+        let flaky = retrying_with(
+            RENAME_ATTEMPTS,
+            delay,
+            busy,
+            |pause| slept.set(slept.get() + pause),
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() <= 2 {
+                    Err(std::io::Error::from_raw_os_error(32))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(flaky.is_ok());
+        assert_eq!((calls.get(), slept.get()), (3, delay * 2));
+
+        // One that never lets go gives up after the attempts, with its error.
+        calls.set(0);
+        let stuck: std::io::Result<()> = retrying_with(
+            RENAME_ATTEMPTS,
+            delay,
+            busy,
+            |_| {},
+            || {
+                calls.set(calls.get() + 1);
+                Err(std::io::Error::from_raw_os_error(32))
+            },
+        );
+        assert_eq!(stuck.unwrap_err().raw_os_error(), Some(32));
+        assert_eq!(calls.get(), RENAME_ATTEMPTS);
+        assert!(
+            delay * (RENAME_ATTEMPTS - 1) >= Duration::from_secs(2)
+                && delay * (RENAME_ATTEMPTS - 1) <= Duration::from_secs(4),
+            "about three seconds in all"
+        );
+
+        // Another error is not waited for.
+        calls.set(0);
+        let full: std::io::Result<()> = retrying_with(
+            RENAME_ATTEMPTS,
+            delay,
+            busy,
+            |_| panic!("slept on an error that cannot pass"),
+            || {
+                calls.set(calls.get() + 1);
+                Err(std::io::Error::from_raw_os_error(112))
+            },
+        );
+        assert!(full.is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn only_the_busy_codes_are_transient_on_windows() {
+        assert!([5, 32, 33].into_iter().all(is_busy_code));
+        assert!(![2, 3, 80, 112, 183].into_iter().any(is_busy_code));
+        assert_eq!(
+            is_transient(&std::io::Error::from_raw_os_error(32)),
+            cfg!(windows)
+        );
+        assert!(!is_transient(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+        assert!(is_transient(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
     }
 
     /// A data folder with a database, its WAL and shared memory.
