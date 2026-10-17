@@ -8,7 +8,6 @@ import { Link, useNavigate, useParams } from "react-router";
 import {
   Alert,
   Button,
-  Checkbox,
   ConfirmDialog,
   SectionHeader,
   StatusChip,
@@ -106,7 +105,6 @@ export function InvoiceDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [downloadBlocked, setDownloadBlocked] = useState(false);
   const [documentsNow, setDocumentsNow] = useState(() => Date.now());
-  const [withSignatureSeal, setWithSignatureSeal] = useState(false);
 
   const refresh = async () => {
     await Promise.all([
@@ -126,9 +124,8 @@ export function InvoiceDetailPage() {
     },
     onSuccess: refresh,
   });
-  const printVariant = withSignatureSeal ? "signed" : "clean";
   const issue = useMutation({
-    mutationFn: () => issueInvoice(invoiceId, printVariant),
+    mutationFn: () => issueInvoice(invoiceId),
     onSuccess: refresh,
     onError: () => {
       void sellerContext.refetch();
@@ -150,7 +147,7 @@ export function InvoiceDetailPage() {
     },
   });
   const document = useMutation({
-    mutationFn: () => renderInvoice(invoiceId, printVariant),
+    mutationFn: () => renderInvoice(invoiceId),
     onSuccess: async () => {
       await refresh();
       setConfirmDocumentRender(false);
@@ -256,8 +253,7 @@ export function InvoiceDetailPage() {
   const documentsNeedRetry =
     !htmlDocument ||
     !pdfDocument ||
-    htmlDocument.status === "failed" ||
-    pdfDocument.status === "failed" ||
+    currentDocuments.some((item) => item.status === "failed") ||
     stalePending;
 
   const openDocument = (documentId: string) => {
@@ -423,45 +419,52 @@ export function InvoiceDetailPage() {
                 <section className="invoice-documents__revision" key={revision}>
                   {revision > 0 ? <h3>{t("billing.documents.revision", { revision })}</h3> : null}
                   {(["html", "pdf"] as const).map((format) => {
-                    const item = revisionDocuments.find((document) => document.format === format);
-                    const pendingIsStale =
-                      item?.status === "pending" &&
-                      documentsNow - new Date(item.updatedAt).getTime() > 5 * 60 * 1000;
-                    return (
-                      <div className="invoice-documents__row" key={format}>
-                        <div>
-                          <strong>{format.toUpperCase()}</strong>
-                          <span>
-                            {item?.status === "ready"
-                              ? t("billing.documents.ready")
-                              : item?.status === "pending"
-                                ? t(
-                                    pendingIsStale
-                                      ? "billing.documents.pendingStale"
-                                      : "billing.documents.pending",
-                                  )
-                                : t("billing.documents.failed", {
-                                    format: format.toUpperCase(),
-                                  })}
-                          </span>
-                          {item ? (
-                            <small>{t(`billing.documents.variant.${item.printVariant}`)}</small>
-                          ) : null}
-                        </div>
-                        {item?.status === "ready" ? (
-                          <Button
-                            variant="secondary"
-                            loading={
-                              downloadDocument.isPending && downloadDocument.variables === item.id
-                            }
-                            onClick={() => openDocument(item.id)}
-                          >
-                            {t(
-                              `billing.documents.${format === "html" ? "openHtml" : "downloadPdf"}`,
-                            )}
-                          </Button>
-                        ) : null}
-                      </div>
+                    const formatDocuments = revisionDocuments.filter(
+                      (document) => document.format === format,
+                    );
+                    return (formatDocuments.length > 0 ? formatDocuments : [undefined]).map(
+                      (item) => {
+                        const pendingIsStale =
+                          item?.status === "pending" &&
+                          documentsNow - new Date(item.updatedAt).getTime() > 5 * 60 * 1000;
+                        return (
+                          <div className="invoice-documents__row" key={item?.id ?? format}>
+                            <div>
+                              <strong>{format.toUpperCase()}</strong>
+                              <span>
+                                {item?.status === "ready"
+                                  ? t("billing.documents.ready")
+                                  : item?.status === "pending"
+                                    ? t(
+                                        pendingIsStale
+                                          ? "billing.documents.pendingStale"
+                                          : "billing.documents.pending",
+                                      )
+                                    : t("billing.documents.failed", {
+                                        format: format.toUpperCase(),
+                                      })}
+                              </span>
+                              {item ? (
+                                <small>{t(`billing.documents.variant.${item.printVariant}`)}</small>
+                              ) : null}
+                            </div>
+                            {item?.status === "ready" ? (
+                              <Button
+                                variant="secondary"
+                                loading={
+                                  downloadDocument.isPending &&
+                                  downloadDocument.variables === item.id
+                                }
+                                onClick={() => openDocument(item.id)}
+                              >
+                                {t(
+                                  `billing.documents.${format === "html" ? "openHtml" : "downloadPdf"}`,
+                                )}
+                              </Button>
+                            ) : null}
+                          </div>
+                        );
+                      },
                     );
                   })}
                 </section>
@@ -475,16 +478,6 @@ export function InvoiceDetailPage() {
               {t("billing.documents.retry")}
             </Button>
           </div>
-        ) : null}
-        {canWrite ? (
-          <Checkbox
-            className="invoice-documents__signature-option"
-            label={t("billing.documents.signed")}
-            checked={withSignatureSeal}
-            onCheckedChange={setWithSignatureSeal}
-            disabled={issue.isPending || document.isPending}
-            hint={t("billing.documents.signedHint")}
-          />
         ) : null}
       </section>
 

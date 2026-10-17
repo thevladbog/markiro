@@ -15,6 +15,14 @@ describe("tenant billing schema", () => {
     expect(schema.invoiceApplicationEvents).toBeDefined();
   });
 
+  it("keeps both print variants independently unique within an invoice revision", () => {
+    const keys = getTableConfig(schema.invoiceDocuments).uniqueConstraints.map((constraint) =>
+      constraint.columns.map((column) => column.name),
+    );
+    expect(keys).toContainEqual(["invoice_id", "revision", "format", "print_variant"]);
+    expect(keys).not.toContainEqual(["invoice_id", "revision", "format"]);
+  });
+
   it("exports the immutable billing enums", () => {
     expect(schema.BILLING_PROFILE_KINDS).toEqual([
       "individual",

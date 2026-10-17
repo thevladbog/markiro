@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, max } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { SIGNED_PRINT_SELLER_TAX_ID } from "@markiro/platform-contracts";
 import type {
   CommercialDocumentDownloadSource,
   CommercialDocumentListItemServiceSource,
@@ -39,7 +40,9 @@ export class BillingDocumentsService {
     const revision = requestedRevision ?? (await this.nextRevision(invoiceId));
     const model = toInvoicePrintModel(invoice);
     resolvePrintVariant(model, { printVariant });
-    const pending = await this.ensurePending(invoice.tenantId, invoiceId, revision, printVariant);
+    const variants: PrintDocumentVariant[] =
+      model.seller.taxId === SIGNED_PRINT_SELLER_TAX_ID ? ["clean", "signed"] : ["clean"];
+    const pending = await this.ensurePending(invoice.tenantId, invoiceId, revision, variants);
     const results = await Promise.all(pending.map((document) => this.renderOne(document, model)));
     return { revision, documents: results };
   }
@@ -98,7 +101,11 @@ export class BillingDocumentsService {
       url: await this.storage.presignRead(
         document.objectKey,
         300,
-        document.format === "pdf" ? { downloadFilename: `invoice-${invoiceId}.pdf` } : undefined,
+        document.format === "pdf"
+          ? {
+              downloadFilename: `invoice-${invoiceId}-r${document.revision}-${document.printVariant}.pdf`,
+            }
+          : undefined,
       ),
     };
   }
@@ -115,26 +122,29 @@ export class BillingDocumentsService {
     tenantId: string,
     invoiceId: string,
     revision: number,
-    printVariant: PrintDocumentVariant,
+    variants: PrintDocumentVariant[],
   ) {
     await this.db
       .insert(schema.invoiceDocuments)
       .values(
-        (["html", "pdf"] as const).map((format) => ({
-          tenantId,
-          invoiceId,
-          revision,
-          format,
-          printVariant,
-          status: "pending" as const,
-          rendererVersion: "billing-print-v3",
-        })),
+        variants.flatMap((printVariant) =>
+          (["html", "pdf"] as const).map((format) => ({
+            tenantId,
+            invoiceId,
+            revision,
+            format,
+            printVariant,
+            status: "pending" as const,
+            rendererVersion: "billing-print-v4",
+          })),
+        ),
       )
       .onConflictDoNothing({
         target: [
           schema.invoiceDocuments.invoiceId,
           schema.invoiceDocuments.revision,
           schema.invoiceDocuments.format,
+          schema.invoiceDocuments.printVariant,
         ],
       });
     return this.db
@@ -165,7 +175,7 @@ export class BillingDocumentsService {
               printVariant: storedPrintVariant(document.printVariant),
             });
       const contentType = format === "html" ? "text/html; charset=utf-8" : "application/pdf";
-      const key = `tenants/${document.tenantId}/invoices/${document.invoiceId}/r${document.revision}.${format}`;
+      const key = `tenants/${document.tenantId}/invoices/${document.invoiceId}/r${document.revision}-${document.printVariant}.${format}`;
       await this.storage.ensureBucket();
       await this.storage.put(key, body, contentType);
       const [updated] = await this.db
@@ -176,7 +186,7 @@ export class BillingDocumentsService {
           contentType,
           sha256: createHash("sha256").update(body).digest("hex"),
           byteSize: body.byteLength,
-          rendererVersion: "billing-print-v3",
+          rendererVersion: "billing-print-v4",
           updatedAt: new Date(),
           errorCode: null,
         })

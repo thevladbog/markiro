@@ -105,7 +105,7 @@ export class BillingController {
   }
 
   @Post(":id/issue")
-  @ApiOperation({ summary: "Issue an invoice" })
+  @ApiOperation({ summary: "Issue an invoice and generate its print variants" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.issue.body,
     response: platformCommercialContracts.invoices.issue.response,
@@ -125,7 +125,7 @@ export class BillingController {
   }
 
   @Post(":id/document")
-  @ApiOperation({ summary: "Render and store the invoice document" })
+  @ApiOperation({ summary: "Render and store invoice print variants" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.document.body,
     response: platformCommercialContracts.invoices.document.response,
@@ -155,7 +155,7 @@ export class BillingController {
   }
 
   @Post(":id/documents")
-  @ApiOperation({ summary: "Render invoice documents" })
+  @ApiOperation({ summary: "Render invoice print variants" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.documents.render.body,
     response: platformCommercialContracts.invoices.documents.render.response,

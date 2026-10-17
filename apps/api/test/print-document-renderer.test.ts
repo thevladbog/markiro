@@ -299,7 +299,8 @@ describe("print document HTML renderer", () => {
     expect(html).toContain('data-barcode-value="MRK-INV-000184"');
     expect(html).toContain(">MRK-INV-000184</span>");
     expect(count(screenPage, "Сформировано системой Markiro")).toBe(1);
-    expect(count(html, 'aria-hidden="true"')).toBe(2);
+    expect(count(html, 'class="document-footer')).toBe(1);
+    expect(count(html, 'class="document-header')).toBe(1);
   });
 
   it("renders an authorized seller signature and seal only for the signed variant", () => {
@@ -550,6 +551,8 @@ describe("print document HTML renderer", () => {
     expect(html).toContain(".document-header{position:fixed");
     expect(html).toContain('.document-id span::after{content:""}');
     expect(html).toContain(".document-footer{position:fixed");
+    // Fragment backgrounds must not paint over fixed chrome on the last page.
+    expect(html).toContain("display:block;background:transparent;box-decoration-break:clone");
     expect(html).not.toContain("counter(page)");
     expect(html).not.toContain("@top-left{");
     expect(html).not.toContain("@bottom-left{");
