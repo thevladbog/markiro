@@ -57,7 +57,8 @@ import type { UpdatesApi } from "../update/updates-api.js";
 import { TAURI_UPDATES, UpdatesProvider } from "../update/updates-context.js";
 import { UpdateFromHostDialog } from "../update/UpdateFromHostDialog.js";
 import { useKeptOffer } from "../update/kept-offer.js";
-import { useHostUpdateOffer } from "../update/use-host-offer.js";
+import { FloorFrameWithUpdateEntry } from "../update/floor-update-entry-context.js";
+import { useHostUpdateCheck } from "../update/use-host-offer.js";
 import { useUpdateShell } from "../office/info/update-context.js";
 import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeWarehouseSessions } from "../floor/warehouse/warehouse-store.js";
@@ -317,12 +318,13 @@ function AppScreens({
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
   // The update the host offers this PC (plan ОБН-3): the office's banner, the
   // station's line off the work screen and the version screen read it.
-  const updateOffer = useHostUpdateOffer({
+  const updateCheck = useHostUpdateCheck({
     link: state.link,
     paired: pairedStatus !== null,
     host: hostApi,
     updates,
   });
+  const updateOffer = updateCheck.offer;
   // «Обновить с хоста» where no office opens (the version screen, a station
   // the host refuses): the dialog, and the shell's own install after it.
   const updateShell = useUpdateShell();
@@ -973,7 +975,9 @@ function AppScreens({
         />
       )}
       {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
-        <div className="floor-frame">
+        <FloorFrameWithUpdateEntry
+          value={{ ...updateCheck, inShift: false, open: () => setUpdateOpen(true) }}
+        >
           <FloorStatusBar
             local={localDb}
             pairing={pairedStatus}
@@ -1059,7 +1063,7 @@ function AppScreens({
               />
             </UnpairContext.Provider>
           )}
-        </div>
+        </FloorFrameWithUpdateEntry>
       )}
       {view.kind === "office_login" && (
         <OfficeLogin

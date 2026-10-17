@@ -40,6 +40,7 @@ import type { RenderLabel } from "./print/print-jobs.js";
 import type { PrintRuntime } from "./print/print-runtime.js";
 import type { ScanSource } from "./scan-source.js";
 import { shortId } from "./setup/setup-parts.js";
+import { InShiftUpdateEntry } from "../update/floor-update-entry-context.js";
 import { WorkstationSetup } from "./setup/WorkstationSetup.js";
 import {
   DEFAULT_SOUND,
@@ -447,7 +448,7 @@ export function FloorApp({
 
   if (view.kind === "setup") {
     const { back } = view;
-    return (
+    const setupScreen = (
       <WorkstationSetup
         local={local}
         hardware={hardware}
@@ -465,6 +466,12 @@ export function FloorApp({
         // Back to the shift the setup was opened from, or to the list.
         onBack={() => backFromSetup(back)}
       />
+    );
+    // Opened from a shift's work screen: an update restarts the app, so the install is held back.
+    return back !== null && back !== "warehouse" ? (
+      <InShiftUpdateEntry>{setupScreen}</InShiftUpdateEntry>
+    ) : (
+      setupScreen
     );
   }
   if (view.kind === "work") {
