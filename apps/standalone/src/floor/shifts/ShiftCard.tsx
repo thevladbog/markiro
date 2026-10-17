@@ -121,6 +121,7 @@ export function ShiftCard({
           local={local}
           productId={copy.productId}
           className="shift-card__photo"
+          faceAlways
           fallback={
             <span className="shift-card__photo-monogram" aria-hidden="true">
               {productMonogram(title)}
@@ -153,8 +154,15 @@ export function ShiftCard({
             />
             <span className="shift-card__number">{copy.number}</span>
           </div>
-          <div className="shift-card__product shift-card__product--only">{title}</div>
-          <div className="shift-card__counterparty">
+          <div className="shift-card__product shift-card__product--only" title={title}>
+            {title}
+          </div>
+          <div
+            className="shift-card__counterparty"
+            {...(copy.counterpartyName === null
+              ? {}
+              : { title: t("floor.shifts.counterparty", { name: copy.counterpartyName }) })}
+          >
             {copy.counterpartyName === null
               ? null
               : t("floor.shifts.counterparty", { name: copy.counterpartyName })}

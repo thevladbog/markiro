@@ -7,6 +7,8 @@
  */
 :where(.floor-frame, .station-screen) [data-photo-backing="gradient"] {
   border-color: var(--brandline);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
   background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
 }
 

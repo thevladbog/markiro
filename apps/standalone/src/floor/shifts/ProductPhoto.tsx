@@ -85,6 +85,7 @@ export function ProductPanel({
   className,
   fallback,
   overlay = null,
+  faceAlways = false,
 }: {
   local: LocalExecutor | undefined;
   productId: string;
@@ -92,6 +93,12 @@ export function ProductPanel({
   fallback: ReactNode;
   /** Laid over the frame's face (the hub card's tags on the gradient). */
   overlay?: ReactNode;
+  /**
+   * The gradient is the frame's face whatever the photo is: for a frame wider than its photo (the
+   * hub card's half), where an opaque picture fitted whole leaves bands that would show the card's
+   * flat surface. The picture then sits on the gradient as a picture does.
+   */
+  faceAlways?: boolean;
 }) {
   if (local === undefined) {
     return (
@@ -108,6 +115,7 @@ export function ProductPanel({
       className={className}
       fallback={fallback}
       overlay={overlay}
+      faceAlways={faceAlways}
     />
   );
 }
@@ -118,16 +126,19 @@ function PhotoPanel({
   className,
   fallback,
   overlay,
+  faceAlways,
 }: {
   local: LocalExecutor;
   productId: string;
   className: string;
   fallback: ReactNode;
   overlay: ReactNode;
+  faceAlways: boolean;
 }) {
   const photo = useStoredProductPhoto(local, productId);
+  const backing = usePhotoBacking(photo);
   return (
-    <div className={className} data-photo-backing={usePhotoBacking(photo)}>
+    <div className={className} data-photo-backing={faceAlways ? "gradient" : backing}>
       <ProductPhotoImage photo={photo} fallback={fallback} />
       {overlay}
     </div>

@@ -160,6 +160,8 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   border-radius: var(--r-card);
+  /* A runtime that drops the gradient still paints the brand: a flat `brand2` face first. */
+  background: var(--brand2);
   background: linear-gradient(305deg, var(--brand1), var(--brand2) 55%, var(--brand3));
   border: 1px solid var(--brandline);
 }
