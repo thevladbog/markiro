@@ -14,7 +14,7 @@ import {
   SetupView,
   type JobHandlers,
 } from "../src/floor/warehouse/ReprintViews.js";
-import type { SummaryLine } from "../src/floor/warehouse/ReprintParts.js";
+import { ScrollColumn, type SummaryLine } from "../src/floor/warehouse/ReprintParts.js";
 import type { WarehouseJob } from "../src/floor/warehouse/warehouse-store.js";
 import { summaryRows } from "../src/floor/warehouse/warehouse-view.js";
 import { OPERATOR_ID } from "./support/floor-work.js";
@@ -106,6 +106,7 @@ const handlers = (): JobHandlers => ({
   onVerify: vi.fn(),
   onSetup: vi.fn(),
   onLeave: vi.fn(),
+  onFinish: vi.fn(),
 });
 const wrap = (node: React.ReactNode) => render(<ThemeProvider>{node}</ThemeProvider>);
 const buttonNames = () => screen.getAllByRole("button").map((button) => button.textContent?.trim());
@@ -168,7 +169,7 @@ describe("the job's detail", () => {
   it("offers the print of a prepared job, and nothing else", () => {
     const h = jobView(job({ state: "prepared" }));
     expect(screen.getByText("Этикетка готова к отправке")).toBeTruthy();
-    expect(buttonNames()).toEqual(["К сменам", "Напечатать этикетку"]);
+    expect(buttonNames()).toEqual(["К сменам", "Завершить сеанс", "Напечатать этикетку"]);
     fireEvent.click(screen.getByRole("button", { name: "Напечатать этикетку" }));
     expect(h.onSend).toHaveBeenCalledTimes(1);
   });
@@ -190,7 +191,12 @@ describe("the job's detail", () => {
     });
     expect(screen.getByText("Этикетка передана на принтер")).toBeTruthy();
     expect(screen.getByText(/Это не подтверждает выход этикетки/)).toBeTruthy();
-    expect(buttonNames()).toEqual(["К сменам", "Напечатать ещё раз", "Следующий код"]);
+    expect(buttonNames()).toEqual([
+      "К сменам",
+      "Завершить сеанс",
+      "Напечатать ещё раз",
+      "Следующий код",
+    ]);
     // The check by a scan is the unknown outcome's alone: the code does not offer it for a sent label.
     expect(screen.queryByRole("button", { name: "Проверить сканом" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Следующий код" }));
@@ -204,7 +210,12 @@ describe("the job's detail", () => {
       resultText: "Проверьте принтер.",
     });
     expect(screen.getByText("Неизвестно, вышла ли этикетка")).toBeTruthy();
-    expect(buttonNames()).toEqual(["К сменам", "Напечатать ещё раз", "Проверить сканом"]);
+    expect(buttonNames()).toEqual([
+      "К сменам",
+      "Завершить сеанс",
+      "Напечатать ещё раз",
+      "Проверить сканом",
+    ]);
     const verify = screen.getByRole("button", { name: "Проверить сканом" });
     expect(verify.className).toContain("floor-primary");
     fireEvent.click(verify);
@@ -229,6 +240,7 @@ describe("the job's detail", () => {
     expect(screen.getByText("Принтер: ошибка")).toBeTruthy();
     expect(buttonNames()).toEqual([
       "К сменам",
+      "Завершить сеанс",
       "Отменить печать",
       "Рабочее место",
       "Повторить отправку",
@@ -259,14 +271,19 @@ describe("the job's detail", () => {
   it("closes a cancelled job on the next code, and a checked one beside the repeat", () => {
     jobView(job({ state: "cancelled" }));
     expect(screen.getByText("Печать отменена")).toBeTruthy();
-    expect(buttonNames()).toEqual(["К сменам", "Следующий код"]);
+    expect(buttonNames()).toEqual(["К сменам", "Завершить сеанс", "Следующий код"]);
     cleanup();
     jobView(job({ state: "verified" }));
     expect(screen.getByText("Новая этикетка проверена")).toBeTruthy();
-    expect(buttonNames()).toEqual(["К сменам", "Напечатать ещё раз", "Следующий код"]);
+    expect(buttonNames()).toEqual([
+      "К сменам",
+      "Завершить сеанс",
+      "Напечатать ещё раз",
+      "Следующий код",
+    ]);
   });
 
-  it("keeps the leave in the heading in every state, beside the reason in words", () => {
+  it("keeps the leave in every state, beside the reason in words", () => {
     const h = jobView(job({ state: "unknown", errorCode: "outcome_unknown" }));
     expect(screen.getByText("Причина: Повреждена")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "К сменам" }));
@@ -601,7 +618,13 @@ describe("the questions over the screen", () => {
 
 describe("the typed code", () => {
   function manual(value: string, online = true) {
-    const calls = { onChange: vi.fn(), onCancel: vi.fn(), onSubmit: vi.fn() };
+    const calls = {
+      onChange: vi.fn(),
+      onCancel: vi.fn(),
+      onSubmit: vi.fn(),
+      onLeave: vi.fn(),
+      onFinish: vi.fn(),
+    };
     wrap(
       <ManualView
         value={value}
@@ -651,5 +674,216 @@ describe("the typed code", () => {
     expect(calls.onCancel).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(screen.getByLabelText(/Номер короба или паллеты/), { key: "Escape" });
     expect(calls.onCancel).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the session's own answers on every screen after a scan", () => {
+  const UNRESOLVED_JOBS: Array<[string, Partial<WarehouseJob>]> = [
+    ["prepared", { state: "prepared" }],
+    ["sending", { state: "sending" }],
+    ["failed", { state: "failed", errorCode: "not_sent" }],
+    ["unknown", { state: "unknown", errorCode: "outcome_unknown" }],
+  ];
+  const RESOLVED_JOBS: Array<[string, Partial<WarehouseJob>]> = [
+    ["sent", { state: "sent" }],
+    ["verified", { state: "verified" }],
+    ["cancelled", { state: "cancelled" }],
+  ];
+
+  it.each(UNRESOLVED_JOBS)(
+    "shows «Завершить сеанс» disabled with its reason beside it while a %s label waits",
+    (_state, over) => {
+      const h = jobView(job(over));
+      const finish = screen.getByRole("button", { name: "Завершить сеанс" });
+      expect(finish.getAttribute("aria-disabled")).toBe("true");
+      const reason = screen.getByText(/Сначала закройте этикетку/).closest("p") as HTMLElement;
+      expect(finish.getAttribute("aria-describedby")).toBe(reason.id);
+      fireEvent.click(finish);
+      expect(h.onFinish).not.toHaveBeenCalled();
+      // The leave is the pause, never held by the label.
+      fireEvent.click(screen.getByRole("button", { name: "К сменам" }));
+      expect(h.onLeave).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(RESOLVED_JOBS)("lets a %s label's detail finish the session", (_state, over) => {
+    const h = jobView(job(over));
+    const finish = screen.getByRole("button", { name: "Завершить сеанс" });
+    expect(finish.getAttribute("aria-disabled")).toBe(null);
+    expect(screen.queryByText(/Сначала закройте этикетку/)).toBeNull();
+    fireEvent.click(finish);
+    expect(h.onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps «Завершить сеанс» on the typed code's screen too, and the leave", () => {
+    const onFinish = vi.fn();
+    wrap(
+      <ManualView
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        online
+        submitProps={{}}
+        reasonText="Причина: Повреждена"
+        press={press}
+        onCancel={vi.fn()}
+        onLeave={vi.fn()}
+        onFinish={onFinish}
+        finishBlocked={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Завершить сеанс" }));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "К сменам" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Отмена" })).toBeTruthy();
+  });
+
+  it("disables «Завершить сеанс» of the list with the same words while a label waits", () => {
+    sessionView({ finishBlocked: true });
+    const finish = screen.getByRole("button", { name: "Завершить сеанс" });
+    expect(finish.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText(/Сначала закройте этикетку/)).toBeTruthy();
+  });
+});
+
+describe("the check of the print by a second scan (the session's switch)", () => {
+  it("offers the switch on the start next to the reason, off and on, as a kit switch card", () => {
+    const onCheck = vi.fn();
+    wrap(
+      <SetupView
+        reason="damaged"
+        lines={[]}
+        press={press}
+        leave={press}
+        onPick={vi.fn()}
+        onChangeTemplates={vi.fn()}
+        onLeave={vi.fn()}
+        onSetup={vi.fn()}
+        onStart={vi.fn()}
+        check="none"
+        onCheck={onCheck}
+      />,
+    );
+    const toggle = screen.getByRole("switch", {
+      name: "Проверка распечатки повторным сканированием",
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onCheck).toHaveBeenCalledWith("required");
+    cleanup();
+    wrap(
+      <SetupView
+        reason="damaged"
+        lines={[]}
+        press={press}
+        leave={press}
+        onPick={vi.fn()}
+        onChangeTemplates={vi.fn()}
+        onLeave={vi.fn()}
+        onSetup={vi.fn()}
+        onStart={vi.fn()}
+        check="required"
+        onCheck={onCheck}
+      />,
+    );
+    const on = screen.getByRole("switch", { name: "Проверка распечатки повторным сканированием" });
+    expect(on.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(on);
+    expect(onCheck).toHaveBeenLastCalledWith("none");
+  });
+
+  it("asks for the scan of the new label of a sent one when the check is required: no next code before it", () => {
+    const h = jobView(job(), { check: "required" });
+    expect(screen.getByRole("button", { name: "Проверить сканом" }).className).toContain(
+      "floor-primary",
+    );
+    expect(screen.queryByRole("button", { name: "Следующий код" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить сканом" }));
+    expect(h.onVerify).toHaveBeenCalledTimes(1);
+    // The operator can still skip it, knowingly, or print again.
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить проверку" }));
+    expect(h.onNext).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Напечатать ещё раз" })).toBeTruthy();
+  });
+
+  it("leaves a sent label as it was when the check is not required", () => {
+    jobView(job(), { check: "none" });
+    expect(screen.queryByRole("button", { name: "Проверить сканом" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Пропустить проверку" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Следующий код" })).toBeTruthy();
+  });
+
+  it("does not ask twice of a label already checked", () => {
+    jobView(job({ state: "verified" }), { check: "required" });
+    expect(screen.queryByRole("button", { name: "Проверить сканом" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Следующий код" })).toBeTruthy();
+  });
+});
+
+describe("a zone that scrolls by itself", () => {
+  function geometry(scrollHeight: number, clientHeight: number) {
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+  }
+  afterEach(() => {
+    // Back to jsdom's own (no layout: zero).
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+  });
+
+  it("says nothing of more below when everything fits, and the fade when it does not", () => {
+    geometry(100, 100);
+    const fits = render(
+      <ScrollColumn>
+        <p>short</p>
+      </ScrollColumn>,
+    );
+    expect(fits.container.querySelector(".rp-col")?.getAttribute("data-more")).toBe("false");
+    fits.unmount();
+    geometry(500, 200);
+    const long = render(
+      <ScrollColumn>
+        <p>long</p>
+      </ScrollColumn>,
+    );
+    const column = long.container.querySelector(".rp-col");
+    expect(column?.getAttribute("data-more")).toBe("true");
+    // At the foot there is nothing more below: the fade goes.
+    const scroller = long.container.querySelector(".rp-scroll") as HTMLElement;
+    scroller.scrollTop = 300;
+    fireEvent.scroll(scroller);
+    expect(column?.getAttribute("data-more")).toBe("false");
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+    expect(column?.getAttribute("data-more")).toBe("true");
+  });
+
+  it("holds the setup's two columns, the journal and the scan zone each in one", () => {
+    sessionView({ journal: [job()] });
+    expect(document.querySelectorAll(".rp-zones > .rp-col, .rp-zones > .rp-journal")).toHaveLength(
+      2,
+    );
+    expect(document.querySelectorAll(".rp-journal .rp-scroll")).toHaveLength(1);
+    cleanup();
+    wrap(
+      <SetupView
+        reason="damaged"
+        lines={[]}
+        press={press}
+        leave={press}
+        onPick={vi.fn()}
+        onChangeTemplates={vi.fn()}
+        onLeave={vi.fn()}
+        onSetup={vi.fn()}
+        onStart={vi.fn()}
+      />,
+    );
+    expect(document.querySelectorAll(".rp-zones--setup > .rp-col")).toHaveLength(2);
   });
 });

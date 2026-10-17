@@ -171,6 +171,28 @@ export function isPrinterSetupFailure(code: string | null): code is SetupFailure
   return code !== null && (SETUP_FAILURES as readonly string[]).includes(code);
 }
 
+/**
+ * The session's check of a print by a second scan of the new label (the equipment's own
+ * `verifyPrintedLabel` is its default, as the duplicate's `verificationPolicy` is the shift's):
+ * `required` holds the next code of a sent label until the new label is scanned.
+ */
+export type ReprintCheck = "none" | "required";
+
+/** A job that waits for the printer or the operator: no other work, and no end of the session, beside it. */
+export function isUnresolved(job: Pick<WarehouseJob, "state">): boolean {
+  return (
+    job.state === "prepared" ||
+    job.state === "sending" ||
+    job.state === "failed" ||
+    job.state === "unknown"
+  );
+}
+
+/** Whether a job stands at the check: a label sent while the session requires the scan of the new one. */
+export function awaitsCheck(job: Pick<WarehouseJob, "state">, check: ReprintCheck): boolean {
+  return check === "required" && job.state === "sent";
+}
+
 /** The answer block of the detail: a glyph, a title (a key of `floor.warehouse.status`) and a body. */
 export interface ResultView {
   tone: TagTone;

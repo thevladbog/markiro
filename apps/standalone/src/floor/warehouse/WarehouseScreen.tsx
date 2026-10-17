@@ -67,11 +67,13 @@ import {
   type WarehouseTemplate,
 } from "./warehouse-templates.js";
 import {
+  isUnresolved,
   jobKindView,
   resultView,
   summaryRows,
   type JobKindView,
   type JournalFilter,
+  type ReprintCheck,
   type SummaryRow,
 } from "./warehouse-view.js";
 import {
@@ -146,9 +148,6 @@ type Panel =
 /** A button that waits for the work in hand: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 
-/** The job states of a job that waits for the printer or the operator; no other work goes beside it. */
-const UNRESOLVED = ["prepared", "sending", "failed", "unknown"] as const;
-
 const defaultNow = () => new Date();
 const defaultNewId = () => crypto.randomUUID();
 
@@ -222,6 +221,12 @@ export function WarehouseScreen({
   const [repaired, setRepaired] = useState(false);
   const [panel, setPanel] = useState<Panel>({ kind: "none" });
   const [verifying, setVerifying] = useState(false);
+  /**
+   * The session's check of a print by a second scan: the equipment's own check is its default,
+   * and the switch of the start changes it for this session (it is not stored: a continued session
+   * asks the equipment again, and a reload of the screen never leaves a check on that nobody asked for).
+   */
+  const [check, setCheck] = useState<ReprintCheck>("none");
   const [said, setSaid] = useState<Said | null>(null);
   const [counts, setCounts] = useState({ sent: 0, waiting: 0 });
   const [manual, setManual] = useState("");
@@ -318,6 +323,7 @@ export function WarehouseScreen({
           printers: loaded.settings.printers,
           assignments: loaded.settings.assignments,
         });
+        setCheck(loaded.settings.verifyPrintedLabel ? "required" : "none");
         setJob(loaded.job);
         setDetail(loaded.job !== null);
         setPhase(loaded.phase);
@@ -722,6 +728,8 @@ export function WarehouseScreen({
         press={press}
         leave={leave}
         onPick={(picked) => setPhase({ ...phase, reason: picked })}
+        check={check}
+        onCheck={setCheck}
         onChangeTemplates={changeTemplates}
         onLeave={onLeave}
         onSetup={onSetup}
@@ -767,6 +775,12 @@ export function WarehouseScreen({
         reasonText={reasonText}
         press={press}
         onCancel={() => setPanel({ kind: "none" })}
+        leave={leave}
+        onLeave={onLeave}
+        finishBlocked={job !== null && isUnresolved(job)}
+        onFinish={() => {
+          if (job === null || !isUnresolved(job)) setPanel({ kind: "finish" });
+        }}
         onSubmit={() => {
           const typed = manual;
           if (typed.trim() === "") return;
@@ -784,7 +798,7 @@ export function WarehouseScreen({
     );
   }
 
-  const unresolved = job !== null && (UNRESOLVED as readonly string[]).includes(job.state);
+  const unresolved = job !== null && isUnresolved(job);
   /** The job as the detail shows it: on its way to the printer while its bytes are being sent. */
   const shown: WarehouseJob | null =
     job === null ? null : sending === job.id ? { ...job, state: "sending", errorCode: null } : job;
@@ -875,6 +889,7 @@ export function WarehouseScreen({
         press={press}
         leave={leave}
         overlay={overlay}
+        check={check}
         handlers={{
           onSend: () => send(shown, { kind: "first" }),
           onRetry: () => send(shown, { kind: "retry" }),
@@ -896,6 +911,9 @@ export function WarehouseScreen({
           onVerify: () => setVerifying((value) => !value),
           onSetup: () => onSetup(),
           onLeave,
+          onFinish: () => {
+            if (!isUnresolved(shown)) setPanel({ kind: "finish" });
+          },
         }}
       />
     );
@@ -926,7 +944,10 @@ export function WarehouseScreen({
       onTemplates={() => {
         if (!unresolved) setPanel({ kind: "templates", initial: "unit" });
       }}
-      onFinish={() => setPanel({ kind: "finish" })}
+      onFinish={() => {
+        if (!unresolved) setPanel({ kind: "finish" });
+      }}
+      finishBlocked={unresolved}
       onLeave={onLeave}
     />
   );
