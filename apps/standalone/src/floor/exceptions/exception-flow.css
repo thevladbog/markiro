@@ -335,3 +335,89 @@
     font: 400 13px/18px var(--font-ui);
   }
 }
+
+/*
+ * A window up to 780 px high (the terminal's ~640-720 CSS px): the picker's finder takes a wider
+ * column so its digit pad is two rows of six 64 px keys instead of four rows of three, the typed
+ * tail is a slim line, and the list of boxes keeps the rest of the stage in whole 64 px rows and
+ * its own scroll (more boxes than fit: the digits narrow the list, as the screen says). The
+ * header, the pad and «Назад» are always in view.
+ */
+@media (max-height: 780px) {
+  .exception-flow {
+    gap: var(--sp-2);
+  }
+
+  .exception-flow__stage:has(> .exception-stage--target) {
+    align-content: stretch;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .exception-stage {
+    gap: var(--sp-2);
+  }
+
+  .exception-stage--target {
+    min-height: 0;
+    gap: var(--sp-3);
+    grid-template-columns: minmax(440px, 500px) minmax(0, 1fr);
+    align-content: stretch;
+  }
+
+  .exception-target__finder {
+    gap: var(--sp-2);
+  }
+
+  .exception-target__scan {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .exception-target__scan-glyph {
+    font-size: 24px;
+  }
+
+  .sscc-search {
+    gap: var(--sp-2);
+  }
+
+  .sscc-search__field {
+    padding: var(--sp-2) var(--sp-3);
+    font: 600 20px/28px var(--font-mono) !important;
+  }
+
+  .sscc-search__field[data-empty="true"] {
+    font: 400 15px/20px var(--font-ui) !important;
+  }
+
+  .sscc-search__pad {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .shift-boxes {
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .shift-boxes h3 {
+    margin: 0;
+    font: 600 22px/28px var(--font-ui);
+  }
+
+  .shift-boxes__list {
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+  }
+
+  .shift-boxes__empty {
+    min-height: 64px;
+  }
+
+  .exception-card {
+    padding: var(--sp-3) var(--sp-4) !important;
+  }
+
+  .exception-actions {
+    gap: var(--sp-2);
+  }
+}
